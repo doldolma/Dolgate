@@ -82,6 +82,50 @@ describe("interactive-auth utils", () => {
     expect(formatInteractiveHop(hop)).toBe("ubuntu@192.168.200.37:22");
   });
 
+  // 사용자는 주소가 아니라 자기가 붙인 이름을 기억한다. 점프 체인에서 어느 쪽 코드를 넣어야
+  // 하는지 판단하려면 그 이름이 먼저 보여야 한다.
+  it("등록된 호스트면 이름을 앞에 붙인다", () => {
+    const hosts = [
+      { id: "h1", kind: "ssh", label: "Lime-GW", hostname: "192.168.200.37", port: 22 },
+    ] as never;
+    const hop = toKeyboardInteractiveHop({
+      username: "ubuntu",
+      host: "192.168.200.37",
+      port: 22,
+    });
+
+    expect(formatInteractiveHop(hop, hosts)).toBe(
+      "Lime-GW (ubuntu@192.168.200.37:22)",
+    );
+  });
+
+  // 포트가 다르게 등록돼 있어도 같은 기기다 — 이름은 맞다.
+  it("포트가 안 맞으면 주소만으로 찾는다", () => {
+    const hosts = [
+      { id: "h1", kind: "ssh", label: "Lime-GW", hostname: "192.168.200.37", port: 2222 },
+    ] as never;
+    const hop = toKeyboardInteractiveHop({
+      username: "ubuntu",
+      host: "192.168.200.37",
+      port: 22,
+    });
+
+    expect(formatInteractiveHop(hop, hosts)).toBe(
+      "Lime-GW (ubuntu@192.168.200.37:22)",
+    );
+  });
+
+  // 등록하지 않은 경유지는 예전처럼 주소만 나온다 — 없는 이름을 지어내지 않는다.
+  it("목록에 없는 주소면 주소만 보여준다", () => {
+    const hop = toKeyboardInteractiveHop({
+      username: "ubuntu",
+      host: "10.9.9.9",
+      port: 22,
+    });
+
+    expect(formatInteractiveHop(hop, [] as never)).toBe("ubuntu@10.9.9.9:22");
+  });
+
   it("drops a hop with no host instead of showing an empty name", () => {
     expect(toKeyboardInteractiveHop({ username: "ubuntu", port: 22 })).toBeNull();
     expect(toKeyboardInteractiveHop(undefined)).toBeNull();

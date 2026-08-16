@@ -136,6 +136,8 @@ import {
   getPane,
   updatePaneState,
   toTrustInput,
+  shiftHostKeyPrompt,
+  clearConnectionView,
 } from "../utils";
 import { cancelReconnect } from "../services/reconnect-orchestrator";
 import { createContainersServices } from "../services/containers";
@@ -173,6 +175,12 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
     portForwardRuntimes: [],
     knownHosts: [],
     pendingHostKeyPrompt: null,
+    queuedHostKeyPrompts: [],
+    connectionViews: {},
+    dismissConnectionView: (key) =>
+      set((state) => ({
+        connectionViews: clearConnectionView(state.connectionViews, key),
+      })),
     // RDP 서버 인증서 확인. 프롬프트를 그리는 곳과 그동안 자기를 내려야 하는 곳이 형제라
     // 여기에 둔다(types.ts 주석 참고).
     pendingRdpCertificatePrompt: null,
@@ -406,7 +414,7 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
             } else {
               await api.knownHosts.trust(toTrustInput(pending.probe));
             }
-            set({ pendingHostKeyPrompt: null });
+            set((state) => shiftHostKeyPrompt(state));
             await syncOperationalData(set);
             // 연결이 이 답을 기다리는 중이면 여기서 끝난다 — 다시 연결하지 않는다. 그것이 이 흐름의
             // 요점이다(다시 연결하면 OTP 를 한 번 더 물어야 한다).
@@ -491,7 +499,7 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
                 progress: resolveErrorProgress(message),
               });
               clearContainerTabConnectionOverlay(set, pending.action.hostId);
-              set({ pendingHostKeyPrompt: null });
+              set((state) => shiftHostKeyPrompt(state));
               return;
             }
             if (pending?.sessionId) {
@@ -499,10 +507,10 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
               markSessionError(set, pending.sessionId, message, {
                 progress: resolveErrorProgress(message),
               });
-              set({ pendingHostKeyPrompt: null });
+              set((state) => shiftHostKeyPrompt(state));
               return;
             }
-            set({ pendingHostKeyPrompt: null });
+            set((state) => shiftHostKeyPrompt(state));
           }
   };
 

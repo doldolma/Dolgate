@@ -72,6 +72,8 @@ import {
 import { DialogBackdrop } from './DialogBackdrop';
 import { KnownHostPromptDialog } from './KnownHostPromptDialog';
 import { Trans, useTranslation } from 'react-i18next';
+import { ConnectionProgressModal } from './ConnectionProgressModal';
+import { useAppStore } from '../store/appStore';
 import { t } from '../i18n';
 
 type ForwardTab = 'ssh' | 'aws-ssm' | 'ecs-task' | 'container' | 'dns';
@@ -581,6 +583,8 @@ function resolveForwardAuthTitle(
 
 function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onCancel }: InteractiveAuthFormProps) {
   const { t: translate } = useTranslation();
+  // 코어는 주소만 준다 — 사용자가 붙인 이름은 여기서 얹는다.
+  const hosts = useAppStore((state) => state.hosts);
   const [responses, setResponses] = useState<InteractivePromptResponses>({});
   const warpgateResponses = useMemo(
     () => (auth.provider === 'warpgate' ? resolveWarpgateResponses(auth) : null),
@@ -592,7 +596,7 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onCancel }: 
   }, [auth.challengeId]);
 
   // 점프 체인에서 누구의 코드를 묻는지. 없으면 베스천과 최종 대상을 구분할 수 없다.
-  const hopLabel = formatInteractiveHop(auth.hop);
+  const hopLabel = formatInteractiveHop(auth.hop, hosts);
 
   return (
     <NoticeCard title={title} className="mt-4">
@@ -794,6 +798,16 @@ export function PortForwardingPanel({
   onClearInteractiveAuth
 }: PortForwardingPanelProps) {
   const { t: translate } = useTranslation();
+  // 진행 중인 연결이 있으면 터미널과 같은 화면을 팝업으로 띄운다.
+  //
+  // 시작 버튼이 규칙 종류마다 흩어져 있어서 각 버튼에 매다는 대신, **뷰가 생기면 뜨는** 방식을
+  // 쓴다 — 시작 경로가 하나 더 생겨도 여기 손댈 일이 없다.
+  const connectionViews = useAppStore((state) => state.connectionViews);
+  const dismissConnectionView = useAppStore((state) => state.dismissConnectionView);
+  const connectingRule = rules.find((rule) => connectionViews[rule.id]) ?? null;
+  const connectingHost = connectingRule
+    ? (hosts.find((host) => host.id === connectingRule.hostId) ?? null)
+    : null;
   const {
     inspectHostContainer,
     listEcsTaskTunnelServices,
@@ -1924,6 +1938,15 @@ export function PortForwardingPanel({
   }
 
   return (
+    <>
+      {connectingRule ? (
+        <ConnectionProgressModal
+          connectionKey={connectingRule.id}
+          host={connectingHost}
+          title={connectingRule.label || translate('portForwarding.title')}
+          onClose={() => dismissConnectionView(connectingRule.id)}
+        />
+      ) : null}
     <div className="space-y-6">
       {/* 상단 브레드크럼(← Hosts · Port Forwarding)에 이미 제목이 있어 흰색 헤더 카드는 생략.
           생성 버튼은 아래 탭 행 오른쪽으로 옮긴다. */}
@@ -1949,7 +1972,9 @@ export function PortForwardingPanel({
           title={translate('portForward.waiting.containerRuntime')}
           onRespond={onRespondInteractiveAuth}
           onReopenUrl={onReopenInteractiveAuthUrl}
-          onCancel={onClearInteractiveAuth}
+          // 이 카드의 challengeId 만 지운다. 인자를 빼면(onCancel 은 인자 없이 불린다)
+          // 다른 연결이 기다리는 카드까지 함께 사라지고, 그쪽은 답을 받지 못해 시간 초과로 죽는다.
+          onCancel={() => onClearInteractiveAuth(discoveryInteractiveAuth.challengeId)}
         />
       ) : null}
 
@@ -2254,7 +2279,8 @@ export function PortForwardingPanel({
                       title={translate('portForward.waiting.containerLookup')}
                       onRespond={onRespondInteractiveAuth}
                       onReopenUrl={onReopenInteractiveAuthUrl}
-                      onCancel={onClearInteractiveAuth}
+                      // 이 카드의 challengeId 만 지운다(위 컨테이너 런타임 카드와 같은 이유).
+                      onCancel={() => onClearInteractiveAuth(discoveryInteractiveAuth.challengeId)}
                     />
                   ) : null}
 
@@ -2857,5 +2883,6 @@ export function PortForwardingPanel({
         />
       ) : null}
     </div>
+    </>
   );
 }

@@ -371,6 +371,13 @@ export interface HostFormProps {
   groupOptions: Array<{ value: string | null; label: string }>;
   /** Saved SSH hosts selectable as a jump host (bastion). See getJumpHostCandidates. */
   jumpHostOptions?: SearchableSelectOption[];
+  /**
+   * 점프 후보 호스트별 tailnet 이름(설정돼 있는 것만).
+   *
+   * 접속은 **첫 홉**의 tailnet 을 탄다. 그것을 폼이 모르면 "점프에만 tailnet 을 걸어 둔" 구성이
+   * 왜 되는지, 반대로 이 호스트에 걸어 둔 tailnet 이 왜 무시되는지 사용자가 알 수 없다.
+   */
+  jumpHostTailnetNames?: Record<string, string>;
   /** 설정에 등록된 tailnet. 이 호스트를 어느 tailnet 으로 보낼지 고르는 데 쓴다. */
   tailnetOptions?: Array<{ id: string; label: string }>;
   snippets?: SnippetRecord[];
@@ -671,6 +678,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   keychainEntries,
   groupOptions,
   jumpHostOptions = [],
+  jumpHostTailnetNames = {},
   tailnetOptions = [],
   snippets = [],
   defaultGroupPath = null,
@@ -806,6 +814,14 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     });
   };
   const jumpHostChain = sshDraft ? deriveJumpChain(sshDraft) : [];
+  // 실제로 소켓을 여는 것은 첫 홉이다 — tailnet 도 그 홉의 것을 탄다.
+  const entryHopId = jumpHostChain[0] ?? '';
+  const entryHopTailnetName = entryHopId
+    ? (jumpHostTailnetNames[entryHopId] ?? '')
+    : '';
+  const entryHopLabel =
+    jumpHostOptions.find((option) => option.value === entryHopId)?.label ??
+    entryHopId;
   const commitJumpHostChain = (ids: string[]) => {
     if (!sshDraft) {
       return;
@@ -2466,6 +2482,27 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               <span className="text-[0.82rem] text-[var(--text-soft)]">
                 {translate('hostForm.jump.description')}
               </span>
+              {/* 첫 홉에 tailnet 이 걸려 있으면 접속은 그것을 탄다. 이 호스트에 따로 걸어 둔
+                  설정은 쓰이지 않으므로, 그 사실을 여기서 말해 준다. */}
+              {entryHopTailnetName ? (
+                <span
+                  className={
+                    selectedTailnetId
+                      ? 'text-[0.82rem] text-[var(--danger)]'
+                      : 'text-[0.82rem] text-[var(--text-soft)]'
+                  }
+                >
+                  {selectedTailnetId
+                    ? translate('hostForm.jump.tailnetOverridden', {
+                        jump: entryHopLabel,
+                        tailnet: entryHopTailnetName,
+                      })
+                    : translate('hostForm.jump.tailnetFromEntryHop', {
+                        jump: entryHopLabel,
+                        tailnet: entryHopTailnetName,
+                      })}
+                </span>
+              ) : null}
             </div>
             <div className={fieldClassName}>
               <ToggleSwitch

@@ -53,6 +53,8 @@ import {
   type MetricChartSeriesDefinition,
 } from "./UPlotMetricChart";
 import { ConnectionStatusOverlay } from "./ConnectionStatusOverlay";
+import { resolveConnectionStages } from "./terminal-workspace/connectionStages";
+import { useAppStore } from "../store/appStore";
 import { ConnectionHopSteps } from "./ConnectionHopSteps";
 import { TerminalInteractiveAuthOverlay } from "./terminal-workspace/TerminalInteractiveAuthOverlay";
 import {
@@ -1417,12 +1419,49 @@ export function ContainersWorkspace({
   const matchingInteractiveAuth =
     interactiveAuths.find((auth) => auth.hostId === host.id) ?? null;
   const shouldShowConnectingOverlay = tab.isLoading && !matchingInteractiveAuth;
+  // 이 연결의 공통 진행 뷰. 배너(승인 링크)가 여기 실려 온다 — 엔드포인트 ID 규칙은 메인과의 약속이다.
+  const connectionView = useAppStore(
+    (state) => state.connectionViews[`containers:${host.id}`] ?? null,
+  );
+  const connectionBanner = connectionView?.banner ?? null;
+  const tailnetStatuses = useAppStore((state) => state.tailnetStatuses);
+  const containersTailnetId =
+    "tailnetId" in host ? (host.tailnetId ?? null) : null;
   const connectionFailurePresentation = useMemo(
     () =>
       tab.errorMessage
         ? resolveConnectionFailurePresentation(tab.errorMessage)
         : null,
     [tab.errorMessage],
+  );
+  // 단계는 터미널과 같은 빌더가 만든다. 컨테이너 탭에는 tailnet·호스트 키 관문이 통째로 없었다.
+  const connectionStages = useMemo(
+    () =>
+      resolveConnectionStages({
+        subject: {
+          status: tab.errorMessage ? "error" : tab.isLoading ? "connecting" : "connected",
+          stage: connectionView?.stage ?? tab.connectionProgress?.stage,
+        },
+        tailnetStatus: containersTailnetId
+          ? tailnetStatuses[containersTailnetId]
+          : undefined,
+        hasTailscale: Boolean(containersTailnetId),
+        hostKind: host.kind,
+        failureLayer: connectionFailurePresentation?.layer ?? null,
+        // 원문이 아니라 정규화된 문구를 넘긴다 — 원문에는 IPC 래퍼 문자열이 붙어 있다.
+        failureMessage: connectionFailurePresentation?.message,
+      }),
+    [
+      tab.errorMessage,
+      tab.isLoading,
+      tab.connectionProgress?.stage,
+      connectionView?.stage,
+      containersTailnetId,
+      tailnetStatuses,
+      host.kind,
+      connectionFailurePresentation?.layer,
+      connectionFailurePresentation?.message,
+    ],
   );
   const shouldShowConnectionFailureOverlay =
     Boolean(connectionFailurePresentation) &&
@@ -2833,6 +2872,8 @@ export function ContainersWorkspace({
           error
           title={connectionFailurePresentation.title}
           message={connectionFailurePresentation.message}
+          stages={connectionStages}
+          steps={tab.connectionHops}
           onRetry={() => {
             void onRetryConnection(host.id);
           }}
@@ -2841,28 +2882,19 @@ export function ContainersWorkspace({
           }}
         />
       ) : shouldShowConnectingOverlay ? (
-        <div
-          className="absolute inset-0 z-[3] grid place-items-center rounded-[12px] bg-[rgba(12,20,32,0.18)]"
-          role="status"
-          aria-live="polite"
-          aria-label="Container connection in progress"
-        >
-          <Card className="grid max-w-[20rem] justify-items-center gap-[0.4rem] px-[1.1rem] py-4 text-center">
-            <div
-              aria-hidden="true"
-              className="h-5 w-5 animate-[sftp-spinner_0.8s_linear_infinite] rounded-full border-2 border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] border-t-[var(--accent-strong)]"
-            />
-            <strong>{translate("containers.connecting.withHost", { label: host.label })}</strong>
-            <span className="font-semibold text-[var(--text)]">
-              {formatConnectionProgressStageLabel(tab.connectionProgress?.stage)}
-            </span>
-            <span className="text-[0.9rem] leading-[1.5] text-[var(--text-soft)]">
-              {tab.connectionProgress?.message ??
-                translate("containers.connecting.preparing")}
-            </span>
-            <ConnectionHopSteps steps={tab.connectionHops} />
-          </Card>
-        </div>
+        // 터미널과 같은 화면을 쓴다 — 예전에는 여기만 자기 카드를 그려서, tailnet 관문도 호스트 키
+        // 확인도 보이지 않았다. 단계·홉·배너는 공용 빌더가 채운다.
+        <ConnectionStatusOverlay
+          error={false}
+          title={translate("containers.connecting.withHost", { label: host.label })}
+          message={
+            tab.connectionProgress?.message ??
+            translate("containers.connecting.preparing")
+          }
+          stages={connectionStages}
+          steps={tab.connectionHops}
+          notes={connectionBanner ? [connectionBanner] : null}
+        />
       ) : null}
 
       {pendingConfirmAction && selectedContainer ? (

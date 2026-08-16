@@ -740,6 +740,38 @@ describe("createAppStore runtime, workspaces, and sharing", () => {
     ]);
   });
 
+  // 포워딩이 붙으면 진행 팝업이 사라져야 한다.
+  //
+  // 코어의 portForwardStarted 는 메인에서 **런타임 레코드로 바뀌어** 들어오므로 handleCoreEvent
+  // 는 그것을 보지 못한다. 그 사실을 놓쳐서, 붙은 뒤에도 팝업이 "SSH 연결" 에 앉은 채 남았다.
+  it("포워딩이 붙으면 진행 뷰가 정리된다", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.getState().handleCoreEvent({
+      type: "connectionHopProgress",
+      endpointId: "pf-1",
+      payload: { hopIndex: 1, hopCount: 1, hopLabel: "ubuntu@target:22", stage: "connecting" },
+    });
+    expect(store.getState().connectionViews["pf-1"]).toBeDefined();
+
+    store.getState().handlePortForwardEvent({
+      runtime: {
+        ruleId: "pf-1",
+        hostId: "host-1",
+        transport: "ssh" as const,
+        mode: "local" as const,
+        bindAddress: "127.0.0.1",
+        bindPort: 8080,
+        status: "running" as const,
+        updatedAt: "2026-03-27T00:00:00.000Z",
+      },
+    } as never);
+
+    expect(store.getState().connectionViews["pf-1"]).toBeUndefined();
+  });
+
   // 포워딩은 start 실패를 삼키고 런타임 이벤트로만 알린다(services/network.ts). 그래서 키가
   // 바뀐 경우의 유일한 접점이 handlePortForwardEvent 다 — 터미널·SFTP·컨테이너와 같은 계약으로
   // 교체 프롬프트를 띄우고, 수락하면 이 룰의 포워딩을 다시 시작한다.

@@ -81,6 +81,8 @@ interface HostDrawerProps {
   keychainEntries: SecretMetadataRecord[];
   groupOptions: Array<{ value: string | null; label: string }>;
   jumpHostOptions?: SearchableSelectOption[];
+  /** 점프 후보별 tailnet 이름. 폼이 "첫 홉의 tailnet 을 탄다" 를 말하는 데 쓴다. */
+  jumpHostTailnetNames?: Record<string, string>;
   tailnetOptions?: Array<{ id: string; label: string }>;
   snippets?: SnippetRecord[];
   defaultGroupPath?: string | null;
@@ -109,6 +111,7 @@ export function HostDrawer({
   keychainEntries,
   groupOptions,
   jumpHostOptions = [],
+  jumpHostTailnetNames = {},
   tailnetOptions = [],
   snippets = [],
   defaultGroupPath = null,
@@ -308,6 +311,7 @@ export function HostDrawer({
           keychainEntries={keychainEntries}
           groupOptions={groupOptions}
           jumpHostOptions={jumpHostOptions}
+          jumpHostTailnetNames={jumpHostTailnetNames}
           tailnetOptions={tailnetOptions}
           snippets={snippets}
           defaultGroupPath={defaultGroupPath}

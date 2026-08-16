@@ -78,6 +78,9 @@ export {
 import { DialogBackdrop } from "./DialogBackdrop";
 import { HostCard } from "./HostCard";
 import { ConnectionHopSteps } from "./ConnectionHopSteps";
+import { ConnectionStatusOverlay } from "./ConnectionStatusOverlay";
+import { useAppStore } from "../store/appStore";
+import { resolveConnectionStages } from "./terminal-workspace/connectionStages";
 import { ArrowLeft, ArrowRight, ArrowUp } from "../ui/icons";
 import { TerminalInteractiveAuthOverlay } from "./terminal-workspace/TerminalInteractiveAuthOverlay";
 import {
@@ -2000,6 +2003,50 @@ function HostPicker({
     isConnecting &&
     !matchingInteractiveAuth &&
     pane.connectingEndpointId !== dismissedInteractiveEndpointId;
+  // 이 연결의 공통 진행 뷰(배너). 엔드포인트 ID 는 코어가 이벤트에 다는 값과 같다.
+  const sftpConnectionView = useAppStore((state) =>
+    pane.connectingEndpointId
+      ? (state.connectionViews[pane.connectingEndpointId] ?? null)
+      : null,
+  );
+  const sftpConnectionBanner = sftpConnectionView?.banner ?? null;
+  const sftpTailnetStatuses = useAppStore((state) => state.tailnetStatuses);
+  const sftpTailnetId =
+    selectedHost && "tailnetId" in selectedHost
+      ? (selectedHost.tailnetId ?? null)
+      : null;
+  // 단계는 터미널과 같은 빌더가 만든다.
+  const sftpConnectionStages = useMemo(
+    () =>
+      resolveConnectionStages({
+        subject: {
+          status: isConnecting ? "connecting" : "connected",
+          stage: sftpConnectionView?.stage ?? pane.connectionProgress?.stage,
+        },
+        tailnetStatus: sftpTailnetId
+          ? sftpTailnetStatuses[sftpTailnetId]
+          : undefined,
+        hasTailscale: Boolean(sftpTailnetId),
+        hostKind: selectedHost?.kind,
+        failureLayer: null,
+      }),
+    [
+      isConnecting,
+      sftpConnectionView?.stage,
+      pane.connectionProgress?.stage,
+      sftpTailnetId,
+      sftpTailnetStatuses,
+      selectedHost?.kind,
+    ],
+  );
+  const sftpConnectingNotes = useMemo(() => {
+    const stageLabel = formatConnectionProgressStageLabel(
+      pane.connectionProgress?.stage,
+    );
+    return [stageLabel, sftpConnectionBanner].filter(
+      (note): note is string => Boolean(note),
+    );
+  }, [pane.connectionProgress?.stage, sftpConnectionBanner]);
   const { ref: groupGridRef, style: groupGridStyle } = useResponsiveCardGrid({
     itemCount: visibleGroups.length,
     minWidth: SFTP_HOST_PICKER_HOST_CARD_MIN_WIDTH_PX,
@@ -2303,36 +2350,27 @@ function HostPicker({
           />
         </div>
       ) : shouldShowConnectingOverlay ? (
-        <div
-          className="absolute inset-0 z-[3] grid place-items-center rounded-[12px] bg-[rgba(12,20,32,0.18)]"
-          role="status"
-          aria-live="polite"
-          aria-label="SFTP host connection in progress"
-        >
-          <Card className="grid max-w-[20rem] justify-items-center gap-[0.4rem] px-[1.1rem] py-4 text-center">
-            <div
-              aria-hidden="true"
-              className="h-5 w-5 animate-spin rounded-full border-2 border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] border-t-[var(--accent-strong)]"
-            />
-            <strong>
-              {selectedHost
-                ? translate("sftp.connecting.withHost", {
-                    label: selectedHost.label,
-                  })
-                : translate("sftp.connecting.generic")}
-            </strong>
-            <span className="font-semibold text-[var(--text)]">
-              {formatConnectionProgressStageLabel(
-                pane.connectionProgress?.stage,
-              )}
-            </span>
-            <span className="text-[0.9rem] leading-[1.5] text-[var(--text-soft)]">
-              {pane.connectionProgress?.message ??
-                translate("sftp.connecting.preparing")}
-            </span>
-            <ConnectionHopSteps steps={pane.connectionHops} />
-          </Card>
-        </div>
+        // 터미널과 같은 화면을 쓴다 — 여기만 자기 카드를 그려서 tailnet 관문도 호스트 키 확인도
+        // 보이지 않았다. 단계·홉·배너는 공용 빌더가 채운다.
+        <ConnectionStatusOverlay
+          error={false}
+          title={
+            selectedHost
+              ? translate("sftp.connecting.withHost", {
+                  label: selectedHost.label,
+                })
+              : translate("sftp.connecting.generic")
+          }
+          message={
+            pane.connectionProgress?.message ??
+            translate("sftp.connecting.preparing")
+          }
+          stages={sftpConnectionStages}
+          steps={pane.connectionHops}
+          // 진행 단계 문구를 남긴다 — AWS(SSM·EIC) 경로는 공통 관문으로 표현되지 않아서
+          // 이 줄이 사라지면 "무엇을 하는 중인지" 를 말할 방법이 없다.
+          notes={sftpConnectingNotes}
+        />
       ) : null}
     </div>
   );

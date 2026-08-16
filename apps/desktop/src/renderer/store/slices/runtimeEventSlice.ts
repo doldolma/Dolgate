@@ -158,6 +158,11 @@ import {
   getPane,
   updatePaneState,
   toTrustInput,
+  enqueueHostKeyPrompt,
+  findHostByAddress,
+  updateConnectionView,
+  upsertConnectionHop,
+  clearConnectionView,
 } from "../utils";
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
 import { createTrustAuthServices } from "../services/trust-auth";
@@ -179,6 +184,7 @@ import {
 } from "../../lib/terminal-upload-registry";
 import { resolveHopHostNames } from "../../lib/connection-hops";
 import type { CoreEvent, HostRecord } from "@shared";
+import { hostIdFromKeyInstallCorrelation } from "@shared";
 import { t } from "../../i18n";
 
 /**
@@ -320,6 +326,120 @@ function applySessionReconnecting(
         : tab,
     ),
   };
+}
+
+/**
+ * 코어 이벤트에서 공통 진행 상태를 뽑아 둔다.
+ *
+ * 여기서 하는 일은 기록뿐이다 — 화면 전환도, 탭 조작도 하지 않는다. 그래야 이 함수가 모든 경로의
+ * 모든 이벤트에서 돌아도 기존 동작을 건드리지 않는다.
+ */
+function recordConnectionView(
+  set: (updater: (state: AppState) => Partial<AppState>) => void,
+  event: CoreEvent,
+): void {
+  // 상관 ID 가 곧 열쇠다. 둘 다 없으면 어느 연결인지 알 수 없으므로 기록하지 않는다.
+  const key = event.sessionId || event.endpointId;
+  if (!key) {
+    return;
+  }
+
+  switch (event.type) {
+    case "connectionHopProgress": {
+      const payload = event.payload as {
+        hopLabel?: unknown;
+        hopIndex?: unknown;
+        hopCount?: unknown;
+        stage?: unknown;
+      };
+      const index = typeof payload.hopIndex === "number" ? payload.hopIndex : 0;
+      if (index <= 0) {
+        return;
+      }
+      const hop: TerminalConnectionHop = {
+        index,
+        count: typeof payload.hopCount === "number" ? payload.hopCount : index,
+        label: typeof payload.hopLabel === "string" ? payload.hopLabel : "",
+        stage:
+          payload.stage === "connected" || payload.stage === "failed"
+            ? payload.stage
+            : "connecting",
+      };
+      set((state) => ({
+        connectionViews: updateConnectionView(state.connectionViews, key, {
+          status: "connecting",
+          hops: upsertConnectionHop(state.connectionViews[key]?.hops, hop),
+        }),
+      }));
+      return;
+    }
+    case "sshBanner": {
+      const payload = event.payload as { text?: unknown };
+      const text = typeof payload.text === "string" ? payload.text : "";
+      if (!text) {
+        return;
+      }
+      set((state) => ({
+        connectionViews: updateConnectionView(state.connectionViews, key, {
+          banner: text,
+        }),
+      }));
+      return;
+    }
+    case "keyboardInteractiveChallenge": {
+      set((state) => ({
+        connectionViews: updateConnectionView(state.connectionViews, key, {
+          status: "connecting",
+          stage: "waiting-interactive-auth",
+        }),
+      }));
+      return;
+    }
+    case "hostKeyTrustChallenge": {
+      set((state) => ({
+        connectionViews: updateConnectionView(state.connectionViews, key, {
+          status: "connecting",
+          stage: "probing-host-key",
+        }),
+      }));
+      return;
+    }
+    case "keyboardInteractiveResolved": {
+      set((state) => ({
+        connectionViews: updateConnectionView(state.connectionViews, key, {
+          stage: "connecting",
+        }),
+      }));
+      return;
+    }
+    // 끝났으면 지운다. 남겨 두면 다음 연결이 앞 시도의 홉을 물려받는다.
+    case "connected":
+    case "closed":
+    case "portForwardStarted":
+    case "portForwardStopped":
+    case "containersConnected":
+    case "authorizedKeyInstalled": {
+      set((state) => ({
+        connectionViews: clearConnectionView(state.connectionViews, key),
+      }));
+      return;
+    }
+    case "error":
+    case "portForwardError":
+    case "containersError": {
+      const payload = event.payload as { message?: unknown };
+      set((state) => ({
+        connectionViews: updateConnectionView(state.connectionViews, key, {
+          status: "error",
+          message:
+            typeof payload?.message === "string" ? payload.message : undefined,
+        }),
+      }));
+      return;
+    }
+    default:
+      return;
+  }
 }
 
 export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
@@ -582,6 +702,18 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
       const activeRetryAttemptBeforeUpdate = get().activeCredentialRetryAttempt;
       scheduleActivityLogsRefresh();
 
+      // 공통 진행 상태를 먼저 모은다. **아래 라우팅과 무관하게** 돈다 — 그래야 자기 화면이 없는
+      // 경로(포워딩·공개키 설치)도 tailnet·점프·신뢰·인증을 그대로 보여줄 수 있다.
+      //
+      // 실패해도 아래로 넘어간다. 이건 진행 표시용 곁가지인데, 여기서 던지면 그 이벤트의 **본
+      // 처리가 통째로 건너뛰어진다** — 터미널이 붙지 않거나 탭이 안 닫히는 식으로 번진다.
+      // 곁가지가 본류를 끊게 두지 않는다.
+      try {
+        recordConnectionView(set, event);
+      } catch (error) {
+        console.warn("[connection-view] 진행 상태를 기록하지 못했습니다", error);
+      }
+
       // 서버가 인증 단계에 보낸 배너(RFC 4252 §5.4). 해석하지 않고 터미널에 그대로 찍는다 —
       // OpenSSH 가 하는 것과 같고, 승인 주소인지 회사 경고문인지는 사용자가 읽고 판단한다.
       // 우리가 문구를 뒤져 의도를 추측하면 정책 안내 링크를 "승인하라"고 잘못 말하게 된다.
@@ -612,6 +744,56 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
         return;
       }
 
+      // 공개 키 설치가 묻는 인증.
+      //
+      // 세션 처리부보다 **먼저** 가른다. 설치는 탭을 만들지 않으므로 그쪽으로 흘려보내면 탭을
+      // 찾다가 아무 일도 못 하고, 사용자는 붉은 오류만 본다. 여기서 자기 카드로 만들어 설치
+      // 대화상자가 그린다(@shared 의 KEY_INSTALL_CORRELATION_PREFIX).
+      const keyInstallHostId = hostIdFromKeyInstallCorrelation(sessionId);
+      if (keyInstallHostId) {
+        if (event.type === "keyboardInteractiveChallenge") {
+          const payload = event.payload as Record<string, unknown>;
+          set((state) => ({
+            pendingInteractiveAuths: upsertPendingInteractiveAuth(
+              state.pendingInteractiveAuths,
+              {
+                source: "keyInstall",
+                sessionId: sessionId as string,
+                hostId: keyInstallHostId,
+                challengeId: String(payload.challengeId ?? ""),
+                name: typeof payload.name === "string" ? payload.name : null,
+                instruction: String(payload.instruction ?? ""),
+                prompts: Array.isArray(payload.prompts)
+                  ? payload.prompts.map((prompt) => {
+                      const candidate = prompt as Record<string, unknown>;
+                      return {
+                        label: String(candidate.label ?? ""),
+                        echo: Boolean(candidate.echo),
+                        allowStoredPassword: Boolean(candidate.allowStoredPassword),
+                        masked: Boolean(candidate.masked),
+                      };
+                    })
+                  : [],
+                hasStoredPassword: Boolean(payload.hasStoredPassword),
+                hop: toKeyboardInteractiveHop(payload.hop),
+                provider: "generic",
+                autoSubmitted: false,
+              },
+            ),
+          }));
+          return;
+        }
+        if (event.type === "keyboardInteractiveResolved") {
+          set((state) => ({
+            pendingInteractiveAuths: state.pendingInteractiveAuths.filter(
+              (auth) =>
+                !(auth.source === "keyInstall" && auth.sessionId === sessionId),
+            ),
+          }));
+          return;
+        }
+      }
+
       // 연결이 "이 서버 키를 신뢰하겠습니까" 를 묻고, 그 자리에서 답을 기다린다.
       //
       // 범위를 가리지 않는다(세션·포워딩·SFTP·컨테이너). 대화상자는 하나뿐이고 답은 챌린지 ID 로
@@ -627,17 +809,13 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
         // 이 키를 **어느 호스트의 것으로 저장할지** 가 여기서 갈린다. 점프 체인이면 질문은 그 홉의
         // 것이므로 홉 주소로 레코드를 찾는다 — 탭의 호스트(최종 대상)로 저장하면 신뢰 범위
         // (tailnet)가 어긋나서, 저장은 되는데 다음 연결이 또 묻는 상태가 된다.
-        const addressed = (record: HostRecord): boolean =>
-          "hostname" in record && record.hostname === host;
         const currentTab = sessionId
           ? state.tabs.find((tab) => tab.sessionId === sessionId)
           : undefined;
         const hostRecord =
-          state.hosts.find(
-            (record) =>
-              addressed(record) && "port" in record && record.port === port,
-          ) ??
-          state.hosts.find(addressed) ??
+          // 주소로 찾는 규칙은 인증 카드가 이름을 얹을 때 쓰는 것과 같아야 한다 — 따로 두면
+          // 신뢰 대화상자와 인증 카드가 같은 홉을 다른 이름으로 부른다.
+          findHostByAddress(state.hosts, host, port) ??
           (currentTab?.source === "host" && currentTab.hostId
             ? state.hosts.find((record) => record.id === currentTab.hostId)
             : undefined);
@@ -648,9 +826,18 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
               record.port === port &&
               record.algorithm === String(payload.algorithm ?? ""),
           ) ?? null;
-        set({
-          pendingHostKeyPrompt: {
-            sessionId: sessionId ?? null,
+        // 보여 주는 것이 있으면 뒤에 세운다. 덮어쓰면 그 물음은 아무도 답할 수 없게 되고, 그
+        // 연결은 예산이 다 될 때까지 "연결 중…"에 앉아 있는다.
+        set((current) =>
+          enqueueHostKeyPrompt(current, {
+            // 공개 키 설치의 상관 ID 는 여기 담지 않는다.
+            //
+            // 이 값은 "답을 기다리는 **탭**" 을 뜻한다 — AppShell 이 그 탭으로 화면을 옮기고,
+            // 거절하면 그 탭을 오류로 표시한다. 설치는 탭이 없으므로 담으면 있지도 않은
+            // `session:keyinstall:…` 로 화면이 튄다. 신뢰 대화상자는 전역이라 이것 없이도 뜬다.
+            sessionId: hostIdFromKeyInstallCorrelation(sessionId)
+              ? null
+              : (sessionId ?? null),
             liveChallengeId: String(payload.challengeId ?? ""),
             probe: {
               hostId: hostRecord?.id ?? "",
@@ -666,8 +853,8 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
             },
             // 살아 있는 질의는 수락 후 다시 연결하지 않는다. action 은 형태를 맞추기 위한 값이다.
             action: { kind: "containers", hostId: hostRecord?.id ?? "" },
-          },
-        });
+          }),
+        );
         return;
       }
 
@@ -2414,6 +2601,18 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
             event.runtime.ruleId,
           );
         }
+
+        // 진행 팝업도 여기서 내린다. **바로 위 주석과 같은 이유다** — 코어의
+        // portForwardStarted·Stopped·Error 는 메인에서 런타임 레코드로 바뀌므로 handleCoreEvent 는
+        // 그것을 보지 못한다. 그래서 뷰가 지워지지 않고, 포워딩이 붙은 뒤에도 팝업이 "SSH 연결"
+        // 에 앉은 채 남아 있었다.
+        //
+        // 실패도 여기서 지운다: 이유는 규칙 줄과 활동 로그가 이미 말해 주고, 모달로 한 번 더
+        // 막아 세우면 사용자가 목록을 만질 수 없다.
+        nextState.connectionViews = clearConnectionView(
+          state.connectionViews,
+          event.runtime.ruleId,
+        );
 
         if (event.runtime.ruleId.startsWith("ecs-service-tunnel:")) {
           nextState.containerTabs = state.containerTabs.map((tab) => {

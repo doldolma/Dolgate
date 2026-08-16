@@ -1186,8 +1186,10 @@ describe("SftpWorkspace column resizing", () => {
       sftp,
     });
 
+    // 진행 화면의 접근성 이름은 이제 제목(=어느 호스트에 붙는 중인지)이다. 고정 문구였을 때는
+    // 화면 낭독이 "SFTP host connection in progress" 만 읽어서 어느 연결인지 알 수 없었다.
     expect(
-      screen.getByLabelText("SFTP host connection in progress"),
+      screen.getByRole("status", { name: "Prod SSH 연결 중..." }),
     ).toBeTruthy();
     expect(
       screen.getByLabelText("Available hosts for right pane"),

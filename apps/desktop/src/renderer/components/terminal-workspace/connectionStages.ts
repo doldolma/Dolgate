@@ -59,23 +59,56 @@ export type ConnectionTransport =
   | 'vnc';
 
 /**
- * 탭과 호스트 종류로 전송 방식을 정한다.
+ * 연결 하나의 진행 상태. **이 화면이 탭에 대해 아는 것의 전부다.**
+ *
+ * 예전에는 여기에 TerminalTab 이 그대로 들어와서, 같은 단계 화면을 터미널 밖(포워딩·컨테이너·
+ * 공개키 설치)에서 쓸 수 없었다 — 그 경로들에는 탭이 없다. 필요한 네 가지만 받으면 무엇이든
+ * 환산해 넣을 수 있다.
+ */
+export interface ConnectionStageSubject {
+  /** 'connected' | 'error' | 그 밖(진행 중). */
+  status?: string | null;
+  /** 코어가 보고한 세부 단계(connecting·waiting-shell·waiting-interactive-auth …). */
+  stage?: string | null;
+  /** 터미널 판의 종류(rdp·vnc). 터미널 밖에서는 비어 있다. */
+  paneKind?: string | null;
+  /** 'local' 이면 원격 관문이 통째로 없다. */
+  source?: string | null;
+}
+
+/** 터미널 탭을 위 형태로 옮긴다. 탭이 없으면 undefined 그대로 흘린다. */
+export function stageSubjectFromTab(
+  tab: TerminalTab | undefined,
+): ConnectionStageSubject | undefined {
+  if (!tab) {
+    return undefined;
+  }
+  return {
+    status: tab.status,
+    stage: tab.connectionProgress?.stage,
+    paneKind: tab.paneKind,
+    source: tab.source,
+  };
+}
+
+/**
+ * 진행 상태와 호스트 종류로 전송 방식을 정한다.
  *
  * 호스트 종류를 모르는 동안(목록 로딩 등)은 SSH 로 본다 — 이 앱의 기본이고, 로컬로 잘못 보면
  * 단계가 통째로 사라진다.
  */
 export function resolveConnectionTransport(
-  tab: TerminalTab | undefined,
+  subject: ConnectionStageSubject | undefined,
   hostKind: HostRecord['kind'] | undefined,
   awsPlatform?: string | null,
 ): ConnectionTransport {
-  if (tab?.paneKind === 'rdp' || hostKind === 'rdp') {
+  if (subject?.paneKind === 'rdp' || hostKind === 'rdp') {
     return 'rdp';
   }
-  if (tab?.paneKind === 'vnc' || hostKind === 'vnc') {
+  if (subject?.paneKind === 'vnc' || hostKind === 'vnc') {
     return 'vnc';
   }
-  if (tab?.source === 'local') {
+  if (subject?.source === 'local') {
     return 'local';
   }
   switch (hostKind) {
@@ -291,7 +324,8 @@ export function resolveTailscaleStages(
  * 오히려 헷갈린다.
  */
 export function resolveConnectionStages(input: {
-  tab: TerminalTab | undefined;
+  /** 이 연결의 진행 상태. 터미널은 stageSubjectFromTab 으로 만들고, 나머지는 직접 채운다. */
+  subject: ConnectionStageSubject | undefined;
   tailnetStatus?: TailnetStatus;
   hasTailscale: boolean;
   /** 대상 기기 주소. 넷맵에서 그 기기를 찾아 경로를 보여주는 데 쓴다. */
@@ -311,15 +345,15 @@ export function resolveConnectionStages(input: {
    */
   tunnelLabel?: string | null;
 }): ConnectionStage[] {
-  const { tab, tailnetStatus, hasTailscale, failureLayer, failureMessage } = input;
-  const transport = resolveConnectionTransport(tab, input.hostKind, input.awsPlatform);
+  const { subject, tailnetStatus, hasTailscale, failureLayer, failureMessage } = input;
+  const transport = resolveConnectionTransport(subject, input.hostKind, input.awsPlatform);
   const stages: ConnectionStage[] = hasTailscale
     ? resolveTailscaleStages(tailnetStatus, failureLayer === 'tailscale', input.targetAddress)
     : [];
 
-  const stage = tab?.connectionProgress?.stage;
-  const failed = tab?.status === 'error';
-  const connected = tab?.status === 'connected';
+  const stage = (subject?.stage ?? undefined) as TerminalConnectionStage | undefined;
+  const failed = subject?.status === 'error';
+  const connected = subject?.status === 'connected';
   // Tailscale 을 쓰는 호스트는 그 계층을 통과해야 호스트 키를 확인할 수 있다. 판정은 코어가 한
   // 곳에서 하고(ready·degraded), 여기서 state·expired·online 으로 다시 조합하지 않는다.
   //

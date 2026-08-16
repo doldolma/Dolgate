@@ -1474,6 +1474,204 @@ describe("createAppStore sessions and auth recovery", () => {
     expect(store.getState().pendingHostKeyPrompt).toBeNull();
   });
 
+  // 공개 키 설치가 묻는 인증도 화면에 올라와야 한다.
+  //
+  // 설치는 탭을 만들지 않아서 붙일 자리가 없었다 — 코어는 물을 곳이 없다고 보고 그냥 실패시켰고,
+  // 대화상자에는 "keyboard-interactive responder is not configured" 만 남았다. OTP 나 비밀번호를
+  // 요구하는 호스트에는 키를 올릴 방법 자체가 없던 셈이다.
+  it("공개 키 설치의 인증 물음을 그 호스트의 카드로 만든다", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.getState().handleCoreEvent({
+      type: "keyboardInteractiveChallenge",
+      sessionId: "keyinstall:host-1",
+      payload: {
+        challengeId: "keyinstall:host-1-1",
+        attempt: 1,
+        instruction: "",
+        prompts: [{ label: "Verification code:", echo: false, masked: false }],
+        hop: { username: "ubuntu", host: "prod.example.com", port: 22 },
+      },
+    });
+
+    const auth = store.getState().pendingInteractiveAuths[0];
+    expect(auth).toMatchObject({
+      source: "keyInstall",
+      hostId: "host-1",
+      sessionId: "keyinstall:host-1",
+      challengeId: "keyinstall:host-1-1",
+    });
+
+    // 답은 상관 ID(sessionId)로 간다 — 설치에는 엔드포인트가 없다.
+    await store
+      .getState()
+      .respondInteractiveAuth("keyinstall:host-1-1", ["123456"]);
+    expect(api.ssh.respondKeyboardInteractive).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "keyinstall:host-1",
+        challengeId: "keyinstall:host-1-1",
+        responses: ["123456"],
+      }),
+    );
+
+    // 코어가 통과를 알리면 카드는 사라진다.
+    store.getState().handleCoreEvent({
+      type: "keyboardInteractiveResolved",
+      sessionId: "keyinstall:host-1",
+      payload: { challengeId: "keyinstall:host-1-1" },
+    });
+    expect(store.getState().pendingInteractiveAuths).toEqual([]);
+  });
+
+  // 설치 중 올라온 신뢰 물음은 탭을 가리키지 않아야 한다.
+  //
+  // sessionId 는 "답을 기다리는 탭"이라는 뜻이고, AppShell 이 그 값으로 화면을 옮긴다. 설치의
+  // 상관 ID 를 그대로 담으면 있지도 않은 `session:keyinstall:…` 로 튄다 — 사용자는 설치
+  // 대화상자를 보고 있다가 빈 화면으로 끌려간다.
+  it("설치의 신뢰 물음은 존재하지 않는 탭을 가리키지 않는다", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.getState().handleCoreEvent({
+      type: "hostKeyTrustChallenge",
+      sessionId: "keyinstall:host-1",
+      payload: {
+        challengeId: "hostkey-trust-install",
+        hop: { username: "ubuntu", host: "bastion.example.com", port: 22 },
+        algorithm: "ssh-ed25519",
+        fingerprintSha256: "SHA256:test",
+        publicKeyBase64: "AAAATEST",
+        mismatch: false,
+      },
+    });
+
+    // 물음 자체는 떠야 한다(전역 대화상자).
+    expect(store.getState().pendingHostKeyPrompt?.liveChallengeId).toBe(
+      "hostkey-trust-install",
+    );
+    expect(store.getState().pendingHostKeyPrompt?.sessionId).toBeNull();
+  });
+
+  // 포워딩·공개키 설치는 탭이 없어서 진행 정보를 받을 자리가 없었다 — 시작해도 tailnet 도 점프도
+  // 아무것도 안 보이고 결과만 떨어졌다. 이제는 상관 ID 만으로 공통 뷰에 모인다.
+  it("탭이 없는 연결도 홉과 배너를 공통 뷰에 모은다", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.getState().handleCoreEvent({
+      type: "connectionHopProgress",
+      endpointId: "rule-1",
+      payload: { hopIndex: 1, hopCount: 2, hopLabel: "ubuntu@bastion:22", stage: "connected" },
+    });
+    store.getState().handleCoreEvent({
+      type: "connectionHopProgress",
+      endpointId: "rule-1",
+      payload: { hopIndex: 2, hopCount: 2, hopLabel: "ubuntu@target:22", stage: "connecting" },
+    });
+    store.getState().handleCoreEvent({
+      type: "sshBanner",
+      endpointId: "rule-1",
+      payload: { text: "Approve at https://login.example.com/a/1" },
+    });
+
+    const view = store.getState().connectionViews["rule-1"];
+    expect(view?.hops.map((hop) => hop.stage)).toEqual(["connected", "connecting"]);
+    expect(view?.banner).toContain("https://login.example.com/a/1");
+
+    // 성공하면 뷰는 사라진다 — 남기면 다음 시작이 앞 시도의 홉을 물려받는다.
+    store.getState().handleCoreEvent({
+      type: "portForwardStarted",
+      endpointId: "rule-1",
+      payload: {},
+    });
+    expect(store.getState().connectionViews["rule-1"]).toBeUndefined();
+  });
+
+  // 실패는 남는다. 사용자가 무엇 때문에 못 붙었는지 읽고 닫아야 한다.
+  it("실패한 연결 뷰는 남고 사용자가 닫을 수 있다", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.getState().handleCoreEvent({
+      type: "connectionHopProgress",
+      endpointId: "rule-1",
+      payload: { hopIndex: 1, hopCount: 1, hopLabel: "ubuntu@target:22", stage: "connecting" },
+    });
+    store.getState().handleCoreEvent({
+      type: "portForwardError",
+      endpointId: "rule-1",
+      payload: { message: "ssh handshake failed" },
+    });
+
+    expect(store.getState().connectionViews["rule-1"]).toMatchObject({
+      status: "error",
+      message: "ssh handshake failed",
+    });
+
+    store.getState().dismissConnectionView("rule-1");
+    expect(store.getState().connectionViews["rule-1"]).toBeUndefined();
+  });
+
+  // 두 연결이 동시에 물으면 둘 다 답을 받아야 한다.
+  //
+  // 슬롯이 하나뿐이던 시절에는 뒤에 온 물음이 앞의 것을 지웠고, 지워진 쪽은 아무도 답할 수 없어
+  // 코어의 예산(5분)이 다 될 때까지 "연결 중…"에 앉아 있었다. 앱을 켤 때 세션을 여러 개
+  // 복원하거나 같은 베스천 뒤의 호스트를 한꺼번에 열면 실제로 겹친다.
+  it("동시에 온 신뢰 물음을 잃지 않고 하나씩 묻는다", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+    const sessionId = store.getState().tabs[0]?.sessionId;
+
+    const challenge = (challengeId: string, host: string) => ({
+      type: "hostKeyTrustChallenge" as const,
+      sessionId: sessionId!,
+      payload: {
+        challengeId,
+        hop: { username: "ubuntu", host, port: 22 },
+        algorithm: "ssh-ed25519",
+        fingerprintSha256: `SHA256:${challengeId}`,
+        publicKeyBase64: "AAAATEST",
+        mismatch: false,
+      },
+    });
+
+    store.getState().handleCoreEvent(challenge("hostkey-trust-a", "a.example.com"));
+    store.getState().handleCoreEvent(challenge("hostkey-trust-b", "b.example.com"));
+
+    // 먼저 온 것을 계속 보여 준다 — 뒤엣것이 앞엣것을 지우지 않는다.
+    expect(store.getState().pendingHostKeyPrompt?.liveChallengeId).toBe(
+      "hostkey-trust-a",
+    );
+    expect(store.getState().queuedHostKeyPrompts).toHaveLength(1);
+
+    store.getState().dismissPendingHostKeyPrompt();
+
+    // 앞엣것을 끝내면 뒤엣것이 올라온다. 그래야 그 연결도 답을 받는다.
+    expect(store.getState().pendingHostKeyPrompt?.liveChallengeId).toBe(
+      "hostkey-trust-b",
+    );
+
+    store.getState().dismissPendingHostKeyPrompt();
+
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+    expect(api.ssh.respondHostKeyTrust).toHaveBeenCalledWith({
+      challengeId: "hostkey-trust-a",
+      trust: false,
+    });
+    expect(api.ssh.respondHostKeyTrust).toHaveBeenCalledWith({
+      challengeId: "hostkey-trust-b",
+      trust: false,
+    });
+  });
+
   // 이미 저장된 키와 다른 키가 오면 "교체" 로 묻는다(기존 제품 결정 그대로).
   it("asks to replace when the key changed", async () => {
     const api = createMockApi();
@@ -2406,5 +2604,102 @@ describe("createAppStore sessions and auth recovery", () => {
       challengeId: "hostkey-1",
       deliveryError: expect.stringContaining("hostkey-1"),
     });
+  });
+
+  // 카드를 닫으면 기다리던 코어도 끊어야 한다.
+  //
+  // 화면에서만 지우면 코어는 예산(5분)이 다 될 때까지 답을 기다린다 — 진행 카드가 "연결 중…"에
+  // 앉은 채 남고, tailnet 을 경유하면 그 노드의 리스까지 붙잡는다. 실기기에서 그 상태였다.
+  it("인증 카드를 닫으면 코어에 취소를 알린다", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    store.setState({
+      pendingInteractiveAuths: [
+        {
+          source: "ssh",
+          sessionId: "session-1",
+          challengeId: "hostkey-1",
+          name: null,
+          instruction: "",
+          prompts: [{ label: "Verification code:", echo: false }],
+          provider: "generic",
+          autoSubmitted: false,
+        },
+      ],
+    });
+
+    store.getState().clearPendingInteractiveAuth("hostkey-1");
+
+    expect(api.ssh.respondKeyboardInteractive).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        challengeId: "hostkey-1",
+        cancelled: true,
+      }),
+    );
+    expect(store.getState().pendingInteractiveAuths).toEqual([]);
+  });
+
+  // 엔드포인트 쪽(SFTP·컨테이너·포워딩) 물음도 같은 경로로 끊긴다. 상관 ID 만 다르다.
+  it("엔드포인트 인증 카드를 닫아도 취소가 전파된다", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    store.setState({
+      pendingInteractiveAuths: [
+        {
+          source: "portForward",
+          endpointId: "rule-1",
+          challengeId: "rule-1-1",
+          name: null,
+          instruction: "",
+          prompts: [{ label: "Verification code:", echo: false }],
+          provider: "generic",
+          autoSubmitted: false,
+        } as never,
+      ],
+    });
+
+    store.getState().clearPendingInteractiveAuth("rule-1-1");
+
+    expect(api.ssh.respondKeyboardInteractive).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endpointId: "rule-1",
+        challengeId: "rule-1-1",
+        cancelled: true,
+      }),
+    );
+  });
+
+  // 닫기가 실패해도 카드는 사라져야 한다. 이미 끝난 물음이면 코어가 "not found" 를 주는데,
+  // 그것 때문에 카드가 남으면 사용자는 닫을 방법이 없다.
+  it("코어가 이미 그 물음을 버렸어도 카드는 닫힌다", async () => {
+    const api = createMockApi();
+    api.ssh.respondKeyboardInteractive = vi
+      .fn()
+      .mockRejectedValue(new Error("challenge hostkey-1 not found"));
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    store.setState({
+      pendingInteractiveAuths: [
+        {
+          source: "ssh",
+          sessionId: "session-1",
+          challengeId: "hostkey-1",
+          name: null,
+          instruction: "",
+          prompts: [{ label: "Verification code:", echo: false }],
+          provider: "generic",
+          autoSubmitted: false,
+        },
+      ],
+    });
+
+    store.getState().clearPendingInteractiveAuth("hostkey-1");
+    await Promise.resolve();
+
+    expect(store.getState().pendingInteractiveAuths).toEqual([]);
   });
 });

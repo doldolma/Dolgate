@@ -402,6 +402,24 @@ describe("ContainersWorkspace", () => {
     expect(screen.queryByText(/Error invoking remote method/u)).toBeNull();
   });
 
+  // 컨테이너 탭에는 tailnet·호스트 키 관문이 통째로 없었다 — 자기 카드를 그렸기 때문이다.
+  // 이제 터미널과 같은 빌더를 쓰므로, 무엇을 거쳐 붙는지가 여기서도 보인다.
+  it("연결 중에 터미널과 같은 관문을 보여준다", () => {
+    render(
+      <ContainersWorkspace
+        {...createProps({
+          ...createTab(),
+          isLoading: true,
+          items: [],
+        })}
+      />,
+    );
+
+    const overlay = screen.getByRole("status");
+    // SSH 로 붙는 호스트이므로 호스트 키 확인과 SSH 연결 관문이 선다.
+    expect(overlay.textContent).toContain("SSH");
+  });
+
   it("marks the selected detail panel tab accessibly and keeps disabled tabs visually inactive", () => {
     render(
       <ContainersWorkspace

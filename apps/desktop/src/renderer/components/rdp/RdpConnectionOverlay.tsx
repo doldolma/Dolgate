@@ -4,7 +4,7 @@ import { useAppStore } from '../../store/appStore';
 import { resolveConnectionFailurePresentation } from '../../store/utils';
 import { acquireTailnetWatch } from '../../services/desktop/tailnet-watch';
 import { ConnectionStatusOverlay } from '../ConnectionStatusOverlay';
-import { resolveConnectionStages } from '../terminal-workspace/connectionStages';
+import { resolveConnectionStages, stageSubjectFromTab } from '../terminal-workspace/connectionStages';
 import { useTranslation } from 'react-i18next';
 
 interface RdpConnectionOverlayProps {
@@ -60,7 +60,7 @@ export function RdpConnectionOverlay({ sessionId }: RdpConnectionOverlayProps) {
   const stages = useMemo(
     () =>
       resolveConnectionStages({
-        tab,
+        subject: stageSubjectFromTab(tab),
         hasTailscale: Boolean(tailnetId),
         // 대상 주소로 넷맵에서 그 기기를 찾아 경로를 보여준다 — Tailscale 이 붙어 있어도 대상에
         // 못 가는 경우가 있고, 그것을 안 보여주면 "설정은 연결됨인데 왜 안 되지" 가 된다.

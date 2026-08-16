@@ -8,6 +8,7 @@ import type {
   PendingContainersInteractiveAuth,
   PendingInteractiveAuth,
   PendingPortForwardInteractiveAuth,
+  PendingKeyInstallInteractiveAuth,
   PendingSessionInteractiveAuth,
   PendingSftpInteractiveAuth,
 } from "../types";
@@ -30,6 +31,12 @@ export function isPendingContainersInteractiveAuth(
   return pending?.source === "containers";
 }
 
+export function isPendingKeyInstallInteractiveAuth(
+  pending: PendingInteractiveAuth | null,
+): pending is PendingKeyInstallInteractiveAuth {
+  return pending?.source === "keyInstall";
+}
+
 export function isPendingPortForwardInteractiveAuth(
   pending: PendingInteractiveAuth | null,
 ): pending is PendingPortForwardInteractiveAuth {
@@ -43,13 +50,14 @@ export function normalizeInteractiveText(value: string | undefined | null): stri
 /**
  * 이 인증 요청이 어느 대상의 것인지. 같은 대상의 새 요청은 앞의 것을 대체한다.
  *
- * 세션은 sessionId, 나머지(SFTP·컨테이너·포워딩)는 endpointId 가 대상이다 — 코어가 챌린지를 올릴
- * 때 쓰는 상관 ID 와 같다.
+ * 코어가 챌린지를 올릴 때 쓰는 상관 ID 와 같아야 한다. endpointId 가 있으면 그쪽이 대상이다 —
+ * VNC 터널은 두 ID 를 다 갖지만 답은 endpointId 로 가기 때문이다(대기표가 거기 걸려 있다).
+ * 나머지(세션·공개 키 설치)는 sessionId 가 대상이다.
  */
 export function interactiveAuthScope(auth: PendingInteractiveAuth): string {
-  return auth.source === "ssh"
-    ? `session:${auth.sessionId}`
-    : `endpoint:${auth.endpointId}`;
+  return "endpointId" in auth
+    ? `endpoint:${auth.endpointId}`
+    : `session:${auth.sessionId}`;
 }
 
 /** 같은 대상의 것을 갈아 끼우고, 없으면 뒤에 붙인다. */
@@ -78,7 +86,7 @@ export function clearEndpointPendingInteractiveAuth(
   endpointId: string,
 ): PendingInteractiveAuth[] {
   return auths.filter(
-    (auth) => auth.source === "ssh" || auth.endpointId !== endpointId,
+    (auth) => !("endpointId" in auth) || auth.endpointId !== endpointId,
   );
 }
 
@@ -108,7 +116,7 @@ export function findEndpointPendingInteractiveAuth(
   }
   return (
     auths.find(
-      (auth) => auth.source !== "ssh" && auth.endpointId === endpointId,
+      (auth) => "endpointId" in auth && auth.endpointId === endpointId,
     ) ?? null
   );
 }
@@ -149,15 +157,52 @@ export function toKeyboardInteractiveHop(
 }
 
 /** 홉을 `user@host:port` 로 적는다. 없는 부분은 생략한다. */
+/**
+ * 이 주소가 어느 호스트인지 찾는다.
+ *
+ * 코어는 **주소만** 안다 — 사용자가 붙인 이름은 화면 쪽에만 있다. 그래서 홉을 보여줄 때마다
+ * 여기서 되찾아 얹는다. 포트까지 맞는 것을 먼저 찾고, 없으면 주소만 같은 것을 쓴다(같은 기기에
+ * 포트만 다르게 등록한 경우에도 이름은 맞다).
+ */
+export function findHostByAddress(
+  hosts: readonly HostRecord[] | undefined,
+  address: string | null | undefined,
+  port?: number | null,
+): HostRecord | undefined {
+  if (!hosts?.length || !address) {
+    return undefined;
+  }
+  const addressed = (record: HostRecord): boolean =>
+    "hostname" in record && record.hostname === address;
+  return (
+    hosts.find(
+      (record) =>
+        addressed(record) && "port" in record && record.port === port,
+    ) ?? hosts.find(addressed)
+  );
+}
+
+/**
+ * 누가 물었는지를 사람이 읽는 형태로.
+ *
+ * **이름을 앞에 둔다.** 사용자는 보통 주소가 아니라 자기가 붙인 이름을 기억하고 있어서, 주소만
+ * 보여 주면 점프 체인에서 어느 쪽 코드를 넣어야 하는지 바로 알기 어렵다. 주소는 뒤에 남겨
+ * 같은 이름이 여럿일 때 구분할 수 있게 한다.
+ *
+ * 목록에 없는 주소면(등록하지 않은 경유지) 예전처럼 주소만 나온다.
+ */
 export function formatInteractiveHop(
   hop: KeyboardInteractiveHop | null | undefined,
+  hosts?: readonly HostRecord[],
 ): string {
   if (!hop?.host) {
     return "";
   }
   const user = hop.username ? `${hop.username}@` : "";
   const port = hop.port ? `:${hop.port}` : "";
-  return `${user}${hop.host}${port}`;
+  const address = `${user}${hop.host}${port}`;
+  const label = findHostByAddress(hosts, hop.host, hop.port)?.label?.trim();
+  return label ? `${label} (${address})` : address;
 }
 
 export function parseWarpgateApprovalUrl(

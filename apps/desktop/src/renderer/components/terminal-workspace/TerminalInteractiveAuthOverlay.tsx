@@ -1,5 +1,6 @@
 import type { PendingInteractiveAuth } from '../../store/createAppStore';
 import { formatInteractiveHop } from '../../store/utils';
+import { useAppStore } from '../../store/appStore';
 import { Button, Input, SectionLabel } from '../../ui';
 import { Trans, useTranslation } from 'react-i18next';
 
@@ -28,9 +29,11 @@ export function TerminalInteractiveAuthOverlay({
   onClose,
 }: TerminalInteractiveAuthOverlayProps) {
   const { t: translate } = useTranslation();
+  // 코어는 주소만 준다 — 사용자가 붙인 이름은 여기서 얹는다.
+  const hosts = useAppStore((state) => state.hosts);
   // 누가 물었는지. 점프 체인에서는 베스천과 최종 대상이 똑같은 "Verification code:" 를 내밀기
   // 때문에, 이 한 줄이 없으면 어느 쪽 OTP 를 넣어야 하는지 알 수 없다.
-  const hopLabel = formatInteractiveHop(interactiveAuth.hop);
+  const hopLabel = formatInteractiveHop(interactiveAuth.hop, hosts);
   const hopLine = hopLabel ? (
     <p className="flex flex-wrap items-baseline gap-2 text-sm text-[var(--text-soft)]">
       <span>{translate('authOverlay.hopLabel')}</span>

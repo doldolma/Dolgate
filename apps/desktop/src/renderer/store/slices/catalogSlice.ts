@@ -339,6 +339,7 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
               settings: snapshot.settings,
               isReady: true,
               pendingHostKeyPrompt: null,
+              queuedHostKeyPrompts: [],
               pendingCredentialRetry: null,
               pendingAwsSftpConfigRetry: null,
               pendingMissingUsernamePrompt: null,

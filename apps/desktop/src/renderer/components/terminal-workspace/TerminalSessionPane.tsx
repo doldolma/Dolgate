@@ -38,7 +38,7 @@ import {
   resolveTailnetLoginRejectedGuidance,
   resolveTailnetPhaseMessage,
 } from './terminalSessionHelpers';
-import { resolveConnectionStages } from './connectionStages';
+import { resolveConnectionStages, stageSubjectFromTab } from './connectionStages';
 import { TerminalAutocompleteOverlay } from './TerminalAutocompleteOverlay';
 import { TerminalBlockOverlay } from './TerminalBlockOverlay';
 import { TerminalBlockStickyHeader } from './TerminalBlockStickyHeader';
@@ -437,7 +437,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   const connectionStages = useMemo(
     () =>
       resolveConnectionStages({
-        tab,
+        subject: stageSubjectFromTab(tab),
         hasTailscale: Boolean(tailnetIdOfHost),
         // 대상 주소로 넷맵에서 그 기기를 찾아 경로를 보여준다 — Tailscale 이 붙어 있어도 대상에
         // 못 가는 경우가 있고, 그것을 안 보여주면 "설정은 연결됨인데 왜 안 되지" 가 된다.

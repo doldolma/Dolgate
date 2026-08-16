@@ -17,8 +17,10 @@ export {
   stripRemovedGroupSegment,
 } from "@shared";
 export { getAwsEc2SftpDisabledMessage } from '../../../common/shared-messages';
+export * from "./connection-views";
 export * from "./containers";
 export * from "./errors-and-prompts";
+export * from "./host-key-prompts";
 export * from "./hosts";
 export * from "./interactive-auth";
 export * from "./network";

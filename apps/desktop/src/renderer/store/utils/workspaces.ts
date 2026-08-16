@@ -16,6 +16,10 @@ import type {
   WorkspaceTabId,
 } from "../types";
 import {
+  dropHostKeyPromptsForSession,
+  remapHostKeyPromptSessionId,
+} from "./host-key-prompts";
+import {
   clearSessionPendingInteractiveAuth,
   isPendingSessionInteractiveAuth,
 } from "./interactive-auth";
@@ -576,13 +580,8 @@ export function replaceSessionReferencesInState(
       state.activeWorkspaceTab === asSessionTabId(previousSessionId)
         ? asSessionTabId(nextSessionId)
         : state.activeWorkspaceTab,
-    pendingHostKeyPrompt:
-      state.pendingHostKeyPrompt?.sessionId === previousSessionId
-        ? {
-            ...state.pendingHostKeyPrompt,
-            sessionId: nextSessionId,
-          }
-        : state.pendingHostKeyPrompt,
+    // 보여 주는 것만 옮기면 줄에 선 물음이 사라진 세션을 가리킨 채 올라온다.
+    ...remapHostKeyPromptSessionId(state, previousSessionId, nextSessionId),
     pendingCredentialRetry:
       state.pendingCredentialRetry?.sessionId === previousSessionId
         ? {
@@ -766,10 +765,8 @@ export function removeSessionFromState(
     homeSection: nextHomeSection,
     settingsSection: nextSettingsSection,
     activeContainerHostId: nextActiveContainerHostId,
-    pendingHostKeyPrompt:
-      state.pendingHostKeyPrompt?.sessionId === sessionId
-        ? null
-        : state.pendingHostKeyPrompt,
+    // 그 세션의 물음은 보여 주던 것도 줄에 선 것도 버린다 — 답할 대상이 없어졌다.
+    ...dropHostKeyPromptsForSession(state, sessionId),
     pendingCredentialRetry:
       state.pendingCredentialRetry?.sessionId === sessionId
         ? null

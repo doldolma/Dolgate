@@ -2374,7 +2374,9 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             }
             try {
               await api.ssh.respondKeyboardInteractive(
-                pending.source === "ssh"
+                // endpointId 가 있으면 답은 그쪽으로 간다(코어의 대기표가 거기 걸려 있다).
+                // 세션과 공개 키 설치는 sessionId 가 상관 ID 다.
+                !("endpointId" in pending)
                   ? {
                       sessionId: pending.sessionId,
                       challengeId,
@@ -2419,14 +2421,47 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             }
             await api.shell.openExternal(pending.approvalUrl);
           },
-    clearPendingInteractiveAuth: (challengeId) =>
+    clearPendingInteractiveAuth: (challengeId) => {
+            // 카드를 지우기 전에, 그 물음을 기다리던 코어에 닫혔다고 알린다.
+            //
+            // **이걸 빠뜨리면 연결이 멈춘 채로 남는다.** 화면에서 지우는 것은 렌더러 상태일 뿐이라
+            // 코어는 계속 답을 기다리고, 사람을 기다리는 구간은 코어의 정지 감시가 일부러 꺼져
+            // 있어서 그쪽이 대신 끊어 주지도 않는다. 결국 예산 5분이 지나야 풀렸다 — 그동안 진행
+            // 카드는 "연결 중…"에 앉아 있고, tailnet 을 경유하면 그 노드의 리스까지 잡은 채라
+            // 설정의 "연결 종료"도 거절된다.
+            const closing = challengeId
+              ? get().pendingInteractiveAuths.filter(
+                  (auth) => auth.challengeId === challengeId,
+                )
+              : get().pendingInteractiveAuths;
+            for (const auth of closing) {
+              void api.ssh
+                .respondKeyboardInteractive(
+                  !("endpointId" in auth)
+                    ? {
+                        sessionId: auth.sessionId,
+                        challengeId: auth.challengeId,
+                        responses: [],
+                        cancelled: true,
+                      }
+                    : {
+                        endpointId: auth.endpointId,
+                        challengeId: auth.challengeId,
+                        responses: [],
+                        cancelled: true,
+                      },
+                )
+                // 이미 끝난 물음이면 코어가 "not found" 를 준다. 닫는 동작에는 알릴 것이 없다.
+                .catch(() => {});
+            }
             set((state) => ({
               pendingInteractiveAuths: challengeId
                 ? state.pendingInteractiveAuths.filter(
                     (auth) => auth.challengeId !== challengeId,
                   )
                 : [],
-            })),
+            }));
+          },
     updatePendingConnectionSize: (sessionId, cols, rows) => {
             set((state) => ({
               pendingConnectionAttempts: state.pendingConnectionAttempts.map(

@@ -155,6 +155,20 @@ export function HomeShell({
   const [tailnetOptions, setTailnetOptions] = useState<
     Array<{ id: string; label: string }>
   >([]);
+  // 점프 후보별 tailnet 이름. 폼이 "첫 홉의 tailnet 을 탄다" 를 말하려면 이게 필요하다.
+  const jumpHostTailnetNames = useMemo(() => {
+    const names: Record<string, string> = {};
+    for (const host of homeViewModel.hosts) {
+      const tailnetId = 'tailnetId' in host ? host.tailnetId?.trim() : '';
+      if (!tailnetId) {
+        continue;
+      }
+      names[host.id] =
+        tailnetOptions.find((option) => option.id === tailnetId)?.label ??
+        tailnetId;
+    }
+    return names;
+  }, [homeViewModel.hosts, tailnetOptions]);
   useEffect(() => {
     if (!isDrawerOpen) {
       return;
@@ -376,6 +390,7 @@ export function HomeShell({
       keychainEntries={settingsViewModel.keychainEntries}
       groupOptions={groupOptions}
       jumpHostOptions={jumpHostOptions}
+      jumpHostTailnetNames={jumpHostTailnetNames}
       tailnetOptions={tailnetOptions}
       snippets={homeViewModel.snippets}
       defaultGroupPath={

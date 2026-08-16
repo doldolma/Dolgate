@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TailnetStatus, TerminalTab } from '@shared';
 import { t } from '../../i18n';
-import { resolveConnectionStages } from './connectionStages';
+import { resolveConnectionStages, stageSubjectFromTab } from './connectionStages';
 
 function createTab(overrides: Partial<TerminalTab> = {}): TerminalTab {
   return {
@@ -39,7 +39,7 @@ describe('resolveConnectionStages', () => {
   // Tailscale 을 안 쓰는 호스트에 없는 관문을 보여주면, 무엇을 기다리는지 오히려 헷갈린다.
   it('Tailscale 을 쓰지 않으면 그 계층이 아예 없다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab({ status: 'connecting' }),
+      subject: stageSubjectFromTab(createTab({ status: 'connecting' })),
       hasTailscale: false,
       failureLayer: null,
     });
@@ -52,7 +52,7 @@ describe('resolveConnectionStages', () => {
   // "호스트 키 확인 → SSH 연결" 을 세우면 없는 관문을 통과한 것처럼 읽힌다.
   it('Windows EC2 는 호스트 키 관문 없이 SSM 단계만 보여준다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab({ status: 'connecting' }),
+      subject: stageSubjectFromTab(createTab({ status: 'connecting' })),
       hasTailscale: false,
       hostKind: 'aws-ec2',
       awsPlatform: 'Windows',
@@ -65,7 +65,7 @@ describe('resolveConnectionStages', () => {
   // 리눅스 EC2 는 SSH-over-SSM 을 먼저 타므로 기존 관문이 그대로 맞다.
   it('리눅스 EC2 는 호스트 키·SSH 관문을 그대로 쓴다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab({ status: 'connecting' }),
+      subject: stageSubjectFromTab(createTab({ status: 'connecting' })),
       hasTailscale: false,
       hostKind: 'aws-ec2',
       awsPlatform: 'Linux/UNIX',
@@ -78,7 +78,7 @@ describe('resolveConnectionStages', () => {
   // 빠르게 지나간 단계도 남아야 한다. 이게 없으면 사용자는 아무것도 못 본 것과 같다.
   it('지나간 단계는 완료로 남는다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab({ status: 'connected' }),
+      subject: stageSubjectFromTab(createTab({ status: 'connected' })),
       hasTailscale: true,
       tailnetStatus: createStatus({ peers: [{ direct: true }] }),
       failureLayer: null,
@@ -96,13 +96,13 @@ describe('resolveConnectionStages', () => {
   // 라고 하면 누를 것을 찾다가 없다는 것만 확인하게 된다.
   it('로그인 단계는 링크가 왔을 때만 사용자 차례가 된다', () => {
     const waiting = resolveConnectionStages({
-      tab: createTab(),
+      subject: stageSubjectFromTab(createTab()),
       hasTailscale: true,
       tailnetStatus: createStatus({ state: 'needsAuth', ready: false }),
       failureLayer: null,
     });
     const ready = resolveConnectionStages({
-      tab: createTab(),
+      subject: stageSubjectFromTab(createTab()),
       hasTailscale: true,
       tailnetStatus: createStatus({ state: 'needsAuth', ready: false, authUrl: 'https://login' }),
       failureLayer: null,
@@ -117,7 +117,7 @@ describe('resolveConnectionStages', () => {
   // 오지 않고, 고칠 것은 설정이다.
   it('로그인이 거부되면 링크를 기다린다고 말하지 않는다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab(),
+      subject: stageSubjectFromTab(createTab()),
       hasTailscale: true,
       tailnetStatus: createStatus({
         state: 'needsAuth',
@@ -143,13 +143,13 @@ describe('resolveConnectionStages', () => {
   // 사용자는 멈춘 줄 안다 — 실제로 그렇게 보였다.
   it('링크를 기다리는 동안 코어가 노드를 다시 세운 것을 보여준다', () => {
     const before = resolveConnectionStages({
-      tab: createTab(),
+      subject: stageSubjectFromTab(createTab()),
       hasTailscale: true,
       tailnetStatus: createStatus({ state: 'needsAuth', ready: false }),
       failureLayer: null,
     });
     const after = resolveConnectionStages({
-      tab: createTab(),
+      subject: stageSubjectFromTab(createTab()),
       hasTailscale: true,
       tailnetStatus: createStatus({ state: 'needsAuth', ready: false, restarts: 2 }),
       failureLayer: null,
@@ -169,7 +169,7 @@ describe('resolveConnectionStages', () => {
   // 만료는 그 단계의 실패다. 로그인 단계에만 표시하면 "왜 또 로그인해야 하는지" 를 알 수 없다.
   it('만료는 등록 확인 단계의 실패로 붙는다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab(),
+      subject: stageSubjectFromTab(createTab()),
       hasTailscale: true,
       tailnetStatus: createStatus({
         state: 'needsAuth',
@@ -186,7 +186,7 @@ describe('resolveConnectionStages', () => {
 
   it('삭제된 identity는 동기화 장애가 아니라 자동 재등록으로 표시한다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab(),
+      subject: stageSubjectFromTab(createTab()),
       hasTailscale: true,
       tailnetStatus: createStatus({
         state: 'running',
@@ -208,14 +208,14 @@ describe('resolveConnectionStages', () => {
   // 이 화면의 존재 이유: Tailscale 때문인지 SSH 가 거절한 것인지 구분.
   it('실패는 그 계층의 단계에만 붙는다', () => {
     const sshFailure = resolveConnectionStages({
-      tab: createTab({ status: 'error', errorMessage: 'connection refused' }),
+      subject: stageSubjectFromTab(createTab({ status: 'error', errorMessage: 'connection refused' })),
       hasTailscale: true,
       tailnetStatus: createStatus({ peers: [{ direct: true }] }),
       failureLayer: 'ssh',
       failureMessage: '대상이 연결을 거부했습니다.',
     });
     const tailscaleFailure = resolveConnectionStages({
-      tab: createTab({ status: 'error', errorMessage: 'tailnet unreachable' }),
+      subject: stageSubjectFromTab(createTab({ status: 'error', errorMessage: 'tailnet unreachable' })),
       hasTailscale: true,
       tailnetStatus: createStatus({ state: 'stopped', ready: false, online: false }),
       failureLayer: 'tailscale',
@@ -235,7 +235,7 @@ describe('resolveConnectionStages', () => {
   // 노드가 안 붙었으면 호스트 키 확인은 시작조차 못 한다. 진행 중으로 보이면 엉뚱한 곳을 본다.
   it('Tailscale 이 준비되기 전 호스트 단계는 시작 전이다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab(),
+      subject: stageSubjectFromTab(createTab()),
       hasTailscale: true,
       tailnetStatus: createStatus({ state: 'needsAuth', ready: false, authUrl: 'https://login' }),
       failureLayer: null,
@@ -248,7 +248,7 @@ describe('resolveConnectionStages', () => {
   // 상태가 정상으로 보이는데 통신이 안 되는 경우의 유일한 단서다.
   it('백엔드 경고와 오류를 그대로 싣는다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab(),
+      subject: stageSubjectFromTab(createTab()),
       hasTailscale: true,
       tailnetStatus: createStatus({
         health: ['relay unreachable', 'accept-routes off'],
@@ -267,7 +267,7 @@ describe('resolveConnectionStages', () => {
   // 그것을 시작 완료로 표시하면 화면이 "노드 시작 ✓" 라고 거짓말한다.
   it("백엔드가 상태를 만들기 전에는 시작 완료로 쓰지 않는다", () => {
     const stages = resolveConnectionStages({
-      tab: createTab(),
+      subject: stageSubjectFromTab(createTab()),
       hasTailscale: true,
       // mapBackendState 가 NoState 를 starting 으로 뭉개므로 화면은 그 구간을 구분할 수 없다.
       tailnetStatus: createStatus({
@@ -287,7 +287,7 @@ describe('resolveConnectionStages', () => {
   // 값으로 유지된다.
   it("컨트롤 플레인 동기화가 끊긴 것을 드러낸다", () => {
     const stale = resolveConnectionStages({
-      tab: createTab(),
+      subject: stageSubjectFromTab(createTab()),
       hasTailscale: true,
       tailnetStatus: createStatus({
         state: 'running',
@@ -316,7 +316,7 @@ describe('resolveConnectionStages', () => {
   // 것을 화면이 부정한다 — 코어가 넘긴 연결을 화면이 되돌려 세워 두는 셈이다.
   it("동기화 없이 진행하기로 한 것은 경고로 남긴다", () => {
     const degraded = resolveConnectionStages({
-      tab: createTab({ status: 'connecting' }),
+      subject: stageSubjectFromTab(createTab({ status: 'connecting' })),
       hasTailscale: true,
       tailnetStatus: createStatus({
         state: 'running',
@@ -339,7 +339,7 @@ describe('resolveConnectionStages', () => {
   // 보여주면 "91대가 보이는데 왜 안 되지" 가 된다.
   it("동기화 중일 때만 기기 수를 말한다", () => {
     const live = resolveConnectionStages({
-      tab: createTab({ status: 'connected' }),
+      subject: stageSubjectFromTab(createTab({ status: 'connected' })),
       hasTailscale: true,
       tailnetStatus: createStatus({ peers: [{ direct: true }, { direct: false }] }),
       failureLayer: null,
@@ -353,16 +353,18 @@ describe('resolveConnectionStages', () => {
   // 사라진다. 문구를 하나씩 분류하는 것으로는 막을 수 없다 — 새 에러가 나올 때마다 같은 일이 생긴다.
   it("분류되지 않은 실패는 진행 중이던 단계에 붙인다", () => {
     const stages = resolveConnectionStages({
-      tab: createTab({
-        status: 'error',
-        errorMessage: 'something nobody classified',
-        connectionProgress: {
-          stage: 'connecting',
-          message: '',
-          blockingKind: 'none',
-          retryable: true,
-        },
-      }),
+      subject: stageSubjectFromTab(
+        createTab({
+          status: 'error',
+          errorMessage: 'something nobody classified',
+          connectionProgress: {
+            stage: 'connecting',
+            message: '',
+            blockingKind: 'none',
+            retryable: true,
+          },
+        }),
+      ),
       hasTailscale: true,
       tailnetStatus: createStatus({ peers: [{ direct: true }] }),
       failureLayer: null,
@@ -380,7 +382,7 @@ describe('resolveConnectionStages', () => {
   // 안 되지" 가 된다.
   it("대상까지의 경로를 보여준다", () => {
     const direct = resolveConnectionStages({
-      tab: createTab({ status: 'connected' }),
+      subject: stageSubjectFromTab(createTab({ status: 'connected' })),
       hasTailscale: true,
       targetAddress: 'agt-1',
       tailnetStatus: createStatus({
@@ -389,7 +391,7 @@ describe('resolveConnectionStages', () => {
       failureLayer: null,
     });
     const relayed = resolveConnectionStages({
-      tab: createTab({ status: 'connected' }),
+      subject: stageSubjectFromTab(createTab({ status: 'connected' })),
       hasTailscale: true,
       targetAddress: '100.64.0.1',
       tailnetStatus: createStatus({
@@ -408,7 +410,7 @@ describe('resolveConnectionStages', () => {
   // 넷맵은 받았는데 대상이 그 안에 없으면, 기다려도 안 된다. 그 사실을 말해야 한다.
   it("넷맵에 없는 대상은 실패로 말한다", () => {
     const stages = resolveConnectionStages({
-      tab: createTab(),
+      subject: stageSubjectFromTab(createTab()),
       hasTailscale: true,
       targetAddress: 'ghost',
       tailnetStatus: createStatus({ peers: [{ direct: true, hostName: 'agt-1' }] }),
@@ -422,7 +424,7 @@ describe('resolveConnectionStages', () => {
   // 없습니다" 로 말하면 멀쩡한 경로를 실패로 그린다 — 실기기에서 사내 192.168.x 주소가 그랬다.
   it("서브넷 라우터가 담당하는 대역은 경로가 있는 것으로 본다", () => {
     const stages = resolveConnectionStages({
-      tab: createTab({ status: 'connected' }),
+      subject: stageSubjectFromTab(createTab({ status: 'connected' })),
       hasTailscale: true,
       targetAddress: '192.168.200.37',
       tailnetStatus: createStatus({
@@ -442,7 +444,7 @@ describe('resolveConnectionStages', () => {
   // 있다. 실패로 단정하면 사용자가 엉뚱한 곳을 의심한다.
   it("담당 대역이 없는 IP 는 실패로 단정하지 않는다", () => {
     const stages = resolveConnectionStages({
-      tab: createTab({ status: 'connected' }),
+      subject: stageSubjectFromTab(createTab({ status: 'connected' })),
       hasTailscale: true,
       targetAddress: '10.9.9.9',
       tailnetStatus: createStatus({
@@ -457,7 +459,7 @@ describe('resolveConnectionStages', () => {
   // 이름(MagicDNS)으로 지정한 대상이 넷맵에 없으면 그건 여전히 실패다 — 기다려도 되지 않는다.
   it("이름으로 지정한 대상이 없으면 여전히 실패다", () => {
     const stages = resolveConnectionStages({
-      tab: createTab(),
+      subject: stageSubjectFromTab(createTab()),
       hasTailscale: true,
       targetAddress: 'ghost',
       tailnetStatus: createStatus({
@@ -473,7 +475,7 @@ describe('resolveConnectionStages', () => {
   // 사용자가 엉뚱한 계층을 의심한다.
   it("이미 분류된 실패를 다른 단계로 옮기지 않는다", () => {
     const stages = resolveConnectionStages({
-      tab: createTab({ status: 'error', errorMessage: 'tailnet expired' }),
+      subject: stageSubjectFromTab(createTab({ status: 'error', errorMessage: 'tailnet expired' })),
       hasTailscale: true,
       tailnetStatus: createStatus({ state: 'needsAuth', ready: false, expired: true }),
       failureLayer: 'tailscale',
@@ -488,7 +490,7 @@ describe('resolveConnectionStages', () => {
   // Tailscale 을 쓰지 않는 호스트에는 그 줄이 없어야 한다.
   it("대상 주소가 없으면 경로 줄을 만들지 않는다", () => {
     const stages = resolveConnectionStages({
-      tab: createTab({ status: 'connected' }),
+      subject: stageSubjectFromTab(createTab({ status: 'connected' })),
       hasTailscale: true,
       tailnetStatus: createStatus({ peers: [{ direct: true }] }),
       failureLayer: null,
@@ -500,7 +502,7 @@ describe('resolveConnectionStages', () => {
   // "보내는데 답이 없다" 를 스스로 읽는다 — 오늘 이 판단에 30 분이 걸렸다.
   it("경로가 없으면 그 사실과 주고받은 양만 말한다", () => {
     const stages = resolveConnectionStages({
-      tab: createTab(),
+      subject: stageSubjectFromTab(createTab()),
       hasTailscale: true,
       targetAddress: 'agt-1',
       tailnetStatus: createStatus({
@@ -521,7 +523,7 @@ describe('resolveConnectionStages', () => {
   // 경로가 있으면 그것도 관찰값과 함께.
   it("경로가 있으면 직결·릴레이와 주고받은 양을 함께 보여준다", () => {
     const stages = resolveConnectionStages({
-      tab: createTab({ status: 'connected' }),
+      subject: stageSubjectFromTab(createTab({ status: 'connected' })),
       hasTailscale: true,
       targetAddress: 'agt-1',
       tailnetStatus: createStatus({
@@ -539,7 +541,7 @@ describe('resolveConnectionStages', () => {
   // ECS Exec 은 SSH 를 쓰지 않는다 — 없는 관문이 통과되는 것처럼 보이면 어디서 막혔는지 못 읽는다.
   it('로컬 셸에는 호스트 계층 단계를 세우지 않는다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab({ source: 'local', hostId: null, status: 'connecting' }),
+      subject: stageSubjectFromTab(createTab({ source: 'local', hostId: null, status: 'connecting' })),
       hasTailscale: false,
       failureLayer: null,
     });
@@ -549,7 +551,7 @@ describe('resolveConnectionStages', () => {
 
   it('RDP 는 호스트 키 대신 RDP 연결 한 단계만 세운다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab({ paneKind: 'rdp', status: 'connecting' }),
+      subject: stageSubjectFromTab(createTab({ paneKind: 'rdp', status: 'connecting' })),
       hasTailscale: false,
       hostKind: 'rdp',
       failureLayer: null,
@@ -563,13 +565,13 @@ describe('resolveConnectionStages', () => {
 
   it('시리얼과 ECS Exec 도 SSH 라고 하지 않는다', () => {
     const serial = resolveConnectionStages({
-      tab: createTab({ status: 'connecting', shellKind: 'serial' }),
+      subject: stageSubjectFromTab(createTab({ status: 'connecting', shellKind: 'serial' })),
       hasTailscale: false,
       hostKind: 'serial',
       failureLayer: null,
     });
     const ecs = resolveConnectionStages({
-      tab: createTab({ status: 'connecting' }),
+      subject: stageSubjectFromTab(createTab({ status: 'connecting' })),
       hasTailscale: false,
       hostKind: 'aws-ecs',
       failureLayer: null,
@@ -583,7 +585,7 @@ describe('resolveConnectionStages', () => {
   it('SSH 계열은 호스트 키 확인을 유지한다', () => {
     for (const hostKind of ['ssh', 'aws-ec2', 'warpgate-ssh'] as const) {
       const stages = resolveConnectionStages({
-        tab: createTab({ status: 'connecting' }),
+        subject: stageSubjectFromTab(createTab({ status: 'connecting' })),
         hasTailscale: false,
         hostKind,
         failureLayer: null,
@@ -596,7 +598,7 @@ describe('resolveConnectionStages', () => {
   // 호스트 종류가 아직 없을 때(목록 로딩) 로컬로 보면 단계가 통째로 사라진다.
   it('호스트 탭인데 종류를 모르면 SSH 로 본다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab({ status: 'connecting' }),
+      subject: stageSubjectFromTab(createTab({ status: 'connecting' })),
       hasTailscale: false,
       failureLayer: null,
     });
@@ -607,7 +609,7 @@ describe('resolveConnectionStages', () => {
   // tailnet 을 경유하는 RDP 는 그 계층을 지나기 전에는 붙는 중이 아니다.
   it('tailnet 이 아직 준비되지 않으면 RDP 단계는 기다린다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab({ paneKind: 'rdp', status: 'connecting' }),
+      subject: stageSubjectFromTab(createTab({ paneKind: 'rdp', status: 'connecting' })),
       hasTailscale: true,
       hostKind: 'rdp',
       tailnetStatus: createStatus({ ready: false, authorized: false, state: 'starting' }),
@@ -620,16 +622,18 @@ describe('resolveConnectionStages', () => {
   // 자격증명 문제이고, 통로는 열렸는데 그 뒤가 막혔으면 원격에 VNC 가 안 떠 있다는 뜻이다.
   it('SSH 터널을 거치면 관문 두 개가 순서대로 진행한다', () => {
     const gateway = resolveConnectionStages({
-      tab: createTab({
-        paneKind: 'vnc',
-        status: 'pending',
-        connectionProgress: {
-          stage: 'ssh-tunnel-gateway',
-          message: '경유 중',
-          blockingKind: 'none',
-          retryable: true,
-        },
-      }),
+      subject: stageSubjectFromTab(
+        createTab({
+          paneKind: 'vnc',
+          status: 'pending',
+          connectionProgress: {
+            stage: 'ssh-tunnel-gateway',
+            message: '경유 중',
+            blockingKind: 'none',
+            retryable: true,
+          },
+        }),
+      ),
       hasTailscale: false,
       hostKind: 'vnc',
       tunnelLabel: 'Gate',
@@ -641,16 +645,18 @@ describe('resolveConnectionStages', () => {
     expect(stateOf(gateway, 'vnc')).toBe('pending');
 
     const opened = resolveConnectionStages({
-      tab: createTab({
-        paneKind: 'vnc',
-        status: 'pending',
-        connectionProgress: {
-          stage: 'ssh-tunnel-open',
-          message: '통로 열림',
-          blockingKind: 'none',
-          retryable: true,
-        },
-      }),
+      subject: stageSubjectFromTab(
+        createTab({
+          paneKind: 'vnc',
+          status: 'pending',
+          connectionProgress: {
+            stage: 'ssh-tunnel-open',
+            message: '통로 열림',
+            blockingKind: 'none',
+            retryable: true,
+          },
+        }),
+      ),
       hasTailscale: false,
       hostKind: 'vnc',
       tunnelLabel: 'Gate',
@@ -664,7 +670,7 @@ describe('resolveConnectionStages', () => {
   // 터널을 안 쓰는 연결에 없는 관문을 세우면 무엇을 기다리는지 오히려 헷갈린다.
   it('터널을 안 쓰면 그 관문이 아예 없다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab({ paneKind: 'vnc' }),
+      subject: stageSubjectFromTab(createTab({ paneKind: 'vnc' })),
       hasTailscale: false,
       hostKind: 'vnc',
       failureLayer: null,
@@ -676,7 +682,7 @@ describe('resolveConnectionStages', () => {
   // tailnet 을 지나야 통로를 열 수 있다. 그 전에 "진행 중" 으로 그리면 순서가 거꾸로 보인다.
   it('tailnet 이 아직이면 터널 관문은 기다린다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab({ paneKind: 'vnc' }),
+      subject: stageSubjectFromTab(createTab({ paneKind: 'vnc' })),
       hasTailscale: true,
       hostKind: 'vnc',
       tailnetStatus: createStatus({ state: 'needsAuth', ready: false, authorized: false }),
@@ -692,16 +698,18 @@ describe('resolveConnectionStages', () => {
   // 사실이 어디서 났는지 이 줄이 말한다.
   it('경유 중 실패는 그 관문에 붙는다', () => {
     const stages = resolveConnectionStages({
-      tab: createTab({
-        paneKind: 'vnc',
-        status: 'error',
-        connectionProgress: {
-          stage: 'ssh-tunnel-gateway',
-          message: '경유 중',
-          blockingKind: 'none',
-          retryable: true,
-        },
-      }),
+      subject: stageSubjectFromTab(
+        createTab({
+          paneKind: 'vnc',
+          status: 'error',
+          connectionProgress: {
+            stage: 'ssh-tunnel-gateway',
+            message: '경유 중',
+            blockingKind: 'none',
+            retryable: true,
+          },
+        }),
+      ),
       hasTailscale: false,
       hostKind: 'vnc',
       tunnelLabel: 'Gate',

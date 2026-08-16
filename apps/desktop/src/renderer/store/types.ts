@@ -603,8 +603,41 @@ export interface PendingVncTunnelInteractiveAuth
   hostId: string;
 }
 
+/**
+ * 공개 키 설치가 묻는 인증.
+ *
+ * 설치는 탭도 엔드포인트도 만들지 않아서 붙일 화면이 없었다 — 코어는 물을 곳이 없으니 그냥
+ * "responder is not configured" 로 끝냈고, OTP 나 비밀번호를 묻는 호스트에는 키를 올릴 수
+ * 없었다. sessionId 에 `keyinstall:<hostId>` 를 실어 그 대화상자를 찾는다
+ * (@shared 의 KEY_INSTALL_CORRELATION_PREFIX).
+ */
+export interface PendingKeyInstallInteractiveAuth
+  extends PendingInteractiveAuthBase {
+  source: "keyInstall";
+  sessionId: string;
+  hostId: string;
+}
+
+/** 진행 중인 연결 하나의 상태. 경로를 가리지 않는다. */
+export interface ConnectionView {
+  /** 상관 ID — sessionId 또는 endpointId. */
+  key: string;
+  status: "connecting" | "connected" | "error";
+  /** 코어가 보고한 세부 단계. 단계 화면이 이것으로 관문을 칠한다. */
+  stage?: string | null;
+  /** 실패 문구(있으면). */
+  message?: string | null;
+  /** 다단 점프의 홉별 진행. */
+  hops: TerminalConnectionHop[];
+  /** 이 연결이 붙는 호스트. 단계 화면이 tailnet 여부·이름을 여기서 찾는다. */
+  hostId?: string | null;
+  /** 서버가 인증 단계에 보낸 배너. 승인 링크가 여기 실려 온다. */
+  banner?: string | null;
+}
+
 export type PendingInteractiveAuth =
   | PendingSessionInteractiveAuth
+  | PendingKeyInstallInteractiveAuth
   | PendingSftpInteractiveAuth
   | PendingContainersInteractiveAuth
   | PendingPortForwardInteractiveAuth
@@ -698,6 +731,25 @@ interface AppStateParts {
   isReady: boolean;
   sftp: SftpState;
   pendingHostKeyPrompt: PendingHostKeyPrompt | null;
+  /**
+   * 지금 보여 주는 것 뒤에 줄 선 신뢰 물음들.
+   *
+   * 슬롯이 하나뿐이던 시절에는 새 물음이 앞의 것을 덮었고, 덮인 물음은 아무도 답할 수 없어 그
+   * 연결이 예산(5분)이 다 될 때까지 "연결 중…"에 앉아 있었다. 세션을 여러 개 복원하거나 같은
+   * 베스천 뒤의 호스트를 한꺼번에 열면 실제로 겹친다(store/utils/host-key-prompts.ts).
+   */
+  queuedHostKeyPrompts: PendingHostKeyPrompt[];
+  /**
+   * 진행 중인 연결들의 공통 진행 상태. 열쇠는 상관 ID(sessionId 또는 endpointId)다.
+   *
+   * 코어는 모든 경로에 같은 이벤트를 올리는데(홉 진행·배너·신뢰·대화형 인증) 그것을 받는 자리가
+   * 경로마다 따로여서, 자리가 없는 포워딩·공개키 설치는 통째로 버려졌다 — 시작해도 tailnet 도
+   * 점프도 아무것도 안 보였다. 여기 모아 두면 어느 화면이든 같은 것을 그린다
+   * (store/utils/connection-views.ts).
+   */
+  connectionViews: Record<string, ConnectionView>;
+  /** 진행 팝업을 닫는다. 실패한 뷰는 스스로 사라지지 않으므로 사용자가 닫을 길이 있어야 한다. */
+  dismissConnectionView: (key: string) => void;
   /**
    * 사용자의 판단을 기다리는 RDP 서버 인증서. 없으면 null.
    *
@@ -1368,6 +1420,9 @@ export type NetworkSlice = Pick<
   | "portForwardRuntimes"
   | "knownHosts"
   | "pendingHostKeyPrompt"
+  | "connectionViews"
+  | "dismissConnectionView"
+  | "queuedHostKeyPrompts"
   | "pendingRdpCertificatePrompt"
   | "setPendingRdpCertificatePrompt"
   | "tailnetStatuses"
