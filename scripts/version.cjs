@@ -22,6 +22,17 @@ const iosProjectPath = path.join(
   "Dolgate.xcodeproj",
   "project.pbxproj",
 );
+// 리눅스 상점(App Center·GNOME 소프트웨어)이 읽는 메타데이터. 버전과 릴리스 날짜가 여기에도
+// 있어서, 손으로 고치기로 두면 잊는다 — 잊어도 설치는 되고 상점만 옛 버전으로 보인다.
+const desktopMetainfoPath = path.join(
+  repoRoot,
+  "apps",
+  "desktop",
+  "build",
+  "linux",
+  "com.doldolma.dolgate.metainfo.xml",
+);
+
 const releaseWorkflowPath = path.join(
   repoRoot,
   ".github",
@@ -89,6 +100,43 @@ function updateIosMarketingVersion(contents, version) {
   return contents.replace(/MARKETING_VERSION = [^;]+;/gu, `MARKETING_VERSION = ${version};`);
 }
 
+/** 오늘 날짜(YYYY-MM-DD). 실행하는 사람의 달력 기준이다 — UTC 로 자르면 아침에 어제가 된다. */
+function today() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * metainfo 의 릴리스 목록에 이 버전을 채운다.
+ *
+ * 이미 있으면 날짜만 오늘로 바꾸고(같은 버전을 다시 찍는 경우), 없으면 **맨 앞에** 넣는다 —
+ * AppStream 은 최신이 위인 목록을 기대한다. 지난 릴리스는 지우지 않는다(상점이 변경 이력으로 쓴다).
+ */
+function updateMetainfoReleases(contents, version, date) {
+  const entry = `<release version="${version}" date="${date}" />`;
+
+  // 버전 문자열을 정규식에 넣지 않는다 — 점을 이스케이프하는 것을 잊기 쉽고, 그러면 1.9.1 이
+  // 1x9x1 에도 걸린다. 여는 태그를 문자열로 찾고 그 항목의 끝(`/>`)까지만 갈아 끼운다.
+  const openAt = contents.indexOf(`<release version="${version}"`);
+  if (openAt >= 0) {
+    const closeAt = contents.indexOf("/>", openAt);
+    if (closeAt < 0) {
+      throw new Error(`metainfo 의 ${version} release 항목이 닫히지 않았습니다.`);
+    }
+    return contents.slice(0, openAt) + entry + contents.slice(closeAt + 2);
+  }
+
+  const openTag = contents.match(/([ \t]*)<releases>\n/u);
+  if (!openTag) {
+    throw new Error("metainfo 에 <releases> 블록이 없습니다.");
+  }
+  // 최신이 위인 목록이다(AppStream 규격). 지난 릴리스는 지우지 않는다 — 상점이 변경 이력으로 쓴다.
+  const indent = `${openTag[1]}  `;
+  return contents.replace(openTag[0], `${openTag[0]}${indent}${entry}\n`);
+}
+
 function setVersion(version) {
   assertSemver(version);
 
@@ -119,6 +167,13 @@ function setVersion(version) {
 
   const iosProject = fs.readFileSync(iosProjectPath, "utf8");
   fs.writeFileSync(iosProjectPath, updateIosMarketingVersion(iosProject, version), "utf8");
+
+  const metainfo = fs.readFileSync(desktopMetainfoPath, "utf8");
+  fs.writeFileSync(
+    desktopMetainfoPath,
+    updateMetainfoReleases(metainfo, version, process.env.DOLGATE_RELEASE_DATE || today()),
+    "utf8",
+  );
 }
 
 function checkVersion() {
@@ -131,6 +186,7 @@ function checkVersion() {
   const androidGradle = fs.readFileSync(androidGradlePath, "utf8");
   const iosProject = fs.readFileSync(iosProjectPath, "utf8");
   const releaseWorkflow = fs.readFileSync(releaseWorkflowPath, "utf8");
+  const desktopMetainfo = fs.readFileSync(desktopMetainfoPath, "utf8");
   const syncApiWorkflow = fs.readFileSync(syncApiWorkflowPath, "utf8");
 
   const expectedVersion = rootPackage.version;
@@ -188,6 +244,19 @@ function checkVersion() {
   } else if (marketingVersions.some((value) => value !== expectedVersion)) {
     errors.push(
       `iOS MARKETING_VERSION mismatch: expected ${expectedVersion}, got ${marketingVersions.join(", ")}`,
+    );
+  }
+
+  // 상점의 버전·갱신일이 이 목록에서 온다. version:set/bump 가 채우므로, 없다는 것은 누군가
+  // package.json 만 손으로 고쳤다는 뜻이다.
+  const metainfoReleases = Array.from(
+    desktopMetainfo.matchAll(/<release\s+version="([^"]+)"/gu),
+    (match) => match[1],
+  );
+  if (!metainfoReleases.includes(expectedVersion)) {
+    errors.push(
+      `Desktop metainfo has no release for ${expectedVersion}: ${metainfoReleases.join(", ") || "(none)"}. ` +
+        "Run npm run version:set to fill it in.",
     );
   }
 

@@ -3,10 +3,7 @@ const { readFileSync, readdirSync } = require('node:fs');
 const path = require('node:path');
 
 const desktopRoot = path.resolve(__dirname, '..');
-const {
-  METAINFO_SOURCE,
-  METAINFO_TARGET,
-} = require(path.join(desktopRoot, 'electron-builder.config.cjs'));
+const { METAINFO_TARGET } = require(path.join(desktopRoot, 'electron-builder.config.cjs'));
 const distDirectory = path.join(desktopRoot, 'release', 'dist');
 const ARCHES = ['x64', 'arm64'];
 
@@ -165,32 +162,7 @@ function verifyDebArtifact(fileName) {
   }
 }
 
-// metainfo 의 최신 릴리스가 지금 빌드하는 버전과 같은지 본다.
-//
-// 상점의 "Last updated" 와 버전 표시가 이 값에서 온다. 올리는 것을 잊으면 새 패키지가 옛
-// 버전으로 보이는데, 설치는 정상이라 아무 신호가 없다.
-function verifyMetainfoRelease() {
-  const xml = readFileSync(METAINFO_SOURCE, 'utf8');
-  const { version } = JSON.parse(
-    readFileSync(path.join(desktopRoot, 'package.json'), 'utf8'),
-  );
-  const releases = [...xml.matchAll(/<release\s+version="([^"]+)"/g)].map(
-    (match) => match[1],
-  );
-  if (releases.length === 0) {
-    throw new Error('metainfo 에 release 항목이 없습니다.');
-  }
-  if (!releases.includes(version)) {
-    throw new Error(
-      `metainfo 에 ${version} 릴리스가 없습니다(있는 것: ${releases.join(', ')}). ` +
-        'build/linux/com.doldolma.dolgate.metainfo.xml 에 이 버전을 추가해 주세요.',
-    );
-  }
-}
-
 function verifyArtifacts() {
-  verifyMetainfoRelease();
-
   const files = listDistFiles();
 
   requireDistFile(files, /^latest-linux\.yml$/);
