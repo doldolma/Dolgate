@@ -157,6 +157,8 @@ export function resolveConnectionFailurePresentation(
     "tailnet-needs-approval": () => t('connectFailure.tailscaleNeedsApproval'),
     "tailnet-mismatch": () => t('connectFailure.tailscaleMismatch'),
     "host-key-untrusted": () => t('connectFailure.hostKeyUntrusted'),
+    "host-key-declined": () => t('connectFailure.hostKeyDeclined'),
+    cancelled: () => t('connectFailure.cancelled'),
     "aws-auth": () => t('connectFailure.awsAuthFailed'),
     "no-route": () => t('connectFailure.noRoute', { target }),
     refused: () => t('connectFailure.refused', { target }),
@@ -166,6 +168,7 @@ export function resolveConnectionFailurePresentation(
   // 제목은 기존 표기를 그대로 유지한다 — 두 분류만 전용 제목을 쓴다.
   const TITLES: Partial<Record<ConnectionFailureCode, string>> = {
     "host-key-untrusted": "Host Key Not Trusted",
+    "host-key-declined": "Host Key Declined",
     "aws-auth": "AWS Authentication Required",
   };
   if (reason.code !== "unknown") {

@@ -121,6 +121,8 @@
     "agentUnreachable": "Could not reach ssh-agent. Check the agent on your desktop.",
     "awsAuth": "The AWS sign-in expired. Sign in again on your desktop and retry.",
     "hostKeyUntrusted": "This host's key is not trusted yet.",
+    "hostKeyDeclined": "You declined this host key, so the connection ended.",
+    "cancelled": "The connection was cancelled.",
     "noRoute": "There is no route to {{target}}. Check your network.",
     "refused": "{{target}} refused the connection. Check the port and whether the server is up.",
     "reset": "The connection to {{target}} was interrupted.",

@@ -67,6 +67,28 @@ describe("progress utils", () => {
       }
     });
 
+    // 신뢰를 거절한 사용자에게 비밀번호를 다시 묻는 것은 할 일이 아니다.
+    //
+    // 코어의 거절 문구는 "host key **was** not trusted" 라서 위의 "is not trusted" 패턴에
+    // 걸리지 않았고, 그 한 단어 차이로 실기기에서 SSH RETRY 창이 떴다.
+    it("does NOT prompt credential retry when the user declined or cancelled", () => {
+      for (const message of [
+        "ssh handshake failed: ssh: handshake failed: host key was not trusted",
+        "ssh handshake failed: ssh: handshake failed: keyboard-interactive challenge was cancelled: context canceled",
+        "ssh handshake failed: ssh: handshake failed: keyboard-interactive challenge was cancelled: no answer came back in time",
+        "host key trust prompt was cancelled: context canceled",
+      ]) {
+        expect(
+          resolveCredentialRetryKind(sshHost({ authType: "password" }), message),
+          message,
+        ).toBeNull();
+        expect(
+          resolveCredentialRetryKind(sshHost({ authType: "privateKey" }), message),
+          message,
+        ).toBeNull();
+      }
+    });
+
     it("does NOT prompt credential retry when the handshake stalled", () => {
       // The server went silent waiting for a browser approval (Tailscale SSH check
       // mode sends the URL as a banner). Our error carries "ssh handshake failed"

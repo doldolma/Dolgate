@@ -20,6 +20,13 @@ const PERMANENT_ERROR_PATTERNS: RegExp[] = [
   /too many authentication failures/i,
   /host key mismatch/i,
   /trusted host key/i,
+  // 사용자가 거절했거나 그만둔 것. 다시 붙어도 같은 물음이고, 자동 재연결은 그 결정을 무시하는
+  // 셈이다 — 예전에는 "ssh handshake failed" 가 transient 로 걸려서 거절한 직후 다시 붙었다.
+  /host key was not trusted/i,
+  /challenge was cancelled/i,
+  /prompt was cancelled/i,
+  /context canceled/i,
+  /no answer came back in time/i,
   /private key auth requires/i,
   /parse private key/i,
   /unsupported auth type/i,

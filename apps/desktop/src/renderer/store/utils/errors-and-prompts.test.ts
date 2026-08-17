@@ -120,6 +120,32 @@ describe("resolveConnectionFailurePresentation", () => {
     });
   });
 
+  // 거절은 "아직 신뢰하지 않음" 과 다른 사건이다 — 사용자가 방금 결정한 것이고, 할 일은
+  // "신뢰한 뒤 다시 시도" 가 아니라 다시 연결할지 결정하는 것뿐이다.
+  it("presents a declined host key as the user's own decision", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "ssh handshake failed: ssh: handshake failed: host key was not trusted",
+      ),
+    ).toEqual({
+      title: "Host Key Declined",
+      message:
+        "호스트 키를 신뢰하지 않아 연결을 끝냈습니다. 다시 연결하면 그 키를 또 물어봅니다.",
+      layer: "hostKey",
+    });
+  });
+
+  it("presents cancelled prompts as a cancellation, not a failure of the server", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "ssh handshake failed: ssh: handshake failed: keyboard-interactive challenge was cancelled: context canceled",
+      ),
+    ).toEqual({
+      title: "Connection Failed",
+      message: "연결을 그만뒀습니다. 다시 시도하려면 재시도를 누르세요.",
+    });
+  });
+
   it("presents untrusted host keys with the existing host-key guidance", () => {
     expect(resolveConnectionFailurePresentation("Host key is not trusted yet.")).toEqual({
       title: "Host Key Not Trusted",

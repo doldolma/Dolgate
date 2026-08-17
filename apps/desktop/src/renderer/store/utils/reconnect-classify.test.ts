@@ -6,6 +6,19 @@ import {
 } from "./reconnect-classify";
 
 describe("classifyReconnect", () => {
+  // 거절·취소는 사용자의 결정이다. 자동으로 다시 붙으면 그 결정을 무시하는 셈이고, 실기기에서
+  // 그랬다 — "ssh handshake failed" 가 transient 로 걸려서 거절한 직후 다시 물었다.
+  it("treats a declined host key and cancelled prompts as permanent", () => {
+    for (const message of [
+      "ssh handshake failed: ssh: handshake failed: host key was not trusted",
+      "keyboard-interactive challenge was cancelled: context canceled",
+      "host key trust prompt was cancelled: context canceled",
+      "keyboard-interactive challenge was cancelled: no answer came back in time",
+    ]) {
+      expect(classifyReconnect(message), message).toBe("permanent");
+    }
+  });
+
   it("treats network drops as transient", () => {
     expect(classifyReconnect("connection reset by peer")).toBe("transient");
     expect(classifyReconnect("ssh keepalive failed: EOF")).toBe("transient");

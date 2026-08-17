@@ -121,6 +121,8 @@
     "agentUnreachable": "ssh-agent 에 연결할 수 없습니다. 데스크톱에서 agent 를 확인해 주세요.",
     "awsAuth": "AWS 인증이 만료되었습니다. 데스크톱에서 다시 로그인한 뒤 시도해 주세요.",
     "hostKeyUntrusted": "이 호스트의 키를 아직 신뢰하지 않았습니다.",
+    "hostKeyDeclined": "호스트 키를 신뢰하지 않아 연결을 끝냈습니다.",
+    "cancelled": "연결을 그만뒀습니다.",
     "noRoute": "{{target}} 에 가는 경로가 없습니다. 네트워크를 확인해 주세요.",
     "refused": "{{target}} 이 연결을 거부했습니다. 포트와 서버 상태를 확인해 주세요.",
     "reset": "{{target}} 과의 연결이 끊겼습니다.",

@@ -109,6 +109,8 @@ const CONNECT_FAILURE_KEYS = {
   "agent-unreachable": "connectFailure.agentUnreachable",
   "aws-auth": "connectFailure.awsAuth",
   "host-key-untrusted": "connectFailure.hostKeyUntrusted",
+  "host-key-declined": "connectFailure.hostKeyDeclined",
+  cancelled: "connectFailure.cancelled",
   "no-route": "connectFailure.noRoute",
   refused: "connectFailure.refused",
   reset: "connectFailure.reset",

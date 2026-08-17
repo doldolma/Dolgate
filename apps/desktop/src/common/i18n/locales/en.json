@@ -2519,6 +2519,8 @@
     "agentNoKeys": "The SSH agent has no keys. Add a key to the agent and connect again.",
     "agentUnreachable": "Could not reach the SSH agent. Check that it is running.",
     "hostKeyUntrusted": "This host's SSH host key is not trusted yet. Trust the host key and try again.",
+    "hostKeyDeclined": "You declined this host key, so the connection ended. Connecting again asks about the same key.",
+    "cancelled": "The connection was cancelled. Press retry to try again.",
     "awsAuthFailed": "Could not verify the AWS authentication. Sign in again.",
     "noRoute": "Cannot reach {{target}}. There is no route to that host from the current network.",
     "refused": "{{target}} refused the connection.",

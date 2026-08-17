@@ -12,6 +12,8 @@
 export type ConnectionFailureCode =
   | "agent-unreachable"
   | "aws-auth"
+  | "cancelled"
+  | "host-key-declined"
   | "host-key-untrusted"
   | "no-route"
   | "refused"
@@ -63,6 +65,22 @@ const RULES: Array<{
     pattern: /connected to a different tailnet/i,
     code: "tailnet-mismatch",
     layer: "tailscale",
+  },
+  // --- 사용자가 스스로 그만둔 것 ---
+  //
+  // 실패로 분류하지만 성질이 다르다: 다시 시도해도 같고, 자격증명을 다시 넣어도 풀리지 않는다.
+  // 이 두 줄이 없으면 아래 타임아웃·리셋 규칙에도 안 걸려 "unknown" 으로 떨어져서 원문이 그대로
+  // 화면에 뜨고, 데스크톱의 재연결·자격증명 판정이 "ssh handshake failed" 만 보고 각각 자동
+  // 재연결과 비밀번호 재입력 창을 띄웠다 — 신뢰를 거절한 사용자에게 둘 다 할 일이 아니다.
+  {
+    pattern: /host key was not trusted/i,
+    code: "host-key-declined",
+    layer: "hostKey",
+  },
+  {
+    pattern:
+      /challenge was cancelled|prompt was cancelled|context canceled|no answer came back in time/i,
+    code: "cancelled",
   },
   {
     pattern: /host key is not trusted yet/i,

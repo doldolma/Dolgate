@@ -69,6 +69,19 @@ export function resolveCredentialRetryKind(
     return null;
   }
 
+  // 사용자가 스스로 그만둔 것도 자격증명 문제가 아니다 — 호스트 키를 거절했거나, 프롬프트를 닫았거나,
+  // 답하지 않아 예산이 끝난 경우다. 계정·비밀번호를 다시 넣는 것으로는 아무것도 달라지지 않는다.
+  //
+  // 위의 호스트 키 패턴으로는 안 걸린다: 코어의 거절 문구는 "host key **was** not trusted" 라서
+  // "is not trusted" 와 어긋난다. 그 한 단어 차이로 신뢰를 거절한 사용자에게 비밀번호 창이 떴다.
+  if (
+    /host key was not trusted|challenge was cancelled|prompt was cancelled|context canceled|no answer came back in time/i.test(
+      message,
+    )
+  ) {
+    return null;
+  }
+
   // 정지(타임아웃)도 자격증명 문제가 아니다. ssh-core는 정지를 "ssh handshake failed: ... i/o
   // timeout" 으로 올리는데(그 접두사는 재연결 판정이 보고 있어 바꿀 수 없다), 아래 auth 패턴에
   // "ssh handshake failed"가 들어 있어 그대로 두면 타임아웃이 계정/비밀번호 재입력 다이얼로그를
