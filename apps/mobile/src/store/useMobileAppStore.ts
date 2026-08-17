@@ -41,6 +41,10 @@ import {
   createVaultKdfDescriptor,
   decideVaultAccess,
   deriveVaultKek,
+  formatInteractiveHop,
+  normalizeJumpHostIds,
+  resolveSshHostTailnetId,
+  type ConnectionFailureLayer,
   formatSyncRevisionEtag,
   isVaultEpochRejectionCode,
   parseSyncRevisionEtag,
@@ -168,12 +172,17 @@ import {
   getEngine,
   type EngineConnection,
   type EngineCredential,
+  type EngineInteractiveAnswer,
+  type EngineHopProgress,
+  type EngineInteractiveChallenge,
+  type EngineJumpTarget,
   type EngineSftpConnection,
   type EngineShell,
   type EngineTailnetStatus,
 } from '../engine';
 import {
   getAwsEc2SftpDisabledMessage,
+  getConnectFailureLayer,
   getConnectFailureMessage,
   getNewVaultPassphraseMessage,
 } from '../i18n/shared-messages';
@@ -193,6 +202,8 @@ const SFTP_TRANSFER_CHUNK_SIZE = 256 * 1024;
 const SESSION_SNAPSHOT_FLUSH_MS = 750;
 const STARTUP_REFRESH_TIMEOUT_MS = 3_000;
 const MOBILE_TAILNET_START_TIMEOUT_MS = 3 * 60 * 1_000;
+/** ProxyJump 다단 깊이 상한. 데스크톱과 같은 값이다(안전장치). */
+const MOBILE_MAX_JUMP_CHAIN = 8;
 // 모듈 로드 시점에는 i18n 초기화 전이고 언어를 바꿔도 갱신되지 않으므로 호출 시점에 번역한다.
 function getStartupRefreshTimeoutMessage(): string {
   return t('store.serverSlow');
@@ -241,6 +252,51 @@ interface PendingCredentialPromptState {
   authType: 'password' | 'privateKey' | 'certificate';
   message?: string | null;
   initialValue: HostSecretInput;
+}
+
+/**
+ * 연결 도중 서버가 낸 대화형 인증 물음(OTP·SSH 쪽 비밀번호 등).
+ *
+ * 자격증명 프롬프트와 다르다. 저 물음은 붙기 **전에** 우리가 무엇을 들고 갈지 묻는 것이고, 이것은
+ * 이미 붙어서 인증하는 중에 **서버가** 묻는 것이다. 그래서 이 물음이 뜬 동안 연결은 답을 기다리며
+ * 서 있고, 닫으면 그 연결이 끝난다.
+ */
+/**
+ * 연결 하나가 지금 무엇을 거치는지. 단계 계산에 넣는 입력이다.
+ *
+ * 예전에는 한 줄 문구(connectionStatusMessage) 하나였다. 그러면 새 단계가 앞 단계를 덮어써서
+ * 지나간 것은 사라지고, 실패했을 때 어디까지 갔는지 알 수 없다 — tailnet 때문인지 SSH 가
+ * 거절한 것인지 구분할 방법이 없었다. 데스크톱이 이것을 단계 목록으로 바꾼 이유가 그것이고,
+ * 계산은 shared-core 가 두 앱에 같은 것을 준다.
+ *
+ * persist 하지 않는다(partialize 는 명시 목록이다). 화면 상태이고, 다시 붙을 때 새로 만들어진다.
+ */
+export interface MobileConnectionViewState {
+  hostId: string;
+  /** tailnet 을 거치는 연결이면 그 노드의 마지막 상태. */
+  tailnetStatus?: EngineTailnetStatus;
+  /** tailnet 을 쓰는 연결인지. 쓰지 않으면 그 계층을 아예 안 보여준다. */
+  hasTailnet: boolean;
+  /** 대상 주소. 넷맵에서 그 기기를 찾아 경로를 보여주는 데 쓴다. */
+  targetAddress?: string;
+  /** 사람이 호스트 키를 판단하는 중인지. */
+  hostKeyPrompted?: boolean;
+  /** 사람이 대화형 인증에 답하는 중인지. */
+  interactiveAuthPending?: boolean;
+  /** 서버가 인증 단계에 보낸 배너. 원문 그대로 보여준다. */
+  banner?: string;
+  /** 지금 붙고 있는 홉. 점프 체인에서 어디까지 갔는지의 유일한 근거다. */
+  hop?: EngineHopProgress;
+  failureLayer?: ConnectionFailureLayer | null;
+  failureMessage?: string;
+}
+
+interface PendingInteractiveAuthPromptState {
+  hostId: string;
+  hostLabel: string;
+  challenge: EngineInteractiveChallenge;
+  /** 물음을 낸 서버. 점프 체인에서 누구의 코드인지 이것으로 가른다. */
+  hopLabel: string | null;
 }
 
 /**
@@ -637,6 +693,9 @@ interface MobileAppState {
   pendingAwsSsoLogin: PendingAwsSsoLoginState | null;
   pendingServerKeyPrompt: PendingServerKeyPromptState | null;
   pendingCredentialPrompt: PendingCredentialPromptState | null;
+  pendingInteractiveAuthPrompt: PendingInteractiveAuthPromptState | null;
+  /** 세션·SFTP 레코드 ID 별 연결 진행. 붙는 중에만 값이 있다. */
+  connectionViews: Record<string, MobileConnectionViewState>;
   pendingStartupCommandPrompt: PendingStartupCommandPromptState | null;
   initializeApp: () => Promise<void>;
   handleAuthCallbackUrl: (url: string) => Promise<void>;
@@ -684,6 +743,9 @@ interface MobileAppState {
   rejectServerKeyPrompt: () => Promise<void>;
   submitCredentialPrompt: (input: HostSecretInput) => Promise<void>;
   cancelCredentialPrompt: () => void;
+  submitInteractiveAuthPrompt: (answer: EngineInteractiveAnswer) => void;
+  /** 닫으면 그 연결을 접는다 — 답 없이 두면 코어가 예산까지 기다린다. */
+  cancelInteractiveAuthPrompt: () => void;
   submitStartupCommandPrompt: (values: Record<string, string>) => void;
   /** 취소하면 startup command 없이 접속을 그대로 쓴다. */
   cancelStartupCommandPrompt: () => void;
@@ -776,6 +838,9 @@ let appStateSubscription: { remove: () => void } | null = null;
 let pendingServerKeyResolver: ((accepted: boolean) => void) | null = null;
 let pendingCredentialResolver:
   | ((value: HostSecretInput | null) => void)
+  | null = null;
+let pendingInteractiveAuthResolver:
+  | ((answer: EngineInteractiveAnswer | null) => void)
   | null = null;
 let pendingStartupCommandResolver:
   | ((values: Record<string, string> | null) => void)
@@ -2137,13 +2202,17 @@ export const useMobileAppStore = create<MobileAppState>()(
         pendingServerKeyResolver = null;
         pendingCredentialResolver?.(null);
         pendingCredentialResolver = null;
+        pendingInteractiveAuthResolver?.(null);
+        pendingInteractiveAuthResolver = null;
         pendingAwsSsoCancelHandler?.();
         pendingAwsSsoCancelHandler = null;
         set({
           pendingAwsSsoLogin: null,
           pendingServerKeyPrompt: null,
           pendingCredentialPrompt: null,
+          pendingInteractiveAuthPrompt: null,
           pendingStartupCommandPrompt: null,
+          connectionViews: {},
         });
       };
 
@@ -2174,7 +2243,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           pendingAwsSsoLogin: null,
           pendingServerKeyPrompt: null,
           pendingCredentialPrompt: null,
+          pendingInteractiveAuthPrompt: null,
           pendingStartupCommandPrompt: null,
+          connectionViews: {},
         });
       };
 
@@ -2839,11 +2910,111 @@ export const useMobileAppStore = create<MobileAppState>()(
           .filter(Boolean);
       };
 
+      /**
+       * 점프 체인을 연결 페이로드의 모양으로 조립한다.
+       *
+       * 모바일은 이것을 아예 보내지 않았다 — 데스크톱에서 점프 호스트를 설정해 동기화해도 폰은
+       * 대상 주소로 직접 붙었고, 베스천 경유만 가능한 호스트는 그냥 타임아웃으로 끝났다.
+       *
+       * 홉도 대상과 같은 자격증명 경로를 쓴다(vault → 없으면 물어본다). 홉의 비밀번호가 없으면
+       * 여기서 사용자에게 묻는데, 그것이 맞다 — 그 홉은 실제로 인증해야 지나갈 수 있다.
+       *
+       * 코어가 읽는 순서는 안쪽부터다: 가장 안쪽(jump 없음)이 이 기기에서 직접 소켓을 여는 첫 홉.
+       */
+      const resolveJumpChain = async (
+        host: SshHostRecord,
+      ): Promise<EngineJumpTarget | undefined> => {
+        const chain = normalizeJumpHostIds(host.jumpHostIds, host.jumpHostId);
+        if (chain.length === 0) {
+          return undefined;
+        }
+        // 데스크톱과 같은 상한. 없으면 잘못 엮인 체인이 재귀로 앱을 잡아먹는다.
+        if (chain.length > MOBILE_MAX_JUMP_CHAIN) {
+          throw new Error(
+            t('store.jumpChainTooDeep', { max: MOBILE_MAX_JUMP_CHAIN }),
+          );
+        }
+        if (chain.includes(host.id)) {
+          throw new Error(t('store.jumpChainSelf'));
+        }
+
+        let resolved: EngineJumpTarget | undefined;
+        for (const jumpHostId of chain) {
+          const jumpHost = get().hosts.find(record => record.id === jumpHostId);
+          if (!jumpHost) {
+            throw new Error(t('store.jumpHostMissing'));
+          }
+          if (!isSshHostRecord(jumpHost)) {
+            throw new Error(t('store.jumpHostMustBeSsh'));
+          }
+          const credentials = await resolveHostCredentials(jumpHost);
+          if (!credentials) {
+            // 사용자가 홉의 자격증명 입력을 접었다. 취소로 끝낸다.
+            throw new TailnetPreparationCancelledError();
+          }
+          const credential = buildEngineCredential(jumpHost, credentials);
+          if (!credential) {
+            throw new Error(
+              t('store.jumpHostCredentialMissing', { label: jumpHost.label }),
+            );
+          }
+          resolved = {
+            host: jumpHost.hostname,
+            port: jumpHost.port,
+            username: jumpHost.username,
+            credential,
+            trustedHostKeysBase64: trustedHostKeysFor(
+              jumpHost.hostname,
+              jumpHost.port,
+              jumpHost.tailnetId,
+            ),
+            ...(resolved ? { jump: resolved } : {}),
+          };
+        }
+        return resolved;
+      };
+
+      /**
+       * 서버가 낸 대화형 인증 물음을 사람에게 올리고 답을 기다린다.
+       *
+       * 답이 올 때까지 그 연결은 코어에서 서 있다 — 그래서 이 약속을 반드시 풀어야 한다. 취소는
+       * null 이고, 그것도 답이다(코어가 그 자리에서 접는다).
+       */
+      const askInteractiveAuth = async (
+        host: Pick<HostRecord, 'id' | 'label'>,
+        challenge: EngineInteractiveChallenge,
+        recordId?: string,
+      ): Promise<EngineInteractiveAnswer | null> => {
+        const hopLabel = formatInteractiveHop(challenge.hop, get().hosts);
+        if (recordId) {
+          patchConnectionView(recordId, { interactiveAuthPending: true });
+        }
+        const answer = await new Promise<EngineInteractiveAnswer | null>(resolve => {
+          // 앞의 물음이 아직 떠 있으면 그것부터 접는다. 슬롯이 하나뿐이라 덮어쓰면 앞의 것을
+          // 아무도 답할 수 없고, 그 연결이 예산까지 멈춘다.
+          pendingInteractiveAuthResolver?.(null);
+          pendingInteractiveAuthResolver = resolve;
+          set({
+            pendingInteractiveAuthPrompt: {
+              hostId: host.id,
+              hostLabel: host.label,
+              challenge,
+              hopLabel,
+            },
+          });
+        });
+        if (recordId) {
+          patchConnectionView(recordId, { interactiveAuthPending: false });
+        }
+        return answer;
+      };
+
       const resolveKnownHostTrust = async (
         host: Pick<HostRecord, 'id' | 'label'> & {
           tailnetId?: string | null;
         },
         info: MobileServerPublicKeyInfo,
+        recordId?: string,
       ): Promise<boolean> => {
         const { status, existing } = getKnownHostStatus(
           get().knownHosts,
@@ -2866,6 +3037,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           return true;
         }
 
+        if (recordId) {
+          patchConnectionView(recordId, { hostKeyPrompted: true });
+        }
         const accepted = await new Promise<boolean>(resolve => {
           pendingServerKeyResolver = resolve;
           set({
@@ -2879,6 +3053,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           });
         });
 
+        if (recordId) {
+          patchConnectionView(recordId, { hostKeyPrompted: false });
+        }
         if (!accepted) {
           return false;
         }
@@ -3195,6 +3372,50 @@ export const useMobileAppStore = create<MobileAppState>()(
         }));
       };
 
+      /**
+       * 연결 진행을 고친다. 없던 연결이면 만들고, 있으면 얹는다.
+       *
+       * 붙는 중에만 존재한다 — 끝나면 beginConnectionView 로 다시 시작하거나 clearConnectionView
+       * 로 지운다. 남겨 두면 다음 연결이 지난번 tailnet 상태를 물려받아 이미 통과한 것처럼 보인다.
+       */
+      const patchConnectionView = (
+        recordId: string,
+        patch: Partial<MobileConnectionViewState>,
+      ) => {
+        set(state => {
+          const current = state.connectionViews[recordId];
+          if (!current) {
+            return {};
+          }
+          return {
+            connectionViews: {
+              ...state.connectionViews,
+              [recordId]: { ...current, ...patch },
+            },
+          };
+        });
+      };
+
+      const beginConnectionView = (
+        recordId: string,
+        view: MobileConnectionViewState,
+      ) => {
+        set(state => ({
+          connectionViews: { ...state.connectionViews, [recordId]: view },
+        }));
+      };
+
+      const clearConnectionView = (recordId: string) => {
+        set(state => {
+          if (!state.connectionViews[recordId]) {
+            return {};
+          }
+          const next = { ...state.connectionViews };
+          delete next[recordId];
+          return { connectionViews: next };
+        });
+      };
+
       const prepareTailnetForConnection = async (input: {
         kind: 'terminal' | 'sftp';
         recordId: string;
@@ -3230,6 +3451,8 @@ export const useMobileAppStore = create<MobileAppState>()(
                 input.recordId,
                 getTailnetProgressMessage(status),
               );
+              // 단계 화면이 읽는 것. 한 줄 문구와 달리 지나간 관문이 남는다.
+              patchConnectionView(input.recordId, { tailnetStatus: status });
               const authUrl = status.authUrl?.trim();
               if (!authUrl) {
                 return;
@@ -3282,14 +3505,13 @@ export const useMobileAppStore = create<MobileAppState>()(
             throw new Error(t('store.tailnetBrowserOpenFailed'));
           }
           const currentHost = get().hosts.find(host => host.id === input.hostId);
+          // **처음 정할 때와 같은 규칙으로 다시 정해야 한다.** 여기서 대상의 tailnetId 를 직접
+          // 읽으면, 첫 홉의 tailnet 으로 노드를 올려놓고 대상 기준으로 검사하게 된다 — 대상에
+          // 설정이 없는 경유 구성에서는 그 둘이 언제나 달라서 붙을 때마다 "설정이 변경되었습니다"
+          // 로 끝났다. 같은 것을 두 곳에서 다르게 판정한 것이 원인이다.
           const currentResolution = currentHost
             ? resolveSyncedTailnetRoute(
-                {
-                  tailnetId:
-                    'tailnetId' in currentHost
-                      ? currentHost.tailnetId
-                      : undefined,
-                },
+                { tailnetId: resolveSshHostTailnetId(currentHost, get().hosts) },
                 get().tailnets,
               )
             : { kind: 'missing' as const, tailnetId: input.resolution.tailnetId };
@@ -3497,8 +3719,11 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
+          // 점프 체인이 있으면 올려야 하는 노드는 **첫 홉**의 것이다. 대상에서 읽으면
+          // "tailnet 안의 베스천을 거쳐 사내 LAN 호스트로" 가 안 된다 — 판정은 shared-core 가
+          // 데스크톱과 같은 규칙으로 한다.
           const tailnetResolution = resolveSyncedTailnetRoute(
-            host,
+            { tailnetId: resolveSshHostTailnetId(host, get().hosts) },
             get().tailnets,
           );
           if (tailnetResolution.kind === 'missing') {
@@ -3524,6 +3749,13 @@ export const useMobileAppStore = create<MobileAppState>()(
             ),
           }));
 
+          // 터미널과 같은 규칙 — tailnet 준비 전에 세워야 그 구간이 화면에 보인다.
+          beginConnectionView(sftpSessionRecord.id, {
+            hostId: host.id,
+            hasTailnet: tailnetResolution.kind === 'tailnet',
+            targetAddress: host.hostname,
+          });
+
           if (tailnetResolution.kind === 'tailnet') {
             const prepared = await prepareTailnetForConnection({
               kind: 'sftp',
@@ -3543,6 +3775,10 @@ export const useMobileAppStore = create<MobileAppState>()(
           console.info(
             `[mobile-sftp] engine=${engine.name} session=${sftpSessionRecord.id}`,
           );
+          // 홉의 자격증명이 없으면 여기서 물어본다 — 붙기 전이라 물어볼 자리가 있다.
+          const jumpChain = isSshHostRecord(host)
+            ? await resolveJumpChain(host)
+            : undefined;
           const engineSftp = await engine.connectSftp({
             connectionId: sftpSessionRecord.id,
             host: host.hostname,
@@ -3550,12 +3786,21 @@ export const useMobileAppStore = create<MobileAppState>()(
             username: host.username,
             credential: security,
             ...(tailnet ? { tailnet } : {}),
+            ...(jumpChain ? { jump: jumpChain } : {}),
             trustedHostKeysBase64: trustedHostKeysFor(
               host.hostname,
               host.port,
               host.tailnetId,
             ),
-            onServerKey: async info => resolveKnownHostTrust(host, info),
+            onServerKey: async info =>
+              resolveKnownHostTrust(host, info, sftpSessionRecord.id),
+            onInteractiveChallenge: challenge =>
+              askInteractiveAuth(host, challenge, sftpSessionRecord.id),
+            // 서버가 인증 단계에 보낸 안내. 붙어 있는 동안 보여줘야 그 자리에서 끝난다 —
+            // 실패한 뒤에 말해 주면 이미 끊긴 연결을 다시 시작해야 한다.
+            onBanner: bannerText =>
+              patchConnectionView(sftpSessionRecord.id, { banner: bannerText }),
+            onHopProgress: hop => patchConnectionView(sftpSessionRecord.id, { hop }),
             onDisconnected: () => {
               closedDuringConnect = true;
               if (runtimeSftpSessions.has(sftpSessionRecord.id)) {
@@ -3600,6 +3845,11 @@ export const useMobileAppStore = create<MobileAppState>()(
                 title: `${host.label} SFTP`,
               },
             ),
+            connectionViews: (() => {
+              const next = { ...state.connectionViews };
+              delete next[sftpSessionRecord.id];
+              return next;
+            })(),
           }));
         } catch (error) {
           await disposeRuntimeSftpSession(sftpSessionRecord.id);
@@ -3610,9 +3860,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             await expireAuthSession();
             return;
           }
-          markSftpSessionState(
-            sftpSessionRecord.id,
-            'error',
+          const message =
             error instanceof Error
               ? getConnectFailureMessage(
                   error.message,
@@ -3620,8 +3868,18 @@ export const useMobileAppStore = create<MobileAppState>()(
                     ? `${host.username}@${host.hostname}:${host.port}`
                     : host.label,
                 )
-              : t('store.sftpConnectFailed'),
-          );
+              : t('store.sftpConnectFailed');
+          markSftpSessionState(sftpSessionRecord.id, 'error', message);
+          // 터미널과 같은 규칙 — 실패한 단계를 남겨 어디서 막혔는지 보이게 한다.
+          patchConnectionView(sftpSessionRecord.id, {
+            failureLayer:
+              error instanceof Error
+                ? getConnectFailureLayer(error.message)
+                : null,
+            failureMessage: message,
+            hostKeyPrompted: false,
+            interactiveAuthPending: false,
+          });
         } finally {
           if (pendingConnection) {
             try {
@@ -3951,8 +4209,11 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
+          // 점프 체인이 있으면 올려야 하는 노드는 **첫 홉**의 것이다. 대상에서 읽으면
+          // "tailnet 안의 베스천을 거쳐 사내 LAN 호스트로" 가 안 된다 — 판정은 shared-core 가
+          // 데스크톱과 같은 규칙으로 한다.
           const tailnetResolution = resolveSyncedTailnetRoute(
-            host,
+            { tailnetId: resolveSshHostTailnetId(host, get().hosts) },
             get().tailnets,
           );
           if (tailnetResolution.kind === 'missing') {
@@ -3976,6 +4237,18 @@ export const useMobileAppStore = create<MobileAppState>()(
               connectionDetails: `${host.username}@${host.hostname}:${host.port}`,
             }),
           }));
+
+          // tailnet 준비 **전에** 세운다. 그 뒤에 세우면 준비 중 올라온 상태가 전부 버려지고,
+          // 화면은 "노드 시작 중" 에 얼어붙는다 — 어디까지 갔는지 보여 주려고 만든 화면이 정작
+          // 가장 오래 걸리는 구간(사람이 브라우저에서 승인하는 구간이 여기 있다)을 못 보여 준다.
+          // tailnet 준비 **전에** 세운다. 그 뒤에 세우면 준비 중 올라온 상태가 전부 버려지고,
+          // 화면은 "노드 시작 중" 에 얼어붙는다 — 어디까지 갔는지 보여 주려고 만든 화면이 정작
+          // 가장 오래 걸리는 구간(사람이 브라우저에서 승인하는 구간이 여기 있다)을 못 보여 준다.
+          beginConnectionView(sessionRecord.id, {
+            hostId: host.id,
+            hasTailnet: tailnetResolution.kind === 'tailnet',
+            targetAddress: host.hostname,
+          });
 
           if (tailnetResolution.kind === 'tailnet') {
             const prepared = await prepareTailnetForConnection({
@@ -4042,6 +4315,8 @@ export const useMobileAppStore = create<MobileAppState>()(
           };
 
           const terminalSize = await resolvePtyTerminalGridSize();
+          // 홉의 자격증명이 없으면 여기서 물어본다 — 아직 붙기 전이라 물어볼 자리가 있다.
+          const jumpChain = await resolveJumpChain(host);
           const connection = await engine.connect({
             connectionId: sessionRecord.id,
             host: host.hostname,
@@ -4049,13 +4324,22 @@ export const useMobileAppStore = create<MobileAppState>()(
             username: host.username,
             credential: security,
             ...(tailnet ? { tailnet } : {}),
+            ...(jumpChain ? { jump: jumpChain } : {}),
             size: terminalSize,
             trustedHostKeysBase64: trustedHostKeysFor(
               host.hostname,
               host.port,
               host.tailnetId,
             ),
-            onServerKey: async info => resolveKnownHostTrust(host, info),
+            onServerKey: async info =>
+              resolveKnownHostTrust(host, info, sessionRecord.id),
+            onInteractiveChallenge: challenge =>
+              askInteractiveAuth(host, challenge, sessionRecord.id),
+            // 서버가 인증 단계에 보낸 안내. 붙어 있는 동안 보여줘야 그 자리에서 끝난다 —
+            // 실패한 뒤에 말해 주면 이미 끊긴 연결을 다시 시작해야 한다.
+            onBanner: bannerText =>
+              patchConnectionView(sessionRecord.id, { banner: bannerText }),
+            onHopProgress: hop => patchConnectionView(sessionRecord.id, { hop }),
             onDisconnected: markDropped,
           });
           pendingConnection = connection;
@@ -4181,6 +4465,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               connectionDetails: `${host.username}@${host.hostname}:${host.port}`,
             }),
           }));
+          clearConnectionView(sessionRecord.id);
         } catch (error) {
           await disposeRuntimeSession(sessionRecord.id);
           if (
@@ -4190,16 +4475,25 @@ export const useMobileAppStore = create<MobileAppState>()(
             // 코어가 올려 보내는 Go 원문("context deadline exceeded" 등)을 그대로 띄우지
             // 않는다 — 데스크톱과 같은 분류를 써서 사람이 읽는 문구로 바꾼다. 분류되지
             // 않은 오류는 원문을 남긴다(유일한 단서다).
-            markSessionState(
-              sessionRecord.id,
-              'error',
+            const message =
               error instanceof Error
                 ? getConnectFailureMessage(
                     error.message,
                     `${host.username}@${host.hostname}:${host.port}`,
                   )
-                : t('store.sshConnectFailed'),
-            );
+                : t('store.sshConnectFailed');
+            markSessionState(sessionRecord.id, 'error', message);
+            // 뷰는 지우지 않는다. 실패한 단계가 남아 있어야 사용자가 어디서 막혔는지 읽는다 —
+            // 지우면 "실패했습니다" 한 줄만 남고 tailnet 인지 SSH 인지 알 수 없다.
+            patchConnectionView(sessionRecord.id, {
+              failureLayer:
+                error instanceof Error
+                  ? getConnectFailureLayer(error.message)
+                  : null,
+              failureMessage: message,
+              hostKeyPrompted: false,
+              interactiveAuthPending: false,
+            });
           }
         } finally {
           if (pendingConnection) {
@@ -5178,7 +5472,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           pendingAwsSsoLogin: null,
           pendingServerKeyPrompt: null,
           pendingCredentialPrompt: null,
+          pendingInteractiveAuthPrompt: null,
           pendingStartupCommandPrompt: null,
+          connectionViews: {},
         });
       };
 
@@ -5220,7 +5516,9 @@ export const useMobileAppStore = create<MobileAppState>()(
         pendingAwsSsoLogin: null,
         pendingServerKeyPrompt: null,
         pendingCredentialPrompt: null,
+        pendingInteractiveAuthPrompt: null,
         pendingStartupCommandPrompt: null,
+        connectionViews: {},
         initializeApp: async () => {
           if (initializePromise) {
             return initializePromise;
@@ -7592,6 +7890,16 @@ export const useMobileAppStore = create<MobileAppState>()(
           pendingCredentialResolver?.(null);
           pendingCredentialResolver = null;
           set({ pendingCredentialPrompt: null });
+        },
+        submitInteractiveAuthPrompt: (answer: EngineInteractiveAnswer) => {
+          pendingInteractiveAuthResolver?.(answer);
+          pendingInteractiveAuthResolver = null;
+          set({ pendingInteractiveAuthPrompt: null });
+        },
+        cancelInteractiveAuthPrompt: () => {
+          pendingInteractiveAuthResolver?.(null);
+          pendingInteractiveAuthResolver = null;
+          set({ pendingInteractiveAuthPrompt: null });
         },
         submitStartupCommandPrompt: (values: Record<string, string>) => {
           pendingStartupCommandResolver?.(values);

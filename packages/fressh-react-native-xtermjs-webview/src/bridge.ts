@@ -5,6 +5,14 @@ type ITerminalInitOnlyOptions = import('@xterm/xterm').ITerminalInitOnlyOptions;
 export type BridgeInboundMessage =
 	| { type: 'initialized' }
 	| { type: 'input'; str: string }
+	/**
+	 * A link in the terminal was activated. The page finds links with
+	 * @xterm/addon-web-links but does not open them: the default handler is
+	 * window.open, and with setSupportMultipleWindows disabled the WebView would
+	 * navigate the terminal page away and take the session with it. So the host
+	 * decides where a link opens.
+	 */
+	| { type: 'linkActivated'; uri: string }
 	| { type: 'debug'; message: string };
 
 // Messages injected from React Native into the WebView (xterm page)

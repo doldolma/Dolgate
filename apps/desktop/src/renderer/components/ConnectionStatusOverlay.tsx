@@ -2,6 +2,9 @@ import { cn } from '../lib/cn';
 import { Button } from '../ui';
 import type { TerminalConnectionHop } from '@shared';
 import { ConnectionHopSteps } from './ConnectionHopSteps';
+import {
+  describeConnectionStage,
+} from './terminal-workspace/connectionStages';
 import type { ConnectionStage, ConnectionStageState } from './terminal-workspace/connectionStages';
 import { useTranslation } from 'react-i18next';
 
@@ -158,6 +161,7 @@ function ConnectionStageList({ stages }: { stages: readonly ConnectionStage[] })
       {stages.map((stage) => {
         const groupChanged = stage.group !== lastGroup;
         lastGroup = stage.group;
+        const described = describeConnectionStage(stage);
         return (
           <li key={stage.id}>
             {groupChanged ? (
@@ -174,10 +178,10 @@ function ConnectionStageList({ stages }: { stages: readonly ConnectionStage[] })
                 {stageMark[stage.state]}
               </span>
               <span className={cn('flex-1', stageTone[stage.state])}>
-                {stage.label}
-                {stage.detail ? (
+                {described.label}
+                {described.detail ? (
                   <span className="block text-[0.72rem] text-[var(--text-subtle)]">
-                    {stage.detail}
+                    {described.detail}
                   </span>
                 ) : null}
               </span>

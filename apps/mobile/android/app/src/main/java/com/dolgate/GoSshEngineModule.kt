@@ -13,6 +13,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 import mobile.Conn
+import mobile.ConnectionEventListener
 import mobile.DisconnectedCallback
 import mobile.Engine
 import mobile.Listener
@@ -49,7 +50,20 @@ class GoSshEngineModule(
    * "route ip+net: netlinkrib: permission denied".
    */
   private val engine: Engine by lazy {
-    Mobile.newEngine().apply { setAndroidNetworkProvider(AndroidNetworkFacts(reactContext)) }
+    Mobile.newEngine().apply {
+      setAndroidNetworkProvider(AndroidNetworkFacts(reactContext))
+      // Set here, not on the first connect: a connection raises its host key and
+      // OTP questions while it is being opened, so the sink has to already exist
+      // when connect is called rather than being installed by it.
+      setConnectionEventListener(
+        ConnectionEventListener { eventJson ->
+          this@GoSshEngineModule.emit(
+            EVENT_CONNECTION,
+            Arguments.createMap().apply { putString("eventJson", eventJson) },
+          )
+        },
+      )
+    }
   }
 
   private val connections = ConcurrentHashMap<String, Conn>()
@@ -169,7 +183,6 @@ class GoSshEngineModule(
       val conn =
         engine.connect(
           requestJson,
-          null,
           DisconnectedCallback {
             var shouldEmit = false
             synchronized(registryLock) {
@@ -213,6 +226,45 @@ class GoSshEngineModule(
         previous?.let { old -> closeQuietly { old.close() } }
       }
       info
+    }
+  }
+
+  /**
+   * Answers a keyboard-interactive challenge the connection raised.
+   *
+   * This does not look in the connection registry: the connect call has not
+   * returned yet — it is blocked waiting for exactly this — so there is nothing
+   * registered to find. The engine locates the challenge by its id.
+   */
+  @ReactMethod
+  fun respondKeyboardInteractive(payloadJson: String, promise: Promise) {
+    onWorker(promise) {
+      engine.respondKeyboardInteractive(payloadJson)
+      null
+    }
+  }
+
+  @ReactMethod
+  fun respondHostKeyTrust(challengeId: String, trust: Boolean, promise: Promise) {
+    onWorker(promise) {
+      engine.respondHostKeyTrust(challengeId, trust)
+      null
+    }
+  }
+
+  /**
+   * Cuts a connection that is still being opened.
+   *
+   * disconnect cannot: it closes a registered connection, and one that is still
+   * dialing was never registered. Without this, dismissing an OTP sheet leaves the
+   * dial standing until its budget runs out — holding the tailnet node's lease
+   * while it waits.
+   */
+  @ReactMethod
+  fun cancelConnect(connectionId: String, promise: Promise) {
+    onWorker(promise) {
+      engine.cancelConnect(connectionId)
+      null
     }
   }
 
@@ -635,5 +687,6 @@ class GoSshEngineModule(
     private const val EVENT_SHELL_CLOSED = "GoSshEngine:shellClosed"
     private const val EVENT_DISCONNECTED = "GoSshEngine:disconnected"
     private const val EVENT_TAILNET = "GoSshEngine:tailnet"
+    private const val EVENT_CONNECTION = "GoSshEngine:connection"
   }
 }

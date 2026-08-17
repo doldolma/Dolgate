@@ -84,7 +84,7 @@ func TestProbeThenConnectWithAcceptedKey(t *testing.T) {
 	connectPayload := server.ConnectPayload()
 	connectPayload.TrustedHostKeyBase64 = key.PublicKeyBase64
 
-	conn, err := NewEngine().Connect(requestJSON(t, connectPayload), nil, nil)
+	conn, err := NewEngine().Connect(requestJSON(t, connectPayload), nil)
 	if err != nil {
 		t.Fatalf("connect with the probed key: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestDisconnectedCallbackFiresOnTransportLoss(t *testing.T) {
 	server := newTestServer(t)
 	recorder := &disconnectRecorder{fired: make(chan string, 4)}
 
-	conn, err := NewEngine().Connect(connectJSON(t, server, 30, 100), nil, recorder)
+	conn, err := NewEngine().Connect(connectJSON(t, server, 30, 100), recorder)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestDisconnectedCallbackSuppressedOnExplicitClose(t *testing.T) {
 	server := newTestServer(t)
 	recorder := &disconnectRecorder{fired: make(chan string, 4)}
 
-	conn, err := NewEngine().Connect(connectJSON(t, server, 30, 100), nil, recorder)
+	conn, err := NewEngine().Connect(connectJSON(t, server, 30, 100), recorder)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}

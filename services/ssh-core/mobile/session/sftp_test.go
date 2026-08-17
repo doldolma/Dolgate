@@ -30,7 +30,7 @@ func newSFTP(t *testing.T) (*SFTP, string) {
 	skipUnlessPosixRemote(t)
 
 	server := newTestServer(t)
-	conn, err := Dial(DialOptions{ID: "conn-1", Target: server.Target(), Config: sshconn.DefaultConfig})
+	conn, err := dialConn("conn-1", server.Target(), sshconn.DefaultConfig)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -451,7 +451,7 @@ func TestSFTPCloseIsIdempotentAndBlocksFurtherUse(t *testing.T) {
 
 func TestStartSFTPFailsOnClosedConnection(t *testing.T) {
 	server := newTestServer(t)
-	conn, err := Dial(DialOptions{ID: "conn-1", Target: server.Target(), Config: sshconn.DefaultConfig})
+	conn, err := dialConn("conn-1", server.Target(), sshconn.DefaultConfig)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestStartSFTPFailsOnClosedConnection(t *testing.T) {
 // A shell and an SFTP session share one transport, so opening both must work.
 func TestSFTPCoexistsWithAShell(t *testing.T) {
 	server := newTestServer(t)
-	conn, err := Dial(DialOptions{ID: "conn-1", Target: server.Target(), Config: sshconn.DefaultConfig})
+	conn, err := dialConn("conn-1", server.Target(), sshconn.DefaultConfig)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

@@ -8,7 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"dolssh/services/ssh-core/internal/hostkeytrust"
 	"dolssh/services/ssh-core/internal/sshconn"
+	"dolssh/services/ssh-core/internal/sshdial"
 	"dolssh/services/ssh-core/mobile/ringbuf"
 	"dolssh/services/ssh-core/mobile/session"
 	"dolssh/services/ssh-core/mobile/vaultkdf"
@@ -63,14 +65,29 @@ type Listener interface {
 	OnDropped(fromSeq int64, toSeq int64)
 }
 
-// InteractiveResponder answers keyboard-interactive and password prompts.
+// ConnectionEventListener receives the events a connection raises while it is
+// being opened: per-hop progress, the server banner, the keyboard-interactive
+// challenges (OTP), and the host key trust question.
 //
-// Respond receives a challenge as JSON ({"name","instruction","prompts":
-// [{"label","echo"}]}) and must return a JSON array of answer strings, one per
-// prompt.
-type InteractiveResponder interface {
-	Respond(challengeJSON string) (string, error)
+// It carries the same JSON events as the desktop stdio protocol, for the reason
+// TailnetEventListener does — one event vocabulary means the connection screen
+// is decided once and both apps render the same thing.
+//
+// **Why a listener rather than a blocking callback.** A prompt has to reach a
+// screen and wait for a person, and the app's UI runs on its own thread; a Go
+// call that blocks inside the bridge waiting for that would hold the connection
+// on the bridge's thread. So the question goes up as an event, and the answer
+// comes back through RespondKeyboardInteractive / RespondHostKeyTrust. The
+// waiting itself happens in internal/sshdial, where the desktop's does.
+type ConnectionEventListener interface {
+	OnConnectionEvent(eventJSON string)
 }
+
+// The prompts a connection raises are answered through this listener, not
+// through a responder object handed to Connect. The previous shape — a blocking
+// Respond(challengeJSON) the host implemented — is gone because nothing could
+// implement it: both native bridges passed nil, so an OTP host could not be
+// connected to at all from mobile.
 
 // ShellClosedCallback fires once after a shell channel has ended and all of its
 // output has been stored.
@@ -82,10 +99,61 @@ type ShellClosedCallback interface {
 type Engine struct {
 	tailnetMu      sync.Mutex
 	tailnetRuntime *mobileTailnetRuntime
+
+	// dialer is the one path connections are opened through, shared with the
+	// desktop engine. It owns the interactive-auth waiting list, so the answers
+	// arriving from the app find their challenge without this file keeping a
+	// second registry that could disagree with it.
+	dialer    *sshdial.Dialer
+	hostTrust *hostkeytrust.Registry
+
+	connectionListenerMu sync.RWMutex
+	connectionListener   ConnectionEventListener
 }
 
 // NewEngine returns an engine.
-func NewEngine() *Engine { return &Engine{} }
+func NewEngine() *Engine {
+	engine := &Engine{hostTrust: hostkeytrust.New()}
+	engine.dialer = sshdial.New(engine.emitConnectionEvent)
+	// The tailnet runtime is created later, when the app configures it, so the
+	// resolver is a method that looks it up at dial time rather than a value.
+	engine.dialer.SetTailnetDial(engine.resolveTailnetDial)
+	engine.dialer.SetHostKeyTrustPrompt(func(
+		ctx context.Context,
+		correlation hostkeytrust.Correlation,
+	) sshconn.HostKeyTrustFunc {
+		return engine.hostTrust.Prompt(ctx, engine.emitConnectionEvent, correlation)
+	})
+	return engine
+}
+
+// SetConnectionEventListener registers where connection events go. Passing nil
+// drops them, which is what a probe or a background reconnect wants.
+func (e *Engine) SetConnectionEventListener(listener ConnectionEventListener) {
+	e.connectionListenerMu.Lock()
+	e.connectionListener = listener
+	e.connectionListenerMu.Unlock()
+}
+
+func (e *Engine) hasConnectionListener() bool {
+	e.connectionListenerMu.RLock()
+	defer e.connectionListenerMu.RUnlock()
+	return e.connectionListener != nil
+}
+
+func (e *Engine) emitConnectionEvent(event coretypes.Event) {
+	e.connectionListenerMu.RLock()
+	listener := e.connectionListener
+	e.connectionListenerMu.RUnlock()
+	if listener == nil {
+		return
+	}
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		return
+	}
+	listener.OnConnectionEvent(string(encoded))
+}
 
 // connectRequest is the wire form of a connection request: the desktop connect
 // payload, plus the handle the app wants to refer to it by and the timeouts.
@@ -106,11 +174,15 @@ type DisconnectedCallback interface {
 // authentication. requestJSON is the same connect payload Connect takes; only
 // the addressing and jump fields are read.
 //
-// The app needs this because host key trust is decided interactively, while the
-// dialer checks strictly against keys it was given up front. So an unknown host
-// is probed, the answer is shown to the user, and the accepted key is passed
-// back in as trustedHostKeyBase64 on the real connect. When a host is already
-// trusted the probe can be skipped: the connect itself enforces the same check.
+// Connecting does not need this: an unknown key raises a trust question inside
+// the connection it appeared in (see ConnectionEventListener), which is what
+// keeps an OTP host from asking for a code twice — once for the probe and once
+// for the real connect, with a code that changes every 30 seconds in between.
+//
+// No app screen calls it today. It stays because reading a key without
+// authenticating is a distinct capability — the desktop uses its own equivalent
+// for host editing — and because it is the only way to answer "what key does this
+// host present" without opening a session.
 //
 // Returns JSON: {"algorithm","publicKeyBase64","fingerprintSha256"}.
 func (e *Engine) ProbeHostKey(requestJSON string) (string, error) {
@@ -194,7 +266,12 @@ func (e *Engine) InspectCertificate(certificateText string) (string, error) {
 	return string(encoded), nil
 }
 
-// dialConfig builds the dialer config shared by Connect and ProbeHostKey.
+// dialConfig builds the config for ProbeHostKey.
+//
+// Connect does not come here — internal/sshdial assembles its config, which is
+// the point of routing through it. A probe deliberately gets less: no trust
+// question, no banner, no progress. There is no screen behind a probe, and
+// waiting for an answer nobody can give is just a stall.
 func (e *Engine) dialConfig(request connectRequest) (sshconn.Config, error) {
 	config := sshconn.DefaultConfig
 	if request.DialTimeoutMs > 0 {
@@ -214,107 +291,113 @@ func (e *Engine) dialConfig(request connectRequest) (sshconn.Config, error) {
 	return config, nil
 }
 
-// Connect establishes an SSH connection. responder and onDisconnected may each
-// be nil.
+// Connect establishes an SSH connection. onDisconnected may be nil.
+//
+// While it runs, the connection raises events to the listener set by
+// SetConnectionEventListener: per-hop progress, the server banner, OTP
+// challenges, and the host key trust question. Answers come back through
+// RespondKeyboardInteractive and RespondHostKeyTrust, so this call stays blocked
+// until the person answers, the connection fails, or CancelConnect cuts it.
 func (e *Engine) Connect(
 	requestJSON string,
-	responder InteractiveResponder,
 	onDisconnected DisconnectedCallback,
 ) (*Conn, error) {
 	var request connectRequest
 	if err := json.Unmarshal([]byte(requestJSON), &request); err != nil {
 		return nil, fmt.Errorf("parse connect request: %w", err)
 	}
-
 	payload := request.ConnectPayload
-	config, err := e.dialConfig(request)
+
+	// Registering before the dial is what makes CancelConnect able to reach it.
+	ctx, finish := e.dialer.Begin(request.ID)
+	defer finish()
+
+	// Questions are asked only when there is somewhere to show them. With no
+	// listener the events go nowhere, and waiting for an answer nobody can see is
+	// not caution — it is a connect that hangs for its whole budget. Passing an
+	// empty correlation id is how internal/sshdial is told that (see its
+	// Request.SessionID); the dial itself stays cancellable either way, because
+	// Begin was given the real handle.
+	correlationID := ""
+	if e.hasConnectionListener() {
+		correlationID = request.ID
+	}
+
+	client, _, err := e.dialer.Dial(ctx, sshdial.Request{
+		// One id for both: mobile has a single handle per connection, and the app
+		// keys its screen by that handle.
+		SessionID:            correlationID,
+		RequestID:            correlationID,
+		Payload:              payload,
+		TCPDialTimeout:       millis(request.DialTimeoutMs),
+		TCPKeepAliveInterval: millis(request.KeepAliveIntervalMs),
+	})
 	if err != nil {
 		return nil, err
 	}
-	target := sshconn.Target{
-		Host:                  payload.Host,
-		Port:                  payload.Port,
-		Username:              payload.Username,
-		AuthType:              payload.AuthType,
-		Password:              payload.Password,
-		PrivateKeyPEM:         payload.PrivateKeyPEM,
-		CertificateText:       payload.CertificateText,
-		Passphrase:            payload.Passphrase,
-		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
-		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
-		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
-		WSProxy:               payload.WSProxy,
-	}
 
-	opts := session.DialOptions{
-		ID:        request.ID,
-		Target:    target,
-		Config:    config,
-		Responder: bridgeResponder(responder),
+	opts := session.AdoptOptions{
+		ID:       request.ID,
+		Host:     payload.Host,
+		Port:     payload.Port,
+		Username: payload.Username,
 	}
 	if onDisconnected != nil {
 		connectionID := request.ID
 		opts.OnDisconnected = func() { onDisconnected.OnDisconnected(connectionID) }
 	}
 
-	conn, err := session.Dial(opts)
-	if err != nil {
-		return nil, err
-	}
-
 	return &Conn{
-		conn:        conn,
+		conn:        session.Adopt(client, opts),
 		defaultRows: payload.Rows,
 		defaultCols: payload.Cols,
 	}, nil
 }
 
-// bridgeResponder adapts the host's JSON-based responder to the dialer's
-// callback, or returns nil so the dialer skips interactive auth entirely.
-func bridgeResponder(responder InteractiveResponder) sshconn.InteractiveResponder {
-	if responder == nil {
-		return nil
+// RespondKeyboardInteractive hands the person's answers to the challenge that
+// asked for them. payloadJSON is coretypes.KeyboardInteractiveRespondPayload:
+// {"challengeId","responses":[…],"storedPasswordIndexes":[…],"cancelled":bool}.
+//
+// storedPasswordIndexes names the prompts to fill with the saved password. The
+// password itself never leaves the engine, so the app returns positions instead
+// of reading a secret out and back in.
+//
+// cancelled means the person closed the sheet, and it comes through this same
+// call for the reason the desktop's does: a dismissed prompt has to be told, or
+// the connection waits out its budget with nothing coming — holding a tailnet
+// node's lease while it waits. Routing it here keeps one path for "the sheet
+// closed", so the two platforms cannot drift on which one they answer through.
+func (e *Engine) RespondKeyboardInteractive(payloadJSON string) error {
+	var payload coretypes.KeyboardInteractiveRespondPayload
+	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+		return fmt.Errorf("parse keyboard-interactive response: %w", err)
 	}
-	return func(challenge sshconn.InteractiveChallenge) ([]string, error) {
-		encoded, err := json.Marshal(challengeWire{
-			Name:        challenge.Name,
-			Instruction: challenge.Instruction,
-			Prompts:     promptsWire(challenge.Prompts),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("encode challenge: %w", err)
-		}
-
-		answersJSON, err := responder.Respond(string(encoded))
-		if err != nil {
-			return nil, err
-		}
-
-		var answers []string
-		if err := json.Unmarshal([]byte(answersJSON), &answers); err != nil {
-			return nil, fmt.Errorf("parse challenge answers: %w", err)
-		}
-		return answers, nil
+	if payload.Cancelled {
+		return e.dialer.CancelChallenge(payload.ChallengeID)
 	}
+	return e.dialer.RespondKeyboardInteractive(payload)
 }
 
-type challengeWire struct {
-	Name        string       `json:"name"`
-	Instruction string       `json:"instruction"`
-	Prompts     []promptWire `json:"prompts"`
+// RespondHostKeyTrust answers the trust question raised mid-connection.
+func (e *Engine) RespondHostKeyTrust(challengeID string, trust bool) error {
+	return e.hostTrust.Respond(challengeID, trust)
 }
 
-type promptWire struct {
-	Label string `json:"label"`
-	Echo  bool   `json:"echo"`
+// CancelConnect cuts a connection that is still being opened.
+//
+// Both halves are needed. Cancelling the context unblocks the machine-side waits
+// (dial, handshake), and closing the challenges unblocks a wait for a person —
+// neither one releases the other.
+func (e *Engine) CancelConnect(connectionID string) {
+	e.dialer.CancelInFlight(connectionID)
+	e.dialer.CancelChallenges(connectionID)
 }
 
-func promptsWire(prompts []sshconn.InteractivePrompt) []promptWire {
-	out := make([]promptWire, 0, len(prompts))
-	for _, prompt := range prompts {
-		out = append(out, promptWire{Label: prompt.Label, Echo: prompt.Echo})
+func millis(value int) time.Duration {
+	if value <= 0 {
+		return 0
 	}
-	return out
+	return time.Duration(value) * time.Millisecond
 }
 
 // Conn is a handle to an established connection.

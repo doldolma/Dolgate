@@ -3,6 +3,9 @@ import { fromByteArray, toByteArray } from 'base64-js';
 const mockNative = {
   probeHostKey: jest.fn(),
   connect: jest.fn(),
+  respondKeyboardInteractive: jest.fn(),
+  respondHostKeyTrust: jest.fn(),
+  cancelConnect: jest.fn(),
   disconnect: jest.fn(),
   startSftp: jest.fn(),
   sftpList: jest.fn(),
@@ -22,18 +25,44 @@ const mockNative = {
 };
 
 
-import { NativeModules } from 'react-native';
+import { DeviceEventEmitter, NativeModules } from 'react-native';
 
 (NativeModules as Record<string, unknown>).GoSshEngineModule = mockNative;
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { GoSshEngineAdapter } = require('../src/engine/goEngine');
 
-const PROBED_KEY = {
+const PRESENTED_KEY = {
+  challengeId: 'hostkey-trust-1',
   algorithm: 'ssh-ed25519',
-  publicKeyBase64: 'AAAAC3NzaC1lZDI1NTE5probe',
-  fingerprintSha256: 'SHA256:probe',
+  publicKeyBase64: 'AAAAC3NzaC1lZDI1NTE5presented',
+  fingerprintSha256: 'SHA256:presented',
+  mismatch: false,
 };
+
+/** 연결 도중 신뢰를 묻고, 답에 따라 끝나는 네이티브 connect. */
+function nativeConnectAskingTrust(): void {
+  mockNative.connect.mockImplementation(async (connectionId: string) => {
+    const decided = new Promise<boolean>(resolve => {
+      mockNative.respondHostKeyTrust.mockImplementation(
+        async (_challengeId: string, trust: boolean) => {
+          resolve(trust);
+        },
+      );
+    });
+    DeviceEventEmitter.emit('GoSshEngine:connection', {
+      eventJson: JSON.stringify({
+        type: 'hostKeyTrustChallenge',
+        sessionId: connectionId,
+        payload: PRESENTED_KEY,
+      }),
+    });
+    if (!(await decided)) {
+      throw new Error('connect: trusted host key is required');
+    }
+    return JSON.stringify({ id: connectionId });
+  });
+}
 
 function connectOptions(overrides: Record<string, unknown> = {}) {
   return {
@@ -49,7 +78,6 @@ function connectOptions(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   Object.values(mockNative).forEach(fn => fn.mockReset());
-  mockNative.probeHostKey.mockResolvedValue(JSON.stringify(PROBED_KEY));
   mockNative.connect.mockResolvedValue(JSON.stringify({ id: 'sftp-conn-1' }));
   mockNative.startSftp.mockResolvedValue('sftp-conn-1~sftp1');
 });
@@ -60,27 +88,32 @@ async function openSftp() {
 }
 
 describe('connectSftp', () => {
-  it('goes through the same probe-then-connect handshake as a shell', async () => {
+  // SFTP 는 connect() 를 그대로 쓴다 — 그래서 신뢰 물음도 셸과 같은 자리에서, 같은 방식으로 온다.
+  it('is asked about the host key the same way a shell is', async () => {
+    nativeConnectAskingTrust();
     const engine = new GoSshEngineAdapter();
     const options = connectOptions();
 
     const sftp = await engine.connectSftp(options);
 
+    expect(mockNative.probeHostKey).not.toHaveBeenCalled();
     expect(options.onServerKey).toHaveBeenCalledWith(
-      expect.objectContaining({ keyBase64: PROBED_KEY.publicKeyBase64 }),
+      expect.objectContaining({ keyBase64: PRESENTED_KEY.publicKeyBase64 }),
+      expect.objectContaining({ challengeId: 'hostkey-trust-1' }),
     );
-    const payload = JSON.parse(mockNative.connect.mock.calls[0][1]);
-    expect(payload.trustedHostKeyBase64).toBe(PROBED_KEY.publicKeyBase64);
     expect(mockNative.startSftp).toHaveBeenCalledWith('sftp-conn-1');
     expect(sftp.id).toBe('sftp-conn-1~sftp1');
   });
 
-  it('aborts without connecting when the host key is rejected', async () => {
+  // 거절하면 세션을 열지 않는다. 예전에는 붙기 전에 물었으니 자명했지만, 이제는 연결 도중에
+  // 묻기 때문에 "거절 → 연결 실패 → 세션 없음" 이 이어지는지 확인해야 한다.
+  it('opens no session when the host key is rejected', async () => {
+    nativeConnectAskingTrust();
     const engine = new GoSshEngineAdapter();
     await expect(
       engine.connectSftp(connectOptions({ onServerKey: jest.fn().mockResolvedValue(false) })),
     ).rejects.toThrow(/신뢰/);
-    expect(mockNative.connect).not.toHaveBeenCalled();
+    expect(mockNative.respondHostKeyTrust).toHaveBeenCalledWith('hostkey-trust-1', false);
     expect(mockNative.startSftp).not.toHaveBeenCalled();
   });
 

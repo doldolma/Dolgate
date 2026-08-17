@@ -13,8 +13,15 @@ import {
   type EngineSftpWriteTextFile,
   type EngineSftpReadChunk,
   type EngineConnection,
+  type EngineConnectionHop,
+  type EngineCredential,
+  type EngineJumpTarget,
   type EngineCursor,
   type EngineFollowOptions,
+  type EngineHopProgress,
+  type EngineHostKeyChallenge,
+  type EngineInteractiveAnswer,
+  type EngineInteractiveChallenge,
   type EngineOutputHandler,
   type EngineReadResult,
   type EngineShell,
@@ -43,8 +50,24 @@ const EVENT_DROPPED = 'GoSshEngine:dropped';
 const EVENT_SHELL_CLOSED = 'GoSshEngine:shellClosed';
 const EVENT_DISCONNECTED = 'GoSshEngine:disconnected';
 const EVENT_TAILNET = 'GoSshEngine:tailnet';
+const EVENT_CONNECTION = 'GoSshEngine:connection';
 
 const DEFAULT_TERM = 'xterm-256color';
+
+/**
+ * An event a connection raises while it is being opened.
+ *
+ * The wire form is ssh-core's, the same one the desktop receives over stdio, so
+ * the two apps read one vocabulary rather than one per platform.
+ */
+type NativeConnectionEvent = {
+  type: string;
+  sessionId?: string;
+  requestId?: string;
+  payload?: Record<string, unknown>;
+};
+
+type ConnectionEventHandler = (event: NativeConnectionEvent) => void;
 
 type NativeReadResult = {
   dataBase64: string;
@@ -66,6 +89,9 @@ type GoSshEngineNativeModule = NativeModule & {
   inspectPrivateKey(privateKeyPem: string, passphrase: string): Promise<string>;
   inspectCertificate(certificateText: string): Promise<string>;
   connect(connectionId: string, requestJson: string): Promise<string>;
+  respondKeyboardInteractive(payloadJson: string): Promise<void>;
+  respondHostKeyTrust(challengeId: string, trust: boolean): Promise<void>;
+  cancelConnect(connectionId: string): Promise<void>;
   disconnect(connectionId: string): Promise<void>;
   startShell(connectionId: string, optionsJson: string): Promise<NativeStartShellResult>;
   sendData(shellId: string, dataBase64: string): Promise<void>;
@@ -177,7 +203,11 @@ function cursorArgs(cursor: EngineCursor): [number, number, number, number] {
 }
 
 function credentialFields(options: ConnectOptions): Record<string, unknown> {
-  const { credential } = options;
+  return credentialFieldsOf(options.credential);
+}
+
+/** 자격증명을 코어의 필드 이름으로. 대상과 점프 홉이 같은 모양을 쓴다. */
+function credentialFieldsOf(credential: EngineCredential): Record<string, unknown> {
   switch (credential.type) {
     case 'password':
       return { authType: 'password', password: credential.password };
@@ -227,22 +257,152 @@ function connectPayload(
     ...(trustedHostKeysBase64?.length
       ? { trustedHostKeysBase64 }
       : {}),
+    ...(options.jump ? { jump: jumpPayload(options.jump) } : {}),
     rows: options.size?.rows ?? 0,
     cols: options.size?.cols ?? 0,
     ...credentialFields(options),
   };
 }
 
-/**
- * ssh-core's strict host key check fails with this when the key a host presents
- * is not among the ones it was handed. It is the signal that a connect made from
- * keys on file has to fall back to asking.
- */
-const HOST_KEY_MISMATCH = 'host key mismatch';
+function hopOf(raw: unknown): EngineConnectionHop | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined;
+  }
+  const hop = raw as Record<string, unknown>;
+  const host = typeof hop.host === 'string' ? hop.host : '';
+  if (!host) {
+    return undefined;
+  }
+  return {
+    host,
+    port: typeof hop.port === 'number' ? hop.port : undefined,
+    username: typeof hop.username === 'string' ? hop.username : undefined,
+  };
+}
 
-function isHostKeyMismatch(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.toLowerCase().includes(HOST_KEY_MISMATCH);
+function interactiveChallengeOf(raw: Record<string, unknown>): EngineInteractiveChallenge {
+  const prompts = Array.isArray(raw.prompts) ? raw.prompts : [];
+  return {
+    challengeId: String(raw.challengeId ?? ''),
+    attempt: typeof raw.attempt === 'number' ? raw.attempt : 1,
+    name: typeof raw.name === 'string' ? raw.name : undefined,
+    instruction: typeof raw.instruction === 'string' ? raw.instruction : '',
+    prompts: prompts.map(entry => {
+      const prompt = (entry ?? {}) as Record<string, unknown>;
+      return {
+        label: String(prompt.label ?? ''),
+        echo: Boolean(prompt.echo),
+        allowStoredPassword: Boolean(prompt.allowStoredPassword),
+        masked: Boolean(prompt.masked),
+      };
+    }),
+    hasStoredPassword: Boolean(raw.hasStoredPassword),
+    hop: hopOf(raw.hop),
+  };
+}
+
+/**
+ * Answers the trust question the connection raised.
+ *
+ * An answer is sent even when the caller's handler throws. The connection is
+ * blocked on this one reply; leaving it unsent turns a UI error into a connection
+ * that hangs until its budget runs out, so a failure to ask is answered as "no".
+ *
+ * onDecision fires the moment the decision is known, before the answer is sent.
+ * Reporting it afterwards loses the race: the engine ends the dial as soon as it
+ * hears "no", and the connect error can reach its handler before a decision
+ * recorded on the way out has landed.
+ */
+async function answerHostKeyChallenge(
+  native: GoSshEngineNativeModule,
+  options: ConnectOptions,
+  raw: Record<string, unknown>,
+  onDecision: (accepted: boolean) => void,
+): Promise<void> {
+  const challenge: EngineHostKeyChallenge = {
+    challengeId: String(raw.challengeId ?? ''),
+    algorithm: String(raw.algorithm ?? ''),
+    fingerprintSha256: String(raw.fingerprintSha256 ?? ''),
+    keyBase64: String(raw.publicKeyBase64 ?? ''),
+    mismatch: Boolean(raw.mismatch),
+    hop: hopOf(raw.hop),
+  };
+  // The key belongs to whichever server presented it. Through a jump chain that
+  // is not the host the request named, so recording it under the request's
+  // address would file a bastion's key against the host behind it.
+  const info: ServerPublicKeyInfo = {
+    host: challenge.hop?.host ?? options.host,
+    port: challenge.hop?.port ?? options.port,
+    algorithm: challenge.algorithm,
+    fingerprintSha256: challenge.fingerprintSha256,
+    keyBase64: challenge.keyBase64,
+  };
+
+  let accepted = false;
+  try {
+    accepted = await options.onServerKey(info, challenge);
+  } catch {
+    accepted = false;
+  }
+  onDecision(accepted);
+  try {
+    await native.respondHostKeyTrust(challenge.challengeId, accepted);
+  } catch {
+    // The challenge is already gone — the connect failed or was cancelled while
+    // the sheet was open. There is nothing left to answer.
+  }
+}
+
+async function answerInteractiveChallenge(
+  native: GoSshEngineNativeModule,
+  options: ConnectOptions,
+  raw: Record<string, unknown>,
+): Promise<void> {
+  const challenge = interactiveChallengeOf(raw);
+  let answer: EngineInteractiveAnswer | null = null;
+  if (options.onInteractiveChallenge) {
+    try {
+      answer = await options.onInteractiveChallenge(challenge);
+    } catch {
+      answer = null;
+    }
+  }
+  // Cancelling is reported rather than left silent: a dismissed prompt that says
+  // nothing leaves the connection waiting out its budget, holding a tailnet
+  // node's lease while it does.
+  const payload = answer
+    ? {
+        challengeId: challenge.challengeId,
+        responses: answer.responses,
+        ...(answer.storedPasswordIndexes?.length
+          ? { storedPasswordIndexes: answer.storedPasswordIndexes }
+          : {}),
+      }
+    : { challengeId: challenge.challengeId, responses: [], cancelled: true };
+  try {
+    await native.respondKeyboardInteractive(JSON.stringify(payload));
+  } catch {
+    // Same as above: the challenge no longer exists.
+  }
+}
+
+/**
+ * A jump hop in the wire form ssh-core reads, recursively.
+ *
+ * The field names are the target's, because a hop is addressed the same way the
+ * target is — one vocabulary for "a machine to authenticate to".
+ */
+function jumpPayload(jump: EngineJumpTarget): Record<string, unknown> {
+  const keys = jump.trustedHostKeysBase64?.filter(Boolean) ?? [];
+  return {
+    host: jump.host,
+    port: jump.port,
+    username: jump.username,
+    trustedHostKeyBase64: keys[0] ?? '',
+    ...(keys.length ? { trustedHostKeysBase64: keys } : {}),
+    ...credentialFieldsOf(jump.credential),
+    ...(jump.jump ? { jump: jumpPayload(jump.jump) } : {}),
+  };
 }
 
 /** Shared event plumbing: one emitter, fanned out to per-shell subscribers. */
@@ -259,6 +419,9 @@ class GoEngineEvents {
   private shellClosedHandlers = new Map<string, () => void>();
   private disconnectHandlers = new Map<string, () => void>();
   private tailnetHandler: ((event: EngineTailnetEvent) => void) | null = null;
+  // Keyed by connection id: a prompt has to reach the connect call that raised
+  // it, and several connections can be opening at once.
+  private connectionHandlers = new Map<string, ConnectionEventHandler>();
   private pendingShellClosedIds = new Set<string>();
 
   /**
@@ -297,6 +460,7 @@ class GoEngineEvents {
         const handler = this.disconnectHandlers.get(String(payload?.connectionId));
         handler?.();
       }),
+      this.emitter.addListener(EVENT_CONNECTION, payload => this.handleConnectionEvent(payload)),
       this.emitter.addListener(EVENT_TAILNET, payload => {
         if (!this.tailnetHandler) {
           return;
@@ -322,6 +486,21 @@ class GoEngineEvents {
       stream: Number(payload?.stream) === STREAM_STDERR ? ('stderr' as const) : ('stdout' as const),
       bytes: toByteArray(String(payload?.dataBase64 ?? '')),
     });
+  }
+
+  private handleConnectionEvent(payload: any): void {
+    let event: NativeConnectionEvent;
+    try {
+      event = JSON.parse(String(payload?.eventJson ?? '')) as NativeConnectionEvent;
+    } catch {
+      // A malformed native event is dropped. The prompt it carried goes
+      // unanswered, and the connect fails on its own budget rather than here.
+      return;
+    }
+    const handler = this.connectionHandlers.get(
+      String(event.sessionId ?? event.requestId ?? ''),
+    );
+    handler?.(event);
   }
 
   private handleDropped(payload: any): void {
@@ -382,6 +561,20 @@ class GoEngineEvents {
     this.disconnectHandlers.delete(connectionId);
   }
 
+  /**
+   * Registers before the connect call, not after: the trust question and the
+   * first OTP round are raised during the dial, so a handler attached once
+   * connect resolves would arrive after the questions it exists to answer.
+   */
+  registerConnectionEvents(connectionId: string, handler: ConnectionEventHandler): void {
+    this.ensureAttached();
+    this.connectionHandlers.set(connectionId, handler);
+  }
+
+  forgetConnectionEvents(connectionId: string): void {
+    this.connectionHandlers.delete(connectionId);
+  }
+
   registerTailnet(handler: (event: EngineTailnetEvent) => void): void {
     this.ensureAttached();
     this.tailnetHandler = handler;
@@ -401,6 +594,7 @@ class GoEngineEvents {
     this.chunkHandlers.clear();
     this.shellClosedHandlers.clear();
     this.disconnectHandlers.clear();
+    this.connectionHandlers.clear();
     this.tailnetHandler = null;
     this.pendingShellClosedIds.clear();
   }
@@ -631,80 +825,79 @@ export class GoSshEngineAdapter implements MobileSshEngine {
   }
 
   /**
-   * Connects, asking about the host key only when it has to.
+   * Connects, asking about whatever the connection runs into: an unknown host
+   * key, a verification code, a banner the server wants read.
    *
-   * The dialer checks host keys strictly against keys it was handed rather than
-   * asking mid-handshake, so a host nobody has seen before takes two steps:
-   * probe it, let the caller accept or reject what it presents, then connect
-   * trusting exactly that key. That costs an extra TCP connection and a full key
-   * exchange, which is why a host with keys already on file skips the probe and
-   * connects against those directly.
+   * Everything is asked inside the one connection. Trust used to be settled
+   * before it — probe the host, show what it presented, then connect trusting
+   * that key — which cost a second TCP connection and key exchange, and could not
+   * work at all where it was needed most: a bastion that wants an OTP made the
+   * probe ask for a code, and by the time the real connect asked again the code
+   * had rotated.
    *
-   * A mismatch is not treated as a failure but as "this needs asking about": the
-   * host may have rotated its key, or dropped the algorithm we had on file, or
-   * be something else entirely. Falling back to the probe routes all three to
-   * the same prompt the first connect uses, so the caller can see what changed
-   * and decide, rather than being handed a bare mismatch error.
+   * Keys already on file are still passed, so a host that presents one of them is
+   * not asked about. A key outside that list raises the question — as a new host
+   * if the list was empty, as a changed key if it was not.
    */
   async connect(options: ConnectOptions): Promise<EngineConnection> {
     const native = requireNative();
     const onFile = options.trustedHostKeysBase64?.filter(Boolean) ?? [];
-
-    if (onFile.length > 0) {
-      if (options.onDisconnected) {
-        events.registerDisconnected(options.connectionId, options.onDisconnected);
-      }
-      try {
-        await native.connect(
-          options.connectionId,
-          JSON.stringify(connectPayload(options, onFile[0], onFile)),
-        );
-        return new GoConnection(options.connectionId, options.size);
-      } catch (error) {
-        events.forgetConnection(options.connectionId);
-        if (!isHostKeyMismatch(error)) {
-          throw error;
-        }
-        // Fall through to the probe so the caller gets asked.
-      }
-    }
-
-    const probeRaw = await native.probeHostKey(
-      JSON.stringify(connectPayload(options, '')),
-    );
-    const probed = JSON.parse(probeRaw) as {
-      algorithm: string;
-      publicKeyBase64: string;
-      fingerprintSha256: string;
-    };
-
-    // The engine reports only the key itself; the address comes from the request
-    // that was just made.
-    const info: ServerPublicKeyInfo = {
-      host: options.host,
-      port: options.port,
-      algorithm: probed.algorithm,
-      fingerprintSha256: probed.fingerprintSha256,
-      keyBase64: probed.publicKeyBase64,
-    };
-
-    const accepted = await options.onServerKey(info);
-    if (!accepted) {
-      throw new HostKeyRejectedError();
-    }
-
     if (options.onDisconnected) {
       events.registerDisconnected(options.connectionId, options.onDisconnected);
     }
 
+    // Tracked so a decline can be reported as itself. The engine ends the dial
+    // with a trust error, and "you said no" reads differently from a host key
+    // that could not be verified.
+    let declined = false;
+    events.registerConnectionEvents(options.connectionId, event => {
+      const payload = (event.payload ?? {}) as Record<string, unknown>;
+      switch (event.type) {
+        case 'hostKeyTrustChallenge':
+          void answerHostKeyChallenge(native, options, payload, accepted => {
+            declined = declined || !accepted;
+          });
+          return;
+        case 'keyboardInteractiveChallenge':
+          void answerInteractiveChallenge(native, options, payload);
+          return;
+        case 'sshBanner': {
+          const text = String(payload.text ?? '');
+          if (text) {
+            options.onBanner?.(text);
+          }
+          return;
+        }
+        case 'connectionHopProgress': {
+          const hopLabel = String(payload.hopLabel ?? '');
+          if (!hopLabel) {
+            return;
+          }
+          options.onHopProgress?.({
+            hopLabel,
+            hopIndex: typeof payload.hopIndex === 'number' ? payload.hopIndex : 1,
+            hopCount: typeof payload.hopCount === 'number' ? payload.hopCount : 1,
+            stage: String(payload.stage ?? ''),
+          });
+          return;
+        }
+        default:
+          // 남는 것은 이 연결이 쓰지 않는 이벤트다(대화형 인증이 풀렸다는 알림 등). 화면이 그리는
+          // 것은 위 네 가지로 충분하다.
+          return;
+      }
+    });
+
     try {
       await native.connect(
         options.connectionId,
-        JSON.stringify(connectPayload(options, probed.publicKeyBase64)),
+        JSON.stringify(connectPayload(options, onFile[0] ?? '', onFile)),
       );
     } catch (error) {
       events.forgetConnection(options.connectionId);
-      throw error;
+      throw declined ? new HostKeyRejectedError() : error;
+    } finally {
+      events.forgetConnectionEvents(options.connectionId);
     }
 
     return new GoConnection(options.connectionId, options.size);

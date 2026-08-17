@@ -3445,7 +3445,7 @@
     "tailscaleTargetNoPath": "Neither a direct connection nor a relay is up.",
     "tailscaleTargetMissing": "That device is not on this Tailscale network.",
     "tailscaleTargetViaSubnet": "Reached through the subnet router {{peer}}.",
-    "tailscaleTargetSubnetRouter": "a subnet router",
+    "tailscaleTargetViaSubnetRouter": "Reached through an unnamed subnet router.",
     "tailscaleTargetNotInTailnet": "Not a device address in this tailnet — reached through a jump host or the local network.",
     "tailscaleTargetTraffic": "sent {{tx}} · received {{rx}}",
     "tunnelGateway": "SSH tunnel via {{label}}",

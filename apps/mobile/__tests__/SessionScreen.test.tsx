@@ -93,6 +93,10 @@ jest.mock('@fressh/react-native-xtermjs-webview', () => {
     ),
   };
 });
+const mockOpenInAppBrowser = jest.fn<Promise<void>, [string]>(async () => undefined);
+jest.mock('../src/lib/in-app-browser', () => ({
+  openInAppBrowser: (url: string) => mockOpenInAppBrowser(url),
+}));
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: jest.fn(async () => null),
   setItem: jest.fn(async () => null),
@@ -379,6 +383,104 @@ describe('SessionScreen', () => {
   // 탭은 연 순서로 늘어서고 그 뒤로 움직이지 않아야 한다. 종류별로 이어 붙이면 SFTP 뒤에 연
   // 터미널이 SFTP 앞으로 끼어들고, SFTP 를 활동 순으로 재정렬하면 목록을 새로 읽을 때마다
   // 탭이 튄다 — 두 경우 모두 여기서 막는다.
+  // 배너는 터미널에 찍는다 — OpenSSH 가 하는 것과 같고, 데스크톱도 그렇게 한다. 패널에 글로
+  // 두면 링크를 누를 수 없다(URL 을 찾는 일은 xterm 의 web-links 애드온이 한다).
+  it('writes the server banner into the terminal', async () => {
+    act(() => {
+      useMobileAppStore.setState({
+        connectionViews: {
+          'session-1': {
+            hostId: 'host-1',
+            hasTailnet: false,
+            banner: 'To authenticate, visit: https://login.example.com/a/abc',
+          },
+        },
+      });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+
+    const written = (mockTerminalHandle?.write.mock.calls ?? [])
+      .map(call => Buffer.from(call[0] as Uint8Array).toString('utf8'))
+      .join('');
+    expect(written).toContain('https://login.example.com/a/abc');
+    // 패널이 같은 글을 또 보여주면 화면에 두 번 뜬다.
+    expect(collectText(tree!.toJSON())).not.toContain('login.example.com');
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  // 탭을 옮겼다 돌아오면 같은 배너가 다시 쓰일 수 있다. 그러면 화면에 두 번 찍힌다.
+  it('writes the same banner only once across tab switches', async () => {
+    act(() => {
+      useMobileAppStore.setState({
+        connectionViews: {
+          'session-1': {
+            hostId: 'host-1',
+            hasTailnet: false,
+            banner: 'approve at https://login.example.com/a/abc',
+          },
+        },
+      });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+    await act(async () => {
+      useMobileAppStore.setState({
+        activeConnectionTab: { kind: 'terminal', id: 'session-2' },
+      });
+    });
+    await act(async () => {
+      useMobileAppStore.setState({
+        activeConnectionTab: { kind: 'terminal', id: 'session-1' },
+      });
+    });
+
+    const bannerWrites = (mockTerminalHandle?.write.mock.calls ?? []).filter(
+      call =>
+        Buffer.from(call[0] as Uint8Array)
+          .toString('utf8')
+          .includes('login.example.com'),
+    );
+    expect(bannerWrites).toHaveLength(1);
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  // 애드온이 링크를 찾아 올려주면 앱이 어디서 열지 정한다. 페이지가 직접 열면 WebView 가 그
+  // 주소로 이동해 터미널이 사라진다 — 세션도 함께 죽는다.
+  it('opens a tapped terminal link in the in-app browser', async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+
+    const onLinkActivated = mockCapturedXtermProps?.onLinkActivated as
+      | ((uri: string) => void)
+      | undefined;
+    expect(onLinkActivated).toBeInstanceOf(Function);
+
+    await act(async () => {
+      onLinkActivated?.('https://ubuntu.com/pro');
+    });
+
+    expect(mockOpenInAppBrowser).toHaveBeenCalledWith('https://ubuntu.com/pro');
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
   it('orders tabs by the time they were opened, mixing terminal and SFTP', async () => {
     const openedAt = (offsetMs: number) =>
       new Date(Date.UTC(2026, 0, 1, 0, 0, 0) + offsetMs).toISOString();

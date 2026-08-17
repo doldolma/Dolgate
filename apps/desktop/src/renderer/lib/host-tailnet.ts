@@ -1,4 +1,10 @@
-import { isRdpHostRecord, isSshHostRecord, isVncHostRecord } from '@shared';
+import {
+  isRdpHostRecord,
+  isSshHostRecord,
+  isVncHostRecord,
+  resolveSshEntryHopTailnetId,
+  resolveSshHostTailnetId,
+} from '@shared';
 import type { HostRecord } from '@shared';
 
 /**
@@ -20,17 +26,9 @@ export function resolveHostTailnetId(
     return undefined;
   }
   if (isSshHostRecord(host)) {
-    // **첫 홉의 설정이 우선이다.** 점프 체인에서 실제로 소켓을 여는 것은 첫 홉뿐이고
-    // (그 뒤는 SSH 채널을 탄다), 올라와 있어야 하는 노드도 그 홉의 것이다.
-    //
-    // 대상에서 읽으면 "tailnet 안의 베스천을 거쳐 사내 LAN 호스트로" 가 안 된다 — 대상은
-    // tailnet 에 있지도 않으니 설정이 비어 있고, 그러면 베스천을 일반 네트워크로 찾다 실패한다.
-    //
-    // 첫 홉에 없으면 대상의 것을 물려받는다. 예전에는 대상에만 설정해 두는 것이 유일한 방법이라
-    // 그렇게 저장된 호스트가 이미 있다 — 그것들을 깨지 않는다.
-    return (
-      resolveEntryHopTailnetId(host, hosts) ?? (host.tailnetId?.trim() || undefined)
-    );
+    // 첫 홉 우선 규칙은 shared-core 가 갖고 있다 — 모바일도 같은 판정을 해야 하고, 한쪽만
+    // 고쳐지면 그 플랫폼에서 베스천을 일반 네트워크로 찾다 실패한다.
+    return resolveSshHostTailnetId(host, hosts);
   }
   if (isRdpHostRecord(host)) {
     return host.tailnetId?.trim() || undefined;
@@ -51,37 +49,6 @@ export function resolveHostTailnetId(
   const tunnelHost = hosts.find((candidate) => candidate.id === tunnelHostId);
   return tunnelHost && isSshHostRecord(tunnelHost)
     ? tunnelHost.tailnetId?.trim() || undefined
-    : undefined;
-}
-
-/**
- * 점프 체인의 첫 홉에 설정된 tailnet. 체인이 없거나 그 홉에 설정이 없으면 undefined.
- *
- * 첫 홉이 목록에 없으면(다른 기기에서 지운 점프 호스트 등) 판정하지 않는다 — 없는 것을 근거로
- * 대상의 설정까지 버리면 멀쩡하던 연결이 끊긴다.
- */
-function resolveEntryHopTailnetId(
-  host: HostRecord,
-  hosts: readonly HostRecord[],
-): string | undefined {
-  if (!isSshHostRecord(host)) {
-    return undefined;
-  }
-  const chain =
-    Array.isArray(host.jumpHostIds) && host.jumpHostIds.length > 0
-      ? host.jumpHostIds
-      : host.jumpHostId
-        ? [host.jumpHostId]
-        : [];
-  const entryJumpId = chain.find(
-    (id): id is string => typeof id === 'string' && id.length > 0,
-  );
-  if (!entryJumpId) {
-    return undefined;
-  }
-  const entryJump = hosts.find((candidate) => candidate.id === entryJumpId);
-  return entryJump && isSshHostRecord(entryJump)
-    ? entryJump.tailnetId?.trim() || undefined
     : undefined;
 }
 

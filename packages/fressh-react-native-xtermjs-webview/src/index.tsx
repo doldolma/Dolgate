@@ -83,6 +83,15 @@ export type XtermJsWebViewProps = {
 	xtermOptions?: Partial<ITerminalOptions>;
 	onInitialized?: () => void;
 	onData?: (data: string) => void;
+	/**
+	 * A link in the terminal output was tapped.
+	 *
+	 * The page never opens it: the WebView would navigate away from the terminal
+	 * and the session would go with it. Deciding where a link opens — an in-app
+	 * browser, the system browser, a confirmation — belongs to the app. Leaving
+	 * this unset makes links inert.
+	 */
+	onLinkActivated?: (uri: string) => void;
 	logger?: {
 		debug?: (...args: unknown[]) => void;
 		log?: (...args: unknown[]) => void;
@@ -125,6 +134,7 @@ export const XtermJsWebView = React.forwardRef<
 		xtermOptions = defaultXtermOptions,
 		onInitialized,
 		onData,
+		onLinkActivated,
 		coalescingThreshold = defaultCoalescingThreshold,
 		logger,
 		size,
@@ -298,6 +308,10 @@ export const XtermJsWebView = React.forwardRef<
 					onData?.(msg.str);
 					return;
 				}
+				if (msg.type === 'linkActivated') {
+					onLinkActivated?.(msg.uri);
+					return;
+				}
 				if (msg.type === 'debug') {
 					logger?.log?.(`received debug msg from webview: `, msg.message);
 					return;
@@ -311,7 +325,7 @@ export const XtermJsWebView = React.forwardRef<
 				);
 			}
 		},
-		[logger, webViewOptions, onInitialized, autoFitFn, onData],
+		[logger, webViewOptions, onInitialized, autoFitFn, onData, onLinkActivated],
 	);
 
 	const onContentProcessDidTerminate = useCallback<

@@ -22,6 +22,7 @@
     "dev:mobile:android": "npm run dev:android --workspace @dolssh/mobile --",
     "dev:mobile:ios": "npm run dev:ios --workspace @dolssh/mobile --",
     "mobile:engine:build": "npm run build:engine --workspace @dolssh/mobile --",
+    "mobile:webview:build": "npm run build --workspace @fressh/react-native-xtermjs-webview",
     "build:mobile:android": "npm run build:android --workspace @dolssh/mobile --",
     "build:mobile:ios": "npm run build:ios --workspace @dolssh/mobile --",
     "version:set": "node ./scripts/version.cjs set",

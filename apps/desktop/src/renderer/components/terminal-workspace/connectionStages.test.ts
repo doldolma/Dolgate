@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import type { TailnetStatus, TerminalTab } from '@shared';
+import type { ConnectionStage, TailnetStatus, TerminalTab } from '@shared';
 import { t } from '../../i18n';
-import { resolveConnectionStages, stageSubjectFromTab } from './connectionStages';
+import {
+  describeConnectionStage,
+  resolveConnectionStages,
+  stageSubjectFromTab,
+} from './connectionStages';
+
+// 단계는 i18n 키로 온다(shared-core 는 UI 언어를 결정하지 않는다). 이 앱이 문구로 바꾼 뒤에
+// 단정해야 사용자가 읽는 것과 같은 것을 확인한다.
+function detailOf(stage: ConnectionStage | undefined): string | undefined {
+  return stage ? describeConnectionStage(stage).detail : undefined;
+}
+
+function labelOf(stage: ConnectionStage): string {
+  return describeConnectionStage(stage).label;
+}
 
 function createTab(overrides: Partial<TerminalTab> = {}): TerminalTab {
   return {
@@ -132,10 +146,10 @@ describe('resolveConnectionStages', () => {
 
     // 실패는 등록 단계에 붙고, 백엔드가 준 이유가 그대로 보여야 한다.
     expect(registration?.state).toBe('failed');
-    expect(registration?.detail).toContain('invalid key');
+    expect(detailOf(registration)).toContain('invalid key');
     // 인증 단계는 진행 중이 아니다 — 기다려서 풀리는 것이 아니기 때문이다.
     expect(auth?.state).toBe('pending');
-    expect(auth?.detail).toBeUndefined();
+    expect(detailOf(auth)).toBeUndefined();
   });
 
   // 링크가 오지 않으면 코어가 노드를 다시 세워 등록을 처음부터 밟는다. 재시작 전후의 상태는
@@ -155,15 +169,15 @@ describe('resolveConnectionStages', () => {
       failureLayer: null,
     });
 
-    const detailOf = (stages: ReturnType<typeof resolveConnectionStages>) =>
-      stages.find((stage) => stage.id === 'tailscale-auth')?.detail ?? '';
+    const authDetail = (stages: ReturnType<typeof resolveConnectionStages>) =>
+      detailOf(stages.find((stage) => stage.id === 'tailscale-auth')) ?? '';
 
-    expect(detailOf(before)).toBe(t('connectStages.tailscaleLinkDetail'));
-    expect(detailOf(after)).toContain(
+    expect(authDetail(before)).toBe(t('connectStages.tailscaleLinkDetail'));
+    expect(authDetail(after)).toContain(
       t('connectStages.tailscaleRestartDetail', { count: 2 }),
     );
     // 무엇을 기다리는지는 그대로 남아야 한다 — 덮어쓰면 재시작만 보이고 대기 이유가 사라진다.
-    expect(detailOf(after)).toContain(t('connectStages.tailscaleLinkDetail'));
+    expect(authDetail(after)).toContain(t('connectStages.tailscaleLinkDetail'));
   });
 
   // 만료는 그 단계의 실패다. 로그인 단계에만 표시하면 "왜 또 로그인해야 하는지" 를 알 수 없다.
@@ -181,7 +195,7 @@ describe('resolveConnectionStages', () => {
     });
 
     expect(stateOf(stages, 'tailscale-registration')).toBe('failed');
-    expect(stages.find((stage) => stage.id === 'tailscale-registration')?.detail).toBeTruthy();
+    expect(detailOf(stages.find((stage) => stage.id === 'tailscale-registration'))).toBeTruthy();
   });
 
   it('삭제된 identity는 동기화 장애가 아니라 자동 재등록으로 표시한다', () => {
@@ -200,7 +214,7 @@ describe('resolveConnectionStages', () => {
 
     const registration = stages.find((stage) => stage.id === 'tailscale-registration');
     expect(registration?.state).toBe('active');
-    expect(registration?.detail).toBe(
+    expect(detailOf(registration)).toBe(
       t('connectStages.tailscaleIdentityInvalidDetail'),
     );
   });
@@ -258,7 +272,7 @@ describe('resolveConnectionStages', () => {
     });
 
     expect(stages.filter((stage) => stage.state === 'warn')).toHaveLength(2);
-    expect(stages.find((stage) => stage.id === 'tailscale-error')?.detail).toBe(
+    expect(detailOf(stages.find((stage) => stage.id === 'tailscale-error'))).toBe(
       'control plane refused',
     );
   });
@@ -302,7 +316,7 @@ describe('resolveConnectionStages', () => {
     expect(sync?.state).toBe('active');
     // 끊긴 것을 말해야 한다. 낡은 기기 목록을 근거로 "91대 보임" 을 쓰면 사용자는 왜 안 되는지
     // 알 수 없다.
-    expect(sync?.detail).toBe(t('connectStages.tailscaleStaleDetail'));
+    expect(detailOf(sync)).toBe(t('connectStages.tailscaleStaleDetail'));
 
     // 끊긴 것은 이 줄 하나다. 등록·로그인은 이미 끝났고(authorized), 그것을 미완료로 되돌리면
     // 화면이 거꾸로 진행하는 것처럼 보인다 — 아래 단계에는 체크가 떠 있는데 위가 "아직" 이었다.
@@ -330,7 +344,7 @@ describe('resolveConnectionStages', () => {
     const sync = degraded.find((stage) => stage.id === 'tailscale-network');
 
     expect(sync?.state).toBe('warn');
-    expect(sync?.detail).toBe(t('connectStages.tailscaleDegradedDetail'));
+    expect(detailOf(sync)).toBe(t('connectStages.tailscaleDegradedDetail'));
     // 코어가 넘겼으므로 호스트 계층은 실제로 진행 중이다.
     expect(stateOf(degraded, 'host-key')).toBe('active');
   });
@@ -347,7 +361,7 @@ describe('resolveConnectionStages', () => {
     const sync = live.find((stage) => stage.id === 'tailscale-network');
 
     expect(sync?.state).toBe('done');
-    expect(sync?.detail).toContain('2');
+    expect(detailOf(sync)).toContain('2');
   });
   // 분류되지 않은 실패가 어느 단계에도 안 붙으면, 실패한 단계가 "아직 시작 안 함" 으로 남아 화면에서
   // 사라진다. 문구를 하나씩 분류하는 것으로는 막을 수 없다 — 새 에러가 나올 때마다 같은 일이 생긴다.
@@ -373,7 +387,7 @@ describe('resolveConnectionStages', () => {
 
     // 호스트 키까지 갔으므로 SSH 연결이 진행 중이던 단계다.
     expect(stateOf(stages, 'ssh')).toBe('failed');
-    expect(stages.find((stage) => stage.id === 'ssh')?.detail).toBe(
+    expect(detailOf(stages.find((stage) => stage.id === 'ssh'))).toBe(
       'something nobody classified',
     );
   });
@@ -401,10 +415,10 @@ describe('resolveConnectionStages', () => {
     });
 
     expect(stateOf(direct, 'tailscale-target')).toBe('done');
-    expect(direct.find((stage) => stage.id === 'tailscale-target')?.detail).toBe(
+    expect(detailOf(direct.find((stage) => stage.id === 'tailscale-target'))).toBe(
       t('connectStages.tailscaleTargetDirect'),
     );
-    expect(relayed.find((stage) => stage.id === 'tailscale-target')?.detail).toContain('tok');
+    expect(detailOf(relayed.find((stage) => stage.id === 'tailscale-target'))).toContain('tok');
   });
 
   // 넷맵은 받았는데 대상이 그 안에 없으면, 기다려도 안 된다. 그 사실을 말해야 한다.
@@ -437,7 +451,7 @@ describe('resolveConnectionStages', () => {
     });
 
     expect(stateOf(stages, 'tailscale-target')).toBe('done');
-    expect(stages.find((stage) => stage.id === 'tailscale-target')?.detail).toContain('router-1');
+    expect(detailOf(stages.find((stage) => stage.id === 'tailscale-target'))).toContain('router-1');
   });
 
   // 기기도 아니고 담당 대역도 없는 IP 는 tailnet 밖 경로(점프 뒤의 망·지금 붙어 있는 랜)로 갈 수
@@ -513,11 +527,11 @@ describe('resolveConnectionStages', () => {
     const target = stages.find((stage) => stage.id === 'tailscale-target');
 
     expect(target?.state).toBe('failed');
-    expect(target?.detail).toContain('146 KB');
-    expect(target?.detail).toContain('0 B');
+    expect(detailOf(target)).toContain('146 KB');
+    expect(detailOf(target)).toContain('0 B');
     // 원인을 단정하지 않는다.
-    expect(target?.detail).not.toContain('삭제');
-    expect(target?.detail).not.toContain('만료');
+    expect(detailOf(target)).not.toContain('삭제');
+    expect(detailOf(target)).not.toContain('만료');
   });
 
   // 경로가 있으면 그것도 관찰값과 함께.
@@ -534,8 +548,8 @@ describe('resolveConnectionStages', () => {
     const target = stages.find((stage) => stage.id === 'tailscale-target');
 
     expect(target?.state).toBe('done');
-    expect(target?.detail).toContain(t('connectStages.tailscaleTargetDirect'));
-    expect(target?.detail).toContain('32 KB');
+    expect(detailOf(target)).toContain(t('connectStages.tailscaleTargetDirect'));
+    expect(detailOf(target)).toContain('32 KB');
   });
   // 무엇에 붙든 "호스트 키 확인 → SSH 연결" 이 뜨던 버그. 로컬 셸에는 둘 다 없고, RDP·시리얼·
   // ECS Exec 은 SSH 를 쓰지 않는다 — 없는 관문이 통과되는 것처럼 보이면 어디서 막혔는지 못 읽는다.
@@ -558,7 +572,7 @@ describe('resolveConnectionStages', () => {
     });
 
     expect(stages.map((stage) => stage.id)).toEqual(['rdp']);
-    expect(stages[0].label).toBe(t('connectStages.rdp'));
+    expect(labelOf(stages[0])).toBe(t('connectStages.rdp'));
     // 앞에 관문이 없으므로 바로 진행 중이어야 한다 — 'pending' 이면 멈춘 것처럼 보인다.
     expect(stages[0].state).toBe('active');
   });
@@ -718,7 +732,7 @@ describe('resolveConnectionStages', () => {
     });
 
     expect(stateOf(stages, 'ssh-tunnel-gateway')).toBe('failed');
-    expect(stages.find((stage) => stage.id === 'ssh-tunnel-gateway')?.detail).toBe(
+    expect(detailOf(stages.find((stage) => stage.id === 'ssh-tunnel-gateway'))).toBe(
       'ssh: handshake failed',
     );
   });

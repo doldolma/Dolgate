@@ -3445,7 +3445,7 @@
     "tailscaleTargetNoPath": "직접 연결도 릴레이도 서지 않았습니다.",
     "tailscaleTargetMissing": "이 Tailscale 네트워크에서 그 기기를 찾을 수 없습니다.",
     "tailscaleTargetViaSubnet": "서브넷 라우터 {{peer}} 경유",
-    "tailscaleTargetSubnetRouter": "서브넷 라우터",
+    "tailscaleTargetViaSubnetRouter": "이름 없는 서브넷 라우터 경유",
     "tailscaleTargetNotInTailnet": "이 tailnet 의 기기 주소가 아닙니다 — 점프 호스트나 지금 붙어 있는 망으로 갑니다.",
     "tailscaleTargetTraffic": "보냄 {{tx}} · 받음 {{rx}}",
     "tunnelGateway": "{{label}} 경유 SSH 터널",

@@ -13,6 +13,7 @@ import { NavigationContainer } from "@react-navigation/native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { CredentialPromptModal } from "./components/CredentialPromptModal";
+import { InteractiveAuthPromptModal } from "./components/InteractiveAuthPromptModal";
 import { StartupVarsPromptModal } from "./components/StartupVarsPromptModal";
 import { AwsSsoWaitingModal } from "./components/AwsSsoWaitingModal";
 import { ServerKeyPromptModal } from "./components/ServerKeyPromptModal";
@@ -53,6 +54,15 @@ export function AppRoot(): React.JSX.Element {
   );
   const rejectServerKeyPrompt = useMobileAppStore(
     (state) => state.rejectServerKeyPrompt,
+  );
+  const pendingInteractiveAuthPrompt = useMobileAppStore(
+    (state) => state.pendingInteractiveAuthPrompt,
+  );
+  const submitInteractiveAuthPrompt = useMobileAppStore(
+    (state) => state.submitInteractiveAuthPrompt,
+  );
+  const cancelInteractiveAuthPrompt = useMobileAppStore(
+    (state) => state.cancelInteractiveAuthPrompt,
   );
   const submitCredentialPrompt = useMobileAppStore(
     (state) => state.submitCredentialPrompt,
@@ -167,6 +177,12 @@ export function AppRoot(): React.JSX.Element {
           prompt={pendingCredentialPrompt}
           onCancel={cancelCredentialPrompt}
           onSubmit={(value) => void submitCredentialPrompt(value)}
+        />
+        <InteractiveAuthPromptModal
+          challenge={pendingInteractiveAuthPrompt?.challenge ?? null}
+          hopLabel={pendingInteractiveAuthPrompt?.hopLabel ?? null}
+          onCancel={cancelInteractiveAuthPrompt}
+          onSubmit={submitInteractiveAuthPrompt}
         />
         <StartupVarsPromptModal
           prompt={pendingStartupCommandPrompt}

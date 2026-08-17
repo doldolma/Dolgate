@@ -9,6 +9,7 @@ import {
   getServerUrlIssue,
   type AuthStatus,
   getConnectionFailureReason,
+  type ConnectionFailureLayer,
   type HostSubtitleLabels,
   type SyncBootstrapStatus,
 } from '@dolssh/shared-core';
@@ -129,6 +130,16 @@ export const CONNECT_FAILURE_MESSAGE_KEYS: readonly string[] = [
  * 분류되지 않은 오류는 원문을 그대로 돌려준다 — 알 수 없는 실패를 뭉뚱그린 문구로 덮으면
  * 무엇이 잘못됐는지 알 수 있는 유일한 단서가 사라진다.
  */
+/**
+ * 실패가 어느 계층의 것인지. 단계 화면이 이 값으로 실패를 붙일 곳을 고른다 — 문구를 뒤져
+ * 추측하면 새 오류 문장이 나올 때마다 엉뚱한 단계에 붙는다.
+ */
+export function getConnectFailureLayer(
+  rawMessage: string,
+): ConnectionFailureLayer | null {
+  return getConnectionFailureReason(rawMessage.trim()).layer ?? null;
+}
+
 export function getConnectFailureMessage(
   rawMessage: string,
   target?: string | null,

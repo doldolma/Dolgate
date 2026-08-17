@@ -51,7 +51,7 @@ func connectJSON(t *testing.T, server *sshtest.Server, rows, cols int) string {
 
 func connectTest(t *testing.T, server *sshtest.Server, rows, cols int) *Conn {
 	t.Helper()
-	conn, err := NewEngine().Connect(connectJSON(t, server, rows, cols), nil, nil)
+	conn, err := NewEngine().Connect(connectJSON(t, server, rows, cols), nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -486,7 +486,7 @@ type closedCallbackFunc func(channelID int64)
 func (f closedCallbackFunc) OnShellClosed(channelID int64) { f(channelID) }
 
 func TestConnectRejectsMalformedRequest(t *testing.T) {
-	if _, err := NewEngine().Connect("{not json", nil, nil); err == nil {
+	if _, err := NewEngine().Connect("{not json", nil); err == nil {
 		t.Error("expected an error for malformed JSON")
 	}
 }
@@ -522,7 +522,7 @@ func TestConnectRejectsUntrustedHostKey(t *testing.T) {
 		t.Fatalf("encode request: %v", err)
 	}
 
-	conn, err := NewEngine().Connect(string(request), nil, nil)
+	conn, err := NewEngine().Connect(string(request), nil)
 	if err == nil {
 		_ = conn.Close()
 		t.Fatal("expected the connect to fail on a host key mismatch")

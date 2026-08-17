@@ -2500,6 +2500,235 @@ describe("useMobileAppStore auth and sync flows", () => {
 
   // The other side of that skip: nothing on file means the user still decides,
   // and no connection is opened until they do.
+  // 모바일은 점프 체인을 아예 보내지 않았다 — 데스크톱에서 설정해 동기화해도 폰은 대상 주소로
+  // 직접 붙었고, 베스천 경유만 가능한 호스트는 타임아웃으로 끝났다. 다단 TOFU·중간 홉 OTP 도
+  // 이것이 없으면 성립하지 않는다.
+  // tailnet 준비는 붙는 시간의 대부분이고, 사람이 브라우저에서 승인해야 하는 구간이 그 안에 있다.
+  // 그 구간이 화면에 보이려면 연결 뷰가 준비 **전에** 서 있어야 한다 — 뒤에 세우면 그때까지 올라온
+  // 상태가 버려지고 화면은 "노드 시작 중" 에 얼어붙는다(실기기에서 그렇게 보였다).
+  it("shows the tailnet layer while the node is still coming up", async () => {
+    const host: SshHostRecord = {
+      id: "host-tailnet",
+      kind: "ssh",
+      label: "Tailnet host",
+      hostname: "oracle1",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      secretRef: "secret-tailnet",
+      privateKeyPath: null,
+      certificatePath: null,
+      tailnetId: "tailnet-1",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    } as SshHostRecord;
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        knownHosts: [],
+        tailnets: [
+          {
+            id: "tailnet-1",
+            label: "corp",
+            authKey: "tskey-abc",
+            hasAuthKey: true,
+            createdAt: "2026-04-13T00:00:00.000Z",
+            updatedAt: "2026-04-13T00:00:00.000Z",
+          },
+        ],
+        secretsByRef: {
+          "secret-tailnet": {
+            secretRef: "secret-tailnet",
+            label: "Tailnet host credentials",
+            password: "pw",
+            updatedAt: "2026-04-13T00:00:00.000Z",
+          },
+        },
+      });
+    });
+
+    // 노드가 올라오는 동안 붙잡는다. startTailnet 이 끝나지 않으면 그 구간에 멈춘 상태가 된다.
+    let releaseTailnet: (() => void) | null = null;
+    engineNative.startTailnet.mockImplementationOnce(
+      async () =>
+        new Promise<void>(resolve => {
+          releaseTailnet = () => resolve();
+        }),
+    );
+
+    await act(async () => {
+      void useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+
+    const state = useMobileAppStore.getState();
+    const session = state.sessions.find(entry => entry.hostId === host.id);
+    expect(session).toBeDefined();
+    const view = state.connectionViews[session!.id];
+    expect(view).toBeDefined();
+    expect(view?.hasTailnet).toBe(true);
+    expect(view?.targetAddress).toBe("oracle1");
+
+    await act(async () => {
+      releaseTailnet?.();
+      await flushAsyncWork();
+    });
+  });
+
+  it("sends the jump chain, innermost first", async () => {
+    const bastion: SshHostRecord = {
+      id: "host-bastion",
+      kind: "ssh",
+      label: "Bastion",
+      hostname: "gw.example.com",
+      port: 2222,
+      username: "jump",
+      authType: "password",
+      secretRef: "secret-bastion",
+      privateKeyPath: null,
+      certificatePath: null,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const target: SshHostRecord = {
+      ...bastion,
+      id: "host-behind",
+      label: "Behind",
+      hostname: "10.1.1.9",
+      port: 22,
+      username: "deploy",
+      secretRef: "secret-behind",
+      jumpHostIds: [bastion.id],
+    } as SshHostRecord;
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [bastion, target],
+        knownHosts: [],
+        secretsByRef: {
+          "secret-bastion": {
+            secretRef: "secret-bastion",
+            label: "Bastion credentials",
+            password: "bastion-pw",
+            updatedAt: "2026-04-13T00:00:00.000Z",
+          },
+          "secret-behind": {
+            secretRef: "secret-behind",
+            label: "Behind credentials",
+            password: "behind-pw",
+            updatedAt: "2026-04-13T00:00:00.000Z",
+          },
+        },
+      });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().connectToHost(target.id);
+      await flushAsyncWork();
+    });
+
+    const request = lastConnectRequest();
+    expect(request.host).toBe("10.1.1.9");
+    // 홉은 자기 주소·사용자·자격증명을 그대로 들고 간다. 대상의 것을 물려받으면 베스천 인증이
+    // 실패하고, 그 실패는 "연결할 수 없음" 으로만 보인다.
+    expect(request.jump).toEqual(
+      expect.objectContaining({
+        host: "gw.example.com",
+        port: 2222,
+        username: "jump",
+        authType: "password",
+        password: "bastion-pw",
+      }),
+    );
+    // 한 홉짜리 체인이므로 그 안쪽은 없다 — 그것이 이 기기에서 직접 소켓을 여는 홉이다.
+    expect((request.jump as Record<string, unknown>).jump).toBeUndefined();
+  });
+
+  // 점프 호스트에 tailnet 이 설정돼 있고 대상에는 없는 경우. 소켓을 여는 것은 첫 홉뿐이라 올려야
+  // 하는 노드도 그쪽이다 — 대상에서 읽으면 베스천을 일반 네트워크로 찾다 실패한다.
+  it("brings up the first hop's tailnet, not the target's", async () => {
+    const bastion: SshHostRecord = {
+      id: "host-bastion",
+      kind: "ssh",
+      label: "Bastion",
+      hostname: "gw",
+      port: 22,
+      username: "jump",
+      authType: "password",
+      secretRef: "secret-bastion",
+      privateKeyPath: null,
+      certificatePath: null,
+      tailnetId: "tailnet-1",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    } as SshHostRecord;
+    const target: SshHostRecord = {
+      ...bastion,
+      id: "host-behind",
+      label: "Behind",
+      hostname: "192.168.50.10",
+      secretRef: "secret-behind",
+      tailnetId: null,
+      jumpHostIds: [bastion.id],
+    } as SshHostRecord;
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [bastion, target],
+        knownHosts: [],
+        tailnets: [
+          {
+            id: "tailnet-1",
+            label: "corp",
+            authKey: "tskey-abc",
+            hasAuthKey: true,
+            createdAt: "2026-04-13T00:00:00.000Z",
+            updatedAt: "2026-04-13T00:00:00.000Z",
+          },
+        ],
+        secretsByRef: {
+          "secret-bastion": {
+            secretRef: "secret-bastion",
+            label: "Bastion credentials",
+            password: "bastion-pw",
+            updatedAt: "2026-04-13T00:00:00.000Z",
+          },
+          "secret-behind": {
+            secretRef: "secret-behind",
+            label: "Behind credentials",
+            password: "behind-pw",
+            updatedAt: "2026-04-13T00:00:00.000Z",
+          },
+        },
+      });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().connectToHost(target.id);
+      await flushAsyncWork();
+    });
+
+    // 대상에는 tailnet 설정이 없지만 첫 홉의 것으로 노드가 올라가야 한다.
+    expect(engineNative.startTailnet).toHaveBeenCalled();
+    const startPayload = JSON.parse(
+      engineNative.startTailnet.mock.calls[0][1] as string,
+    ) as { config?: { id?: string } };
+    expect(startPayload.config?.id).toBe("tailnet-1");
+
+    // 그리고 실제로 붙어야 한다. 노드를 올린 것만 확인하면, 준비가 끝난 뒤 "설정이 바뀌었나" 를
+    // 다시 판정하는 곳이 대상 기준으로 검사해 매번 거절하는 것을 놓친다 — 실기기에서 그랬다.
+    expect(engineNative.connect).toHaveBeenCalledTimes(1);
+    expect(lastConnectRequest().tailnetId).toBe("tailnet-1");
+    expect(
+      useMobileAppStore.getState().sessions.find(s => s.hostId === target.id)
+        ?.errorMessage,
+    ).toBeNull();
+  });
+
   it("prompts for an unknown host key instead of connecting", async () => {
     const host: SshHostRecord = {
       id: "host-unknown",
@@ -2531,14 +2760,58 @@ describe("useMobileAppStore auth and sync flows", () => {
       });
     });
 
+    // 코어가 연결 **도중에** 묻는다. 별도 프로브 연결은 없다 — 그것이 있으면 OTP 를 요구하는
+    // 호스트에서 코드를 두 번 넣어야 하고, 30초마다 바뀌는 값이라 통과하지 못한다.
+    // Once 로 심는다 — 이 스위트의 beforeEach 는 clearAllMocks 만 해서 구현은 남고, 뒤 테스트의
+    // 연결이 여기서 심은 물음을 받게 된다.
+    engineNative.connect.mockImplementationOnce(async (connectionId: string) => {
+      const decided = new Promise<boolean>(resolve => {
+        engineNative.respondHostKeyTrust.mockImplementationOnce(
+          async (_challengeId: string, trust: boolean) => {
+            resolve(trust);
+          },
+        );
+      });
+      DeviceEventEmitter.emit("GoSshEngine:connection", {
+        eventJson: JSON.stringify({
+          type: "hostKeyTrustChallenge",
+          sessionId: connectionId,
+          payload: {
+            challengeId: "hostkey-trust-1",
+            algorithm: "ssh-ed25519",
+            fingerprintSha256: "SHA256:fresh",
+            publicKeyBase64: "AAAAC3NzaC1lZDI1NTE5fresh",
+            mismatch: false,
+          },
+        }),
+      });
+      if (!(await decided)) {
+        throw new Error("connect: trusted host key is required");
+      }
+      return JSON.stringify({ id: connectionId });
+    });
+
     await act(async () => {
-      await useMobileAppStore.getState().connectToHost(host.id);
+      void useMobileAppStore.getState().connectToHost(host.id);
       await flushAsyncWork();
     });
 
-    expect(engineNative.probeHostKey).toHaveBeenCalledTimes(1);
-    expect(engineNative.connect).not.toHaveBeenCalled();
+    expect(engineNative.probeHostKey).not.toHaveBeenCalled();
+    // 물음이 떠 있고, 아직 아무 답도 가지 않았다.
     expect(useMobileAppStore.getState().pendingServerKeyPrompt).not.toBeNull();
+    expect(engineNative.respondHostKeyTrust).not.toHaveBeenCalled();
+
+    // 사용자가 승낙하면 그 답이 그 물음으로 돌아가고 연결이 이어진다.
+    await act(async () => {
+      await useMobileAppStore.getState().acceptServerKeyPrompt();
+      await flushAsyncWork();
+    });
+
+    expect(engineNative.respondHostKeyTrust).toHaveBeenCalledWith(
+      "hostkey-trust-1",
+      true,
+    );
+    expect(useMobileAppStore.getState().pendingServerKeyPrompt).toBeNull();
   });
 
   it("connects certificate SSH hosts with synced private key and certificate", async () => {

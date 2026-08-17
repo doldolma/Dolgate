@@ -1,14 +1,11 @@
 package session
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
-
-	"dolssh/services/ssh-core/internal/sshconn"
 )
 
 // ErrConnClosed is returned once a connection has been closed.
@@ -27,7 +24,7 @@ type ConnInfo struct {
 // Conn is an established SSH connection that shells are opened on.
 //
 // Dialing, the jump chain, host key policy, auth precedence and certificate
-// handling all come from internal/sshconn, which the desktop engine uses too.
+// handling all come from internal/sshdial, the path the desktop engine uses too.
 // This type only adds what mobile needs on top: shell channels whose output is
 // retained for cursor reads.
 type Conn struct {
@@ -44,37 +41,37 @@ type Conn struct {
 	disconnectOnce sync.Once
 }
 
-// DialOptions describes a connection attempt.
-type DialOptions struct {
+// AdoptOptions describes a connection that has already been dialed.
+type AdoptOptions struct {
 	// ID is the handle the caller refers to this connection by.
-	ID     string
-	Target sshconn.Target
-	// Config carries timeouts, the per-hop progress callback, and the local
-	// ssh-agent endpoint when the target authenticates through one.
-	Config sshconn.Config
-	// Responder answers keyboard-interactive and password prompts. Nil means
-	// those methods are not attempted.
-	Responder sshconn.InteractiveResponder
+	ID string
+	// Host, Port and Username are reported back through Info. They come from the
+	// request rather than the client because ssh.Client does not carry the
+	// address it was asked for.
+	Host     string
+	Port     int
+	Username string
 	// OnDisconnected fires once when the transport goes away for any reason,
 	// including a remote-side close or a network drop, so the app can mark the
 	// session closed without polling. It runs on an internal goroutine.
 	OnDisconnected func()
 }
 
-// Dial establishes a connection.
-func Dial(opts DialOptions) (*Conn, error) {
-	client, err := sshconn.DialClient(context.Background(), opts.Target, opts.Config, opts.Responder)
-	if err != nil {
-		return nil, err
-	}
-
+// Adopt wraps an established client.
+//
+// Dialing itself is not here: it belongs to internal/sshdial, the one path every
+// platform opens connections through. Keeping it out of this file is what lets
+// mobile receive the things that path owns — the interactive-auth waiting list,
+// in-connection host key trust, banners, per-hop progress, and a cancellable
+// dial — instead of a fifth copy of the assembly that gets them late or never.
+func Adopt(client *ssh.Client, opts AdoptOptions) *Conn {
 	conn := &Conn{
 		client: client,
 		info: ConnInfo{
 			ID:            opts.ID,
-			Host:          opts.Target.Host,
-			Port:          opts.Target.Port,
-			Username:      opts.Target.Username,
+			Host:          opts.Host,
+			Port:          opts.Port,
+			Username:      opts.Username,
 			ConnectedAtMs: nowMs(),
 			ServerVersion: string(client.ServerVersion()),
 		},
@@ -90,7 +87,7 @@ func Dial(opts DialOptions) (*Conn, error) {
 			conn.notifyDisconnected(opts.OnDisconnected)
 		}()
 	}
-	return conn, nil
+	return conn
 }
 
 func (c *Conn) notifyDisconnected(callback func()) {

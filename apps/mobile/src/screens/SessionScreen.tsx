@@ -30,6 +30,9 @@ import {
   XtermJsWebView,
   type XtermWebViewHandle,
 } from '@fressh/react-native-xtermjs-webview';
+import { ConnectionStagesPanel } from '../components/ConnectionStagesPanel';
+import { openInAppBrowser } from '../lib/in-app-browser';
+import { resolveMobileConnectionStages } from '../lib/connection-stages';
 import { IosEdgeSwipeBack } from '../components/IosEdgeSwipeBack';
 import {
   TerminalInputView,
@@ -386,6 +389,44 @@ export function SessionScreen(): React.JSX.Element {
     activeTab?.kind === 'sftp'
       ? (liveSftpSessions.find(session => session.id === activeTab.id) ?? null)
       : null;
+  // 붙는 중에만 값이 있다. 실패하면 실패한 단계가 남는다 — 그때가 이 화면이 가장 필요한 순간이다.
+  const activeConnectionView = useMobileAppStore(state =>
+    activeSession ? state.connectionViews[activeSession.id] : undefined,
+  );
+  // 서버 배너를 터미널에 찍는다 — OpenSSH 가 하는 것과 같고, 데스크톱도 그렇게 한다.
+  //
+  // 패널이 아니라 터미널인 이유: 링크를 누를 수 있어야 한다. URL 을 찾는 일은 xterm 의 web-links
+  // 애드온이 이미 하고, 그래야 배너뿐 아니라 세션 출력에 나오는 주소(MOTD 의 업데이트 안내 등)도
+  // 같은 규칙으로 눌린다. 화면 쪽에서 정규식으로 찾으면 배너 하나만 되고 규칙이 두 곳으로 갈린다.
+  //
+  // 같은 배너를 두 번 찍지 않게 세션+글 조합을 기억한다. 재연결하면 서버가 다시 보내므로 그때는
+  // 다시 찍혀야 한다(글이 같아도 세션 ID 가 다르다).
+  const writtenBannerRef = useRef<string | null>(null);
+  useEffect(() => {
+    const banner = activeConnectionView?.banner?.trim();
+    const sessionId = activeSession?.id;
+    if (!banner || !sessionId || !terminalReady) {
+      return;
+    }
+    const stamp = `${sessionId}:${banner}`;
+    if (writtenBannerRef.current === stamp) {
+      return;
+    }
+    writtenBannerRef.current = stamp;
+    // 셸 출력과 섞이지 않게 줄을 맞춘다. 배너는 인증 단계에 오므로 보통 화면은 아직 비어 있다.
+    terminalRef.current?.write(
+      Uint8Array.from(Buffer.from(`${banner.replace(/\r?\n/g, '\r\n')}\r\n`, 'utf8')),
+    );
+  }, [activeConnectionView?.banner, activeSession?.id, terminalReady]);
+
+  const connectionStages = useMemo(
+    () =>
+      resolveMobileConnectionStages({
+        view: activeConnectionView,
+        status: activeSession?.status,
+      }),
+    [activeConnectionView, activeSession?.status],
+  );
   // 내장 편집기는 엔진 SFTP 에만 있다 — AWS SFTP 는 sync-api 브로커를 지나며 파일
   // 읽기/쓰기 연산이 없어 편집 항목을 내보내지 않는다.
   const activeSftpHost = activeSftpSession
@@ -1236,30 +1277,15 @@ export function SessionScreen(): React.JSX.Element {
         </Pressable>
       </Modal>
 
-      {activeSession?.status === 'connecting' &&
-      activeSession.connectionStatusMessage ? (
-        <View
-          style={[
-            styles.inlineBanner,
-            {
-              backgroundColor: palette.surface,
-              borderColor: palette.sessionStatusWarning,
-              marginHorizontal: 4,
-            },
-          ]}
-        >
-          <ActivityIndicator size="small" color={palette.accent} />
-          <View style={styles.inlineBannerCopy}>
-            <Text style={[styles.inlineBannerTitle, { color: palette.text }]}>
-              {activeSession.title}
-            </Text>
-            <Text
-              style={[styles.inlineBannerText, { color: palette.mutedText }]}
-            >
-              {activeSession.connectionStatusMessage}
-            </Text>
-          </View>
-        </View>
+      {/* 연결이 어디까지 갔는지. 한 줄 문구였을 때는 지나간 관문이 사라져서, 실패했을 때
+          tailnet 인지 SSH 인지 구분할 수 없었다 — 데스크톱과 같은 단계 목록을 쓴다. 실패한
+          뒤에도 남겨 보여준다(그때가 가장 필요하다). */}
+      {activeSession && connectionStages.length > 0 ? (
+        <ConnectionStagesPanel
+          title={activeSession.title}
+          stages={connectionStages}
+          busy={activeSession.status === 'connecting'}
+        />
       ) : null}
 
       {activeSession?.errorMessage ? (
@@ -1384,6 +1410,16 @@ export function SessionScreen(): React.JSX.Element {
                     injectedJavaScript: `${TERMINAL_GRID_REPORT_SCRIPT}\n${TERMINAL_GESTURE_SCRIPT}`,
                   }}
                   onInitialized={() => setTerminalReady(true)}
+                  // 링크는 xterm 의 web-links 애드온이 찾고, 여는 것은 여기서 정한다. 페이지가
+                  // 직접 열면 WebView 가 그 주소로 이동해 터미널이 사라진다(세션도 함께).
+                  // 계정·tailnet 로그인과 같은 인앱 시트로 연다 — 앱을 벗어나지 않아야 승인이
+                  // 필요한 연결을 그 자리에서 끝낼 수 있다.
+                  onLinkActivated={uri => {
+                    void openInAppBrowser(uri).catch(() => {
+                      // 열 수 없는 주소는 그대로 둔다. 글은 터미널에 남아 있으므로 사용자가
+                      // 직접 옮겨 적을 수 있고, 여기서 오류창을 띄우면 화면을 가린다.
+                    });
+                  }}
                   onData={data => {
                     sendDirectTerminalInput(data);
                   }}

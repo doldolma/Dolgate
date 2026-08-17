@@ -8,6 +8,9 @@ const mockNative = {
   inspectPrivateKey: jest.fn(),
   inspectCertificate: jest.fn(),
   connect: jest.fn(),
+  respondKeyboardInteractive: jest.fn(),
+  respondHostKeyTrust: jest.fn(),
+  cancelConnect: jest.fn(),
   disconnect: jest.fn(),
   startShell: jest.fn(),
   sendData: jest.fn(),
@@ -52,11 +55,15 @@ function emitNative(eventName: string, payload: unknown): void {
 const engineModule = require('../src/engine');
 const { GoSshEngineAdapter } = require('../src/engine/goEngine');
 
-// What the engine reports for a probe: the key only, no address.
-const PROBED_KEY = {
+const EVENT_CONNECTION = 'GoSshEngine:connection';
+
+// What the engine reports when a server presents a key it was not given.
+const PRESENTED_KEY = {
+  challengeId: 'hostkey-trust-1',
   algorithm: 'ssh-ed25519',
-  publicKeyBase64: 'AAAAC3NzaC1lZDI1NTE5probe',
-  fingerprintSha256: 'SHA256:probe',
+  publicKeyBase64: 'AAAAC3NzaC1lZDI1NTE5presented',
+  fingerprintSha256: 'SHA256:presented',
+  mismatch: false,
 };
 
 // What the caller must receive: the known-hosts shape, address included.
@@ -64,9 +71,52 @@ const EXPECTED_KEY_INFO = {
   host: '10.0.0.1',
   port: 22,
   algorithm: 'ssh-ed25519',
-  fingerprintSha256: 'SHA256:probe',
-  keyBase64: 'AAAAC3NzaC1lZDI1NTE5probe',
+  fingerprintSha256: 'SHA256:presented',
+  keyBase64: 'AAAAC3NzaC1lZDI1NTE5presented',
 };
+
+/**
+ * Makes the native connect behave the way the engine does: it raises a question
+ * mid-dial, waits for the answer, and ends the dial if the answer refuses.
+ *
+ * A mock that only emitted would prove nothing — the whole point is that the
+ * connect is still open while the person is being asked, so the answer has to be
+ * what decides it.
+ */
+function nativeConnectAsking(
+  event: Record<string, unknown>,
+  options: { failWhenRefused?: boolean } = {},
+): void {
+  mockNative.connect.mockImplementation(async (connectionId: string) => {
+    const answered = new Promise<{ trust?: boolean; cancelled?: boolean }>(resolve => {
+      mockNative.respondHostKeyTrust.mockImplementation(
+        async (_challengeId: string, trust: boolean) => {
+          resolve({ trust });
+        },
+      );
+      mockNative.respondKeyboardInteractive.mockImplementation(
+        async (payloadJson: string) => {
+          resolve(JSON.parse(payloadJson));
+        },
+      );
+    });
+    emitNative(EVENT_CONNECTION, {
+      eventJson: JSON.stringify({ sessionId: connectionId, ...event }),
+    });
+    const answer = await answered;
+    if (options.failWhenRefused !== false && (answer.trust === false || answer.cancelled)) {
+      throw new Error('connect: trusted host key is required');
+    }
+    return JSON.stringify({ id: connectionId });
+  });
+}
+
+function trustChallengeEvent(payload: Record<string, unknown> = {}) {
+  return {
+    type: 'hostKeyTrustChallenge',
+    payload: { ...PRESENTED_KEY, ...payload },
+  };
+}
 
 function baseConnectOptions(overrides: Record<string, unknown> = {}) {
   return {
@@ -86,7 +136,6 @@ beforeEach(() => {
   engineModule.resetGoEngineEvents();
   engineModule.resetEngine();
 
-  mockNative.probeHostKey.mockResolvedValue(JSON.stringify(PROBED_KEY));
   mockNative.connect.mockResolvedValue(JSON.stringify({ id: 'conn-1' }));
   mockNative.startShell.mockResolvedValue({
     shellId: 'conn-1#1',
@@ -96,45 +145,80 @@ beforeEach(() => {
 });
 
 describe('connect', () => {
-  it('probes the host, asks the caller, then connects trusting that exact key', async () => {
+  // 이 한 건이 이번 변경의 핵심이다. 예전에는 붙기 **전에** 별도 연결로 키를 읽어 와 물었다 —
+  // OTP 를 요구하는 호스트에서는 그 프로브가 코드를 한 번 먹고, 진짜 연결이 다시 물을 때는 코드가
+  // 이미 바뀌어 있었다.
+  it('asks about the key inside the connection, without a probe', async () => {
+    nativeConnectAsking(trustChallengeEvent());
     const engine = new GoSshEngineAdapter();
     const options = baseConnectOptions();
 
     const connection = await engine.connect(options);
 
-    expect(options.onServerKey).toHaveBeenCalledWith(EXPECTED_KEY_INFO);
+    expect(mockNative.probeHostKey).not.toHaveBeenCalled();
+    expect(options.onServerKey).toHaveBeenCalledWith(
+      EXPECTED_KEY_INFO,
+      expect.objectContaining({
+        challengeId: 'hostkey-trust-1',
+        mismatch: false,
+      }),
+    );
+    // 승낙은 그 물음으로 되돌아가야 한다. 안 보내면 연결은 예산까지 서 있는다.
+    expect(mockNative.respondHostKeyTrust).toHaveBeenCalledWith('hostkey-trust-1', true);
 
-    // The probe must not claim to trust anything yet.
-    const probePayload = JSON.parse(mockNative.probeHostKey.mock.calls[0][0]);
-    expect(probePayload.trustedHostKeyBase64).toBe('');
-    expect(probePayload.host).toBe('10.0.0.1');
-
-    // The real connect carries exactly the accepted key.
     const [connectionId, requestJson] = mockNative.connect.mock.calls[0];
     expect(connectionId).toBe('conn-1');
     const connectPayload = JSON.parse(requestJson);
-    expect(connectPayload.trustedHostKeyBase64).toBe(PROBED_KEY.publicKeyBase64);
     expect(connectPayload.authType).toBe('password');
     expect(connectPayload.password).toBe('s3cret');
     expect(connectPayload.rows).toBe(30);
     expect(connectPayload.cols).toBe(100);
-
     expect(connection.id).toBe('conn-1');
   });
 
-  it('aborts without connecting when the caller rejects the host key', async () => {
+  // 거절은 답을 **보내기 전에** 기록돼야 한다. 브리지를 건너는 respondHostKeyTrust 가 끝나기를
+  // 기다린 뒤에 기록하면, 코어가 "아니오" 를 듣고 dial 을 끝낸 오류가 먼저 도착해 사용자의 거절이
+  // "호스트 키를 확인할 수 없음" 으로 바뀐다. 여기서는 그 왕복을 일부러 늦춰 그 순서를 붙잡는다.
+  it('refuses the key when the caller declines, and says so', async () => {
+    mockNative.connect.mockImplementation(async (connectionId: string) => {
+      const decided = new Promise<boolean>(resolve => {
+        mockNative.respondHostKeyTrust.mockImplementation(
+          (_challengeId: string, trust: boolean) => {
+            // 결정은 곧바로 알려지지만, 이 호출의 약속은 나중에 끝난다(네이티브 왕복).
+            resolve(trust);
+            return new Promise<void>(done => setTimeout(done, 20));
+          },
+        );
+      });
+      emitNative(EVENT_CONNECTION, {
+        eventJson: JSON.stringify({ sessionId: connectionId, ...trustChallengeEvent() }),
+      });
+      if (!(await decided)) {
+        throw new Error('connect: trusted host key is required');
+      }
+      return JSON.stringify({ id: connectionId });
+    });
+
     const engine = new GoSshEngineAdapter();
     const options = baseConnectOptions({
       onServerKey: jest.fn().mockResolvedValue(false),
     });
 
     await expect(engine.connect(options)).rejects.toThrow(/신뢰/);
-    expect(mockNative.connect).not.toHaveBeenCalled();
+    expect(mockNative.respondHostKeyTrust).toHaveBeenCalledWith('hostkey-trust-1', false);
   });
 
-  // The probe is a whole extra TCP connection and key exchange, so a host whose
-  // keys are already on file must not pay for it.
-  it('skips the probe entirely when keys are already on file', async () => {
+  // 사용자가 거절한 것과 키를 확인할 수 없는 것은 다른 일이다. 코어의 문구를 그대로 올리면
+  // "당신이 아니라고 했다" 가 "확인 실패" 로 보인다.
+  it('reports a core failure as itself when nothing was declined', async () => {
+    mockNative.connect.mockRejectedValueOnce(new Error('connection refused'));
+    const engine = new GoSshEngineAdapter();
+
+    await expect(engine.connect(baseConnectOptions())).rejects.toThrow(/refused/);
+  });
+
+  // 저장된 키를 내민 호스트는 물어볼 일이 없다 — 코어가 목록과 맞춰 보고 통과시킨다.
+  it('sends every key on file so the server can pick its algorithm', async () => {
     const engine = new GoSshEngineAdapter();
     const options = baseConnectOptions({
       trustedHostKeysBase64: ['AAAAKEY1', 'AAAAKEY2'],
@@ -142,86 +226,257 @@ describe('connect', () => {
 
     const connection = await engine.connect(options);
 
-    expect(mockNative.probeHostKey).not.toHaveBeenCalled();
     expect(options.onServerKey).not.toHaveBeenCalled();
     expect(connection.id).toBe('conn-1');
-
-    // All of them go over, because the server picks which algorithm it presents.
     const payload = JSON.parse(mockNative.connect.mock.calls[0][1]);
     expect(payload.trustedHostKeysBase64).toEqual(['AAAAKEY1', 'AAAAKEY2']);
+    expect(payload.trustedHostKeyBase64).toBe('AAAAKEY1');
   });
 
-  it('does not skip the probe when the key list is empty', async () => {
+  it('omits the key list when there is nothing on file', async () => {
+    nativeConnectAsking(trustChallengeEvent());
     const engine = new GoSshEngineAdapter();
     await engine.connect(baseConnectOptions({ trustedHostKeysBase64: [] }));
 
-    expect(mockNative.probeHostKey).toHaveBeenCalledTimes(1);
     const payload = JSON.parse(mockNative.connect.mock.calls[0][1]);
     expect(payload.trustedHostKeysBase64).toBeUndefined();
+    expect(payload.trustedHostKeyBase64).toBe('');
   });
 
-  it('uses the same Tailnet route for the host-key probe and connection', async () => {
+  // 키가 바뀐 경우도 실패가 아니라 물음이다 — 회전했을 수도, 알고리즘이 달라졌을 수도, 다른
+  // 장비일 수도 있고, 그 판단은 사용자만 할 수 있다.
+  it('asks again when the presented key is not the one on file', async () => {
+    nativeConnectAsking(trustChallengeEvent({ mismatch: true }));
+    const engine = new GoSshEngineAdapter();
+    const options = baseConnectOptions({ trustedHostKeysBase64: ['AAAASTALE'] });
+
+    const connection = await engine.connect(options);
+
+    expect(mockNative.probeHostKey).not.toHaveBeenCalled();
+    expect(options.onServerKey).toHaveBeenCalledWith(
+      EXPECTED_KEY_INFO,
+      expect.objectContaining({ mismatch: true }),
+    );
+    expect(connection.id).toBe('conn-1');
+    // 다시 붙지 않는다. 예전에는 여기서 프로브를 하고 두 번째 connect 를 걸었다.
+    expect(mockNative.connect).toHaveBeenCalledTimes(1);
+  });
+
+  // 점프 체인에서는 키를 내민 쪽이 요청한 호스트가 아니다. 요청 주소로 기록하면 베스천의 키가
+  // 그 뒤 호스트의 것으로 저장된다.
+  it('files the key under the server that presented it', async () => {
+    nativeConnectAsking(
+      trustChallengeEvent({ hop: { username: 'jump', host: '10.9.9.9', port: 2222 } }),
+    );
+    const engine = new GoSshEngineAdapter();
+    const options = baseConnectOptions();
+
+    await engine.connect(options);
+
+    expect(options.onServerKey).toHaveBeenCalledWith(
+      expect.objectContaining({ host: '10.9.9.9', port: 2222 }),
+      expect.objectContaining({
+        hop: { username: 'jump', host: '10.9.9.9', port: 2222 },
+      }),
+    );
+  });
+
+  it('carries the Tailnet route on the connect', async () => {
     const engine = new GoSshEngineAdapter();
     await engine.connect(
       baseConnectOptions({
+        trustedHostKeysBase64: ['AAAAKEY1'],
         tailnet: { tailnetId: 'corp', tailnetName: 'example.com' },
       }),
     );
 
-    const probe = JSON.parse(mockNative.probeHostKey.mock.calls[0][0]);
-    const connect = JSON.parse(mockNative.connect.mock.calls[0][1]);
-    expect(probe).toEqual(
-      expect.objectContaining({
-        tailnetId: 'corp',
-        tailnetName: 'example.com',
-      }),
-    );
-    expect(connect).toEqual(
+    expect(JSON.parse(mockNative.connect.mock.calls[0][1])).toEqual(
       expect.objectContaining({
         tailnetId: 'corp',
         tailnetName: 'example.com',
       }),
     );
   });
+});
 
-  // A host that presents something outside the list has to reach the prompt, not
-  // hand the caller a bare mismatch error: it may have rotated its key, dropped
-  // the algorithm on file, or be an impostor, and only the caller can tell.
-  it('falls back to the probe when the keys on file are rejected', async () => {
-    mockNative.connect
-      .mockRejectedValueOnce(new Error('connect: host key mismatch'))
-      .mockResolvedValueOnce(JSON.stringify({ id: 'conn-1' }));
+describe('interactive authentication', () => {
+  function otpChallengeEvent(payload: Record<string, unknown> = {}) {
+    return {
+      type: 'keyboardInteractiveChallenge',
+      payload: {
+        challengeId: 'conn-1-2',
+        attempt: 2,
+        name: '',
+        instruction: 'Two-factor',
+        hasStoredPassword: true,
+        prompts: [
+          {
+            label: 'Verification code:',
+            echo: false,
+            allowStoredPassword: false,
+            masked: false,
+          },
+        ],
+        ...payload,
+      },
+    };
+  }
 
+  // 모바일에는 이 창구가 없어서 OTP 호스트에 아예 붙을 수 없었다.
+  it('asks the caller and sends the answer back to the challenge', async () => {
+    nativeConnectAsking(otpChallengeEvent());
+    const onInteractiveChallenge = jest.fn().mockResolvedValue({ responses: ['123456'] });
     const engine = new GoSshEngineAdapter();
-    const options = baseConnectOptions({
-      trustedHostKeysBase64: ['AAAASTALE'],
+
+    const connection = await engine.connect(
+      baseConnectOptions({ trustedHostKeysBase64: ['AAAAKEY1'], onInteractiveChallenge }),
+    );
+
+    expect(onInteractiveChallenge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        challengeId: 'conn-1-2',
+        attempt: 2,
+        instruction: 'Two-factor',
+        hasStoredPassword: true,
+        prompts: [
+          {
+            label: 'Verification code:',
+            echo: false,
+            allowStoredPassword: false,
+            // 인증 코드는 일부러 가리지 않는다 — 코어가 프롬프트마다 내리는 판정을 그대로 옮긴다.
+            masked: false,
+          },
+        ],
+      }),
+    );
+    expect(JSON.parse(mockNative.respondKeyboardInteractive.mock.calls[0][0])).toEqual({
+      challengeId: 'conn-1-2',
+      responses: ['123456'],
     });
-
-    const connection = await engine.connect(options);
-
-    expect(mockNative.probeHostKey).toHaveBeenCalledTimes(1);
-    expect(options.onServerKey).toHaveBeenCalledWith(EXPECTED_KEY_INFO);
     expect(connection.id).toBe('conn-1');
-
-    // The retry trusts what the caller just accepted, not the stale list.
-    const retry = JSON.parse(mockNative.connect.mock.calls[1][1]);
-    expect(retry.trustedHostKeyBase64).toBe(PROBED_KEY.publicKeyBase64);
-    expect(retry.trustedHostKeysBase64).toBeUndefined();
   });
 
-  it('surfaces a non-mismatch failure instead of probing again', async () => {
-    mockNative.connect.mockRejectedValueOnce(new Error('connection refused'));
-
+  // 값이 아니라 칸 번호만 돌려보낸다. 비밀번호를 앱으로 꺼냈다 다시 넣지 않는다.
+  it('points at the prompts the saved password should fill', async () => {
+    nativeConnectAsking(
+      otpChallengeEvent({
+        prompts: [
+          { label: 'Password:', echo: false, allowStoredPassword: true, masked: true },
+          {
+            label: 'Verification code:',
+            echo: false,
+            allowStoredPassword: false,
+            masked: false,
+          },
+        ],
+      }),
+    );
     const engine = new GoSshEngineAdapter();
-    const options = baseConnectOptions({
-      trustedHostKeysBase64: ['AAAAKEY1'],
-    });
 
-    await expect(engine.connect(options)).rejects.toThrow(/refused/);
-    expect(mockNative.probeHostKey).not.toHaveBeenCalled();
-    expect(options.onServerKey).not.toHaveBeenCalled();
+    await engine.connect(
+      baseConnectOptions({
+        trustedHostKeysBase64: ['AAAAKEY1'],
+        onInteractiveChallenge: jest.fn().mockResolvedValue({
+          responses: ['', '123456'],
+          storedPasswordIndexes: [0],
+        }),
+      }),
+    );
+
+    expect(JSON.parse(mockNative.respondKeyboardInteractive.mock.calls[0][0])).toEqual({
+      challengeId: 'conn-1-2',
+      responses: ['', '123456'],
+      storedPasswordIndexes: [0],
+    });
   });
 
+  // 닫았다는 것도 답이다. 아무것도 보내지 않으면 연결은 예산(5분)까지 기다리고, tailnet 경유면
+  // 그동안 그 노드의 리스를 붙잡고 있다.
+  it('reports a dismissed prompt as cancelled', async () => {
+    nativeConnectAsking(otpChallengeEvent());
+    const engine = new GoSshEngineAdapter();
+
+    await expect(
+      engine.connect(
+        baseConnectOptions({
+          trustedHostKeysBase64: ['AAAAKEY1'],
+          onInteractiveChallenge: jest.fn().mockResolvedValue(null),
+        }),
+      ),
+    ).rejects.toThrow();
+
+    expect(JSON.parse(mockNative.respondKeyboardInteractive.mock.calls[0][0])).toEqual({
+      challengeId: 'conn-1-2',
+      responses: [],
+      cancelled: true,
+    });
+  });
+
+  // 물어볼 자리가 없는 호출(백그라운드 재연결 등)은 기다리게 두지 않고 접는다.
+  it('cancels instead of hanging when the caller cannot ask', async () => {
+    nativeConnectAsking(otpChallengeEvent());
+    const engine = new GoSshEngineAdapter();
+
+    await expect(
+      engine.connect(baseConnectOptions({ trustedHostKeysBase64: ['AAAAKEY1'] })),
+    ).rejects.toThrow();
+
+    expect(JSON.parse(mockNative.respondKeyboardInteractive.mock.calls[0][0])).toEqual({
+      challengeId: 'conn-1-2',
+      responses: [],
+      cancelled: true,
+    });
+  });
+
+  it('hands the server banner to the caller while the connection waits', async () => {
+    nativeConnectAsking(otpChallengeEvent());
+    const onBanner = jest.fn();
+    mockNative.connect.mockImplementation(async (connectionId: string) => {
+      emitNative(EVENT_CONNECTION, {
+        eventJson: JSON.stringify({
+          type: 'sshBanner',
+          sessionId: connectionId,
+          payload: { text: 'Approve this login at https://example.com/approve' },
+        }),
+      });
+      return JSON.stringify({ id: connectionId });
+    });
+    const engine = new GoSshEngineAdapter();
+
+    await engine.connect(
+      baseConnectOptions({ trustedHostKeysBase64: ['AAAAKEY1'], onBanner }),
+    );
+
+    expect(onBanner).toHaveBeenCalledWith(
+      'Approve this login at https://example.com/approve',
+    );
+  });
+
+  // 다른 연결의 물음이 이 연결의 창구로 가면 사용자는 엉뚱한 코드를 넣게 되고, 방식당 시도는
+  // 한 번뿐이라 그걸로 끝난다.
+  it('ignores a prompt addressed to another connection', async () => {
+    const onInteractiveChallenge = jest.fn().mockResolvedValue({ responses: ['123456'] });
+    mockNative.connect.mockImplementation(async (connectionId: string) => {
+      emitNative(EVENT_CONNECTION, {
+        eventJson: JSON.stringify({
+          ...otpChallengeEvent(),
+          sessionId: 'someone-else',
+        }),
+      });
+      return JSON.stringify({ id: connectionId });
+    });
+    const engine = new GoSshEngineAdapter();
+
+    await engine.connect(
+      baseConnectOptions({ trustedHostKeysBase64: ['AAAAKEY1'], onInteractiveChallenge }),
+    );
+
+    expect(onInteractiveChallenge).not.toHaveBeenCalled();
+    expect(mockNative.respondKeyboardInteractive).not.toHaveBeenCalled();
+  });
+});
+
+describe('connect payload', () => {
   it('maps a private key credential onto the desktop connect payload', async () => {
     const engine = new GoSshEngineAdapter();
     await engine.connect(

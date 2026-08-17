@@ -61,6 +61,11 @@ type Request struct {
 	// RequestID 는 화면이 이 이벤트를 어느 요청의 것으로 볼지다.
 	RequestID string
 	Payload   coretypes.ConnectPayload
+	// TCPDialTimeout·TCPKeepAliveInterval 은 이 연결 하나에만 적용하는 값이다(0 이면 dialer 의
+	// 기본값). 데스크톱은 매니저 설정으로 한 번 정하지만 모바일은 연결마다 들고 오므로, 그것을
+	// SetTimeouts 로 덮으면 동시에 붙는 다른 연결의 값까지 바뀐다.
+	TCPDialTimeout       time.Duration
+	TCPKeepAliveInterval time.Duration
 }
 
 // Dialer 는 세션 계열과 원격 키 설치가 공유하는 연결 경로다.
@@ -159,6 +164,13 @@ func (d *Dialer) Dial(
 	dialTimeout := d.tcpDialTimeout
 	keepAlive := d.tcpKeepAliveInterval
 	d.mu.RUnlock()
+
+	if req.TCPDialTimeout > 0 {
+		dialTimeout = req.TCPDialTimeout
+	}
+	if req.TCPKeepAliveInterval > 0 {
+		keepAlive = req.TCPKeepAliveInterval
+	}
 
 	// tailnet 경유면 raw 전송을 그 노드로 바꾼다. 경로가 없으면 nil 이라 평소대로 나간다.
 	dial, dialErr := sshconn.ResolveTailnetDial(resolveTailnet, payload.TailnetID, payload.TailnetName)

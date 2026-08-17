@@ -2,6 +2,7 @@ package session
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"sync"
 	"testing"
@@ -26,12 +27,29 @@ func newTestServer(t *testing.T) *sshtest.Server {
 
 func dialTestConn(t *testing.T, server *sshtest.Server) *Conn {
 	t.Helper()
-	conn, err := Dial(DialOptions{ID: "conn-1", Target: server.Target(), Config: sshconn.DefaultConfig})
+	conn, err := dialConn("conn-1", server.Target(), sshconn.DefaultConfig)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	return conn
+}
+
+// dialConn opens a connection the way the engine does: internal/sshconn dials,
+// Adopt wraps the client. These tests are about what runs on top of a live
+// connection, so they need a client, not the dial policy that produced it —
+// that lives in internal/sshdial and is tested there.
+func dialConn(id string, target sshconn.Target, config sshconn.Config) (*Conn, error) {
+	client, err := sshconn.DialClient(context.Background(), target, config, nil)
+	if err != nil {
+		return nil, err
+	}
+	return Adopt(client, AdoptOptions{
+		ID:       id,
+		Host:     target.Host,
+		Port:     target.Port,
+		Username: target.Username,
+	}), nil
 }
 
 // waitForRing blocks until the ring holds want bytes of output, or fails.
@@ -349,7 +367,7 @@ func TestShellEndsWhenRemoteClosesChannel(t *testing.T) {
 
 func TestConnCloseEndsShellsAndIsIdempotent(t *testing.T) {
 	server := newTestServer(t)
-	conn, err := Dial(DialOptions{ID: "conn-1", Target: server.Target(), Config: sshconn.DefaultConfig})
+	conn, err := dialConn("conn-1", server.Target(), sshconn.DefaultConfig)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -393,7 +411,7 @@ func TestDialRejectsUntrustedHostKey(t *testing.T) {
 	// internal/sshconn, and the engine must not weaken it.
 	target.TrustedHostKeyBase64 = base64.StdEncoding.EncodeToString([]byte("not-the-host-key"))
 
-	conn, err := Dial(DialOptions{ID: "conn-1", Target: target, Config: sshconn.DefaultConfig})
+	conn, err := dialConn("conn-1", target, sshconn.DefaultConfig)
 	if err == nil {
 		_ = conn.Close()
 		t.Fatal("expected the dial to fail on a host key mismatch")
@@ -414,7 +432,7 @@ func TestDialReportsHopProgress(t *testing.T) {
 		mu.Unlock()
 	}
 
-	conn, err := Dial(DialOptions{ID: "conn-1", Target: server.Target(), Config: config})
+	conn, err := dialConn("conn-1", server.Target(), config)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

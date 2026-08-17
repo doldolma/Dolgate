@@ -69,6 +69,22 @@ RCT_EXTERN_METHOD(connect
                   : (RCTPromiseResolveBlock)resolve reject
                   : (RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(respondKeyboardInteractive
+                  : (NSString *)payloadJson resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(respondHostKeyTrust
+                  : (NSString *)challengeId trust
+                  : (nonnull NSNumber *)trust resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(cancelConnect
+                  : (NSString *)connectionId resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(disconnect
                   : (NSString *)connectionId resolve
                   : (RCTPromiseResolveBlock)resolve reject

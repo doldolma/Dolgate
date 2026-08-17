@@ -96,6 +96,102 @@ export type EngineTailnetRoute = {
   tailnetName?: string;
 };
 
+/**
+ * Which server in the chain is speaking.
+ *
+ * Present on every prompt so a jump chain can say whose key is being trusted and
+ * whose code is being asked for. Without it, two hops asking in a row look like
+ * the same question twice — and answering the wrong one ends the connection,
+ * because SSH allows one attempt per method.
+ */
+export type EngineConnectionHop = {
+  username?: string;
+  host?: string;
+  port?: number;
+};
+
+/**
+ * 지금 어느 홉을 붙고 있는지.
+ *
+ * 점프 체인에서는 이것이 없으면 "연결 중" 이 전부다 — 베스천에서 막힌 것과 그 뒤 대상에서 막힌 것이
+ * 같은 모양으로 보인다. 코어가 홉마다 connecting·connected 를 보고한다.
+ */
+export type EngineHopProgress = {
+  /** `user@host:port`. 코어가 아는 주소 그대로다. */
+  hopLabel: string;
+  /** 1 부터. 1 이 이 기기에서 직접 붙는 홉이다. */
+  hopIndex: number;
+  hopCount: number;
+  /** 'connecting' | 'connected' 등, 코어가 그 홉에 대해 보고한 단계. */
+  stage: string;
+};
+
+/** One field of a keyboard-interactive round. */
+export type EngineInteractivePrompt = {
+  label: string;
+  /** False means the server asked for this not to be shown as it is typed. */
+  echo: boolean;
+  /**
+   * Whether the saved password may answer this field.
+   *
+   * The engine decides it per hop; the app must not re-derive it from the label.
+   * A server that writes `Password:` while actually asking for a second factor
+   * would get the password sent as the code, and that spends the one attempt.
+   */
+  allowStoredPassword: boolean;
+  /** Whether to mask the input. Verification codes are deliberately not masked. */
+  masked: boolean;
+};
+
+export type EngineInteractiveChallenge = {
+  challengeId: string;
+  /** Which round of this method it is; the first is 1. */
+  attempt: number;
+  name?: string;
+  instruction: string;
+  prompts: EngineInteractivePrompt[];
+  /** True when the connection has a saved password an answer may point at. */
+  hasStoredPassword: boolean;
+  hop?: EngineConnectionHop;
+};
+
+/** The answers to one challenge. */
+export type EngineInteractiveAnswer = {
+  responses: string[];
+  /**
+   * Positions to fill with the saved password. The engine substitutes them, so
+   * the password is never read out of the vault and back in.
+   */
+  storedPasswordIndexes?: number[];
+};
+
+/** A server key that needs a decision, raised inside the connection it appeared in. */
+export type EngineHostKeyChallenge = {
+  challengeId: string;
+  algorithm: string;
+  fingerprintSha256: string;
+  keyBase64: string;
+  /** True when a key is already on file for this host and a different one arrived. */
+  mismatch: boolean;
+  hop?: EngineConnectionHop;
+};
+
+/**
+ * 이 대상에 닿기 전에 거쳐야 하는 서버(ProxyJump). 재귀라서 다단이 표현된다.
+ *
+ * 가장 안쪽(jump 가 없는 것)이 이 기기에서 직접 소켓을 여는 홉이고, 바깥으로 갈수록 그 뒤의
+ * 홉이다 — 코어가 읽는 순서가 그렇다.
+ */
+export type EngineJumpTarget = {
+  host: string;
+  port: number;
+  username: string;
+  credential: EngineCredential;
+  /** 이 홉에 대해 이미 신뢰하는 키. 없으면 이 홉의 키도 연결 중에 물어본다. */
+  trustedHostKeysBase64?: string[];
+  jump?: EngineJumpTarget;
+};
+
 export type ConnectOptions = {
   /** Caller-chosen handle, used for diagnostics and native-side bookkeeping. */
   connectionId: string;
@@ -105,6 +201,13 @@ export type ConnectOptions = {
   credential: EngineCredential;
   /** Omitted for a normal direct-network connection. */
   tailnet?: EngineTailnetRoute;
+  /**
+   * 경유할 SSH 서버들. 없으면 대상에 직접 붙는다.
+   *
+   * tailnet 은 **첫 홉**의 것을 쓴다(소켓을 여는 것은 그 홉뿐이다). 그 판정은 호출부가 하고
+   * 여기서는 정해진 것을 그대로 나른다.
+   */
+  jump?: EngineJumpTarget;
   /** Initial PTY geometry, applied to shells that do not override it. */
   size?: EngineTerminalSize;
   /**
@@ -124,10 +227,41 @@ export type ConnectOptions = {
   /**
    * Decides whether to trust the host key. Resolving false aborts the connect.
    *
-   * Called once per connect that has to ask — that is, when the host is new, or
-   * when it presents a key that is not in trustedHostKeysBase64.
+   * Called while the connection is open at the point the key arrived, once per
+   * server that has to be asked about — so a jump chain can ask about each hop,
+   * and an OTP host is not authenticated twice to find out what key it has.
    */
-  onServerKey: (info: ServerPublicKeyInfo) => Promise<boolean>;
+  onServerKey: (
+    info: ServerPublicKeyInfo,
+    challenge: EngineHostKeyChallenge,
+  ) => Promise<boolean>;
+  /**
+   * Answers a keyboard-interactive round (OTP, an SSH-side password prompt, a
+   * challenge-response device). Resolving null cancels the connect.
+   *
+   * Rounds arrive one at a time, and the server ends the attempt if an answer is
+   * wrong, so each call must be answered before the next arrives. Omitting this
+   * leaves interactive auth with nowhere to ask, which fails the connect against
+   * any host that requires it.
+   */
+  onInteractiveChallenge?: (
+    challenge: EngineInteractiveChallenge,
+  ) => Promise<EngineInteractiveAnswer | null>;
+  /**
+   * The banner the server sent during authentication (RFC 4252 §5.4), verbatim.
+   *
+   * Some servers use it to tell the person to approve the login somewhere else
+   * and send nothing further until they do. Shown while the connection waits, it
+   * can be acted on; reported after a failure, the connection is already gone.
+   */
+  onBanner?: (text: string) => void;
+  /**
+   * 홉마다의 진행. 점프 체인이 없으면 대상 한 번만 온다.
+   *
+   * 화면이 "어디까지 갔는지" 를 말할 수 있는 유일한 근거다 — 이것을 버리면 여러 홉을 지나는 연결이
+   * 통째로 "연결 중" 한 줄이 된다.
+   */
+  onHopProgress?: (progress: EngineHopProgress) => void;
   /** Fires if the transport goes away without disconnect() being called. */
   onDisconnected?: () => void;
 };

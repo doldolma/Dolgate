@@ -20,6 +20,7 @@ final class GoSshEngineModule: RCTEventEmitter {
   private static let eventShellClosed = "GoSshEngine:shellClosed"
   private static let eventDisconnected = "GoSshEngine:disconnected"
   private static let eventTailnet = "GoSshEngine:tailnet"
+  private static let eventConnection = "GoSshEngine:connection"
   private static let errorCode = "go_ssh_engine_error"
 
   private let engine = MobileNewEngine()
@@ -43,6 +44,18 @@ final class GoSshEngineModule: RCTEventEmitter {
 
   override static func requiresMainQueueSetup() -> Bool { false }
 
+  override init() {
+    super.init()
+    // Registered here rather than on the first connect: a connection raises its
+    // host key and OTP questions while it is being opened, so the sink has to be
+    // in place before any connect call, not installed by one.
+    engine?.setConnectionEventListener(
+      ConnectionEventRelay { [weak self] eventJson in
+        self?.dispatch(GoSshEngineModule.eventConnection, ["eventJson": eventJson])
+      }
+    )
+  }
+
   override func supportedEvents() -> [String] {
     [
       GoSshEngineModule.eventChunk,
@@ -50,6 +63,7 @@ final class GoSshEngineModule: RCTEventEmitter {
       GoSshEngineModule.eventShellClosed,
       GoSshEngineModule.eventDisconnected,
       GoSshEngineModule.eventTailnet,
+      GoSshEngineModule.eventConnection,
     ]
   }
 
@@ -239,7 +253,6 @@ final class GoSshEngineModule: RCTEventEmitter {
 
       let connection = try engine.connect(
         requestJson,
-        responder: nil,
         onDisconnected: DisconnectedRelay { [weak self] _ in
           guard let self else { return }
           self.registryLock.lock()
@@ -284,6 +297,56 @@ final class GoSshEngineModule: RCTEventEmitter {
       }
 
       return info
+    }
+  }
+
+  /// Answers a keyboard-interactive challenge the connection raised.
+  ///
+  /// This does not go through the connection registry: the connect call has not
+  /// returned yet — it is blocked waiting for exactly this — so there is nothing
+  /// registered to look up. The engine finds the challenge by its id.
+  @objc(respondKeyboardInteractive:resolve:reject:)
+  func respondKeyboardInteractive(
+    payloadJson: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      let engine = try requireEngine(self?.engine)
+      try engine.respondKeyboardInteractive(payloadJson)
+      return nil
+    }
+  }
+
+  @objc(respondHostKeyTrust:trust:resolve:reject:)
+  func respondHostKeyTrust(
+    challengeId: String,
+    trust: NSNumber,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      let engine = try requireEngine(self?.engine)
+      try engine.respondHostKeyTrust(challengeId, trust: trust.boolValue)
+      return nil
+    }
+  }
+
+  /// Cuts a connection that is still being opened.
+  ///
+  /// disconnect cannot do this: it closes a registered connection, and one that
+  /// is still dialing was never registered. Without this, dismissing an OTP sheet
+  /// leaves the dial standing until its budget runs out — holding the tailnet
+  /// node's lease while it waits.
+  @objc(cancelConnect:resolve:reject:)
+  func cancelConnect(
+    connectionId: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      try requireEngine(self?.engine).cancelConnect(connectionId)
+      return nil
     }
   }
 
@@ -918,4 +981,12 @@ private final class TailnetEventRelay: NSObject, MobileTailnetEventListenerProto
   init(_ handler: @escaping (String) -> Void) { self.handler = handler }
 
   func onTailnetEvent(_ eventJSON: String?) { handler(eventJSON ?? "") }
+}
+
+private final class ConnectionEventRelay: NSObject, MobileConnectionEventListenerProtocol {
+  private let handler: (String) -> Void
+
+  init(_ handler: @escaping (String) -> Void) { self.handler = handler }
+
+  func onConnectionEvent(_ eventJSON: String?) { handler(eventJSON ?? "") }
 }

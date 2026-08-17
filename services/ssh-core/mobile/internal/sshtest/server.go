@@ -34,6 +34,27 @@ const (
 	Password = "s3cret"
 )
 
+// Options turns the fixture into the hosts that were impossible to connect to
+// from mobile, so those paths can be driven without a real bastion.
+type Options struct {
+	// OTPCode makes the fixture authenticate with keyboard-interactive instead of
+	// password, asking for the password and the code in **separate rounds**.
+	//
+	// Separate rounds is the point: it is what shows that the saved password is
+	// answered automatically and only the code reaches the person. One combined
+	// round would pass whether or not that works.
+	OTPCode string
+	// Banner is sent during authentication (RFC 4252 §5.4) when set.
+	Banner string
+	// CombinedPrompts asks for the password and the code in one round.
+	//
+	// Real servers do both, and the difference is visible to the person: a single
+	// round cannot be auto-answered from the saved password (the engine will not
+	// guess which field it belongs to), so it is the shape where the app has to
+	// point at the field itself.
+	CombinedPrompts bool
+}
+
 // StderrTrigger, written to the shell's stdin, makes the fake shell emit
 // StderrReply on stderr instead of echoing, so a test can tell the two output
 // streams apart.
@@ -87,7 +108,10 @@ type Server struct {
 }
 
 // NewServer starts a fixture on a loopback port.
-func NewServer() (*Server, error) {
+func NewServer() (*Server, error) { return NewServerWithOptions(Options{}) }
+
+// NewServerWithOptions starts a fixture that authenticates as options describe.
+func NewServerWithOptions(options Options) (*Server, error) {
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("generate host key: %w", err)
@@ -97,13 +121,59 @@ func NewServer() (*Server, error) {
 		return nil, fmt.Errorf("build host signer: %w", err)
 	}
 
-	config := &ssh.ServerConfig{
-		PasswordCallback: func(conn ssh.ConnMetadata, pw []byte) (*ssh.Permissions, error) {
+	config := &ssh.ServerConfig{}
+	if options.OTPCode != "" && options.CombinedPrompts {
+		config.KeyboardInteractiveCallback = func(
+			conn ssh.ConnMetadata,
+			ask ssh.KeyboardInteractiveChallenge,
+		) (*ssh.Permissions, error) {
+			given, askErr := ask(
+				"", "",
+				[]string{"Password:", "Verification code:"},
+				[]bool{false, false},
+			)
+			if askErr != nil {
+				return nil, askErr
+			}
+			if conn.User() != User || len(given) != 2 {
+				return nil, fmt.Errorf("authentication failed")
+			}
+			if given[0] != Password || given[1] != options.OTPCode {
+				return nil, fmt.Errorf("authentication failed")
+			}
+			return nil, nil
+		}
+	} else if options.OTPCode != "" {
+		config.KeyboardInteractiveCallback = func(
+			conn ssh.ConnMetadata,
+			ask ssh.KeyboardInteractiveChallenge,
+		) (*ssh.Permissions, error) {
+			given, askErr := ask("", "", []string{"Password:"}, []bool{false})
+			if askErr != nil {
+				return nil, askErr
+			}
+			if conn.User() != User || len(given) != 1 || given[0] != Password {
+				return nil, fmt.Errorf("authentication failed")
+			}
+			given, askErr = ask("", "", []string{"Verification code:"}, []bool{false})
+			if askErr != nil {
+				return nil, askErr
+			}
+			if len(given) != 1 || given[0] != options.OTPCode {
+				return nil, fmt.Errorf("authentication failed")
+			}
+			return nil, nil
+		}
+	} else {
+		config.PasswordCallback = func(conn ssh.ConnMetadata, pw []byte) (*ssh.Permissions, error) {
 			if conn.User() == User && string(pw) == Password {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("authentication failed")
-		},
+		}
+	}
+	if options.Banner != "" {
+		config.BannerCallback = func(ssh.ConnMetadata) string { return options.Banner }
 	}
 	config.AddHostKey(hostSigner)
 

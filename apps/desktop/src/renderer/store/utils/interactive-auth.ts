@@ -156,54 +156,9 @@ export function toKeyboardInteractiveHop(
   };
 }
 
-/** 홉을 `user@host:port` 로 적는다. 없는 부분은 생략한다. */
-/**
- * 이 주소가 어느 호스트인지 찾는다.
- *
- * 코어는 **주소만** 안다 — 사용자가 붙인 이름은 화면 쪽에만 있다. 그래서 홉을 보여줄 때마다
- * 여기서 되찾아 얹는다. 포트까지 맞는 것을 먼저 찾고, 없으면 주소만 같은 것을 쓴다(같은 기기에
- * 포트만 다르게 등록한 경우에도 이름은 맞다).
- */
-export function findHostByAddress(
-  hosts: readonly HostRecord[] | undefined,
-  address: string | null | undefined,
-  port?: number | null,
-): HostRecord | undefined {
-  if (!hosts?.length || !address) {
-    return undefined;
-  }
-  const addressed = (record: HostRecord): boolean =>
-    "hostname" in record && record.hostname === address;
-  return (
-    hosts.find(
-      (record) =>
-        addressed(record) && "port" in record && record.port === port,
-    ) ?? hosts.find(addressed)
-  );
-}
-
-/**
- * 누가 물었는지를 사람이 읽는 형태로.
- *
- * **이름을 앞에 둔다.** 사용자는 보통 주소가 아니라 자기가 붙인 이름을 기억하고 있어서, 주소만
- * 보여 주면 점프 체인에서 어느 쪽 코드를 넣어야 하는지 바로 알기 어렵다. 주소는 뒤에 남겨
- * 같은 이름이 여럿일 때 구분할 수 있게 한다.
- *
- * 목록에 없는 주소면(등록하지 않은 경유지) 예전처럼 주소만 나온다.
- */
-export function formatInteractiveHop(
-  hop: KeyboardInteractiveHop | null | undefined,
-  hosts?: readonly HostRecord[],
-): string {
-  if (!hop?.host) {
-    return "";
-  }
-  const user = hop.username ? `${hop.username}@` : "";
-  const port = hop.port ? `:${hop.port}` : "";
-  const address = `${user}${hop.host}${port}`;
-  const label = findHostByAddress(hosts, hop.host, hop.port)?.label?.trim();
-  return label ? `${label} (${address})` : address;
-}
+// findHostByAddress·formatInteractiveHop 은 shared-core 에 있다 — 모바일도 같은 이름·같은 주소
+// 형식을 보여줘야 하고, 그 둘은 문구가 아니라 주소 조립이라 UI 언어에 걸리지 않는다.
+export { findHostByAddress, formatInteractiveHop } from "@shared";
 
 export function parseWarpgateApprovalUrl(
   ...parts: Array<string | undefined | null>
