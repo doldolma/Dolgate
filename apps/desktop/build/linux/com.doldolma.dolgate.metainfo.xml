@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  App Center·GNOME 소프트웨어가 이 앱의 상점 페이지를 그릴 때 읽는 파일(AppStream MetaInfo).
+
+  **deb 의 control 필드로는 이 화면을 채울 수 없다.** control 에는 라이선스 필드 자체가 없고,
+  게시자·아이콘·갱신일 같은 값도 없다 — 그래서 이것이 없으면 App Center 가 "Unknown publisher",
+  "License unknown", 아이콘 없는 회색 원으로 그린다(실제로 그렇게 나왔다).
+
+  id 는 appId(com.doldolma.dolgate)와 같게 두고, 실행할 항목은 launchable 로 데스크톱 파일을
+  가리킨다. 아이콘은 stock 으로 두면 상점이 hicolor 테마에 설치된 dolgate 아이콘을 찾는다
+  (electron-builder 가 /usr/share/icons/hicolor/<크기>/apps/dolgate.png 로 넣는다).
+
+  릴리스 목록은 "Last updated" 가 되는 값이다. 버전을 올릴 때 여기도 한 줄 추가한다 —
+  scripts/build-linux-installers.cjs 가 패키지 버전과 이 파일의 최신 릴리스가 어긋나면 빌드를
+  실패시킨다(잊으면 상점에 옛 날짜가 남는다).
+-->
+<component type="desktop-application">
+  <id>com.doldolma.dolgate</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>Dolgate</name>
+  <summary>SSH, SFTP, and remote desktop client</summary>
+
+  <developer id="com.doldolma">
+    <name>doldolma</name>
+  </developer>
+
+  <launchable type="desktop-id">dolgate.desktop</launchable>
+  <icon type="stock">dolgate</icon>
+
+  <description>
+    <p>
+      Dolgate connects to servers over SSH with jump hosts, keyboard-interactive and
+      one-time-code prompts, and host key trust asked inside the connection.
+    </p>
+    <p>
+      It also browses files over SFTP, opens local port forwards, attaches to container
+      and AWS EC2 shells, and shows remote desktops over VNC and RDP.
+    </p>
+  </description>
+
+  <categories>
+    <category>Development</category>
+    <category>Network</category>
+    <category>RemoteAccess</category>
+  </categories>
+
+  <keywords>
+    <keyword>ssh</keyword>
+    <keyword>sftp</keyword>
+    <keyword>terminal</keyword>
+    <keyword>port forwarding</keyword>
+    <keyword>vnc</keyword>
+    <keyword>rdp</keyword>
+  </keywords>
+
+  <url type="homepage">https://github.com/doldolma/dolgate</url>
+  <url type="bugtracker">https://github.com/doldolma/dolgate/issues</url>
+
+  <!-- 이것이 없으면 GNOME 소프트웨어가 "등급 정보 없음" 경고를 붙인다. 해당 항목이 없으므로 빈 값이다. -->
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="1.9.1" date="2026-08-17" />
+  </releases>
+</component>

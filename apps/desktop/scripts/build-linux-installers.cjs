@@ -3,6 +3,10 @@ const { readFileSync, readdirSync } = require('node:fs');
 const path = require('node:path');
 
 const desktopRoot = path.resolve(__dirname, '..');
+const {
+  METAINFO_SOURCE,
+  METAINFO_TARGET,
+} = require(path.join(desktopRoot, 'electron-builder.config.cjs'));
 const distDirectory = path.join(desktopRoot, 'release', 'dist');
 const ARCHES = ['x64', 'arm64'];
 
@@ -102,6 +106,49 @@ function verifyDebDirectoryModes(fileName) {
   }
 }
 
+// 상점(App Center·GNOME 소프트웨어)이 읽는 파일들이 실제로 들어갔는지 본다.
+//
+// 빠져도 설치는 성공하고 앱도 실행되므로 아무도 눈치채지 못한다 — 상점 페이지만 조용히
+// "Unknown publisher / License unknown" 에 아이콘 없는 회색 원으로 남는다(실제로 그랬다).
+function verifyDebStoreMetadata(fileName) {
+  const contents = spawnSync('dpkg-deb', ['-c', path.join(distDirectory, fileName)], {
+    encoding: 'utf8',
+  });
+  if (contents.error && contents.error.code === 'ENOENT') {
+    return;
+  }
+  if (contents.status !== 0) {
+    throw new Error(`${fileName}: dpkg-deb 로 내용을 확인하지 못했습니다.`);
+  }
+  const required = [
+    METAINFO_TARGET.replace(/^\//, './'),
+    './usr/share/doc/dolgate/copyright',
+    './usr/share/applications/dolgate.desktop',
+  ];
+  for (const entry of required) {
+    if (!contents.stdout.includes(entry)) {
+      throw new Error(`${fileName}: deb 에 ${entry} 가 없습니다.`);
+    }
+  }
+  // 아이콘은 크기별로 들어간다. 하나도 없으면 상점·런처가 기본 아이콘을 쓴다.
+  if (!/\.\/usr\/share\/icons\/hicolor\/\d+x\d+\/apps\/dolgate\.png/.test(contents.stdout)) {
+    throw new Error(`${fileName}: deb 에 hicolor 아이콘이 없습니다.`);
+  }
+
+  // control 쪽도 함께 본다. Maintainer·Homepage·Section 은 배포판 도구와 상점이 함께 쓴다.
+  const control = spawnSync('dpkg-deb', ['-f', path.join(distDirectory, fileName)], {
+    encoding: 'utf8',
+  });
+  if (control.status !== 0) {
+    throw new Error(`${fileName}: dpkg-deb -f 로 control 을 읽지 못했습니다.`);
+  }
+  for (const field of ['Maintainer:', 'Homepage:', 'Section: net']) {
+    if (!control.stdout.includes(field)) {
+      throw new Error(`${fileName}: control 에 ${field} 가 없습니다.`);
+    }
+  }
+}
+
 function verifyDebArtifact(fileName) {
   const buffer = readFileSync(path.join(distDirectory, fileName));
   if (buffer.length < 1024 * 1024) {
@@ -118,7 +165,32 @@ function verifyDebArtifact(fileName) {
   }
 }
 
+// metainfo 의 최신 릴리스가 지금 빌드하는 버전과 같은지 본다.
+//
+// 상점의 "Last updated" 와 버전 표시가 이 값에서 온다. 올리는 것을 잊으면 새 패키지가 옛
+// 버전으로 보이는데, 설치는 정상이라 아무 신호가 없다.
+function verifyMetainfoRelease() {
+  const xml = readFileSync(METAINFO_SOURCE, 'utf8');
+  const { version } = JSON.parse(
+    readFileSync(path.join(desktopRoot, 'package.json'), 'utf8'),
+  );
+  const releases = [...xml.matchAll(/<release\s+version="([^"]+)"/g)].map(
+    (match) => match[1],
+  );
+  if (releases.length === 0) {
+    throw new Error('metainfo 에 release 항목이 없습니다.');
+  }
+  if (!releases.includes(version)) {
+    throw new Error(
+      `metainfo 에 ${version} 릴리스가 없습니다(있는 것: ${releases.join(', ')}). ` +
+        'build/linux/com.doldolma.dolgate.metainfo.xml 에 이 버전을 추가해 주세요.',
+    );
+  }
+}
+
 function verifyArtifacts() {
+  verifyMetainfoRelease();
+
   const files = listDistFiles();
 
   requireDistFile(files, /^latest-linux\.yml$/);
@@ -135,6 +207,7 @@ function verifyArtifacts() {
   for (const fileName of debFiles) {
     verifyDebArtifact(fileName);
     verifyDebDirectoryModes(fileName);
+    verifyDebStoreMetadata(fileName);
   }
 
   console.log(`[linux-dist] 아티팩트 검증 완료: ${files.sort((a, b) => a.localeCompare(b)).join(', ')}`);

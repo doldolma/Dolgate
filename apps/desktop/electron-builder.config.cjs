@@ -1,5 +1,15 @@
 const path = require('node:path');
 
+
+// 상점(App Center·GNOME 소프트웨어)이 읽는 메타데이터. 설치 경로는 AppStream 규격이 정한다.
+const METAINFO_SOURCE = path.resolve(
+  __dirname,
+  'build/linux/com.doldolma.dolgate.metainfo.xml',
+);
+const METAINFO_TARGET = '/usr/share/metainfo/com.doldolma.dolgate.metainfo.xml';
+// 데비안은 저작권 파일을 여기서 찾는다(정책 12.5). fpm 의 --license 는 control 값만 채운다.
+const LICENSE_SOURCE = path.resolve(__dirname, '../../LICENSE');
+
 module.exports = {
   appId: 'com.doldolma.dolgate',
   productName: 'Dolgate',
@@ -85,6 +95,16 @@ module.exports = {
   // chromium 패키지도 libasound2 를 첫 의존성으로 선언한다 — 같은 바이너리에 같은 처방이다.
   deb: {
     afterInstall: path.resolve(__dirname, 'build/linux/after-install.sh'),
+    // 상점 페이지용 메타데이터와 저작권 파일을 함께 넣는다.
+    //
+    // fpm 의 위치 인자(`원본=설치경로`)로 붙인다 — electron-builder 는 이 배열을 fpm 명령의
+    // 소스 목록 앞에 그대로 이어 붙인다(app-builder-lib 의 FpmTarget). deb control 에는 라이선스
+    // 필드가 없고 상점은 AppStream 을 읽으므로, 이 파일이 없으면 게시자·라이선스·아이콘이 전부
+    // 빈칸으로 나온다.
+    fpm: [
+      `${METAINFO_SOURCE}=${METAINFO_TARGET}`,
+      `${LICENSE_SOURCE}=/usr/share/doc/dolgate/copyright`,
+    ],
     // libasound2 만 적으면 안 된다. Ubuntu 24.04 에는 실패키지가 없고 t64 전환으로
     // libasound2t64 와 liboss4-salsa-asound2(OSS4 호환 shim)가 둘 다 Provides 하는데,
     // apt 가 후자를 뽑으면 libasound.so.2 가 표준 경로에 깔리지 않아 그대로 실행 실패다.
@@ -104,6 +124,16 @@ module.exports = {
   },
   rpm: {
     afterInstall: path.resolve(__dirname, 'build/linux/after-install.sh'),
+    // 상점 페이지용 메타데이터와 저작권 파일을 함께 넣는다.
+    //
+    // fpm 의 위치 인자(`원본=설치경로`)로 붙인다 — electron-builder 는 이 배열을 fpm 명령의
+    // 소스 목록 앞에 그대로 이어 붙인다(app-builder-lib 의 FpmTarget). deb control 에는 라이선스
+    // 필드가 없고 상점은 AppStream 을 읽으므로, 이 파일이 없으면 게시자·라이선스·아이콘이 전부
+    // 빈칸으로 나온다.
+    fpm: [
+      `${METAINFO_SOURCE}=${METAINFO_TARGET}`,
+      `${LICENSE_SOURCE}=/usr/share/doc/dolgate/copyright`,
+    ],
     // (A or B) 는 rpm 의 rich dependency 다 — electron-builder 기본값을 그대로 유지한다.
     // libsecret 은 기본 목록에 없다. DT_NEEDED 가 아니라 Electron 이 런타임에 dlopen 하므로
     // 없어도 실행은 되지만 safeStorage 가 평문 폴백으로 떨어진다 — deb 와 같게 맞춘다.
@@ -124,6 +154,22 @@ module.exports = {
     icon: path.resolve(__dirname, 'build/icons/dolssh.png'),
     category: 'Development',
     executableName: 'dolgate',
+    // deb 의 Section. 없으면 fpm 기본값이 들어가 배포판 도구가 분류하지 못한다.
+    packageCategory: 'net',
+    // 짧은 줄과 긴 설명을 나눈다. 하나만 주면 control 의 Description 첫 줄과 본문이 같은 문장이
+    // 되어 상점 페이지에 같은 글이 두 번 나온다(실제로 그랬다).
+    synopsis: 'SSH, SFTP, and remote desktop client',
+    description:
+      'Dolgate connects to servers over SSH with jump hosts, one-time-code prompts, and ' +
+      'host key trust asked inside the connection. It also browses files over SFTP, opens ' +
+      'local port forwards, attaches to container and AWS EC2 shells, and shows remote ' +
+      'desktops over VNC and RDP.',
+    desktop: {
+      entry: {
+        GenericName: 'SSH Client',
+        Keywords: 'ssh;sftp;terminal;port forwarding;vnc;rdp;',
+      },
+    },
     // 실제 타겟/arch는 scripts/build-linux-installers.cjs 가 CLI로 지정한다.
     //
     // AppImage 는 배포하지 않는다. 다운로드한 파일에는 실행 비트가 없어 사용자가 chmod 를
@@ -142,3 +188,8 @@ module.exports = {
   // 넘기는데, 그 경우 doPack 이 곧바로 return 해서 서명 단계 자체가 없고 훅도 발화하지
   // 않는다. 서명·공증은 electron-builder 앞단의 scripts/sign-notarize-mac.cjs 가 한다.
 };
+
+// 패키지 검증(scripts/build-linux-installers.cjs)이 같은 경로를 보게 내보낸다. 두 곳에 상수를
+// 두면 한쪽만 고쳐져서 검증이 엉뚱한 파일을 찾는다.
+module.exports.METAINFO_SOURCE = METAINFO_SOURCE;
+module.exports.METAINFO_TARGET = METAINFO_TARGET;
