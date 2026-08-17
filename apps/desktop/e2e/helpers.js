@@ -7,6 +7,78 @@ const path = require("node:path");
 const { resolvePackagedAppLaunch } = require("./packaged-app-launch.cjs");
 
 const desktopMainPath = path.resolve(__dirname, "../.vite/build/main.js");
+
+/**
+ * 이 테스트가 만든 것들의 정리 목록.
+ *
+ * **본문의 finally 에서 정리하지 않는다.** finally 에서 던진 오류는 try 의 결과를 덮어써서, 통과한
+ * 테스트가 정리 실패로 찍힌다 — Windows 에서 실행 중인 exe 를 지우려다(EPERM) 연결 스펙 5개가
+ * 전부 실패로 보였고, 그 오류가 본문 결과를 가려 원인을 찾는 데 시간이 걸렸다. 훅에서 정리하면
+ * Playwright 가 그것을 teardown 오류로 따로 보고한다.
+ */
+const pendingCleanups = [];
+
+/** 정리 하나를 등록한다. 등록 순서의 **역순**으로 실행된다(앱을 닫은 뒤 데이터 디렉터리를 지운다). */
+function trackCleanup(dispose) {
+  pendingCleanups.push(dispose);
+}
+
+/**
+ * 등록된 정리를 모두 실행한다. 스펙마다 `test.afterEach(drainCleanups)` 로 걸어 준다.
+ *
+ * 하나가 실패해도 나머지를 **끝까지** 시도한 뒤 한꺼번에 알린다 — 먼저 실패한 것 때문에 프로세스가
+ * 남으면 다음 테스트가 그 영향을 받는다.
+ */
+async function drainCleanups() {
+  const failures = [];
+  for (const dispose of pendingCleanups.splice(0).reverse()) {
+    try {
+      await dispose();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "테스트 정리에 실패했다");
+  }
+}
+
+/**
+ * 픽스처 디렉터리를 지운다.
+ *
+ * **Windows 는 실행 중인 exe 를 지울 수 없다**(EPERM). 프로세스가 끝난 직후에도 백신·인덱서가
+ * 잠깐 잡고 있을 수 있어서 재시도를 둔다 — macOS·Linux 는 실행 중에도 unlink 가 되므로 이 규칙이
+ * 없어도 통과했고, 그래서 이 함정은 Windows 에서만 드러났다.
+ */
+async function removeFixtureDir(dir) {
+  if (!dir) {
+    return;
+  }
+  await rm(dir, {
+    recursive: true,
+    force: true,
+    maxRetries: 20,
+    retryDelay: 50,
+  });
+}
+
+/** 프로세스를 끝내고 **실제로 끝나기를** 기다린다. kill 은 신호만 보내고 곧바로 돌아온다. */
+async function killAndWait(child, timeoutMs = 5_000) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  child.kill();
+  const settled = await Promise.race([
+    exited.then(() => true),
+    new Promise((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+  ]);
+  if (!settled) {
+    // 신호를 무시했다. Windows 에서는 둘 다 TerminateProcess 지만, 그 밖에서는 이것이 마지막 수단이다.
+    child.kill("SIGKILL");
+    await exited;
+  }
+}
 const timestamp = "2025-01-01T00:00:00.000Z";
 const fakeAwsSessionReadyMarker = "READY:FAKE_AWS_SSM";
 const smokeAwsProfileId = "aws-profile-smoke-default";
@@ -242,14 +314,21 @@ async function startFakeSshd(options = {}) {
   });
 
   const [host, portText] = announced.address.split(":");
+  // 정리를 호출부에 맡기지 않는다. 잊으면 프로세스와 디렉터리가 남고, 그 사실은 다음 실행에서야
+  // 드러난다. stop() 은 여러 번 불려도 안전하다(끝난 프로세스는 그냥 지나가고 삭제는 force 다).
+  trackCleanup(() => stopFakeSshd());
+  async function stopFakeSshd() {
+    // 순서가 계약이다. 지우기 전에 프로세스가 끝나야 한다 — Windows 는 실행 중인 exe 를 지울 수
+    // 없다(EPERM). macOS·Linux 는 실행 중에도 unlink 가 되므로 이 함정은 Windows 에서만 드러났다.
+    await killAndWait(child);
+    await removeFixtureDir(fixtureRoot);
+  }
+
   return {
     host,
     port: Number(portText),
     hostKeyBase64: announced.hostKey,
-    async stop() {
-      child.kill();
-      await rm(fixtureRoot, { recursive: true, force: true });
-    },
+    stop: stopFakeSshd,
   };
 }
 
@@ -369,6 +448,7 @@ async function buildAwsFixture() {
     throw new Error(`failed to build Windows AWS fixture: ${stderr}`);
   }
 
+  trackCleanup(() => removeFixtureDir(fixtureRoot));
   return {
     fixtureRoot,
     fixturePath,
@@ -591,6 +671,10 @@ module.exports = {
   getSessionTerminalState,
   getCapturedTerminalSizes,
   launchDesktop,
+  killAndWait,
+  removeFixtureDir,
+  trackCleanup,
+  drainCleanups,
   waitForSessionTerminalState,
   waitForTerminalInputReady,
   waitForCapturedTerminalOutput,

@@ -2,11 +2,13 @@ const { test, expect } = require("@playwright/test");
 const {
   buildAwsFixture,
   createFakeAuthSessionJson,
+  drainCleanups,
   launchDesktop,
   mkdtemp,
   os,
+  trackCleanup,
   path,
-  rm,
+  removeFixtureDir,
   waitForCapturedTerminalOutput,
   waitForFakeAwsSessionReady,
   waitForReplayState,
@@ -27,6 +29,9 @@ async function seekReplay(page, nextPositionMs) {
 }
 
 test.describe("desktop replay regression", () => {
+  // 정리는 훅에서 한다 — 본문 finally 에서 하면 정리 실패가 테스트 결과를 덮는다(helpers 참고).
+  test.afterEach(drainCleanups);
+
   test("records a remote session into Logs and replays it in a detached window", async () => {
     const userDataDir = await mkdtemp(
       path.join(os.tmpdir(), "dolssh-smoke-replay-"),
@@ -42,120 +47,119 @@ test.describe("desktop replay regression", () => {
       DOLSSH_E2E_CAPTURE_TERMINAL: "1",
       DOLSSH_E2E_FAKE_AWS_FIXTURE_PATH: fixture.fixturePath,
     });
-
-    try {
-      const page = await app.firstWindow();
-      const awsCard = page
-        .locator('[data-host-card="true"]')
-        .filter({ hasText: "Smoke AWS" })
-        .first();
-
-      await expect(awsCard).toBeVisible();
-      await awsCard.dblclick();
-      await waitForFakeAwsSessionReady(page);
-      await page.locator('[data-terminal-canvas="true"]').click();
-      await page.keyboard.type("replay-smoke-check");
-      await page.keyboard.press("Enter");
-      await waitForCapturedTerminalOutput(page, "ECHO:replay-smoke-check");
-
-      await page.getByRole("button", { name: /Smoke AWS 세션 종료/ }).click();
-
-      // 세션 종료 후 홈(타이틀바 탭)으로 돌아와 좌측 사이드바 푸터의 Logs 섹션으로 이동한다.
-      // (구 "Home navigation" 레일은 Host 화면 재구성으로 제거됨.)
-      await page.getByRole("button", { name: "Home", exact: true }).click();
-      await page.getByRole("button", { name: "Logs", exact: true }).click();
-
-      await expect(
-        page.getByRole("heading", { name: "Logs" }).first(),
-      ).toBeVisible();
-      // 페이지 전역 getByText는 취약하다 — EC2가 신뢰된 호스트로 붙으면서 fake 환경에선
-      // SSH-over-SSM이 SSM 셸로 폴백하며 남기는 경고 로그의 metadata(JSON)에도 "AWS SSM"이
-      // 들어가 2개가 매칭된다. 검증 의도(세션 lifecycle 카드 내용)에 맞게 카드로 스코프한다.
-      const lifecycleCard = page
-        .getByTestId("logs-lifecycle-card")
-        .filter({ hasText: "Smoke AWS" })
-        .first();
-      await expect(lifecycleCard).toBeVisible();
-      await expect(lifecycleCard.getByText("AWS SSM")).toBeVisible();
-      await expect(
-        lifecycleCard.getByText("default · ap-northeast-2 · i-smoke-test"),
-      ).toBeVisible();
-      await expect(lifecycleCard.getByText("Closed")).toBeVisible();
-
-      const replayWindowPromise = app.waitForEvent("window");
-      await page.getByRole("button", { name: "Replay" }).click();
-      const replayWindow = await replayWindowPromise;
-      await replayWindow.waitForLoadState("domcontentloaded");
-
-      const initialReplayState = await waitForReplayState(
-        replayWindow,
-        {
-          isPlaying: true,
-          includesText: "ECHO:replay-smoke-check",
-          requireDuration: true,
-        },
-      );
-
-      expect(initialReplayState?.durationMs).toBeGreaterThan(0);
-      expect(initialReplayState?.terminalText).toContain("ECHO:replay-smoke-check");
-      const midSeekMs = Math.max(
-        100,
-        Math.floor((initialReplayState.durationMs * 0.5) / 100) * 100,
-      );
-      const lateSeekMs = Math.max(
-        midSeekMs,
-        Math.floor((initialReplayState.durationMs * 0.8) / 100) * 100,
-      );
-
-      await replayWindow.keyboard.press("Space");
-      await waitForReplayState(
-        replayWindow,
-        {
-          isPlaying: false,
-          includesText: "ECHO:replay-smoke-check",
-        },
-      );
-
-      await seekReplay(replayWindow, midSeekMs);
-      await expect(replayWindow.getByLabel("Replay scrubber")).toHaveValue(String(midSeekMs));
-      const pausedSeekState = await waitForReplayState(
-        replayWindow,
-        {
-          isPlaying: false,
-        },
-      );
-      expect(pausedSeekState?.isPlaying).toBe(false);
-
-      await replayWindow.keyboard.press("Space");
-      await waitForReplayState(
-        replayWindow,
-        {
-          isPlaying: true,
-        },
-      );
-
-      await seekReplay(replayWindow, lateSeekMs);
-      await expect(replayWindow.getByLabel("Replay scrubber")).toHaveValue(String(lateSeekMs));
-      const playingSeekState = await waitForReplayState(
-        replayWindow,
-        {
-          isPlaying: true,
-        },
-      );
-      expect(playingSeekState?.isPlaying).toBe(true);
-
-      await replayWindow.getByRole("button", { name: "Zoom in" }).click();
-      const zoomedState = await waitForReplayState(
-        replayWindow,
-        {
-          zoomPercent: 110,
-        },
-      );
-      expect(zoomedState?.zoomPercent).toBe(110);
-    } finally {
+    // 여기서 등록해 두면 아래에서 무엇이 실패해도 앱과 데이터 디렉터리가 남지 않는다.
+    trackCleanup(async () => {
       await app.close();
-      await rm(userDataDir, { recursive: true, force: true });
-      await rm(fixture.fixtureRoot, { recursive: true, force: true });
-    }
+      await removeFixtureDir(userDataDir);
+    });
+
+    const page = await app.firstWindow();
+    const awsCard = page
+      .locator('[data-host-card="true"]')
+      .filter({ hasText: "Smoke AWS" })
+      .first();
+
+    await expect(awsCard).toBeVisible();
+    await awsCard.dblclick();
+    await waitForFakeAwsSessionReady(page);
+    await page.locator('[data-terminal-canvas="true"]').click();
+    await page.keyboard.type("replay-smoke-check");
+    await page.keyboard.press("Enter");
+    await waitForCapturedTerminalOutput(page, "ECHO:replay-smoke-check");
+
+    await page.getByRole("button", { name: /Smoke AWS 세션 종료/ }).click();
+
+    // 세션 종료 후 홈(타이틀바 탭)으로 돌아와 좌측 사이드바 푸터의 Logs 섹션으로 이동한다.
+    // (구 "Home navigation" 레일은 Host 화면 재구성으로 제거됨.)
+    await page.getByRole("button", { name: "Home", exact: true }).click();
+    await page.getByRole("button", { name: "Logs", exact: true }).click();
+
+    await expect(
+      page.getByRole("heading", { name: "Logs" }).first(),
+    ).toBeVisible();
+    // 페이지 전역 getByText는 취약하다 — EC2가 신뢰된 호스트로 붙으면서 fake 환경에선
+    // SSH-over-SSM이 SSM 셸로 폴백하며 남기는 경고 로그의 metadata(JSON)에도 "AWS SSM"이
+    // 들어가 2개가 매칭된다. 검증 의도(세션 lifecycle 카드 내용)에 맞게 카드로 스코프한다.
+    const lifecycleCard = page
+      .getByTestId("logs-lifecycle-card")
+      .filter({ hasText: "Smoke AWS" })
+      .first();
+    await expect(lifecycleCard).toBeVisible();
+    await expect(lifecycleCard.getByText("AWS SSM")).toBeVisible();
+    await expect(
+      lifecycleCard.getByText("default · ap-northeast-2 · i-smoke-test"),
+    ).toBeVisible();
+    await expect(lifecycleCard.getByText("Closed")).toBeVisible();
+
+    const replayWindowPromise = app.waitForEvent("window");
+    await page.getByRole("button", { name: "Replay" }).click();
+    const replayWindow = await replayWindowPromise;
+    await replayWindow.waitForLoadState("domcontentloaded");
+
+    const initialReplayState = await waitForReplayState(
+      replayWindow,
+      {
+        isPlaying: true,
+        includesText: "ECHO:replay-smoke-check",
+        requireDuration: true,
+      },
+    );
+
+    expect(initialReplayState?.durationMs).toBeGreaterThan(0);
+    expect(initialReplayState?.terminalText).toContain("ECHO:replay-smoke-check");
+    const midSeekMs = Math.max(
+      100,
+      Math.floor((initialReplayState.durationMs * 0.5) / 100) * 100,
+    );
+    const lateSeekMs = Math.max(
+      midSeekMs,
+      Math.floor((initialReplayState.durationMs * 0.8) / 100) * 100,
+    );
+
+    await replayWindow.keyboard.press("Space");
+    await waitForReplayState(
+      replayWindow,
+      {
+        isPlaying: false,
+        includesText: "ECHO:replay-smoke-check",
+      },
+    );
+
+    await seekReplay(replayWindow, midSeekMs);
+    await expect(replayWindow.getByLabel("Replay scrubber")).toHaveValue(String(midSeekMs));
+    const pausedSeekState = await waitForReplayState(
+      replayWindow,
+      {
+        isPlaying: false,
+      },
+    );
+    expect(pausedSeekState?.isPlaying).toBe(false);
+
+    await replayWindow.keyboard.press("Space");
+    await waitForReplayState(
+      replayWindow,
+      {
+        isPlaying: true,
+      },
+    );
+
+    await seekReplay(replayWindow, lateSeekMs);
+    await expect(replayWindow.getByLabel("Replay scrubber")).toHaveValue(String(lateSeekMs));
+    const playingSeekState = await waitForReplayState(
+      replayWindow,
+      {
+        isPlaying: true,
+      },
+    );
+    expect(playingSeekState?.isPlaying).toBe(true);
+
+    await replayWindow.getByRole("button", { name: "Zoom in" }).click();
+    const zoomedState = await waitForReplayState(
+      replayWindow,
+      {
+        zoomPercent: 110,
+      },
+    );
+    expect(zoomedState?.zoomPercent).toBe(110);
   });
 });

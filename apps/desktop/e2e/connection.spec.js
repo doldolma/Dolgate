@@ -2,11 +2,13 @@ const { test, expect } = require("@playwright/test");
 const {
   createFakeAuthSessionJson,
   createSshHostWithPassword,
+  drainCleanups,
   launchDesktop,
   mkdtemp,
   os,
   path,
-  rm,
+  removeFixtureDir,
+  trackCleanup,
   startFakeSshd,
   waitForCapturedTerminalOutput,
   writeDesktopState,
@@ -22,6 +24,9 @@ const {
  * 가짜 sshd 를 띄워 그 조건을 만든다(services/ssh-core/internal/sshconn/testfixture).
  */
 test.describe("연결 화면", () => {
+  // 정리는 훅에서 한다 — 본문 finally 에서 하면 정리 실패가 테스트 결과를 덮는다(helpers 참고).
+  test.afterEach(drainCleanups);
+
   const trustCardName = "새 호스트 키를 확인해 주세요.";
 
   async function boot() {
@@ -36,18 +41,17 @@ test.describe("연결 화면", () => {
       DOLSSH_E2E_DISABLE_SYNC: "1",
       DOLSSH_E2E_CAPTURE_TERMINAL: "1",
     });
+    // 여기서 등록해 두면 아래에서 무엇이 실패해도 앱과 데이터 디렉터리가 남지 않는다.
+    trackCleanup(async () => {
+      await app.close();
+      await removeFixtureDir(userDataDir);
+    });
     const page = await app.firstWindow();
     // 부팅이 끝나 호스트 화면이 서야 그 뒤 조작이 먹는다.
     await expect(page.getByRole("button", { name: "New Host" })).toBeVisible({
       timeout: 30_000,
     });
-    return {
-      page,
-      async stop() {
-        await app.close();
-        await rm(userDataDir, { recursive: true, force: true });
-      },
-    };
+    return page;
   }
 
   function hostCard(page, label) {
@@ -65,26 +69,19 @@ test.describe("연결 화면", () => {
    */
   test("처음 보는 호스트의 키를 탭 안에서 묻고, 수락하면 그대로 붙는다", async () => {
     const sshd = await startFakeSshd({ user: "ubuntu", password: "pw" });
-    const booted = await boot();
+    const page = await boot();
+    await createSshHostWithPassword(page, sshd);
+    await hostCard(page, "Fake SSHD").dblclick();
 
-    try {
-      const { page } = booted;
-      await createSshHostWithPassword(page, sshd);
-      await hostCard(page, "Fake SSHD").dblclick();
+    const trustCard = page.getByRole("dialog", { name: trustCardName });
+    await expect(trustCard).toBeVisible({ timeout: 30_000 });
+    // 지문을 보여 줘야 사용자가 대조할 수 있다.
+    await expect(trustCard).toContainText("SHA256:");
 
-      const trustCard = page.getByRole("dialog", { name: trustCardName });
-      await expect(trustCard).toBeVisible({ timeout: 30_000 });
-      // 지문을 보여 줘야 사용자가 대조할 수 있다.
-      await expect(trustCard).toContainText("SHA256:");
+    await trustCard.getByRole("button", { name: "저장 후 계속" }).click();
 
-      await trustCard.getByRole("button", { name: "저장 후 계속" }).click();
-
-      // 같은 연결이 이어져 셸까지 간다. 가짜 sshd 가 찍는 표식으로 확인한다.
-      await waitForCapturedTerminalOutput(page, "READY:FAKE_SSHD", 30_000);
-    } finally {
-      await booted.stop();
-      await sshd.stop();
-    }
+    // 같은 연결이 이어져 셸까지 간다. 가짜 sshd 가 찍는 표식으로 확인한다.
+    await waitForCapturedTerminalOutput(page, "READY:FAKE_SSHD", 30_000);
   });
 
   /**
@@ -96,49 +93,41 @@ test.describe("연결 화면", () => {
   test("두 탭이 동시에 물어도 화면에는 그 탭의 물음만 뜬다", async () => {
     const first = await startFakeSshd({ user: "ubuntu", password: "pw" });
     const second = await startFakeSshd({ user: "ubuntu", password: "pw" });
-    const booted = await boot();
+    const page = await boot();
+    await createSshHostWithPassword(page, first, { label: "Fake A" });
+    await createSshHostWithPassword(page, second, { label: "Fake B" });
 
-    try {
-      const { page } = booted;
-      await createSshHostWithPassword(page, first, { label: "Fake A" });
-      await createSshHostWithPassword(page, second, { label: "Fake B" });
+    await hostCard(page, "Fake A").dblclick();
+    const trustCards = page.getByRole("dialog", { name: trustCardName });
+    await expect(trustCards).toHaveCount(1, { timeout: 30_000 });
 
-      await hostCard(page, "Fake A").dblclick();
-      const trustCards = page.getByRole("dialog", { name: trustCardName });
-      await expect(trustCards).toHaveCount(1, { timeout: 30_000 });
+    // 두 번째 호스트도 연결한다. 첫 물음이 덮이거나 사라지면 안 된다.
+    //
+    // 상단 Home 탭으로 돌아간다 — 신뢰 카드는 그 판 안에 있으므로 목록을 가린다(전역 모달이
+    // 아니라는 뜻이기도 하다).
+    await page.getByRole("button", { name: "Home" }).click();
+    await hostCard(page, "Fake B").dblclick();
 
-      // 두 번째 호스트도 연결한다. 첫 물음이 덮이거나 사라지면 안 된다.
-      //
-      // 상단 Home 탭으로 돌아간다 — 신뢰 카드는 그 판 안에 있으므로 목록을 가린다(전역 모달이
-      // 아니라는 뜻이기도 하다).
-      await page.getByRole("button", { name: "Home" }).click();
-      await hostCard(page, "Fake B").dblclick();
+    // **하나만** 보인다 — 겹쳐 쌓이지 않는다. 숨은 탭의 물음은 그 판에 남아 있다.
+    await expect(trustCards).toHaveCount(1, { timeout: 30_000 });
 
-      // **하나만** 보인다 — 겹쳐 쌓이지 않는다. 숨은 탭의 물음은 그 판에 남아 있다.
-      await expect(trustCards).toHaveCount(1, { timeout: 30_000 });
+    // 이 탭의 것을 수락하면 이 탭이 진행한다.
+    await trustCards.getByRole("button", { name: "저장 후 계속" }).click();
+    await waitForCapturedTerminalOutput(page, "READY:FAKE_SSHD", 30_000);
 
-      // 이 탭의 것을 수락하면 이 탭이 진행한다.
-      await trustCards.getByRole("button", { name: "저장 후 계속" }).click();
-      await waitForCapturedTerminalOutput(page, "READY:FAKE_SSHD", 30_000);
+    // 이 탭에서는 물음이 사라졌고, 앞 탭의 것이 **이어서 뜨지 않는다.**
+    //
+    // 전역 모달이던 시절에는 하나를 답하면 곧바로 다음 것이 같은 자리에 떴다 — 사용자에게는
+    // 팝업이 끝없이 겹쳐 오는 것으로 보였다. 지금은 각자 자기 판에 있으므로 여기서는 0 이다.
+    await expect(trustCards).toHaveCount(0);
 
-      // 이 탭에서는 물음이 사라졌고, 앞 탭의 것이 **이어서 뜨지 않는다.**
-      //
-      // 전역 모달이던 시절에는 하나를 답하면 곧바로 다음 것이 같은 자리에 떴다 — 사용자에게는
-      // 팝업이 끝없이 겹쳐 오는 것으로 보였다. 지금은 각자 자기 판에 있으므로 여기서는 0 이다.
-      await expect(trustCards).toHaveCount(0);
-
-      // 앞 탭으로 옮기면 답하지 않은 물음이 **그대로** 기다리고 있다. 이것이 "각자 자기 판에서
-      // 기다린다" 의 나머지 절반이다 — 지워지지도, 남의 탭으로 옮겨 가지도 않는다.
-      await page
-        .getByRole("button", { name: "Fake A 세션으로 이동" })
-        .click();
-      await expect(trustCards).toHaveCount(1, { timeout: 30_000 });
-      await expect(trustCards).toContainText(`${first.host}:${first.port}`);
-    } finally {
-      await booted.stop();
-      await first.stop();
-      await second.stop();
-    }
+    // 앞 탭으로 옮기면 답하지 않은 물음이 **그대로** 기다리고 있다. 이것이 "각자 자기 판에서
+    // 기다린다" 의 나머지 절반이다 — 지워지지도, 남의 탭으로 옮겨 가지도 않는다.
+    await page
+      .getByRole("button", { name: "Fake A 세션으로 이동" })
+      .click();
+    await expect(trustCards).toHaveCount(1, { timeout: 30_000 });
+    await expect(trustCards).toContainText(`${first.host}:${first.port}`);
   });
 
   /**
@@ -156,39 +145,31 @@ test.describe("연결 화면", () => {
       relay: true,
     });
     const target = await startFakeSshd({ user: "ubuntu", password: "pw" });
-    const booted = await boot();
+    const page = await boot();
+    const jump = await createSshHostWithPassword(page, bastion, {
+      label: "Bastion",
+    });
+    expect(jump.id, "점프 호스트 id 를 받아야 체인을 엮을 수 있다").toBeTruthy();
+    await createSshHostWithPassword(page, target, {
+      label: "Behind Bastion",
+      jumpHostIds: [jump.id],
+    });
 
-    try {
-      const { page } = booted;
-      const jump = await createSshHostWithPassword(page, bastion, {
-        label: "Bastion",
-      });
-      expect(jump.id, "점프 호스트 id 를 받아야 체인을 엮을 수 있다").toBeTruthy();
-      await createSshHostWithPassword(page, target, {
-        label: "Behind Bastion",
-        jumpHostIds: [jump.id],
-      });
+    await hostCard(page, "Behind Bastion").dblclick();
 
-      await hostCard(page, "Behind Bastion").dblclick();
+    const trustCard = page.getByRole("dialog", { name: trustCardName });
 
-      const trustCard = page.getByRole("dialog", { name: trustCardName });
+    // 첫 물음은 **베스천**의 키다 — 소켓을 먼저 여는 홉이 그쪽이다.
+    await expect(trustCard).toBeVisible({ timeout: 30_000 });
+    await expect(trustCard).toContainText(`${bastion.host}:${bastion.port}`);
+    await trustCard.getByRole("button", { name: "저장 후 계속" }).click();
 
-      // 첫 물음은 **베스천**의 키다 — 소켓을 먼저 여는 홉이 그쪽이다.
-      await expect(trustCard).toBeVisible({ timeout: 30_000 });
-      await expect(trustCard).toContainText(`${bastion.host}:${bastion.port}`);
-      await trustCard.getByRole("button", { name: "저장 후 계속" }).click();
+    // 그다음이 최종 대상의 키다. 같은 연결 안에서 이어진다.
+    await expect(trustCard).toBeVisible({ timeout: 30_000 });
+    await expect(trustCard).toContainText(`${target.host}:${target.port}`);
+    await trustCard.getByRole("button", { name: "저장 후 계속" }).click();
 
-      // 그다음이 최종 대상의 키다. 같은 연결 안에서 이어진다.
-      await expect(trustCard).toBeVisible({ timeout: 30_000 });
-      await expect(trustCard).toContainText(`${target.host}:${target.port}`);
-      await trustCard.getByRole("button", { name: "저장 후 계속" }).click();
-
-      await waitForCapturedTerminalOutput(page, "READY:FAKE_SSHD", 30_000);
-    } finally {
-      await booted.stop();
-      await target.stop();
-      await bastion.stop();
-    }
+    await waitForCapturedTerminalOutput(page, "READY:FAKE_SSHD", 30_000);
   });
 
   /**
@@ -203,32 +184,25 @@ test.describe("연결 화면", () => {
       password: "pw",
       otp: "424242",
     });
-    const booted = await boot();
+    const page = await boot();
+    await createSshHostWithPassword(page, sshd);
+    await hostCard(page, "Fake SSHD").dblclick();
 
-    try {
-      const { page } = booted;
-      await createSshHostWithPassword(page, sshd);
-      await hostCard(page, "Fake SSHD").dblclick();
+    // 키를 먼저 신뢰한다(신뢰가 인증보다 앞이다).
+    const trustCard = page.getByRole("dialog", { name: trustCardName });
+    await expect(trustCard).toBeVisible({ timeout: 30_000 });
+    await trustCard.getByRole("button", { name: "저장 후 계속" }).click();
 
-      // 키를 먼저 신뢰한다(신뢰가 인증보다 앞이다).
-      const trustCard = page.getByRole("dialog", { name: trustCardName });
-      await expect(trustCard).toBeVisible({ timeout: 30_000 });
-      await trustCard.getByRole("button", { name: "저장 후 계속" }).click();
+    // 인증 코드 칸만 뜬다 — 비밀번호는 저장된 값으로 코어가 답했다.
+    const codeField = page.getByLabel("Verification code:");
+    await expect(codeField).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByLabel("Password:")).toHaveCount(0);
 
-      // 인증 코드 칸만 뜬다 — 비밀번호는 저장된 값으로 코어가 답했다.
-      const codeField = page.getByLabel("Verification code:");
-      await expect(codeField).toBeVisible({ timeout: 30_000 });
-      await expect(page.getByLabel("Password:")).toHaveCount(0);
+    // 덮인 것이 없다는 뜻으로, 실제로 눌러 타이핑한다.
+    await codeField.fill("424242");
+    await page.getByRole("button", { name: "응답 보내기" }).click();
 
-      // 덮인 것이 없다는 뜻으로, 실제로 눌러 타이핑한다.
-      await codeField.fill("424242");
-      await page.getByRole("button", { name: "응답 보내기" }).click();
-
-      await waitForCapturedTerminalOutput(page, "READY:FAKE_SSHD", 30_000);
-    } finally {
-      await booted.stop();
-      await sshd.stop();
-    }
+    await waitForCapturedTerminalOutput(page, "READY:FAKE_SSHD", 30_000);
   });
   /**
    * 포워딩도 **무엇을 거쳐 붙는지** 말해야 한다.
@@ -247,59 +221,51 @@ test.describe("연결 화면", () => {
       relay: true,
     });
     const target = await startFakeSshd({ user: "ubuntu", password: "pw" });
-    const booted = await boot();
+    const page = await boot();
+    const jump = await createSshHostWithPassword(page, bastion, {
+      label: "PF Bastion",
+    });
+    const host = await createSshHostWithPassword(page, target, {
+      label: "PF Target",
+      jumpHostIds: [jump.id],
+    });
 
-    try {
-      const { page } = booted;
-      const jump = await createSshHostWithPassword(page, bastion, {
-        label: "PF Bastion",
+    // 규칙도 앱의 실제 경로로 만든다 — 호스트 id 는 실행 중에 정해진다.
+    await page.evaluate(async (hostId) => {
+      await window.dolssh.portForwards.create({
+        label: "E2E Forward",
+        hostId,
+        transport: "ssh",
+        mode: "local",
+        bindAddress: "127.0.0.1",
+        // 0 이면 OS 가 빈 포트를 고른다 — 고정 포트는 다른 실행과 부딪친다.
+        bindPort: 0,
+        targetHost: "127.0.0.1",
+        targetPort: 9,
       });
-      const host = await createSshHostWithPassword(page, target, {
-        label: "PF Target",
-        jumpHostIds: [jump.id],
-      });
+    }, host.id);
+    await page.reload();
 
-      // 규칙도 앱의 실제 경로로 만든다 — 호스트 id 는 실행 중에 정해진다.
-      await page.evaluate(async (hostId) => {
-        await window.dolssh.portForwards.create({
-          label: "E2E Forward",
-          hostId,
-          transport: "ssh",
-          mode: "local",
-          bindAddress: "127.0.0.1",
-          // 0 이면 OS 가 빈 포트를 고른다 — 고정 포트는 다른 실행과 부딪친다.
-          bindPort: 0,
-          targetHost: "127.0.0.1",
-          targetPort: 9,
-        });
-      }, host.id);
-      await page.reload();
+    await page.getByRole("button", { name: "Port Forwarding" }).click();
+    await page
+      .getByRole("button", { name: "Start", exact: true })
+      .first()
+      .click();
 
-      await page.getByRole("button", { name: "Port Forwarding" }).click();
-      await page
-        .getByRole("button", { name: "Start", exact: true })
-        .first()
-        .click();
+    // 포워딩에는 탭이 없으므로 신뢰는 전역 대화상자가 받는다. 경유 호스트의 키가 먼저 온다.
+    const trustDialog = page.getByRole("dialog", { name: trustCardName });
+    await expect(trustDialog).toBeVisible({ timeout: 30_000 });
+    await expect(trustDialog).toContainText(`${bastion.host}:${bastion.port}`);
+    await trustDialog.getByRole("button", { name: "저장 후 계속" }).click();
 
-      // 포워딩에는 탭이 없으므로 신뢰는 전역 대화상자가 받는다. 경유 호스트의 키가 먼저 온다.
-      const trustDialog = page.getByRole("dialog", { name: trustCardName });
-      await expect(trustDialog).toBeVisible({ timeout: 30_000 });
-      await expect(trustDialog).toContainText(`${bastion.host}:${bastion.port}`);
-      await trustDialog.getByRole("button", { name: "저장 후 계속" }).click();
+    // 그다음이 최종 대상의 키다.
+    await expect(trustDialog).toBeVisible({ timeout: 30_000 });
+    await expect(trustDialog).toContainText(`${target.host}:${target.port}`);
+    await trustDialog.getByRole("button", { name: "저장 후 계속" }).click();
 
-      // 그다음이 최종 대상의 키다.
-      await expect(trustDialog).toBeVisible({ timeout: 30_000 });
-      await expect(trustDialog).toContainText(`${target.host}:${target.port}`);
-      await trustDialog.getByRole("button", { name: "저장 후 계속" }).click();
-
-      // 규칙이 실제로 떴다 — `Starting` 에 멈추지 않는다.
-      await expect(page.getByText("Running").first()).toBeVisible({
-        timeout: 30_000,
-      });
-    } finally {
-      await booted.stop();
-      await target.stop();
-      await bastion.stop();
-    }
+    // 규칙이 실제로 떴다 — `Starting` 에 멈추지 않는다.
+    await expect(page.getByText("Running").first()).toBeVisible({
+      timeout: 30_000,
+    });
   });
 });
