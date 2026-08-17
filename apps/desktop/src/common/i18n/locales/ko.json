@@ -738,7 +738,8 @@
       "newTmuxWindowTitle": "새 tmux 창 (new-window)",
       "closeThisWindow": "{{title}} 이 창 닫기",
       "close": "{{title}} 닫기",
-      "closeThisWindowTooltip": "이 창 닫기 — 이 tmux window 만 닫습니다. 세션 전체는 하단 바의 Detach/Kill 을 쓰세요."
+      "closeThisWindowTooltip": "이 창 닫기 — 이 tmux window 만 닫습니다. 세션 전체는 하단 바의 Detach/Kill 을 쓰세요.",
+      "selectSession": "{{title}} 세션으로 이동"
     }
   },
   "aws": {

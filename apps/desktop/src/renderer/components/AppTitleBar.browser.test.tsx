@@ -268,7 +268,7 @@ describe('AppTitleBar update popover', () => {
 
     // 세션 탭 pill 자체는 창 드래그 대상이 아니어야 한다(클릭·재정렬 유지).
     const pill = screen
-      .getByRole('button', { name: 'mqtt/evo-parser' })
+      .getByRole('button', { name: 'mqtt/evo-parser 세션으로 이동' })
       .closest('.group');
     expect(pill?.className).toContain('[-webkit-app-region:no-drag]');
   });
@@ -306,7 +306,7 @@ describe('AppTitleBar update popover', () => {
     const tabStrip = container.querySelector('[data-titlebar-tab-strip="true"]');
     const homeButton = screen.getByRole('button', { name: 'Home' });
     const sftpButton = screen.getByRole('button', { name: 'SFTP' });
-    const sessionButton = screen.getByRole('button', { name: 'mqtt/evo-parser' });
+    const sessionButton = screen.getByRole('button', { name: 'mqtt/evo-parser 세션으로 이동' });
 
     expect(fixedTabs).toContainElement(homeButton);
     expect(fixedTabs).toContainElement(sftpButton);
@@ -365,7 +365,7 @@ describe('AppTitleBar update popover', () => {
       />,
     );
 
-    const sessionButton = screen.getByRole('button', { name: 'mqtt/evo-parser' });
+    const sessionButton = screen.getByRole('button', { name: 'mqtt/evo-parser 세션으로 이동' });
     const closeButton = screen.getByRole('button', { name: 'mqtt/evo-parser 세션 종료' });
     const pill = sessionButton.closest('.group');
 
@@ -390,7 +390,7 @@ describe('AppTitleBar update popover', () => {
       tabStrip: [{ kind: 'session', sessionId: tab.sessionId }],
     });
 
-    const sessionButton = screen.getByRole('button', { name: 'mqtt/evo-parser' });
+    const sessionButton = screen.getByRole('button', { name: 'mqtt/evo-parser 세션으로 이동' });
     const pill = sessionButton.closest('.group');
     expect(pill).toBeTruthy();
 
@@ -469,7 +469,7 @@ describe('AppTitleBar update popover', () => {
       />,
     );
 
-    const sessionButton = screen.getByRole('button', { name: 'mqtt/evo-parser' });
+    const sessionButton = screen.getByRole('button', { name: 'mqtt/evo-parser 세션으로 이동' });
     const pill = sessionButton.closest('.group');
 
     expect(pill).toBeTruthy();

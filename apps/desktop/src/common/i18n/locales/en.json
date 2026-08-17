@@ -738,7 +738,8 @@
       "newTmuxWindowTitle": "New tmux window (new-window)",
       "closeThisWindow": "Close this {{title}} window",
       "close": "Close {{title}}",
-      "closeThisWindowTooltip": "Close this window — closes only this tmux window. Use Detach/Kill in the bottom bar for the whole session."
+      "closeThisWindowTooltip": "Close this window — closes only this tmux window. Use Detach/Kill in the bottom bar for the whole session.",
+      "selectSession": "Go to the {{title}} session"
     }
   },
   "aws": {

@@ -1879,6 +1879,10 @@ export function AppTitleBar({
                     'min-w-[8.5rem]',
                     getTitlebarDynamicTabButtonClass(item.active),
                   )}
+                  // 제목은 잘려서 보이고(truncate) 상태 점·지연 시간이 같은 버튼 안에 섞여 있다.
+                  // 이름을 따로 주지 않으면 화면 낭독이 "● Prod 42ms" 처럼 읽고, 자동화도 이 탭을
+                  // 특정할 수 없다(닫기 버튼에만 이름이 있었다).
+                  aria-label={translate('titleBar.tab.selectSession', { title: item.title })}
                   onClick={() => onSelectSession(item.sessionId)}
                 >
                   <TabStatusDot state={item.dotState} />
