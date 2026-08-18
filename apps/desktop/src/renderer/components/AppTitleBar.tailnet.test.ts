@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { TailnetPeer } from '@shared';
+import type { HostRecord } from '@shared';
 import {
+  collectTailnetIdsInUse,
   findTailnetPeer,
   findTailnetSubnetRouter,
   shortenRouterName,
@@ -126,5 +128,48 @@ describe('shortenRouterName', () => {
   it('never exceeds the budget', () => {
     expect(shortenRouterName('a'.repeat(80)).length).toBe(14);
     expect(shortenRouterName('a'.repeat(80), 5).length).toBe(5);
+  });
+});
+
+// tailnet 상태 폴링 대상은 "화면에 떠 있는 것들이 쓰는 tailnet" 이다. 여기서 빠지면
+// 호출부가 statuses 를 비워 hover 가 "연결 안 됨" 으로 보인다 — 연결은 멀쩡한데 표시만 깨진다.
+describe('collectTailnetIdsInUse', () => {
+  const sshHost = (id: string, tailnetId?: string): HostRecord =>
+    ({
+      id,
+      kind: 'ssh',
+      label: id,
+      hostname: `${id}.example.ts.net`,
+      port: 22,
+      username: 'ubuntu',
+      ...(tailnetId ? { tailnetId } : {}),
+    }) as unknown as HostRecord;
+
+  const hosts = [sshHost('host-1', 'tn-1'), sshHost('host-2', 'tn-2'), sshHost('host-3')];
+
+  it('collects the tailnet of an open tab', () => {
+    const ids = collectTailnetIdsInUse([{ hostId: 'host-1' }], [], hosts);
+    expect([...ids]).toEqual(['tn-1']);
+  });
+
+  // control mode 로 붙으면 원래 SSH 탭이 자리를 내주고 tmux 그룹이 된다. 그룹만 남았을 때
+  // 목록이 비면 상태가 지워져 "연결 안 됨" 이 된다 — 이 케이스가 실제 증상이었다.
+  it('collects the tailnet of a tmux group even when no tab remains', () => {
+    const ids = collectTailnetIdsInUse([], [{ hostId: 'host-1' }], hosts);
+    expect([...ids]).toEqual(['tn-1']);
+  });
+
+  it('merges tabs and tmux groups without duplicates', () => {
+    const ids = collectTailnetIdsInUse(
+      [{ hostId: 'host-1' }, { hostId: 'host-2' }],
+      [{ hostId: 'host-1' }],
+      hosts,
+    );
+    expect([...ids].sort()).toEqual(['tn-1', 'tn-2']);
+  });
+
+  it('ignores hosts that do not use a tailnet', () => {
+    const ids = collectTailnetIdsInUse([{ hostId: 'host-3' }], [{ hostId: null }], hosts);
+    expect(ids.size).toBe(0);
   });
 });

@@ -383,21 +383,48 @@ export function tailnetIdOf(host: HostRecord | undefined | null): string {
   return '';
 }
 
-function useTailnetPathLookup(tabs: TerminalTab[], hosts: HostRecord[]): TailnetPathLookup {
-  const tailnetIdsInUse = useMemo(() => {
-    const ids = new Set<string>();
-    for (const tab of tabs) {
-      const host = hosts.find((candidate) => candidate.id === tab.hostId);
-      // **SSH 만 보면 안 된다.** RDP·VNC 도 tailnet 을 경유해 붙는다(ipc/rdp·ipc/vnc 의
-      // openForward). 여기서 빼면 그 세션의 상태를 아예 조회하지 않아 hover 에 경로가 안 뜬다 —
-      // "느린데 릴레이 경유인지 직결인지" 를 그 줄에서만 알 수 있다.
-      const tailnetId = tailnetIdOf(host);
-      if (tailnetId) {
-        ids.add(tailnetId);
-      }
+/**
+ * 상태를 폴링해야 하는 tailnet 목록. 화면에 떠 있는 것들이 실제로 쓰는 tailnet 만 모은다.
+ *
+ * **SSH 만 보면 안 된다.** RDP·VNC 도 tailnet 을 경유해 붙는다(ipc/rdp·ipc/vnc 의
+ * openForward). 빼면 그 세션의 상태를 아예 조회하지 않아 hover 에 경로가 안 뜬다 —
+ * "느린데 릴레이 경유인지 직결인지" 를 그 줄에서만 알 수 있다.
+ *
+ * **tmux 그룹도 봐야 한다.** control mode 로 붙으면 원래 SSH 탭이 자리를 내주고 그룹으로
+ * 바뀌어 tabs 에서 사라진다. 빠뜨리면 tailnet 을 쓰는 탭이 하나도 없는 것으로 계산돼
+ * 호출부가 statuses 를 통째로 비우고, 그룹 hover 는 라벨만 남은 채 "연결 안 됨" 으로
+ * 보인다(연결은 멀쩡한데 표시만 깨진다).
+ */
+export function collectTailnetIdsInUse(
+  tabs: Pick<TerminalTab, 'hostId'>[],
+  tmuxGroups: Pick<TmuxSessionGroup, 'hostId'>[],
+  hosts: HostRecord[],
+): Set<string> {
+  const ids = new Set<string>();
+  const addFor = (hostId: string | null | undefined) => {
+    const tailnetId = tailnetIdOf(hosts.find((candidate) => candidate.id === hostId));
+    if (tailnetId) {
+      ids.add(tailnetId);
     }
-    return ids;
-  }, [tabs, hosts]);
+  };
+  for (const tab of tabs) {
+    addFor(tab.hostId);
+  }
+  for (const group of tmuxGroups) {
+    addFor(group.hostId);
+  }
+  return ids;
+}
+
+function useTailnetPathLookup(
+  tabs: TerminalTab[],
+  tmuxGroups: TmuxSessionGroup[],
+  hosts: HostRecord[],
+): TailnetPathLookup {
+  const tailnetIdsInUse = useMemo(
+    () => collectTailnetIdsInUse(tabs, tmuxGroups, hosts),
+    [tabs, tmuxGroups, hosts],
+  );
   // Set 은 매번 새 객체라 의존성으로 쓰면 효과가 매 렌더 재실행된다. 내용으로 비교한다.
   const tailnetKey = useMemo(() => [...tailnetIdsInUse].sort().join(','), [tailnetIdsInUse]);
 
@@ -1586,7 +1613,7 @@ export function AppTitleBar({
           (item) => getTabKey(itemToTarget(item)) === hoveredTab.key,
         ) ?? null
       : null;
-  const tailnetPath = useTailnetPathLookup(tabs, hosts);
+  const tailnetPath = useTailnetPathLookup(tabs, tmuxGroups, hosts);
   const hoverInfo = hoveredItem
     ? buildTabHoverInfo(hoveredItem, tabs, hosts, tmuxGroups, workspaces, tailnetPath)
     : null;
