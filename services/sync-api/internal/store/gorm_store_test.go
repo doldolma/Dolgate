@@ -1235,3 +1235,92 @@ func TestGormStoreRejectsMalformedKinds(t *testing.T) {
 		}
 	}
 }
+
+// users 행의 생성·수정 시각. GORM 이 채우지만, **채워지는 경로가 정해져 있다** — Create 와
+// Update/Updates 만이고 UpdateColumn 계열은 일부러 건너뛴다(훅·자동시각 없음이 그 API 의 목적이다).
+//
+// 이 테스트가 지키는 것: 계정 생성에서 둘 다 채워지고, 그 뒤 users 를 바꾸는 경로들이 updated_at 을
+// 실제로 움직인다는 것. 갱신을 UpdateColumn 으로 되돌리면 updated_at 이 생성 시각에 멈춘 채
+// 거짓말을 하게 되고, 이 테스트가 그것을 잡는다.
+func TestGormStoreUserTimestamps(t *testing.T) {
+	for _, tc := range storeTestCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store := tc.open(t)
+			ctx := context.Background()
+
+			user, err := store.CreateUser(ctx, "stamps@example.com", "hash")
+			if err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+
+			readStamps := func() (time.Time, time.Time) {
+				t.Helper()
+				var row userRow
+				if err := store.db.Where("id = ?", user.ID).Take(&row).Error; err != nil {
+					t.Fatalf("행 조회: %v", err)
+				}
+				if row.CreatedAt == nil || row.UpdatedAt == nil {
+					t.Fatalf("생성·수정 시각이 비어 있다: created=%v updated=%v", row.CreatedAt, row.UpdatedAt)
+				}
+				return *row.CreatedAt, *row.UpdatedAt
+			}
+
+			created, updated := readStamps()
+			if created.IsZero() || updated.IsZero() {
+				t.Fatalf("생성 시각이 0 이다: created=%v updated=%v", created, updated)
+			}
+
+			// 시각 해상도(밀리초)를 넘겨야 앞뒤를 구분할 수 있다.
+			for _, step := range []struct {
+				name string
+				run  func() error
+			}{
+				{"자격증명 능력 하한 올리기", func() error { return store.RaiseSyncDataFloor(ctx, user.ID, 1) }},
+				// 실제 push 경로다. UpsertSyncRecords 는 레코드만 쓰고 revision 을 올리지 않는다 —
+				// users 행을 건드리는 것은 ApplyPushRecords 의 bump 다. push 는 볼트 fence 를
+				// 지나야 하므로 볼트를 먼저 만든다(v1).
+				{"동기화 push", func() error {
+					vault, err := store.GetOrCreateUserVaultKey(ctx, user.ID)
+					if err != nil {
+						return err
+					}
+					_, err = store.ApplyPushRecords(ctx, user.ID, syncmodel.Payload{
+						syncmodel.KindHosts: []syncmodel.Record{
+							{
+								ID:               "h1",
+								EncryptedPayload: "enc",
+								UpdatedAt:        time.Now().UTC().Format(time.RFC3339Nano),
+							},
+						},
+					}, VaultPushFence{Epoch: vault.Epoch, Version: 1})
+					return err
+				}},
+				{"비밀번호 변경", func() error {
+					if err := store.SaveRefreshToken(ctx, RefreshToken{
+						UserID:     user.ID,
+						TokenHash:  "keep-hash",
+						ExpiresAt:  time.Now().Add(time.Hour),
+						LastUsedAt: time.Now(),
+					}); err != nil {
+						return err
+					}
+					return store.UpdateUserPassword(ctx, user.ID, "hash", "hash2", "keep-hash")
+				}},
+			} {
+				time.Sleep(5 * time.Millisecond)
+				before := updated
+				if err := step.run(); err != nil {
+					t.Fatalf("%s: %v", step.name, err)
+				}
+				var nextCreated time.Time
+				nextCreated, updated = readStamps()
+				if !updated.After(before) {
+					t.Fatalf("%s 뒤에도 updated_at 이 그대로다: %v → %v", step.name, before, updated)
+				}
+				if !nextCreated.Equal(created) {
+					t.Fatalf("%s 가 created_at 을 바꿨다: %v → %v", step.name, created, nextCreated)
+				}
+			}
+		})
+	}
+}

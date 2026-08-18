@@ -56,6 +56,19 @@ type userRow struct {
 	// 받아 max 로만 갱신한다(단조). 내려가지 않는다: 그 종류를 다 지웠는지 서버가 확인할 방법이
 	// 없고, 잘못 내리면 옛 클라이언트가 다시 데이터를 망칠 수 있다.
 	SyncDataFloor int `gorm:"column:sync_data_floor;not null;default:0"`
+	// 계정이 만들어진 시각과 이 행이 마지막으로 바뀐 시각. GORM 이 이름으로 알아보고 채운다.
+	//
+	// **nullable 이다.** 이 컬럼이 생기기 전에 만들어진 계정은 진짜 생성 시각을 알 수 없다.
+	// NOT NULL 로 두면 AutoMigrate 가 기존 행에 무언가를 채워야 하는데(SQLite 는 아예 거부한다),
+	// 마이그레이션 시각을 넣으면 "그때 가입한 계정" 이라는 거짓이 사실처럼 남는다. 모른다는 것은
+	// NULL 로 둔다.
+	//
+	// `updated_at` 은 **행이 바뀔 때마다** 움직여야 의미가 있다. 이 파일의 users 갱신은
+	// `Update`/`Updates` 를 쓴다 — `UpdateColumn` 계열은 GORM 이 자동 시각을 건너뛰므로 그것으로
+	// 바꾸면 이 컬럼이 생성 시각에 멈춘 채 거짓말을 한다(예외는 migrate() 의 보정 한 곳이고,
+	// 그 이유는 그쪽에 적어 두었다).
+	CreatedAt *time.Time `gorm:"column:created_at"`
+	UpdatedAt *time.Time `gorm:"column:updated_at"`
 }
 
 func (userRow) TableName() string {
@@ -321,6 +334,9 @@ func (s *GormStore) migrate() error {
 	}
 	// 현재 v2 행 또는 reset 이력(vault_epoch > 0)이 있는 계정은 E2EE floor를 복원한다.
 	// 이 작업은 멱등이며, 이후에는 v2 생성/reset 트랜잭션이 floor를 직접 유지한다.
+	//
+	// **여기만 UpdateColumn 을 유지한다.** 스키마 보정은 계정에 일어난 변경이 아니라 우리 쪽
+	// 사정이다 — updated_at 을 움직이면 서버를 올릴 때마다 모든 계정이 "방금 수정됨" 이 된다.
 	return s.db.Model(&userRow{}).
 		Where("vault_epoch > ? OR EXISTS (SELECT 1 FROM user_vault_keys WHERE user_vault_keys.user_id = users.id AND user_vault_keys.version >= ?)", 0, 2).
 		UpdateColumn("vault_version_floor", 2).Error
@@ -428,7 +444,7 @@ func (s *GormStore) UpdateUserPassword(
 
 		if err := tx.Model(&userRow{}).
 			Where("id = ?", userID).
-			UpdateColumn("password_hash", passwordHash).Error; err != nil {
+			Update("password_hash", passwordHash).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("user_id = ? AND token_hash <> ?", userID, keepRefreshTokenHash).
@@ -1020,7 +1036,7 @@ func finalizeVaultCreateTx(tx *gorm.DB, userID string, row userVaultKeyRow, out 
 	}
 	if err := tx.Model(&userRow{}).
 		Where("id = ?", userID).
-		UpdateColumns(map[string]any{
+		Updates(map[string]any{
 			"vault_epoch":         gorm.Expr("vault_epoch + 1"),
 			"vault_version_floor": 2,
 		}).Error; err != nil {
@@ -1168,7 +1184,7 @@ func (s *GormStore) ResetUserVault(ctx context.Context, userID string, expectedE
 		// epoch 을 올려 옛 DEK 세대의 push 가 재설정 전의 창에서도 fence 에 걸리게 한다.
 		if err := tx.Model(&userRow{}).
 			Where("id = ?", userID).
-			UpdateColumns(map[string]any{
+			Updates(map[string]any{
 				"sync_revision":       gorm.Expr("sync_revision + 1"),
 				"vault_epoch":         gorm.Expr("vault_epoch + 1"),
 				"vault_version_floor": 2,
@@ -1308,7 +1324,7 @@ func (s *GormStore) RaiseSyncDataFloor(ctx context.Context, userID string, floor
 	}
 	return s.db.WithContext(ctx).Model(&userRow{}).
 		Where("id = ? AND sync_data_floor < ?", userID, floor).
-		UpdateColumn("sync_data_floor", floor).Error
+		Update("sync_data_floor", floor).Error
 }
 
 // bumpSyncRevisionTx 는 주어진 트랜잭션에서 원자적 UPDATE(sync_revision = sync_revision + 1)
@@ -1317,7 +1333,7 @@ func (s *GormStore) RaiseSyncDataFloor(ctx context.Context, userID string, floor
 func bumpSyncRevisionTx(tx *gorm.DB, userID string, out *int64) error {
 	if err := tx.Model(&userRow{}).
 		Where("id = ?", userID).
-		UpdateColumn("sync_revision", gorm.Expr("sync_revision + 1")).Error; err != nil {
+		Update("sync_revision", gorm.Expr("sync_revision + 1")).Error; err != nil {
 		return err
 	}
 	var row userRow
@@ -1461,7 +1477,7 @@ func (s *GormStore) ApplyPushRecords(ctx context.Context, userID string, payload
 		}
 		result := tx.Model(&userRow{}).
 			Where("id = ?", userID).
-			UpdateColumn("sync_revision", gorm.Expr("sync_revision + 1"))
+			Update("sync_revision", gorm.Expr("sync_revision + 1"))
 		if result.Error != nil {
 			return result.Error
 		}
