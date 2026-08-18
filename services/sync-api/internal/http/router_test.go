@@ -297,6 +297,23 @@ func TestAuthRefreshAndSyncFlow(t *testing.T) {
 	if len(syncResponse[syncmodel.KindGroups]) != 1 || len(syncResponse[syncmodel.KindHosts]) != 1 || len(syncResponse[syncmodel.KindSecrets]) != 1 || len(syncResponse[syncmodel.KindPreferences]) != 1 {
 		t.Fatalf("unexpected sync response: %#v", syncResponse)
 	}
+	// 안 올린 kind 도 빈 배열로 응답에 있어야 한다. 이미 배포된 클라이언트는 없는 키를
+	// 그대로 읽어 던진다(모바일 1.9.x) — 그 앱들이 붙어 있는 한 이 모양을 유지한다.
+	for _, kind := range []syncmodel.Kind{
+		syncmodel.KindKnownHosts,
+		syncmodel.KindPortForwards,
+		syncmodel.KindDNSOverrides,
+		syncmodel.KindAWSProfiles,
+		syncmodel.KindSnippets,
+	} {
+		records, ok := syncResponse[kind]
+		if !ok || records == nil {
+			t.Fatalf("expected %s to be an empty array, got %s", kind, getSyncRecorder.Body.String())
+		}
+		if len(records) != 0 {
+			t.Fatalf("expected %s to be empty, got %#v", kind, records)
+		}
+	}
 
 	refreshBody := bytes.NewBufferString(`{"refreshToken":"` + signupResponse.Tokens.RefreshToken + `"}`)
 	refreshRequest := httptest.NewRequest(http.MethodPost, "/auth/refresh", refreshBody)

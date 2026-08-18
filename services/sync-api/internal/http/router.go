@@ -1642,7 +1642,9 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 
-		ctx.JSON(http.StatusOK, payload)
+		// 빈 kind 는 맵에 키가 없다. 이미 배포된 클라이언트를 위해 응답에서만 옛 모양
+		// (모든 레거시 kind 가 빈 배열로라도 존재)을 유지한다 — WithLegacyWireKinds 주석 참고.
+		ctx.JSON(http.StatusOK, payload.WithLegacyWireKinds())
 	})
 	syncGroup.POST("", func(ctx *gin.Context) {
 		userID := ctx.GetString("userId")

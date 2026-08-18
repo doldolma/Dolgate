@@ -8,8 +8,10 @@ import { APP_VERSION } from '../src/lib/app-metadata';
 import {
   buildBrowserLoginUrl,
   changeRemoteAccountPassword,
+  decodeAwsProfiles,
   deriveSecretMetadata,
   fetchExchangeSession,
+  fetchSyncSnapshot,
   getOrCreateClientInstallationId,
   refreshAuthSession,
   resetClientInstallationIdCacheForTests,
@@ -305,5 +307,64 @@ describe('deriveSecretMetadata', () => {
       domain: null,
       hasManagedPrivateKey: true,
     });
+  });
+});
+
+describe('sync snapshot payload shape', () => {
+  // 서버는 레코드가 0개인 kind 를 키째로 뺀다. 그걸 그대로 디코드에 넘기면
+  // `undefined.filter` 가 던지고, 그 예외는 복호화 실패와 구분되지 않아 사용자에게는
+  // "데이터가 손상됐다"로 보인다 — 그룹·AWS 프로필을 안 쓰는 계정이 그렇게 깨졌다.
+  it('fills in the kinds the server omits when they have no records', async () => {
+    globalThis.fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => '"7"' },
+      json: async () => ({
+        hosts: [
+          {
+            id: 'host-1',
+            encrypted_payload: 'ciphertext',
+            updated_at: '2026-08-18T00:00:00.000Z',
+          },
+        ],
+      }),
+    })) as unknown as typeof fetch;
+
+    const snapshot = await fetchSyncSnapshot(
+      'https://ssh.doldolma.com',
+      'access-token',
+    );
+
+    if (snapshot.notModified) {
+      throw new Error('expected a full snapshot');
+    }
+    expect(snapshot.payload.hosts).toHaveLength(1);
+    expect(snapshot.payload.groups).toEqual([]);
+    expect(snapshot.payload.knownHosts).toEqual([]);
+    expect(snapshot.payload.secrets).toEqual([]);
+    expect(snapshot.payload.awsProfiles).toEqual([]);
+    // 디코드가 던지지 않는 것까지 확인한다 — 사용자가 실제로 만난 지점이다.
+    expect(decodeAwsProfiles(snapshot.payload, 'a2V5')).toEqual([]);
+  });
+
+  it('keeps kinds this build does not know about', async () => {
+    globalThis.fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => '"7"' },
+      json: async () => ({ hosts: [], somethingNewer: [{ id: 'x' }] }),
+    })) as unknown as typeof fetch;
+
+    const snapshot = await fetchSyncSnapshot(
+      'https://ssh.doldolma.com',
+      'access-token',
+    );
+
+    if (snapshot.notModified) {
+      throw new Error('expected a full snapshot');
+    }
+    expect(
+      (snapshot.payload as unknown as Record<string, unknown[]>).somethingNewer,
+    ).toHaveLength(1);
   });
 });

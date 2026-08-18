@@ -910,6 +910,26 @@ export type SyncSnapshotResult =
   | { notModified: true; payload: null; etag: null }
   | { notModified: false; payload: SyncPayloadV2; etag: string | null };
 
+// 서버는 레코드가 0개인 kind 를 키째로 뺀다 — "없는 배열은 빈 배열로 다룬다" 가 응답
+// 계약이다(sync-api listAllSyncRecordsTx). 디코드 쪽에서 kind 마다 막으면 하나 빠뜨리는
+// 순간 `undefined.filter` 가 던지는데, 그 예외는 복호화 실패와 구분되지 않아 "데이터가
+// 손상됐다"로 뜬다(그룹이나 AWS 프로필을 한 번도 안 만든 계정이 그렇게 깨졌다). 그래서
+// 경계에서 한 번만 메꾼다 — 데스크톱 normalizeSyncPayload 와 같은 규칙이다.
+//
+// 모르는 kind 는 그대로 둔다. 우리가 안 읽을 뿐이고, 떨어뜨릴 이유가 없다.
+function normalizeSyncPayload(
+  payload: Partial<SyncPayloadV2> | null | undefined,
+): SyncPayloadV2 {
+  const empty = buildEmptySyncPayload();
+  const normalized: SyncPayloadV2 = { ...empty, ...(payload ?? {}) };
+  for (const kind of Object.keys(empty) as Array<keyof SyncPayloadV2>) {
+    if (!Array.isArray(normalized[kind])) {
+      normalized[kind] = [];
+    }
+  }
+  return normalized;
+}
+
 export async function fetchSyncSnapshot(
   serverUrl: string,
   accessToken: string,
@@ -933,7 +953,9 @@ export async function fetchSyncSnapshot(
   if (!response.ok) {
     throw await toApiError(response);
   }
-  const payload = (await response.json()) as SyncPayloadV2;
+  const payload = normalizeSyncPayload(
+    (await response.json()) as Partial<SyncPayloadV2>,
+  );
   return { notModified: false, payload, etag: response.headers.get('etag') };
 }
 

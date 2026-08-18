@@ -27,6 +27,45 @@ const (
 	KindSnippets     Kind = "snippets"
 )
 
+// legacyWireKinds 는 Payload 가 명명 필드 구조체였을 때 응답에 **항상** 있던 kind 다.
+// 맵으로 바꾸면서 레코드가 0개인 kind 는 키째로 사라졌는데, 그때 이미 배포돼 있던
+// 클라이언트 중에는 없는 키를 빈 배열로 다루지 않고 그대로 읽어 던지는 것이 있다
+// (모바일 1.9.x — 그 예외가 복호화 실패와 구분되지 않아 "데이터가 손상됐다"로 뜬다).
+// 서버는 고쳐서 다시 올리면 되지만 스토어에 나간 앱은 그럴 수 없으므로, 응답에서만
+// 옛 모양을 유지한다.
+//
+// **이 목록은 늘리지 않는다.** 새 kind 까지 채우기 시작하면 "서버는 kind 를 모른다"는
+// 규칙이 도로 무너진다. 여기 아홉 개는 구조체 시절의 필드 그대로이고, 그 시절 클라이언트가
+// 다 사라지면 이 셋도 통째로 지우면 된다.
+var legacyWireKinds = []Kind{
+	KindGroups,
+	KindHosts,
+	KindSecrets,
+	KindKnownHosts,
+	KindPortForwards,
+	KindDNSOverrides,
+	KindPreferences,
+	KindAWSProfiles,
+	KindSnippets,
+}
+
+// WithLegacyWireKinds 는 위 kind 들이 빠짐없이 담긴 사본을 돌려준다. 응답 직전에만 쓴다 —
+// 저장소가 읽어 온 스냅샷 자체는 "있는 것만 있는" 상태로 두어야, 서버가 kind 를 아는 척하는
+// 코드가 여기 말고 다른 데로 번지지 않는다.
+func (p Payload) WithLegacyWireKinds() Payload {
+	filled := make(Payload, len(p)+len(legacyWireKinds))
+	for kind, records := range p {
+		filled[kind] = records
+	}
+	for _, kind := range legacyWireKinds {
+		if _, ok := filled[kind]; !ok {
+			// nil 슬라이스는 JSON 에서 null 이다 — 빈 배열이어야 옛 클라이언트가 읽는다.
+			filled[kind] = []Record{}
+		}
+	}
+	return filled
+}
+
 // MaxKindLength 는 kind 이름의 상한이다. 컬럼 정의(varchar(64))와 맞춘다.
 const MaxKindLength = 64
 
