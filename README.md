@@ -2,7 +2,7 @@
 
 **English** | [한국어](./README.ko.md)
 
-Dolgate is an SSH workspace that carries the same server working environment across Windows, macOS, Linux, iOS and Android.
+Dolgate is an SSH workspace that carries the same server working environment across Windows, macOS, Linux, iOS and Android. On desktop, RDP and VNC remote desktops open in the same workspace.
 Hosts, sessions and snippets sync between devices — and you can self-host `sync-api` so your connection details and working data stay under your own control.
 
 Two things set it apart from other SSH clients: **it joins a Tailscale tailnet without installing Tailscale**, and **it talks to AWS SSM without the AWS CLI or session-manager-plugin**.
@@ -15,6 +15,7 @@ Two things set it apart from other SSH clients: **it joins a Tailscale tailnet w
 ### Highlights
 
 - **SSH workspace** — multi-session terminals, SFTP and port forwarding in one app. SSH Agent authentication, Agent Forwarding and jump hosts (bastions) are supported.
+- **RDP & VNC remote desktops** — open RDP and VNC alongside SSH sessions in the desktop app. View multiple RDP monitors together or spread them across local monitors, with direct Tailscale connections, RDP over SSM and VNC over an SSH tunnel.
 - **AWS SSM integration** — reach EC2 instances that have no public IP and no inbound ports, without installing the AWS CLI or session-manager-plugin. Supports SSH-over-SSM, SSM shell fallback, AWS SFTP, SSM port forwarding and ECS Exec.
 - **Tailscale built in** — the app itself becomes a tailnet node without installing Tailscale, and it never touches your OS network settings. Join several tailnets at once and move between them in one window, even when they are separate networks.
 - **Command blocks** — every command you run shows its exit status and duration. Copy just the output, re-run it, or jump between failed commands.
@@ -26,7 +27,7 @@ Two things set it apart from other SSH clients: **it joins a Tailscale tailnet w
 
 ## Components
 
-- **Desktop** — Windows · macOS · Linux (Electron). The main app: multi-session terminals, SFTP, port forwarding, session sharing, AWS and container work.
+- **Desktop** — Windows · macOS · Linux (Electron). The main app: multi-session terminals, RDP and VNC remote desktops, SFTP, port forwarding, session sharing, AWS and container work.
 - **Mobile** — iOS · Android (React Native). Focused on reaching remote sessions through synced hosts/groups and a session tab workspace.
 - **sync-api** — the server behind browser login, the sync store, the session share viewer and the AWS SSM broker. You can run it yourself (see [self-hosting](#self-hosting-sync-api) below).
 
@@ -56,6 +57,13 @@ For development setup, running locally and release builds, see the [build and de
 - Session recording and replay — stored locally, never synced to the server
 - OS notification on command completion — for long-running or failed commands (threshold and conditions configurable)
 - Command blocks — per-command status via shell integration, hover actions (copy output/command, re-run, AI) and a command palette (`Cmd/Ctrl+Shift+P`)
+
+**Remote desktops (desktop app)**
+
+- RDP and VNC remote desktops in the same tab workspace as SSH sessions
+- RDP multi-monitor — view monitors together or spread them across separate local displays
+- RDP audio, clipboard and local folder sharing; VNC view-only mode, image quality controls and clipboard
+- Direct Tailscale connections, RDP over SSM and VNC over an SSH tunnel
 
 **AI assistant**
 

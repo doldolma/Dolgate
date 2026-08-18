@@ -1,20 +1,22 @@
 # Dolgate Architecture
 
-Dolgate currently divides into four major runtime boundaries.
+Dolgate currently divides into six major runtime boundaries.
 
 1. The Electron-based desktop app
 2. The React Native-based mobile app
 3. Go `ssh-core`, providing SSH/SFTP/port forwarding
-4. Go `sync-api`, handling authentication, sync, the session share viewer, and the AWS SSM broker
+4. Rust `rdp-core`, providing RDP remote desktop sessions
+5. Rust `vnc-core`, providing VNC/RFB remote desktop sessions
+6. Go `sync-api`, handling authentication, sync, the session share viewer, and the AWS SSM broker
 
 Complex user flows (auth/offline, Session Share, AWS import, host export/import, Warpgate) are summarized under [Key flows](#key-flows) below.
 
 ```mermaid
 flowchart LR
   subgraph Desktop["Electron Desktop"]
-    Main["main<br/>browser login / AI egress / local storage / process management"]
+    Main["main<br/>browser login / AI egress / local storage / sidecar management"]
     Preload["preload<br/>contextBridge API"]
-    Renderer["renderer<br/>workspace UI / xterm.js / AI panel / state"]
+    Renderer["renderer<br/>workspace UI / xterm.js / remote canvases / AI panel / state"]
     Main --> Preload --> Renderer
   end
   subgraph Mobile["React Native Mobile"]
@@ -23,6 +25,8 @@ flowchart LR
     MobileApp --> MobileSSH
   end
   Main <-->|"stdio framed IPC"| CoreCmd["cmd/ssh-core<br/>wire adapter"]
+  Main <-->|"stdio framed IPC"| RdpCore["rdp-core<br/>RDP / pixels / audio"]
+  Main <-->|"stdio framed IPC"| VncCore["vnc-core<br/>RFB / pixels / cursor"]
   Main <-->|"auth / sync / share"| Sync["sync-api<br/>browser login / sync records / viewer"]
   MobileApp <-->|"auth / sync / AWS broker"| Sync
   Sync -.-> CoreLib["ssh-core/pkg/runtime<br/>embedded AWS SSM bridge"]
@@ -35,17 +39,17 @@ flowchart LR
 ## Desktop app
 
 - `main`
-  Manages browser windows, local file storage, the encrypted secret store, browser login, server sync, AI provider egress, the Go core process lifecycle, and GitHub Releases-based auto-update.
+  Manages browser windows, local file storage, the encrypted secret store, browser login, server sync, AI provider egress, the Go/Rust sidecar lifecycles, and GitHub Releases-based auto-update.
 - `preload`
   Exposes only the minimum API the renderer needs, via `contextBridge`.
 - `renderer`
-  Owns Zustand state and the xterm.js tab UI, the login gate, the host list, search interfaces, the pinned `SFTP` workspace, the AI panel, and terminal scrollback snapshots.
+  Owns Zustand state and the xterm.js/remote-canvas tab UI, the login gate, the host list, search interfaces, the pinned `SFTP` workspace, the AI panel, and terminal scrollback snapshots.
 
 Key runtime traits:
 
 - main handles login recovery at app start, `offline-authenticated` entry based on the offline lease, and session exchange for external browser login (detailed steps under [Key flows > Auth and offline](#auth-and-offline)).
 - The AI assistant's provider calls and web/URL tools run in Electron main, keeping API keys and external egress out of the renderer. The renderer owns only the terminal snapshot taken at question time and the user interface.
-- `ssh-core` is not kept running from app start; it starts lazily when an actual SSH/SFTP/port forwarding path needs it.
+- `ssh-core`, `rdp-core`, and `vnc-core` are not kept running from app start; each starts lazily when a connection needs it. RDP/VNC routes through a tailnet, SSM, or an SSH tunnel can start `ssh-core` as well to provide a session-scoped loopback forward.
 - Local file browsing is served by Electron main's file service; remote SFTP operations, file transfers, and in-app file editing (read/write) are the Go core's job.
 
 ## Mobile app
@@ -70,6 +74,15 @@ Key runtime traits:
 - SSH terminal sessions are identified by `sessionId`, SFTP endpoints by `endpointId`, and transfer jobs by `jobId`.
 - In development, desktop runs `go run ./cmd/ssh-core` on demand, and the server composes the embedded runtime directly inside the `sync-api` process.
 
+## Remote desktop cores
+
+- The Electron desktop runs `services/rdp-core` and `services/vnc-core` as independent Rust child processes. Mobile does not spawn or bind either core; remote desktop sessions are desktop-only.
+- Both sidecars use the shared `services/core-framing` 9-byte stdio framing. Control requests and lifecycle events are JSON metadata frames; screen rectangles, cursors, and RDP audio travel as binary stream frames.
+- `rdp-core` is built on IronRDP and handles the RDP handshake, CredSSP, graphics, display control, clipboard, audio, and drive redirection. Electron main verifies and pins the server certificate before allowing credentials to be sent.
+- `vnc-core` handles the RFB handshake, VNCAuth/VeNCrypt, framebuffer decoding, cursor updates, clipboard text, and desktop-size requests.
+- The sidecars make ordinary TCP connections. For an in-app tailnet, RDP over SSM, or VNC over an SSH tunnel, Electron main asks `ssh-core` to open a loopback listener and passes that endpoint to the Rust core. This keeps OS routing untouched and lets SSH trust/authentication prompts remain in the main connection UI.
+- Electron main forwards high-volume pixel/audio frames only to windows watching that session; renderer canvases paint the frames without routing them through Zustand state.
+
 ## Sync API
 
 - The server provides the `/login` browser page and auth APIs together with the encrypted sync record store.
@@ -84,6 +97,7 @@ Key runtime traits:
 ## Boundary summary
 
 - Desktop uses the `cmd/ssh-core` child process.
+- Desktop uses separate `rdp-core` and `vnc-core` child processes for remote screens; `ssh-core` supplies their private-network loopback forwards when needed.
 - Mobile binds `ssh-core/mobile` via gomobile to handle SSH inside the app process, talking to the server only at the auth/sync/AWS boundaries.
 - `sync-api` covers browser login, the encrypted sync store, session share, and the AWS SSM broker in one process.
 - `ssh-core/pkg/runtime` is the shared core runtime reused by both desktop and server. Mobile uses the `mobile` package instead of this façade, but the connection layer `internal/sshconn` is shared by all three.
@@ -125,6 +139,14 @@ flowchart TD
 - The chat panel starts collapsed; opening it enables live chat between participants.
 - When the session ends, viewer connections and chat history are cleaned up together.
 
+### Remote desktop connection
+
+1. Electron main resolves the RDP/VNC host and decrypts its credential without exposing the password to the renderer.
+2. For a tailnet, RDP over SSM, or VNC SSH tunnel, `ssh-core` opens a session-scoped loopback forward. A direct connection skips this step.
+3. `rdp-core` or `vnc-core` connects to the direct or forwarded endpoint and emits connection progress plus binary frame data.
+4. Electron main sends frames only to windows subscribed to that session, and the renderer paints them into the session canvas.
+5. Disconnecting closes both the protocol session and any loopback forward created for it.
+
 ### AWS import + AWS SFTP
 
 #### import
@@ -155,7 +177,7 @@ flowchart TD
 
 ### Host export / import
 
-- Exporting hosts or groups from the host list bundles what the connection needs (credentials, jump hosts, and so on).
+- Exporting hosts or groups from the host list bundles what the connection needs (credentials, jump hosts, the SSH host used by a VNC tunnel, and so on).
 - Choose between a passphrase-encrypted Dolgate file and a plaintext OpenSSH config. The number of hosts OpenSSH cannot express is shown upfront, and those hosts are excluded.
 
 ### Warpgate import

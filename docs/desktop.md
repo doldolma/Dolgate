@@ -1,11 +1,13 @@
 # Dolgate Desktop
 
-Dolgate Desktop is an Electron-based SSH workspace for Windows, macOS, and Linux.
-Its central role today is handling multiple sessions on one screen — with file transfer, port forwarding, session sharing, and AWS/container work in a single UI.
+Dolgate Desktop is an Electron-based SSH and remote desktop workspace for Windows, macOS, and Linux.
+Its central role today is handling terminal and remote screen sessions in one UI — together with file transfer, port forwarding, session sharing, and AWS/container work.
 
 ## Current features
 
 - Multi-session terminals with a tab-based workspace
+- RDP remote desktops with multi-monitor layouts, audio, clipboard, and local folder sharing
+- VNC remote desktops with view-only mode, image quality controls, clipboard, and SSH tunneling
 - tmux control mode integration (remote windows → tabs, panes → split workspace, detach supported)
 - mosh connections (UDP-based, resilient to switching networks and sleep/wake)
 - Command autocomplete (Fig specs + generators + paths + snippets)
@@ -23,12 +25,34 @@ Its central role today is handling multiple sessions on one screen — with file
 - Local / Remote / Dynamic port forwarding
 - Session recording and replay (stored locally, never synced to the server)
 - Session Share with a browser viewer and live chat
-- AWS EC2 import, EC2 SSH-over-SSM, SSM shell fallback, AWS SFTP, SSM port forwarding, ECS Exec shell, ECS tunneling
+- AWS EC2 import, EC2 SSH-over-SSM, Windows RDP over SSM, SSM shell fallback, AWS SFTP, SSM port forwarding, ECS Exec shell, ECS tunneling
 - Docker / Podman container monitoring, logs, metrics, shells, tunneling
-- Host export (encrypted Dolgate file · OpenSSH config), Dolgate file import
+- Host export (encrypted Dolgate file · OpenSSH config), including RDP/VNC hosts in the Dolgate format, and Dolgate file import
 - OpenSSH / Xshell / Termius import
 - Passkey (WebAuthn) login and passkey management (when enabled on the server)
 - Update distribution via GitHub Releases
+
+## RDP and VNC remote desktops
+
+RDP and VNC hosts open as full workspace tabs alongside terminal sessions. Remote desktop sessions are available in the desktop app only; they use the full workspace rather than terminal split panes so that text and controls remain readable.
+
+### RDP
+
+- **Multi-monitor**: use one display or select multiple local displays (up to the RDP protocol limit of 16). The remote monitors can stay together in the main workspace or be spread into one window per local display, then collapsed back into the main window.
+- **Display and input**: the remote resolution follows the available window size. Keyboard and pointer input go to the remote session while its canvas is focused.
+- **Redirection**: remote audio and text clipboard synchronization are enabled by default. One or more local folders can be exposed as remote drives, individually marked read-only when needed.
+- **Connection routes**: connect directly, through the built-in Tailscale/Headscale node, or to a Windows EC2 instance through an AWS SSM port-forwarding session. The RDP server name remains the identity used for certificate verification even when a loopback forward carries the traffic.
+- **Server trust**: most RDP servers use self-signed certificates, so the first connection asks you to verify the SHA-256 fingerprint before credentials are sent. The accepted fingerprint is pinned to the host (TOFU), synced with the encrypted host record, and can be revoked under Settings > Security.
+- **Other options**: reusable `DOMAIN\user` credentials, admin sessions, 16/32-bit color, automatic reconnect, and manual screen refresh.
+
+### VNC
+
+- **Connection routes**: connect directly, through a tailnet, or through a saved SSH host. The SSH tunnel reuses that host's authentication, jump chain, host-key trust, and tailnet route; OTP and trust prompts appear over the VNC connection screen when needed.
+- **Session behavior**: choose whether to share the server with other VNC clients or request an exclusive session, and enable view-only mode to prevent accidental keyboard or pointer input.
+- **Display and transfer**: choose lossless, balanced, or fast image quality; synchronize text through the clipboard; and request the current window size when the VNC server supports desktop resizing.
+- **Protocol limits**: VNC exposes one framebuffer and has no RDP-style audio, drive redirection, or negotiated multi-monitor layout.
+
+Both protocols participate in the regular connection progress UI, activity log, recent-host tracking, and automatic reconnect behavior. Passwords and related host settings follow the same encrypted storage and E2EE sync rules as SSH credentials.
 
 ## Command autocomplete
 
@@ -157,7 +181,7 @@ A tailnet node lives inside the app, so you can reach hosts inside a tailnet **w
 - **Registration**: add under Settings > **Tailscale**. Enter a name, a Headscale server address (empty = the default Tailscale server), and an auth key; it saves once the **connection test** passes. After joining, it also shows which account joined which tailnet.
 - **Authentication**: with an auth key, registration happens without a browser. Leave it empty and a browser opens automatically as soon as the auth link is ready. Nodes registered with an auth key are cleaned up by the control plane when unused; nodes registered via browser login persist.
 - **Assigning hosts**: choose in the **Tailnet** selector in the host create/edit window's Connection section. The *Manage* link next to it jumps straight to the Tailscale section in Settings.
-- **Scope**: shell · tmux · mosh · SFTP · containers · port forwarding, and **host key verification too**, all leave through the same path (injected at the single dial point every connection passes). mosh routes both the bootstrap SSH and the UDP session through the tailnet.
+- **Scope**: shell · tmux · mosh · SFTP · containers · port forwarding · RDP · VNC, and **SSH host key verification too**, all leave through the tailnet. mosh routes both the bootstrap SSH and the UDP session through it; RDP and VNC use session-scoped loopback forwards so their Rust sidecars do not alter OS routing or DNS.
 - **First connection**: you do not have to pre-connect in Settings — the node comes up when you connect to a host. So **only the first connection takes a few seconds**; after that it is instant. One node is shared per tailnet and stays up for 30 minutes after the last connection ends. Tailnets that require browser login must be authenticated in Settings first.
 - **When sync is lost**: even if synchronization with the control plane (map poll) drops, **connections are still attempted**. Existing routes keep working from the already-received device list — what broke is the update channel (Tailscale itself does not warn about this state for 8 minutes). It waits briefly and moves on, leaving a warning on the *control plane sync* step of the connection screen — shown as **sync lost** in Settings. If the host truly cannot be reached, the reason appears at the next steps (routing/SSH).
 - **Host key trust**: a trusted key is valid **only within that tailnet**. The same name on a different tailnet is a different machine. Right before connecting, the actually-joined tailnet is compared against the stored one — if they differ, the connection is refused.
@@ -180,7 +204,7 @@ Sign in with biometrics or a security key instead of a password. It appears **on
 
 Right-click a host or group in the host list and choose **Export...** to save it to a file together with everything the connection needs. Desktop only.
 
-- **Formats**: **Dolgate file (`.dolgate`)** — contains credentials and related settings, fully encrypted with an export passphrase (4+ characters; Argon2id + AES-256-GCM). **The passphrase is unrecoverable.** / **OpenSSH config** — plaintext, credentials excluded; hosts that cannot be expressed are counted and skipped.
+- **Formats**: **Dolgate file (`.dolgate`)** — contains credentials and related settings, including RDP/VNC credentials and the SSH host needed by a VNC tunnel, fully encrypted with an export passphrase (4+ characters; Argon2id + AES-256-GCM). **The passphrase is unrecoverable.** / **OpenSSH config** — plaintext, credentials excluded; hosts that cannot be expressed (including RDP/VNC) are counted and skipped.
 - **Importing a Dolgate file**: pick the file and enter the passphrase to preview what will come in; the import is applied only when you confirm. Existing items are skipped; items with name collisions are imported under a new name and reported.
 - **Importing from other apps**: the host list's import menu also reads **OpenSSH · Termius · Xshell (Windows only) · Warpgate · AWS SSM · serial**.
 
@@ -248,4 +272,4 @@ When a terminal session ends, its I/O and screen size changes are kept as local 
 
 - For local development runs and release builds (`release:dist:*` / `release:publish:*`), see [build-and-deploy](./build-and-deploy.md).
 - AWS/SSM operational prerequisites and example IAM permissions are in the [AWS / SSM setup guide](./aws.md).
-- The desktop runtime boundaries (lazy ssh-core startup, `cmd/ssh-core` stdio framed IPC, sync-api's role, GitHub Releases auto-update) are covered in [architecture](./architecture.md).
+- The desktop runtime boundaries (lazy `ssh-core`, `rdp-core`, and `vnc-core` startup; stdio framed IPC; sync-api's role; GitHub Releases auto-update) are covered in [architecture](./architecture.md).

@@ -2,7 +2,7 @@
 
 ## Using Dolgate
 
-1. [Desktop guide](./desktop.md) — every desktop feature and how to use it: terminals, autocomplete, command blocks, AI, SFTP, tmux, mosh
+1. [Desktop guide](./desktop.md) — every desktop feature and how to use it: SSH terminals, RDP/VNC remote desktops, autocomplete, AI, SFTP, tmux, mosh
 2. [Tailscale / Headscale guide](./tailscale.md) — registering networks, assigning them to hosts, connection states, security rules
 3. [AWS / SSM setup guide](./aws.md) — prerequisites and example IAM policies for EC2/SSM/ECS features
 4. [Self-hosting sync-api](./sync-api-self-hosting.md) — running your own login/sync server, from SQLite to MySQL/OIDC/passkeys
@@ -10,7 +10,7 @@
 
 ## Internals & contributing
 
-- [Architecture](./architecture.md) — the four runtime boundaries and key user flows
+- [Architecture](./architecture.md) — runtime boundaries, the SSH/RDP/VNC cores, and key user flows
 - [Build and deployment](./build-and-deploy.md) — version policy, release procedure, per-platform builds
 - [SSH core IPC protocol](./ipc-protocol.md) — the framed stdio protocol between Electron main and Go ssh-core
 - [AI assistant](./ai-assistant-design.md) — providers, context, tools, and security boundaries of the AI panel

@@ -2,7 +2,7 @@
 
 [English](./README.md) | **한국어**
 
-Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경을 이어 쓰는 SSH 워크스페이스입니다.
+Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경을 이어 쓰는 SSH 워크스페이스입니다. 데스크톱 앱에서는 RDP와 VNC 원격 화면도 같은 워크스페이스에서 열 수 있습니다.
 호스트·세션·스니펫을 동기화하되, sync-api를 직접 호스팅해 접속 정보와 작업 데이터를 스스로 통제할 수 있습니다.
 
 <picture>
@@ -13,6 +13,7 @@ Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경
 ### 대표 기능
 
 - **SSH 워크스페이스** — 다중 세션 터미널, SFTP, 포트 포워딩을 한 앱에서 다룹니다. SSH Agent 인증과 Agent Forwarding, 점프 호스트(베스천) 경유도 지원합니다.
+- **RDP · VNC 원격 데스크톱** — 데스크톱 앱에서 RDP와 VNC 화면을 SSH 세션과 같은 워크스페이스에 엽니다. RDP의 여러 모니터를 한 화면에서 보거나 로컬 모니터별 창으로 펼칠 수 있고, Tailscale 직접 연결, RDP over SSM, VNC SSH 터널도 지원합니다.
 - **AWS SSM 통합** — AWS CLI나 session-manager-plugin 설치 없이, 공인 IP·인바운드 포트가 없는 EC2에 접속합니다. SSH-over-SSM, SSM shell fallback, AWS SFTP, SSM 포트 포워딩, ECS Exec을 지원합니다.
 - **Tailscale 내장** — Tailscale 설치 없이 앱 자체가 tailnet 노드가 되고, OS 네트워크 설정은 건드리지 않습니다. 여러 tailnet에 동시에 참여해, 망이 달라도 전환 없이 한 창에서 오갈 수 있습니다.
 - **명령 블록** — 실행한 명령마다 성공·실패와 소요 시간을 표시합니다. 출력만 복사하거나 바로 재실행하고, 실패한 명령만 골라 이동할 수 있습니다.
@@ -24,7 +25,7 @@ Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경
 
 ## 구성
 
-- **Desktop** — Windows · macOS · Linux (Electron). 멀티 세션 터미널, SFTP, 포트 포워딩, 세션 공유, AWS/컨테이너 작업을 다루는 메인 앱입니다.
+- **Desktop** — Windows · macOS · Linux (Electron). 멀티 세션 터미널, RDP·VNC 원격 화면, SFTP, 포트 포워딩, 세션 공유, AWS/컨테이너 작업을 다루는 메인 앱입니다.
 - **Mobile** — iOS · Android (React Native). 동기화된 호스트/그룹과 세션 탭 워크스페이스를 중심으로 원격 세션에 접근합니다.
 - **sync-api** — 브라우저 로그인, 동기화 저장소, session share viewer, AWS SSM 브로커를 담당하는 서버입니다. 직접 띄울 수 있습니다(아래 [자체 호스팅](#자체-sync-api-호스팅) 참고).
 
@@ -54,6 +55,13 @@ Linux `deb`와 ARM64 빌드는 [GitHub Releases](https://github.com/doldolma/dol
 - 세션 녹화 및 재생 — 로컬 저장, 서버 동기화 없음
 - 명령 완료 OS 알림 — 오래 걸리거나 실패한 명령이 끝났을 때 (기준 시간·조건 설정)
 - 명령 블록 — 셸 통합 기반으로 명령 단위 상태 표시, hover 액션(출력/명령 복사·재실행·AI), 명령 팔레트(`Cmd/Ctrl+Shift+P`)
+
+**원격 데스크톱 (데스크톱 앱)**
+
+- RDP·VNC 원격 화면을 SSH 세션과 같은 탭 워크스페이스에서 사용
+- RDP 다중 모니터 — 한 화면에 함께 표시하거나 로컬 모니터별 별도 창으로 펼치기
+- RDP 오디오·클립보드·로컬 폴더 공유, VNC 보기 전용·화질 설정·클립보드
+- Tailscale 직접 연결, RDP over SSM, VNC SSH 터널
 
 **AI 어시스턴트**
 

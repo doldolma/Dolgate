@@ -15,8 +15,7 @@ For desktop features see [desktop](./desktop.md); for runtime boundaries see [ar
 - Node.js 24+
 - npm 11+
 - Go 1.26+ — `services/ssh-core`, `services/sync-api`, and running the desktop app
-- Rust 1.97+ — only for `services/rdp-core` (the RDP sidecar). The version is pinned by
-  `services/rdp-core/rust-toolchain.toml`, so `rustup` picks it up automatically.
+- Rust 1.97+ — `services/core-framing`, `services/rdp-core`, and `services/vnc-core`. Both sidecars pin the same toolchain in their `rust-toolchain.toml`, so `rustup` picks it up automatically. Building `vnc-core` also needs Perl and a C toolchain for its vendored OpenSSL.
 - JDK 17 + Android SDK/NDK for Android builds, Xcode + CocoaPods for iOS builds
 
 Initial setup:
@@ -27,13 +26,17 @@ npm ci
 (cd services/sync-api && go build ./...)
 ```
 
-RDP is optional: the desktop app builds and runs without Rust, and only fails when you open an
-RDP host (`rdp-core binary not found`). To work on it, build the sidecar once — the first build
-compiles IronRDP, aws-lc-sys, and OpenH264 from source, so expect it to take a while.
+The remote desktop sidecars are optional for unrelated desktop work: the app can start without
+them, but opening an RDP or VNC host fails if its binary is unavailable. `npm run dev:desktop`
+prepares both automatically when the Rust toolchain is installed. To build them manually, run:
 
 ```bash
 (cd services/rdp-core && cargo build)
+(cd services/vnc-core && cargo build)
 ```
+
+The first RDP build compiles IronRDP, aws-lc-sys, and OpenH264 from source. The first VNC build
+compiles vendored OpenSSL for VeNCrypt, so either one can take a while.
 
 ## Running locally for development
 
@@ -51,7 +54,7 @@ Full tests:
 
 ```bash
 npm run check:js   # Node only. Version consistency + typecheck + desktop/mobile tests
-npm run check      # The above + Go service tests (requires the Go toolchain)
+npm run check      # The above + Go and Rust service tests (requires both toolchains)
 ```
 
 Additional checks:
@@ -59,6 +62,7 @@ Additional checks:
 ```bash
 npm run typecheck                      # desktop + mobile
 npm run test:mobile                    # mobile only
+npm run test:rust                      # core-framing + rdp-core + vnc-core
 (cd services/ssh-core && go test ./...)
 (cd services/sync-api && go test ./...)
 ```
@@ -140,7 +144,7 @@ GitHub Actions creates one `vX.Y.Z` GitHub Release, uploading the desktop artifa
 
 `sync-api` container publishing is keyed off the same `v*` tag.
 
-The release workflow must pass `desktop test`, `ssh-core test`, `mobile typecheck`, and `mobile Jest` before publishing.
+The release workflow must pass `desktop test`, `ssh-core test`, `mobile typecheck`, and `mobile Jest` before publishing. Its platform build jobs also compile and package `rdp-core` and `vnc-core`; the shared test workflow runs both Rust test suites on pushes and pull requests.
 
 - Pushing a tag like `vX.Y.Z` produces `ghcr.io/doldolma/dolgate-sync-api:X.Y.Z`, `:X.Y`, and `:latest` on GHCR together.
 - Pushing to `main` alone does not build a new production `sync-api` image.
@@ -166,6 +170,8 @@ npm run release:dist:linux
 ```
 
 Linux installer packages are only produced on a Linux host — macOS's `ar` corrupts deb archives (fpm reports success while quietly emitting an empty 96-byte archive), and rpm needs separate tooling as well. Running this command on any other host stops with an error. Official packages are built by GitHub Actions when a release tag is pushed.
+
+Each desktop release command builds and bundles `ssh-core`, `rdp-core`, and `vnc-core` for its target platform. The Rust sidecars link native C dependencies, so official macOS, Windows, and Linux artifacts are built on their respective GitHub-hosted runners rather than cross-compiled from one OS.
 
 GitHub Release upload:
 

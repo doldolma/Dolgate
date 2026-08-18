@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Dolgate — 오픈소스 SSH 워크스페이스</title>
-  <meta name="description" content="Windows · macOS · Linux · iOS · Android에서 쓰는 오픈소스 SSH 워크스페이스. 터미널·SFTP·포트 포워딩·tmux를 한 앱에서 다루고, 호스트·키·스니펫은 종단간 암호화로 동기화합니다. 동기화 서버 self-host 지원." />
+  <title>Dolgate — 오픈소스 SSH · 원격 데스크톱 클라이언트</title>
+  <meta name="description" content="Windows · macOS · Linux · iOS · Android에서 쓰는 오픈소스 SSH 워크스페이스. 데스크톱에서는 RDP·VNC 원격 화면도 지원하며, 호스트·키·스니펫은 종단간 암호화로 동기화합니다. 동기화 서버 self-host 지원." />
   <link rel="icon" type="image/svg+xml" href="./assets/icon.svg" />
   <link rel="apple-touch-icon" href="./assets/icon-192.png" />
   <link rel="canonical" href="https://doldolma.github.io/Dolgate/" />
@@ -13,8 +13,8 @@
   <link rel="alternate" hreflang="x-default" href="https://doldolma.github.io/Dolgate/" />
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0e18" />
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f7fb" />
-  <meta property="og:title" content="Dolgate — 오픈소스 SSH 워크스페이스" />
-  <meta property="og:description" content="데스크톱에서 모바일로 끊김 없이 이어지는 오픈소스 SSH 워크스페이스" />
+  <meta property="og:title" content="Dolgate — 오픈소스 SSH · 원격 데스크톱 클라이언트" />
+  <meta property="og:description" content="SSH 작업 환경과 RDP·VNC 원격 화면을 한 워크스페이스에서" />
   <meta property="og:image" content="./assets/hosts-workspace.png" />
   <style>
     :root {
@@ -311,6 +311,7 @@
     <h1 data-i18n="hero.h1">오픈소스 SSH 워크스페이스,<br /><span class="accent">데스크톱에서 모바일로 끊김 없이.</span></h1>
     <p class="sub" data-i18n="hero.sub">
       SSH부터 EC2 SSM, tmux, SFTP, 포트 포워딩까지 한 앱에서.
+      데스크톱에서는 RDP·VNC 원격 화면도 같은 워크스페이스에서 열 수 있습니다.
       호스트·키·스니펫은 종단간 암호화(E2EE)로 동기화되고, 동기화 서버도 직접 띄울 수 있습니다.
     </p>
     <div class="platforms">
@@ -350,7 +351,7 @@
   <div class="wrap">
     <div class="sec-label">Features</div>
     <h2 data-i18n="feat.h2">워크스페이스에 들어 있는 것들</h2>
-    <p class="sec-sub" data-i18n="feat.sub">SSH부터 AWS SSM, 컨테이너까지 — 서버 작업의 전 과정을 한 앱에서 다룹니다.</p>
+    <p class="sec-sub" data-i18n="feat.sub">SSH부터 원격 데스크톱, AWS SSM, 컨테이너까지 — 서버 작업의 전 과정을 한 앱에서 다룹니다.</p>
 
     <div class="grid">
       <div class="card"><div class="ico">🖥️</div><h3 data-i18n="card.ssh.t">SSH / SSM 워크스페이스</h3>
@@ -361,8 +362,8 @@
         <p data-i18n="card.complete.d">Fig 스펙 기반 자동완성이 원격 세션 안에서 동작합니다. 하위 명령·옵션에 더해 원격 서버의 파일 경로, 서버에서 만들어지는 동적 값, 스니펫까지 이어서 제안합니다.</p></div>
       <div class="card"><div class="ico">🤖</div><h3 data-i18n="card.ai.t">AI 어시스턴트</h3>
         <p data-i18n="card.ai.d">현재 세션의 호스트 정보와 터미널 출력을 바탕으로 질문하고, 조회는 자동·변경은 승인 후 실행. OpenAI 호환 · Claude · Codex 지원.</p></div>
-      <div class="card"><div class="ico">🎬</div><h3 data-i18n="card.record.t">세션 녹화 · 재생</h3>
-        <p data-i18n="card.record.d">종료된 터미널 세션을 타임라인으로 다시 봅니다. 녹화는 로컬에만 저장되고 서버로 전송되지 않습니다.</p></div>
+      <div class="card"><div class="ico">🖱️</div><h3 data-i18n="card.remoteDesktop.t">RDP · VNC 원격 데스크톱</h3>
+        <p data-i18n="card.remoteDesktop.d">데스크톱 앱에서 RDP·VNC 원격 화면을 엽니다. RDP의 여러 모니터를 한 화면에서 보거나 별도 창으로 펼칠 수 있고, Tailscale 직접 연결·RDP over SSM·VNC SSH 터널도 지원합니다.</p></div>
       <div class="card"><div class="ico">🔁</div><h3 data-i18n="card.sync.t">E2EE 동기화, self-host로</h3>
         <p data-i18n="card.sync.d">호스트·시크릿·스니펫을 종단간 암호화로 데스크톱↔모바일 동기화. 동기화 서버(sync-api)는 Docker 한 줄로 직접 띄울 수도 있습니다.</p></div>
       <div class="card"><div class="ico">🌐</div><h3 data-i18n="card.tailnet.t">Tailscale 내장</h3>
@@ -377,7 +378,8 @@
       <span class="chip" data-i18n="chip.4">원격 파일 편집</span>
       <span class="chip" data-i18n="chip.5">Docker · Podman 모니터링</span>
       <span class="chip" data-i18n="chip.6">mosh</span>
-      <span class="chip" data-i18n="chip.7">OpenSSH · Xshell · Termius 가져오기</span>
+      <span class="chip" data-i18n="chip.7">세션 녹화 · 재생</span>
+      <span class="chip" data-i18n="chip.8">OpenSSH · Xshell · Termius 가져오기</span>
     </div>
   </div>
 </section>
