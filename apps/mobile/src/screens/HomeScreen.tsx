@@ -306,16 +306,24 @@ export function HomeScreen(): React.JSX.Element {
     visibleGroups,
   ]);
 
+  // 영어는 1개일 때 문구가 달라진다("1 host"). i18next 복수형 규칙은 Intl.PluralRules
+  // 가 없는 런타임이 있어 쓰지 않으므로, 데스크톱처럼 경우별 키를 골라 쓴다.
+  const countLabel = useCallback(
+    (key: "home.groupHostCount" | "home.folderCount", count: number): string =>
+      translate(count === 1 ? `${key}One` : key, { count }),
+    [translate],
+  );
+
   const currentGroupTitle = isFavoritesView
     ? translate("home.favorites")
     : currentGroupPath
       ? groupNameByPath.get(currentGroupPath) ?? getGroupLabel(currentGroupPath)
       : "All Hosts";
   const currentGroupSubtitle = isFavoritesView
-    ? translate("home.groupHostCount", { count: filteredHosts.length })
+    ? countLabel("home.groupHostCount", filteredHosts.length)
     : currentGroupPath
       ? currentGroupPath
-      : translate("home.folderCount", { count: visibleGroups.length });
+      : countLabel("home.folderCount", visibleGroups.length);
 
   const emptyState = useMemo(() => {
     if (isSearching) {
@@ -638,9 +646,7 @@ export function HomeScreen(): React.JSX.Element {
                       numberOfLines={1}
                       style={[styles.groupCardMeta, { color: palette.mutedText }]}
                     >
-                      {translate("home.groupHostCount", {
-                        count: item.hostCount,
-                      })}
+                      {countLabel("home.groupHostCount", item.hostCount)}
                     </Text>
                   </View>
                   <Ionicons
@@ -693,7 +699,7 @@ export function HomeScreen(): React.JSX.Element {
                         { color: palette.mutedText },
                       ]}
                     >
-                      {translate("home.groupHostCount", { count: item.group.hostCount })}
+                      {countLabel("home.groupHostCount", item.group.hostCount)}
                     </Text>
                   </View>
                   <Ionicons

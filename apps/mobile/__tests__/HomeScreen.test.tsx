@@ -11,6 +11,7 @@ import {
   createDefaultMobileSettings,
   createDefaultSyncStatus,
 } from "../src/lib/mobile";
+import { applyMobileLanguage } from "../src/i18n";
 import { HomeScreen } from "../src/screens/HomeScreen";
 import { useMobileAppStore } from "../src/store/useMobileAppStore";
 
@@ -289,6 +290,28 @@ describe("HomeScreen group browsing", () => {
       jest.runOnlyPendingTimers();
       tree!.unmount();
     });
+  });
+
+  // 영어에서 1개일 때 "1 hosts" 로 나오던 자리다 — 앱스토어 스크린샷에도 그대로 찍힌다.
+  it("uses the singular wording for a folder holding one host in English", async () => {
+    applyMobileLanguage("en");
+    let tree: renderer.ReactTestRenderer;
+
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    const text = collectText(tree!.toJSON()).join(" ");
+    expect(text).toContain("1 host");
+    expect(text).not.toContain("1 hosts");
+    expect(text).toContain("2 hosts");
+    expect(text).toContain("2 folders");
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+    applyMobileLanguage("ko");
   });
 
   // 즐겨찾기는 데스크톱과 같이 최상단에 고정된 하나의 그룹이다 — 누르면 일반 그룹처럼

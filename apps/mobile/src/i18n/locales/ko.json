@@ -100,6 +100,12 @@
       "title": "언어",
       "system": "시스템 설정"
     },
+    "theme": {
+      "title": "테마",
+      "system": "시스템 설정 따르기",
+      "light": "밝게",
+      "dark": "어둡게"
+    },
     "sections": {
       "account": "계정",
       "server": "서버",
@@ -372,6 +378,7 @@
     "favorites": "즐겨찾기",
     "openFavorites": "즐겨찾기 열기",
     "folderCount": "{{count}}개 폴더",
+    "folderCountOne": "{{count}}개 폴더",
     "emptySearchTitle": "검색 결과가 없습니다.",
     "emptySearchBody": "다른 이름이나 주소로 다시 검색해보세요.",
     "emptyGroupTitle": "이 그룹에는 직접 속한 호스트가 없습니다.",
@@ -393,6 +400,7 @@
     "goToParentGroup": "이전 그룹으로 이동",
     "openGroup": "{{name}} 그룹 열기",
     "groupHostCount": "{{count}}개 호스트",
+    "groupHostCountOne": "{{count}}개 호스트",
     "groupMeta": "그룹 {{meta}}"
   },
   "session": {

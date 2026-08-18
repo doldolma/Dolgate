@@ -301,6 +301,42 @@ describe("SettingsScreen server save navigation", () => {
 
   // 심사 가이드라인 5.1.1(i) 은 스토어 메타데이터 URL 과 별개로 "앱 안에서 쉽게 접근"을
   // 요구한다. 로그인해야 쓰는 앱이라 로그인 전 화면(서버 설정)에서도 닿아야 한다.
+  it("changes the theme from the settings picker", async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SettingsScreen />);
+    });
+
+    // 기본은 기기 외형을 따르고, 고른 값이 그대로 행에 보여야 한다 — 고르는 자리가
+    // 없어서 다크로 바꿀 방법이 없던 것이 이 테스트가 지키는 것이다.
+    expect(useMobileAppStore.getState().settings.theme).toBe("system");
+    const themeRow = findPressableByText(tree!.root, "시스템 설정 따르기");
+    await act(async () => {
+      themeRow.props.onPress();
+    });
+
+    // 시트 뒤 배경도 눌리는 요소이고 시트 전체 문구를 품고 있으므로, 문구가 정확히
+    // 일치하는 가장 안쪽 항목을 골라야 한다.
+    const darkOption = tree!.root
+      .findAll(
+        (node) =>
+          typeof node.props.onPress === "function" &&
+          collectText(node).trim() === "어둡게",
+      )
+      .slice(-1)[0];
+    await act(async () => {
+      darkOption.props.onPress();
+    });
+
+    expect(useMobileAppStore.getState().settings.theme).toBe("dark");
+    expect(tree!.root.findAllByType(Modal).length).toBe(0);
+    findPressableByText(tree!.root, "어둡게");
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
   it("opens the privacy policy from both the settings tab and the pre-login screen", async () => {
     useMobileAppStore.setState({ auth: createAuthenticatedState() });
 

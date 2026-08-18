@@ -35,7 +35,11 @@ import {
   getSyncStatusLabel,
 } from '../i18n/shared-messages';
 import { useTranslation } from "react-i18next";
-import { APP_LANGUAGE_OPTIONS, type AppLanguage } from "@dolssh/shared-core";
+import {
+  APP_LANGUAGE_OPTIONS,
+  type AppLanguage,
+  type AppTheme,
+} from "@dolssh/shared-core";
 
 interface SettingsContentProps {
   mode: "auth" | "full";
@@ -47,6 +51,10 @@ const LANGUAGE_LABELS: Record<"ko" | "en", string> = {
   ko: "한국어",
   en: "English",
 };
+
+// 테마 선택지. 데스크톱도 같은 순서를 자기 화면에 두고 있다 — 문구는 앱마다 다르므로
+// 공유하는 것은 AppTheme 타입까지다.
+const THEME_OPTIONS: readonly AppTheme[] = ["system", "light", "dark"];
 
 function SettingsContent({
   mode,
@@ -85,6 +93,7 @@ function SettingsContent({
     useState("");
   const [changingAccountPassword, setChangingAccountPassword] = useState(false);
   const [languagePickerOpen, setLanguagePickerOpen] = useState(false);
+  const [themePickerOpen, setThemePickerOpen] = useState(false);
   const [changePassphraseOpen, setChangePassphraseOpen] = useState(false);
   const [currentPassphraseDraft, setCurrentPassphraseDraft] = useState("");
   const [nextPassphraseDraft, setNextPassphraseDraft] = useState("");
@@ -145,12 +154,22 @@ function SettingsContent({
     setLanguagePickerOpen(false);
   }, []);
 
+  const closeThemePicker = useCallback((): void => {
+    setThemePickerOpen(false);
+  }, []);
+
   const currentLanguage: AppLanguage = settings.language ?? "system";
   const languageOptionLabel = useCallback(
     (option: AppLanguage): string =>
       option === "system"
         ? translate("settings.language.system")
         : LANGUAGE_LABELS[option],
+    [translate],
+  );
+
+  const currentTheme: AppTheme = settings.theme ?? "system";
+  const themeOptionLabel = useCallback(
+    (option: AppTheme): string => translate(`settings.theme.${option}`),
     [translate],
   );
 
@@ -521,6 +540,19 @@ function SettingsContent({
         />
       </SettingsGroup>
 
+      {/* 테마 — 언어와 같은 규칙이다. 기본은 기기 외형을 따르고, 직접 고를 수도 있다.
+          모델(AppTheme)과 팔레트 적용은 원래부터 있었고 고르는 자리만 없었다. */}
+      <SettingsGroup header={translate("settings.theme.title")}>
+        <SettingsRow
+          accessibilityLabel={translate("settings.theme.title")}
+          accessibilityValue={{ text: themeOptionLabel(currentTheme) }}
+          chevron
+          icon="contrast-outline"
+          label={themeOptionLabel(currentTheme)}
+          onPress={() => setThemePickerOpen(true)}
+        />
+      </SettingsGroup>
+
       {/* known host 지문과 자격증명 이름을 늘어놓으면 화면 대부분이 디버그 목록이 된다 —
           개수만 보여준다. */}
       {showFullSettings ? (
@@ -614,6 +646,67 @@ function SettingsContent({
                   label={translate("common.cancel")}
                   tone="accent"
                   onPress={closeLanguagePicker}
+                />
+              </SettingsGroup>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      ) : null}
+      {themePickerOpen ? (
+        <Modal
+          animationType="fade"
+          transparent
+          visible
+          onRequestClose={closeThemePicker}
+        >
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={translate("common.close")}
+            onPress={closeThemePicker}
+            style={[
+              styles.sheetBackdrop,
+              {
+                backgroundColor: palette.overlay,
+                paddingBottom: Math.max(screenPadding.paddingBottom, 14),
+              },
+            ]}
+          >
+            <Pressable
+              onPress={(event) => event.stopPropagation()}
+              style={styles.sheetBody}
+            >
+              <SettingsGroup solid>
+                <SettingsRow>
+                  <Text
+                    style={[styles.sheetHeading, { color: palette.mutedText }]}
+                  >
+                    {translate("settings.theme.title")}
+                  </Text>
+                </SettingsRow>
+                {THEME_OPTIONS.map((option) => {
+                  const active = currentTheme === option;
+                  return (
+                    <SettingsRow
+                      key={option}
+                      check={active}
+                      label={themeOptionLabel(option)}
+                      tone={active ? "accent" : "default"}
+                      onPress={() => {
+                        closeThemePicker();
+                        if (!active) {
+                          void updateSettings({ theme: option });
+                        }
+                      }}
+                    />
+                  );
+                })}
+              </SettingsGroup>
+              <SettingsGroup solid>
+                <SettingsRow
+                  align="center"
+                  label={translate("common.cancel")}
+                  tone="accent"
+                  onPress={closeThemePicker}
                 />
               </SettingsGroup>
             </Pressable>
