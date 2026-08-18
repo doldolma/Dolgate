@@ -784,6 +784,49 @@ describe("createAppStore containers", () => {
     });
   });
 
+  // Cmd+W 는 containers 화면에서 그 안의 호스트 탭을 닫아야 한다. 예전에는 containers 가
+  // home/sftp 와 같은 고정 탭으로 취급돼 false 를 돌려줬고, 호출부(NetworkBridge)가 창을
+  // 닫아 창이 하나일 때 앱이 통째로 종료됐다.
+  it("closes the active host containers tab on Cmd+W instead of the window", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.setState((state) => ({
+      containerTabs: [
+        ...state.containerTabs,
+        createContainerTab("host-1", { kind: "host-containers" }),
+        createContainerTab("host-2", { kind: "host-containers" }),
+      ],
+      activeContainerHostId: "host-1",
+      activeWorkspaceTab: "containers",
+    }));
+
+    // true = 닫을 것이 있었다. 호출부는 이때 창을 닫지 않는다.
+    expect(store.getState().closeActiveTab()).toBe(true);
+    // closeHostContainersTab 은 release 를 await 한 뒤에야 상태를 바꾼다.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const hostIds = store.getState().containerTabs.map((tab) => tab.hostId);
+    expect(hostIds).not.toContain("host-1");
+    expect(hostIds).toContain("host-2");
+  });
+
+  // 호스트 탭이 하나도 없으면 닫을 것이 없다 — 그때는 기존대로 창을 닫게 false 를 돌려준다.
+  it("falls back to closing the window when no host containers tab is open", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    store.setState(() => ({
+      containerTabs: [],
+      activeContainerHostId: null,
+      activeWorkspaceTab: "containers",
+    }));
+
+    expect(store.getState().closeActiveTab()).toBe(false);
+  });
+
   it("stops persisted container service tunnels when the host containers tab is closed", async () => {
     const api = createMockApi();
     const store = createAppStore(api);

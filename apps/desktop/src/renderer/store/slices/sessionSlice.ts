@@ -1194,9 +1194,9 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             }));
           },
     closeActiveTab: () => {
-            // Cmd+W(크롬식): 현재 활성 동적 탭(세션/분할 워크스페이스/tmux 그룹)을 닫는다.
-            // 닫을 동적 탭이 있으면 true, 없으면(home/sftp/containers 등) false 를 돌려준다
-            // — 호출부가 false 면 창을 닫는다.
+            // Cmd+W(크롬식): 현재 활성 탭을 닫는다. 닫을 것이 있으면 true, 없으면
+            // (home/sftp 처럼 닫는다는 개념이 없는 고정 탭) false 를 돌려준다 — 호출부가
+            // false 면 창을 닫는다.
             const active = get().activeWorkspaceTab;
             if (active.startsWith("session:")) {
               void get().disconnectTab(active.slice("session:".length));
@@ -1214,6 +1214,18 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                 void get().detachTmuxWorkspace(group.activeWorkspaceId);
               }
               return true;
+            }
+            // containers 는 고정 탭이지만 그 안에 호스트 탭이 따로 있다. 화면에 보이는
+            // 닫을 것은 그 호스트 탭이므로 Cmd+W 도 그것을 닫는다 — 탭 × 와 같은 동작이다.
+            // 여기서 창을 닫아 버리면 (창이 하나일 때) 앱이 통째로 종료됐다.
+            if (active === "containers") {
+              const hostId = get().activeContainerHostId;
+              if (hostId) {
+                void get().closeHostContainersTab(hostId);
+                return true;
+              }
+              // 호스트 탭이 하나도 없으면 닫을 것이 없다 — home/sftp 와 같게 둔다.
+              return false;
             }
             return false;
           },
