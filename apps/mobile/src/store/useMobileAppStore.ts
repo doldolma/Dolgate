@@ -5509,6 +5509,20 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
           set({ terminalGrid: size });
+          // **살아 있는 셸에도 알린다.** 이것이 없으면 원격 PTY 는 접속 순간의 크기에 갇힌다 —
+          // xterm 은 화면에 맞춰 다시 fit 하지만 서버는 모르므로, 화면을 채우는 프로그램(htop·
+          // vim·less)이 옛 행/열로 그려서 6.9" 화면의 절반이 비어 있었다. 화면을 돌리거나
+          // 키보드를 여닫아 크기가 달라진 뒤에도 같은 문제가 남는다.
+          //
+          // 세션마다 카드 크기가 같으므로 살아 있는 SSH 셸 전부에 같은 크기를 보낸다(AWS SSM
+          // 세션은 셸 채널이 아니라 WebSocket 이라 여기서 다루지 않는다).
+          for (const runtime of runtimeSessions.values()) {
+            if (runtime.kind !== 'ssh') {
+              continue;
+            }
+            // 이미 닫힌 셸에 쓰면 거부된다 — 크기 알림이 실패해도 세션은 그대로 쓴다.
+            void runtime.shell.resize(size).catch(() => undefined);
+          }
         },
         bootstrapping: false,
         authGateResolved: false,

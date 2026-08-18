@@ -413,7 +413,10 @@
     "showExtraKeys": "Show extra control keys",
     "more": "More",
     "closeKeyboard": "Close keyboard",
-    "openKeyboard": "Open keyboard"
+    "openKeyboard": "Open keyboard",
+    "terminalCopy": "Copy",
+    "terminalPaste": "Paste",
+    "terminalSelectAll": "Select All"
   },
   "aws": {
     "profileNotFound": "No AWS profile to connect this host with was found.",

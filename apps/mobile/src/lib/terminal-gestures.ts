@@ -154,7 +154,23 @@ export const TERMINAL_GESTURE_TUNING = {
  * 핸들을 끌어서 넓힌다 — iOS 텍스트 선택과 같은 방식이다. 핸들·바는 자기 리스너에서
  * stopPropagation 하므로 xterm 에도, 이 판정기에도 닿지 않는다.
  */
-export const TERMINAL_GESTURE_SCRIPT = `(function () {
+/**
+ * 액션 바에 쓸 문구. 주입 스크립트는 WebView 안에서 도는 순수 JS 라 i18n 을 쓸 수 없으므로
+ * 호출부가 넘긴다 — 하드코딩해 두면 앱 언어와 무관하게 그 언어로 보인다(실제로 한글로 보였다).
+ *
+ * 스크립트는 WebView 가 마운트될 때 한 번 주입되므로, 세션이 떠 있는 동안 언어를 바꾸면 그 세션의
+ * 바에는 이전 문구가 남는다. 다음에 그 판을 열면 새 문구로 주입된다.
+ */
+export interface TerminalGestureLabels {
+  copy: string;
+  paste: string;
+  selectAll: string;
+}
+
+export function buildTerminalGestureScript(
+  labels: TerminalGestureLabels,
+): string {
+  return `(function () {
   if (window.__dolgateGestures) { return; }
   window.__dolgateGestures = true;
 
@@ -162,6 +178,7 @@ export const TERMINAL_GESTURE_SCRIPT = `(function () {
   var MARKER = '${GESTURE_MARKER}';
   var OSC_SCROLL = ${OSC_SCROLL_TO_BOTTOM};
   var OSC_PASTE = ${OSC_PASTE};
+  var LABELS = ${JSON.stringify(labels)};
 
   function post(payload) {
     try {
@@ -418,16 +435,16 @@ export const TERMINAL_GESTURE_SCRIPT = `(function () {
       applySelection();
     }
 
-    var copyButton = makeButton('복사', function () {
+    var copyButton = makeButton(LABELS.copy, function () {
       var text = selectionText();
       if (text) { post({ type: 'copy', text: text }); }
       clearSelection();
     });
-    var pasteButton = makeButton('붙여넣기', function () {
+    var pasteButton = makeButton(LABELS.paste, function () {
       post({ type: 'paste' });
       clearSelection();
     });
-    makeButton('전체 선택', function () {
+    makeButton(LABELS.selectAll, function () {
       try {
         var last = term.buffer.active.length - 1;
         sel = { from: { col: 0, row: 0 }, to: { col: term.cols - 1, row: last } };
@@ -842,6 +859,7 @@ export const TERMINAL_GESTURE_SCRIPT = `(function () {
   }, 50);
 })();
 true;`;
+}
 
 /** 패키지 logger 인자에서 제스처 이벤트를 골라낸다(그 외 로그는 그대로 흘린다). */
 export function parseTerminalGestureEvent(

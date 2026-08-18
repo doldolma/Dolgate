@@ -2033,6 +2033,112 @@ describe("useMobileAppStore auth and sync flows", () => {
 
   // Probing costs a whole extra TCP connection and key exchange, so a host that
   // was approved once must not pay for it again.
+  // xterm 이 화면에 맞춰 다시 fit 해도 원격은 접속 순간의 크기에 갇혀 있었다 — 화면을 채우는
+  // 프로그램(htop·vim)이 옛 행/열로 그려서 큰 화면의 절반이 비었다. 크기 보고가 오면 살아 있는
+  // 셸에도 알려야 한다.
+  it("tells live shells about a new terminal grid", async () => {
+    const host: SshHostRecord = {
+      id: "host-grid",
+      kind: "ssh",
+      label: "Grid host",
+      hostname: "grid.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      secretRef: "secret-grid",
+      privateKeyPath: null,
+      certificatePath: null,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        knownHosts: [],
+        secretsByRef: {
+          "secret-grid": {
+            secretRef: "secret-grid",
+            label: "Grid host credentials",
+            password: "pw",
+            updatedAt: "2026-04-13T00:00:00.000Z",
+          },
+        },
+      });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+    engineNative.resize.mockClear();
+
+    await act(async () => {
+      useMobileAppStore.getState().reportTerminalGrid({ cols: 52, rows: 47 });
+      await flushAsyncWork();
+    });
+
+    expect(engineNative.resize).toHaveBeenCalledWith(
+      expect.any(String),
+      47,
+      52,
+    );
+  });
+
+  // 같은 크기가 다시 보고되는 일이 잦다(리마운트·재구독). 그때마다 원격에 알리면 화면을
+  // 채우는 프로그램이 매번 다시 그린다.
+  it("does not tell shells about an unchanged grid", async () => {
+    const host: SshHostRecord = {
+      id: "host-grid2",
+      kind: "ssh",
+      label: "Grid host 2",
+      hostname: "grid2.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      secretRef: "secret-grid2",
+      privateKeyPath: null,
+      certificatePath: null,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        knownHosts: [],
+        secretsByRef: {
+          "secret-grid2": {
+            secretRef: "secret-grid2",
+            label: "Grid host 2 credentials",
+            password: "pw",
+            updatedAt: "2026-04-13T00:00:00.000Z",
+          },
+        },
+      });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+
+    await act(async () => {
+      useMobileAppStore.getState().reportTerminalGrid({ cols: 40, rows: 30 });
+      await flushAsyncWork();
+    });
+    engineNative.resize.mockClear();
+
+    await act(async () => {
+      useMobileAppStore.getState().reportTerminalGrid({ cols: 40, rows: 30 });
+      await flushAsyncWork();
+    });
+
+    expect(engineNative.resize).not.toHaveBeenCalled();
+  });
+
   it("connects without probing when the host key is already on file", async () => {
     const host: SshHostRecord = {
       id: "host-known",

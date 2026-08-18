@@ -55,7 +55,7 @@ import {
   parseReportedTerminalGrid,
 } from '../lib/terminal-size';
 import {
-  TERMINAL_GESTURE_SCRIPT,
+  buildTerminalGestureScript,
   TERMINAL_SCROLL_TO_BOTTOM_SEQUENCE,
   arrowSequence,
   parseTerminalGestureEvent,
@@ -396,6 +396,17 @@ export function SessionScreen(): React.JSX.Element {
   // 서버 배너는 여기서 터미널에 쓰지 않는다. 스토어가 세션 스냅샷에 합쳐 두고
   // (lib/terminal-banner), 아래 스냅샷 복원 effect 들이 그리므로 백그라운드 탭·늦은
   // WebView 부팅·재접속이 한 경로로 처리된다. 직접 쓰면 다음 복원에서 지워진다.
+
+  // 액션 바 문구는 주입 시점에 정해진다(WebView 안에서는 i18n 을 쓸 수 없다).
+  const terminalGestureScript = useMemo(
+    () =>
+      buildTerminalGestureScript({
+        copy: translate('session.terminalCopy'),
+        paste: translate('session.terminalPaste'),
+        selectAll: translate('session.terminalSelectAll'),
+      }),
+    [translate],
+  );
 
   const connectionStages = useMemo(
     () =>
@@ -1385,7 +1396,7 @@ export function SessionScreen(): React.JSX.Element {
                     scrollEnabled: false,
                     // 실제 fit 된 그리드를 보고받아 PTY 크기를 맞춘다. onMessage 는
                     // 넘기면 안 된다 — 패키지 핸들러를 덮어써 입출력이 끊긴다.
-                    injectedJavaScript: `${TERMINAL_GRID_REPORT_SCRIPT}\n${TERMINAL_GESTURE_SCRIPT}`,
+                    injectedJavaScript: `${TERMINAL_GRID_REPORT_SCRIPT}\n${terminalGestureScript}`,
                   }}
                   onInitialized={() => setTerminalReady(true)}
                   // 링크는 xterm 의 web-links 애드온이 찾고, 여는 것은 여기서 정한다. 페이지가

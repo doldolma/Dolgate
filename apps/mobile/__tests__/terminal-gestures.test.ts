@@ -1,7 +1,7 @@
 import { Buffer } from 'buffer';
 
 import {
-  TERMINAL_GESTURE_SCRIPT,
+  buildTerminalGestureScript,
   arrowSequence,
   parseTerminalGestureEvent,
   terminalPasteSequence,
@@ -104,14 +104,36 @@ describe('terminalPasteSequence', () => {
   });
 });
 
-describe('TERMINAL_GESTURE_SCRIPT', () => {
+describe('buildTerminalGestureScript', () => {
+  const labels = { copy: 'Copy', paste: 'Paste', selectAll: 'Select All' };
+
   it('중복 주입을 막는 가드가 있다', () => {
     // WebView 리마운트마다 다시 주입되므로 핸들러가 겹치면 방향키가 여러 번 나간다.
-    expect(TERMINAL_GESTURE_SCRIPT).toContain('window.__dolgateGestures');
+    expect(buildTerminalGestureScript(labels)).toContain('window.__dolgateGestures');
   });
 
   it('문법이 유효하다', () => {
     // 주입 문자열이라 빌드가 검사해 주지 않는다 — 여기서 한 번 파싱한다.
-    expect(() => new Function(TERMINAL_GESTURE_SCRIPT)).not.toThrow();
+    expect(() => new Function(buildTerminalGestureScript(labels))).not.toThrow();
+  });
+
+  // 하드코딩해 두면 앱 언어와 무관하게 그 언어로 보인다 — 영문 기기에서 액션 바만 한글로 떴다.
+  it('액션 바 문구를 호출부에서 받는다', () => {
+    const script = buildTerminalGestureScript(labels);
+    expect(script).toContain('"copy":"Copy"');
+    expect(script).toContain('"selectAll":"Select All"');
+    // 버튼에 문구를 박아 두면 앱 언어와 무관하게 그 언어로 보인다(주석의 한글은 무관하다).
+    expect(script).not.toContain("makeButton('복사'");
+    expect(script).not.toContain("makeButton('붙여넣기'");
+    expect(script).not.toContain("makeButton('전체 선택'");
+  });
+
+  it('문구에 따옴표가 있어도 스크립트가 깨지지 않는다', () => {
+    const script = buildTerminalGestureScript({
+      copy: 'Cop"y',
+      paste: "Pas'te",
+      selectAll: 'Select\\All',
+    });
+    expect(() => new Function(script)).not.toThrow();
   });
 });

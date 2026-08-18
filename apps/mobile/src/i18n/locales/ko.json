@@ -413,7 +413,10 @@
     "showExtraKeys": "추가 제어키 표시",
     "more": "더보기",
     "closeKeyboard": "키보드 닫기",
-    "openKeyboard": "키보드 열기"
+    "openKeyboard": "키보드 열기",
+    "terminalCopy": "복사",
+    "terminalPaste": "붙여넣기",
+    "terminalSelectAll": "전체 선택"
   },
   "aws": {
     "profileNotFound": "이 호스트에 연결할 AWS 프로필을 찾을 수 없습니다.",
