@@ -3,7 +3,7 @@ const { readFileSync, readdirSync } = require('node:fs');
 const path = require('node:path');
 
 const desktopRoot = path.resolve(__dirname, '..');
-const { METAINFO_TARGET } = require(path.join(desktopRoot, 'electron-builder.config.cjs'));
+const { METAINFO_TARGET } = require('./linux-package-paths.cjs');
 const distDirectory = path.join(desktopRoot, 'release', 'dist');
 const ARCHES = ['x64', 'arm64'];
 

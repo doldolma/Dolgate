@@ -1,14 +1,9 @@
 const path = require('node:path');
-
-
-// 상점(App Center·GNOME 소프트웨어)이 읽는 메타데이터. 설치 경로는 AppStream 규격이 정한다.
-const METAINFO_SOURCE = path.resolve(
-  __dirname,
-  'build/linux/com.doldolma.dolgate.metainfo.xml',
-);
-const METAINFO_TARGET = '/usr/share/metainfo/com.doldolma.dolgate.metainfo.xml';
-// 데비안은 저작권 파일을 여기서 찾는다(정책 12.5). fpm 의 --license 는 control 값만 채운다.
-const LICENSE_SOURCE = path.resolve(__dirname, '../../LICENSE');
+const {
+  LICENSE_SOURCE,
+  METAINFO_SOURCE,
+  METAINFO_TARGET,
+} = require('./scripts/linux-package-paths.cjs');
 
 module.exports = {
   appId: 'com.doldolma.dolgate',
@@ -188,8 +183,3 @@ module.exports = {
   // 넘기는데, 그 경우 doPack 이 곧바로 return 해서 서명 단계 자체가 없고 훅도 발화하지
   // 않는다. 서명·공증은 electron-builder 앞단의 scripts/sign-notarize-mac.cjs 가 한다.
 };
-
-// 패키지 검증(scripts/build-linux-installers.cjs)이 같은 경로를 보게 내보낸다. 두 곳에 상수를
-// 두면 한쪽만 고쳐져서 검증이 엉뚱한 파일을 찾는다.
-module.exports.METAINFO_SOURCE = METAINFO_SOURCE;
-module.exports.METAINFO_TARGET = METAINFO_TARGET;
