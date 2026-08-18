@@ -237,9 +237,9 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
         working-directory: services/rdp-core
 
-      # 첫 실행은 IronRDP·aws-lc-sys·openh264 를 소스에서 빌드해 오래 걸린다. 키가
-      # Cargo.lock 이라 의존성이 그대로면 다음 실행부터 증분이고, restore-keys 로 낡은
-      # 캐시도 물려받는다.
+      # 테스트와 릴리스가 같은 target 캐시를 쓴다. main push 에서는 아래에서 Linux x64·arm64
+      # release 타깃도 빌드하므로, 이후 태그 릴리스가 기본 브랜치의 이 캐시를 그대로 복원한다.
+      # v2 는 예전 debug-only 캐시와 구분해 첫 main 실행이 release 산출물을 반드시 저장하게 한다.
       - name: Cache cargo build
         uses: actions/cache@v5
         with:
@@ -247,8 +247,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             services/rdp-core/target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('services/rdp-core/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-rdp-v2-${{ hashFiles('services/rdp-core/Cargo.lock', 'services/rdp-core/Cargo.toml', 'services/rdp-core/rust-toolchain.toml') }}
           restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-rdp-v2-
             ${{ runner.os }}-${{ runner.arch }}-cargo-
 
       # 3-OS 매트릭스로 돌리지 않는다. 컴파일 오류와 로직 회귀는 플랫폼에 거의 무관하고,
@@ -265,6 +266,20 @@ jobs:
       - name: Run patched vendor crate tests
         working-directory: services/rdp-core
         run: cargo test -p ironrdp-rdpdr-native
+
+      # 태그 잡이 만든 캐시는 다음 태그가 볼 수 없다. 기본 브랜치 push 에서 실제 릴리스와 같은
+      # 두 Linux 타깃을 미리 빌드해, 공유 가능한 main 범위 캐시에 넣는다. PR 은 테스트만 돈다.
+      - name: Install the Linux aarch64 cross toolchain
+        if: github.event_name == 'push'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Warm Linux RDP release targets
+        if: github.event_name == 'push'
+        run: |
+          node apps/desktop/scripts/build-rdp-core.cjs linux x64
+          node apps/desktop/scripts/build-rdp-core.cjs linux arm64
 
   vnc-core-test:
     name: vnc-core test
@@ -291,8 +306,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             services/vnc-core/target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-${{ hashFiles('services/vnc-core/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-v2-${{ hashFiles('services/vnc-core/Cargo.lock', 'services/vnc-core/Cargo.toml', 'services/vnc-core/rust-toolchain.toml') }}
           restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-v2-
             ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-
 
       # 이 잡이 없던 동안 vnc-core 의 테스트 100여 개가 CI 에서 한 번도 돌지 않았다 —
@@ -307,6 +323,99 @@ jobs:
       - name: Run core-framing tests
         working-directory: services/core-framing
         run: cargo test
+
+      # rdp-core 잡과 같은 이유로 main 에 Linux release 산출물을 저장한다. vendored OpenSSL 도
+      # 여기서 한 번 컴파일되므로 태그 릴리스에서는 target 캐시로 재사용된다.
+      - name: Install the Linux aarch64 cross toolchain
+        if: github.event_name == 'push'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Warm Linux VNC release targets
+        if: github.event_name == 'push'
+        run: |
+          node apps/desktop/scripts/build-vnc-core.cjs linux x64
+          node apps/desktop/scripts/build-vnc-core.cjs linux arm64
+
+  # Rust 테스트는 Ubuntu 한 번이면 충분하지만, C 라이브러리를 링크하는 release 산출물은
+  # 플랫폼별 네이티브 러너에서 만들어야 한다. main push 에서만 macOS·Windows 캐시를 데우고,
+  # PR 에는 이 추가 비용을 부과하지 않는다.
+  rdp-core-release-cache:
+    name: rdp-core release cache (${{ matrix.os }})
+    if: github.event_name == 'push'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        run: rustup show active-toolchain || rustup toolchain install
+        working-directory: services/rdp-core
+
+      - name: Cache cargo build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/rdp-core/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-rdp-v2-${{ hashFiles('services/rdp-core/Cargo.lock', 'services/rdp-core/Cargo.toml', 'services/rdp-core/rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-rdp-v2-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
+
+      - name: Warm macOS RDP release targets
+        if: matrix.os == 'macos-latest'
+        run: node apps/desktop/scripts/build-rdp-core.cjs darwin universal
+
+      - name: Warm Windows RDP release target
+        if: matrix.os == 'windows-latest'
+        run: node apps/desktop/scripts/build-rdp-core.cjs win32 x64
+
+  vnc-core-release-cache:
+    name: vnc-core release cache (${{ matrix.os }})
+    if: github.event_name == 'push'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        run: rustup show active-toolchain || rustup toolchain install
+        working-directory: services/vnc-core
+
+      - name: Cache cargo build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/vnc-core/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-v2-${{ hashFiles('services/vnc-core/Cargo.lock', 'services/vnc-core/Cargo.toml', 'services/vnc-core/rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-v2-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-
+
+      - name: Warm macOS VNC release targets
+        if: matrix.os == 'macos-latest'
+        run: node apps/desktop/scripts/build-vnc-core.cjs darwin universal
+
+      - name: Warm Windows VNC release target
+        if: matrix.os == 'windows-latest'
+        run: node apps/desktop/scripts/build-vnc-core.cjs win32 x64
 
   desktop-test:
     name: desktop test

@@ -227,32 +227,46 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
         working-directory: services/rdp-core
 
-      - name: Cache cargo build
-        uses: actions/cache@v4
+      # 태그에서 저장한 캐시는 다음 태그가 볼 수 없다. Repository Test 의 main push 가 같은 키와
+      # 경로에 debug 테스트 및 플랫폼별 release 산출물을 함께 저장하고, 릴리스는 복원만 한다.
+      - name: Restore RDP cargo build
+        id: cargo-cache-rdp
+        uses: actions/cache/restore@v5
         with:
-          # 두 코어를 함께 담는다. vnc-core 가 빠져 있던 동안에는 릴리스마다 그 크레이트를 처음부터
-          # 컴파일했고, 거기에는 vendored OpenSSL 소스 빌드가 딸려 있다(mac 은 universal 이라 2아치를
-          # 각각). core-framing·vendor/ironrdp-* 는 경로 의존이라 참조하는 쪽 target 에 들어가므로
-          # 이 둘로 덮인다.
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             services/rdp-core/target
-            services/vnc-core/target
-          # 두 lock 을 함께 해시한다. rdp 쪽만 보면 vnc 의존성이 바뀐 뒤에도 낡은 캐시를 복원하고
-          # 그 위에 다시 빌드한다.
-          #
-          # **`dist-` 로 테스트 잡과 이름공간을 나눈다.** 릴리스는 `--target <트리플>` 로 빌드해서
-          # 산출물이 `target/<트리플>/release/` 에 들어가고, 테스트 잡은 호스트로 빌드해
-          # `target/release/` 에 넣는다. 키를 공유하면 서로 쓸모없는 물건을 복원할 뿐 아니라,
-          # 먼저 저장한 쪽 때문에 다른 쪽의 저장이 "이미 존재" 로 건너뛰어진다 — 실제로 릴리스의
-          # 리눅스 크로스 산출물이 그렇게 한 번도 캐시에 남지 않았다.
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-dist-${{ hashFiles('services/rdp-core/Cargo.lock', 'services/vnc-core/Cargo.lock') }}
-          # 키가 바뀌어도(의존성 갱신·해시 대상 변경) 접두사로 이전 캐시를 물려받는다. 이것이 없으면
-          # 키가 한 글자만 달라져도 두 크레이트를 처음부터 컴파일한다 — cargo 는 복원된 산출물의
-          # 유효성을 스스로 판단하므로 낡은 것이 섞여도 안전하다.
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-rdp-v2-${{ hashFiles('services/rdp-core/Cargo.lock', 'services/rdp-core/Cargo.toml', 'services/rdp-core/rust-toolchain.toml') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-cargo-dist-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-rdp-v2-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
+
+      - name: Restore VNC cargo build
+        id: cargo-cache-vnc
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/vnc-core/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-v2-${{ hashFiles('services/vnc-core/Cargo.lock', 'services/vnc-core/Cargo.toml', 'services/vnc-core/rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-v2-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-
+
+      - name: Report native release cache misses
+        shell: bash
+        env:
+          RDP_CACHE_HIT: ${{ steps.cargo-cache-rdp.outputs.cache-hit }}
+          VNC_CACHE_HIT: ${{ steps.cargo-cache-vnc.outputs.cache-hit }}
+        run: |
+          if [ "${RDP_CACHE_HIT}" != "true" ]; then
+            echo "::warning::Exact main RDP release cache was not found; this job may rebuild native dependencies."
+          fi
+          if [ "${VNC_CACHE_HIT}" != "true" ]; then
+            echo "::warning::Exact main VNC release cache was not found; this job may rebuild vendored OpenSSL."
+          fi
 
       # 러너 번들 npm 이 codex 도입 후의 lock 그래프에서 hoist 된 7zip-bin 바이너리를
       # 누락 설치할 수 있어, 로컬에서 이 lock 을 올바르게 설치함을 검증한 npm 으로 고정한다.
@@ -349,32 +363,46 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
         working-directory: services/rdp-core
 
-      - name: Cache cargo build
-        uses: actions/cache@v4
+      # 태그에서 저장한 캐시는 다음 태그가 볼 수 없다. Repository Test 의 main push 가 같은 키와
+      # 경로에 debug 테스트 및 플랫폼별 release 산출물을 함께 저장하고, 릴리스는 복원만 한다.
+      - name: Restore RDP cargo build
+        id: cargo-cache-rdp
+        uses: actions/cache/restore@v5
         with:
-          # 두 코어를 함께 담는다. vnc-core 가 빠져 있던 동안에는 릴리스마다 그 크레이트를 처음부터
-          # 컴파일했고, 거기에는 vendored OpenSSL 소스 빌드가 딸려 있다(mac 은 universal 이라 2아치를
-          # 각각). core-framing·vendor/ironrdp-* 는 경로 의존이라 참조하는 쪽 target 에 들어가므로
-          # 이 둘로 덮인다.
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             services/rdp-core/target
-            services/vnc-core/target
-          # 두 lock 을 함께 해시한다. rdp 쪽만 보면 vnc 의존성이 바뀐 뒤에도 낡은 캐시를 복원하고
-          # 그 위에 다시 빌드한다.
-          #
-          # **`dist-` 로 테스트 잡과 이름공간을 나눈다.** 릴리스는 `--target <트리플>` 로 빌드해서
-          # 산출물이 `target/<트리플>/release/` 에 들어가고, 테스트 잡은 호스트로 빌드해
-          # `target/release/` 에 넣는다. 키를 공유하면 서로 쓸모없는 물건을 복원할 뿐 아니라,
-          # 먼저 저장한 쪽 때문에 다른 쪽의 저장이 "이미 존재" 로 건너뛰어진다 — 실제로 릴리스의
-          # 리눅스 크로스 산출물이 그렇게 한 번도 캐시에 남지 않았다.
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-dist-${{ hashFiles('services/rdp-core/Cargo.lock', 'services/vnc-core/Cargo.lock') }}
-          # 키가 바뀌어도(의존성 갱신·해시 대상 변경) 접두사로 이전 캐시를 물려받는다. 이것이 없으면
-          # 키가 한 글자만 달라져도 두 크레이트를 처음부터 컴파일한다 — cargo 는 복원된 산출물의
-          # 유효성을 스스로 판단하므로 낡은 것이 섞여도 안전하다.
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-rdp-v2-${{ hashFiles('services/rdp-core/Cargo.lock', 'services/rdp-core/Cargo.toml', 'services/rdp-core/rust-toolchain.toml') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-cargo-dist-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-rdp-v2-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
+
+      - name: Restore VNC cargo build
+        id: cargo-cache-vnc
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/vnc-core/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-v2-${{ hashFiles('services/vnc-core/Cargo.lock', 'services/vnc-core/Cargo.toml', 'services/vnc-core/rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-v2-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-
+
+      - name: Report native release cache misses
+        shell: bash
+        env:
+          RDP_CACHE_HIT: ${{ steps.cargo-cache-rdp.outputs.cache-hit }}
+          VNC_CACHE_HIT: ${{ steps.cargo-cache-vnc.outputs.cache-hit }}
+        run: |
+          if [ "${RDP_CACHE_HIT}" != "true" ]; then
+            echo "::warning::Exact main RDP release cache was not found; this job may rebuild native dependencies."
+          fi
+          if [ "${VNC_CACHE_HIT}" != "true" ]; then
+            echo "::warning::Exact main VNC release cache was not found; this job may rebuild vendored OpenSSL."
+          fi
 
       # build-mac 과 동일한 가드 — 러너 npm 이 7zip-bin(win/x64/7za.exe)을 누락 설치하는
       # 사례 대응. path7za 가 플랫폼별 경로를 해석하므로 같은 스니펫을 그대로 쓴다.
@@ -461,32 +489,46 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
         working-directory: services/rdp-core
 
-      - name: Cache cargo build
-        uses: actions/cache@v4
+      # 태그에서 저장한 캐시는 다음 태그가 볼 수 없다. Repository Test 의 main push 가 같은 키와
+      # 경로에 debug 테스트 및 플랫폼별 release 산출물을 함께 저장하고, 릴리스는 복원만 한다.
+      - name: Restore RDP cargo build
+        id: cargo-cache-rdp
+        uses: actions/cache/restore@v5
         with:
-          # 두 코어를 함께 담는다. vnc-core 가 빠져 있던 동안에는 릴리스마다 그 크레이트를 처음부터
-          # 컴파일했고, 거기에는 vendored OpenSSL 소스 빌드가 딸려 있다(mac 은 universal 이라 2아치를
-          # 각각). core-framing·vendor/ironrdp-* 는 경로 의존이라 참조하는 쪽 target 에 들어가므로
-          # 이 둘로 덮인다.
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             services/rdp-core/target
-            services/vnc-core/target
-          # 두 lock 을 함께 해시한다. rdp 쪽만 보면 vnc 의존성이 바뀐 뒤에도 낡은 캐시를 복원하고
-          # 그 위에 다시 빌드한다.
-          #
-          # **`dist-` 로 테스트 잡과 이름공간을 나눈다.** 릴리스는 `--target <트리플>` 로 빌드해서
-          # 산출물이 `target/<트리플>/release/` 에 들어가고, 테스트 잡은 호스트로 빌드해
-          # `target/release/` 에 넣는다. 키를 공유하면 서로 쓸모없는 물건을 복원할 뿐 아니라,
-          # 먼저 저장한 쪽 때문에 다른 쪽의 저장이 "이미 존재" 로 건너뛰어진다 — 실제로 릴리스의
-          # 리눅스 크로스 산출물이 그렇게 한 번도 캐시에 남지 않았다.
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-dist-${{ hashFiles('services/rdp-core/Cargo.lock', 'services/vnc-core/Cargo.lock') }}
-          # 키가 바뀌어도(의존성 갱신·해시 대상 변경) 접두사로 이전 캐시를 물려받는다. 이것이 없으면
-          # 키가 한 글자만 달라져도 두 크레이트를 처음부터 컴파일한다 — cargo 는 복원된 산출물의
-          # 유효성을 스스로 판단하므로 낡은 것이 섞여도 안전하다.
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-rdp-v2-${{ hashFiles('services/rdp-core/Cargo.lock', 'services/rdp-core/Cargo.toml', 'services/rdp-core/rust-toolchain.toml') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-cargo-dist-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-rdp-v2-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
+
+      - name: Restore VNC cargo build
+        id: cargo-cache-vnc
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/vnc-core/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-v2-${{ hashFiles('services/vnc-core/Cargo.lock', 'services/vnc-core/Cargo.toml', 'services/vnc-core/rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-v2-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-
+
+      - name: Report native release cache misses
+        shell: bash
+        env:
+          RDP_CACHE_HIT: ${{ steps.cargo-cache-rdp.outputs.cache-hit }}
+          VNC_CACHE_HIT: ${{ steps.cargo-cache-vnc.outputs.cache-hit }}
+        run: |
+          if [ "${RDP_CACHE_HIT}" != "true" ]; then
+            echo "::warning::Exact main RDP release cache was not found; this job may rebuild native dependencies."
+          fi
+          if [ "${VNC_CACHE_HIT}" != "true" ]; then
+            echo "::warning::Exact main VNC release cache was not found; this job may rebuild vendored OpenSSL."
+          fi
 
       - name: Install the aarch64 cross toolchain
         # 이 러너는 x64 인데 릴리스는 linux/arm64 도 낸다. ssh-core 는 GOARCH 만 바꾸면 되지만
