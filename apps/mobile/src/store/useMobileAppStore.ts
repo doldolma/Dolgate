@@ -137,6 +137,7 @@ import {
   type AwsSsoBrowserLoginPrompt,
   resolveAwsSessionForHost,
 } from '../lib/aws-session';
+import { appendSessionBanner } from '../lib/terminal-banner';
 import { AwsSftpHostKeyChallengeError, connectAwsSftp } from '../lib/aws-sftp';
 import { openAwsSsoBrowser } from '../lib/aws-sso-bridge';
 import { closeInAppBrowser, openInAppBrowser } from '../lib/in-app-browser';
@@ -4337,8 +4338,28 @@ export const useMobileAppStore = create<MobileAppState>()(
               askInteractiveAuth(host, challenge, sessionRecord.id),
             // 서버가 인증 단계에 보낸 안내. 붙어 있는 동안 보여줘야 그 자리에서 끝난다 —
             // 실패한 뒤에 말해 주면 이미 끊긴 연결을 다시 시작해야 한다.
-            onBanner: bannerText =>
-              patchConnectionView(sessionRecord.id, { banner: bannerText }),
+            onBanner: bannerText => {
+              // 연결 진행 카드용(붙는 중에만 산다).
+              patchConnectionView(sessionRecord.id, { banner: bannerText });
+              // 터미널에는 직접 쓰지 않고 이 세션의 스냅샷에 합친다. 직접 쓰면 (1) 활성
+              // 탭이 아닌 세션의 배너는 아무도 못 받고 (2) 다음 스냅샷 복원이 화면을
+              // 지우면서 같이 지운다. 스냅샷에 넣으면 배경 탭·늦은 WebView 부팅·재접속이
+              // 한 경로로 해결된다(lib/terminal-banner 주석 참고).
+              const merged = appendSessionBanner(
+                runtimeSessionSnapshots.get(sessionRecord.id),
+                bannerText,
+              );
+              if (merged === null) {
+                return;
+              }
+              runtimeSessionSnapshots.set(
+                sessionRecord.id,
+                trimSnapshot(merged),
+              );
+              // 배너는 지금 사용자가 행동해야 하는 안내일 수 있다(Tailscale 추가 인증 등).
+              // 디바운스를 기다리지 않고 바로 반영한다.
+              flushSessionSnapshot(sessionRecord.id);
+            },
             onHopProgress: hop => patchConnectionView(sessionRecord.id, { hop }),
             onDisconnected: markDropped,
           });

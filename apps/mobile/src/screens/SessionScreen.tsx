@@ -393,31 +393,9 @@ export function SessionScreen(): React.JSX.Element {
   const activeConnectionView = useMobileAppStore(state =>
     activeSession ? state.connectionViews[activeSession.id] : undefined,
   );
-  // 서버 배너를 터미널에 찍는다 — OpenSSH 가 하는 것과 같고, 데스크톱도 그렇게 한다.
-  //
-  // 패널이 아니라 터미널인 이유: 링크를 누를 수 있어야 한다. URL 을 찾는 일은 xterm 의 web-links
-  // 애드온이 이미 하고, 그래야 배너뿐 아니라 세션 출력에 나오는 주소(MOTD 의 업데이트 안내 등)도
-  // 같은 규칙으로 눌린다. 화면 쪽에서 정규식으로 찾으면 배너 하나만 되고 규칙이 두 곳으로 갈린다.
-  //
-  // 같은 배너를 두 번 찍지 않게 세션+글 조합을 기억한다. 재연결하면 서버가 다시 보내므로 그때는
-  // 다시 찍혀야 한다(글이 같아도 세션 ID 가 다르다).
-  const writtenBannerRef = useRef<string | null>(null);
-  useEffect(() => {
-    const banner = activeConnectionView?.banner?.trim();
-    const sessionId = activeSession?.id;
-    if (!banner || !sessionId || !terminalReady) {
-      return;
-    }
-    const stamp = `${sessionId}:${banner}`;
-    if (writtenBannerRef.current === stamp) {
-      return;
-    }
-    writtenBannerRef.current = stamp;
-    // 셸 출력과 섞이지 않게 줄을 맞춘다. 배너는 인증 단계에 오므로 보통 화면은 아직 비어 있다.
-    terminalRef.current?.write(
-      Uint8Array.from(Buffer.from(`${banner.replace(/\r?\n/g, '\r\n')}\r\n`, 'utf8')),
-    );
-  }, [activeConnectionView?.banner, activeSession?.id, terminalReady]);
+  // 서버 배너는 여기서 터미널에 쓰지 않는다. 스토어가 세션 스냅샷에 합쳐 두고
+  // (lib/terminal-banner), 아래 스냅샷 복원 effect 들이 그리므로 백그라운드 탭·늦은
+  // WebView 부팅·재접속이 한 경로로 처리된다. 직접 쓰면 다음 복원에서 지워진다.
 
   const connectionStages = useMemo(
     () =>

@@ -385,14 +385,26 @@ describe('SessionScreen', () => {
   // 탭이 튄다 — 두 경우 모두 여기서 막는다.
   // 배너는 터미널에 찍는다 — OpenSSH 가 하는 것과 같고, 데스크톱도 그렇게 한다. 패널에 글로
   // 두면 링크를 누를 수 없다(URL 을 찾는 일은 xterm 의 web-links 애드온이 한다).
+  //
+  // 화면이 배너를 직접 쓰지는 않는다. 스토어의 onBanner 가 세션 스냅샷에 합쳐 두고
+  // (lib/terminal-banner) 화면은 그 스냅샷을 그린다 — 그래야 활성 탭이 아닌 세션의
+  // 배너도 살아남고, 스냅샷 복원이 화면을 지울 때 같이 지워지지 않는다.
   it('writes the server banner into the terminal', async () => {
+    const BANNER_URL = 'https://login.example.com/a/abc';
     act(() => {
       useMobileAppStore.setState({
+        sessions: [
+          {
+            ...session,
+            lastViewportSnapshot: `To authenticate, visit: ${BANNER_URL}\r\n`,
+          },
+          secondSession,
+        ],
         connectionViews: {
           'session-1': {
             hostId: 'host-1',
             hasTailnet: false,
-            banner: 'To authenticate, visit: https://login.example.com/a/abc',
+            banner: `To authenticate, visit: ${BANNER_URL}`,
           },
         },
       });
@@ -406,7 +418,7 @@ describe('SessionScreen', () => {
     const written = (mockTerminalHandle?.write.mock.calls ?? [])
       .map(call => Buffer.from(call[0] as Uint8Array).toString('utf8'))
       .join('');
-    expect(written).toContain('https://login.example.com/a/abc');
+    expect(written).toContain(BANNER_URL);
     // 패널이 같은 글을 또 보여주면 화면에 두 번 뜬다.
     expect(collectText(tree!.toJSON())).not.toContain('login.example.com');
 
@@ -415,17 +427,19 @@ describe('SessionScreen', () => {
     });
   });
 
-  // 탭을 옮겼다 돌아오면 같은 배너가 다시 쓰일 수 있다. 그러면 화면에 두 번 찍힌다.
-  it('writes the same banner only once across tab switches', async () => {
+  // 탭을 옮겼다 돌아오면 스냅샷을 다시 그린다. 그때 화면을 먼저 지우므로 배너가 두 번
+  // 쌓이지 않는다 — 덧쓰기가 되면 같은 안내가 화면에 겹쳐 보인다.
+  it('redraws the banner from the snapshot without stacking it', async () => {
+    const BANNER_URL = 'https://login.example.com/a/abc';
     act(() => {
       useMobileAppStore.setState({
-        connectionViews: {
-          'session-1': {
-            hostId: 'host-1',
-            hasTailnet: false,
-            banner: 'approve at https://login.example.com/a/abc',
+        sessions: [
+          {
+            ...session,
+            lastViewportSnapshot: `approve at ${BANNER_URL}\r\n`,
           },
-        },
+          secondSession,
+        ],
       });
     });
 
@@ -444,13 +458,18 @@ describe('SessionScreen', () => {
       });
     });
 
-    const bannerWrites = (mockTerminalHandle?.write.mock.calls ?? []).filter(
-      call =>
-        Buffer.from(call[0] as Uint8Array)
-          .toString('utf8')
-          .includes('login.example.com'),
+    const writes = (mockTerminalHandle?.write.mock.calls ?? []).map(call =>
+      Buffer.from(call[0] as Uint8Array).toString('utf8'),
     );
-    expect(bannerWrites).toHaveLength(1);
+    // 배너를 담은 쓰기마다 그 직전에 화면 초기화가 있어야 한다.
+    for (const [index, text] of writes.entries()) {
+      if (!text.includes('login.example.com')) {
+        continue;
+      }
+      const preceding = writes.slice(0, index).join('');
+      expect(preceding).toMatch(/\x1b\[2J|\x1bc/);
+    }
+    expect(writes.join('')).toContain(BANNER_URL);
 
     await act(async () => {
       tree!.unmount();
