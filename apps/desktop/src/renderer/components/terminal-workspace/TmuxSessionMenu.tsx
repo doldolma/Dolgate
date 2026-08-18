@@ -85,7 +85,7 @@ export function TmuxSessionMenu({
         }
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex items-center gap-1 rounded-[4px] px-[0.25rem] py-[0.25rem] text-[var(--text-muted)] hover:bg-[color-mix(in_srgb,var(--surface)_80%,var(--text)_20%)]"
+        className="flex items-center gap-1 rounded-[4px] px-[0.25rem] text-[var(--text-muted)] hover:bg-[color-mix(in_srgb,var(--surface)_80%,var(--text)_20%)]"
       >
         <span className="max-w-[16rem] truncate">{triggerLabel}</span>
         <span aria-hidden>
@@ -98,9 +98,12 @@ export function TmuxSessionMenu({
       </button>
 
       {open ? (
+        // 오른쪽 끝에 맞춰 왼쪽으로 펼친다. 이 메뉴를 다는 tmux 바는 하단 줄의 오른쪽에
+        // 붙어 있어서, left-0 으로 오른쪽으로 펼치면 min-w(16rem)가 창 밖으로 나가
+        // 가로 스크롤이 생기고 화면이 밀린다.
         <div
           role="menu"
-          className="absolute bottom-[calc(100%+0.3rem)] left-0 z-20 min-w-[16rem] max-w-[24rem] overflow-hidden rounded-[6px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_24px_rgba(0,0,0,0.28)]"
+          className="absolute bottom-[calc(100%+0.3rem)] right-0 z-20 min-w-[16rem] max-w-[24rem] overflow-hidden rounded-[6px] border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_24px_rgba(0,0,0,0.28)]"
         >
           {/* 새 세션 만들기 — 이름 입력 후 Enter (new-session -s <name>). */}
           <div className="border-b border-[var(--border)] px-[0.7rem] py-[0.4rem]">

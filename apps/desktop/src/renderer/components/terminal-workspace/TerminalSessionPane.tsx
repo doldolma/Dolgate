@@ -23,7 +23,7 @@ import { TerminalConnectionOverlay } from './TerminalConnectionOverlay';
 import { TerminalHostStatusBar } from './TerminalHostStatusBar';
 import { TerminalMoshStatusBar } from './TerminalMoshStatusBar';
 import { TerminalTmuxStatusBar } from './TerminalTmuxStatusBar';
-import { statusBarStack } from './terminalStatusBarChrome';
+import { statusBarDivider, statusBarStack } from './terminalStatusBarChrome';
 import { useHostMetrics } from '../../controllers/useHostMetrics';
 import { TerminalHostKeyTrustCard } from './TerminalHostKeyTrustCard';
 import { TerminalInteractiveAuthOverlay } from './TerminalInteractiveAuthOverlay';
@@ -937,27 +937,38 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           tmux 경로(SessionShell)도 같은 statusBarStack 을 쓴다 — 컨테이너가 갈리면 같은
           바가 연결 방식에 따라 다른 간격으로 놓인다. */}
       <div className={statusBarStack}>
-        <TerminalHostStatusBar
-          status={hostMetrics.status}
-          metrics={hostMetrics.metrics}
-          onRetry={hostMetrics.retry}
-        />
+        {/* mosh 는 자기 줄에 둔다. tmux·자원 바와 같이 뜨는 조합이 아니라 어차피 한 줄이다. */}
         {tab?.moshState ? (
           <TerminalMoshStatusBar
             state={tab.moshState}
             lastResponseAt={tab.lastMoshResponseAt ?? null}
           />
         ) : null}
-        {tab?.tmuxAvailable && !tab.tmux ? (
-          <TerminalTmuxStatusBar
-            version={tab.tmuxAvailable.version}
-            sessions={tab.tmuxAvailable.sessions}
-            onOpen={handleOpenTmux}
-            onAttachSession={handleAttachTmuxSession}
-            onCreateSession={handleCreateTmuxSession}
-            onKillSession={handleKillTmuxSession}
-          />
-        ) : null}
+        {/* 자원과 tmux 는 한 줄에 나눠 놓는다 — 세로로 쌓으면 터미널이 두 줄만큼 좁아지는데,
+            둘 다 짧아서 한 줄에 들어간다. 자원이 왼쪽을 채우고 tmux 는 오른쪽 끝에 붙는다.
+            자원 바는 지표를 못 읽는 연결에서 null 을 반환하며, 그때 tmux 만 남아도 위치는
+            같다(빈 flex-1 이 왼쪽을 차지한다). */}
+        <div className="flex items-stretch">
+          <div className="min-w-0 flex-1">
+            <TerminalHostStatusBar
+              status={hostMetrics.status}
+              metrics={hostMetrics.metrics}
+              onRetry={hostMetrics.retry}
+            />
+          </div>
+          {tab?.tmuxAvailable && !tab.tmux ? (
+            <div className={cn('shrink-0', statusBarDivider)}>
+              <TerminalTmuxStatusBar
+                version={tab.tmuxAvailable.version}
+                sessions={tab.tmuxAvailable.sessions}
+                onOpen={handleOpenTmux}
+                onAttachSession={handleAttachTmuxSession}
+                onCreateSession={handleCreateTmuxSession}
+                onKillSession={handleKillTmuxSession}
+              />
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );

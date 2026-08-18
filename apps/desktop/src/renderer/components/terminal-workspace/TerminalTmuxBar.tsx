@@ -24,10 +24,14 @@ interface TerminalTmuxBarProps {
   onSelectSession: (name: string) => void;
   onKillSession?: (name: string) => void;
   onRefresh?: () => void;
-  /** 우측 액션 — 라벨과 동작만 다르고 생김새는 공유한다(열기 / detach). */
-  actionLabel: string;
+  /**
+   * 우측 액션 — 라벨과 동작만 다르고 생김새는 공유한다(열기 / detach). 없으면 버튼을
+   * 그리지 않는다: 감지 바는 세션 메뉴로 attach·생성이 모두 되므로 control mode 를
+   * 쓸 수 있는 tmux 에서는 버튼이 군더더기다.
+   */
+  actionLabel?: string;
   actionTitle?: string;
-  onAction: () => void;
+  onAction?: () => void;
 }
 
 // tmux 하단 1줄 바의 단일 표현 컴포넌트.
@@ -71,14 +75,16 @@ export function TerminalTmuxBar({
         onKillSession={onKillSession}
         onRefresh={onRefresh}
       />
-      <button
-        type="button"
-        className={statusBarActionButton}
-        title={actionTitle}
-        onClick={onAction}
-      >
-        {actionLabel}
-      </button>
+      {actionLabel && onAction ? (
+        <button
+          type="button"
+          className={statusBarActionButton}
+          title={actionTitle}
+          onClick={onAction}
+        >
+          {actionLabel}
+        </button>
+      ) : null}
     </div>
   );
 }

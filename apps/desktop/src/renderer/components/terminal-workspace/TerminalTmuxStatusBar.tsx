@@ -1,4 +1,5 @@
 import type { TmuxSessionInfo } from '../../store/types';
+import { supportsTmuxControlMode } from '../../lib/tmux-version';
 import { TerminalTmuxBar } from './TerminalTmuxBar';
 import { useTranslation } from 'react-i18next';
 
@@ -34,6 +35,10 @@ export function TerminalTmuxStatusBar({
     sessions.length > 0
       ? translate('tmuxStatus.sessionCount', { count: sessions.length })
       : translate('tmuxStatus.noSessions');
+  // control mode(2.6+) 를 쓸 수 있으면 세션 메뉴만으로 attach·생성이 다 되므로 버튼을
+  // 두지 않는다. 미만 버전은 메뉴 경로가 전부 `tmux -CC` 라 쓸 수 없고, onOpen 만
+  // passthrough 폴백을 갖고 있어 유일한 진입점이다 — 그때만 남긴다.
+  const legacyOpenOnly = !supportsTmuxControlMode(version);
 
   return (
     <TerminalTmuxBar
@@ -43,8 +48,8 @@ export function TerminalTmuxStatusBar({
       onCreateSession={onCreateSession}
       onSelectSession={onAttachSession}
       onKillSession={onKillSession}
-      actionLabel={translate('tmuxStatus.open')}
-      onAction={onOpen}
+      actionLabel={legacyOpenOnly ? translate('tmuxStatus.open') : undefined}
+      onAction={legacyOpenOnly ? onOpen : undefined}
     />
   );
 }
