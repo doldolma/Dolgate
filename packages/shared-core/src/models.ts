@@ -364,6 +364,13 @@ export interface RdpHostRecord extends HostBaseRecord {
   useAllMonitors?: boolean | null;
   /** 원격 소리를 받는다. 없거나 null 이면 켜짐. */
   audioEnabled?: boolean | null;
+  /**
+   * 로컬 마이크를 원격으로 보낸다(AUDIO_INPUT). 없거나 null 이면 **꺼짐**.
+   *
+   * 소리 재생과 기본값이 반대인 이유: 이쪽은 사용자의 마이크를 켜는 일이다. 켜져 있는 줄 모르고
+   * 원격에 소리가 넘어가면 안 되므로, 명시적으로 켠 호스트에서만 동작한다.
+   */
+  microphoneEnabled?: boolean | null;
   /** 원격과 클립보드를 주고받는다. 없거나 null 이면 켜짐. */
   clipboardEnabled?: boolean | null;
   /**
@@ -495,6 +502,8 @@ export interface RdpHostDraft extends HostBaseDraft {
   useAllMonitors?: boolean | null;
   /** 원격 소리를 받는다. 기본 켜짐. [[RdpHostRecord]] 참고. */
   audioEnabled?: boolean | null;
+  /** 마이크를 원격으로 보낸다. 기본 꺼짐. [[RdpHostRecord]] 참고. */
+  microphoneEnabled?: boolean | null;
   /** 원격과 클립보드를 주고받는다. 기본 켜짐. [[RdpHostRecord]] 참고. */
   clipboardEnabled?: boolean | null;
   /** 색 깊이(비트). 기본 32. [[RdpHostRecord]] 참고. */
@@ -3515,6 +3524,13 @@ export interface TerminalTab {
   rdpUsername?: string;
   /** 원격 데스크톱의 현재 해상도. 접속 응답에서 채우고 resized 이벤트로 갱신한다. */
   rdpDesktopSize?: { width: number; height: number };
+  /**
+   * 마이크를 보낼 수 없는 이유. 보낼 수 있으면 null/undefined.
+   *
+   * 탭 hover 에 표시한다. 화면 위에 배너로 띄우던 것을 옮긴 것이다 — 원격 화면 위에 겹치면
+   * 작업 표시줄과 섞여 읽히지 않고, 붙어 있는 내내 떠 있었다.
+   */
+  rdpMicrophoneProblem?: 'denied' | 'noDevice' | 'failed' | 'serverRefused' | null;
   /** control mode(tmux -CC) pane일 때만 채워진다. 평시엔 null/undefined. */
   tmux?: TerminalTmuxPaneState | null;
   /** SSH 접속 후 감지한 원격 tmux 정보(하단바 표시용). 미감지면 null/undefined. */

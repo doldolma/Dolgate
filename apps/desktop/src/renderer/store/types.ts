@@ -1137,6 +1137,16 @@ interface AppStateParts {
     sessionId: string,
     monitors: RdpMonitorSelection[] | null,
   ) => Promise<void>;
+  /**
+   * 마이크를 보낼 수 없는 이유를 이 세션 탭에 기록한다(탭 hover 표시용).
+   *
+   * 이유를 아는 곳은 렌더러다 — 권한·장치는 캡처를 시도해 봐야 알고, 서버가 채널을 열지 않은
+   * 것은 코어가 이벤트로 알려 준다. 둘 다 이 한 곳으로 모은다.
+   */
+  setRdpMicrophoneProblem: (
+    sessionId: string,
+    problem: TerminalTab["rdpMicrophoneProblem"],
+  ) => void;
   handleTmuxLayoutChange: (
     controlSessionId: string,
     windowId: string,
@@ -1287,6 +1297,7 @@ export type CatalogSlice = Pick<
 export type SessionSlice = Pick<
   AppStateParts,
   | "setRdpMonitors"
+  | "setRdpMicrophoneProblem"
   | "tabs"
   | "sessionShareChatNotifications"
   | "workspaces"

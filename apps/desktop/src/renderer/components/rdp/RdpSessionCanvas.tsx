@@ -13,6 +13,8 @@ import { useRdpCanvas } from "./useRdpCanvas";
 import { useRdpAudio } from "./useRdpAudio";
 import { useRdpAutoResize } from "./useRdpAutoResize";
 import { useRdpClipboard } from "./useRdpClipboard";
+import { useRdpMicrophone } from "./useRdpMicrophone";
+import { useTranslation } from "react-i18next";
 import { useRdpInput } from "./useRdpInput";
 import { useRdpKeyboardCapture } from "./useRdpKeyboardCapture";
 import { rdpKeyboardCaptureAttributes } from "../../lib/rdp-keyboard-focus";
@@ -45,6 +47,13 @@ interface RdpSessionCanvasProps {
   /** 로컬 → 원격 클립보드 전달. 호스트에서 끄면 false 다. */
   clipboard?: boolean;
   /**
+   * 로컬 마이크를 원격으로 보낼지. 호스트에서 켠 경우만 true 다.
+   *
+   * 소리 재생과 같은 이유로 **창 하나만** 켜야 한다 — 창마다 열면 같은 마이크를 여러 번 잡아
+   * 원격에 소리가 겹쳐 들어간다.
+   */
+  microphone?: boolean;
+  /**
    * 오류 문구를 이 캔버스가 직접 그릴지.
    *
    * 메인 창에서는 꺼야 한다 — `RdpConnectionOverlay` 가 같은 pane 을 덮으면서 같은 내용을
@@ -67,7 +76,9 @@ export function RdpSessionCanvas({
   autoResize = true,
   audio = true,
   clipboard = true,
+  microphone = false,
 }: RdpSessionCanvasProps) {
+  const { t: translate } = useTranslation();
   const [desktop, setDesktop] = useState<RdpConnectedPayload | null>(connected ?? null);
   const [error, setError] = useState<string | null>(null);
   // 인증서 프롬프트는 스토어에 둔다 — 연결 오버레이가 그동안 자기를 내려야 하는데, 그쪽은 이
@@ -157,6 +168,19 @@ export function RdpSessionCanvas({
 
   // 원격 → 로컬은 메인 프로세스가 처리한다. 여기서는 로컬 → 원격만 담당한다.
   useRdpClipboard(sessionId, canvasRef, clipboard && visible && Boolean(desktop));
+
+  // 마이크는 숨은 pane 에서도 계속 보낸다 — 통화 중에 다른 탭을 보면 소리가 끊기면 안 된다.
+  const { problem: microphoneProblem } = useRdpMicrophone(
+    sessionId,
+    microphone && Boolean(desktop),
+  );
+
+  // 마이크가 안 되는 이유는 **탭 hover** 에 보여준다. 예전에는 원격 화면 위에 배너로 겹쳤는데,
+  // 원격의 작업 표시줄과 섞여 읽히지 않았고 붙어 있는 내내 떠 있었다.
+  const setRdpMicrophoneProblem = useAppStore((state) => state.setRdpMicrophoneProblem);
+  useEffect(() => {
+    setRdpMicrophoneProblem(sessionId, microphoneProblem);
+  }, [microphoneProblem, sessionId, setRdpMicrophoneProblem]);
 
   const { handlers } = useRdpInput({
     sessionId,

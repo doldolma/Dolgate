@@ -17,6 +17,12 @@ use tracing::{debug, info};
 /// 소리가 한 조각이라도 왔는지를 펌프와 나눠 갖는다.
 pub type AudioHeard = Arc<AtomicBool>;
 
+/// 백엔드를 **매번 새로** 만드는 공장.
+///
+/// 동적 채널(AUDIO_PLAYBACK_DVC)은 서버가 닫고 다시 열 수 있어서 하나로는 부족하다
+/// (audio_output_dvc.rs 의 `AudioOutputDvcListener` 주석 참고).
+pub type AudioBackendFactory = Box<dyn FnMut() -> AudioBackend + Send>;
+
 use crate::output::Output;
 use crate::protocol::AudioFramePayload;
 

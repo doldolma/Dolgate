@@ -7,6 +7,8 @@
 //! Logs go to stderr only. stdout is the frame channel and a stray `println!` would corrupt it.
 
 mod audio;
+mod audio_input;
+mod audio_output_dvc;
 mod clipboard;
 mod drive;
 mod egfx;
@@ -46,6 +48,13 @@ struct SessionHandle {
     layout: Sender<Vec<crate::protocol::MonitorRequest>>,
     /// Local clipboard text, so the remote can paste what was copied here.
     clipboard: Sender<String>,
+    /// 렌더러가 캡처한 마이크 PCM. 마이크를 끈 세션에서는 아무도 보내지 않는다.
+    microphone: Sender<Vec<u8>>,
+    /// 연결 도중 취소를 전파하기 위한 소켓 사본.
+    ///
+    /// `stop` 만으로는 연결 단계를 멈출 수 없다 — 자세한 이유는 `session::CancelSocket` 주석에
+    /// 있다. 붙기 전이면 비어 있다.
+    cancel_socket: crate::session::CancelSocket,
     /// 화면 전체를 다시 보내 달라는 요청.
     ///
     /// RDP 는 바뀐 부분만 보낸다. 세션 도중에 새로 붙는 창(모니터별 창처럼)은 그동안의 화면을
@@ -91,7 +100,7 @@ fn main() -> anyhow::Result<()> {
             }
         };
 
-        handle(request, &output, &sessions);
+        handle(request, frame.payload, &output, &sessions);
     }
 
     stop_all(&sessions);
@@ -99,7 +108,9 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle(request: Request, output: &Arc<Output>, sessions: &Sessions) {
+/// `payload` 는 프레임의 바이너리 몫이다. 마이크 PCM 처럼 JSON 에 담기 아까운 것만 쓴다 —
+/// base64 로 감싸면 실제로 33% 커지고, 초당 수십 번 오는 것이라 그 낭비가 계속 쌓인다.
+fn handle(request: Request, payload: Vec<u8>, output: &Arc<Output>, sessions: &Sessions) {
     match request.kind.as_str() {
         "health" => {
             let _ = output.send_event(
@@ -113,6 +124,7 @@ fn handle(request: Request, output: &Arc<Output>, sessions: &Sessions) {
         "rdpSetLayout" => request_layout(request, sessions),
         "rdpRefresh" => request_refresh(request, sessions),
         "rdpClipboard" => set_clipboard(request, sessions),
+        "rdpMicAudio" => send_microphone(request, payload, sessions),
         "disconnect" => disconnect(request, output, sessions),
         other => {
             warn!(kind = other, "unknown request type");
@@ -158,6 +170,8 @@ fn connect_rdp(request: Request, output: &Arc<Output>, sessions: &Sessions) {
     let (layout_tx, layout_rx) = mpsc::channel();
     let (refresh_tx, refresh_rx) = mpsc::channel();
     let (clipboard_tx, clipboard_rx) = mpsc::channel();
+    let (microphone_tx, microphone_rx) = mpsc::channel();
+    let cancel_socket: crate::session::CancelSocket = Arc::new(std::sync::Mutex::new(None));
     {
         let mut guard = sessions.lock().expect("sessions mutex poisoned");
         if guard.contains_key(&session_id) {
@@ -180,6 +194,8 @@ fn connect_rdp(request: Request, output: &Arc<Output>, sessions: &Sessions) {
                 layout: layout_tx,
                 refresh: refresh_tx,
                 clipboard: clipboard_tx,
+                microphone: microphone_tx,
+                cancel_socket: Arc::clone(&cancel_socket),
             },
         );
     }
@@ -213,6 +229,8 @@ fn connect_rdp(request: Request, output: &Arc<Output>, sessions: &Sessions) {
                     layout_rx,
                     refresh_rx,
                     clipboard_rx,
+                    microphone_rx,
+                    cancel_socket,
                 );
             }));
 
@@ -271,6 +289,14 @@ fn disconnect(request: Request, output: &Arc<Output>, sessions: &Sessions) {
         .get(session_id)
     {
         handle.stop.store(true, Ordering::Relaxed);
+        // **연결 도중이면 소켓을 끊는다.** 플래그는 펌프 루프만 본다 — 아직 붙는 중이라면
+        // 스레드는 핸드셰이크 읽기에 최대 30초 갇혀 있고, 그동안 사용자가 닫은 탭의 연결이
+        // 계속 진행된 뒤 timeout 오류가 뒤늦게 올라왔다.
+        if let Ok(slot) = handle.cancel_socket.lock() {
+            if let Some(socket) = slot.as_ref() {
+                let _ = socket.shutdown(std::net::Shutdown::Both);
+            }
+        }
     }
 
     let _ = output.send_event(
@@ -392,6 +418,33 @@ fn request_refresh(request: Request, sessions: &Sessions) {
         .get(session_id)
     {
         let _ = handle.refresh.send(());
+    }
+}
+
+/// 렌더러가 캡처한 마이크 PCM 을 세션으로 넘긴다.
+///
+/// 프레임 payload 를 그대로 넘긴다 — 협상된 사양의 리틀엔디언 16-bit PCM 이고, 이 프로세스는
+/// 내용을 해석하지 않는다. 세션이 없거나 마이크를 끈 세션이면 조용히 버린다(초당 수십 번 오는
+/// 것이라 그때마다 오류를 올리면 로그가 그것만으로 찬다).
+fn send_microphone(request: Request, payload: Vec<u8>, sessions: &Sessions) {
+    let Some(session_id) = request.session_id.as_deref() else {
+        return;
+    };
+    if payload.is_empty() {
+        return;
+    }
+    let bytes = payload.len();
+    match sessions
+        .lock()
+        .expect("sessions mutex poisoned")
+        .get(session_id)
+    {
+        Some(handle) => {
+            let _ = handle.microphone.send(payload);
+        }
+        // 세션을 못 찾으면 조용히 사라진다. 마이크가 "안 된다" 는 신고에서 이 경우와 렌더러가
+        // 아예 안 보내는 경우를 갈라야 한다.
+        None => tracing::debug!(session_id, bytes, "microphone chunk for an unknown session"),
     }
 }
 

@@ -21,7 +21,11 @@ import type {
   SessionLifecycleLogMetadata,
 } from "@shared";
 import { logMessage } from "./activity-log-message";
-import { CoreFrameParser, encodeControlFrameOf } from "./core-framing";
+import {
+  CoreFrameParser,
+  encodeControlFrameOf,
+  encodeControlFrameWithPayload,
+} from "./core-framing";
 
 // rdp-core 가 오디오 stream frame 에 실어 보내는 형식 정보.
 interface RdpAudioMetadata {
@@ -219,7 +223,37 @@ export class RdpManager {
     }
   }
 
+  /**
+   * 이 세션을 연 창. 그 창이 닫히면 세션도 끊는다.
+   *
+   * **픽셀을 보는 창(watcher)과 다르다.** 모니터별 창은 같은 세션을 같이 보지만 세션의 주인이
+   * 아니다 — 모니터 창을 닫았다고 세션을 끊으면 본 탭이 죽는다.
+   */
+  private readonly ownerBySession = new Map<string, number>();
+
+  /** 세션의 주인 창을 기록한다. 접속을 시작한 창이 주인이다. */
+  setSessionOwner(sessionId: string, webContentsId: number): void {
+    this.ownerBySession.set(sessionId, webContentsId);
+  }
+
+  /**
+   * 그 창이 열었던 세션을 모두 끊는다. 창이 닫힐 때 부른다.
+   *
+   * 이것이 없으면 멀티윈도우에서 창 하나를 닫아도 그 창의 원격 화면 세션이 코어에 남는다 —
+   * 프레임 전달만 멈추고(watcher 해제) TCP·원격 세션은 앱이 끝날 때까지 살아 있었다.
+   */
+  disconnectSessionsOwnedBy(webContentsId: number): void {
+    for (const [sessionId, ownerId] of Array.from(this.ownerBySession)) {
+      if (ownerId !== webContentsId) {
+        continue;
+      }
+      this.ownerBySession.delete(sessionId);
+      this.disconnect(sessionId);
+    }
+  }
+
   disconnect(sessionId: string): void {
+    this.ownerBySession.delete(sessionId);
     if (!this.process || !this.sessions.has(sessionId)) {
       return;
     }
@@ -230,6 +264,31 @@ export class RdpManager {
         sessionId,
         payload: {},
       }),
+    );
+  }
+
+  /**
+   * 캡처한 마이크 PCM 을 코어로 넘긴다.
+   *
+   * 입력과 같은 fire-and-forget 이다 — 초당 수십 번 오고, 늦게 도착한 소리는 값이 없다. 세션이
+   * 없거나 마이크를 끈 세션이면 코어가 조용히 버린다.
+   *
+   * 바이트는 JSON 이 아니라 프레임의 payload 자리로 간다(base64 로 부풀리지 않는다).
+   */
+  sendMicrophoneAudio(sessionId: string, chunk: Uint8Array): void {
+    if (!this.process || !this.sessions.has(sessionId) || chunk.byteLength === 0) {
+      return;
+    }
+    this.process.stdin.write(
+      encodeControlFrameWithPayload(
+        {
+          id: `rdp-${++this.requestSeq}`,
+          type: "rdpMicAudio",
+          sessionId,
+          payload: {},
+        },
+        chunk,
+      ),
     );
   }
 
@@ -510,6 +569,36 @@ export class RdpManager {
         return;
       }
 
+      // 마이크 협상 결과와 실패 사유는 **렌더러가 받아야** 한다. 사양이 있어야 그 사양대로
+      // 마이크를 잡고(코어는 캡처를 안 한다), 실패는 화면에 보여야 한다 — 조용히 실패하면
+      // 사용자는 마이크가 켜진 줄 알고 원격에서 말한다.
+      //
+      // 이 두 케이스가 없던 동안 아래 `default` 가 둘 다 버렸고, 그래서 협상이 서버까지 다
+      // 끝났는데도 렌더러는 마이크를 열지 않았다(코어에 PCM 이 한 조각도 오지 않았다).
+      case "microphoneFormat": {
+        // 이벤트 타입에서 그대로 뽑아 쓴다 — 모양이 바뀌면 여기가 먼저 깨진다.
+        const payload = event.payload as Extract<
+          RdpSessionEvent,
+          { type: "microphoneFormat" }
+        >["payload"];
+        if (event.sessionId) {
+          this.emitEvent({ type: "microphoneFormat", sessionId: event.sessionId, payload });
+        }
+        return;
+      }
+
+      case "microphoneUnavailable": {
+        const payload = event.payload as { reason?: "serverRefused" };
+        if (event.sessionId) {
+          this.emitEvent({
+            type: "microphoneUnavailable",
+            sessionId: event.sessionId,
+            payload: { reason: payload?.reason ?? "serverRefused" },
+          });
+        }
+        return;
+      }
+
       case "resized": {
         const payload = event.payload as {
           desktopWidth: number;
@@ -577,6 +666,7 @@ export class RdpManager {
     } else if (event.type === "closed") {
       this.finalizeLifecycle(event.sessionId, "closed", event.reason ?? null);
       this.lifecycleBySession.delete(event.sessionId);
+      this.ownerBySession.delete(event.sessionId);
     }
     this.onSessionEvent?.(event);
     this.broadcast("rdp:event", event);

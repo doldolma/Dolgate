@@ -114,6 +114,7 @@ export const ipcChannels = {
     connect: 'rdp:connect',
     disconnect: 'rdp:disconnect',
     input: 'rdp:input',
+    micAudio: 'rdp:mic-audio',
     trustCertificate: 'rdp:trust-certificate',
     revokeCertificateTrust: 'rdp:revoke-certificate-trust',
     resize: 'rdp:resize',

@@ -36,6 +36,12 @@ vi.mock("../rdp-monitor-windows", () => {
   return { RdpMonitorWindows: MockRdpMonitorWindows };
 });
 
+// 마이크 권한 API. 테스트마다 상태를 바꿔 끼운다.
+const mediaAccess = {
+  status: vi.fn((_type: string): string => "not-determined"),
+  ask: vi.fn(async (_type: string) => true),
+};
+
 vi.mock("electron", () => ({
   app: { on: vi.fn() },
   BrowserWindow: { fromWebContents: () => sender.window },
@@ -47,6 +53,10 @@ vi.mock("electron", () => ({
   },
   dialog: { showOpenDialog: vi.fn() },
   clipboard: { readText: () => "", writeText: vi.fn() },
+  systemPreferences: {
+    getMediaAccessStatus: (type: string) => mediaAccess.status(type),
+    askForMediaAccess: (type: string) => mediaAccess.ask(type),
+  },
   ipcMain: {
     handle: (channel: string, handler: (...args: unknown[]) => unknown) => {
       handlers.set(channel, handler);
@@ -144,6 +154,7 @@ function createHarness(
     connect: vi.fn(async () => ({
       monitors: [],
     })),
+    setSessionOwner: vi.fn(),
     disconnect: vi.fn(),
     sendInput: vi.fn(),
     requestResize: vi.fn(),
@@ -162,7 +173,7 @@ function createHarness(
     // 인증서 판정은 connect 가 진행되는 도중에 불린다. 그 순서를 그대로 재현한다.
     async connectAndVerify() {
       const connect = handlers.get("rdp:connect")!;
-      const pending = connect({}, "sess-1", "rdp-1");
+      const pending = connect({ sender: { id: 1 } }, "sess-1", "rdp-1");
       // 시크릿 로딩이 한 틱 소비한다. 실제로는 TCP/TLS 뒤라 훨씬 늦게 오지만, 여기서는
       // 등록이 await 앞에 있는지를 이 한 틱으로 검증한다.
       await Promise.resolve();
@@ -320,6 +331,68 @@ describe("registerRdpIpcHandlers monitor layout", () => {
       expect.objectContaining({ audio: false, clipboard: false, colorDepth: 16 }),
       expect.objectContaining({ hostId: "rdp-1" }),
     );
+  });
+
+  // 마이크는 소리와 기본값이 반대다 — **켠 호스트에서만** 채널을 붙여야 한다. 기본이 켜짐이면
+  // 이 필드를 모르는 옛 레코드가 조용히 마이크를 연다.
+  it("마이크는 켠 호스트에서만 코어에 요청한다", async () => {
+    const off = createHarness("AA:BB:CC");
+    await off.connectAndVerify();
+    expect(off.rdpManager.connect).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ microphone: false }),
+      expect.objectContaining({ hostId: "rdp-1" }),
+    );
+
+    const on = createHarness("AA:BB:CC", null, { microphoneEnabled: true });
+    await on.connectAndVerify();
+    expect(on.rdpManager.connect).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ microphone: true }),
+      expect.objectContaining({ hostId: "rdp-1" }),
+    );
+  });
+
+  // 캡처 시작 시점에 물으면 대화상자가 원격 통화 위로 끼어들어 첫 몇 초를 놓친다. 그래서 접속
+  // 시점에 미리 묻는다. **결과를 기다리지 않는다** — 기다리면 접속이 멈춘 것처럼 보인다.
+  it("마이크를 켠 호스트면 접속할 때 권한을 미리 묻는다", async () => {
+    const platform = process.platform;
+    // 이 API 는 macOS 전용이다. 리눅스 CI 에서도 같은 것을 검사하려면 플랫폼을 고정해야 한다.
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+    try {
+      mediaAccess.status.mockReturnValue("not-determined");
+      mediaAccess.ask.mockClear();
+      await createHarness("AA:BB:CC", null, { microphoneEnabled: true }).connectAndVerify();
+      expect(mediaAccess.ask).toHaveBeenCalledWith("microphone");
+
+      // 이미 허용돼 있으면 다시 묻지 않는다(macOS 도 대화상자를 안 띄우지만, 부를 이유가 없다).
+      mediaAccess.status.mockReturnValue("granted");
+      mediaAccess.ask.mockClear();
+      await createHarness("AA:BB:CC", null, { microphoneEnabled: true }).connectAndVerify();
+      expect(mediaAccess.ask).not.toHaveBeenCalled();
+
+      // 마이크를 안 쓰는 호스트에는 묻지 않는다 — 쓰지도 않을 권한을 묻는 앱이 된다.
+      mediaAccess.status.mockReturnValue("not-determined");
+      await createHarness("AA:BB:CC").connectAndVerify();
+      expect(mediaAccess.ask).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process, "platform", { value: platform, configurable: true });
+    }
+  });
+
+  // macOS 전용 API 다. 다른 플랫폼에서 부르면 없는 함수를 부르게 된다.
+  it("macOS 가 아니면 권한 API 를 부르지 않는다", async () => {
+    const platform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    try {
+      mediaAccess.status.mockClear();
+      mediaAccess.ask.mockClear();
+      await createHarness("AA:BB:CC", null, { microphoneEnabled: true }).connectAndVerify();
+      expect(mediaAccess.status).not.toHaveBeenCalled();
+      expect(mediaAccess.ask).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process, "platform", { value: platform, configurable: true });
+    }
   });
 
   it("sends every shared folder with the name the form shows", async () => {
@@ -686,6 +759,7 @@ describe("registerRdpIpcHandlers monitor spread", () => {
     const rdpManager = {
       setCertificateVerifier: vi.fn(),
       connect: vi.fn(async () => ({ monitors })),
+      setSessionOwner: vi.fn(),
       describeSession: vi.fn(() => ({ monitors })),
       emitMonitorRegion: vi.fn(),
       declareMonitorLayout: vi.fn(),
@@ -706,7 +780,7 @@ describe("registerRdpIpcHandlers monitor spread", () => {
       monitorWindows,
       async spread() {
         // 접속이 원격 모니터 ↔ 물리 화면 대응을 기록한다. 그것이 없으면 펼치기가 빈손으로 끝난다.
-        await handlers.get("rdp:connect")!({}, "sess-1", "rdp-1");
+        await handlers.get("rdp:connect")!({ sender: { id: 1 } }, "sess-1", "rdp-1");
         sender.window = mainWindow;
         return handlers.get("rdp:spread-monitors")!({}, "sess-1");
       },

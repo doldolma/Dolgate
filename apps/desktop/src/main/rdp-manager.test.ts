@@ -124,6 +124,90 @@ describe("RdpManager", () => {
     });
   });
 
+  // **마이크 이벤트를 렌더러까지 보내야 한다.** 캡처는 렌더러가 하고, 그 사양은 서버가 정한다 —
+  // 이 이벤트가 중간에서 사라지면 협상이 서버까지 다 끝나도 마이크가 열리지 않는다(실측: 코어에
+  // PCM 이 한 조각도 오지 않았다). 실패 사유도 같은 이유로 보여야 한다.
+  it("forwards the microphone format and unavailability to the renderer", async () => {
+    const { manager, core, sent } = createManager();
+
+    const pending = manager.connect("sess-1", CONNECT);
+    const request = core.requests()[0].metadata as unknown as { id: string };
+    core.emit(connectedFrame(request.id, "sess-1"));
+    await pending;
+
+    core.emit(
+      encodeControlFrame({
+        type: "microphoneFormat",
+        sessionId: "sess-1",
+        payload: { sampleRate: 44100, channels: 2, bitsPerSample: 16, framesPerPacket: 441 },
+      } as never),
+    );
+    core.emit(
+      encodeControlFrame({
+        type: "microphoneUnavailable",
+        sessionId: "sess-1",
+        payload: { reason: "serverRefused" },
+      } as never),
+    );
+
+    const events = sent.map((entry) => entry.payload as { type: string; payload?: unknown });
+    expect(events.find((event) => event.type === "microphoneFormat")?.payload).toEqual({
+      sampleRate: 44100,
+      channels: 2,
+      bitsPerSample: 16,
+      framesPerPacket: 441,
+    });
+    expect(events.find((event) => event.type === "microphoneUnavailable")?.payload).toEqual({
+      reason: "serverRefused",
+    });
+  });
+
+  // **창이 닫히면 그 창이 연 세션은 끊어야 한다.** 예전에는 프레임 전달만 멈추고(watcher 해제)
+  // 코어의 세션은 그대로 남아, 원격 윈도우 세션까지 잡은 채 앱이 끝날 때까지 살아 있었다.
+  it("disconnects the sessions owned by a window that closed", async () => {
+    const { manager, core } = createManager();
+
+    const first = manager.connect("sess-1", CONNECT);
+    core.emit(connectedFrame((core.requests()[0].metadata as unknown as { id: string }).id, "sess-1"));
+    await first;
+    manager.setSessionOwner("sess-1", 1);
+
+    const second = manager.connect("sess-2", CONNECT);
+    const secondId = (core.requests().at(-1)!.metadata as unknown as { id: string }).id;
+    core.emit(connectedFrame(secondId, "sess-2"));
+    await second;
+    manager.setSessionOwner("sess-2", 2);
+
+    manager.disconnectSessionsOwnedBy(1);
+
+    const closed = core
+      .requests()
+      .map((request) => request.metadata as unknown as { type: string; sessionId?: string })
+      .filter((request) => request.type === "disconnect")
+      .map((request) => request.sessionId);
+    expect(closed).toEqual(["sess-1"]);
+  });
+
+  // 모니터별 창처럼 **보기만 하는 창**이 닫혀도 세션은 살아 있어야 한다. 주인과 watcher 를
+  // 뒤섞으면 모니터 창을 닫는 것만으로 본 탭이 죽는다.
+  it("keeps the session when a window that only watches it closes", async () => {
+    const { manager, core } = createManager();
+
+    const pending = manager.connect("sess-1", CONNECT);
+    core.emit(connectedFrame((core.requests()[0].metadata as unknown as { id: string }).id, "sess-1"));
+    await pending;
+    manager.setSessionOwner("sess-1", 1);
+    manager.watchSession("sess-1", 2);
+
+    manager.disconnectSessionsOwnedBy(2);
+
+    const closed = core
+      .requests()
+      .map((request) => request.metadata as unknown as { type: string })
+      .filter((request) => request.type === "disconnect");
+    expect(closed).toEqual([]);
+  });
+
   it("rejects the connect when the core reports an error", async () => {
     const { manager, core } = createManager();
 

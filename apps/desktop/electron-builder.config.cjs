@@ -41,6 +41,16 @@ module.exports = {
       }
     ],
     hardenedRuntime: true,
+    // 마이크 권한이 필요해서 기본 권한 파일을 쓰지 않는다(build/entitlements.mac.plist 주석 참고).
+    // 헬퍼 프로세스에도 같은 파일을 물린다 — 실제로 장치를 여는 것은 렌더러 쪽 헬퍼다.
+    entitlements: path.resolve(__dirname, 'build/entitlements.mac.plist'),
+    entitlementsInherit: path.resolve(__dirname, 'build/entitlements.mac.plist'),
+    extendInfo: {
+      // macOS 권한 대화상자에 그대로 뜨는 문구다. Electron 기본값("This app needs access to
+      // the microphone")이 그대로 나가면 무엇에 쓰는지 알 수 없다.
+      NSMicrophoneUsageDescription:
+        '원격 데스크톱 세션에 마이크 소리를 보내려면 마이크 접근이 필요합니다.'
+    },
     gatekeeperAssess: false
   },
   dmg: {

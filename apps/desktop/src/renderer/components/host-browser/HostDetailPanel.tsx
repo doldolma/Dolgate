@@ -560,6 +560,14 @@ function buildRdpRows(
     label: t('hostDetail.row.remoteAudio'),
     value: describeToggle(host.audioEnabled !== false),
   });
+  // 마이크는 기본이 꺼짐이라 켰을 때만 적는다(관리 세션과 같은 규칙). 원격에 소리가 넘어가는
+  // 설정이라, 켜져 있다는 사실이 이 표에서 보여야 한다.
+  if (host.microphoneEnabled === true) {
+    rows.push({
+      label: t('hostDetail.row.microphone'),
+      value: t('hostDetail.row.enabled'),
+    });
+  }
   rows.push({
     label: t('hostDetail.row.clipboard'),
     value: describeToggle(host.clipboardEnabled !== false),

@@ -1461,6 +1461,8 @@ export interface DesktopApi {
       sessionId: string,
       events: import("./rdp").RdpInputEvent[],
     ) => void;
+    /** 캡처한 마이크 PCM(협상된 사양의 16-bit PCM). 사양은 `microphoneFormat` 이벤트가 알린다. */
+    sendMicrophoneAudio: (sessionId: string, chunk: ArrayBuffer) => void;
     trustCertificate: (sessionId: string, accept: boolean) => Promise<void>;
     /**
      * 신뢰한 서버 인증서를 해제한다(설정 › Security 목록). 갱신된 호스트 레코드를 돌려준다.

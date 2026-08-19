@@ -27,6 +27,21 @@ export function encodeControlFrame<TPayload>(message: CoreRequest<TPayload> | Co
   return encodeControlFrameOf(message);
 }
 
+// 제어 메시지에 바이너리 몫을 함께 싣는다.
+//
+// 마이크 PCM 처럼 **초당 수십 번 오는 바이트**를 위한 것이다. JSON 에 base64 로 담으면 실제 크기가
+// 33% 늘고, 그 낭비가 세션 내내 쌓인다. 프레이밍은 이미 payload 자리를 갖고 있으므로 그것을 쓴다
+// (stream frame 을 쓰지 않는 이유는 그쪽이 세션 출력 전용 경로이고, 이건 요청이기 때문이다).
+export function encodeControlFrameWithPayload(message: object, payload: Uint8Array): Buffer {
+  const metadata = Buffer.from(JSON.stringify(message), 'utf8');
+  const payloadBuffer = Buffer.from(payload);
+  return Buffer.concat([
+    encodeHeader(frameKinds.control, metadata.length, payloadBuffer.length),
+    metadata,
+    payloadBuffer
+  ]);
+}
+
 // stream frame은 터미널 바이트를 그대로 실어 나르는 hot path다.
 export function encodeStreamFrame(metadata: CoreStreamFrame, payload: Uint8Array): Buffer {
   const metadataBuffer = Buffer.from(JSON.stringify(metadata), 'utf8');

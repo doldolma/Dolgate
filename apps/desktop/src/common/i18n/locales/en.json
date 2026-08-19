@@ -673,6 +673,7 @@
       "waitingNetwork": "Waiting for network",
       "attempts": "attempt {{attempt}}/{{max}}",
       "error": "Error",
+      "microphone": "Microphone",
       "cwd": "Location",
       "shell": "Shell",
       "connectedFor": "Connected for",
@@ -1442,7 +1443,11 @@
         "add": "Add folder",
         "remove": "Remove"
       },
-      "credential": "Credential"
+      "credential": "Credential",
+      "microphone": {
+        "label": "Send microphone",
+        "description": "Sends your local microphone to the remote session. Asks for microphone permission on the first connection."
+      }
     },
     "vnc": {
       "credential": "VNC password",
@@ -1776,7 +1781,8 @@
       "imageQuality": "Image Quality",
       "screenSharing": "Screen Sharing",
       "viewOnly": "View Only",
-      "deletedSshHost": "Deleted SSH host — will not connect"
+      "deletedSshHost": "Deleted SSH host — will not connect",
+      "microphone": "Microphone"
     },
     "env": {
       "heading": "Environment variables ({{count}})",
@@ -3455,6 +3461,18 @@
     "overlay": {
       "connectingTitle": "Connecting",
       "failedTitle": "Cannot connect"
+    },
+    "microphone": {
+      "denied": "Microphone permission was denied, so no audio is sent to the remote session.",
+      "noDevice": "No microphone was found, so no audio is sent to the remote session.",
+      "failed": "The microphone could not be opened, so no audio is sent to the remote session.",
+      "serverRefused": "The remote never opened the microphone channel, so no audio is sent. Try starting a recording on the remote, or check the server’s audio recording redirection setting.",
+      "short": {
+        "denied": "Permission denied",
+        "noDevice": "No device",
+        "failed": "Cannot open",
+        "serverRefused": "Remote did not open it"
+      }
     }
   },
   "errorBoundary": {

@@ -64,6 +64,38 @@ const HANDSHAKE_READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// 창을 닫아 버린 세션의 스레드가 영원히 남으므로 상한을 둔다.
 const TRUST_VERDICT_TIMEOUT: Duration = Duration::from_secs(180);
 
+/// TCP 를 잡는 데 허용하는 시간.
+///
+/// OS 기본값(맥·리눅스에서 1분 넘는다)에 맡기면, 닿지 않는 주소로 붙는 세션의 스레드가 그만큼
+/// 남는다. TCP 핸드셰이크는 왕복 세 번이라 느린 회선에서도 이보다 한참 짧다.
+const DIAL_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// dial 이 끝났는지 확인하는 주기. 취소에 얼마나 빨리 반응하는지가 이 값이다.
+const DIAL_POLL: Duration = Duration::from_millis(50);
+
+/// 연결 도중 취소를 위해 들고 있는 소켓 사본.
+///
+/// **연결 단계에서는 `stop` 플래그만으로 멈출 수 없다.** 핸드셰이크 읽기가 최대
+/// `HANDSHAKE_READ_TIMEOUT` 만큼 블로킹되고(CredSSP·라이선스 교환이 그만큼 걸릴 수 있어 짧게
+/// 둘 수도 없다), 그 읽기는 우리가 아니라 크레이트 안에서 일어난다. 그래서 플래그를 세워도
+/// 스레드는 30초 뒤에야 깨어나고, 사용자가 탭을 닫은 지 한참 뒤에 timeout 오류가 올라왔다.
+///
+/// 소켓 사본을 하나 들고 있다가 `shutdown` 하면 그 블로킹 읽기가 즉시 돌아온다. 취소를 실제로
+/// 전파하는 유일한 방법이다.
+pub type CancelSocket = Arc<std::sync::Mutex<Option<TcpStream>>>;
+
+/// 취소된 세션. 오류가 아니라 "사용자가 닫았다" 는 뜻이라 사용자에게 메시지를 보내지 않는다.
+#[derive(Debug)]
+struct Cancelled;
+
+impl std::fmt::Display for Cancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the session was cancelled before it finished connecting")
+    }
+}
+
+impl std::error::Error for Cancelled {}
+
 pub fn run(
     session_id: String,
     request_id: String,
@@ -76,6 +108,10 @@ pub fn run(
     layout_updates: Receiver<Vec<crate::protocol::MonitorRequest>>,
     refresh: Receiver<()>,
     local_clipboard: Receiver<String>,
+    // 렌더러가 캡처한 마이크 PCM. 마이크를 끈 세션에서는 아무것도 오지 않는다.
+    microphone: Receiver<Vec<u8>>,
+    // 연결 도중 취소를 전파하기 위한 소켓 슬롯. 붙는 즉시 여기에 사본을 넣는다.
+    cancel_socket: CancelSocket,
 ) {
     // 그래픽 파이프라인은 한 번 써 보고, 이 서버가 우리가 못 푸는 것을 보내면 그것 없이 다시
     // 붙는다. 접속 도중 판정되므로(첫 화면이 그려질 때) 사용자가 뭘 하기 전에 끝난다.
@@ -103,9 +139,11 @@ pub fn run(
             &layout_updates,
             &refresh,
             &local_clipboard,
+            &microphone,
             &graceful_reason,
             allow_egfx,
             &mut trusted_fingerprint,
+            &cancel_socket,
         ) {
             Ok(()) => break,
             Err(error)
@@ -116,6 +154,16 @@ pub fn run(
                 // 사용자에게는 오류를 보내지 않는다. 화면이 잠깐 비었다가 예전 경로로 채워진다.
                 info!(session_id, "reconnecting without the graphics pipeline");
                 allow_egfx = false;
+            }
+            // 사용자가 연결 도중 탭을 닫았다. 오류가 아니므로 메시지를 올리지 않는다 — 닫아
+            // 버린 세션의 실패 안내가 뒤늦게 뜨면 무슨 일인지 알 수 없다.
+            Err(error) if stop.load(Ordering::Relaxed) => {
+                debug!(
+                    session_id,
+                    error = format!("{error:#}"),
+                    "connect abandoned after the session was cancelled"
+                );
+                break;
             }
             Err(error) => {
                 warn!(session_id, error = format!("{error:#}"), "session failed");
@@ -153,10 +201,17 @@ fn connect_and_pump(
     layout_updates: &Receiver<Vec<crate::protocol::MonitorRequest>>,
     refresh: &Receiver<()>,
     local_clipboard: &Receiver<String>,
+    // 렌더러가 캡처한 마이크 PCM. 협상된 사양의 원본 바이트다(변환은 렌더러가 한다).
+    microphone: &Receiver<Vec<u8>>,
     graceful_reason: &Arc<std::sync::Mutex<Option<String>>>,
     allow_egfx: bool,
     trusted_fingerprint: &mut Option<String>,
+    cancel_socket: &CancelSocket,
 ) -> anyhow::Result<()> {
+    // 이미 취소됐으면 붙지 않는다. EGFX 없이 다시 붙는 경로에서 특히 중요하다 — 사용자가 그
+    // 사이에 탭을 닫았을 수 있다.
+    anyhow::ensure!(!stop.load(Ordering::Relaxed), Cancelled);
+
     for monitor in &payload.monitors {
         anyhow::ensure!(
             monitor.width >= 200 && monitor.height >= 200,
@@ -182,6 +237,12 @@ fn connect_and_pump(
     let audio_heard: crate::audio::AudioHeard =
         Arc::new(std::sync::atomic::AtomicBool::new(false));
 
+    // 마이크(AUDIO_INPUT). 협상이 끝나면 코어가 캡처 사양을 이 채널로 알리고, 펌프가 그것을
+    // 이벤트로 올려 렌더러가 그 사양대로 마이크를 잡는다.
+    let (mic_format_tx, mic_format_rx) = std::sync::mpsc::channel();
+    // 채널이 열렸는지·OPEN 까지 왔는지를 붙이는 쪽과 펌프가 나눠 갖는다.
+    let mic_channel = Arc::new(crate::audio_input::AudinChannel::default());
+
     let (clipboard_tx, clipboard_rx) = std::sync::mpsc::channel();
     let clipboard_backend = TextClipboardBackend::new(
         session_id.to_owned(),
@@ -202,8 +263,14 @@ fn connect_and_pump(
         payload.audio.then(|| {
             AudioBackend::new(session_id.to_owned(), Arc::clone(output), Arc::clone(&audio_heard))
         }),
-        AudioBackend::new(session_id.to_owned(), Arc::clone(output), Arc::clone(&audio_heard)),
-        AudioBackend::new(session_id.to_owned(), Arc::clone(output), Arc::clone(&audio_heard)),
+        Box::new({
+            let session_id = session_id.to_owned();
+            let output = Arc::clone(output);
+            let heard = Arc::clone(&audio_heard);
+            move || AudioBackend::new(session_id.clone(), Arc::clone(&output), Arc::clone(&heard))
+        }),
+        payload.microphone.then(|| mic_format_tx.clone()),
+        &mic_channel,
         payload
             .drives
             .iter()
@@ -215,6 +282,8 @@ fn connect_and_pump(
             .collect(),
         allow_egfx,
         trusted_fingerprint,
+        stop,
+        cancel_socket,
     )
     .context("connect")?;
 
@@ -233,6 +302,9 @@ fn connect_and_pump(
         channels = ?joined,
         // 관리 세션 요청이 실렸는지. 서버가 이걸 무시하는지 가릴 때 이 줄부터 본다.
         admin_session = payload.admin_session,
+        // 마이크를 요청했는지. **우리가 안 보낸 것과 서버가 거절한 것을 가리는 유일한 근거다** —
+        // audin 줄이 아예 없을 때 이 값이 false 면 우리 문제, true 면 서버가 채널을 열지 않은 것이다.
+        microphone_requested = payload.microphone,
         "connected"
     );
 
@@ -272,6 +344,10 @@ fn connect_and_pump(
         &egfx_surface,
         &egfx_unusable,
         &audio_heard,
+        microphone,
+        payload.microphone,
+        &mic_channel,
+        &mic_format_rx,
     )
 }
 
@@ -308,6 +384,14 @@ fn pump(
     egfx: &crate::egfx_surface::EgfxSurfaceHandle,
     egfx_unusable: &crate::egfx::EgfxUnusable,
     audio_heard: &crate::audio::AudioHeard,
+    // 렌더러가 캡처한 마이크 PCM.
+    microphone: &Receiver<Vec<u8>>,
+    // 이 세션이 마이크를 요청했는지. 요청했는데 채널이 안 열리면 그 사실을 사용자에게 알린다.
+    microphone_requested: bool,
+    // 마이크 채널의 상태. 리스너로 붙인 채널이라 크레이트의 TypeId 조회로는 찾을 수 없다.
+    mic_channel: &Arc<crate::audio_input::AudinChannel>,
+    // audin 협상이 끝나면 오는 캡처 사양. 렌더러에 그대로 올린다.
+    mic_format: &Receiver<crate::audio_input::CaptureFormat>,
 ) -> anyhow::Result<()> {
     let activation_factory = connection_result.activation_factory.clone();
     let mut active_stage = ActiveStageBuilder {
@@ -357,6 +441,10 @@ fn pump(
     // 소리가 오지 않는다는 것도 한 번은 남긴다.
     let started = std::time::Instant::now();
     let mut logged_silence = false;
+    // 마이크 채널이 안 열린 것을 한 번만 알린다.
+    let mut warned_no_microphone = false;
+    // 마이크 조각을 몇 개 실어 보냈는지(로그용).
+    let mut mic_sent: u64 = 0;
     // Tracks which keys and buttons are currently down so a press/release pair is never lost and
     // the server is never left with a stuck modifier.
     let mut input_db = Database::new();
@@ -368,6 +456,16 @@ fn pump(
         }
 
         flush_resize_requests(resize, &mut active_stage, &mut framed, &mut pending_resize)?;
+        flush_microphone(
+            session_id,
+            microphone,
+            mic_format,
+            &mut active_stage,
+            &mut framed,
+            output,
+            mic_channel,
+            &mut mic_sent,
+        )?;
         if flush_layout_requests(
             session_id,
             layout_updates,
@@ -433,6 +531,33 @@ fn pump(
         {
             logged_silence = true;
             info!(session_id, "no audio from the server after 15s");
+        }
+
+        // 마이크를 요청했는데 채널이 안 열리면 **사용자에게 말한다.** 침묵하면 사용자는 마이크가
+        // 켜진 줄 알고 원격에서 말한다 — 실제로 그렇게 됐다.
+        //
+        // **왜 안 열렸는지는 여기서 알 수 없다.** 서버가 리디렉션을 막아 둔 경우와, 원격에서 아직
+        // 아무도 마이크를 요청하지 않은 경우가 같은 모양이다(정책·오디오 서비스가 모두 허용인
+        // 서버에서도 유휴 데스크톱에서는 열리지 않았다 — 실측). 그래서 단정하지 않고 사실만 적는다.
+        if !warned_no_microphone
+            && microphone_requested
+            && started.elapsed() >= std::time::Duration::from_secs(10)
+            && !mic_channel.created()
+        {
+            warned_no_microphone = true;
+            info!(
+                session_id,
+                "the server has not opened AUDIO_INPUT within 10s (policy, or nothing is recording)"
+            );
+            output.send_event(
+                &Event::new(
+                    "microphoneUnavailable",
+                    crate::protocol::MicrophoneUnavailablePayload {
+                        reason: "serverRefused",
+                    },
+                )
+                .session(session_id),
+            )?;
         }
 
         // 내보내는 주기를 묶는다.
@@ -926,6 +1051,84 @@ fn encode_monitor_layout(
             .encode_dvc_messages(messages)
             .map_err(|error| anyhow::anyhow!("{error}")),
     )
+}
+
+/// 마이크 PCM 을 AUDIO_INPUT 채널로 흘려보내고, 협상된 캡처 사양을 렌더러에 알린다.
+///
+/// 크기 변경(DISP)과 같은 모양이다 — 펌프가 채널에서 꺼내 DVC 로 인코딩해 보낸다. 채널 처리기
+/// 안에서 보내지 않는 이유는 그쪽이 서버 메시지를 처리하는 자리라, 거기서 캡처를 기다리면 화면
+/// 갱신까지 함께 막히기 때문이다.
+///
+/// **협상이 끝나기 전에 온 PCM 은 버린다.** 채널이 열리기 전에 보내면 서버가 무시하고, 우리가
+/// 쌓아 두면 나중에 몇 초 밀린 소리가 한꺼번에 나간다 — 마이크는 늦은 소리보다 없는 소리가 낫다.
+fn flush_microphone(
+    session_id: &str,
+    microphone: &Receiver<Vec<u8>>,
+    mic_format: &Receiver<crate::audio_input::CaptureFormat>,
+    active_stage: &mut ActiveStage,
+    framed: &mut UpgradedFramed,
+    output: &Output,
+    mic_channel: &Arc<crate::audio_input::AudinChannel>,
+    // 지금까지 보낸 조각 수. 첫 조각과 이후 100개마다 로그를 남기는 데만 쓴다 — 마이크가
+    // "안 된다" 는 신고가 들어왔을 때 렌더러가 안 보내는 것과 우리가 안 싣는 것을 갈라야 한다.
+    mic_sent: &mut u64,
+) -> anyhow::Result<()> {
+    // 사양이 정해졌으면 렌더러에 먼저 알린다. 그래야 그 사양대로 잡은 PCM 이 오기 시작한다.
+    while let Ok(format) = mic_format.try_recv() {
+        output.send_event(
+            &Event::new("microphoneFormat", crate::protocol::MicrophoneFormatPayload {
+                sample_rate: format.sample_rate,
+                channels: format.channels,
+                bits_per_sample: format.bits_per_sample,
+                frames_per_packet: format.frames_per_packet,
+            })
+            .session(session_id),
+        )?;
+    }
+
+    // 채널이 열렸고 서버가 OPEN 까지 보냈는지.
+    let ready = mic_channel.ready();
+
+    loop {
+        let chunk = match microphone.try_recv() {
+            Ok(chunk) => chunk,
+            Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+        };
+        let Some(channel_id) = ready else {
+            // 렌더러는 보내는데 채널이 안 열렸다. 조용히 버리면 원인을 가릴 수 없다.
+            if *mic_sent == 0 {
+                *mic_sent = u64::MAX;
+                warn!(
+                    session_id,
+                    bytes = chunk.len(),
+                    "microphone audio arrived before AUDIO_INPUT was open; dropping"
+                );
+            }
+            continue;
+        };
+        let chunk_len = chunk.len();
+        let messages = ironrdp_dvc::encode_dvc_messages(
+            channel_id,
+            crate::audio_input::AudinClient::encode_data(chunk),
+            ironrdp_svc::ChannelFlags::empty(),
+        )
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let encoded = active_stage
+            .encode_dvc_messages(messages)
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let bytes = chunk_len;
+        framed.write_all(&encoded).context("send microphone audio")?;
+        // MAX 는 위에서 "열리기 전에 버렸다" 를 한 번 남기려고 쓴 표시다. 실제로 보내기 시작하면
+        // 처음부터 센다.
+        if *mic_sent == u64::MAX {
+            *mic_sent = 0;
+        }
+        *mic_sent += 1;
+        if *mic_sent == 1 || *mic_sent % 100 == 0 {
+            debug!(session_id, chunks = *mic_sent, bytes, "microphone audio sent");
+        }
+    }
+    Ok(())
 }
 
 /// Asks the server to change the desktop size.
@@ -1526,6 +1729,9 @@ fn build_config(
         // 소리를 끈 세션에서는 이걸 내려 서버가 애초에 보내지 않게 한다 — 채널만 안 붙이면
         // 서버는 계속 인코딩해서 보내고 우리가 버리는 꼴이 된다.
         enable_audio_playback: payload.audio,
+        // 마이크를 쓸 세션만 선언한다. 이 플래그가 서버가 AUDIO_INPUT 을 여는 방아쇠다 —
+        // 채널만 등록해 두면 서버는 시작하지 않고, 원격에 마이크가 나타나지 않는다.
+        enable_audio_capture: payload.microphone,
         compression_type: None,
         pointer_software_rendering: true,
         multitransport_flags: None,
@@ -1555,14 +1761,21 @@ fn connect(
     // None 이면 그 채널을 붙이지 않는다. 정적 채널이라 접속 시점에만 결정할 수 있다.
     clipboard_backend: Option<TextClipboardBackend>,
     audio_backend: Option<AudioBackend>,
-    // 동적 채널로 오는 소리를 받을 백엔드. 정적 채널과 같은 세션으로 흘러 나간다.
-    dvc_audio_backend: AudioBackend,
-    lossy_audio_backend: AudioBackend,
+    // 동적 채널로 오는 소리를 받을 백엔드를 만드는 공장. 정적 채널과 같은 세션으로 흘러 나간다.
+    // 채널이 닫히고 다시 열릴 수 있어서 하나가 아니라 공장을 받는다.
+    mut make_dvc_audio_backend: crate::audio::AudioBackendFactory,
+    // 마이크를 쓸 세션이면 협상 사양을 돌려보낼 채널. None 이면 AUDIO_INPUT 을 아예 붙이지 않는다.
+    mic_format_tx: Option<std::sync::mpsc::Sender<crate::audio_input::CaptureFormat>>,
+    // 마이크 채널의 상태를 펌프와 나눠 갖는 핸들.
+    mic_channel: &Arc<crate::audio_input::AudinChannel>,
     drives: Vec<crate::drive::DriveShareConfig>,
     // allow_egfx: 그래픽 파이프라인을 쓸지. 앞선 시도가 이 채널로 화면을 못 그렸으면 끄고 다시
     // 붙는다. trusted_fingerprint: 이미 승인된 인증서 지문. 같으면 다시 묻지 않는다.
     allow_egfx: bool,
     trusted_fingerprint: &mut Option<String>,
+    // 취소 전파용. 소켓을 잡는 즉시 사본을 넣어 둔다(CancelSocket 주석 참고).
+    stop: &AtomicBool,
+    cancel_socket: &CancelSocket,
 ) -> anyhow::Result<(
     ConnectionResult,
     UpgradedFramed,
@@ -1588,10 +1801,20 @@ fn connect(
         "dialing"
     );
 
-    let tcp_stream = TcpStream::connect(server_addr).context("TCP connect")?;
+    let tcp_stream = dial(server_addr, stop).context("TCP connect")?;
     tcp_stream
         .set_read_timeout(Some(HANDSHAKE_READ_TIMEOUT))
         .context("set handshake read timeout")?;
+
+    // **소켓 사본을 취소 슬롯에 넣는다.** 이때부터 disconnect 가 이 소켓을 shutdown 할 수 있고,
+    // 핸드셰이크 중이던 블로킹 읽기가 즉시 돌아온다(CancelSocket 주석 참고).
+    if let Ok(clone) = tcp_stream.try_clone() {
+        if let Ok(mut slot) = cancel_socket.lock() {
+            *slot = Some(clone);
+        }
+    }
+    // 사본을 넣기 전에 취소가 왔을 수 있다. 여기서 한 번 더 본다.
+    anyhow::ensure!(!stop.load(Ordering::Relaxed), Cancelled);
 
     let client_addr = tcp_stream.local_addr().context("get socket local address")?;
 
@@ -1622,20 +1845,45 @@ fn connect(
 
     // 그래픽 파이프라인을 안 쓸 때는 채널 자체를 붙이지 않는다. 붙여 두면 서버가 그리로 보내고,
     // 우리가 못 푸는 것이 섞여 있으면 화면이 다시 비게 된다.
-    // 소리는 정적 채널(rdpsnd)로 받는다.
-    //
-    // 서버는 동적 채널(AUDIO_PLAYBACK_DVC)로도 열려고 하는데, 그걸 받아 주면 소리를 그리로
-    // 돌려 보내고는 정작 아무것도 보내지 않는다(채널만 열리고 payload 0건). 받지 않으면 정적
-    // 채널로 되돌아온다.
     let dynamic_channels = DrdynvcClient::new()
         .with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())));
-    // 소리는 정적 채널(rdpsnd)로 온다. 서버가 동적 채널(AUDIO_PLAYBACK_DVC)도 열려고 하지만,
-    // 열어 줘도 그리로는 아무것도 보내지 않는 것을 실측으로 확인했다 — 채널만 열리고 payload 0건.
-    let _ = (dvc_audio_backend, lossy_audio_backend);
+
+    // **소리는 동적 채널(AUDIO_PLAYBACK_DVC)도 받는다.**
+    //
+    // 예전에는 거절했다 — 받아 주면 서버가 소리를 그리로 돌리고 아무것도 보내지 않는 것으로
+    // 보였기 때문이다. 그 관찰은 반쪽이었다: 채널만 열고 형식 목록을 보내지 않으면 서버는 기다린다
+    // (audio_output_dvc.rs 가 그 협상을 한다).
+    //
+    // 거절의 대가가 컸다. 최신 윈도우는 재생·녹음을 한 오디오 엔드포인트로 다루므로, 이 채널
+    // 개설이 계속 실패하면 그 엔드포인트가 올라오지 않는다 — 실측(EC2 Windows): 서버가 네 번
+    // 재시도하는 동안 rdpsnd 로 소리가 한 조각도 안 왔고, 원격 녹음기는 "녹음 장치 없음" 이었으며
+    // AUDIO_INPUT 도 열리지 않았다. 소리를 끈 세션에서는 붙이지 않는다.
+    //
+    // **개설 요청마다 새 처리기를 만드는 리스너로 붙인다.** 서버가 이 채널을 닫고 다시 열기
+    // 때문이다(audio_output_dvc.rs 의 `AudioOutputDvcListener` 주석에 실측이 있다).
+    let dynamic_channels = if audio_backend.is_some() {
+        dynamic_channels.with_listener(crate::audio_output_dvc::AudioOutputDvcListener::new(
+            move || Box::new(make_dvc_audio_backend()) as Box<dyn ironrdp_rdpsnd::client::RdpsndClientHandler>,
+        ))
+    } else {
+        dynamic_channels
+    };
     let dynamic_channels = if allow_egfx {
         dynamic_channels.with_dynamic_channel(graphics_pipeline)
     } else {
         dynamic_channels
+    };
+    // 마이크는 동적 채널(AUDIO_INPUT)이다. 끈 세션에서는 붙이지 않는다 — 붙여 두면 서버가
+    // 협상을 시작하고, 우리가 아무것도 보내지 않으면 그쪽은 마이크가 죽은 것으로 본다.
+    let dynamic_channels = match mic_format_tx {
+        Some(mic_format_tx) => {
+            info!("audin: registering the AUDIO_INPUT channel and declaring INFO_AUDIOCAPTURE");
+            dynamic_channels.with_listener(crate::audio_input::AudinListener::new(
+                mic_format_tx,
+                Arc::clone(mic_channel),
+            ))
+        }
+        None => dynamic_channels,
     };
 
     let mut connector = connector::ClientConnector::new(config, client_addr)
@@ -1721,6 +1969,39 @@ fn connect(
 ///
 /// tailnet 경유의 로컬 포워드 주소를 받는 자리다. 포트가 없으면 거절한다 — 기본 포트를 붙여
 /// 추측하면 엉뚱한 곳으로 붙는다.
+/// TCP 를 잡되, 그 사이에 취소가 오면 기다리지 않고 돌아온다.
+///
+/// **소켓을 잡기 전에는 끊을 소켓이 없다.** `CancelSocket` 은 잡은 뒤부터만 쓸 수 있어서, dial
+/// 자체는 다른 방법으로 중단해야 한다 — 붙는 일을 스레드에 맡기고 이쪽에서 `stop` 을 본다.
+/// 취소되면 그 스레드는 혼자 끝나고(최대 `DIAL_TIMEOUT`) 잡은 소켓이 있으면 그대로 닫힌다.
+fn dial(addr: core::net::SocketAddr, stop: &AtomicBool) -> anyhow::Result<TcpStream> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        // 받는 쪽이 이미 포기했으면(취소) 보낼 곳이 없다. 그건 오류가 아니다.
+        let _ = tx.send(TcpStream::connect_timeout(&addr, DIAL_TIMEOUT));
+    });
+    await_dial(&rx, stop)
+}
+
+/// dial 결과를 기다리며 취소를 지켜본다. 분리해 둔 이유는 이 대기 규칙을 테스트하기 위해서다.
+fn await_dial(
+    rx: &std::sync::mpsc::Receiver<std::io::Result<TcpStream>>,
+    stop: &AtomicBool,
+) -> anyhow::Result<TcpStream> {
+    loop {
+        match rx.recv_timeout(DIAL_POLL) {
+            Ok(result) => return result.map_err(anyhow::Error::from),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                anyhow::ensure!(!stop.load(Ordering::Relaxed), Cancelled);
+            }
+            // 붙는 스레드가 결과 없이 사라졌다. 일어날 일이 아니지만 조용히 매달려 있으면 안 된다.
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                anyhow::bail!("the dial thread ended without a result")
+            }
+        }
+    }
+}
+
 fn resolve_dial_address(address: &str) -> anyhow::Result<core::net::SocketAddr> {
     use std::net::ToSocketAddrs as _;
     address
@@ -1885,6 +2166,95 @@ mod danger {
 /// 어떻게 해석하는지가 본질이라 실기기 대조가 필요하다. 여기서는 값이 조용히 떨어지지 않는지만
 /// 잠근다.
 #[cfg(test)]
+mod cancel_tests {
+    use super::{CancelSocket, HANDSHAKE_READ_TIMEOUT};
+    use std::io::Read;
+    use std::net::{Shutdown, TcpListener, TcpStream};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    /// **취소가 "전파된다" 는 것은 이 동작이다.** 연결 단계에서 스레드는 핸드셰이크 읽기에 갇혀
+    /// 있고, `stop` 플래그는 아무도 보지 않는다(그 읽기는 크레이트 안에서 일어난다). 소켓을
+    /// 끊어야 그 읽기가 즉시 돌아온다 — 그러지 못하면 사용자가 탭을 닫아도 30초 뒤에 timeout
+    /// 오류가 뒤늦게 올라온다.
+    #[test]
+    fn shutting_down_the_socket_unblocks_a_blocked_handshake_read() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        // 응답하지 않는 서버. 우리가 끊으면 이쪽 읽기도 돌아와 스레드가 끝난다.
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept");
+            let mut sink = [0_u8; 1];
+            let _ = socket.read(&mut sink);
+        });
+
+        let stream = TcpStream::connect(addr).expect("connect");
+        stream
+            .set_read_timeout(Some(HANDSHAKE_READ_TIMEOUT))
+            .expect("read timeout");
+        let cancel: CancelSocket =
+            Arc::new(std::sync::Mutex::new(Some(stream.try_clone().expect("clone"))));
+
+        let canceller = std::thread::spawn({
+            let cancel = Arc::clone(&cancel);
+            move || {
+                std::thread::sleep(Duration::from_millis(50));
+                let slot = cancel.lock().expect("cancel slot");
+                slot.as_ref().expect("socket").shutdown(Shutdown::Both).expect("shutdown");
+            }
+        });
+
+        let started = Instant::now();
+        let mut byte = [0_u8; 1];
+        let read = (&stream).read(&mut byte);
+
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "취소가 읽기를 깨우지 못했다 — {HANDSHAKE_READ_TIMEOUT:?} 를 기다린 셈이다"
+        );
+        assert!(
+            matches!(read, Ok(0) | Err(_)),
+            "끊긴 소켓의 읽기는 끝나야 한다: {read:?}"
+        );
+
+        canceller.join().expect("canceller");
+        server.join().expect("server");
+    }
+
+    /// **소켓을 잡기 전에 닫으면 끊을 소켓이 없다.** 그 구간의 취소는 dial 결과를 기다리는 쪽이
+    /// 처리한다 — 붙는 스레드가 끝나기를 기다리지 않고 돌아와야 한다. 여기서는 결과가 영영 오지
+    /// 않는 채널로 그 상황을 만든다(닿지 않는 주소에 실제로 붙어 보면 결과가 네트워크에 달려
+    /// 테스트가 흔들린다).
+    #[test]
+    fn a_cancelled_dial_returns_without_waiting_for_the_connect() {
+        let (tx, rx) = std::sync::mpsc::channel::<std::io::Result<TcpStream>>();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let canceller = std::thread::spawn({
+            let stop = Arc::clone(&stop);
+            move || {
+                std::thread::sleep(Duration::from_millis(50));
+                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+
+        let started = Instant::now();
+        let result = super::await_dial(&rx, &stop);
+
+        assert!(result.is_err(), "취소됐으면 소켓을 돌려줄 수 없다");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "취소를 보고 바로 돌아와야 한다 — {:?} 를 기다린 셈이다",
+            super::DIAL_TIMEOUT
+        );
+
+        canceller.join().expect("canceller");
+        // 보내는 쪽을 여기서 놓는다. 위 대기가 Disconnected 로 끝나지 않았음을 보장하려고 붙잡아 뒀다.
+        drop(tx);
+    }
+}
+
+#[cfg(test)]
 mod admin_session_tests {
     use super::build_config;
     use crate::protocol::{ConnectPayload, MonitorRequest};
@@ -1896,6 +2266,7 @@ mod admin_session_tests {
             username: "user".to_owned(),
             password: String::new(),
             domain: None,
+            microphone: false,
             monitors: vec![MonitorRequest {
                 width: 1920,
                 height: 1080,
@@ -1989,6 +2360,29 @@ mod session_option_tests {
 
         let on = build_config(true, &payload(serde_json::json!({})), 1920, 1080, Vec::new());
         assert!(on.enable_audio_playback);
+    }
+
+    /// 마이크 리디렉션은 **선언이 방아쇠다.** 채널을 붙여도 이 플래그가 없으면 서버가 열지 않아
+    /// 원격의 장치 목록에 마이크가 나타나지 않는다(실측).
+    #[test]
+    fn declares_audio_capture_only_when_the_microphone_is_on() {
+        let off = build_config(
+            true,
+            &payload(serde_json::json!({})),
+            1920,
+            1080,
+            Vec::new(),
+        );
+        assert!(!off.enable_audio_capture, "기본은 꺼짐이어야 한다");
+
+        let on = build_config(
+            true,
+            &payload(serde_json::json!({ "microphone": true })),
+            1920,
+            1080,
+            Vec::new(),
+        );
+        assert!(on.enable_audio_capture);
     }
 
     #[test]

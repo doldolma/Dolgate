@@ -87,6 +87,12 @@ pub struct ConnectPayload {
     /// 원격과 클립보드를 주고받는다. 끄면 cliprdr 채널을 아예 붙이지 않는다.
     #[serde(default = "default_true")]
     pub clipboard: bool,
+    /// 마이크를 원격으로 보낸다(AUDIO_INPUT). 끄면 그 동적 채널을 아예 붙이지 않는다.
+    ///
+    /// **기본값이 거짓이다.** 소리 재생과 달리 이쪽은 사용자의 마이크를 켜는 일이라, 이 필드를
+    /// 모르는 옛 요청이 조용히 마이크를 여는 일이 없어야 한다.
+    #[serde(default)]
+    pub microphone: bool,
     /// 색 깊이(비트). 없으면 커넥터 기본값(32)을 그대로 쓴다.
     ///
     /// 16 만 특별히 다룬다 — 32 는 지금까지와 완전히 같은 경로여야 해서 아무것도 설정하지 않는다.
@@ -288,6 +294,30 @@ pub struct AudioFramePayload {
     pub bits_per_sample: u16,
     /// 서버가 붙인 타임스탬프(ms). 재생 순서 판단에 쓴다.
     pub timestamp: u32,
+}
+
+/// 마이크 캡처 사양. audin 협상이 끝난 뒤 한 번 나간다.
+///
+/// 렌더러가 이 사양대로 마이크를 잡아야 한다 — 서버가 자기 목록에서 고른 형식이고, 다른 사양으로
+/// 보내면 원격에서 소리가 빠르거나 느리게 재생된다(리샘플링은 오디오 그래프가 할 일이다).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MicrophoneFormatPayload {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub bits_per_sample: u16,
+    /// 서버가 한 번에 받고 싶어 하는 프레임 수. 0 이면 이전 값을 유지하라는 뜻이다.
+    pub frames_per_packet: u32,
+}
+
+/// 마이크를 쓸 수 없다는 알림.
+///
+/// 지금은 이유가 하나다: 우리는 요청했는데 서버가 AUDIO_INPUT 채널을 열지 않았다(윈도우가 오디오
+/// 녹음 리디렉션을 막아 둔 구성). 이유를 문자열로 두는 이유는 화면이 안내 문구를 고르기 때문이다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MicrophoneUnavailablePayload {
+    pub reason: &'static str,
 }
 
 /// Metadata for a stream frame carrying pixels.

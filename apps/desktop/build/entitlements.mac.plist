@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- 앞의 세 개는 electron-builder 기본 권한을 그대로 옮긴 것이다. entitlements 파일을
+         지정하는 순간 기본값이 **대체**되므로, 이것을 빼면 앱이 실행되지 않는다. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- 마이크(RDP AUDIO_INPUT). hardened runtime 에서는 이 권한이 없으면 getUserMedia 가
+         막힌다. dev 는 Electron.app 이 들고 있는 권한으로 돌아서 이 빈틈이 가려진다 —
+         패키지 앱에서만 마이크가 안 되는 모양이 정확히 이것이다. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+  </dict>
+</plist>

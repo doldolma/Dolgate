@@ -20,6 +20,11 @@ export interface RdpBridge {
   ) => Promise<RdpConnectedPayload>;
   disconnect: (sessionId: string) => Promise<void>;
   sendInput: (sessionId: string, events: RdpInputEvent[]) => void;
+  /**
+   * 캡처한 마이크 PCM 을 코어로 보낸다. 협상된 사양의 리틀엔디언 16-bit PCM 이어야 한다
+   * (사양은 `microphoneFormat` 이벤트로 온다).
+   */
+  sendMicrophoneAudio: (sessionId: string, chunk: ArrayBuffer) => void;
   trustCertificate: (sessionId: string, accept: boolean) => Promise<void>;
   /**
    * 신뢰한 서버 인증서를 해제한다. 갱신된 호스트 레코드를 돌려준다(없거나 RDP 가 아니면 null).
@@ -62,6 +67,8 @@ export function buildRdpBridge(ipcRenderer: IpcRenderer): RdpBridge {
     disconnect: (sessionId) => ipcRenderer.invoke(ipcChannels.rdp.disconnect, sessionId),
     sendInput: (sessionId, events) =>
       ipcRenderer.send(ipcChannels.rdp.input, sessionId, events),
+    sendMicrophoneAudio: (sessionId, chunk) =>
+      ipcRenderer.send(ipcChannels.rdp.micAudio, sessionId, chunk),
     trustCertificate: (sessionId, accept) =>
       ipcRenderer.invoke(ipcChannels.rdp.trustCertificate, sessionId, accept),
     revokeCertificateTrust: (hostId) =>

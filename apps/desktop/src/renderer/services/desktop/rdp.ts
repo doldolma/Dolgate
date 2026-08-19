@@ -60,6 +60,11 @@ export function setRdpKeyboardCapture(active: boolean): void {
   desktopApi.rdp.setKeyboardCapture(active);
 }
 
+/** 캡처한 마이크 PCM 을 코어로 보낸다(협상된 사양의 16-bit PCM). */
+export function sendRdpMicrophoneAudio(sessionId: string, chunk: ArrayBuffer): void {
+  desktopApi.rdp.sendMicrophoneAudio(sessionId, chunk);
+}
+
 export function subscribeRdpEvents(
   listener: (event: RdpSessionEvent) => void,
 ): () => void {

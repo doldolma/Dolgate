@@ -673,6 +673,7 @@
       "waitingNetwork": "네트워크 대기 중",
       "attempts": "{{attempt}}/{{max}}회 시도",
       "error": "오류",
+      "microphone": "마이크",
       "cwd": "현재 위치",
       "shell": "셸",
       "connectedFor": "연결 경과",
@@ -1442,7 +1443,11 @@
         "add": "폴더 추가",
         "remove": "제거"
       },
-      "credential": "인증 정보"
+      "credential": "인증 정보",
+      "microphone": {
+        "label": "마이크 보내기",
+        "description": "로컬 마이크 소리를 원격으로 전달합니다. 처음 연결할 때 마이크 권한을 묻습니다."
+      }
     },
     "vnc": {
       "credential": "VNC 비밀번호",
@@ -1776,7 +1781,8 @@
       "imageQuality": "화질",
       "screenSharing": "화면 공유",
       "viewOnly": "보기 전용",
-      "deletedSshHost": "삭제된 SSH 호스트 — 연결되지 않습니다"
+      "deletedSshHost": "삭제된 SSH 호스트 — 연결되지 않습니다",
+      "microphone": "마이크"
     },
     "env": {
       "heading": "환경 변수 ({{count}})",
@@ -3455,6 +3461,18 @@
     "overlay": {
       "connectingTitle": "연결 중",
       "failedTitle": "연결할 수 없습니다"
+    },
+    "microphone": {
+      "denied": "마이크 권한이 거부되어 원격으로 소리를 보내지 못합니다.",
+      "noDevice": "마이크를 찾지 못해 원격으로 소리를 보내지 못합니다.",
+      "failed": "마이크를 열지 못해 원격으로 소리를 보내지 못합니다.",
+      "serverRefused": "원격이 마이크 채널을 열지 않아 소리를 보내지 못합니다. 원격에서 녹음을 시작해 보거나, 서버의 오디오 녹음 리디렉션 설정을 확인하세요.",
+      "short": {
+        "denied": "권한 거부됨",
+        "noDevice": "장치 없음",
+        "failed": "열 수 없음",
+        "serverRefused": "원격이 열지 않음"
+      }
     }
   },
   "errorBoundary": {

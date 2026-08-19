@@ -111,12 +111,21 @@ describe('HostDetailPanel — RDP Connection 탭', () => {
     // 기본값이 켬인 토글은 껐을 때도 보여야 한다.
     expect(rowValue('원격 소리')).toBe('사용 안 함');
     expect(rowValue('클립보드 공유')).toBe('사용');
+    // 마이크는 기본이 꺼짐이라 이 호스트에는 줄이 없어야 한다(켠 경우만 적는다).
+    expect(screen.queryByText('마이크')).toBeNull();
     expect(rowValue('공유 폴더')).toBe('docs읽기 전용');
     // 신뢰한 인증서 지문은 설정한 값이 아니라 여기 넣지 않는다(접속 시 확인 화면이 보여준다).
     expect(screen.queryByText('AA:BB:CC:DD:EE:FF')).toBeNull();
 
     // tailnet 목록은 비동기로 도착한다.
     expect(await screen.findByText('corp-tailnet')).toBeTruthy();
+  });
+
+  // 원격에 소리가 넘어가는 설정이라, 켜져 있다는 사실이 이 표에서 보여야 한다.
+  it('마이크를 켰으면 그 줄을 보여준다', () => {
+    renderPanel(makeHost({ microphoneEnabled: true }));
+
+    expect(rowValue('마이크')).toBe('사용');
   });
 
   it('설정하지 않은 값은 기본값으로 보여주고 없는 줄은 빼낸다', () => {

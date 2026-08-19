@@ -1037,6 +1037,24 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     //
     // 모니터 레이아웃은 GCC 블록으로 접속 시점에 선언하는 값이라 세션 중에 바꿀 수 없다.
     // 그래서 끊고 다시 붙인다 — mstsc 나 Microsoft Remote Desktop 도 이 설정에 재접속을
+    setRdpMicrophoneProblem: (sessionId, problem) => {
+            set((state) => {
+              const tab = state.tabs.find((item) => item.sessionId === sessionId);
+              // 값이 그대로면 손대지 않는다 — 렌더러가 매 렌더마다 같은 값을 알려도 리렌더가
+              // 번지지 않게.
+              if (!tab || (tab.rdpMicrophoneProblem ?? null) === (problem ?? null)) {
+                return {};
+              }
+              return {
+                tabs: state.tabs.map((item) =>
+                  item.sessionId === sessionId
+                    ? { ...item, rdpMicrophoneProblem: problem ?? null }
+                    : item,
+                ),
+              };
+            });
+          },
+
     // 요구한다. 이 선택은 호스트에 저장하지 않는다: 이번 세션에만 적용된다.
     setRdpMonitors: async (sessionId, monitors) => {
             const tab = get().tabs.find((item) => item.sessionId === sessionId);

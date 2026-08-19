@@ -9,7 +9,7 @@ import {
   type RdpSessionEvent,
 } from "@shared";
 import type { WebContents } from "electron";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, screen } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, screen, systemPreferences } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { RdpManager } from "../rdp-manager";
 import { logMessage } from "../activity-log-message";
@@ -586,6 +586,15 @@ export function registerRdpIpcHandlers(
       // 닫기를 빠뜨릴 자리가 적다. 렌더러에 두면 창이 죽을 때 포워드가 남는다.
       const dialAddress = await openSessionForward(sessionId, host);
 
+      // 이 창이 이 세션의 주인이다. 창이 닫히면 세션도 끊는다(아래 destroyed 훅).
+      rdpManager.setSessionOwner(sessionId, event.sender.id);
+
+      // 마이크를 쓸 호스트면 권한을 **접속 시점에** 미리 물어본다. 기다리지는 않는다 — 아래
+      // 주석 참고.
+      if (host.microphoneEnabled === true) {
+        void requestMicrophoneAccess();
+      }
+
       try {
         const payload = await rdpManager.connect(
           sessionId,
@@ -602,6 +611,8 @@ export function registerRdpIpcHandlers(
           adminSession: host.adminSession === true,
           // 없거나 null 이 "켜짐"이다. 옛 호스트가 조용해지지 않는다.
           audio: host.audioEnabled !== false,
+          // 켠 호스트에서만 AUDIO_INPUT 을 붙인다. 코어 기본값도 꺼짐이다.
+          microphone: host.microphoneEnabled === true,
           clipboard: host.clipboardEnabled !== false,
           // 32 는 커넥터 기본값이라 보내지 않는다 — 코어가 아무것도 설정하지 않는 경로로 간다.
           colorDepth: host.colorDepth === 16 ? 16 : undefined,
@@ -666,10 +677,17 @@ export function registerRdpIpcHandlers(
   });
 
   // 픽셀을 보낼 창을 좁힌다. 창이 닫히면 등록을 지워 죽은 id 가 남지 않게 한다.
+  //
+  // **주인 창이 닫히면 세션도 끊는다.** 프레임 전달만 멈추면 코어의 세션은 그대로 남아, 원격
+  // 윈도우 세션까지 잡은 채로 앱이 끝날 때까지 살아 있었다. 모니터별 창이 닫히는 것은 여기에
+  // 해당하지 않는다 — 그 창은 watcher 일 뿐 주인이 아니다(rdp-manager 의 ownerBySession 참고).
   ipcMain.on(ipcChannels.rdp.watch, (event, sessionId: string) => {
     const id = event.sender.id;
     rdpManager.watchSession(sessionId, id);
-    event.sender.once("destroyed", () => rdpManager.forgetWatcher(id));
+    event.sender.once("destroyed", () => {
+      rdpManager.forgetWatcher(id);
+      rdpManager.disconnectSessionsOwnedBy(id);
+    });
   });
 
   ipcMain.on(ipcChannels.rdp.unwatch, (event, sessionId: string) => {
@@ -789,6 +807,15 @@ export function registerRdpIpcHandlers(
       rdpManager.sendInput(sessionId, toDesktopEvents(sessionId, events));
     },
   );
+
+  // 마이크 PCM. 입력과 같은 fire-and-forget 채널이다 — 초당 수십 번 오므로 invoke 로 왕복하면
+  // 그 왕복만으로 렌더러가 밀린다.
+  ipcMain.on(
+    ipcChannels.rdp.micAudio,
+    (_event, sessionId: string, chunk: ArrayBuffer) => {
+      rdpManager.sendMicrophoneAudio(sessionId, new Uint8Array(chunk));
+    },
+  );
 }
 
 /**
@@ -812,6 +839,35 @@ const MAX_DESKTOP_SIDE = 8192;
  * 창을 못 찾으면 null. 부르는 쪽이 예전 값으로 돌아간다.
  */
 /** 렌더러가 잰 크기를 프로토콜이 받아들이는 범위로 맞춘다. */
+/**
+ * 마이크 권한을 접속 시점에 미리 물어본다(macOS).
+ *
+ * 이 호출이 없으면 macOS 는 렌더러가 **처음 캡처를 시작할 때** 묻는다. 그 시점은 원격에서 통화나
+ * 녹음이 막 시작된 순간이라, 대화상자가 그 위로 끼어들고 사용자는 첫 몇 초를 놓친다.
+ *
+ * **결과를 기다리지 않는다.** 기다리면 사용자가 대화상자를 누를 때까지 접속이 멈춘 것처럼 보인다.
+ * 화면은 그동안 붙어도 되고, 실제 캡처는 서버가 AUDIO_INPUT 을 열 때까지 시작되지 않는다 —
+ * 그 사이에 답이 들어온다. 거부해도 접속은 그대로 진행한다(화면·소리·클립보드는 쓸 수 있고,
+ * 마이크가 안 되는 것은 렌더러가 그때 사용자에게 알린다).
+ *
+ * 이미 허용/거부가 정해져 있으면 macOS 는 대화상자 없이 바로 답한다 — 그래서 접속마다 불러도
+ * 사용자에게 보이는 것이 없다. 이 API 는 macOS 전용이다.
+ */
+async function requestMicrophoneAccess(): Promise<void> {
+  if (process.platform !== "darwin") {
+    return;
+  }
+  try {
+    if (systemPreferences.getMediaAccessStatus("microphone") === "granted") {
+      return;
+    }
+    await systemPreferences.askForMediaAccess("microphone");
+  } catch {
+    // 권한 API 가 없거나 실패해도 접속은 계속한다. 마이크만 못 쓰는 상태로 남고, 그 사실은
+    // 렌더러가 알린다.
+  }
+}
+
 function clampViewport(
   viewport?: { width: number; height: number },
 ): { width: number; height: number } | null {

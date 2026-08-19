@@ -108,6 +108,8 @@ export function RdpMonitorWindow({
         // 소리는 메인 창 하나만 낸다. 창마다 켜면 같은 PCM 이 창 수만큼 서로 다른 시각에
         // 재생되어 메아리가 지고 소리가 겹쳐 커진다.
         audio={false}
+        // 마이크도 메인 창만 잡는다. 창마다 열면 같은 마이크를 여러 번 잡아 원격에 겹쳐 들어간다.
+        microphone={false}
       />
     </div>
   );

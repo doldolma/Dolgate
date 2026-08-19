@@ -26,6 +26,8 @@ export interface RdpConnectOptions {
   adminSession?: boolean;
   /** 원격 소리를 받는다. 생략하면 켜짐. */
   audio?: boolean;
+  /** 마이크를 원격으로 보낸다(AUDIO_INPUT). 생략하면 **꺼짐** — 켠 호스트에서만 연다. */
+  microphone?: boolean;
   /** 원격과 클립보드를 주고받는다. 생략하면 켜짐. */
   clipboard?: boolean;
   /** 색 깊이(비트). 생략하면 커넥터 기본값(32). 16 만 특별히 다룬다. */
@@ -192,4 +194,34 @@ export type RdpSessionEvent =
       type: 'monitorRegion';
       sessionId: string;
       region: RdpMonitorPlacement | null;
+    }
+  /**
+   * 마이크 캡처 사양이 정해졌다(AUDIO_INPUT 협상 완료).
+   *
+   * **서버가 자기 형식 목록에서 고른 값이다.** 이 사양대로 캡처해야 원격에서 소리가 빠르거나
+   * 느리게 들리지 않는다. 이 이벤트가 오기 전에는 마이크를 열지 않는다 — 미리 열면 사용자에게
+   * 권한을 묻고도 쓰지 못한 채 다시 열어야 한다.
+   */
+  /**
+   * 마이크를 쓸 수 없다.
+   *
+   * 지금은 이유가 하나다 — 우리는 요청했는데 서버가 AUDIO_INPUT 채널을 열지 않았다(윈도우가
+   * 오디오 녹음 리디렉션을 막아 둔 구성). **이 알림이 없으면 사용자는 마이크가 켜진 줄 알고
+   * 원격에서 말한다.**
+   */
+  | {
+      type: 'microphoneUnavailable';
+      sessionId: string;
+      payload: { reason: 'serverRefused' };
+    }
+  | {
+      type: 'microphoneFormat';
+      sessionId: string;
+      payload: {
+        sampleRate: number;
+        channels: number;
+        bitsPerSample: number;
+        /** 서버가 한 번에 받고 싶어 하는 프레임 수. 0 이면 이전 값을 유지하라는 뜻이다. */
+        framesPerPacket: number;
+      };
     };

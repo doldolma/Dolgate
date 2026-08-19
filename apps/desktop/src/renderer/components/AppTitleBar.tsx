@@ -696,6 +696,18 @@ export function buildTabHoverInfo(
     } else if (tab?.status === 'error' && tab.errorMessage) {
       rows.push({ label: t('titleBar.hover.error'), value: tab.errorMessage, valueColor: TAB_DOT_COLOR.error });
     }
+
+    // 마이크를 보낼 수 없으면 그 이유. **조용히 실패하면 사용자는 마이크가 켜진 줄 알고 원격에서
+    // 말한다** — 그래서 어딘가에는 반드시 보여야 하고, 그 자리가 여기다(예전에는 원격 화면 위에
+    // 배너로 겹쳐 두었는데 작업 표시줄과 섞여 읽히지 않았다).
+    if (tab?.rdpMicrophoneProblem) {
+      rows.push({
+        label: t('titleBar.hover.microphone'),
+        // hover 행은 좁고 잘린다(truncate). 긴 안내 문장 대신 짧은 상태 말을 쓴다.
+        value: t(`rdp.microphone.short.${tab.rdpMicrophoneProblem}`),
+        valueColor: 'var(--warning-text)',
+      });
+    }
     const cwd = getSessionCwd(item.sessionId);
     if (cwd) {
       rows.push({ label: t('titleBar.hover.cwd'), value: cwd });

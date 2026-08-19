@@ -259,6 +259,14 @@ pub struct Config {
     pub autologon: bool,
     /// If true, the INFO_NOAUDIOPLAYBACK flag is set in the [`ClientInfoPdu`](ironrdp_pdu::rdp::ClientInfoPdu)
     pub enable_audio_playback: bool,
+    /// 마이크 리디렉션(AUDIO_INPUT)을 쓰겠다고 알린다 — `INFO_AUDIOCAPTURE`.
+    ///
+    /// **이 플래그가 없으면 서버가 AUDIO_INPUT 채널을 열지 않는다.** 클라이언트가 그 동적 채널을
+    /// 붙여 두어도 서버 쪽에서 시작하지 않으므로 협상이 아예 일어나지 않고, 원격의 장치 목록에
+    /// 마이크가 나타나지 않는다(실측: 채널만 등록했을 때 그랬다).
+    ///
+    /// 업스트림에는 이 필드가 없어서 vendor 에 얹었다([MS-RDPBCGR] 2.2.1.11.1.1).
+    pub enable_audio_capture: bool,
     pub performance_flags: PerformanceFlags,
 
     pub license_cache: Option<Arc<dyn LicenseCache>>,
