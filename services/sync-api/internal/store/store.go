@@ -234,6 +234,10 @@ type Store interface {
 	// RaiseSyncDataFloor 는 수준을 올리기만 한다(단조). 이미 같거나 높으면 아무 일도 없다.
 	RaiseSyncDataFloor(ctx context.Context, userID string, floor int) error
 
+	// GetSyncGate 는 /sync 게이트 두 개(존재 여부, 데이터 하한)를 users 행 한 번으로 읽는다.
+	// 행이 없으면 (false, 0, nil) — 탈퇴한 사용자다.
+	GetSyncGate(ctx context.Context, userID string) (bool, int, error)
+
 	// 유저 존재 확인 — 탈퇴 직후 잔여 access 토큰의 sync 재유입(데이터 부활) 차단용.
 	// "행 없음"은 (false, nil), 드라이버 에러만 err 로 돌려준다.
 	UserExists(ctx context.Context, userID string) (bool, error)

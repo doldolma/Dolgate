@@ -78,6 +78,15 @@ Important files:
 - `dolgate_sync.db`
 - `auth-signing-private.pem`
 
+SQLite runs in WAL mode, so recent commits may still live in `dolgate_sync.db-wal` next to the
+database file. Copying only `dolgate_sync.db` from a running server can therefore miss the newest
+data. Either back up the whole `/app/data` directory with the server stopped, or take a consistent
+copy while it runs:
+
+```bash
+docker compose exec sync-api sqlite3 /app/data/dolgate_sync.db ".backup '/app/data/backup.db'"
+```
+
 ### HTTPS / reverse proxy
 
 - Production deployments should sit behind an HTTPS reverse proxy.
@@ -259,7 +268,10 @@ Default values:
 
 - `PORT`: `8080`
 - `DB_DRIVER`: `sqlite` (`mysql` and `postgres` are also supported)
-- `DATABASE_URL`: `file:./data/dolgate_sync.db?_pragma=busy_timeout(5000)`
+- `DATABASE_URL`: `file:./data/dolgate_sync.db` (SQLite only: `busy_timeout=5000` and
+  `journal_mode=WAL` are added automatically for any pragma you do not set yourself, so
+  `?_pragma=journal_mode(DELETE)` stays in effect if you need the older journal mode — for example
+  when the database file lives on a network filesystem, where WAL is not supported)
 - `AUTH_SIGNING_PRIVATE_KEY_PATH`: `./data/auth-signing-private.pem`
 - `LOCAL_AUTH_ENABLED`: `true`
 - `LOCAL_SIGNUP_ENABLED`: `true`

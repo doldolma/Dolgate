@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -302,20 +303,53 @@ func openDialector(driver string, dsn string) (gorm.Dialector, error) {
 	}
 }
 
-// withSQLiteDefaults 는 DSN 에 명시가 없을 때 busy_timeout 과 WAL 을 기본으로 켠다.
-// 지금은 pool=1 이 모든 접근을 직렬화해 잠금 충돌이 없지만, 그 가정은 코드 어디에도
-// 강제돼 있지 않다 — 풀 크기를 늘리거나 외부 프로세스(백업/CLI)가 같은 파일을 열면
-// busy_timeout 없인 즉시 SQLITE_BUSY 5xx 가 난다. 사용자가 DSN 에 _pragma 를 직접
-// 지정했다면 그대로 존중한다.
+// withSQLiteDefaults 는 DSN 에 **없는** pragma 만 채운다.
+//
+// busy_timeout 없인 잠금 충돌이 즉시 SQLITE_BUSY 5xx 가 되고, WAL 이 아니면 쓰기마다 저널
+// fsync 가 붙는 데다 외부 리더(백업·CLI)가 쓰기와 겹칠 때 막힌다. 둘 다 기본으로 켜 두는 게 맞다.
+//
+// **pragma 하나라도 있으면 통째로 손대지 않던 시절이 있었다.** 그런데 기본 설정 DSN 이 이미
+// busy_timeout 을 달고 나가서, 아무 설정도 하지 않은 자체 호스팅 배포가 전부 "사용자가 지정함"
+// 으로 분류돼 WAL 이 한 번도 켜지지 않았다. 그래서 이제 pragma 단위로 본다 — 명시한 것은 그대로
+// 존중하고(journal_mode 를 DELETE 로 적어 두면 그 값이 유지된다), 빠뜨린 것만 채운다.
+//
+// 메모리 DSN 은 저널·타임아웃이 의미 없어 건드리지 않는다.
 func withSQLiteDefaults(dsn string) string {
-	if strings.Contains(dsn, "_pragma=") || dsn == ":memory:" || strings.HasPrefix(dsn, "file::memory:") {
+	if dsn == ":memory:" || strings.HasPrefix(dsn, "file::memory:") {
 		return dsn
 	}
-	separator := "?"
-	if strings.Contains(dsn, "?") {
-		separator = "&"
+
+	_, rawQuery, hasQuery := strings.Cut(dsn, "?")
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		// 우리가 읽지 못하는 DSN 은 그대로 넘긴다 — 드라이버가 내는 원래 오류를 가리지 않는다.
+		return dsn
 	}
-	return dsn + separator + "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	specified := make(map[string]bool, len(values["_pragma"]))
+	for _, pragma := range values["_pragma"] {
+		name, _, _ := strings.Cut(pragma, "(")
+		specified[strings.ToLower(strings.TrimSpace(name))] = true
+	}
+
+	result := dsn
+	for _, fallback := range []struct {
+		name   string
+		clause string
+	}{
+		{"busy_timeout", "_pragma=busy_timeout(5000)"},
+		{"journal_mode", "_pragma=journal_mode(WAL)"},
+	} {
+		if specified[fallback.name] {
+			continue
+		}
+		separator := "?"
+		if hasQuery {
+			separator = "&"
+		}
+		result += separator + fallback.clause
+		hasQuery = true
+	}
+	return result
 }
 
 func (s *GormStore) migrate() error {
@@ -1617,6 +1651,26 @@ func (s *GormStore) UserExists(ctx context.Context, userID string) (bool, error)
 		return false, err
 	}
 	return count > 0, nil
+}
+
+// GetSyncGate 는 /sync 게이트가 필요한 두 값을 users 행 **한 번**으로 읽는다.
+//
+// 존재 확인(탈퇴 차단)과 데이터 하한(구클라이언트 차단)은 같은 행에 있는데, 미들웨어가
+// 나뉘어 있어 폴링마다 같은 행을 두 번 왕복했다. 행이 없으면 탈퇴한 사용자이므로 존재
+// 확인은 이 조회에 공짜로 딸려 온다.
+//
+// revision 은 여기서 읽지 않는다 — 스냅샷과 같은 트랜잭션에서 읽어야 "새 ETag + 옛 데이터"
+// 로 어긋나지 않는다(GetSyncSnapshot 주석 참고).
+func (s *GormStore) GetSyncGate(ctx context.Context, userID string) (bool, int, error) {
+	var row userRow
+	err := s.db.WithContext(ctx).Select("sync_data_floor").Where("id = ?", userID).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, 0, nil
+	}
+	if err != nil {
+		return false, 0, err
+	}
+	return true, row.SyncDataFloor, nil
 }
 
 // DeleteUserData 는 회원 탈퇴용으로 사용자의 모든 행을 단일 트랜잭션으로 hard delete 한다.

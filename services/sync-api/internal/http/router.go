@@ -1602,7 +1602,21 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 
 	syncGroup := router.Group("/sync")
 	syncGroup.Use(authMiddleware(authService))
-	syncGroup.Use(requireExistingUser)
+	// 동기화 응답을 HTTP 캐시에 저장하지 못하게 한다.
+	//
+	// 응답에는 ETag 만 있고 캐시 지시가 없었다. 그러면 클라이언트의 투명 HTTP 캐시(안드로이드
+	// OkHttp 등)가 본문을 저장해 두고 **앱이 요청하지도 않은** 조건부 요청을 스스로 보낸다.
+	// 레코드가 없는 계정은 revision 이 움직이지 않아 ETag 가 늘 같으므로, 서버가 304 를 주고
+	// 캐시는 옛 본문을 200 인 척 앱에 건넨다 — 응답 모양을 고쳐도 그 기기만 영원히 낫지 않는다
+	// (실제로 겪었다). 계정마다 URL 이 같고 Vary 도 없어서, 한 기기에서 계정을 바꿨을 때 서로의
+	// 본문이 섞일 수 있는 구멍도 같이 닫는다.
+	//
+	// 앱이 직접 붙이는 If-None-Match(lastSyncRevision)는 애플리케이션 레벨이라 그대로 동작한다 —
+	// 변경이 없으면 여전히 304 로 끝난다. 사라지는 것은 "캐시가 본문을 되살리는" 동작뿐이다.
+	syncGroup.Use(func(ctx *gin.Context) {
+		ctx.Header("Cache-Control", "no-store")
+		ctx.Next()
+	})
 	// 계정 데이터가 요구하는 수준을 못 갖춘 클라이언트는 여기서 멈춘다. pull 도 push 도 막는다 —
 	// 받아서 망가지는 것과 고쳐서 되올리는 것이 같은 사고의 두 면이다.
 	//
@@ -1611,11 +1625,20 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	// 변경이 왜 안 오는지 알 수 없다. 세션을 안 주면 E2EE 전환 때와 같은 경로로 로그인 화면에
 	// 안내가 뜬다. 대가는 그 기기가 로그아웃된다는 것이다 — 원인을 모르는 채 데이터가 어긋나는
 	// 쪽보다 낫다고 보고 택했다.
+	//
+	// 존재 확인과 하한 조회는 users 행 하나를 보는 같은 일이라 한 번의 조회로 합쳤다(GetSyncGate).
+	// 폴링이 30초 주기라 기기 수만큼 곱해지는 왕복이다 — 나뉘어 있을 이유가 없다.
 	syncGroup.Use(func(ctx *gin.Context) {
-		floor, err := store.GetSyncDataFloor(ctx.Request.Context(), ctx.GetString("userId"))
+		exists, floor, err := store.GetSyncGate(ctx.Request.Context(), ctx.GetString("userId"))
 		if err != nil {
 			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			ctx.Abort()
+			return
+		}
+		// 탈퇴 직후 아직 만료 전 access 토큰을 가진 기기의 쓰기(지운 데이터 부활, 볼트 재생성)를
+		// 막고, 그 기기의 즉시 로그아웃(401 → refresh 실패)을 유도한다.
+		if !exists {
+			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "로그인이 필요합니다."})
 			return
 		}
 		if rejectOutdatedClientForFloor(ctx, floor) {

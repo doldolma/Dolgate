@@ -1324,3 +1324,76 @@ func TestGormStoreUserTimestamps(t *testing.T) {
 		})
 	}
 }
+
+// pragma 하나가 적혀 있다고 나머지 기본값까지 통째로 포기하면, 기본 설정 DSN(busy_timeout 만
+// 달려 있었다)이 WAL 을 영영 못 켠다. 실제로 그 상태로 배포돼 있었다.
+func TestWithSQLiteDefaultsFillsOnlyWhatIsMissing(t *testing.T) {
+	cases := []struct {
+		name string
+		dsn  string
+		want []string
+		deny []string
+	}{
+		{
+			name: "빈 DSN 은 둘 다 채운다",
+			dsn:  "file:./data/dolgate_sync.db",
+			want: []string{"_pragma=busy_timeout(5000)", "_pragma=journal_mode(WAL)"},
+		},
+		{
+			name: "busy_timeout 만 적혀 있으면 journal_mode 를 채운다",
+			dsn:  "file:./data/dolgate_sync.db?_pragma=busy_timeout(9000)",
+			want: []string{"_pragma=busy_timeout(9000)", "_pragma=journal_mode(WAL)"},
+			deny: []string{"busy_timeout(5000)"},
+		},
+		{
+			name: "journal_mode 를 명시했으면 그대로 존중한다",
+			dsn:  "file:./data/dolgate_sync.db?_pragma=journal_mode(DELETE)",
+			want: []string{"_pragma=journal_mode(DELETE)", "_pragma=busy_timeout(5000)"},
+			deny: []string{"journal_mode(WAL)"},
+		},
+		{
+			name: "메모리 DSN 은 건드리지 않는다",
+			dsn:  ":memory:",
+			want: []string{":memory:"},
+			deny: []string{"_pragma"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := withSQLiteDefaults(tc.dsn)
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("withSQLiteDefaults(%q) = %q, want it to contain %q", tc.dsn, got, want)
+				}
+			}
+			for _, deny := range tc.deny {
+				if strings.Contains(got, deny) {
+					t.Errorf("withSQLiteDefaults(%q) = %q, want it to drop %q", tc.dsn, got, deny)
+				}
+			}
+		})
+	}
+}
+
+// 문자열만 맞추면 "붙였는데 안 먹는" 경우를 못 잡는다 — 실제로 열어서 저널 모드를 확인한다.
+func TestOpenSQLiteEnablesWALEvenWhenAnotherPragmaIsSet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wal.db")
+	store, err := OpenSQLite("file:" + path + "?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	sqlDB, err := store.db.DB()
+	if err != nil {
+		t.Fatalf("DB() error = %v", err)
+	}
+	defer sqlDB.Close()
+
+	var mode string
+	if err := sqlDB.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		t.Fatalf("PRAGMA journal_mode error = %v", err)
+	}
+	if !strings.EqualFold(mode, "wal") {
+		t.Errorf("journal_mode = %q, want wal", mode)
+	}
+}

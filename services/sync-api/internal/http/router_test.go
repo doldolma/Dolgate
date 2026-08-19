@@ -1565,6 +1565,11 @@ func TestSyncRevisionETag(t *testing.T) {
 	if etag != fmt.Sprintf("\"%d\"", rev1) {
 		t.Fatalf("expected ETag for revision %d, got %q", rev1, etag)
 	}
+	// 투명 HTTP 캐시가 본문을 저장하면, revision 이 안 움직이는 계정에서 옛 본문이 영원히
+	// 되살아난다(응답 모양을 고쳐도 그 기기만 안 낫는다). 200 과 304 양쪽에 있어야 한다.
+	if cacheControl := getRecorder.Header().Get("Cache-Control"); cacheControl != "no-store" {
+		t.Fatalf("expected Cache-Control no-store on 200, got %q", cacheControl)
+	}
 
 	// 같은 ETag 로 조건부 GET → 변경 없음 → 304, 본문 없음.
 	notModified := httptest.NewRecorder()
@@ -1576,6 +1581,9 @@ func TestSyncRevisionETag(t *testing.T) {
 	}
 	if notModified.Body.Len() != 0 {
 		t.Fatalf("expected empty body on 304, got %q", notModified.Body.String())
+	}
+	if cacheControl := notModified.Header().Get("Cache-Control"); cacheControl != "no-store" {
+		t.Fatalf("expected Cache-Control no-store on 304, got %q", cacheControl)
 	}
 
 	// 다시 push → 리비전 단조 증가.

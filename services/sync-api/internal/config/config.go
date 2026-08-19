@@ -98,7 +98,10 @@ func defaultConfig() AppConfig {
 		},
 		Database: DatabaseConfig{
 			Driver: "sqlite",
-			URL:    "file:./data/dolgate_sync.db?_pragma=busy_timeout(5000)",
+			// pragma 는 여기 적지 않는다. withSQLiteDefaults 가 busy_timeout·journal_mode(WAL) 을
+			// 채우고, 사용자가 DATABASE_URL 에 적은 것만 존중한다 — 기본값에 하나라도 적어 두면
+			// "사용자가 지정한 DSN" 과 구분되지 않는다.
+			URL: "file:./data/dolgate_sync.db",
 		},
 		Auth: AuthConfig{
 			SigningPrivateKeyPath:         "./data/auth-signing-private.pem",
