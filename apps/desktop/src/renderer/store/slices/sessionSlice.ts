@@ -1037,6 +1037,22 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     //
     // 모니터 레이아웃은 GCC 블록으로 접속 시점에 선언하는 값이라 세션 중에 바꿀 수 없다.
     // 그래서 끊고 다시 붙인다 — mstsc 나 Microsoft Remote Desktop 도 이 설정에 재접속을
+    setRdpCameraProblem: (sessionId, problem) => {
+            set((state) => {
+              const tab = state.tabs.find((item) => item.sessionId === sessionId);
+              if (!tab || (tab.rdpCameraProblem ?? null) === (problem ?? null)) {
+                return {};
+              }
+              return {
+                tabs: state.tabs.map((item) =>
+                  item.sessionId === sessionId
+                    ? { ...item, rdpCameraProblem: problem ?? null }
+                    : item,
+                ),
+              };
+            });
+          },
+
     setRdpMicrophoneProblem: (sessionId, problem) => {
             set((state) => {
               const tab = state.tabs.find((item) => item.sessionId === sessionId);

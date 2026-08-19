@@ -25,6 +25,13 @@ export interface RdpBridge {
    * (사양은 `microphoneFormat` 이벤트로 온다).
    */
   sendMicrophoneAudio: (sessionId: string, chunk: ArrayBuffer) => void;
+  /**
+   * 인코딩된 카메라 프레임 한 장(H.264 Annex B).
+   *
+   * 입력·마이크와 같은 fire-and-forget 이다. **서버가 허락한 만큼만 보내야 한다** —
+   * `cameraCredit` 이벤트가 그 허락이다.
+   */
+  sendCameraFrame: (sessionId: string, chunk: ArrayBuffer) => void;
   trustCertificate: (sessionId: string, accept: boolean) => Promise<void>;
   /**
    * 신뢰한 서버 인증서를 해제한다. 갱신된 호스트 레코드를 돌려준다(없거나 RDP 가 아니면 null).
@@ -69,6 +76,8 @@ export function buildRdpBridge(ipcRenderer: IpcRenderer): RdpBridge {
       ipcRenderer.send(ipcChannels.rdp.input, sessionId, events),
     sendMicrophoneAudio: (sessionId, chunk) =>
       ipcRenderer.send(ipcChannels.rdp.micAudio, sessionId, chunk),
+    sendCameraFrame: (sessionId, chunk) =>
+      ipcRenderer.send(ipcChannels.rdp.cameraFrame, sessionId, chunk),
     trustCertificate: (sessionId, accept) =>
       ipcRenderer.invoke(ipcChannels.rdp.trustCertificate, sessionId, accept),
     revokeCertificateTrust: (hostId) =>

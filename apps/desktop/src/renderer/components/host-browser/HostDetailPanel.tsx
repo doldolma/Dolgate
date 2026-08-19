@@ -568,6 +568,13 @@ function buildRdpRows(
       value: t('hostDetail.row.enabled'),
     });
   }
+  // 카메라도 같은 규칙이다 — 켜져 있으면 영상이 원격으로 넘어간다는 사실이 보여야 한다.
+  if (host.cameraEnabled === true) {
+    rows.push({
+      label: t('hostDetail.row.camera'),
+      value: t('hostDetail.row.enabled'),
+    });
+  }
   rows.push({
     label: t('hostDetail.row.clipboard'),
     value: describeToggle(host.clipboardEnabled !== false),

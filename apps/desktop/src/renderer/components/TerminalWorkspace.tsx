@@ -687,6 +687,7 @@ export function TerminalWorkspace({
             visible={visible}
             audio={rdpHostFor(hosts, tab)?.audioEnabled !== false}
             microphone={rdpHostFor(hosts, tab)?.microphoneEnabled === true}
+            camera={rdpHostFor(hosts, tab)?.cameraEnabled === true}
             clipboard={rdpHostFor(hosts, tab)?.clipboardEnabled !== false}
           />
           {/* 연결 진행·실패를 pane 위에 덮는다. tailnet 을 경유하면 그 계층의 단계까지 보인다 —

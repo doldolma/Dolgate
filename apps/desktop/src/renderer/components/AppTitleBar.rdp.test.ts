@@ -44,6 +44,28 @@ const build = (tab: TerminalTab) =>
     ).rows.map((row) => [row.label, row.value]),
   );
 
+describe('탭 hover 의 카메라 행', () => {
+  it('보낼 수 있으면 행이 없다', () => {
+    expect(build(rdpTab())['카메라']).toBeUndefined();
+  });
+
+  it('이유마다 짧은 상태 말을 보여준다', () => {
+    expect(build(rdpTab({ rdpCameraProblem: 'denied' }))['카메라']).toBe('권한 거부됨');
+    expect(build(rdpTab({ rdpCameraProblem: 'serverRefused' }))['카메라']).toBe(
+      '원격이 열지 않음',
+    );
+  });
+
+  // 마이크와 카메라가 동시에 실패할 수 있다. 한 행이 다른 행을 덮으면 원인 하나를 놓친다.
+  it('마이크와 카메라가 같이 실패하면 두 행이 다 보인다', () => {
+    const rows = build(
+      rdpTab({ rdpMicrophoneProblem: 'denied', rdpCameraProblem: 'noDevice' }),
+    );
+    expect(rows['마이크']).toBe('권한 거부됨');
+    expect(rows['카메라']).toBe('장치 없음');
+  });
+});
+
 describe('탭 hover 의 마이크 행', () => {
   it('보낼 수 있으면 행이 없다', () => {
     // 정상인 세션에서 행이 늘면 정작 문제가 있는 값이 묻힌다.

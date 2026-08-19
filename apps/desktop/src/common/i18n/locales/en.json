@@ -674,6 +674,7 @@
       "attempts": "attempt {{attempt}}/{{max}}",
       "error": "Error",
       "microphone": "Microphone",
+      "camera": "Camera",
       "cwd": "Location",
       "shell": "Shell",
       "connectedFor": "Connected for",
@@ -1447,6 +1448,10 @@
       "microphone": {
         "label": "Send microphone",
         "description": "Sends your local microphone to the remote session. Asks for microphone permission on the first connection."
+      },
+      "camera": {
+        "label": "Send camera",
+        "description": "Sends your local camera to the remote session. Asks for camera permission on the first connection."
       }
     },
     "vnc": {
@@ -1782,7 +1787,8 @@
       "screenSharing": "Screen Sharing",
       "viewOnly": "View Only",
       "deletedSshHost": "Deleted SSH host — will not connect",
-      "microphone": "Microphone"
+      "microphone": "Microphone",
+      "camera": "Camera"
     },
     "env": {
       "heading": "Environment variables ({{count}})",
@@ -3467,6 +3473,18 @@
       "noDevice": "No microphone was found, so no audio is sent to the remote session.",
       "failed": "The microphone could not be opened, so no audio is sent to the remote session.",
       "serverRefused": "The remote never opened the microphone channel, so no audio is sent. Try starting a recording on the remote, or check the server’s audio recording redirection setting.",
+      "short": {
+        "denied": "Permission denied",
+        "noDevice": "No device",
+        "failed": "Cannot open",
+        "serverRefused": "Remote did not open it"
+      }
+    },
+    "camera": {
+      "denied": "Camera permission was denied, so no video is sent to the remote session.",
+      "noDevice": "No camera was found, so no video is sent to the remote session.",
+      "failed": "The camera could not be opened, so no video is sent to the remote session.",
+      "serverRefused": "The remote session did not open the camera channel, so no video is sent. Open an app that uses the camera on the remote side, or check the server's camera redirection settings.",
       "short": {
         "denied": "Permission denied",
         "noDevice": "No device",

@@ -395,6 +395,55 @@ describe("registerRdpIpcHandlers monitor layout", () => {
     }
   });
 
+  // 카메라도 마이크와 같은 규칙이다 — **켠 호스트에서만** 채널을 붙인다. 기본이 켜짐이면 이 필드를
+  // 모르는 옛 레코드가 조용히 카메라를 연다.
+  it("카메라는 켠 호스트에서만 코어에 요청한다", async () => {
+    const off = createHarness("AA:BB:CC");
+    await off.connectAndVerify();
+    expect(off.rdpManager.connect).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ camera: false }),
+      expect.objectContaining({ hostId: "rdp-1" }),
+    );
+
+    const on = createHarness("AA:BB:CC", null, { cameraEnabled: true });
+    await on.connectAndVerify();
+    expect(on.rdpManager.connect).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ camera: true }),
+      expect.objectContaining({ hostId: "rdp-1" }),
+    );
+  });
+
+  it("카메라를 켠 호스트면 접속할 때 권한을 미리 묻는다", async () => {
+    const platform = process.platform;
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+    try {
+      mediaAccess.status.mockReturnValue("not-determined");
+      mediaAccess.ask.mockClear();
+      await createHarness("AA:BB:CC", null, { cameraEnabled: true }).connectAndVerify();
+      expect(mediaAccess.ask).toHaveBeenCalledWith("camera");
+
+      // 마이크와 카메라를 다 켰으면 둘 다 묻는다.
+      mediaAccess.ask.mockClear();
+      await createHarness("AA:BB:CC", null, {
+        cameraEnabled: true,
+        microphoneEnabled: true,
+      }).connectAndVerify();
+      expect(mediaAccess.ask.mock.calls.map(([kind]) => kind).sort()).toEqual([
+        "camera",
+        "microphone",
+      ]);
+
+      // 카메라를 안 쓰는 호스트에는 카메라를 묻지 않는다.
+      mediaAccess.ask.mockClear();
+      await createHarness("AA:BB:CC").connectAndVerify();
+      expect(mediaAccess.ask).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process, "platform", { value: platform, configurable: true });
+    }
+  });
+
   it("sends every shared folder with the name the form shows", async () => {
     // 이름을 코어가 다시 만들면 편집 화면에 보여준 이름과 원격에 뜨는 이름이 갈린다.
     const harness = createHarness("AA:BB:CC", null, {

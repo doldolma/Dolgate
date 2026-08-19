@@ -13,6 +13,7 @@ import { useRdpCanvas } from "./useRdpCanvas";
 import { useRdpAudio } from "./useRdpAudio";
 import { useRdpAutoResize } from "./useRdpAutoResize";
 import { useRdpClipboard } from "./useRdpClipboard";
+import { useRdpCamera } from "./useRdpCamera";
 import { useRdpMicrophone } from "./useRdpMicrophone";
 import { useTranslation } from "react-i18next";
 import { useRdpInput } from "./useRdpInput";
@@ -54,6 +55,12 @@ interface RdpSessionCanvasProps {
    */
   microphone?: boolean;
   /**
+   * 로컬 카메라를 원격으로 보낼지. 호스트에서 켠 경우만 true 다.
+   *
+   * 마이크와 같은 이유로 **창 하나만** 켜야 한다 — 창마다 열면 같은 카메라를 여러 번 잡는다.
+   */
+  camera?: boolean;
+  /**
    * 오류 문구를 이 캔버스가 직접 그릴지.
    *
    * 메인 창에서는 꺼야 한다 — `RdpConnectionOverlay` 가 같은 pane 을 덮으면서 같은 내용을
@@ -77,6 +84,7 @@ export function RdpSessionCanvas({
   audio = true,
   clipboard = true,
   microphone = false,
+  camera = false,
 }: RdpSessionCanvasProps) {
   const { t: translate } = useTranslation();
   const [desktop, setDesktop] = useState<RdpConnectedPayload | null>(connected ?? null);
@@ -175,12 +183,20 @@ export function RdpSessionCanvas({
     microphone && Boolean(desktop),
   );
 
+  // 카메라도 숨은 pane 에서 계속 보낸다 — 통화 중에 다른 탭을 보면 영상이 끊기면 안 된다.
+  const { problem: cameraProblem } = useRdpCamera(sessionId, camera && Boolean(desktop));
+
   // 마이크가 안 되는 이유는 **탭 hover** 에 보여준다. 예전에는 원격 화면 위에 배너로 겹쳤는데,
   // 원격의 작업 표시줄과 섞여 읽히지 않았고 붙어 있는 내내 떠 있었다.
   const setRdpMicrophoneProblem = useAppStore((state) => state.setRdpMicrophoneProblem);
   useEffect(() => {
     setRdpMicrophoneProblem(sessionId, microphoneProblem);
   }, [microphoneProblem, sessionId, setRdpMicrophoneProblem]);
+
+  const setRdpCameraProblem = useAppStore((state) => state.setRdpCameraProblem);
+  useEffect(() => {
+    setRdpCameraProblem(sessionId, cameraProblem);
+  }, [cameraProblem, sessionId, setRdpCameraProblem]);
 
   const { handlers } = useRdpInput({
     sessionId,

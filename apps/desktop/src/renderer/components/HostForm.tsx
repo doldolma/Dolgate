@@ -246,6 +246,7 @@ const defaultRdpDraft: RdpHostDraft = {
   // null 이 "켜짐"이다. 명시적으로 false 를 넣지 않는다 — 저장 계층이 false 만 기록한다.
   audioEnabled: null,
   microphoneEnabled: null,
+  cameraEnabled: null,
   clipboardEnabled: null,
   colorDepth: null,
   tailnetId: null,
@@ -1124,6 +1125,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         useAllMonitors: host.useAllMonitors ?? null,
         audioEnabled: host.audioEnabled ?? null,
         microphoneEnabled: host.microphoneEnabled ?? null,
+        cameraEnabled: host.cameraEnabled ?? null,
         clipboardEnabled: host.clipboardEnabled ?? null,
         colorDepth: host.colorDepth ?? null,
         tailnetId: host.tailnetId ?? null,
@@ -3233,6 +3235,18 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 handleRdpFieldChange(
                   'microphoneEnabled',
                   rdpDraft.microphoneEnabled === true ? null : true,
+                )
+              }
+            />
+            {/* 카메라도 기본이 꺼짐이다(마이크와 같은 이유). */}
+            <ToggleSwitch
+              checked={rdpDraft.cameraEnabled === true}
+              label={translate('hostForm.rdp.camera.label')}
+              description={translate('hostForm.rdp.camera.description')}
+              onClick={() =>
+                handleRdpFieldChange(
+                  'cameraEnabled',
+                  rdpDraft.cameraEnabled === true ? null : true,
                 )
               }
             />

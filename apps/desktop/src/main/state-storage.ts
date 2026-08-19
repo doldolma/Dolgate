@@ -982,6 +982,7 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
       useAllMonitors: value.useAllMonitors === true ? true : null,
       audioEnabled: value.audioEnabled === false ? false : null,
       microphoneEnabled: value.microphoneEnabled === true ? true : null,
+      cameraEnabled: value.cameraEnabled === true ? true : null,
       clipboardEnabled: value.clipboardEnabled === false ? false : null,
       colorDepth: value.colorDepth === 16 ? 16 : null,
       tailnetId: typeof value.tailnetId === 'string' && value.tailnetId.trim() ? value.tailnetId.trim() : null,

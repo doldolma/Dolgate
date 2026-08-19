@@ -9,6 +9,8 @@
 mod audio;
 mod audio_input;
 mod audio_output_dvc;
+mod camera;
+mod camera_pdu;
 mod clipboard;
 mod drive;
 mod egfx;
@@ -50,6 +52,8 @@ struct SessionHandle {
     clipboard: Sender<String>,
     /// 렌더러가 캡처한 마이크 PCM. 마이크를 끈 세션에서는 아무도 보내지 않는다.
     microphone: Sender<Vec<u8>>,
+    /// 렌더러가 인코딩한 카메라 프레임(H.264 Annex B) 한 장. 카메라를 끈 세션에서는 오지 않는다.
+    camera: Sender<Vec<u8>>,
     /// 연결 도중 취소를 전파하기 위한 소켓 사본.
     ///
     /// `stop` 만으로는 연결 단계를 멈출 수 없다 — 자세한 이유는 `session::CancelSocket` 주석에
@@ -125,6 +129,7 @@ fn handle(request: Request, payload: Vec<u8>, output: &Arc<Output>, sessions: &S
         "rdpRefresh" => request_refresh(request, sessions),
         "rdpClipboard" => set_clipboard(request, sessions),
         "rdpMicAudio" => send_microphone(request, payload, sessions),
+        "rdpCameraFrame" => send_camera_frame(request, payload, sessions),
         "disconnect" => disconnect(request, output, sessions),
         other => {
             warn!(kind = other, "unknown request type");
@@ -171,6 +176,7 @@ fn connect_rdp(request: Request, output: &Arc<Output>, sessions: &Sessions) {
     let (refresh_tx, refresh_rx) = mpsc::channel();
     let (clipboard_tx, clipboard_rx) = mpsc::channel();
     let (microphone_tx, microphone_rx) = mpsc::channel();
+    let (camera_tx, camera_rx) = mpsc::channel();
     let cancel_socket: crate::session::CancelSocket = Arc::new(std::sync::Mutex::new(None));
     {
         let mut guard = sessions.lock().expect("sessions mutex poisoned");
@@ -195,6 +201,7 @@ fn connect_rdp(request: Request, output: &Arc<Output>, sessions: &Sessions) {
                 refresh: refresh_tx,
                 clipboard: clipboard_tx,
                 microphone: microphone_tx,
+                camera: camera_tx,
                 cancel_socket: Arc::clone(&cancel_socket),
             },
         );
@@ -230,6 +237,7 @@ fn connect_rdp(request: Request, output: &Arc<Output>, sessions: &Sessions) {
                     refresh_rx,
                     clipboard_rx,
                     microphone_rx,
+                    camera_rx,
                     cancel_socket,
                 );
             }));
@@ -445,6 +453,30 @@ fn send_microphone(request: Request, payload: Vec<u8>, sessions: &Sessions) {
         // 세션을 못 찾으면 조용히 사라진다. 마이크가 "안 된다" 는 신고에서 이 경우와 렌더러가
         // 아예 안 보내는 경우를 갈라야 한다.
         None => tracing::debug!(session_id, bytes, "microphone chunk for an unknown session"),
+    }
+}
+
+/// 렌더러가 인코딩한 카메라 프레임 한 장.
+///
+/// 마이크와 같은 fire-and-forget 이다. 다만 **버려지는 것을 조용히 두면 안 된다** — H.264 는
+/// 프레임을 버리면 원격 디코더의 참조 사슬이 끊긴다. 세션을 못 찾는 경우만 로그로 남긴다.
+fn send_camera_frame(request: Request, payload: Vec<u8>, sessions: &Sessions) {
+    let Some(session_id) = request.session_id.as_deref() else {
+        return;
+    };
+    if payload.is_empty() {
+        return;
+    }
+    let bytes = payload.len();
+    match sessions
+        .lock()
+        .expect("sessions mutex poisoned")
+        .get(session_id)
+    {
+        Some(handle) => {
+            let _ = handle.camera.send(payload);
+        }
+        None => tracing::debug!(session_id, bytes, "camera frame for an unknown session"),
     }
 }
 

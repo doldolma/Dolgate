@@ -1147,6 +1147,11 @@ interface AppStateParts {
     sessionId: string,
     problem: TerminalTab["rdpMicrophoneProblem"],
   ) => void;
+  /** 카메라를 보낼 수 없는 이유를 이 세션 탭에 기록한다(탭 hover 표시용). */
+  setRdpCameraProblem: (
+    sessionId: string,
+    problem: TerminalTab["rdpCameraProblem"],
+  ) => void;
   handleTmuxLayoutChange: (
     controlSessionId: string,
     windowId: string,
@@ -1298,6 +1303,7 @@ export type SessionSlice = Pick<
   AppStateParts,
   | "setRdpMonitors"
   | "setRdpMicrophoneProblem"
+  | "setRdpCameraProblem"
   | "tabs"
   | "sessionShareChatNotifications"
   | "workspaces"

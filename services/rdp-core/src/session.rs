@@ -110,6 +110,8 @@ pub fn run(
     local_clipboard: Receiver<String>,
     // 렌더러가 캡처한 마이크 PCM. 마이크를 끈 세션에서는 아무것도 오지 않는다.
     microphone: Receiver<Vec<u8>>,
+    // 렌더러가 인코딩한 카메라 프레임(H.264). 카메라를 끈 세션에서는 아무것도 오지 않는다.
+    camera: Receiver<Vec<u8>>,
     // 연결 도중 취소를 전파하기 위한 소켓 슬롯. 붙는 즉시 여기에 사본을 넣는다.
     cancel_socket: CancelSocket,
 ) {
@@ -140,6 +142,7 @@ pub fn run(
             &refresh,
             &local_clipboard,
             &microphone,
+            &camera,
             &graceful_reason,
             allow_egfx,
             &mut trusted_fingerprint,
@@ -203,6 +206,8 @@ fn connect_and_pump(
     local_clipboard: &Receiver<String>,
     // 렌더러가 캡처한 마이크 PCM. 협상된 사양의 원본 바이트다(변환은 렌더러가 한다).
     microphone: &Receiver<Vec<u8>>,
+    // 렌더러가 인코딩한 카메라 프레임. 한 항목이 한 장이다.
+    camera: &Receiver<Vec<u8>>,
     graceful_reason: &Arc<std::sync::Mutex<Option<String>>>,
     allow_egfx: bool,
     trusted_fingerprint: &mut Option<String>,
@@ -250,6 +255,11 @@ fn connect_and_pump(
         clipboard_tx,
     );
 
+    // 카메라(MS-RDPECAM). 채널 상태는 펌프가 보고(프레임을 보낼 수 있는지), 신호는 렌더러에
+    // 이벤트로 올린다(캡처 시작·정지·허락).
+    let camera_channel = Arc::new(crate::camera::CameraChannel::default());
+    let (camera_signal_tx, camera_signal_rx) = std::sync::mpsc::channel();
+
     let (connection_result, framed, egfx_surface, egfx_unusable) = connect(
         config,
         payload.host.clone(),
@@ -271,6 +281,9 @@ fn connect_and_pump(
         }),
         payload.microphone.then(|| mic_format_tx.clone()),
         &mic_channel,
+        payload
+            .camera
+            .then(|| (Arc::clone(&camera_channel), camera_signal_tx.clone())),
         payload
             .drives
             .iter()
@@ -348,6 +361,9 @@ fn connect_and_pump(
         payload.microphone,
         &mic_channel,
         &mic_format_rx,
+        camera,
+        &camera_channel,
+        &camera_signal_rx,
     )
 }
 
@@ -392,6 +408,11 @@ fn pump(
     mic_channel: &Arc<crate::audio_input::AudinChannel>,
     // audin 협상이 끝나면 오는 캡처 사양. 렌더러에 그대로 올린다.
     mic_format: &Receiver<crate::audio_input::CaptureFormat>,
+    // 렌더러가 인코딩한 카메라 프레임.
+    camera: &Receiver<Vec<u8>>,
+    // 카메라 채널 상태(보낼 수 있는지)와 서버가 만든 신호(시작·정지·허락).
+    camera_channel: &Arc<crate::camera::CameraChannel>,
+    camera_signals: &Receiver<crate::camera::CameraSignal>,
 ) -> anyhow::Result<()> {
     let activation_factory = connection_result.activation_factory.clone();
     let mut active_stage = ActiveStageBuilder {
@@ -445,6 +466,8 @@ fn pump(
     let mut warned_no_microphone = false;
     // 마이크 조각을 몇 개 실어 보냈는지(로그용).
     let mut mic_sent: u64 = 0;
+    // 카메라 프레임을 몇 장 실어 보냈는지(로그용).
+    let mut camera_sent: u64 = 0;
     // Tracks which keys and buttons are currently down so a press/release pair is never lost and
     // the server is never left with a stuck modifier.
     let mut input_db = Database::new();
@@ -465,6 +488,16 @@ fn pump(
             output,
             mic_channel,
             &mut mic_sent,
+        )?;
+        flush_camera(
+            session_id,
+            camera,
+            camera_signals,
+            &mut active_stage,
+            &mut framed,
+            output,
+            camera_channel,
+            &mut camera_sent,
         )?;
         if flush_layout_requests(
             session_id,
@@ -1061,6 +1094,83 @@ fn encode_monitor_layout(
 ///
 /// **협상이 끝나기 전에 온 PCM 은 버린다.** 채널이 열리기 전에 보내면 서버가 무시하고, 우리가
 /// 쌓아 두면 나중에 몇 초 밀린 소리가 한꺼번에 나간다 — 마이크는 늦은 소리보다 없는 소리가 낫다.
+/// 카메라 신호를 렌더러에 올리고, 허락이 있으면 프레임을 실어 보낸다.
+///
+/// **서버가 당겨 간다(credit).** 허락이 없으면 보내지 않는다 — 보내도 서버가 버린다. 그리고
+/// H.264 는 인코딩된 프레임을 버릴 수 없으므로(참조 사슬이 끊긴다) 여기서는 절대 버리지 않고,
+/// 버리는 것은 렌더러가 인코딩 전에 한다. 그래서 이 함수는 큐에 쌓인 것을 허락만큼만 흘린다.
+fn flush_camera(
+    session_id: &str,
+    camera: &Receiver<Vec<u8>>,
+    signals: &Receiver<crate::camera::CameraSignal>,
+    active_stage: &mut ActiveStage,
+    framed: &mut UpgradedFramed,
+    output: &Output,
+    channel: &Arc<crate::camera::CameraChannel>,
+    sent: &mut u64,
+) -> anyhow::Result<()> {
+    // 1) 서버가 만든 신호를 렌더러에 올린다. 이것 없이는 렌더러가 캡처를 시작할 수 없다.
+    while let Ok(signal) = signals.try_recv() {
+        match signal {
+            crate::camera::CameraSignal::Start { width, height, fps } => {
+                output.send_event(
+                    &Event::new("cameraStart", crate::protocol::CameraStartPayload {
+                        width,
+                        height,
+                        fps,
+                    })
+                    .session(session_id),
+                )?;
+            }
+            crate::camera::CameraSignal::Stop => {
+                output.send_event(
+                    &Event::new("cameraStop", crate::protocol::EmptyPayload {}).session(session_id),
+                )?;
+            }
+            crate::camera::CameraSignal::Credit => {
+                output.send_event(
+                    &Event::new("cameraCredit", crate::protocol::CameraCreditPayload {
+                        credit: 1,
+                    })
+                    .session(session_id),
+                )?;
+            }
+        }
+    }
+
+    // 2) 허락이 있는 만큼 프레임을 보낸다.
+    loop {
+        let Some((channel_id, stream_index)) = channel.ready() else {
+            break;
+        };
+        let frame = match camera.try_recv() {
+            Ok(frame) => frame,
+            Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+        };
+        if !channel.take_credit() {
+            // 그 사이에 허락이 사라졌다(정지 요청 등). 이 프레임은 버린다 — 다음 시작에서
+            // 렌더러가 키프레임부터 다시 보낸다.
+            break;
+        }
+        let bytes = frame.len();
+        let messages = ironrdp_dvc::encode_dvc_messages(
+            channel_id,
+            crate::camera::encode_sample(stream_index, frame),
+            ironrdp_svc::ChannelFlags::empty(),
+        )
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let encoded = active_stage
+            .encode_dvc_messages(messages)
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        framed.write_all(&encoded).context("send camera frame")?;
+        *sent += 1;
+        if *sent == 1 || *sent % 100 == 0 {
+            debug!(session_id, frames = *sent, bytes, "camera frame sent");
+        }
+    }
+    Ok(())
+}
+
 fn flush_microphone(
     session_id: &str,
     microphone: &Receiver<Vec<u8>>,
@@ -1768,6 +1878,8 @@ fn connect(
     mic_format_tx: Option<std::sync::mpsc::Sender<crate::audio_input::CaptureFormat>>,
     // 마이크 채널의 상태를 펌프와 나눠 갖는 핸들.
     mic_channel: &Arc<crate::audio_input::AudinChannel>,
+    // 카메라를 쓸 세션이면 채널 상태와 신호 보낼 곳. None 이면 rdpecam 채널을 붙이지 않는다.
+    camera: Option<(Arc<crate::camera::CameraChannel>, std::sync::mpsc::Sender<crate::camera::CameraSignal>)>,
     drives: Vec<crate::drive::DriveShareConfig>,
     // allow_egfx: 그래픽 파이프라인을 쓸지. 앞선 시도가 이 채널로 화면을 못 그렸으면 끄고 다시
     // 붙는다. trusted_fingerprint: 이미 승인된 인증서 지문. 같으면 다시 묻지 않는다.
@@ -1882,6 +1994,24 @@ fn connect(
                 mic_format_tx,
                 Arc::clone(mic_channel),
             ))
+        }
+        None => dynamic_channels,
+    };
+
+    // 카메라(MS-RDPECAM)는 채널이 둘이다 — 제어 채널에서 카메라를 알리고, 서버가 우리가 알려
+    // 준 이름으로 장치 채널을 연다. 끈 세션에서는 둘 다 붙이지 않는다.
+    let dynamic_channels = match camera {
+        Some((camera_channel, camera_signals)) => {
+            info!(
+                channel = crate::camera::DEVICE_CHANNEL_NAME,
+                "rdpecam: registering the camera channels"
+            );
+            dynamic_channels
+                .with_listener(crate::camera::CameraEnumeratorListener)
+                .with_listener(crate::camera::CameraDeviceListener::new(
+                    camera_channel,
+                    camera_signals,
+                ))
         }
         None => dynamic_channels,
     };
@@ -2267,6 +2397,7 @@ mod admin_session_tests {
             password: String::new(),
             domain: None,
             microphone: false,
+            camera: false,
             monitors: vec![MonitorRequest {
                 width: 1920,
                 height: 1080,

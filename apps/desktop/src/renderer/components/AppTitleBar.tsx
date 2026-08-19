@@ -708,6 +708,14 @@ export function buildTabHoverInfo(
         valueColor: 'var(--warning-text)',
       });
     }
+
+    if (tab?.rdpCameraProblem) {
+      rows.push({
+        label: t('titleBar.hover.camera'),
+        value: t(`rdp.camera.short.${tab.rdpCameraProblem}`),
+        valueColor: 'var(--warning-text)',
+      });
+    }
     const cwd = getSessionCwd(item.sessionId);
     if (cwd) {
       rows.push({ label: t('titleBar.hover.cwd'), value: cwd });

@@ -15,5 +15,8 @@
          패키지 앱에서만 마이크가 안 되는 모양이 정확히 이것이다. -->
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    <!-- 카메라(MS-RDPECAM). 마이크와 같은 이유로 hardened runtime 에서 이 권한이 필요하다. -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
   </dict>
 </plist>

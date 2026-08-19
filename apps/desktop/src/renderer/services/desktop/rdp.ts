@@ -65,6 +65,11 @@ export function sendRdpMicrophoneAudio(sessionId: string, chunk: ArrayBuffer): v
   desktopApi.rdp.sendMicrophoneAudio(sessionId, chunk);
 }
 
+/** 인코딩된 카메라 프레임 한 장. 허락(cameraCredit)이 있을 때만 부른다. */
+export function sendRdpCameraFrame(sessionId: string, chunk: ArrayBuffer): void {
+  desktopApi.rdp.sendCameraFrame(sessionId, chunk);
+}
+
 export function subscribeRdpEvents(
   listener: (event: RdpSessionEvent) => void,
 ): () => void {

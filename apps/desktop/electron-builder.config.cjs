@@ -49,7 +49,9 @@ module.exports = {
       // macOS 권한 대화상자에 그대로 뜨는 문구다. Electron 기본값("This app needs access to
       // the microphone")이 그대로 나가면 무엇에 쓰는지 알 수 없다.
       NSMicrophoneUsageDescription:
-        '원격 데스크톱 세션에 마이크 소리를 보내려면 마이크 접근이 필요합니다.'
+        '원격 데스크톱 세션에 마이크 소리를 보내려면 마이크 접근이 필요합니다.',
+      NSCameraUsageDescription:
+        '원격 데스크톱 세션에 카메라 영상을 보내려면 카메라 접근이 필요합니다.'
     },
     gatekeeperAssess: false
   },

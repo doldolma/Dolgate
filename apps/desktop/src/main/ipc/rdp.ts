@@ -592,7 +592,10 @@ export function registerRdpIpcHandlers(
       // 마이크를 쓸 호스트면 권한을 **접속 시점에** 미리 물어본다. 기다리지는 않는다 — 아래
       // 주석 참고.
       if (host.microphoneEnabled === true) {
-        void requestMicrophoneAccess();
+        void requestMediaAccess("microphone");
+      }
+      if (host.cameraEnabled === true) {
+        void requestMediaAccess("camera");
       }
 
       try {
@@ -613,6 +616,8 @@ export function registerRdpIpcHandlers(
           audio: host.audioEnabled !== false,
           // 켠 호스트에서만 AUDIO_INPUT 을 붙인다. 코어 기본값도 꺼짐이다.
           microphone: host.microphoneEnabled === true,
+          // 켠 호스트에서만 rdpecam 채널을 붙인다. 코어 기본값도 꺼짐이다.
+          camera: host.cameraEnabled === true,
           clipboard: host.clipboardEnabled !== false,
           // 32 는 커넥터 기본값이라 보내지 않는다 — 코어가 아무것도 설정하지 않는 경로로 간다.
           colorDepth: host.colorDepth === 16 ? 16 : undefined,
@@ -816,6 +821,14 @@ export function registerRdpIpcHandlers(
       rdpManager.sendMicrophoneAudio(sessionId, new Uint8Array(chunk));
     },
   );
+
+  // 카메라 프레임. 마이크와 같은 fire-and-forget 이고, 서버가 허락한 만큼만 온다.
+  ipcMain.on(
+    ipcChannels.rdp.cameraFrame,
+    (_event, sessionId: string, chunk: ArrayBuffer) => {
+      rdpManager.sendCameraFrame(sessionId, new Uint8Array(chunk));
+    },
+  );
 }
 
 /**
@@ -840,30 +853,30 @@ const MAX_DESKTOP_SIDE = 8192;
  */
 /** 렌더러가 잰 크기를 프로토콜이 받아들이는 범위로 맞춘다. */
 /**
- * 마이크 권한을 접속 시점에 미리 물어본다(macOS).
+ * 마이크·카메라 권한을 접속 시점에 미리 물어본다(macOS).
  *
  * 이 호출이 없으면 macOS 는 렌더러가 **처음 캡처를 시작할 때** 묻는다. 그 시점은 원격에서 통화나
  * 녹음이 막 시작된 순간이라, 대화상자가 그 위로 끼어들고 사용자는 첫 몇 초를 놓친다.
  *
  * **결과를 기다리지 않는다.** 기다리면 사용자가 대화상자를 누를 때까지 접속이 멈춘 것처럼 보인다.
- * 화면은 그동안 붙어도 되고, 실제 캡처는 서버가 AUDIO_INPUT 을 열 때까지 시작되지 않는다 —
- * 그 사이에 답이 들어온다. 거부해도 접속은 그대로 진행한다(화면·소리·클립보드는 쓸 수 있고,
- * 마이크가 안 되는 것은 렌더러가 그때 사용자에게 알린다).
+ * 화면은 그동안 붙어도 되고, 실제 캡처는 서버가 채널을 열 때까지 시작되지 않는다 — 그 사이에
+ * 답이 들어온다. 거부해도 접속은 그대로 진행한다(화면·소리·클립보드는 쓸 수 있고, 마이크·카메라가
+ * 안 되는 것은 렌더러가 그때 사용자에게 알린다).
  *
  * 이미 허용/거부가 정해져 있으면 macOS 는 대화상자 없이 바로 답한다 — 그래서 접속마다 불러도
  * 사용자에게 보이는 것이 없다. 이 API 는 macOS 전용이다.
  */
-async function requestMicrophoneAccess(): Promise<void> {
+async function requestMediaAccess(kind: "microphone" | "camera"): Promise<void> {
   if (process.platform !== "darwin") {
     return;
   }
   try {
-    if (systemPreferences.getMediaAccessStatus("microphone") === "granted") {
+    if (systemPreferences.getMediaAccessStatus(kind) === "granted") {
       return;
     }
-    await systemPreferences.askForMediaAccess("microphone");
+    await systemPreferences.askForMediaAccess(kind);
   } catch {
-    // 권한 API 가 없거나 실패해도 접속은 계속한다. 마이크만 못 쓰는 상태로 남고, 그 사실은
+    // 권한 API 가 없거나 실패해도 접속은 계속한다. 그 장치만 못 쓰는 상태로 남고, 그 사실은
     // 렌더러가 알린다.
   }
 }

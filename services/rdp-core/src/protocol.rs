@@ -93,6 +93,12 @@ pub struct ConnectPayload {
     /// 모르는 옛 요청이 조용히 마이크를 여는 일이 없어야 한다.
     #[serde(default)]
     pub microphone: bool,
+    /// 카메라를 원격으로 보낸다(MS-RDPECAM). 끄면 그 동적 채널을 아예 붙이지 않는다.
+    ///
+    /// 마이크와 같은 이유로 **기본값이 거짓이다** — 이 필드를 모르는 옛 요청이 조용히 카메라를
+    /// 켜는 일이 없어야 한다.
+    #[serde(default)]
+    pub camera: bool,
     /// 색 깊이(비트). 없으면 커넥터 기본값(32)을 그대로 쓴다.
     ///
     /// 16 만 특별히 다룬다 — 32 는 지금까지와 완전히 같은 경로여야 해서 아무것도 설정하지 않는다.
@@ -308,6 +314,29 @@ pub struct MicrophoneFormatPayload {
     pub bits_per_sample: u16,
     /// 서버가 한 번에 받고 싶어 하는 프레임 수. 0 이면 이전 값을 유지하라는 뜻이다.
     pub frames_per_packet: u32,
+}
+
+/// 카메라 캡처를 시작하라는 알림.
+///
+/// **서버가 사양을 정한다.** 우리가 광고한 것과 다를 수 있어서 서버가 고른 값을 그대로 올린다 —
+/// 다른 사양으로 캡처하면 원격에서 찌그러진 화면이 된다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraStartPayload {
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+}
+
+/// 프레임 한 장을 더 보낼 수 있다는 알림(credit).
+///
+/// 서버가 `SampleRequest` 로 한 장씩 허락하고, H.264 는 인코딩된 프레임을 버릴 수 없다. 그래서
+/// **버리는 것은 렌더러가 인코딩 전에** 해야 하고, 그 판단에 이 알림이 필요하다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraCreditPayload {
+    /// 지금까지 쌓인 허락 수. 렌더러는 이 값이 늘어난 만큼만 인코딩한다.
+    pub credit: u32,
 }
 
 /// 마이크를 쓸 수 없다는 알림.

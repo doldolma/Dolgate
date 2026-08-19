@@ -275,6 +275,29 @@ export class RdpManager {
    *
    * 바이트는 JSON 이 아니라 프레임의 payload 자리로 간다(base64 로 부풀리지 않는다).
    */
+  /**
+   * 인코딩된 카메라 프레임 한 장을 코어로 넘긴다.
+   *
+   * 마이크와 같은 경로지만 **버려지면 안 된다** — H.264 는 프레임을 잃으면 원격 디코더의 참조
+   * 사슬이 끊긴다. 그래서 렌더러가 허락(credit)만큼만 보내고, 여기서는 그대로 흘린다.
+   */
+  sendCameraFrame(sessionId: string, chunk: Uint8Array): void {
+    if (!this.process || !this.sessions.has(sessionId) || chunk.byteLength === 0) {
+      return;
+    }
+    this.process.stdin.write(
+      encodeControlFrameWithPayload(
+        {
+          id: `rdp-${++this.requestSeq}`,
+          type: "rdpCameraFrame",
+          sessionId,
+          payload: {},
+        },
+        chunk,
+      ),
+    );
+  }
+
   sendMicrophoneAudio(sessionId: string, chunk: Uint8Array): void {
     if (!this.process || !this.sessions.has(sessionId) || chunk.byteLength === 0) {
       return;
@@ -575,6 +598,38 @@ export class RdpManager {
       //
       // 이 두 케이스가 없던 동안 아래 `default` 가 둘 다 버렸고, 그래서 협상이 서버까지 다
       // 끝났는데도 렌더러는 마이크를 열지 않았다(코어에 PCM 이 한 조각도 오지 않았다).
+      // 카메라 신호도 렌더러가 받아야 한다. 캡처는 렌더러가 하고 사양·허락은 서버가 정한다 —
+      // 이 이벤트가 중간에서 사라지면 협상이 끝나도 카메라가 열리지 않는다(마이크에서 그랬다).
+      case "cameraStart": {
+        const payload = event.payload as Extract<
+          RdpSessionEvent,
+          { type: "cameraStart" }
+        >["payload"];
+        if (event.sessionId) {
+          this.emitEvent({ type: "cameraStart", sessionId: event.sessionId, payload });
+        }
+        return;
+      }
+
+      case "cameraStop": {
+        if (event.sessionId) {
+          this.emitEvent({ type: "cameraStop", sessionId: event.sessionId, payload: {} });
+        }
+        return;
+      }
+
+      case "cameraCredit": {
+        const payload = event.payload as { credit?: number };
+        if (event.sessionId) {
+          this.emitEvent({
+            type: "cameraCredit",
+            sessionId: event.sessionId,
+            payload: { credit: payload?.credit ?? 1 },
+          });
+        }
+        return;
+      }
+
       case "microphoneFormat": {
         // 이벤트 타입에서 그대로 뽑아 쓴다 — 모양이 바뀌면 여기가 먼저 깨진다.
         const payload = event.payload as Extract<

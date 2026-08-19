@@ -162,6 +162,70 @@ describe("RdpManager", () => {
     });
   });
 
+  // 카메라도 마이크와 같은 함정이 있다 — 이벤트 스위치의 default 가 삼키면 협상이 끝나도
+  // 렌더러가 캡처를 시작하지 않는다. 그리고 credit 이 안 오면 한 장도 못 보낸다.
+  it("forwards the camera start, credit and stop to the renderer", async () => {
+    const { manager, core, sent } = createManager();
+
+    const pending = manager.connect("sess-1", CONNECT);
+    const request = core.requests()[0].metadata as unknown as { id: string };
+    core.emit(connectedFrame(request.id, "sess-1"));
+    await pending;
+
+    core.emit(
+      encodeControlFrame({
+        type: "cameraStart",
+        sessionId: "sess-1",
+        payload: { width: 640, height: 480, fps: 15 },
+      } as never),
+    );
+    core.emit(
+      encodeControlFrame({
+        type: "cameraCredit",
+        sessionId: "sess-1",
+        payload: { credit: 1 },
+      } as never),
+    );
+    core.emit(
+      encodeControlFrame({ type: "cameraStop", sessionId: "sess-1", payload: {} } as never),
+    );
+
+    const events = sent.map((entry) => entry.payload as { type: string; payload?: unknown });
+    expect(events.find((event) => event.type === "cameraStart")?.payload).toEqual({
+      width: 640,
+      height: 480,
+      fps: 15,
+    });
+    expect(events.find((event) => event.type === "cameraCredit")?.payload).toEqual({ credit: 1 });
+    expect(events.some((event) => event.type === "cameraStop")).toBe(true);
+  });
+
+  // 프레임은 JSON 이 아니라 프레임 payload 자리로 가야 한다 — base64 로 부풀리면 초당 30장이
+  // 그대로 1.3배가 된다.
+  it("relays camera frames as a binary payload", async () => {
+    const { manager, core } = createManager();
+
+    const pending = manager.connect("sess-1", CONNECT);
+    const request = core.requests()[0].metadata as unknown as { id: string };
+    core.emit(connectedFrame(request.id, "sess-1"));
+    await pending;
+
+    manager.sendCameraFrame("sess-1", new Uint8Array([0, 0, 0, 1, 0x65]));
+
+    // 프레이밍 파서는 control 프레임의 payload 를 버리므로(메타데이터만 쓴다) 원시 버퍼로 본다.
+    const written = core.stdin.written.at(-1)!;
+    expect((core.requests().at(-1)!.metadata as unknown as { type: string }).type).toBe(
+      "rdpCameraFrame",
+    );
+    expect(written.readUInt32BE(5)).toBe(5);
+    expect(Array.from(written.subarray(written.length - 5))).toEqual([0, 0, 0, 1, 0x65]);
+
+    // 없는 세션에 보내면 아무것도 나가지 않는다(닫힌 탭의 프레임이 코어로 새면 안 된다).
+    const before = core.requests().length;
+    manager.sendCameraFrame("sess-nope", new Uint8Array([1]));
+    expect(core.requests().length).toBe(before);
+  });
+
   // **창이 닫히면 그 창이 연 세션은 끊어야 한다.** 예전에는 프레임 전달만 멈추고(watcher 해제)
   // 코어의 세션은 그대로 남아, 원격 윈도우 세션까지 잡은 채 앱이 끝날 때까지 살아 있었다.
   it("disconnects the sessions owned by a window that closed", async () => {

@@ -28,6 +28,8 @@ export interface RdpConnectOptions {
   audio?: boolean;
   /** 마이크를 원격으로 보낸다(AUDIO_INPUT). 생략하면 **꺼짐** — 켠 호스트에서만 연다. */
   microphone?: boolean;
+  /** 카메라를 원격으로 보낸다(MS-RDPECAM). 생략하면 **꺼짐** — 켠 호스트에서만 연다. */
+  camera?: boolean;
   /** 원격과 클립보드를 주고받는다. 생략하면 켜짐. */
   clipboard?: boolean;
   /** 색 깊이(비트). 생략하면 커넥터 기본값(32). 16 만 특별히 다룬다. */
@@ -213,6 +215,27 @@ export type RdpSessionEvent =
       type: 'microphoneUnavailable';
       sessionId: string;
       payload: { reason: 'serverRefused' };
+    }
+  /**
+   * 카메라 캡처를 시작하라. **서버가 사양을 정한다** — 우리가 광고한 것과 다를 수 있고, 다른
+   * 사양으로 캡처하면 원격에서 찌그러진 화면이 된다.
+   */
+  | {
+      type: 'cameraStart';
+      sessionId: string;
+      payload: { width: number; height: number; fps: number };
+    }
+  | { type: 'cameraStop'; sessionId: string; payload: Record<string, never> }
+  /**
+   * 프레임 한 장을 더 보낼 수 있다(credit).
+   *
+   * 서버가 한 장씩 허락하고, H.264 는 인코딩된 프레임을 버릴 수 없다(참조 사슬이 끊긴다).
+   * 그래서 렌더러는 이 알림이 있을 때만 인코딩한다 — 버리는 것은 인코딩 전에 한다.
+   */
+  | {
+      type: 'cameraCredit';
+      sessionId: string;
+      payload: { credit: number };
     }
   | {
       type: 'microphoneFormat';

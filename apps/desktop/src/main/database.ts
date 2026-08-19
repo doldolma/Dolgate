@@ -731,6 +731,7 @@ function toRdpHostRecord(
     audioEnabled: draft.audioEnabled === false ? false : null,
     // 기본이 꺼짐이라 **켠 경우만** 참으로 남긴다(audioEnabled 와 방향이 반대다).
     microphoneEnabled: draft.microphoneEnabled === true ? true : null,
+    cameraEnabled: draft.cameraEnabled === true ? true : null,
     clipboardEnabled: draft.clipboardEnabled === false ? false : null,
     // 32 는 기본값이라 저장하지 않는다 — 접속 경로가 null 을 32 로 읽는다.
     colorDepth: draft.colorDepth === 16 ? 16 : null,

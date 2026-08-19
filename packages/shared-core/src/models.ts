@@ -371,6 +371,13 @@ export interface RdpHostRecord extends HostBaseRecord {
    * 원격에 소리가 넘어가면 안 되므로, 명시적으로 켠 호스트에서만 동작한다.
    */
   microphoneEnabled?: boolean | null;
+  /**
+   * 로컬 카메라를 원격으로 보낸다(MS-RDPECAM).
+   *
+   * 마이크와 같은 이유로 **켠 호스트에서만** 채널을 붙인다 — 이 필드를 모르는 옛 레코드가
+   * 조용히 카메라를 켜면 안 된다.
+   */
+  cameraEnabled?: boolean | null;
   /** 원격과 클립보드를 주고받는다. 없거나 null 이면 켜짐. */
   clipboardEnabled?: boolean | null;
   /**
@@ -504,6 +511,13 @@ export interface RdpHostDraft extends HostBaseDraft {
   audioEnabled?: boolean | null;
   /** 마이크를 원격으로 보낸다. 기본 꺼짐. [[RdpHostRecord]] 참고. */
   microphoneEnabled?: boolean | null;
+  /**
+   * 로컬 카메라를 원격으로 보낸다(MS-RDPECAM).
+   *
+   * 마이크와 같은 이유로 **켠 호스트에서만** 채널을 붙인다 — 이 필드를 모르는 옛 레코드가
+   * 조용히 카메라를 켜면 안 된다.
+   */
+  cameraEnabled?: boolean | null;
   /** 원격과 클립보드를 주고받는다. 기본 켜짐. [[RdpHostRecord]] 참고. */
   clipboardEnabled?: boolean | null;
   /** 색 깊이(비트). 기본 32. [[RdpHostRecord]] 참고. */
@@ -3531,6 +3545,8 @@ export interface TerminalTab {
    * 작업 표시줄과 섞여 읽히지 않고, 붙어 있는 내내 떠 있었다.
    */
   rdpMicrophoneProblem?: 'denied' | 'noDevice' | 'failed' | 'serverRefused' | null;
+  /** 카메라를 보낼 수 없는 이유. 마이크와 같은 자리(탭 hover)에 보여준다. */
+  rdpCameraProblem?: 'denied' | 'noDevice' | 'failed' | 'serverRefused' | null;
   /** control mode(tmux -CC) pane일 때만 채워진다. 평시엔 null/undefined. */
   tmux?: TerminalTmuxPaneState | null;
   /** SSH 접속 후 감지한 원격 tmux 정보(하단바 표시용). 미감지면 null/undefined. */

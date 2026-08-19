@@ -110,6 +110,8 @@ export function RdpMonitorWindow({
         audio={false}
         // 마이크도 메인 창만 잡는다. 창마다 열면 같은 마이크를 여러 번 잡아 원격에 겹쳐 들어간다.
         microphone={false}
+        // 카메라도 메인 창만 잡는다(위와 같은 이유).
+        camera={false}
       />
     </div>
   );
