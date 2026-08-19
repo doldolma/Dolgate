@@ -1,3 +1,4 @@
+import { AppState } from 'react-native';
 import { act } from 'react-test-renderer';
 import { gcm } from '@noble/ciphers/aes.js';
 import { randomBytes, utf8ToBytes } from '@noble/ciphers/utils.js';
@@ -2104,5 +2105,114 @@ describe('useMobileAppStore vault flows', () => {
     useMobileAppStore.getState().deferVaultMigration();
 
     expect(useMobileAppStore.getState().vaultMigrationDeferred).toBe(false);
+  });
+
+  // 이 두 갈래는 사용자에게 할 말이 다르다. 복호화 실패는 데이터 쪽, 그 외(응답 모양이 안 맞아
+  // 던진 것)는 앱을 올리면 풀린다 — 한 문구로 뭉뚱그리면 진단이 엉뚱한 데로 간다.
+  it('separates a real decrypt failure from an unreadable payload', async () => {
+    const dek = new Uint8Array(32).fill(3);
+    const otherDek = new Uint8Array(32).fill(4);
+    const kdf = createVaultKdfDescriptor();
+    const wrappedDekBase64 = wrapVaultDek(
+      dek,
+      deriveFakeKekForPassphrase('passphrase-1234', kdf.saltBase64),
+    );
+    const session = createV2AuthSession(wrappedDekBase64, kdf, {
+      dekVerifierBase64: computeVaultDekVerifier(dek),
+    });
+
+    const respondWithHosts = (hosts: unknown[]) => {
+      fetchMock.mockImplementation(async input => {
+        const path = new URL(String(input)).pathname;
+        if (path === '/api/info') {
+          return serverInfoResponse();
+        }
+        if (path === '/auth/refresh') {
+          return createJsonResponse(session);
+        }
+        return createJsonResponse(
+          { ...buildEmptySyncPayload(), hosts },
+          200,
+          '"3"',
+        );
+      });
+    };
+
+    // 남의 DEK 로 봉인된 레코드 — 태그 검증이 실패한다(진짜 복호화 실패).
+    mockVaultDekInKeychain(fromByteArray(dek));
+    respondWithHosts([
+      createEncryptedRecord(
+        'host-1',
+        createHostRecord(),
+        fromByteArray(otherDek),
+      ),
+    ]);
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState(session) });
+      await useMobileAppStore.getState().syncNow();
+    });
+    expect(useMobileAppStore.getState().syncStatus.errorMessage).toContain(
+      '복호화할 수 없습니다',
+    );
+
+    // 레코드 자리에 엉뚱한 값 — 복호화까지 가지도 못한 구조 오류다.
+    resetMobileStoreRuntimeForTests();
+    respondWithHosts([null]);
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState(session) });
+      await useMobileAppStore.getState().syncNow();
+    });
+    const message = useMobileAppStore.getState().syncStatus.errorMessage;
+    expect(message).toContain('읽을 수 없습니다');
+    expect(message).not.toContain('손상');
+  });
+
+  // 오류로 끝난 동기화도 폴링을 살려 둬야 한다. 안 그러면 서버가 고쳐져도 앱을 강제 종료했다
+  // 켜기 전까지 그 화면에 갇힌다 — 타이머와 포그라운드 복귀 리스너가 여기서만 만들어진다.
+  it('keeps polling alive after a decode failure so it can recover', async () => {
+    const dek = new Uint8Array(32).fill(5);
+    const otherDek = new Uint8Array(32).fill(6);
+    const kdf = createVaultKdfDescriptor();
+    const wrappedDekBase64 = wrapVaultDek(
+      dek,
+      deriveFakeKekForPassphrase('passphrase-1234', kdf.saltBase64),
+    );
+    const session = createV2AuthSession(wrappedDekBase64, kdf, {
+      dekVerifierBase64: computeVaultDekVerifier(dek),
+    });
+    mockVaultDekInKeychain(fromByteArray(dek));
+    fetchMock.mockImplementation(async input => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/info') {
+        return serverInfoResponse();
+      }
+      if (path === '/auth/refresh') {
+        return createJsonResponse(session);
+      }
+      return createJsonResponse(
+        {
+          ...buildEmptySyncPayload(),
+          hosts: [
+            createEncryptedRecord(
+              'host-1',
+              createHostRecord(),
+              fromByteArray(otherDek),
+            ),
+          ],
+        },
+        200,
+        '"3"',
+      );
+    });
+
+    const appStateSpy = jest.spyOn(AppState, 'addEventListener');
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState(session) });
+      await useMobileAppStore.getState().syncNow();
+    });
+
+    expect(useMobileAppStore.getState().syncStatus.status).toBe('error');
+    expect(appStateSpy).toHaveBeenCalledWith('change', expect.any(Function));
+    appStateSpy.mockRestore();
   });
 });

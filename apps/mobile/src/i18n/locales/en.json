@@ -199,6 +199,7 @@
     "ssmWebsocketFailed": "The AWS SSM WebSocket connection failed.",
     "ssmClosedUnexpectedly": "The AWS SSM session closed unexpectedly.",
     "syncDecryptFailed": "The sync data could not be decrypted. It may be corrupted.",
+    "syncPayloadUnreadable": "Could not read the sync data. Please update the app to the latest version.",
     "usingCache": "Using cached data without a network.",
     "onlineOnly": "Available only while signed in online.",
     "vaultCancelledAccountChanged": "The sync vault operation was cancelled because the account or server changed.",

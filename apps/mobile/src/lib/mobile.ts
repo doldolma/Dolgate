@@ -1289,17 +1289,44 @@ function encodeEncryptedPayload<T>(value: T, keyBase64: string): string {
   return JSON.stringify(envelope);
 }
 
+/**
+ * 레코드 복호화 실패에만 붙는 이름.
+ *
+ * "데이터가 손상됐다"고 말할 근거는 이 오류뿐이다. 디코드 블록의 catch 에는 구조 오류(서버
+ * 응답 모양이 바뀌어 배열이 없다든지)도 같이 떨어지는데, 그것까지 손상으로 표시하면 사용자는
+ * 복구할 수 없는 문제라고 오해하고 개발자는 암호 쪽을 파게 된다 — 실제로 그렇게 한참 돌아갔다.
+ *
+ * 클래스 대신 name 을 쓰는 이유는 트랜스파일 타깃에 따라 Error 상속의 instanceof 가 깨지기
+ * 때문이다. 이름 비교는 어디서나 같게 동작한다.
+ */
+export const SYNC_RECORD_DECRYPT_ERROR_NAME = 'SyncRecordDecryptError';
+
+export function isSyncRecordDecryptError(error: unknown): boolean {
+  return (
+    error instanceof Error && error.name === SYNC_RECORD_DECRYPT_ERROR_NAME
+  );
+}
+
 function decodeEncryptedPayload<T>(payload: string, keyBase64: string): T {
-  const envelope = JSON.parse(payload) as SyncEnvelope;
-  const key = toByteArray(keyBase64);
-  const iv = toByteArray(envelope.iv);
-  const tag = toByteArray(envelope.tag);
-  const ciphertext = toByteArray(envelope.ciphertext);
-  const sealed = new Uint8Array(ciphertext.length + tag.length);
-  sealed.set(ciphertext);
-  sealed.set(tag, ciphertext.length);
-  const plaintext = gcm(key, iv).decrypt(sealed);
-  return JSON.parse(Buffer.from(plaintext).toString('utf8')) as T;
+  try {
+    const envelope = JSON.parse(payload) as SyncEnvelope;
+    const key = toByteArray(keyBase64);
+    const iv = toByteArray(envelope.iv);
+    const tag = toByteArray(envelope.tag);
+    const ciphertext = toByteArray(envelope.ciphertext);
+    const sealed = new Uint8Array(ciphertext.length + tag.length);
+    sealed.set(ciphertext);
+    sealed.set(tag, ciphertext.length);
+    const plaintext = gcm(key, iv).decrypt(sealed);
+    return JSON.parse(Buffer.from(plaintext).toString('utf8')) as T;
+  } catch (error) {
+    // 봉투가 깨졌든 태그 검증이 실패했든 사용자에게는 같은 뜻이다 — 이 레코드는 이 키로 못 연다.
+    const decryptError = new Error(
+      error instanceof Error ? error.message : String(error),
+    );
+    decryptError.name = SYNC_RECORD_DECRYPT_ERROR_NAME;
+    throw decryptError;
+  }
 }
 
 async function fetchJson<T>(

@@ -78,6 +78,7 @@ import {
   decodeAwsProfiles,
   decodeGroups,
   decodeKnownHosts,
+  isSyncRecordDecryptError,
   decodeManagedSecrets,
   decodeSnippets,
   decodeSupportedHosts,
@@ -5102,8 +5103,12 @@ export const useMobileAppStore = create<MobileAppState>()(
               }
               if (reconciled.status === 'unlocked') {
                 // 재판정 후에도 verifier 가 이 DEK 를 증명한다(세대 그대로) — 원인은
-                // DEK 가 아니라 데이터 손상이다. 재잠금해 봐야 같은 DEK 를 다시 받을
+                // DEK 가 아니라 이 응답 자체다. 재잠금해 봐야 같은 DEK 를 다시 받을
                 // 뿐이므로(무한 재입력 루프) 오류로 표시한다.
+                //
+                // 복호화 실패와 그 외를 구분해서 말한다. 응답 모양이 안 맞아 던진 것까지
+                // "손상"이라고 하면 사용자는 복구 불가능한 문제로 오해하고, 원인 추적도
+                // 암호 쪽으로 헛돈다(실제로 그랬다) — 그쪽은 앱을 올리면 풀린다.
                 set({
                   vault: reconciled,
                   secureStateReady: true,
@@ -5111,9 +5116,15 @@ export const useMobileAppStore = create<MobileAppState>()(
                   syncStatus: {
                     ...readySyncStatus,
                     status: 'error',
-                    errorMessage: t('store.syncDecryptFailed'),
+                    errorMessage: isSyncRecordDecryptError(decodeError)
+                      ? t('store.syncDecryptFailed')
+                      : t('store.syncPayloadUnreadable'),
                   },
                 });
+                // 이 상태에서도 폴링은 계속 돌아야 한다. 서버가 고쳐졌는데 앱이 다시 물어보지
+                // 않으면 그 실행 내내 오류 화면에 갇힌다 — 타이머도 포그라운드 복귀 리스너도
+                // 여기서만 만들어지므로, 안 부르면 앱을 죽였다 켜기 전까지 재시도가 없다.
+                ensureSyncPollingLifecycle();
                 return;
               }
               // 여기 도달 = unlocked → locked/none 전이(세대 교체 확정). in-flight
@@ -5129,6 +5140,9 @@ export const useMobileAppStore = create<MobileAppState>()(
                   errorMessage: t('store.vaultResetElsewhere'),
                 },
               });
+              // 잠금해제 뒤 스스로 이어받게 폴링은 살려 둔다(잠긴 동안의 pull 은 게이트에서
+              // 조용히 끝난다).
+              ensureSyncPollingLifecycle();
               return;
             }
             if (isStaleSync()) {

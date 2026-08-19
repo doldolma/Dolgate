@@ -199,6 +199,7 @@
     "ssmWebsocketFailed": "AWS SSM WebSocket 연결에 실패했습니다.",
     "ssmClosedUnexpectedly": "AWS SSM 세션이 예기치 않게 종료되었습니다.",
     "syncDecryptFailed": "동기화 데이터를 복호화할 수 없습니다. 데이터가 손상되었을 수 있습니다.",
+    "syncPayloadUnreadable": "동기화 데이터를 읽을 수 없습니다. 앱을 최신 버전으로 업데이트해 주세요.",
     "usingCache": "네트워크 없이 캐시된 데이터를 사용하고 있습니다.",
     "onlineOnly": "온라인 로그인 상태에서만 사용할 수 있습니다.",
     "vaultCancelledAccountChanged": "로그인 계정 또는 서버가 변경되어 동기화 볼트 작업을 취소했습니다.",
