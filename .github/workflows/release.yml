@@ -530,12 +530,35 @@ jobs:
             echo "::warning::Exact main VNC release cache was not found; this job may rebuild vendored OpenSSL."
           fi
 
+      # .deb 를 캐시하는 이유는 rdp-core test 잡의 같은 스텝 주석을 참조한다 — 미러가 느린 날
+      # 60MB 다운로드가 30분씩 걸렸고, 진행이 멈추지 않아 타임아웃으로는 끊기지 않았다.
+      - name: Resolve the aarch64 cross toolchain download set
+        id: cross-apt
+        run: |
+          sudo apt-get update
+          sudo apt-get install --print-uris -y --no-install-recommends \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            | grep "^'" | sort > /tmp/cross-apt-uris.txt
+          echo "key=$(sha256sum /tmp/cross-apt-uris.txt | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the aarch64 cross toolchain packages
+        uses: actions/cache@v5
+        with:
+          path: ~/apt-cache
+          key: ${{ runner.os }}-apt-aarch64-cross-${{ steps.cross-apt.outputs.key }}
+
       - name: Install the aarch64 cross toolchain
         # 이 러너는 x64 인데 릴리스는 linux/arm64 도 낸다. ssh-core 는 GOARCH 만 바꾸면 되지만
         # rdp-core 는 aws-lc-sys(C)를 링크하므로 타깃용 컴파일러·링커가 있어야 한다.
+        #
+        # 여기서는 continue-on-error 를 쓰지 않는다 — 이 툴체인이 없으면 릴리스 산출물이
+        # 나오지 않으므로 실패는 실패로 드러나야 한다. 상한만 둔다.
+        timeout-minutes: 20
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          mkdir -p ~/apt-cache/partial
+          sudo apt-get install -y --no-install-recommends \
+            -o Dir::Cache::archives="$HOME/apt-cache" \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       # build-mac 과 동일한 가드 — 러너 npm 이 7zip-bin(linux/x64/7za)을 누락 설치하는
       # 사례 대응. path7za 가 플랫폼별 경로를 해석하므로 같은 스니펫을 그대로 쓴다.
@@ -583,6 +606,9 @@ jobs:
       # 러너 이미지 내용에 기댄 암묵적 전제다 — 이미지가 바뀌면 태그를 밀고 나서야 알게 되니
       # 명시한다. 이미 있으면 몇 초에 끝난다.
       - name: Install rpm build tooling
+        # 이쪽은 몇 MB 라 캐시까지 둘 이유는 없다. 미러가 느린 날 무한정 매달리지 않게
+        # 상한만 둔다.
+        timeout-minutes: 10
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends rpm

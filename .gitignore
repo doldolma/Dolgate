@@ -50,3 +50,5 @@ web/en/
 !**/.env.local.example
 # generate:icons 가 .icns 를 만들 때 쓰는 중간 산출물. 결과물(.icns/.ico/.png)만 커밋한다.
 apps/desktop/build/icons/dolssh.iconset
+
+.kiro

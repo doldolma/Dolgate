@@ -269,14 +269,45 @@ jobs:
 
       # 태그 잡이 만든 캐시는 다음 태그가 볼 수 없다. 기본 브랜치 push 에서 실제 릴리스와 같은
       # 두 Linux 타깃을 미리 빌드해, 공유 가능한 main 범위 캐시에 넣는다. PR 은 테스트만 돈다.
-      - name: Install the Linux aarch64 cross toolchain
+
+      # apt 미러가 느린 날 이 스텝 하나가 30분을 먹은 적이 있다 — 59.7MB 를 33kB/s 로 받았다.
+      # 멈춘 게 아니라 계속 조금씩 받고 있었으므로 타임아웃·재시도 설정으로는 끊기지 않는다.
+      # 그래서 받을 .deb 목록을 캐시 키로 삼는다. 목록은 --print-uris 가 그대로 주고, 저장소
+      # 버전이 바뀌면 키가 달라져 그때만 다시 받는다.
+      - name: Resolve the aarch64 cross toolchain download set
+        id: cross-apt
         if: github.event_name == 'push'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get install --print-uris -y --no-install-recommends \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            | grep "^'" | sort > /tmp/cross-apt-uris.txt
+          echo "key=$(sha256sum /tmp/cross-apt-uris.txt | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the aarch64 cross toolchain packages
+        if: github.event_name == 'push'
+        uses: actions/cache@v5
+        with:
+          path: ~/apt-cache
+          key: ${{ runner.os }}-apt-aarch64-cross-${{ steps.cross-apt.outputs.key }}
+
+      - name: Install the Linux aarch64 cross toolchain
+        id: cross-toolchain
+        if: github.event_name == 'push'
+        # 이 스텝은 릴리스 캐시 예열용이라 게이트가 아니다 — 미러가 느린 날에는 12분에 끊고
+        # 잡을 계속 진행한다. 상한이 없으면 GitHub 기본값인 6시간까지 매달린다.
+        timeout-minutes: 12
+        continue-on-error: true
+        run: |
+          mkdir -p ~/apt-cache/partial
+          sudo apt-get install -y --no-install-recommends \
+            -o Dir::Cache::archives="$HOME/apt-cache" \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       - name: Warm Linux RDP release targets
-        if: github.event_name == 'push'
+        # 툴체인이 없으면 arm64 링크가 실패한다. continue-on-error 로 넘긴 실패는 outcome 에만
+        # 남으므로(conclusion 은 success 로 덮인다) 그것을 보고 건너뛴다.
+        if: github.event_name == 'push' && steps.cross-toolchain.outcome == 'success'
         run: |
           node apps/desktop/scripts/build-rdp-core.cjs linux x64
           node apps/desktop/scripts/build-rdp-core.cjs linux arm64
@@ -326,14 +357,43 @@ jobs:
 
       # rdp-core 잡과 같은 이유로 main 에 Linux release 산출물을 저장한다. vendored OpenSSL 도
       # 여기서 한 번 컴파일되므로 태그 릴리스에서는 target 캐시로 재사용된다.
-      - name: Install the Linux aarch64 cross toolchain
+
+      # .deb 를 캐시하는 이유는 rdp-core test 잡의 같은 스텝 주석을 참조한다 — 미러가 느린 날
+      # 60MB 다운로드가 30분씩 걸렸고, 진행이 멈추지 않아 타임아웃으로는 끊기지 않았다.
+      - name: Resolve the aarch64 cross toolchain download set
+        id: cross-apt
         if: github.event_name == 'push'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get install --print-uris -y --no-install-recommends \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            | grep "^'" | sort > /tmp/cross-apt-uris.txt
+          echo "key=$(sha256sum /tmp/cross-apt-uris.txt | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the aarch64 cross toolchain packages
+        if: github.event_name == 'push'
+        uses: actions/cache@v5
+        with:
+          path: ~/apt-cache
+          key: ${{ runner.os }}-apt-aarch64-cross-${{ steps.cross-apt.outputs.key }}
+
+      - name: Install the Linux aarch64 cross toolchain
+        id: cross-toolchain
+        if: github.event_name == 'push'
+        # 이 스텝은 릴리스 캐시 예열용이라 게이트가 아니다 — 미러가 느린 날에는 12분에 끊고
+        # 잡을 계속 진행한다. 상한이 없으면 GitHub 기본값인 6시간까지 매달린다.
+        timeout-minutes: 12
+        continue-on-error: true
+        run: |
+          mkdir -p ~/apt-cache/partial
+          sudo apt-get install -y --no-install-recommends \
+            -o Dir::Cache::archives="$HOME/apt-cache" \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       - name: Warm Linux VNC release targets
-        if: github.event_name == 'push'
+        # 툴체인이 없으면 arm64 링크가 실패한다. continue-on-error 로 넘긴 실패는 outcome 에만
+        # 남으므로(conclusion 은 success 로 덮인다) 그것을 보고 건너뛴다.
+        if: github.event_name == 'push' && steps.cross-toolchain.outcome == 'success'
         run: |
           node apps/desktop/scripts/build-vnc-core.cjs linux x64
           node apps/desktop/scripts/build-vnc-core.cjs linux arm64

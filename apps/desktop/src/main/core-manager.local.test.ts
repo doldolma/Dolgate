@@ -356,6 +356,34 @@ describe("CoreManager local shell sessions", () => {
     vi.clearAllMocks();
   });
 
+  // **붙는 중에 닫아도 코어에 알려야 한다.**
+  //
+  // 예전에는 connected 가 아닌 탭을 로컬에서만 정리하고 코어에는 아무것도 보내지 않았다. 그러면
+  // dial 이 계속 진행되고, 성공한 뒤에는 이 탭이 없어서 `connected` 를 아무도 처리하지 않아
+  // 그 세션이 프로세스가 끝날 때까지 남았다(TCP·고루틴·원격 세션까지).
+  //
+  // 로컬 셸로 시험하는 이유는 connecting 상태의 탭을 가장 싸게 만들 수 있기 때문이다 — 검사하는
+  // 동작은 전송 방식과 무관하다.
+  it("아직 연결 중인 탭을 닫아도 코어에 disconnect 를 보낸다", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const { sessionId } = await manager.connectLocalSession({
+      cols: 80,
+      rows: 24,
+      title: "Terminal",
+    });
+
+    // connected 를 보내지 않는다 — 아직 붙는 중이다.
+    manager.disconnect(sessionId);
+
+    const sent = fakeProcess.writes.map((frame) => decodeControlFrame(frame));
+    const disconnect = sent.find((frame) => frame.type === "disconnect");
+    expect(disconnect, `보낸 프레임: ${sent.map((frame) => frame.type).join(", ")}`).toBeDefined();
+    expect(disconnect?.sessionId).toBe(sessionId);
+  });
+
   it("sends localConnect to ssh-core and reuses write/resize/disconnect flow", async () => {
     const fakeProcess = createFakeChildProcess();
     spawnMock.mockReturnValue(fakeProcess.child);

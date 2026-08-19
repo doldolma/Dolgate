@@ -88,6 +88,45 @@ function managerWith(core: ReturnType<typeof fakeCore>, windows: ReturnType<type
 }
 
 describe("VncManager", () => {
+  // **창이 닫히면 그 창이 연 세션은 끊어야 한다.**
+  //
+  // 예전에는 창을 닫아도 코어의 세션이 그대로 남아, 서버 쪽 화면까지 잡은 채 앱이 끝날 때까지
+  // 살아 있었다. 멀티윈도우에서 창 하나만 닫는 경우가 그랬다.
+  it("주인 창이 닫히면 그 창의 세션을 끊는다", () => {
+    const core = fakeCore();
+    const manager = managerWith(core, [windowStub(1), windowStub(2)]);
+
+    void manager.connect({ sessionId: "sess-1", host: "10.0.0.5", port: 5901, password: "" });
+    void manager.connect({ sessionId: "sess-2", host: "10.0.0.6", port: 5901, password: "" });
+    manager.setSessionOwner("sess-1", 1);
+    manager.setSessionOwner("sess-2", 2);
+
+    manager.disconnectSessionsOwnedBy(1);
+
+    const closed = requestsIn(core.written)
+      .filter((request) => request.type === "disconnectVnc")
+      .map((request) => request.sessionId);
+    expect(closed).toEqual(["sess-1"]);
+  });
+
+  // 모니터별 창처럼 **보기만 하는 창**이 닫혀도 세션은 살아 있어야 한다. 주인과 watcher 를
+  // 뒤섞으면 부속 창을 닫는 것만으로 본 탭이 죽는다.
+  it("보기만 하는 창이 닫혀도 세션은 끊지 않는다", () => {
+    const core = fakeCore();
+    const manager = managerWith(core, [windowStub(1), windowStub(2)]);
+
+    void manager.connect({ sessionId: "sess-1", host: "10.0.0.5", port: 5901, password: "" });
+    manager.setSessionOwner("sess-1", 1);
+    manager.watchSession("sess-1", 2);
+
+    manager.disconnectSessionsOwnedBy(2);
+
+    const closed = requestsIn(core.written).filter(
+      (request) => request.type === "disconnectVnc",
+    );
+    expect(closed).toEqual([]);
+  });
+
   it("connect 요청에 기본 포트·공유 설정을 실어 보낸다", async () => {
     const core = fakeCore();
     const window = windowStub(1);

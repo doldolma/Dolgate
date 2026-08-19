@@ -19,7 +19,7 @@ use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context as _, Result};
+use anyhow::{bail, ensure, Context as _, Result};
 use tracing::{debug, trace, warn};
 
 use crate::ard;
@@ -445,8 +445,39 @@ pub fn run(
     output: Output,
     register: impl FnOnce(SessionHandle),
 ) -> Result<()> {
-    match connect_and_run(&session_id, &request_id, payload, &output, register) {
+    // **핸들을 붙기 전에 만들어 등록한다.**
+    //
+    // 예전에는 협상까지 다 끝낸 뒤에 등록했다. 그래서 그 사이에 사용자가 탭을 닫으면
+    // `disconnectVnc` 가 등록표에서 아무것도 찾지 못해 **취소가 사라졌고**, 세션은 계속 붙어서
+    // 탭도 없는 채로 살아남았다(서버 쪽에도 세션이 남는다).
+    //
+    // 여기서 만드는 두 번째 이유는 아래 Err 분기다 — 닫은 뒤에 난 오류는 취소의 결과이므로
+    // 사용자에게 올리지 않아야 하고, 그 판단에 이 핸들이 필요하다.
+    let (outbound_tx, outbound_rx) = channel::<Outbound>();
+    let handle = SessionHandle {
+        outbound: outbound_tx,
+        closed: Arc::new(AtomicBool::new(false)),
+        shutdown: Arc::new(Mutex::new(None)),
+    };
+    register(handle.clone());
+
+    match connect_and_run(
+        &session_id,
+        &request_id,
+        payload,
+        &output,
+        &handle,
+        outbound_rx,
+    ) {
         Ok(()) => {
+            output.send_event(&Event::new("closed", EmptyPayload {}).session(&session_id))?;
+            Ok(())
+        }
+        // 사용자가 연결 도중 닫았다. 오류가 아니므로 메시지를 올리지 않는다 — 닫아 버린 탭의
+        // 실패 안내가 뒤늦게 뜨면 무슨 일인지 알 수 없다. 소켓을 끊어서 난 읽기 오류도 여기로
+        // 온다(그것이 취소의 실제 모양이다).
+        Err(error) if handle.is_closed() => {
+            debug!(session = %session_id, %error, "연결 도중 닫혀 중단했다");
             output.send_event(&Event::new("closed", EmptyPayload {}).session(&session_id))?;
             Ok(())
         }
@@ -465,32 +496,51 @@ pub fn run(
     }
 }
 
+/// 취소된 세션. 오류가 아니라 "사용자가 닫았다" 는 뜻이라 사용자에게 메시지를 보내지 않는다.
+#[derive(Debug)]
+struct Cancelled;
+
+impl std::fmt::Display for Cancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("세션이 연결을 마치기 전에 닫혔습니다")
+    }
+}
+
+impl std::error::Error for Cancelled {}
+
 fn connect_and_run(
     session_id: &str,
     request_id: &str,
     payload: ConnectPayload,
     output: &Output,
-    register: impl FnOnce(SessionHandle),
+    // 이미 등록된 핸들. 만드는 자리가 `run` 인 이유는 그쪽 주석에 있다.
+    handle: &SessionHandle,
+    outbound_rx: Receiver<Outbound>,
 ) -> Result<()> {
     let address = format!("{}:{}", payload.host, payload.port);
-    let socket = connect(&address).with_context(|| format!("{address} 에 연결할 수 없습니다"))?;
+
+    // 소켓 사본은 잡히는 대로 채워 넣는다 — 이 슬롯이 협상 중 취소를 가능하게 한다.
+    let socket = connect(&address, handle)
+        .with_context(|| format!("{address} 에 연결할 수 없습니다"))?;
     socket.set_nodelay(true).ok();
     socket.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).ok();
-
-    let (outbound_tx, outbound_rx) = channel::<Outbound>();
-    let handle = SessionHandle {
-        outbound: outbound_tx,
-        closed: Arc::new(AtomicBool::new(false)),
-        shutdown: Arc::new(Mutex::new(socket.try_clone().ok())),
-    };
+    if let Ok(mut slot) = handle.shutdown.lock() {
+        *slot = socket.try_clone().ok();
+    }
+    // 사본을 넣기 전에 닫혔을 수 있다. 여기서 한 번 더 본다.
+    ensure!(!handle.is_closed(), Cancelled);
 
     let mut transport = Transport::Plain(socket);
     let version = rfb::negotiate_version(&mut transport).context("RFB 버전 협상")?;
     debug!(?version, "RFB 버전 협상 완료");
 
+    ensure!(!handle.is_closed(), Cancelled);
+
     let offered = rfb::read_security_types(&mut transport, version).context("보안 타입 협상")?;
     // 인증이 통로를 바꿔 돌려준다 — VeNCrypt 는 여기서 TLS 를 세우고 그 안에서 다시 인증한다.
     transport = authenticate(transport, version, &offered, &payload, &handle)?;
+
+    ensure!(!handle.is_closed(), Cancelled);
 
     rfb::write_client_init(&mut transport, payload.shared).context("ClientInit")?;
     let init = rfb::read_server_init(&mut transport).context("ServerInit")?;
@@ -529,8 +579,6 @@ fn connect_and_run(
         .request(request_id),
     )?;
 
-    register(handle.clone());
-
     let mut framebuffer = Framebuffer::new(init.width, init.height);
     // **세션당 하나다.** ZRLE 의 zlib 사전이 사각형을 넘어 이어지므로 여기서 살아 있어야 한다.
     let mut zlib = ZlibStream::new();
@@ -562,12 +610,15 @@ fn connect_and_run(
     result
 }
 
-fn connect(address: &str) -> Result<TcpStream> {
+fn connect(address: &str, handle: &SessionHandle) -> Result<TcpStream> {
     // to_socket_addrs 로 후보를 모두 시도한다. IPv6 만 응답하는 호스트가 있고, 첫 후보에서
     // 멈추면 그런 대상에 닿지 못한다.
     use std::net::ToSocketAddrs as _;
     let mut last: Option<io::Error> = None;
     for candidate in address.to_socket_addrs()? {
+        // **후보마다 확인한다.** 닿지 않는 주소가 여러 개면 후보 수 × CONNECT_TIMEOUT 만큼
+        // 붙잡혀 있게 되고, 그동안 사용자가 닫은 세션이 계속 붙기를 시도한다.
+        ensure!(!handle.is_closed(), Cancelled);
         match TcpStream::connect_timeout(&candidate, CONNECT_TIMEOUT) {
             Ok(socket) => return Ok(socket),
             Err(error) => last = Some(error),

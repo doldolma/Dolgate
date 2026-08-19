@@ -170,6 +170,8 @@ export function registerVncIpcHandlers(
             target: `${host.hostname}:${host.port}`,
           }),
         );
+        // 이 창이 이 세션의 주인이다. 창이 닫히면 세션도 끊는다(아래 watch 의 destroyed 훅).
+        vncManager.setSessionOwner(sessionId, event.sender.id);
         return await vncManager.connect(
           {
             sessionId,
@@ -245,8 +247,18 @@ export function registerVncIpcHandlers(
     vncManager.refreshScreen(sessionId);
   });
 
+  // **창이 닫히면 등록을 지우고, 그 창이 주인인 세션은 끊는다.**
+  //
+  // 등록만 남으면 죽은 webContents id 가 watcher 집합에 쌓이고(RDP 쪽은 이 훅이 있었다), 세션을
+  // 끊지 않으면 멀티윈도우에서 창 하나를 닫아도 그 창의 VNC 세션이 서버 쪽 화면까지 잡은 채로
+  // 앱이 끝날 때까지 살아 있다.
   ipcMain.on(ipcChannels.vnc.watch, (event, sessionId: string) => {
-    vncManager.watchSession(sessionId, event.sender.id);
+    const id = event.sender.id;
+    vncManager.watchSession(sessionId, id);
+    event.sender.once("destroyed", () => {
+      vncManager.forgetWatcher(id);
+      vncManager.disconnectSessionsOwnedBy(id);
+    });
   });
 
   ipcMain.on(ipcChannels.vnc.unwatch, (event, sessionId: string) => {

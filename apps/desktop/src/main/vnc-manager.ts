@@ -186,7 +186,36 @@ export class VncManager {
       });
   }
 
+  /**
+   * 이 세션을 연 창. 그 창이 닫히면 세션도 끊는다.
+   *
+   * **픽셀을 보는 창(watcher)과 다르다** — watcher 는 프레임을 받는 창이고, 주인은 접속을 시작한
+   * 창 하나다.
+   */
+  private readonly ownerBySession = new Map<string, number>();
+
+  /** 세션의 주인 창을 기록한다. 접속을 시작한 창이 주인이다. */
+  setSessionOwner(sessionId: string, webContentsId: number): void {
+    this.ownerBySession.set(sessionId, webContentsId);
+  }
+
+  /**
+   * 그 창이 열었던 세션을 모두 끊는다. 창이 닫힐 때 부른다.
+   *
+   * 이것이 없으면 멀티윈도우에서 창 하나를 닫아도 그 창의 VNC 세션이 코어에 남는다 — 서버 쪽
+   * 화면 세션까지 잡은 채로 앱이 끝날 때까지 살아 있었다.
+   */
+  disconnectSessionsOwnedBy(webContentsId: number): void {
+    for (const [sessionId, ownerId] of Array.from(this.ownerBySession)) {
+      if (ownerId !== webContentsId) {
+        continue;
+      }
+      this.disconnect(sessionId);
+    }
+  }
+
   disconnect(sessionId: string): void {
+    this.ownerBySession.delete(sessionId);
     this.sessions.delete(sessionId);
     this.connectedBySession.delete(sessionId);
     this.watchersBySession.delete(sessionId);
@@ -544,6 +573,7 @@ export class VncManager {
         }
         this.sessions.delete(sessionId);
         this.connectedBySession.delete(sessionId);
+        this.ownerBySession.delete(sessionId);
         this.finalizeLifecycle(sessionId, "closed", null);
         this.lifecycleBySession.delete(sessionId);
         this.emitEvent({ type: "closed", sessionId });

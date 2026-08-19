@@ -4325,6 +4325,23 @@ export class CoreManager {
         },
       });
       this.sessionOwnerById.delete(sessionId);
+      // **로컬 정리만 하면 붙는 중인 연결이 그대로 살아남는다.**
+      //
+      // 이 분기는 아직 connected 가 아닌 모든 탭이 탄다 — 다단 점프·OTP 대기·tailnet 경유는
+      // 연결이 수 초에서 수 분이라 그 사이에 탭을 닫는 것은 흔한 일이다. 그때 코어에 알리지
+      // 않으면 dial 이 계속 진행되고, 성공한 뒤에는 이 탭이 없으므로 `connected` 를 아무도
+      // 처리하지 않아(handleEvent 의 existing 검사) 그 세션이 프로세스가 끝날 때까지 남는다.
+      //
+      // 코어의 종료 경로는 붙는 중인 작업을 먼저 끊고(CancelInFlight·CancelChallenges), 모르는
+      // 세션 id 는 조용히 무시한다 — 이미 닫힌 탭에 보내도 안전하다.
+      if (this.process) {
+        this.sendControl({
+          id: randomUUID(),
+          type: "disconnect",
+          sessionId,
+          payload: {},
+        });
+      }
       return;
     }
     this.sendControl({

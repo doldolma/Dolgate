@@ -637,6 +637,69 @@ fn run_session_as(
     (joined, close_tx, handle_rx)
 }
 
+/// 인사도 보내지 않는 서버. 클라이언트를 협상 첫 읽기에 붙잡아 둔다.
+///
+/// 붙은 순간을 알려 준다 — 그 전에 닫으면 취소가 dial 단계에서 걸려 협상 중 취소를 시험하지
+/// 못한다(실제로 그렇게 됐다).
+fn spawn_silent_server() -> (u16, Receiver<()>, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (accepted_tx, accepted_rx) = channel();
+    let joined = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        accepted_tx.send(()).ok();
+        // 아무것도 보내지 않는다. 클라이언트가 끊으면 이쪽 읽기도 끝난다.
+        let mut sink = [0_u8; 1];
+        let _ = socket.read(&mut sink);
+    });
+    (port, accepted_rx, joined)
+}
+
+/// **연결이 끝나기 전에 닫아도 취소가 통해야 한다.**
+///
+/// 예전에는 협상까지 다 끝낸 뒤에야 세션을 등록했다. 그래서 그 사이에 사용자가 탭을 닫으면
+/// `disconnectVnc` 가 등록표에서 아무것도 찾지 못했고(취소가 사라진다), 세션은 계속 붙어서 탭도
+/// 없는 채로 남았다. 이 테스트는 두 가지를 본다: 붙는 도중에도 **핸들을 받을 수 있는지**, 그리고
+/// 닫으면 협상 타임아웃을 기다리지 않고 **바로 끝나는지**.
+#[test]
+fn closing_during_the_handshake_cancels_the_session() {
+    let (port, accepted, server) = spawn_silent_server();
+    let collected = Collected::default();
+    let (session, _close, handles) = run_session(port, "", collected.clone());
+
+    // 협상이 끝나지 않았는데도 핸들이 와야 한다 — 예전 순서에서는 영영 오지 않았다.
+    let handle = handles
+        .recv_timeout(Duration::from_secs(3))
+        .expect("붙는 도중에도 세션이 등록돼야 한다");
+    // 붙은 뒤에 닫아야 "협상 중 취소" 가 된다.
+    accepted
+        .recv_timeout(Duration::from_secs(3))
+        .expect("서버가 접속을 받아야 한다");
+
+    let started = Instant::now();
+    handle.close();
+    session.join().expect("세션 스레드");
+
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "닫으면 협상 타임아웃을 기다리지 않고 끝나야 한다"
+    );
+
+    // 사용자가 닫은 것이라 오류가 아니다. closed 하나로 끝난다.
+    let kinds: Vec<String> = collected
+        .frames(1)
+        .iter()
+        .map(|frame| metadata(frame)["type"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert!(kinds.contains(&"closed".to_owned()), "closed 가 와야 한다: {kinds:?}");
+    assert!(
+        !kinds.contains(&"error".to_owned()),
+        "닫은 세션에 오류를 올리면 안 된다: {kinds:?}"
+    );
+
+    server.join().expect("가짜 서버");
+}
+
 #[test]
 fn negotiates_and_delivers_the_first_screen() {
     let (port, seen) = spawn_server(1, true);
