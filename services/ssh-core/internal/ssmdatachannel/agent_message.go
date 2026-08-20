@@ -13,6 +13,12 @@ import (
 
 const agentMsgHeaderLen = 116 // the binary size of all AgentMessage fields except payloadLength and Payload
 
+// agentMsgMinHeaderLen 은 헤더의 최소 크기다 — channel_closed 는 PayloadType 이 없어 112 로 온다.
+const agentMsgMinHeaderLen = agentMsgHeaderLen - 4
+
+// payloadLengthFieldLen 은 헤더 뒤에 붙는 payloadLength 필드 크기다.
+const payloadLengthFieldLen = 4
+
 // AgentMessage is the structural representation of the binary format of an SSM agent message use for communication
 // between local clients (like this), and remote agents installed on EC2 instances.
 // This is the order the fields must appear as on the wire
@@ -81,7 +87,33 @@ func (m *AgentMessage) ValidateMessage() error {
 // UnmarshalBinary reads the wire format data and updates the fields in the method receiver.  Satisfies the
 // encoding.BinaryUnmarshaler interface.
 func (m *AgentMessage) UnmarshalBinary(data []byte) error {
-	m.headerLength = binary.BigEndian.Uint32(data)
+	// **길이는 슬라이싱 전에 검사한다.** 아래 오프셋은 프레임이 스스로 신고한 headerLength·
+	// payloadLength 를 그대로 쓰는데, 그 값이 프레임 크기와 어긋나면 슬라이싱에서 패닉이 난다.
+	// 그리고 그 패닉은 세션 하나로 끝나지 않는다 — 모바일에서는 앱이, 데스크톱에서는 코어가,
+	// sync-api 에서는 모든 사용자의 세션을 안고 있는 서버 프로세스가 같이 죽는다.
+	//
+	// ValidateMessage 에도 같은 검사가 있지만 슬라이싱 **뒤**라서 이 경우에는 닿지 못했다.
+	if len(data) < agentMsgMinHeaderLen+payloadLengthFieldLen {
+		return fmt.Errorf("ssm frame too short: %d bytes", len(data))
+	}
+	headerLength := binary.BigEndian.Uint32(data)
+	if headerLength < agentMsgMinHeaderLen || headerLength > agentMsgHeaderLen {
+		return fmt.Errorf("invalid message header length: %d", headerLength)
+	}
+	// uint32 로 더하면 신고 값이 클 때 넘쳐서 검사를 통과해 버린다.
+	payloadLenEnd := uint64(headerLength) + payloadLengthFieldLen
+	if payloadLenEnd > uint64(len(data)) {
+		return fmt.Errorf("ssm frame too short for its %d byte header: %d bytes", headerLength, len(data))
+	}
+	payloadLength := binary.BigEndian.Uint32(data[headerLength:payloadLenEnd])
+	if payloadLenEnd+uint64(payloadLength) > uint64(len(data)) {
+		return fmt.Errorf(
+			"payload length mismatch, WANT: %d, GOT: %d",
+			payloadLength, uint64(len(data))-payloadLenEnd,
+		)
+	}
+
+	m.headerLength = headerLength
 	m.MessageType = parseMessageType(data[4:36])
 	m.schemaVersion = binary.BigEndian.Uint32(data[36:40])
 	m.createdDate = parseTime(data[40:48])
@@ -95,9 +127,8 @@ func (m *AgentMessage) UnmarshalBinary(data []byte) error {
 		m.PayloadType = PayloadType(binary.BigEndian.Uint32(data[112:m.headerLength]))
 	}
 
-	payloadLenEnd := m.headerLength + 4
-	m.payloadLength = binary.BigEndian.Uint32(data[m.headerLength:payloadLenEnd])
-	m.Payload = data[payloadLenEnd : payloadLenEnd+m.payloadLength]
+	m.payloadLength = payloadLength
+	m.Payload = data[payloadLenEnd : payloadLenEnd+uint64(payloadLength)]
 
 	return m.ValidateMessage()
 }

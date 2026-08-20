@@ -1,6 +1,7 @@
 package ssmdatachannel
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -516,17 +517,236 @@ func TestAckDoesNotConsumeTheStreamOpener(t *testing.T) {
 		case msg := <-seen:
 			switch msg.messageType {
 			case Acknowledge:
-				if msg.flags == Syn {
-					t.Fatalf("ack 가 Syn 을 가져갔다(seq=%d) — 스트림은 입력이 열어야 한다", msg.seq)
+				if msg.flags != Ack {
+					t.Fatalf("ack flags=%d, want Ack(%d)", msg.flags, Ack)
 				}
 			case InputStreamData:
-				if msg.flags != Syn || msg.seq != 0 {
-					t.Fatalf("첫 입력 flags=%d seq=%d, want flags=Syn(%d) seq=0", msg.flags, msg.seq, Syn)
+				// 공식 클라이언트와 같다: 스트림 데이터는 0번부터, 플래그는 Data 고정.
+				if msg.flags != Data || msg.seq != 0 {
+					t.Fatalf("첫 입력 flags=%d seq=%d, want flags=Data(%d) seq=0", msg.flags, msg.seq, Data)
 				}
 				return
 			}
 		case <-deadline:
 			t.Fatal("입력이 나가지 않았다")
 		}
+	}
+}
+
+// 프레임이 거짓 길이를 신고해도 **패닉하지 않고 오류로 거절해야 한다.**
+//
+// 오프셋 계산이 전부 프레임이 신고한 headerLength·payloadLength 를 그대로 쓰므로, 검사 없이
+// 슬라이싱하면 `slice bounds out of range` 로 프로세스가 죽는다. 세션 하나가 아니라 프로세스다 —
+// 모바일은 앱이, 데스크톱은 코어가, sync-api 는 모든 사용자의 세션을 안고 있는 서버가 같이 죽는다.
+func TestUnmarshalRejectsLyingFrameLengths(t *testing.T) {
+	good := NewAgentMessage()
+	good.MessageType = OutputStreamData
+	good.Flags = Data
+	good.PayloadType = Output
+	good.Payload = []byte("hello")
+	frame, err := good.MarshalBinary()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	withPatch := func(patch func(buf []byte)) []byte {
+		buf := make([]byte, len(frame))
+		copy(buf, frame)
+		patch(buf)
+		return buf
+	}
+
+	cases := map[string][]byte{
+		"payloadLength 를 크게 신고": withPatch(func(buf []byte) {
+			binary.BigEndian.PutUint32(buf[agentMsgHeaderLen:], 0xffff)
+		}),
+		"payloadLength 를 최대값으로 신고": withPatch(func(buf []byte) {
+			binary.BigEndian.PutUint32(buf[agentMsgHeaderLen:], 0xffffffff)
+		}),
+		"headerLength 를 크게 신고": withPatch(func(buf []byte) {
+			binary.BigEndian.PutUint32(buf, 0xfffffffc)
+		}),
+		"headerLength 를 작게 신고": withPatch(func(buf []byte) {
+			binary.BigEndian.PutUint32(buf, 8)
+		}),
+		"헤더보다 짧은 프레임": frame[:64],
+	}
+
+	for name, data := range cases {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("패닉했다: %v", r)
+				}
+			}()
+			if err := new(AgentMessage).UnmarshalBinary(data); err == nil {
+				t.Fatal("거짓 길이를 통과시켰다")
+			}
+		})
+	}
+
+	// 멀쩡한 프레임은 그대로 통과해야 한다.
+	parsed := new(AgentMessage)
+	if err := parsed.UnmarshalBinary(frame); err != nil {
+		t.Fatalf("정상 프레임을 거절했다: %v", err)
+	}
+	if string(parsed.Payload) != "hello" {
+		t.Fatalf("payload = %q, want \"hello\"", parsed.Payload)
+	}
+}
+
+// 크기 전송이 실패하면 **그 크기를 기억하지 않아야 한다.**
+//
+// 보내기 전에 기억하면 한 번 실패한 크기는 "이미 보냈다" 로 남아 다시 시도되지 않고, 원격 PTY
+// 크기가 계속 어긋난 채로 굳는다.
+func TestSetTerminalSizeForgetsFailedWrites(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer ws.Close()
+		for {
+			if _, _, err := ws.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	dc := new(SsmDataChannel)
+	if err := dc.OpenWithSessionToken("ws"+strings.TrimPrefix(srv.URL, "http"), "test-token"); err != nil {
+		t.Fatalf("OpenWithSessionToken: %v", err)
+	}
+
+	// 소켓을 닫아 쓰기를 실패시킨다.
+	_ = dc.Close()
+	if err := dc.SetTerminalSize(24, 80); err == nil {
+		t.Fatal("닫힌 채널에서 크기 전송이 성공했다고 한다")
+	}
+	// 같은 크기를 다시 시도하면 또 오류여야 한다. nil 이 오면 "이미 보냈다" 로 건너뛴 것이다.
+	if err := dc.SetTerminalSize(24, 80); err == nil {
+		t.Fatal("실패한 크기를 보냈다고 기억해서 재시도를 건너뛴다")
+	}
+}
+
+// 첫 발신이 TerminateSession 이어도 **Fin 플래그가 남아야 한다.**
+//
+// 플래그는 비트마스크가 아니라 열거형이라, 스트림을 여는 Syn 을 얹으면 종료 통보라는 뜻이 사라진다.
+func TestFirstMessageKeepsNonDataFlag(t *testing.T) {
+	seen := make(chan AgentMessageFlag, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer ws.Close()
+		if _, _, err := ws.ReadMessage(); err != nil { // channel-open JSON
+			return
+		}
+		for {
+			_, data, err := ws.ReadMessage()
+			if err != nil {
+				return
+			}
+			msg := new(AgentMessage)
+			if err := msg.UnmarshalBinary(data); err != nil {
+				t.Errorf("unmarshal: %v", err)
+				return
+			}
+			select {
+			case seen <- msg.Flags:
+			default:
+			}
+		}
+	}))
+	defer srv.Close()
+
+	dc := new(SsmDataChannel)
+	if err := dc.OpenWithSessionToken("ws"+strings.TrimPrefix(srv.URL, "http"), "test-token"); err != nil {
+		t.Fatalf("OpenWithSessionToken: %v", err)
+	}
+	defer dc.Close()
+
+	if err := dc.TerminateSession(); err != nil {
+		t.Fatalf("TerminateSession: %v", err)
+	}
+	select {
+	case flags := <-seen:
+		if flags != Fin {
+			t.Fatalf("첫 발신 flags = %d, want Fin(%d)", flags, Fin)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("종료 메시지가 나가지 않았다")
+	}
+}
+
+// 단독 LF 은 CR 로 바꿔 보낸다 — 공식 클라이언트와 같은 규칙이다.
+//
+// 윈도우 인스턴스의 winpty 셸은 LF 을 "다음 줄" 로만 보고 명령을 실행하지 않는다. 이걸 맞추지
+// 않으면 \n 을 보내는 붙여넣기·스크립트가 윈도우 SSM 셸에서 아무 일도 하지 않는다.
+func TestWriteConvertsLoneLineFeedToCarriageReturn(t *testing.T) {
+	seen := make(chan []byte, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer ws.Close()
+		if _, _, err := ws.ReadMessage(); err != nil { // channel-open JSON
+			return
+		}
+		for {
+			_, data, err := ws.ReadMessage()
+			if err != nil {
+				return
+			}
+			msg := new(AgentMessage)
+			if err := msg.UnmarshalBinary(data); err != nil {
+				t.Errorf("unmarshal: %v", err)
+				return
+			}
+			if msg.MessageType == InputStreamData && msg.PayloadType == Output {
+				select {
+				case seen <- msg.Payload:
+				default:
+				}
+			}
+		}
+	}))
+	defer srv.Close()
+
+	dc := new(SsmDataChannel)
+	if err := dc.OpenWithSessionToken("ws"+strings.TrimPrefix(srv.URL, "http"), "test-token"); err != nil {
+		t.Fatalf("OpenWithSessionToken: %v", err)
+	}
+	defer dc.Close()
+
+	if _, err := dc.Write([]byte{'\n'}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	select {
+	case payload := <-seen:
+		if string(payload) != "\r" {
+			t.Fatalf("payload = %q, want \"\\r\"", payload)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("입력이 나가지 않았다")
+	}
+
+	// 여러 바이트 안의 LF 은 건드리지 않는다(공식 구현도 단독 한 바이트만 바꾼다).
+	if _, err := dc.Write([]byte("ls\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	select {
+	case payload := <-seen:
+		if string(payload) != "ls\n" {
+			t.Fatalf("payload = %q, want \"ls\\n\"", payload)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("두 번째 입력이 나가지 않았다")
 	}
 }

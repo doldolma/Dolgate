@@ -55,7 +55,9 @@ const (
 	dataChannelBufferSize        = 10000
 	dataChannelResendInterval    = 100 * time.Millisecond
 	dataChannelRetransmitAfter   = time.Second
-	dataChannelResendMaxAttempts = 3000
+	// 1초 간격 재전송이므로 300회면 약 5분이다. 3000(≈50분)이었을 때는 이미 죽은 채널을
+	// 그만큼 붙들고 있어서, 사용자에게는 "끊기지도 않는데 아무것도 안 되는 탭" 으로 남았다.
+	dataChannelResendMaxAttempts = 300
 	// Match the official session-manager-plugin generation. Agents use the
 	// handshake client version to decide whether port sessions may use smux.
 	dataChannelClientVersion = "1.3.0.0"
@@ -75,7 +77,6 @@ type SsmDataChannel struct {
 	inSeqNum      int64
 	mu            sync.Mutex
 	ws            *websocket.Conn
-	synSent       bool
 	handshakeCh   chan bool
 	handshakeOnce sync.Once
 	// handshakeDone 은 에이전트가 HandshakeComplete 를 보냈는지다. handshakeCh 는 Close 에서
@@ -255,9 +256,14 @@ func (c *SsmDataChannel) WaitForHandshakeComplete(ctx context.Context) error {
 		}
 	}()
 
+	// 채널을 한 번만 집어 두고 쓴다 — detachBuffers 가 락 안에서 필드를 비운다.
+	c.mu.Lock()
+	handshakeCh := c.handshakeCh
+	c.mu.Unlock()
+
 	for {
 		select {
-		case <-c.handshakeCh:
+		case <-handshakeCh:
 			return nil
 		case <-ctx.Done():
 			c.detachBuffers()
@@ -405,6 +411,14 @@ func (c *SsmDataChannel) Write(payload []byte) (int, error) {
 	msg.Flags = Data
 	msg.PayloadType = Output
 
+	// **단독 LF 은 CR 로 바꿔 보낸다.** 공식 클라이언트가 하는 그대로다(streaming.go 의
+	// SendInputDataMessage: `if bytes.Equal(inputData, []byte{10}) { inputData = []byte{13} }`).
+	// 윈도우 인스턴스의 winpty 셸은 LF 을 "다음 줄" 로만 보고 명령을 실행하지 않아서, \n 을 보내는
+	// 붙여넣기·스크립트는 프롬프트에서 줄만 넘어가고 아무 일도 일어나지 않는다.
+	if bytes.Equal(payload, []byte{'\n'}) {
+		payload = []byte{'\r'}
+	}
+
 	// KMS 세션이면 여기서 암호화한다. 재전송 버퍼(WriteMsg 안)에 들어가기 **전에** 해야 한다 —
 	// 나중에 암호화하면 재전송마다 nonce 가 바뀌어 같은 시퀀스 번호로 다른 바이트가 나간다.
 	if enc := c.sessionEncryption(); enc != nil {
@@ -462,15 +476,16 @@ func (c *SsmDataChannel) WriteMsg(msg *AgentMessage) (int, error) {
 		// 에이전트는 0번(Syn)으로 시작하는 스트림을 기다리므로 **입력을 전부 쌓아 두고 처리하지
 		// 않는다** — 출력은 멀쩡하고 오류도 없어서, 화면에서는 "타이핑이 그냥 안 되는" 것으로만
 		// 보였다(모바일 SSM 셸이 이 경합에 계속 졌다).
-	case !c.synSent:
-		// The first message opens the stream: sequence 0 with the Syn flag.
-		c.seqNum = 0
-		c.synSent = true
-		msg.Flags = Syn
-		msg.SequenceNumber = 0
 	default:
-		c.seqNum++
+		// **스트림 번호는 0부터, 보낼 때마다 하나씩.** 플래그는 호출부가 정한 것을 그대로 둔다.
+		//
+		// 공식 클라이언트(aws/session-manager-plugin, src/datachannel/streaming.go 의
+		// SendInputDataMessage)가 하는 것과 같다: `flag uint64 = 0` 고정이고 Syn·Fin 을 쓰는
+		// 코드는 아예 없다. 우리가 물려받은 커뮤니티 재구현이 "첫 메시지가 Syn 으로 스트림을
+		// 연다" 는 개념을 스스로 만들었고, 그 때문에 첫 발신이 ack 이면 ack 이 0번을 가져가
+		// 정작 입력은 1번부터 나가 에이전트가 0번을 기다리며 전부 쌓아 두는 일이 있었다.
 		msg.SequenceNumber = c.seqNum
+		c.seqNum++
 	}
 
 	// MarshalBinary mutates msg (payload digest/length); marshaling under the channel
@@ -647,7 +662,11 @@ func (c *SsmDataChannel) sessionEncryption() *payloadCrypto {
 // SetTerminalSize sends a message to the SSM service which indicates the size to use for the remote terminal
 // when using a shell session client.
 func (c *SsmDataChannel) SetTerminalSize(rows, cols uint32) error {
-	if c.lastRows == rows && c.lastCols == cols {
+	// 캐시는 락으로 감싼다 — 크기 변경은 리사이즈 이벤트와 세션 설정에서 동시에 올 수 있다.
+	c.mu.Lock()
+	unchanged := c.lastRows == rows && c.lastCols == cols
+	c.mu.Unlock()
+	if unchanged {
 		// skip if terminal size is unchanged
 		return nil
 	}
@@ -668,12 +687,17 @@ func (c *SsmDataChannel) SetTerminalSize(rows, cols uint32) error {
 	msg.PayloadType = Size
 	msg.Payload = payload
 
-	// Remind our future selves what the last-set values were:
+	if _, err := c.WriteMsg(msg); err != nil {
+		return err
+	}
+
+	// **보낸 뒤에 기억한다.** 보내기 전에 기억하면 write 가 한 번 실패한 크기는 "이미 보냈다" 로
+	// 남아 영구히 재시도되지 않고, 원격 PTY 크기가 계속 어긋난 채로 굳는다.
+	c.mu.Lock()
 	c.lastRows = rows
 	c.lastCols = cols
-
-	_, err = c.WriteMsg(msg)
-	return err
+	c.mu.Unlock()
+	return nil
 }
 
 // TerminateSession sends the TerminateSession message to the AWS service to indicate that the port forwarding
@@ -750,8 +774,12 @@ func (c *SsmDataChannel) processOutputStreamMessage(msg *AgentMessage, acknowled
 	case HandshakeComplete:
 		c.handshakeDone.Store(true)
 		c.handshakeOnce.Do(func() {
-			if c.handshakeCh != nil {
-				close(c.handshakeCh)
+			// detachBuffers 가 락 안에서 이 필드를 비우므로 여기서도 락을 잡고 읽는다.
+			c.mu.Lock()
+			ch := c.handshakeCh
+			c.mu.Unlock()
+			if ch != nil {
+				close(ch)
 			}
 		})
 	default:
