@@ -17,7 +17,7 @@ func TestResolveTailnetDialWithoutARoute(t *testing.T) {
 	}
 
 	for _, id := range []string{"", "   "} {
-		dial, err := ResolveTailnetDial(resolve, id, "gridwiz.com")
+		dial, err := ResolveTailnetDial(resolve, id, "acme-corp.com")
 		if err != nil {
 			t.Fatalf("ResolveTailnetDial(%q) error = %v", id, err)
 		}
@@ -32,7 +32,7 @@ func TestResolveTailnetDialWithoutARoute(t *testing.T) {
 
 // tailnet 지원이 꺼진 빌드/환경이면 resolver 자체가 없다. 그때도 평소 경로로 나가야 한다.
 func TestResolveTailnetDialWithoutAResolver(t *testing.T) {
-	dial, err := ResolveTailnetDial(nil, "net-a", "gridwiz.com")
+	dial, err := ResolveTailnetDial(nil, "net-a", "acme-corp.com")
 	if err != nil {
 		t.Fatalf("ResolveTailnetDial() error = %v", err)
 	}
@@ -49,7 +49,7 @@ func TestResolveTailnetDialPassesTheRouteThrough(t *testing.T) {
 			return func(context.Context, string, string) (net.Conn, error) { return nil, nil }, nil
 		},
 		"net-a",
-		"gridwiz.com",
+		"acme-corp.com",
 	)
 
 	if err != nil {
@@ -58,8 +58,8 @@ func TestResolveTailnetDialPassesTheRouteThrough(t *testing.T) {
 	if dial == nil {
 		t.Fatal("ResolveTailnetDial() returned no dialer for a real route")
 	}
-	if gotID != "net-a" || gotName != "gridwiz.com" {
-		t.Errorf("resolver got (%q, %q), want (net-a, gridwiz.com)", gotID, gotName)
+	if gotID != "net-a" || gotName != "acme-corp.com" {
+		t.Errorf("resolver got (%q, %q), want (net-a, acme-corp.com)", gotID, gotName)
 	}
 }
 

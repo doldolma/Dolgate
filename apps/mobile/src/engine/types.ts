@@ -425,6 +425,41 @@ export type EngineTailnetEvent =
       };
     };
 
+/** SSM 셸 요청. 필드 이름은 코어(coretypes.AWSConnectPayload)의 JSON 그대로다. */
+export interface AwsSsmShellRequest {
+  region: string;
+  instanceId: string;
+  cols: number;
+  rows: number;
+  streamUrl: string;
+  tokenValue: string;
+  ssmSessionId?: string;
+  /** 윈도우 인스턴스면 "powershell". 비어 있으면 POSIX 셸이다. */
+  shellKind?: string;
+  kmsKeyId?: string;
+  kmsCipherTextBlobBase64?: string;
+  kmsPlainTextKeyBase64?: string;
+}
+
+/** SSM 포트포워드 요청. 코어(coretypes.SSMPortForwardStartPayload)의 JSON 그대로다. */
+export interface SsmPortForwardRequest {
+  region: string;
+  targetId: string;
+  targetPort: number;
+  /** 0 이면 커널이 빈 포트를 고른다. */
+  bindPort: number;
+  streamUrl: string;
+  tokenValue: string;
+  ssmSessionId?: string;
+}
+
+export interface EngineSsmForward {
+  readonly id: string;
+  /** SSH 가 붙어야 할 로컬 포트. */
+  readonly bindPort: number;
+  stop(): Promise<void>;
+}
+
 export interface MobileSshEngine {
   readonly name: string;
   /**
@@ -448,6 +483,33 @@ export interface MobileSshEngine {
   forgetTailnet(tailnetId: string): Promise<void>;
   closeTailnets(): Promise<void>;
   connect(options: ConnectOptions): Promise<EngineConnection>;
+  /**
+   * SSH over SSM 에 쓸 임시 키쌍을 만든다.
+   *
+   * EC2 Instance Connect 는 공개키를 60초만 인스턴스에 올려 주므로 세션마다 새 키가 필요하다.
+   * 기기에 crypto 가 없어 엔진이 만든다.
+   */
+  generateEphemeralSshKey(): Promise<{ privateKeyPem: string; publicKey: string }>;
+  /**
+   * AWS SSM 셸을 연다. **돌아오는 것은 SSH 셸과 같은 `EngineShell`** 이라 터미널 화면을 그대로
+   * 붙일 수 있다.
+   *
+   * 자격증명은 엔진에 오지 않는다 — 앱이 `ssm:StartSession` 으로 받은 토큰만 넘긴다.
+   */
+  startAwsSsmShell(options: {
+    sessionId: string;
+    request: AwsSsmShellRequest;
+    onClosed?: () => void;
+  }): Promise<EngineShell>;
+  /**
+   * SSH over SSM 을 태울 로컬 포워드를 연다. 실제로 묶인 포트로 평범하게 SSH 를 붙인다.
+   *
+   * 세션이 끝나면 `stop()` 을 불러야 한다 — 남겨 두면 AWS 쪽에 SSM 세션이 남는다.
+   */
+  startSsmPortForward(options: {
+    forwardId: string;
+    request: SsmPortForwardRequest;
+  }): Promise<EngineSsmForward>;
   /**
    * Opens a file-transfer session. This is its own connection rather than a
    * channel on a terminal session, matching how the app treats the file browser:

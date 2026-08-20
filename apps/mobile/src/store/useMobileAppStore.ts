@@ -49,6 +49,12 @@ import {
   isVaultEpochRejectionCode,
   parseSyncRevisionEtag,
   getAwsEc2HostSshPort,
+  isAwsEc2WindowsPlatform,
+  isAwsHostKeySecurityError,
+  recordSshOverSsmFallback,
+  shouldAttemptSshOverSsm,
+  usesAwsServerProxy,
+  type AwsSshOverSsmFallbackMemo,
   isAwsEc2HostRecord,
   isSshHostRecord,
   MAX_HOST_STARTUP_COMMAND_LENGTH,
@@ -137,7 +143,13 @@ import {
 import {
   type AwsSsoBrowserLoginPrompt,
   resolveAwsSessionForHost,
+  type ResolvedAwsSessionResult,
 } from '../lib/aws-session';
+import {
+  pushEc2InstanceConnectKey,
+  startSsmPortForwardSession,
+  startSsmShellSession,
+} from '../lib/aws-ssm-direct';
 import { appendSessionBanner } from '../lib/terminal-banner';
 import { AwsSftpHostKeyChallengeError, connectAwsSftp } from '../lib/aws-sftp';
 import { openAwsSsoBrowser } from '../lib/aws-sso-bridge';
@@ -173,6 +185,7 @@ import {
 import {
   getEngine,
   type EngineConnection,
+  type EngineSsmForward,
   type EngineCredential,
   type EngineInteractiveAnswer,
   type EngineHopProgress,
@@ -400,9 +413,18 @@ interface SshRuntimeSession {
   kind: 'ssh';
   recordId: string;
   hostId: string;
-  connection: EngineConnection;
+  /**
+   * SSH 세션이면 채워진다. **기기에서 직접 연 SSM 셸에서는 null 이다** — 그 세션에는 SSH
+   * 연결이 없고 셸만 있다(SSM 데이터채널 위의 원격 셸이다).
+   */
+  connection: EngineConnection | null;
   shell: EngineShell;
   backgroundListenerId: number | null;
+  /**
+   * SSH over SSM 을 태운 로컬 포워드. 세션이 끝나면 반드시 닫아야 한다 — 남겨 두면 AWS 쪽에
+   * SSM 세션이 살아 있는 것으로 남는다.
+   */
+  ssmForward?: EngineSsmForward | null;
 }
 
 interface AwsRuntimeSession {
@@ -724,6 +746,13 @@ interface MobileAppState {
   updateSettings: (input: Partial<MobileSettings>) => Promise<void>;
   connectToHost: (hostId: string) => Promise<string | null>;
   saveHost: (input: MobileHostDraftInput) => Promise<void>;
+  /**
+   * EC2 호스트의 서버 프록시 설정을 바꾼다.
+   *
+   * `saveHost` 는 SSH 호스트 전용이라(다른 종류는 거절한다) 이 한 필드만 다루는 자리를 따로
+   * 둔다. 켜면 SSH 전송이 sync-api WebSocket 을 타고, 끄면 기기에서 직접 SSM 으로 붙는다.
+   */
+  setAwsSsmServerProxyEnabled: (hostId: string, enabled: boolean) => Promise<void>;
   toggleHostFavorite: (hostId: string) => Promise<void>;
   deleteHost: (hostId: string) => Promise<void>;
   duplicateSession: (sessionId: string) => Promise<string | null>;
@@ -792,6 +821,13 @@ interface MobileAppState {
 }
 
 const runtimeSessions = new Map<string, RuntimeSession>();
+/**
+ * SSH over SSM 이 실패한 호스트의 기억. 앱이 도는 동안만 산다.
+ *
+ * 데스크톱도 같은 방식이다(메모리 맵) — 저장할 값이 아니다. 실패 이유는 대개 인스턴스 쪽
+ * 사정이고, 앱을 다시 켰을 때 한 번 더 시도해 보는 것이 맞다.
+ */
+const awsSshOverSsmFallbacks = new Map<string, AwsSshOverSsmFallbackMemo>();
 const runtimeSftpSessions = new Map<string, SftpRuntimeSession>();
 // 세션별 터미널 구독 세대. 재구독이 잦아 낡은 리스너가 겹치는데, 이 값으로
 // 배달 시점에 차단한다(자세한 이유는 subscribeToSessionTerminal 참고).
@@ -2086,9 +2122,10 @@ function disconnectRuntimeSession(sessionId: string): void {
 }
 
 async function closeSshRuntimeResources(
-  connection: EngineConnection,
+  connection: EngineConnection | null,
   shell: EngineShell | null,
   backgroundListenerId: number | null,
+  ssmForward?: EngineSsmForward | null,
 ): Promise<void> {
   if (shell && backgroundListenerId !== null) {
     try {
@@ -2100,9 +2137,17 @@ async function closeSshRuntimeResources(
       await shell.close();
     } catch {}
   }
-  try {
-    await connection.disconnect();
-  } catch {}
+  if (connection) {
+    try {
+      await connection.disconnect();
+    } catch {}
+  }
+  // 포워드는 마지막에 닫는다 — SSH 를 먼저 끊어야 그 위의 터널이 조용히 끝난다.
+  if (ssmForward) {
+    try {
+      await ssmForward.stop();
+    } catch {}
+  }
 }
 
 async function disposeRuntimeSession(sessionId: string): Promise<void> {
@@ -2115,6 +2160,7 @@ async function disposeRuntimeSession(sessionId: string): Promise<void> {
       runtime.connection,
       runtime.shell,
       runtime.backgroundListenerId,
+      runtime.ssmForward,
     );
   }
 }
@@ -3009,6 +3055,251 @@ export const useMobileAppStore = create<MobileAppState>()(
           patchConnectionView(recordId, { interactiveAuthPending: false });
         }
         return answer;
+      };
+
+      /**
+       * AWS 접속 실패를 사람이 읽는 문구로.
+       *
+       * SSH 경로가 쓰는 분류기를 그대로 쓴다(데스크톱과 같은 표). 분류되지 않으면 원문을 남긴다.
+       */
+      const describeAwsConnectFailure = (
+        error: unknown,
+        target: string,
+      ): string => {
+        if (!(error instanceof Error) || !error.message.trim()) {
+          return t('store.ssmDirectFailed');
+        }
+        return getConnectFailureMessage(error.message, target);
+      };
+
+      /**
+       * EC2 인스턴스에 **기기에서 직접** 붙는다. 서버(sync-api)를 거치지 않는다.
+       *
+       * 데스크톱과 같은 순서다: SSH over SSM 을 먼저 시도하고(실제 SSH 셸이라 셸 통합·SFTP·
+       * 점프가 살아난다) 실패하면 SSM 셸로 폴백한다. 무엇을 시도할지·언제 재시도할지는
+       * shared-core 의 규칙을 쓴다 — 두 플랫폼이 갈리지 않아야 한다.
+       *
+       * 서버 프록시를 켠 호스트는 여기 오지 않는다(호출부에서 갈린다).
+       */
+      const connectAwsEc2Directly = async (input: {
+        host: AwsEc2HostRecord;
+        sessionRecordId: string;
+        resolved: ResolvedAwsSessionResult;
+        terminalSize: { cols: number; rows: number };
+        markClosed: () => void;
+        markDropped: () => void;
+      }): Promise<void> => {
+        const { host, sessionRecordId, resolved, terminalSize } = input;
+        const engine = getEngine();
+        const sshPort = getAwsEc2HostSshPort(host);
+        const isWindowsInstance = isAwsEc2WindowsPlatform(host.awsPlatform);
+        const attemptSsh = shouldAttemptSshOverSsm({
+          host,
+          isWindowsInstance,
+          memo: awsSshOverSsmFallbacks.get(host.id) ?? null,
+          nowMs: Date.now(),
+        });
+
+        console.info(
+          `[mobile-aws] direct attemptSsh=${attemptSsh} windows=${isWindowsInstance}`,
+        );
+        let sshFailure: string | null = null;
+        if (attemptSsh) {
+          const sshUsername = host.awsSshUsername?.trim();
+          const availabilityZone = host.awsAvailabilityZone?.trim();
+          if (!sshUsername || !availabilityZone) {
+            // 계정·AZ 는 인스턴스 메타데이터에서 온다. 없으면 SSH 로 갈 수 없다 — 폴백 사유로
+            // 남기고 SSM 셸로 간다(데스크톱도 이 경우 SSH 를 시도하지 않는다).
+            sshFailure = host.awsSshMetadataError || t('store.awsSftpUsernameRequired');
+          } else {
+            let forward: EngineSsmForward | null = null;
+            try {
+              // EIC 키는 60초만 유효하다. 세션마다 새로 만든다.
+              const key = await engine.generateEphemeralSshKey();
+              await pushEc2InstanceConnectKey({
+                credentials: resolved.credentials,
+                region: resolved.region,
+                instanceId: host.awsInstanceId,
+                availabilityZone,
+                osUser: sshUsername,
+                publicKey: key.publicKey,
+              });
+              const token = await startSsmPortForwardSession({
+                credentials: resolved.credentials,
+                region: resolved.region,
+                instanceId: host.awsInstanceId,
+                remotePort: sshPort,
+                // 0 이면 커널이 빈 포트를 고른다. 기기에서 고정 포트를 쓸 이유가 없다.
+                localPort: 0,
+              });
+              forward = await engine.startSsmPortForward({
+                forwardId: `ssm-fwd:${sessionRecordId}`,
+                request: {
+                  region: resolved.region,
+                  targetId: host.awsInstanceId,
+                  targetPort: sshPort,
+                  bindPort: 0,
+                  streamUrl: token.streamUrl,
+                  tokenValue: token.tokenValue,
+                  ssmSessionId: token.sessionId,
+                },
+              });
+
+              // **호스트 키 신뢰는 인스턴스 신원으로 기록한다.** 실제로 붙는 주소는
+              // 127.0.0.1 이라, 그 주소로 기록하면 다른 인스턴스도 같은 키로 통과한다.
+              const identity = buildAwsSsmKnownHostIdentity({
+                profileName: resolved.profileName,
+                region: resolved.region,
+                instanceId: host.awsInstanceId,
+              });
+              const connection = await engine.connect({
+                connectionId: sessionRecordId,
+                host: '127.0.0.1',
+                port: forward.bindPort,
+                username: sshUsername,
+                credential: { type: 'key', privateKey: key.privateKeyPem },
+                size: terminalSize,
+                trustedHostKeysBase64: trustedHostKeysFor(identity, sshPort),
+                onServerKey: async info =>
+                  resolveKnownHostTrust(
+                    host,
+                    { ...info, host: identity, port: sshPort },
+                    sessionRecordId,
+                  ),
+                onDisconnected: input.markDropped,
+              });
+              const shell = await connection.startShell({
+                term: 'xterm',
+                size: terminalSize,
+                onClosed: input.markClosed,
+              });
+
+              runtimeSessions.set(sessionRecordId, {
+                kind: 'ssh',
+                recordId: sessionRecordId,
+                hostId: host.id,
+                connection,
+                shell,
+                backgroundListenerId: null,
+                ssmForward: forward,
+              });
+              awsSshOverSsmFallbacks.delete(host.id);
+              console.info(
+                `[mobile-aws] direct connected=ssh-over-ssm user=${sshUsername} ` +
+                  `localPort=${forward.bindPort}`,
+              );
+              set(state => ({
+                sessions: patchSessionRecord(state.sessions, sessionRecordId, {
+                  status: 'connected',
+                  errorMessage: null,
+                  // **어떤 경로로 붙었는지 남긴다.** 두 경로 모두 결과가 "붙었다" 라서 이것 없이는
+                  // 서버를 거쳤는지 기기에서 직접 붙었는지 확인할 방법이 없다.
+                  connectionStatusMessage: t('store.ssmPathDirectSsh'),
+                  lastEventAt: new Date().toISOString(),
+                  lastConnectedAt: new Date().toISOString(),
+                  title: host.label,
+                  connectionKind: 'aws-ssm',
+                  connectionDetails: resolved.connectionDetails,
+                }),
+              }));
+              return;
+            } catch (error) {
+              const message =
+                error instanceof Error ? error.message : String(error);
+              // 호스트 키 문제는 폴백하지 않는다 — 폴백해 버리면 사용자가 신뢰한 뒤 SSH 로
+              // 붙을 기회가 사라진다.
+              if (isAwsHostKeySecurityError(message)) {
+                if (forward) {
+                  await forward.stop().catch(() => undefined);
+                }
+                throw error;
+              }
+              sshFailure = message;
+              console.info(`[mobile-aws] direct sshFailed reason=${message}`);
+              if (forward) {
+                await forward.stop().catch(() => undefined);
+              }
+              awsSshOverSsmFallbacks.set(
+                host.id,
+                recordSshOverSsmFallback({ host, nowMs: Date.now() }),
+              );
+            }
+          }
+        }
+
+        // SSM 셸로 폴백. 윈도우 인스턴스는 애초에 여기로 온다.
+        try {
+          const token = await startSsmShellSession({
+            credentials: resolved.credentials,
+            region: resolved.region,
+            instanceId: host.awsInstanceId,
+          });
+          const shell = await engine.startAwsSsmShell({
+            sessionId: sessionRecordId,
+            request: {
+              region: resolved.region,
+              instanceId: host.awsInstanceId,
+              cols: terminalSize.cols,
+              rows: terminalSize.rows,
+              streamUrl: token.streamUrl,
+              tokenValue: token.tokenValue,
+              ssmSessionId: token.sessionId,
+              shellKind: isWindowsInstance ? 'powershell' : '',
+              kmsKeyId: token.kmsKeyId,
+              kmsCipherTextBlobBase64: token.kmsCipherTextBlobBase64,
+              kmsPlainTextKeyBase64: token.kmsPlainTextKeyBase64,
+            },
+            onClosed: input.markClosed,
+          });
+
+          console.info(
+            `[mobile-aws] direct connected=ssm-shell fellBack=${sshFailure !== null}`,
+          );
+          runtimeSessions.set(sessionRecordId, {
+            kind: 'ssh',
+            recordId: sessionRecordId,
+            hostId: host.id,
+            // SSM 셸에는 SSH 연결이 없다 — 셸만 있다.
+            connection: null,
+            shell,
+            backgroundListenerId: null,
+            ssmForward: null,
+          });
+          set(state => ({
+            sessions: patchSessionRecord(state.sessions, sessionRecordId, {
+              status: 'connected',
+              errorMessage: null,
+              // SSH 로 붙지 못해 내려온 것이면 그 사실을 남긴다. 조용히 SSM 셸로 붙으면
+              // 사용자는 왜 계정이 ssm-user 인지, 왜 SFTP 가 없는지 알 수 없다.
+              connectionStatusMessage: sshFailure
+                ? t('store.ssmSshFellBack')
+                : t('store.ssmPathDirectShell'),
+              lastEventAt: new Date().toISOString(),
+              lastConnectedAt: new Date().toISOString(),
+              title: host.label,
+              connectionKind: 'aws-ssm',
+              connectionDetails: resolved.connectionDetails,
+            }),
+          }));
+        } catch (error) {
+          const target = `${host.awsInstanceName?.trim() || host.awsInstanceId}`;
+          const fallbackMessage = describeAwsConnectFailure(error, target);
+          if (!sshFailure) {
+            throw new Error(fallbackMessage);
+          }
+          const sshMessage = getConnectFailureMessage(sshFailure, target);
+          // 둘 다 실패했으면 두 이유를 같이 보여준다 — 하나만 보이면 엉뚱한 곳을 고친다.
+          // 다만 **같은 이유면 한 번만** 보여준다. 예전에는 같은 문구가 `/` 로 두 번 붙어서
+          // 무슨 말인지 알 수 없었다(실측: "undefined is not a function" 두 개).
+          throw new Error(
+            sshMessage === fallbackMessage
+              ? sshMessage
+              : t('store.ssmBothFailed', {
+                  ssh: sshMessage,
+                  shell: fallbackMessage,
+                }),
+          );
+        }
       };
 
       const resolveKnownHostTrust = async (
@@ -4567,7 +4858,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             } catch {}
           }
 
-          if (awsSsmServerSupport === 'unsupported') {
+          // **서버 프록시를 켠 호스트만 서버 능력에 묶인다.** 직접 붙는 호스트는 서버가
+          // SSM 을 못 해도 상관없다 — 기기가 직접 AWS 를 부른다.
+          if (usesAwsServerProxy(host) && awsSsmServerSupport === 'unsupported') {
             markSessionState(
               sessionRecord.id,
               'error',
@@ -4614,6 +4907,60 @@ export const useMobileAppStore = create<MobileAppState>()(
             }
           }
           const terminalSize = await resolvePtyTerminalGridSize();
+
+          // **서버 프록시를 끈 호스트는 기기에서 직접 붙는다.**
+          //
+          // 자격증명이 기기를 떠나지 않고, SSH over SSM 이 되면 실제 계정으로 들어간다.
+          // 서버로 되돌아가는 폴백은 두지 않는다 — 접속 경로는 호스트 설정이 정하고, 실패는
+          // 실패로 보여야 한다(조용히 다른 경로로 붙으면 왜 계정이 다른지 알 수 없다).
+          if (!usesAwsServerProxy(host)) {
+            // **어느 경로로 붙었는지는 로그로만 알 수 있다.** 두 경로 모두 결과가 "붙었다" 라서
+            // 화면만 보면 구분되지 않는다(SSH 경로의 [mobile-ssh] 로그와 같은 이유로 남긴다).
+            console.info(
+              `[mobile-aws] path=direct host=${host.id} instance=${host.awsInstanceId}`,
+            );
+            try {
+              await connectAwsEc2Directly({
+                host,
+                sessionRecordId: sessionRecord.id,
+                resolved: resolvedSession,
+                terminalSize,
+                markClosed: () => {
+                  void disposeRuntimeSession(sessionRecord.id);
+                  markSessionState(sessionRecord.id, 'closed');
+                },
+                markDropped: () => {
+                  void disposeRuntimeSession(sessionRecord.id);
+                  markSessionState(
+                    sessionRecord.id,
+                    'error',
+                    t('store.sessionDropped'),
+                    'dropped',
+                  );
+                },
+              });
+            } catch (error) {
+              await disposeRuntimeSession(sessionRecord.id);
+              // 데스크톱과 같은 분류를 지난다 — 코어·SDK 원문("undefined is not a function",
+              // Go 의 "context deadline exceeded" 등)을 그대로 띄우면 사용자가 할 수 있는 것이
+              // 없다. 분류되지 않은 것은 원문을 남긴다(유일한 단서다).
+              markSessionState(
+                sessionRecord.id,
+                'error',
+                describeAwsConnectFailure(
+                  error,
+                  host.awsInstanceName?.trim() || host.awsInstanceId,
+                ),
+              );
+            } finally {
+              pendingSessionConnections.delete(sessionRecord.id);
+            }
+            return;
+          }
+
+          console.info(
+            `[mobile-aws] path=server-proxy host=${host.id} instance=${host.awsInstanceId}`,
+          );
           const wsUrl = new URL(
             '/api/aws-sessions/ws',
             get().settings.serverUrl,
@@ -4687,6 +5034,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 sessions: patchSessionRecord(state.sessions, sessionRecord.id, {
                   status: 'connected',
                   errorMessage: null,
+                  connectionStatusMessage: t('store.ssmPathServerProxy'),
                   lastEventAt: new Date().toISOString(),
                   lastConnectedAt: new Date().toISOString(),
                   title: host.label,
@@ -6684,6 +7032,48 @@ export const useMobileAppStore = create<MobileAppState>()(
             ]),
           });
         },
+        // EC2 서버 프록시 토글. 즐겨찾기와 같은 경로를 쓴다 — 먼저 로컬만 바꾸면 push 가
+        // 실패했을 때 이 기기만 다른 상태로 남고, 그러면 데스크톱과 접속 경로가 갈린다.
+        setAwsSsmServerProxyEnabled: async (hostId: string, enabled: boolean) => {
+          const host = get().hosts.find(item => item.id === hostId);
+          if (!host || host.kind !== 'aws-ec2') {
+            throw new Error(t('store.hostToEditNotFound'));
+          }
+          const record: HostRecord = {
+            ...host,
+            awsSsmServerProxyEnabled: enabled ? true : undefined,
+            updatedAt: new Date().toISOString(),
+          };
+
+          try {
+            await callWithFreshAccessToken(async accessToken => {
+              const currentSession = get().auth.session;
+              if (!currentSession) {
+                throw new Error(t('store.onlineOnly'));
+              }
+              const pushedRevision = await postSyncSnapshot(
+                get().settings.serverUrl,
+                accessToken,
+                buildHostMutationSyncPayload(
+                  { hosts: [record], secrets: [] },
+                  resolveVaultKeyForPush(currentSession),
+                ),
+                resolveVaultEpochForPush(),
+              );
+              storePushedRevision(pushedRevision);
+            });
+          } catch (error) {
+            await handleVaultDekMismatchError(error);
+            throw error;
+          }
+
+          set({
+            hosts: sortHosts([
+              ...get().hosts.filter(item => item.id !== record.id),
+              record,
+            ]),
+          });
+        },
         // 호스트 삭제 — tombstone push 성공 후 로컬에서 제거. 연결된 시크릿은 다른
         // 호스트와 공유될 수 있으므로 남긴다. 라이브 세션도 유지된다(목록에는
         // "삭제된 호스트"로 표시).
@@ -8061,7 +8451,9 @@ export function resetMobileStoreRuntimeForTests(): void {
     try {
       if (runtime.kind === 'ssh') {
         void runtime.shell.close();
-        void runtime.connection.disconnect();
+        // 직접 연 SSM 셸에는 SSH 연결이 없다(셸만 있다).
+        void runtime.connection?.disconnect();
+        void runtime.ssmForward?.stop();
       } else {
         runtime.socket.close();
       }

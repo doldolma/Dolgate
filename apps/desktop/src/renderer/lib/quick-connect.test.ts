@@ -27,31 +27,31 @@ const sshHost = (overrides: Partial<Extract<HostRecord, { kind: 'ssh' }>> = {}) 
 
 describe('quick-connect', () => {
   it('parses basic ssh user host commands', () => {
-    expect(parseQuickSshCommand('ssh gridwiz@192.168.0.13')).toEqual({
-      username: 'gridwiz',
+    expect(parseQuickSshCommand('ssh acme@192.168.0.13')).toEqual({
+      username: 'acme',
       hostname: '192.168.0.13',
       port: 22,
     });
   });
 
   it('parses colon and -p port forms', () => {
-    expect(parseQuickSshCommand('ssh gridwiz@192.168.0.13:2222')).toEqual({
-      username: 'gridwiz',
+    expect(parseQuickSshCommand('ssh acme@192.168.0.13:2222')).toEqual({
+      username: 'acme',
       hostname: '192.168.0.13',
       port: 2222,
     });
-    expect(parseQuickSshCommand('ssh -p 2200 gridwiz@lime.local')).toEqual({
-      username: 'gridwiz',
+    expect(parseQuickSshCommand('ssh -p 2200 acme@lime.local')).toEqual({
+      username: 'acme',
       hostname: 'lime.local',
       port: 2200,
     });
   });
 
   it('rejects unsupported ssh command shapes', () => {
-    expect(parseQuickSshCommand('scp gridwiz@192.168.0.13')).toBeNull();
-    expect(parseQuickSshCommand('ssh -i key.pem gridwiz@192.168.0.13')).toBeNull();
-    expect(parseQuickSshCommand('ssh gridwiz@192.168.0.13 whoami')).toBeNull();
-    expect(parseQuickSshCommand('ssh gridwiz@192.168.0.13:99999')).toBeNull();
+    expect(parseQuickSshCommand('scp acme@192.168.0.13')).toBeNull();
+    expect(parseQuickSshCommand('ssh -i key.pem acme@192.168.0.13')).toBeNull();
+    expect(parseQuickSshCommand('ssh acme@192.168.0.13 whoami')).toBeNull();
+    expect(parseQuickSshCommand('ssh acme@192.168.0.13:99999')).toBeNull();
   });
 
   it('builds duplicate labels in the selected group only', () => {

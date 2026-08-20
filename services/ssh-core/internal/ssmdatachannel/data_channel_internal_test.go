@@ -442,3 +442,91 @@ func TestUnknownAndSeparatedOutputPayloadsDoNotKillTheSession(t *testing.T) {
 		t.Errorf("모르는 종류는 흘려보내지 않는다: %q", payload)
 	}
 }
+
+// 에이전트 메시지에 대한 ack 가 먼저 나가도 **첫 스트림 메시지가 Syn·0번을 가져야 한다.**
+//
+// ack 는 상대 시퀀스를 미러링하는 메시지라 스트림을 열 수 없다. ack 가 Syn 을 가져가 버리면
+// 정작 입력이 Syn 없이 1번으로 나가고, 에이전트는 0번으로 시작하는 스트림을 기다리며 입력을
+// 전부 쌓아 두기만 한다 — 출력은 멀쩡하고 오류도 없어서 "타이핑이 그냥 안 되는" 것으로 보인다.
+// 실기기에서 모바일 SSM 셸이 이 경합에 계속 졌다(에이전트의 첫 메시지가 우리 첫 쓰기보다 빨랐다).
+func TestAckDoesNotConsumeTheStreamOpener(t *testing.T) {
+	type sent struct {
+		messageType MessageType
+		flags       AgentMessageFlag
+		seq         int64
+	}
+	seen := make(chan sent, 8)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer ws.Close()
+		if _, _, err := ws.ReadMessage(); err != nil { // channel-open JSON
+			return
+		}
+		for {
+			_, data, err := ws.ReadMessage()
+			if err != nil {
+				return
+			}
+			msg := new(AgentMessage)
+			if err := msg.UnmarshalBinary(data); err != nil {
+				t.Errorf("unmarshal: %v", err)
+				return
+			}
+			select {
+			case seen <- sent{messageType: msg.MessageType, flags: msg.Flags, seq: msg.SequenceNumber}:
+			default:
+			}
+		}
+	}))
+	defer srv.Close()
+
+	dc := new(SsmDataChannel)
+	if err := dc.OpenWithSessionToken("ws"+strings.TrimPrefix(srv.URL, "http"), "test-token"); err != nil {
+		t.Fatalf("OpenWithSessionToken: %v", err)
+	}
+	defer dc.Close()
+
+	// 에이전트가 먼저 말한다(셸 배너). 우리는 여기에 ack 를 보낸다 — 그것이 첫 발신 메시지다.
+	banner := NewAgentMessage()
+	banner.MessageType = OutputStreamData
+	banner.Flags = Data
+	banner.PayloadType = Output
+	banner.SequenceNumber = 0
+	banner.Payload = []byte("PS C:\\> ")
+	data, err := banner.MarshalBinary()
+	if err != nil {
+		t.Fatalf("marshal banner: %v", err)
+	}
+	if _, err := dc.HandleMsg(data); err != nil {
+		t.Fatalf("HandleMsg banner: %v", err)
+	}
+
+	// 그 다음에 사용자가 타이핑한다.
+	if _, err := dc.Write([]byte{0x03}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case msg := <-seen:
+			switch msg.messageType {
+			case Acknowledge:
+				if msg.flags == Syn {
+					t.Fatalf("ack 가 Syn 을 가져갔다(seq=%d) — 스트림은 입력이 열어야 한다", msg.seq)
+				}
+			case InputStreamData:
+				if msg.flags != Syn || msg.seq != 0 {
+					t.Fatalf("첫 입력 flags=%d seq=%d, want flags=Syn(%d) seq=0", msg.flags, msg.seq, Syn)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("입력이 나가지 않았다")
+		}
+	}
+}

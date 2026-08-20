@@ -19,6 +19,9 @@ Every AWS feature is built into the app. EC2 terminals try SSH-over-SSM first, a
 Profiles you have been managing in a local `~/.aws` config can be copied into the app's own profile store via **import**.
 
 Additionally, AWS import requires target instances to be **SSM managed instances**, and uses SSM Run Command to auto-detect the SSH username/port.
+
+The simplest way to make all EC2 instances SSM managed is to enable [Default Host Management Configuration (DHMC)](https://docs.aws.amazon.com/systems-manager/latest/userguide/fleet-manager-default-host-management-configuration.html) in the Systems Manager console. With DHMC enabled, instances with SSM Agent installed are automatically registered without attaching an IAM instance profile to each one.
+
 AWS import currently targets **Linux/UNIX EC2 instances**; Windows instances are not supported as SSH import targets.
 
 EC2 SSH-over-SSM and AWS SFTP inject a temporary public key through EC2 Instance Connect, then open SSH/SFTP over the SSM tunnel. The target instance therefore needs a running sshd, and the user/role needs the `ec2-instance-connect:SendSSHPublicKey` permission.

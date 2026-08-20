@@ -151,6 +151,63 @@ jest.mock("@aws-sdk/client-sts", () => ({
   GetCallerIdentityCommand: jest.fn(),
   AssumeRoleCommand: jest.fn(),
 }));
+// 직접 경로가 실제로 도는지 보려면 AWS 호출을 대역으로 둬야 한다. 값은 테스트마다 바꾼다.
+const mockSsmDirect = {
+  startSsmShellSession: jest.fn(),
+  startSsmPortForwardSession: jest.fn(),
+  pushEc2InstanceConnectKey: jest.fn(),
+};
+jest.mock("../src/lib/aws-ssm-direct", () => ({
+  startSsmShellSession: (...args: unknown[]) =>
+    mockSsmDirect.startSsmShellSession(...args),
+  startSsmPortForwardSession: (...args: unknown[]) =>
+    mockSsmDirect.startSsmPortForwardSession(...args),
+  pushEc2InstanceConnectKey: (...args: unknown[]) =>
+    mockSsmDirect.pushEc2InstanceConnectKey(...args),
+}));
+
+// 서버 프록시 경로를 태우려면 WebSocket 을 대역으로 둬야 한다. RN 의 것은 네이티브를 부른다.
+class FakeWebSocket {
+  static instances: FakeWebSocket[] = [];
+  readyState = 0;
+  sent: string[] = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onerror: ((event: unknown) => void) | null = null;
+  onclose: ((event: { code?: number; reason?: string }) => void) | null = null;
+
+  constructor(readonly url: string) {
+    FakeWebSocket.instances.push(this);
+  }
+
+  send(payload: string) {
+    // 실제 WebSocket 도 열리기 전에 보내면 던진다. 그 규칙을 지켜야 "입력이 조용히 사라지는"
+    // 상황이 테스트에서도 재현된다.
+    if (this.readyState !== 1) {
+      throw new Error("INVALID_STATE_ERR");
+    }
+    this.sent.push(payload);
+  }
+
+  close() {
+    this.readyState = 3;
+  }
+
+  acceptConnection() {
+    this.readyState = 1;
+    this.onopen?.();
+  }
+
+  deliver(message: unknown) {
+    this.onmessage?.({ data: JSON.stringify(message) });
+  }
+
+  lastSent(): Record<string, unknown> | null {
+    const raw = this.sent[this.sent.length - 1];
+    return raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+  }
+}
+
 jest.mock("@react-native-async-storage/async-storage", () => ({
   getItem: jest.fn(async () => null),
   setItem: jest.fn(async () => null),
@@ -1877,11 +1934,14 @@ describe("useMobileAppStore auth and sync flows", () => {
     }
   });
 
+  // 서버 능력 게이트는 **서버 프록시를 켠 호스트에만** 적용된다. 직접 붙는 호스트는 서버가 SSM 을
+  // 못 해도 상관없다 — 기기가 직접 AWS 를 부른다.
   it("blocks AWS host connections when the server reports SSM support is unavailable", async () => {
     const awsHost: AwsEc2HostRecord = {
       id: "host-aws-1",
       kind: "aws-ec2",
       label: "Production EC2",
+      awsSsmServerProxyEnabled: true,
       awsProfileId: "profile-prod",
       awsProfileName: "prod",
       awsRegion: "ap-northeast-2",
@@ -1927,6 +1987,218 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(session?.connectionKind).toBe("aws-ssm");
     expect(session?.status).toBe("error");
     expect(session?.errorMessage).toContain("지원하지 않습니다");
+  });
+
+  // **서버 프록시를 끈 호스트는 기기에서 직접 붙는다.** 서버가 SSM 을 못 한다고 해도 막지 않고,
+  // 자격증명을 서버로 보내지도 않는다.
+  it("connects AWS hosts directly when the server proxy is off", async () => {
+    const awsHost: AwsEc2HostRecord = {
+      id: "host-aws-direct",
+      kind: "aws-ec2",
+      label: "Direct EC2",
+      awsProfileId: "profile-prod",
+      awsProfileName: "prod",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-direct",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const awsProfile: ManagedAwsProfilePayload = {
+      id: "profile-prod",
+      name: "prod",
+      kind: "static",
+      region: "ap-northeast-2",
+      accessKeyId: "AKIAPROD",
+      secretAccessKey: "prod-secret",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+
+    // SSM 셸 시작이 실패하는 상황으로 둔다. 그 오류 문구가 세션에 그대로 오면 게이트를 지나
+    // 직접 경로가 돌았다는 뜻이다(서버 능력은 unsupported 로 두었다).
+    mockSsmDirect.startSsmShellSession.mockRejectedValueOnce(
+      new Error("ssm:StartSession 권한이 없습니다"),
+    );
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [awsHost],
+        awsProfiles: [awsProfile],
+        syncStatus: {
+          ...createDefaultSyncStatus(),
+          awsProfilesServerSupport: "supported",
+          // 서버가 못 한다고 해도 직접 경로는 막히지 않아야 한다.
+          awsSsmServerSupport: "unsupported",
+        },
+      });
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(awsHost.id);
+      await flushAsyncWork();
+    });
+    expect(sessionId).not.toBeNull();
+
+    const session = useMobileAppStore
+      .getState()
+      .sessions.find(item => item.id === sessionId);
+    expect(session?.status).toBe("error");
+    expect(session?.errorMessage).toContain("ssm:StartSession");
+    // 자격증명이 서버로 나가지 않는다 — 직접 경로는 우리 서버에 아무것도 보내지 않는다.
+    expect(mockSsmDirect.startSsmShellSession).toHaveBeenCalledTimes(1);
+  });
+
+  // **SSM 셸 세션에도 타이핑이 들어가야 한다.** 이 경로에는 SSH 연결이 없어서(셸만 있다)
+  // writeToSession 이 셸로 바로 보내는지가 유일한 확인 지점이다 — 실기기에서 "프롬프트는
+  // 뜨는데 입력이 안 되는" 증상이 여기서 갈린다.
+  it("types into a directly opened SSM shell", async () => {
+    const awsHost: AwsEc2HostRecord = {
+      id: "host-aws-windows",
+      kind: "aws-ec2",
+      label: "Windows EC2",
+      awsProfileId: "profile-prod",
+      awsProfileName: "prod",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-windows",
+      // 윈도우 인스턴스는 SSH 를 건너뛰고 바로 SSM 셸로 간다.
+      awsPlatform: "windows",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const awsProfile: ManagedAwsProfilePayload = {
+      id: "profile-prod",
+      name: "prod",
+      kind: "static",
+      region: "ap-northeast-2",
+      accessKeyId: "AKIAPROD",
+      secretAccessKey: "prod-secret",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    mockSsmDirect.startSsmShellSession.mockResolvedValueOnce({
+      sessionId: "ssm-session-1",
+      streamUrl: "wss://ssm.example/stream",
+      tokenValue: "token-1",
+    });
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [awsHost],
+        awsProfiles: [awsProfile],
+        syncStatus: {
+          ...createDefaultSyncStatus(),
+          awsProfilesServerSupport: "supported",
+          awsSsmServerSupport: "unsupported",
+        },
+      });
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(awsHost.id);
+      await flushAsyncWork();
+    });
+
+    const session = useMobileAppStore
+      .getState()
+      .sessions.find(item => item.id === sessionId);
+    expect(session?.status).toBe("connected");
+    expect(engineNative.startAwsSsmShell).toHaveBeenCalledTimes(1);
+
+    engineNative.sendData.mockClear();
+    await act(async () => {
+      await useMobileAppStore
+        .getState()
+        .writeToSession(String(sessionId), "whoami\r");
+    });
+
+    expect(engineNative.sendData).toHaveBeenCalledWith(
+      "test-ssm-shell",
+      Buffer.from("whoami\r", "utf8").toString("base64"),
+    );
+  });
+
+  // **서버 프록시 세션에도 타이핑이 들어가야 한다.** 이 경로는 소켓으로 input 메시지를 보내는데,
+  // 여태 테스트가 없어서 "붙기는 하는데 입력이 안 되는" 상태를 아무도 못 잡았다.
+  it("types into a server-proxied SSM session", async () => {
+    const awsHost: AwsEc2HostRecord = {
+      id: "host-aws-proxy",
+      kind: "aws-ec2",
+      label: "Proxied EC2",
+      awsSsmServerProxyEnabled: true,
+      awsProfileId: "profile-prod",
+      awsProfileName: "prod",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-proxy",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const awsProfile: ManagedAwsProfilePayload = {
+      id: "profile-prod",
+      name: "prod",
+      kind: "static",
+      region: "ap-northeast-2",
+      accessKeyId: "AKIAPROD",
+      secretAccessKey: "prod-secret",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+
+    const originalWebSocket = (globalThis as { WebSocket?: unknown }).WebSocket;
+    FakeWebSocket.instances = [];
+    (globalThis as { WebSocket?: unknown }).WebSocket = FakeWebSocket;
+
+    try {
+      await act(async () => {
+        resetStore({
+          auth: createAuthenticatedState(),
+          hosts: [awsHost],
+          awsProfiles: [awsProfile],
+          syncStatus: {
+            ...createDefaultSyncStatus(),
+            awsProfilesServerSupport: "supported",
+            awsSsmServerSupport: "supported",
+          },
+        });
+      });
+
+      let sessionId: string | null = null;
+      await act(async () => {
+        sessionId = await useMobileAppStore.getState().connectToHost(awsHost.id);
+        await flushAsyncWork();
+      });
+
+      const socket = FakeWebSocket.instances[0];
+      expect(socket).toBeDefined();
+
+      await act(async () => {
+        socket.acceptConnection();
+        await flushAsyncWork();
+      });
+      expect(socket.lastSent()?.type).toBe("start");
+
+      await act(async () => {
+        socket.deliver({ type: "ready" });
+        await flushAsyncWork();
+      });
+      const session = useMobileAppStore
+        .getState()
+        .sessions.find(item => item.id === sessionId);
+      expect(session?.status).toBe("connected");
+
+      await act(async () => {
+        await useMobileAppStore
+          .getState()
+          .writeToSession(String(sessionId), "whoami\r");
+      });
+
+      expect(socket.lastSent()).toEqual({
+        type: "input",
+        dataBase64: Buffer.from("whoami\r", "utf8").toString("base64"),
+      });
+    } finally {
+      (globalThis as { WebSocket?: unknown }).WebSocket = originalWebSocket;
+    }
   });
 
   it("connects private key SSH hosts with passphrase-backed saved credentials", async () => {

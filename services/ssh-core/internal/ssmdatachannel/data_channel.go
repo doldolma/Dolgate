@@ -452,13 +452,23 @@ func (c *SsmDataChannel) WriteMsg(msg *AgentMessage) (int, error) {
 	mirrorsPeerSeq := msg.MessageType == Acknowledge
 
 	c.mu.Lock()
-	if !c.synSent {
+	switch {
+	case mirrorsPeerSeq:
+		// **ack 는 스트림을 열지 못한다.** 상대 시퀀스를 미러링하는 메시지라 번호가 우리 것이
+		// 아니고, 여기서 Syn 을 붙이면 그 번호로 스트림이 열린 것처럼 표시된다.
+		//
+		// 이걸 구분하지 않았을 때: 에이전트의 첫 메시지가 우리 첫 쓰기보다 먼저 도착하면 ack 가
+		// 첫 발신 메시지가 되어 Syn·0번을 가져가고, 정작 첫 입력은 Syn 없이 1번으로 나갔다.
+		// 에이전트는 0번(Syn)으로 시작하는 스트림을 기다리므로 **입력을 전부 쌓아 두고 처리하지
+		// 않는다** — 출력은 멀쩡하고 오류도 없어서, 화면에서는 "타이핑이 그냥 안 되는" 것으로만
+		// 보였다(모바일 SSM 셸이 이 경합에 계속 졌다).
+	case !c.synSent:
 		// The first message opens the stream: sequence 0 with the Syn flag.
 		c.seqNum = 0
 		c.synSent = true
 		msg.Flags = Syn
 		msg.SequenceNumber = 0
-	} else if !mirrorsPeerSeq {
+	default:
 		c.seqNum++
 		msg.SequenceNumber = c.seqNum
 	}

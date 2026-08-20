@@ -187,7 +187,7 @@ func TestTailnetDialRefusesADifferentTailnet(t *testing.T) {
 	}}
 	instance := newDialRuntime(t, node)
 
-	dial, _ := instance.tailnetDial(TailnetRoute{ID: "corp", ExpectedName: "gridwiz.com"})
+	dial, _ := instance.tailnetDial(TailnetRoute{ID: "corp", ExpectedName: "acme-corp.com"})
 	_, err := dial(context.Background(), "tcp", "server:22")
 
 	if !errors.Is(err, ErrTailnetMismatch) {
@@ -205,11 +205,11 @@ func TestTailnetDialAllowsTheExpectedTailnet(t *testing.T) {
 	node := &dialNode{status: tailnet.Status{
 		State:       tailnet.StateRunning,
 		Online:      true,
-		TailnetName: "gridwiz.com",
+		TailnetName: "acme-corp.com",
 	}}
 	instance := newDialRuntime(t, node)
 
-	dial, _ := instance.tailnetDial(TailnetRoute{ID: "corp", ExpectedName: "gridwiz.com"})
+	dial, _ := instance.tailnetDial(TailnetRoute{ID: "corp", ExpectedName: "acme-corp.com"})
 	conn, err := dial(context.Background(), "tcp", "server:22")
 	if err != nil {
 		t.Fatalf("dial() error = %v", err)
@@ -222,7 +222,7 @@ func TestTailnetDialAllowsAnUnknownExpectedName(t *testing.T) {
 	node := &dialNode{status: tailnet.Status{
 		State:       tailnet.StateRunning,
 		Online:      true,
-		TailnetName: "gridwiz.com",
+		TailnetName: "acme-corp.com",
 	}}
 	instance := newDialRuntime(t, node)
 
@@ -240,7 +240,7 @@ func TestTailnetDialAllowsWhenTheControlPlaneReportsNoName(t *testing.T) {
 	node := &dialNode{status: tailnet.Status{State: tailnet.StateRunning, Online: true}}
 	instance := newDialRuntime(t, node)
 
-	dial, _ := instance.tailnetDial(TailnetRoute{ID: "corp", ExpectedName: "gridwiz.com"})
+	dial, _ := instance.tailnetDial(TailnetRoute{ID: "corp", ExpectedName: "acme-corp.com"})
 	conn, err := dial(context.Background(), "tcp", "server:22")
 	if err != nil {
 		t.Fatalf("dial() error = %v", err)

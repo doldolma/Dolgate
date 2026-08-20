@@ -239,7 +239,13 @@
     "jumpChainSelf": "점프 호스트 목록에 이 호스트 자신이 들어 있습니다.",
     "jumpHostMissing": "점프 호스트를 찾을 수 없습니다. 데스크톱에서 확인해 주세요.",
     "jumpHostMustBeSsh": "점프 호스트는 SSH 호스트여야 합니다.",
-    "jumpHostCredentialMissing": "{{label}} 의 자격증명이 없어 경유할 수 없습니다."
+    "jumpHostCredentialMissing": "{{label}} 의 자격증명이 없어 경유할 수 없습니다.",
+    "ssmDirectFailed": "SSM 세션을 시작하지 못했습니다.",
+    "ssmSshFellBack": "SSH 로 붙지 못해 SSM 셸로 연결했습니다.",
+    "ssmPathDirectSsh": "SSH over SSM · 기기에서 직접",
+    "ssmPathDirectShell": "SSM 셸 · 기기에서 직접",
+    "ssmPathServerProxy": "SSM 셸 · 서버 경유",
+    "ssmBothFailed": "SSH: {{ssh}} · SSM 셸: {{shell}}"
   },
   "vaultGate": {
     "switchAccount": "다른 계정으로 로그인 (로그아웃)",
@@ -373,6 +379,16 @@
       "missing": "선택한 스니펫을 찾을 수 없습니다. 연결 시 startup command를 건너뜁니다.",
       "varsHint": "연결할 때 변수 값을 묻습니다.",
       "snippetOnlyOnDesktop": "스니펫은 데스크톱에서 만들고 편집합니다."
+    },
+    "ec2": {
+      "instanceSection": "인스턴스",
+      "connectionSection": "접속",
+      "instanceId": "인스턴스 ID",
+      "region": "리전",
+      "profile": "프로필",
+      "serverProxy": "서버 프록시",
+      "serverProxyHint": "켜면 SSH 전송이 서버(sync-api)를 거칩니다. 직접 붙을 수 없는 망이거나, 앱이 백그라운드로 가도 세션을 유지해야 할 때 씁니다. 끄면 이 기기에서 AWS SSM 으로 직접 붙습니다.",
+      "proxySaveFailed": "서버 프록시 설정을 저장하지 못했습니다."
     }
   },
   "home": {

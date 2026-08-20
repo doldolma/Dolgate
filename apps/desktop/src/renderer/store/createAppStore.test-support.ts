@@ -27,7 +27,7 @@ export function createEcsHost(): HostRecord {
   return {
     id: "ecs-host-1",
     kind: "aws-ecs",
-    label: "gridwiz-ecs",
+    label: "acme-ecs",
     awsProfileId: "profile-default",
     awsProfileName: "default",
     awsRegion: "ap-northeast-2",

@@ -377,7 +377,7 @@ describe("CoreManager AWS SSM sessions", () => {
     expect(fakeProcess.writes).toHaveLength(1);
 
     // 진짜 프롬프트가 뜬 뒤 출력이 멈추면 그때 정확히 한 번만 보낸다.
-    fakeProcess.emitData(sessionId, "gridwiz@lime-dev:~$ ");
+    fakeProcess.emitData(sessionId, "acme@lime-dev:~$ ");
     expect(fakeProcess.writes).toHaveLength(1);
     vi.advanceTimersByTime(300);
     expect(fakeProcess.writes).toHaveLength(2);
@@ -460,7 +460,7 @@ describe("CoreManager AWS SSM sessions", () => {
 
     socket.receive({
       type: "output",
-      dataBase64: Buffer.from("gridwiz@lime-dev:~$ ", "utf8").toString("base64"),
+      dataBase64: Buffer.from("acme@lime-dev:~$ ", "utf8").toString("base64"),
     });
     expect(socket.sent).toHaveLength(1);
 

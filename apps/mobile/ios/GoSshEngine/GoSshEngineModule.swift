@@ -36,6 +36,7 @@ final class GoSshEngineModule: RCTEventEmitter {
   private var connections: [String: MobileConn] = [:]
   private var shells: [String: MobileShell] = [:]
   private var sftpSessions: [String: MobileSFTPSession] = [:]
+  private var ssmForwards: [String: MobileSsmForward] = [:]
   private var shellSuffix: Int64 = 0
   private var sftpSuffix: Int64 = 0
   private lazy var tailnetEvents = TailnetEventRelay { [weak self] eventJson in
@@ -422,6 +423,116 @@ final class GoSshEngineModule: RCTEventEmitter {
         "shellId": shellId,
         "info": info,
       ]
+    }
+  }
+
+  /// SSH over SSM 에 쓸 임시 키쌍. EIC 는 세션마다 새 키를 요구한다.
+  @objc(generateEphemeralSshKey:reject:)
+  func generateEphemeralSshKey(
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      let engine = try requireEngine(self?.engine)
+      return try callReturningString { engine.generateEphemeralSshKey($0) }
+    }
+  }
+
+  /// AWS SSM 셸을 연다.
+  ///
+  /// **돌아오는 것은 SSH 셸과 같은 `MobileShell` 이다.** 그래서 아래의 sendData·resize·
+  /// followOutput·closeShell 이 그대로 쓰인다 — SSM 을 별도 레지스트리로 두면 두 경로 중 한쪽에만
+  /// 있는 버그가 생긴다.
+  ///
+  /// 자격증명은 여기 오지 않는다. 앱이 `ssm:StartSession` 으로 받은 streamUrl·tokenValue 만 담긴
+  /// requestJson 이 들어온다.
+  @objc(startAwsSsmShell:requestJson:resolve:reject:)
+  func startAwsSsmShell(
+    sessionId: String,
+    requestJson: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      guard let self else { return nil }
+
+      self.registryLock.lock()
+      self.shellSuffix += 1
+      let shellId = "ssm:\(sessionId)#\(self.shellSuffix)"
+      self.registryLock.unlock()
+
+      var closed = false
+      let engine = try requireEngine(self.engine)
+      let shell = try engine.startAwsSsmShell(
+        requestJson,
+        onClosed: AwsSsmClosedRelay { [weak self] reason in
+          guard let self else { return }
+          self.registryLock.lock()
+          closed = true
+          self.shells.removeValue(forKey: shellId)
+          self.registryLock.unlock()
+          var payload: [String: Any] = ["shellId": shellId]
+          if !reason.isEmpty { payload["reason"] = reason }
+          self.dispatch(GoSshEngineModule.eventShellClosed, payload)
+        }
+      )
+      let info = try callReturningString { shell.infoJSON($0) }
+
+      self.registryLock.lock()
+      let closedBeforeRegistration = closed
+      if !closedBeforeRegistration {
+        self.shells[shellId] = shell
+      }
+      self.registryLock.unlock()
+      if closedBeforeRegistration {
+        try? shell.close()
+      }
+
+      return [
+        "shellId": shellId,
+        "info": info,
+      ]
+    }
+  }
+
+  /// SSH over SSM 을 태울 로컬 포워드를 연다. 실제로 묶인 포트를 돌려준다.
+  ///
+  /// 앱은 그 주소(127.0.0.1:포트)로 평범하게 SSH 를 붙인다 — 데스크톱과 같은 방식이라 점프·SFTP
+  /// 가 그대로 동작한다. 세션이 끝나면 반드시 stopSsmPortForward 를 불러야 한다.
+  @objc(startSsmPortForward:requestJson:resolve:reject:)
+  func startSsmPortForward(
+    forwardId: String,
+    requestJson: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      guard let self else { return nil }
+      let engine = try requireEngine(self.engine)
+      let forward = try engine.startSsmPortForward(requestJson)
+      self.registryLock.lock()
+      self.ssmForwards[forwardId] = forward
+      self.registryLock.unlock()
+      return [
+        "forwardId": forwardId,
+        "bindPort": Int(forward.bindPort()),
+      ]
+    }
+  }
+
+  @objc(stopSsmPortForward:resolve:reject:)
+  func stopSsmPortForward(
+    forwardId: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      guard let self else { return nil }
+      self.registryLock.lock()
+      let forward = self.ssmForwards.removeValue(forKey: forwardId)
+      self.registryLock.unlock()
+      try forward?.stop()
+      return nil
     }
   }
 
@@ -957,6 +1068,14 @@ private final class OutputRelay: NSObject, MobileListenerProtocol {
   func onDropped(_ fromSeq: Int64, toSeq: Int64) {
     droppedHandler(fromSeq, toSeq)
   }
+}
+
+private final class AwsSsmClosedRelay: NSObject, MobileAwsSsmClosedCallbackProtocol {
+  private let handler: (String) -> Void
+
+  init(_ handler: @escaping (String) -> Void) { self.handler = handler }
+
+  func onAwsSsmClosed(_ reason: String?) { handler(reason ?? "") }
 }
 
 private final class ShellClosedRelay: NSObject, MobileShellClosedCallbackProtocol {

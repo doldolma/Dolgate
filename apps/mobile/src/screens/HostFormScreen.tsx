@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useCallback, useMemo, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -6,6 +6,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -13,7 +14,11 @@ import {
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NavigationProp, RouteProp } from "@react-navigation/native";
 import { isSshHostRecord } from "@dolssh/shared-core";
-import type { AuthType, HostStartupCommand } from "@dolssh/shared-core";
+import type {
+  AuthType,
+  AwsEc2HostRecord,
+  HostStartupCommand,
+} from "@dolssh/shared-core";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { SettingsGroup, SettingsRow } from "../components/SettingsList";
 import { StartupSnippetPickerModal } from "../components/StartupSnippetPickerModal";
@@ -221,6 +226,83 @@ function Segmented<T extends string>({
 
 // SSH 호스트 생성·수정 폼. 데스크톱 전용 고급 필드(jump host·환경변수·시작 명령 등)는
 // 다루지 않는다 — 수정 시 스토어(saveHost)가 기존 값을 그대로 보존한다.
+/**
+ * EC2 호스트 화면. 편집할 수 있는 것은 **서버 프록시 하나**다.
+ *
+ * 인스턴스·리전·계정은 AWS 가 정하고 동기화로 들어오는 값이라 기기에서 고칠 것이 아니다. 반면
+ * 접속 경로는 기기 사정에 따라 달라진다 — 그래서 이 토글만 여기 둔다.
+ */
+function AwsEc2HostForm({ host }: { host: AwsEc2HostRecord }): React.JSX.Element {
+  const { t: translate } = useTranslation();
+  const palette = useMobilePalette();
+  const screenPadding = useScreenPadding({ includeSafeTop: false });
+  const setServerProxy = useMobileAppStore(
+    (state) => state.setAwsSsmServerProxyEnabled,
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const enabled = host.awsSsmServerProxyEnabled === true;
+
+  const toggle = useCallback(async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await setServerProxy(host.id, !enabled);
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : translate("hostForm.ec2.proxySaveFailed"),
+      );
+    } finally {
+      setSaving(false);
+    }
+  }, [enabled, host.id, setServerProxy, translate]);
+
+  return (
+    <ScrollView
+      style={[styles.screen, { backgroundColor: palette.background }]}
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingHorizontal: screenPadding.paddingHorizontal,
+          paddingTop: 14,
+          paddingBottom: screenPadding.paddingBottom,
+        },
+      ]}
+    >
+      <SettingsGroup header={translate("hostForm.ec2.instanceSection")}>
+        <SettingsRow label={translate("hostForm.fields.name")} value={host.label} />
+        <SettingsRow
+          label={translate("hostForm.ec2.instanceId")}
+          value={host.awsInstanceId}
+        />
+        <SettingsRow label={translate("hostForm.ec2.region")} value={host.awsRegion} />
+        <SettingsRow
+          label={translate("hostForm.ec2.profile")}
+          value={host.awsProfileName}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup
+        header={translate("hostForm.ec2.connectionSection")}
+        footer={translate("hostForm.ec2.serverProxyHint")}
+      >
+        <SettingsRow label={translate("hostForm.ec2.serverProxy")}>
+          <View style={styles.ec2ToggleRow}>
+            <Text style={[styles.ec2ToggleLabel, { color: palette.text }]}>
+              {translate("hostForm.ec2.serverProxy")}
+            </Text>
+            <Switch value={enabled} onValueChange={toggle} disabled={saving} />
+          </View>
+        </SettingsRow>
+      </SettingsGroup>
+
+      {error ? (
+        <Text style={[styles.ec2Error, { color: palette.danger }]}>{error}</Text>
+      ) : null}
+    </ScrollView>
+  );
+}
+
 export function HostFormScreen(): React.JSX.Element {
   const { t: translate } = useTranslation();
   const palette = useMobilePalette();
@@ -238,6 +320,16 @@ export function HostFormScreen(): React.JSX.Element {
     }
     const found = hosts.find((host) => host.id === hostId);
     return found && isSshHostRecord(found) ? found : null;
+  }, [hostId, hosts]);
+
+  // **EC2 호스트는 이 폼이 편집하지 않는다.** 인스턴스 정보는 AWS 가 정하고 동기화로 들어온다.
+  // 다만 접속 경로를 정하는 서버 프록시는 기기에서 바꿀 수 있어야 해서 그 한 가지만 갈라 준다.
+  const editingEc2Host = useMemo(() => {
+    if (!hostId) {
+      return null;
+    }
+    const found = hosts.find((host) => host.id === hostId);
+    return found && found.kind === "aws-ec2" ? found : null;
   }, [hostId, hosts]);
   // 데스크톱에서만 설정할 수 있는 방식은 잠근다. 이걸 password 로 떨어뜨리면 이름만 고쳐
   // 저장해도 authType 이 password 로 덮어써져 데스크톱에서도 그 호스트가 깨진다.
@@ -441,6 +533,12 @@ export function HostFormScreen(): React.JSX.Element {
     }
     return undefined;
   })();
+
+  if (editingEc2Host) {
+    return (
+      <AwsEc2HostForm host={editingEc2Host} />
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -670,6 +768,14 @@ export function HostFormScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
+  ec2ToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flex: 1,
+  },
+  ec2ToggleLabel: { fontSize: 15 },
+  ec2Error: { marginTop: 12, fontSize: 13 },
   screen: {
     flex: 1,
   },

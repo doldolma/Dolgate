@@ -35,6 +35,14 @@ NativeModules.GoSshEngineModule = NativeModules.GoSshEngineModule ?? {
   cancelConnect: jest.fn(async () => undefined),
   disconnect: jest.fn(async () => undefined),
   startShell: jest.fn(async () => ({ shellId: "test-shell", info: "{}" })),
+  generateEphemeralSshKey: jest.fn(async () =>
+    JSON.stringify({ privateKeyPem: "TEST PRIVATE KEY", publicKey: "ssh-ed25519 AAAATEST" }),
+  ),
+  // SSM 셸도 SSH 셸과 같은 shellId 체계로 돌아온다 — 그래서 sendData/resize/followOutput 이
+  // 그대로 쓰인다. 목도 같은 모양이어야 그 사실이 테스트로 검증된다.
+  startAwsSsmShell: jest.fn(async () => ({ shellId: "test-ssm-shell", info: "{}" })),
+  startSsmPortForward: jest.fn(async () => ({ forwardId: "test-forward", bindPort: 54321 })),
+  stopSsmPortForward: jest.fn(async () => undefined),
   sendData: jest.fn(async () => undefined),
   resize: jest.fn(async () => undefined),
   closeShell: jest.fn(async () => undefined),

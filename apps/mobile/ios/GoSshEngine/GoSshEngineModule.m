@@ -96,6 +96,27 @@ RCT_EXTERN_METHOD(startShell
                   : (RCTPromiseResolveBlock)resolve reject
                   : (RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(generateEphemeralSshKey
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(startAwsSsmShell
+                  : (NSString *)sessionId requestJson
+                  : (NSString *)requestJson resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(startSsmPortForward
+                  : (NSString *)forwardId requestJson
+                  : (NSString *)requestJson resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(stopSsmPortForward
+                  : (NSString *)forwardId resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(sendData
                   : (NSString *)shellId dataBase64
                   : (NSString *)dataBase64 resolve

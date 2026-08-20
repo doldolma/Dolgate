@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
+import mobile.AwsSsmClosedCallback
 import mobile.Conn
 import mobile.ConnectionEventListener
 import mobile.DisconnectedCallback
@@ -21,6 +22,7 @@ import mobile.Mobile
 import mobile.SFTPSession
 import mobile.Shell
 import mobile.ShellClosedCallback
+import mobile.SsmForward
 import mobile.TailnetEventListener
 
 /**
@@ -70,6 +72,7 @@ class GoSshEngineModule(
   private val shells = ConcurrentHashMap<String, Shell>()
   private val shellListeners = ConcurrentHashMap<String, MutableSet<Long>>()
   private val sftpSessions = ConcurrentHashMap<String, SFTPSession>()
+  private val ssmForwards = ConcurrentHashMap<String, SsmForward>()
   private val registryLock = Any()
   private val nextShellSuffix = AtomicLong(0)
   private val nextSftpSuffix = AtomicLong(0)
@@ -320,6 +323,95 @@ class GoSshEngineModule(
         putString("shellId", shellId)
         putString("info", info)
       }
+    }
+  }
+
+  /**
+   * AWS SSM 셸을 연다.
+   *
+   * **돌아오는 것은 SSH 셸과 같은 `Shell` 이다.** 그래서 이 아래의 sendData·resize·followOutput·
+   * closeShell 이 그대로 쓰인다 — SSM 을 별도 레지스트리로 두면 두 경로 중 한쪽에만 있는 버그가
+   * 생긴다.
+   *
+   * 자격증명은 여기 오지 않는다. 앱이 `ssm:StartSession` 으로 받은 streamUrl·tokenValue 만 담긴
+   * requestJson 이 들어온다.
+   */
+  /** SSH over SSM 에 쓸 임시 키쌍. EIC 는 세션마다 새 키를 요구한다. */
+  @ReactMethod
+  fun generateEphemeralSshKey(promise: Promise) {
+    onWorker(promise) { engine.generateEphemeralSshKey() }
+  }
+
+  @ReactMethod
+  fun startAwsSsmShell(sessionId: String, requestJson: String, promise: Promise) {
+    onWorker(promise) {
+      val shellId = "ssm:$sessionId#${nextShellSuffix.incrementAndGet()}"
+      var closed = false
+      val shell =
+        engine.startAwsSsmShell(
+          requestJson,
+          AwsSsmClosedCallback { reason ->
+            synchronized(registryLock) {
+              closed = true
+              shells.remove(shellId)
+              shellListeners.remove(shellId)
+            }
+            emit(
+              EVENT_SHELL_CLOSED,
+              Arguments.createMap().apply {
+                putString("shellId", shellId)
+                if (!reason.isNullOrEmpty()) putString("reason", reason)
+              },
+            )
+          },
+        )
+      val info = shell.infoJSON()
+      val closedBeforeRegistration =
+        synchronized(registryLock) {
+          if (closed) {
+            true
+          } else {
+            shells[shellId] = shell
+            shellListeners[shellId] = java.util.Collections.synchronizedSet(mutableSetOf())
+            false
+          }
+        }
+      if (closedBeforeRegistration) {
+        closeQuietly { shell.close() }
+      }
+
+      Arguments.createMap().apply {
+        putString("shellId", shellId)
+        putString("info", info)
+      }
+    }
+  }
+
+  /**
+   * SSH over SSM 을 태울 로컬 포워드를 연다.
+   *
+   * 실제로 묶인 포트를 돌려주므로 앱은 그 주소(127.0.0.1:포트)로 평범하게 SSH 를 붙인다 —
+   * 데스크톱과 같은 방식이고, 그래서 점프·SFTP 가 그대로 동작한다. 세션이 끝나면 반드시
+   * stopSsmPortForward 를 불러야 한다.
+   */
+  @ReactMethod
+  fun startSsmPortForward(forwardId: String, requestJson: String, promise: Promise) {
+    onWorker(promise) {
+      val forward = engine.startSsmPortForward(requestJson)
+      synchronized(registryLock) { ssmForwards[forwardId] = forward }
+      Arguments.createMap().apply {
+        putString("forwardId", forwardId)
+        putInt("bindPort", forward.bindPort())
+      }
+    }
+  }
+
+  @ReactMethod
+  fun stopSsmPortForward(forwardId: String, promise: Promise) {
+    onWorker(promise) {
+      val forward = synchronized(registryLock) { ssmForwards.remove(forwardId) }
+      forward?.stop()
+      null
     }
   }
 

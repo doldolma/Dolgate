@@ -488,7 +488,7 @@ func (c *Conn) StartShell(optionsJSON string, onClosed ShellClosedCallback) (*Sh
 	if err != nil {
 		return nil, err
 	}
-	return &Shell{shell: shell, followers: make(map[int64]*ringbuf.Follower)}, nil
+	return &Shell{shell: shell, fan: newOutputFan(shell.Ring())}, nil
 }
 
 // StartSFTP opens a file-transfer session on the connection. A shell and an
@@ -660,15 +660,30 @@ func (e *Engine) DeriveArgon2idKey(
 
 // Shell is a handle to a live shell channel.
 type Shell struct {
+	// SSH 셸이면 채워진다. SSM 셸(rdpecam 아닌 AWS SSM 세션)에서는 nil 이다.
 	shell *session.Shell
-
-	mu             sync.Mutex
-	followers      map[int64]*ringbuf.Follower
-	nextListenerID int64
+	// SSM 셸이면 채워진다.
+	ssm *ssmShell
+	// 출력 구독. 두 경우가 **같은 헬퍼**를 쓴다(outputfan.go 주석 참고).
+	fan *outputFan
 }
 
 // InfoJSON describes the shell.
 func (s *Shell) InfoJSON() (string, error) {
+	if s.ssm != nil {
+		// SSM 세션에는 SSH 채널이 없다. 앱은 이 값들을 표시에만 쓰므로 0 과 세션 손잡이로 채운다.
+		encoded, err := json.Marshal(map[string]any{
+			"channelId":     int64(0),
+			"createdAtMs":   s.ssm.createdAtMs,
+			"connectedAtMs": s.ssm.createdAtMs,
+			"term":          "xterm-256color",
+			"connectionId":  s.ssm.sessionID,
+		})
+		if err != nil {
+			return "", fmt.Errorf("encode shell info: %w", err)
+		}
+		return string(encoded), nil
+	}
 	info := s.shell.Info()
 	encoded, err := json.Marshal(map[string]any{
 		"channelId":     int64(info.ChannelID),
@@ -684,19 +699,27 @@ func (s *Shell) InfoJSON() (string, error) {
 }
 
 // SendData writes bytes to the shell's stdin.
-func (s *Shell) SendData(data []byte) error { return s.shell.SendData(data) }
+func (s *Shell) SendData(data []byte) error {
+	if s.ssm != nil {
+		return s.ssm.sendData(data)
+	}
+	return s.shell.SendData(data)
+}
 
 // Resize reports new terminal geometry to the remote side.
 func (s *Shell) Resize(rows, cols int) error {
+	if s.ssm != nil {
+		return s.ssm.resize(rows, cols)
+	}
 	return s.shell.Resize(clampUint32(rows), clampUint32(cols))
 }
 
 // CurrentSeq is the sequence number the next chunk of output will carry.
-func (s *Shell) CurrentSeq() int64 { return toInt64(s.shell.Ring().CurrentSeq()) }
+func (s *Shell) CurrentSeq() int64 { return s.fan.currentSeq() }
 
 // StatsJSON reports ring occupancy, for diagnostics.
 func (s *Shell) StatsJSON() (string, error) {
-	stats := s.shell.Ring().Stats()
+	stats := s.fan.ring.Stats()
 	encoded, err := json.Marshal(map[string]any{
 		"ringBytesCount":    toInt64(stats.RingBytesCount),
 		"usedBytes":         toInt64(stats.UsedBytes),
@@ -717,62 +740,29 @@ func (s *Shell) StatsJSON() (string, error) {
 // tailBytes for CursorTailBytes, timeMs for CursorTimeMs. A non-positive
 // maxBytes takes the default cap.
 func (s *Shell) ReadBuffer(cursorMode int, seq int64, tailBytes int64, timeMs float64, maxBytes int) *ReadResult {
-	result := s.shell.Ring().Read(buildCursor(cursorMode, seq, tailBytes, timeMs), maxBytes)
-	return newReadResult(result)
+	return s.fan.readBuffer(cursorMode, seq, tailBytes, timeMs, maxBytes)
 }
 
 // AddListener replays from a cursor and then follows live output, merging
 // chunks within coalesceMs (non-positive takes the default). The returned id is
 // passed to RemoveListener.
 func (s *Shell) AddListener(listener Listener, cursorMode int, seq int64, tailBytes int64, timeMs float64, coalesceMs int) int64 {
-	if listener == nil {
-		return 0
-	}
-
-	window := time.Duration(coalesceMs) * time.Millisecond
-	follower := ringbuf.Follow(
-		s.shell.Ring(),
-		buildCursor(cursorMode, seq, tailBytes, timeMs),
-		window,
-		&listenerBridge{listener: listener},
-	)
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.nextListenerID++
-	id := s.nextListenerID
-	s.followers[id] = follower
-	return id
+	return s.fan.addListener(listener, cursorMode, seq, tailBytes, timeMs, coalesceMs)
 }
 
 // RemoveListener stops a listener. It returns once no further callback can
 // arrive, and is safe to call with an unknown id.
-func (s *Shell) RemoveListener(id int64) {
-	s.mu.Lock()
-	follower, ok := s.followers[id]
-	delete(s.followers, id)
-	s.mu.Unlock()
-
-	if ok {
-		follower.Stop()
-	}
-}
+func (s *Shell) RemoveListener(id int64) { s.fan.removeListener(id) }
 
 // Close ends the shell and stops its listeners.
 func (s *Shell) Close() error {
-	err := s.shell.Close()
-
-	s.mu.Lock()
-	followers := make([]*ringbuf.Follower, 0, len(s.followers))
-	for id, follower := range s.followers {
-		followers = append(followers, follower)
-		delete(s.followers, id)
+	var err error
+	if s.ssm != nil {
+		err = s.ssm.close()
+	} else {
+		err = s.shell.Close()
 	}
-	s.mu.Unlock()
-
-	for _, follower := range followers {
-		follower.Stop()
-	}
+	s.fan.stopFollowers()
 	return err
 }
 

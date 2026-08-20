@@ -777,7 +777,7 @@ describe('HostBrowser helpers', () => {
   it('offers Quick Connect for ssh commands and passes parsed input', () => {
     const onQuickConnectSsh = vi.fn().mockResolvedValue(undefined);
     renderBrowser({
-      searchQuery: 'ssh gridwiz@192.168.0.13',
+      searchQuery: 'ssh acme@192.168.0.13',
       onQuickConnectSsh,
     });
 
@@ -786,7 +786,7 @@ describe('HostBrowser helpers', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
 
     expect(onQuickConnectSsh).toHaveBeenCalledWith({
-      username: 'gridwiz',
+      username: 'acme',
       hostname: '192.168.0.13',
       port: 22,
     });

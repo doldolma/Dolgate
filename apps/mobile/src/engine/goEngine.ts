@@ -31,6 +31,9 @@ import {
   type MobileSshEngine,
   type ServerPublicKeyInfo,
   type StartShellOptions,
+  type AwsSsmShellRequest,
+  type SsmPortForwardRequest,
+  type EngineSsmForward,
 } from './types';
 import { t } from '../i18n';
 
@@ -94,6 +97,15 @@ type GoSshEngineNativeModule = NativeModule & {
   cancelConnect(connectionId: string): Promise<void>;
   disconnect(connectionId: string): Promise<void>;
   startShell(connectionId: string, optionsJson: string): Promise<NativeStartShellResult>;
+  /** SSH over SSM 에 쓸 임시 키쌍(JSON: privateKeyPem·publicKey). */
+  generateEphemeralSshKey(): Promise<string>;
+  /** AWS SSM 셸. SSH 셸과 같은 shellId 체계로 돌아오므로 아래 셸 조작이 그대로 쓰인다. */
+  startAwsSsmShell(sessionId: string, requestJson: string): Promise<NativeStartShellResult>;
+  startSsmPortForward(
+    forwardId: string,
+    requestJson: string,
+  ): Promise<{ forwardId: string; bindPort: number }>;
+  stopSsmPortForward(forwardId: string): Promise<void>;
   sendData(shellId: string, dataBase64: string): Promise<void>;
   resize(shellId: string, rows: number, cols: number): Promise<void>;
   closeShell(shellId: string): Promise<void>;
@@ -940,6 +952,49 @@ export class GoSshEngineAdapter implements MobileSshEngine {
       params.outputLength,
     );
     return toByteArray(derived);
+  }
+
+  async generateEphemeralSshKey(): Promise<{
+    privateKeyPem: string;
+    publicKey: string;
+  }> {
+    const raw = await requireNative().generateEphemeralSshKey();
+    return JSON.parse(raw) as { privateKeyPem: string; publicKey: string };
+  }
+
+  async startAwsSsmShell(options: {
+    sessionId: string;
+    request: AwsSsmShellRequest;
+    onClosed?: () => void;
+  }): Promise<EngineShell> {
+    if (options.onClosed) {
+      events.prepareShellClosed();
+    }
+    const result = await requireNative().startAwsSsmShell(
+      options.sessionId,
+      JSON.stringify({ id: options.sessionId, ...options.request }),
+    );
+    if (options.onClosed) {
+      events.registerShellClosed(result.shellId, options.onClosed);
+    }
+    return new GoShell(result.shellId);
+  }
+
+  async startSsmPortForward(options: {
+    forwardId: string;
+    request: SsmPortForwardRequest;
+  }): Promise<EngineSsmForward> {
+    const result = await requireNative().startSsmPortForward(
+      options.forwardId,
+      JSON.stringify({ id: options.forwardId, ...options.request }),
+    );
+    return {
+      id: result.forwardId,
+      bindPort: result.bindPort,
+      stop: async () => {
+        await requireNative().stopSsmPortForward(result.forwardId);
+      },
+    };
   }
 
   async validatePrivateKey(privateKeyPem: string, passphrase?: string): Promise<string | null> {

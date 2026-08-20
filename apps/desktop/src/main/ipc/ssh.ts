@@ -1,6 +1,9 @@
 import {
-  getAwsEc2HostSshPort,
+  buildAwsEc2SshOverSsmSignature,
   isAwsEc2HostRecord,
+  isAwsHostKeySecurityError,
+  recordSshOverSsmFallback,
+  shouldAttemptSshOverSsm,
   isAwsEc2WindowsPlatform,
   isAwsEcsHostRecord,
   isWarpgateSshHostRecord,
@@ -56,43 +59,14 @@ async function assertAwsSsmServerProxySupported(
   }
 }
 
-// SSH-over-SSM 실패로 SSM 셸에 폴백한 뒤 이 시간 안에는 SSH 재시도를 건너뛴다.
-// 실패한 SSH 시도는 preflight(Run Command)·EIC·핸드셰이크까지 수 초를 쓰므로,
-// 연결할 때마다 그 레이턴시를 반복 지불하지 않게 한다.
-const AWS_SSH_OVER_SSM_RETRY_AFTER_MS = 10 * 60 * 1000;
-
-// SSH-over-SSM 가능성에 영향을 주는 연결 설정의 지문. 시그니처가 바뀌면
-// (포트·사용자·AZ·인스턴스·프로필·프록시 모드 수정) 폴백 기억을 버리고 SSH부터 다시 시도한다.
-function buildAwsEc2SshOverSsmSignature(host: AwsEc2HostRecord): string {
-  return JSON.stringify([
-    host.awsRegion,
-    host.awsInstanceId,
-    getAwsEc2HostSshPort(host),
-    host.awsSshUsername?.trim() || null,
-    host.awsAvailabilityZone ?? null,
-    host.awsSsmServerProxyEnabled === true,
-    host.awsProfileId ?? null,
-  ]);
-}
-
-// 호스트 키 관련 실패는 SSM 셸로 폴백하지 않는다.
-//
-// 신뢰를 묻는 자리는 두 곳이다: 연결 안에서 코어가 묻거나(hostKeyTrustChallenge), 연결 전에
-// 신뢰된 키를 요구하거나(host-coordinator 의 requireTrustedHostKeys — AWS SSM 계열).
-// 어느 쪽이든 폴백해 버리면 사용자가 신뢰한 뒤 SSH 로 붙을 기회가 사라진다.
+// 시도 순서·재시도 억제·호스트키 판정은 **shared-core 한 벌**을 쓴다. 모바일도 같은 함수를
+// 쓰므로 규칙이 플랫폼마다 갈리지 않는다(packages/shared-core/src/aws-ssm-attempt.ts).
 function errorMessageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 function isHostKeySecurityError(error: unknown): boolean {
-  const message = errorMessageOf(error);
-  return [
-    /Host key is not trusted yet/i,
-    /host key mismatch/i,
-    /Host key changed/i,
-    /trusted host key/i,
-    /host key trust/i,
-  ].some((pattern) => pattern.test(message));
+  return isAwsHostKeySecurityError(errorMessageOf(error));
 }
 
 function combineAwsSshFallbackFailure(
@@ -241,15 +215,18 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           const signature = buildAwsEc2SshOverSsmSignature(host);
           let failedSshOverSsm: { error: unknown; signature: string } | undefined;
           const memo = awsSshOverSsmFallbacks.get(host.id);
-          const skipSshAttempt =
-            isWindowsInstance ||
-            (memo !== undefined &&
-              memo.signature === signature &&
-              memo.retryAfter > Date.now());
-          if (memo && !skipSshAttempt) {
+          const attemptSsh = shouldAttemptSshOverSsm({
+            host,
+            isWindowsInstance,
+            memo: memo
+              ? { signature: memo.signature, retryAfterMs: memo.retryAfter }
+              : null,
+            nowMs: Date.now(),
+          });
+          if (memo && attemptSsh) {
             awsSshOverSsmFallbacks.delete(host.id);
           }
-          if (!skipSshAttempt) {
+          if (attemptSsh) {
             try {
               connection = await connectAwsEc2OverSsm(ctx, host, {
                 cols: input.cols,
@@ -286,9 +263,12 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
             }
             if (failedSshOverSsm) {
               const reason = errorMessageOf(failedSshOverSsm.error);
+              const recorded = recordSshOverSsmFallback({ host, nowMs: Date.now() });
               awsSshOverSsmFallbacks.set(host.id, {
+                // 지문은 실패 당시의 것을 쓴다 — 그 사이 사용자가 설정을 고쳤으면 다음 접속에서
+                // 다시 시도해야 한다.
                 signature: failedSshOverSsm.signature,
-                retryAfter: Date.now() + AWS_SSH_OVER_SSM_RETRY_AFTER_MS,
+                retryAfter: recorded.retryAfterMs,
               });
               ctx.activityLogs.append(
                 "warn",

@@ -1,8 +1,8 @@
 import React from "react";
 import renderer, { act } from "react-test-renderer";
-import { Alert, TextInput } from "react-native";
+import { Alert, Switch, Text, TextInput } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import type { SshHostRecord } from "@dolssh/shared-core";
+import type { HostRecord, SshHostRecord } from "@dolssh/shared-core";
 import {
   createDefaultMobileSettings,
   createDefaultSyncStatus,
@@ -79,7 +79,7 @@ function renderForm(): renderer.ReactTestRenderer {
   );
 }
 
-function resetStore(hosts: SshHostRecord[] = []): void {
+function resetStore(hosts: HostRecord[] = []): void {
   useMobileAppStore.setState({
     hydrated: true,
     bootstrapping: false,
@@ -673,5 +673,78 @@ describe("HostFormScreen", () => {
     await act(async () => {
       tree!.unmount();
     });
+  });
+});
+
+// **EC2 호스트는 이 폼이 편집하지 않는다** — 인스턴스 정보는 AWS 가 정한다. 다만 접속 경로(서버
+// 프록시)는 기기 사정에 따라 달라지므로 폰에서 껐다 켤 수 있어야 한다.
+describe("HostFormScreen — AWS EC2", () => {
+  const ec2Host = {
+    id: "host-ec2",
+    kind: "aws-ec2",
+    label: "prod-web",
+    awsProfileId: "p-1",
+    awsProfileName: "prod",
+    awsRegion: "ap-northeast-2",
+    awsInstanceId: "i-abc",
+    createdAt: "2026-07-01T00:00:00.000Z",
+    updatedAt: "2026-07-01T00:00:00.000Z",
+  } as unknown as HostRecord;
+
+  beforeEach(() => {
+    mockRouteParams = { hostId: "host-ec2" };
+  });
+
+  it("서버 프록시를 껐다 켤 수 있다", async () => {
+    const setServerProxy = jest.fn(async () => undefined);
+    resetStore([ec2Host]);
+    useMobileAppStore.setState({
+      setAwsSsmServerProxyEnabled: setServerProxy,
+    } as never);
+
+    let view: renderer.ReactTestRenderer;
+    await act(async () => {
+      view = renderForm();
+    });
+    const toggle = view!.root.findByType(Switch);
+    expect(toggle.props.value).toBe(false);
+
+    await act(async () => {
+      toggle.props.onValueChange(true);
+    });
+    expect(setServerProxy).toHaveBeenCalledWith("host-ec2", true);
+
+    // 켜진 호스트에서는 반대로 끌 수 있어야 한다.
+    resetStore([{ ...ec2Host, awsSsmServerProxyEnabled: true } as HostRecord]);
+    useMobileAppStore.setState({
+      setAwsSsmServerProxyEnabled: setServerProxy,
+    } as never);
+    let enabledView: renderer.ReactTestRenderer;
+    await act(async () => {
+      enabledView = renderForm();
+    });
+    const enabledToggle = enabledView!.root.findByType(Switch);
+    expect(enabledToggle.props.value).toBe(true);
+
+    await act(async () => {
+      enabledToggle.props.onValueChange(false);
+    });
+    expect(setServerProxy).toHaveBeenLastCalledWith("host-ec2", false);
+  });
+
+  it("인스턴스 정보는 읽기 전용으로 보여준다", async () => {
+    resetStore([ec2Host]);
+    let view: renderer.ReactTestRenderer;
+    await act(async () => {
+      view = renderForm();
+    });
+    const texts = view!.root
+      .findAllByType(Text)
+      .flatMap(node => (typeof node.props.children === "string" ? [node.props.children] : []));
+
+    expect(texts).toContain("i-abc");
+    expect(texts).toContain("ap-northeast-2");
+    // 이름을 고치는 칸은 없다 — 이 폼은 EC2 를 편집하지 않는다.
+    expect(hasInput(view!.root, "이름")).toBe(false);
   });
 });

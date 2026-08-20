@@ -287,9 +287,9 @@ describe("buildDolgateHostBundle", () => {
 describe("tailnet transfer", () => {
   const tailnet: TailnetPayload = {
     id: "tn-1",
-    label: "Gridwiz",
+    label: "Acme",
     controlUrl: "https://headscale.example.com",
-    tailnetName: "gridwiz.example.com",
+    tailnetName: "acme-corp.example.com",
     ephemeral: false,
     hasAuthKey: true,
     createdAt: timestamp,
@@ -321,7 +321,7 @@ describe("tailnet transfer", () => {
     expect(bundle.tailnets).toHaveLength(1);
     expect(bundle.tailnets[0]).toMatchObject({
       id: "tn-1",
-      label: "Gridwiz",
+      label: "Acme",
       controlUrl: "https://headscale.example.com",
       authKey: "tskey-abc",
       hasAuthKey: true,

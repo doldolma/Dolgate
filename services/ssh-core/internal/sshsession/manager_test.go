@@ -797,14 +797,14 @@ func TestConnectUsesTheTailnetDialer(t *testing.T) {
 		Password:             "x",
 		TrustedHostKeyBase64: "AAAA",
 		TailnetID:            "net-a",
-		TailnetName:          "gridwiz.com",
+		TailnetName:          "acme-corp.com",
 	})
 
 	if err == nil {
 		t.Fatal("Connect() error = nil, want the dial failure")
 	}
-	if gotID != "net-a" || gotName != "gridwiz.com" {
-		t.Errorf("TailnetDial got (%q, %q), want (net-a, gridwiz.com)", gotID, gotName)
+	if gotID != "net-a" || gotName != "acme-corp.com" {
+		t.Errorf("TailnetDial got (%q, %q), want (net-a, acme-corp.com)", gotID, gotName)
 	}
 	if !dialCalled {
 		t.Error("the tailnet dialer was never used — the connection went out directly")

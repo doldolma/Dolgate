@@ -3,6 +3,7 @@ export * from "./api";
 export * from "./base64";
 export * from "./client-api";
 export * from "./connection-failure";
+export * from "./aws-ssm-attempt";
 export * from "./connection-stages";
 export * from "./group-paths";
 export * from "./interactive-hop";

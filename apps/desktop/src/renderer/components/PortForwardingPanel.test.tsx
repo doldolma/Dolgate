@@ -67,11 +67,11 @@ const hosts: HostRecord[] = [
   {
     id: 'ecs-host-1',
     kind: 'aws-ecs',
-    label: 'gridwiz-ecs',
+    label: 'acme-ecs',
     awsProfileName: 'default',
     awsRegion: 'ap-northeast-2',
-    awsEcsClusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/gridwiz-ecs',
-    awsEcsClusterName: 'gridwiz-ecs',
+    awsEcsClusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/acme-ecs',
+    awsEcsClusterName: 'acme-ecs',
     groupName: null,
     tags: [],
     terminalThemeId: null,
@@ -275,7 +275,7 @@ describe('PortForwardingPanel helpers', () => {
   it('returns only matching hosts for each transport tab', () => {
     expect(getAvailablePortForwardHosts(hosts, 'ssh').map((host) => host.label)).toEqual(['SSH Host']);
     expect(getAvailablePortForwardHosts(hosts, 'aws-ssm').map((host) => host.label)).toEqual(['Bastion']);
-    expect(getAvailablePortForwardHosts(hosts, 'ecs-task').map((host) => host.label)).toEqual(['gridwiz-ecs']);
+    expect(getAvailablePortForwardHosts(hosts, 'ecs-task').map((host) => host.label)).toEqual(['acme-ecs']);
     expect(getAvailablePortForwardHosts(hosts, 'container').map((host) => host.label)).toEqual(['SSH Host', 'Bastion', 'Warpgate']);
   });
 
@@ -571,11 +571,11 @@ describe('PortForwardingPanel dialog', () => {
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'AWS ECS Host' }));
     fireEvent.change(screen.getByLabelText('ECS task forwarding host search'), {
-      target: { value: 'gridwiz' },
+      target: { value: 'acme' },
     });
 
     const listbox = screen.getByRole('listbox', { name: 'AWS ECS Host options' });
-    expect(within(listbox).getByText('gridwiz-ecs')).toBeInTheDocument();
+    expect(within(listbox).getByText('acme-ecs')).toBeInTheDocument();
   });
 
   it('filters container forwarding host picker options', () => {
@@ -799,7 +799,7 @@ describe('PortForwardingPanel dialog', () => {
         {
           kind: 'ecs-cluster',
           hostId: 'ecs-host-1',
-          title: 'gridwiz-ecs',
+          title: 'acme-ecs',
           runtime: null,
           unsupportedReason: null,
           items: [],

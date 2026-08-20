@@ -51,8 +51,23 @@ export interface AwsSsoBrowserLoginPrompt {
   onCancel: () => void;
 }
 
+/** SSM API 를 부를 때 쓰는 자격증명. 기기 밖으로 나가지 않는다. */
+export interface ResolvedAwsCredentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+}
+
 export interface ResolvedAwsSessionResult {
   envSpec: AwsSessionEnvSpec;
+  /**
+   * envSpec 과 같은 값이지만 API 호출용 모양이다.
+   *
+   * **서버 경유 경로는 envSpec 을 서버로 보내고, 직접 경로는 이 값으로 기기에서 SSM 을 부른다.**
+   * 두 경로가 같은 해석기를 쓰도록 여기서 함께 돌려준다 — 자격증명을 두 번 만들면 SSO 토큰
+   * 갱신이 한쪽에만 반영되는 일이 생긴다.
+   */
+  credentials: ResolvedAwsCredentials;
   profileName: string;
   region: string;
   connectionDetails: string;
@@ -104,6 +119,11 @@ export async function resolveAwsSessionForHost(input: {
   const envSpec = createAwsSessionEnvSpec(credentials.credentials, credentials.region);
   return {
     envSpec,
+    credentials: {
+      accessKeyId: credentials.credentials.accessKeyId,
+      secretAccessKey: credentials.credentials.secretAccessKey,
+      sessionToken: credentials.credentials.sessionToken,
+    },
     profileName: profile.name,
     region: credentials.region,
     connectionDetails: [

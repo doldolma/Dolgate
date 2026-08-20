@@ -97,14 +97,14 @@ describe('TerminalConnectionOverlay', () => {
           {
             index: 1,
             count: 2,
-            label: 'gridwiz@10.0.0.1:22',
+            label: 'acme@10.0.0.1:22',
             stage: 'connected',
             name: 'Lime-DB',
           },
           {
             index: 2,
             count: 2,
-            label: 'gridwiz@192.168.0.13:22',
+            label: 'acme@192.168.0.13:22',
             stage: 'connecting',
             name: 'lime-dev',
           },
@@ -115,6 +115,6 @@ describe('TerminalConnectionOverlay', () => {
     // 사용자 지정 호스트 이름과 계정 주소가 함께 표시된다.
     expect(screen.getByText('Lime-DB')).toBeInTheDocument();
     expect(screen.getByText('lime-dev')).toBeInTheDocument();
-    expect(screen.getByText(/gridwiz@192\.168\.0\.13:22/)).toBeInTheDocument();
+    expect(screen.getByText(/acme@192\.168\.0\.13:22/)).toBeInTheDocument();
   });
 });

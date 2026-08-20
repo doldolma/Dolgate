@@ -99,7 +99,7 @@ function createCoordinator(
         {
           id: "net-a",
           label: "Work",
-          tailnetName: "gridwiz.com",
+          tailnetName: "acme-corp.com",
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
         },
@@ -220,7 +220,7 @@ describe("resolveTailnetRoute", () => {
 
     expect(coordinator.resolveTailnetRoute({ tailnetId: "net-a" })).toEqual({
       tailnetId: "net-a",
-      tailnetName: "gridwiz.com",
+      tailnetName: "acme-corp.com",
     });
   });
 
@@ -239,7 +239,7 @@ describe("resolveTailnetRoute", () => {
 
     expect(coordinator.resolveTailnetRoute({ tailnetId: " net-a " })).toEqual({
       tailnetId: "net-a",
-      tailnetName: "gridwiz.com",
+      tailnetName: "acme-corp.com",
     });
   });
 

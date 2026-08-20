@@ -22,15 +22,15 @@ import (
 func TestStatusFromBackendCarriesTheAccountAndTailnet(t *testing.T) {
 	state := &ipnstate.Status{
 		BackendState:   ipn.Running.String(),
-		CurrentTailnet: &ipnstate.TailnetStatus{Name: "gridwiz.com"},
+		CurrentTailnet: &ipnstate.TailnetStatus{Name: "acme-corp.com"},
 		TailscaleIPs:   []netip.Addr{netip.MustParseAddr("100.101.102.103")},
 		Self: &ipnstate.PeerStatus{
 			UserID: tailcfg.UserID(7),
 			// tsnet 은 끝에 점을 붙여 준다.
-			DNSName: "dolgate-macbook.gridwiz.com.",
+			DNSName: "dolgate-macbook.acme-corp.com.",
 		},
 		User: map[tailcfg.UserID]tailcfg.UserProfile{
-			7: {ID: 7, LoginName: "dolma@gridwiz.com", DisplayName: "도영 허"},
+			7: {ID: 7, LoginName: "dolma@acme-corp.com", DisplayName: "도영 허"},
 		},
 	}
 
@@ -39,13 +39,13 @@ func TestStatusFromBackendCarriesTheAccountAndTailnet(t *testing.T) {
 	if status.State != StateRunning {
 		t.Errorf("State = %q, want running", status.State)
 	}
-	if status.TailnetName != "gridwiz.com" {
+	if status.TailnetName != "acme-corp.com" {
 		t.Errorf("TailnetName = %q", status.TailnetName)
 	}
-	if status.LoginName != "dolma@gridwiz.com" {
+	if status.LoginName != "dolma@acme-corp.com" {
 		t.Errorf("LoginName = %q", status.LoginName)
 	}
-	if status.NodeName != "dolgate-macbook.gridwiz.com" {
+	if status.NodeName != "dolgate-macbook.acme-corp.com" {
 		t.Errorf("NodeName = %q — the trailing dot must go", status.NodeName)
 	}
 	if status.NodeIP != "100.101.102.103" {
@@ -75,14 +75,14 @@ func TestStatusFromBackendBeforeConnecting(t *testing.T) {
 func TestStatusFromBackendToleratesAMissingUserProfile(t *testing.T) {
 	status := statusFromBackend(&ipnstate.Status{
 		BackendState:   ipn.Running.String(),
-		CurrentTailnet: &ipnstate.TailnetStatus{Name: "gridwiz.com"},
-		Self:           &ipnstate.PeerStatus{UserID: tailcfg.UserID(7), DNSName: "node.gridwiz.com."},
+		CurrentTailnet: &ipnstate.TailnetStatus{Name: "acme-corp.com"},
+		Self:           &ipnstate.PeerStatus{UserID: tailcfg.UserID(7), DNSName: "node.acme-corp.com."},
 	}, time.Now())
 
 	if status.LoginName != "" {
 		t.Errorf("LoginName = %q, want empty", status.LoginName)
 	}
-	if status.TailnetName != "gridwiz.com" || status.NodeName != "node.gridwiz.com" {
+	if status.TailnetName != "acme-corp.com" || status.NodeName != "node.acme-corp.com" {
 		t.Errorf("the rest should survive: %#v", status)
 	}
 }
