@@ -352,6 +352,24 @@ export interface UseHostBrowserParams {
   searchQuery: string;
   hostViewMode?: HostViewMode;
   selectedHostId: string | null;
+  /**
+   * 단일 선택을 상위가 막을 수 있게 한다. false 를 주면 내부 선택도 움직이지 않는다.
+   *
+   * 편집 중에는 상위가 "저장하지 않은 변경" 을 물어본 뒤에 선택을 옮긴다. 내부 상태만 먼저
+   * 움직이면 목록 하이라이트와 우측 패널이 서로 다른 호스트를 가리킨다(실제로 그랬다).
+   */
+  canSelectHost?: (
+    hostId: string,
+    options?: { reason?: 'click' | 'menu' },
+  ) => boolean;
+  /**
+   * 그룹 이동(그룹 카드·트리 클릭, All Hosts 복귀)을 상위가 가로챈다.
+   *
+   * **거부가 아니라 "이어서 실행" 이다.** 거부만 하면 확인을 받은 뒤 이동을 다시 실행할 주체가
+   * 없어서 편집기만 닫히고 이동이 사라진다(실제로 그랬다). 상위는 물어볼 필요가 없으면 즉시,
+   * 물어봤으면 사용자가 답한 뒤에 `proceed()` 를 부른다.
+   */
+  onLeaveGroupScope?: (proceed: () => void) => void;
   activityLogs?: ActivityLogRecord[];
   snippets?: SnippetRecord[];
   onSetHostFavorite: (hostId: string, favorite: boolean) => void | Promise<void>;
@@ -410,6 +428,8 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     currentGroupPath,
     searchQuery,
     selectedHostId,
+    canSelectHost,
+    onLeaveGroupScope,
     onClearHostSelection,
     onSelectHost,
     onNavigateGroup,
@@ -425,6 +445,11 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   const [selectedHostIds, setSelectedHostIds] = useState<string[]>(
     selectedHostId ? [selectedHostId] : [],
   );
+  // 상위가 보관한 선택이 바뀌면 목록 하이라이트를 그것으로 맞춘다. 편집 중 전환처럼 상위가
+  // 직접 선택을 옮기는 경로가 있어서, 내부 상태만 두면 둘이 어긋난 채로 남는다.
+  useEffect(() => {
+    setSelectedHostIds(selectedHostId ? [selectedHostId] : []);
+  }, [selectedHostId]);
   const [selectedGroupPaths, setSelectedGroupPaths] = useState<string[]>([]);
   const [hostSelectionAnchor, setHostSelectionAnchor] = useState<string | null>(null);
   const [groupSelectionAnchor, setGroupSelectionAnchor] = useState<string | null>(null);
@@ -999,7 +1024,16 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     setHostSelectionAnchor(hostId);
   }
 
-  function selectSingleHost(hostId: string) {
+  /**
+   * 호스트 하나를 단독 선택한다.
+   *
+   * `reason` 은 상위가 판단을 달리할 근거다 — 우클릭(menu)으로 선택이 옮겨가는 것과 좌클릭으로
+   * 옮겨가는 것은 편집 중일 때 뜻이 다르다(메뉴를 열려던 동작이 확인 창을 띄우면 안 된다).
+   */
+  function selectSingleHost(hostId: string, reason: 'click' | 'menu' = 'click') {
+    if (canSelectHost && !canSelectHost(hostId, { reason })) {
+      return;
+    }
     setSelectedHostIds([hostId]);
     setSelectedGroupPaths([]);
     setHostSelectionAnchor(hostId);
@@ -1068,21 +1102,36 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       handleNavigateRoot();
       return;
     }
-    selectSingleGroup(groupPath);
-    // 그룹을 고르면 즐겨찾기 스코프는 해제(즐겨찾기/그룹/All Hosts는 상호배타 스코프).
-    setFavoritesFilterActive(false);
-    onNavigateGroup(groupPath);
+    // 상위가 편집 중이면 확인을 받은 뒤에 이 계속(continuation)을 부른다. 내부 상태 변경도 그
+    // 안에 있어서, 확인 중에 하이라이트만 먼저 움직이는 일이 없다.
+    leaveGroupScope(() => {
+      selectSingleGroup(groupPath);
+      // 그룹을 고르면 즐겨찾기 스코프는 해제(즐겨찾기/그룹/All Hosts는 상호배타 스코프).
+      setFavoritesFilterActive(false);
+      onNavigateGroup(groupPath);
+    });
+  }
+
+  /** 편집 중이면 상위가 물어본 뒤에 이어서 실행한다. 편집 중이 아니면 그 자리에서 실행한다. */
+  function leaveGroupScope(proceed: () => void) {
+    if (onLeaveGroupScope) {
+      onLeaveGroupScope(proceed);
+      return;
+    }
+    proceed();
   }
 
   function handleNavigateRoot() {
     setContextMenu(null);
-    setSelectedGroupPaths([]);
-    setSelectedHostIds([]);
-    setGroupSelectionAnchor(null);
-    setHostSelectionAnchor(null);
-    setFavoritesFilterActive(false);
-    onClearHostSelection();
-    onNavigateGroup(null);
+    leaveGroupScope(() => {
+      setSelectedGroupPaths([]);
+      setSelectedHostIds([]);
+      setGroupSelectionAnchor(null);
+      setHostSelectionAnchor(null);
+      setFavoritesFilterActive(false);
+      onClearHostSelection();
+      onNavigateGroup(null);
+    });
   }
 
   function handleToggleGroupBranch(groupPath: string) {

@@ -1,3 +1,4 @@
+import { cloneElement } from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -238,6 +239,7 @@ interface RenderBrowserOptions {
   selectedHostId?: string | null;
   active?: boolean;
   activityLogs?: ActivityLogRecord[];
+  canSelectHost?: (hostId: string, options?: { reason?: 'click' | 'menu' }) => boolean;
   onClearHostSelection?: ReturnType<typeof vi.fn>;
   onSelectHost?: ReturnType<typeof vi.fn>;
   onDuplicateHosts?: ReturnType<typeof vi.fn>;
@@ -281,6 +283,7 @@ function renderBrowser({
   selectedHostId = null,
   active = true,
   activityLogs = [],
+  canSelectHost,
   onClearHostSelection = vi.fn(),
   onSelectHost = vi.fn(),
   onDuplicateHosts = vi.fn().mockResolvedValue(undefined),
@@ -324,6 +327,7 @@ function renderBrowser({
       selectedHostId={selectedHostId}
       active={active}
       activityLogs={activityLogs}
+      canSelectHost={canSelectHost}
       onSearchChange={vi.fn()}
       onHostViewModeChange={onHostViewModeChange}
       onOpenLocalTerminal={onOpenLocalTerminal}
@@ -360,7 +364,13 @@ function renderBrowser({
       onSelectSection={onSelectSection}
     />
   );
-  return render(element);
+  const view = render(element);
+  return {
+    ...view,
+    /** 상위가 selectedHostId 만 바꿔 내려주는 경로(편집 대상 전환)를 흉내낸다. */
+    rerenderSelectedHost: (nextHostId: string | null) =>
+      view.rerender(cloneElement(element, { selectedHostId: nextHostId })),
+  };
 }
 
 function createDataTransfer(): DataTransfer {
@@ -1757,4 +1767,67 @@ describe('HostBrowser dialogs', () => {
     await waitFor(() => expect(onRemoveSecret).toHaveBeenCalledWith('secret:host-1'));
   });
 
+  // 편집 중에는 상위(HomeShell)가 "저장 안 된 변경" 을 물어본 뒤에 선택을 옮긴다. 상위가 막았는데
+  // 목록 하이라이트만 움직이면, 편집을 닫았을 때 센터와 우측이 서로 다른 호스트를 가리킨다.
+  it('leaves the highlight alone when the parent vetoes the selection', () => {
+    const onSelectHost = vi.fn();
+    renderBrowser({
+      selectedHostId: 'host-1',
+      onSelectHost,
+      canSelectHost: () => false,
+    });
+
+    const card = (hostId: string) =>
+      document.querySelector(`[data-host-id="${hostId}"]`) as HTMLElement;
+
+    fireEvent.click(card('host-2'));
+
+    expect(onSelectHost).not.toHaveBeenCalled();
+    expect(card('host-2')).toHaveAttribute('data-host-card-state', 'idle');
+    expect(card('host-1')).toHaveAttribute('data-host-card-state', 'selected');
+  });
+
+  // 상위가 직접 선택을 옮기는 경로(편집 대상 전환)가 있다. 그때 목록도 따라와야 한다.
+  it('follows the selection the parent hands down', () => {
+    const { rerenderSelectedHost } = renderBrowser({ selectedHostId: 'host-1' });
+    const card = (hostId: string) =>
+      document.querySelector(`[data-host-id="${hostId}"]`) as HTMLElement;
+    expect(card('host-1')).toHaveAttribute('data-host-card-state', 'selected');
+
+    rerenderSelectedHost('host-2');
+
+    expect(card('host-2')).toHaveAttribute('data-host-card-state', 'selected');
+    expect(card('host-1')).toHaveAttribute('data-host-card-state', 'idle');
+  });
+
+  // 파일 탐색기와 같은 규칙: 선택 안 된 항목을 우클릭하면 그 항목이 선택돼 보인다. 무엇에 걸리는
+  // 메뉴인지 화면에서 알 수 있어야 한다.
+  it('selects the right-clicked host and marks it as the menu target', () => {
+    renderBrowser({ selectedHostId: 'host-1' });
+    const card = (hostId: string) =>
+      document.querySelector(`[data-host-id="${hostId}"]`) as HTMLElement;
+
+    fireEvent.contextMenu(card('host-2'));
+
+    expect(card('host-2')).toHaveAttribute('data-host-card-state', 'selected');
+    expect(card('host-2')).toHaveAttribute('data-host-menu-target', 'true');
+    expect(card('host-1')).not.toHaveAttribute('data-host-menu-target');
+  });
+
+  // 편집 중에는 상위가 메뉴발 선택을 거절한다(확인 창이 뜨면 메뉴 한 번 열려고 편집이 끊긴다).
+  // 그때도 무엇에 걸리는지는 보여야 한다.
+  it('keeps the selection but still marks the target when the parent refuses menu selection', () => {
+    renderBrowser({
+      selectedHostId: 'host-1',
+      canSelectHost: (_hostId, options) => options?.reason !== 'menu',
+    });
+    const card = (hostId: string) =>
+      document.querySelector(`[data-host-id="${hostId}"]`) as HTMLElement;
+
+    fireEvent.contextMenu(card('host-2'));
+
+    expect(card('host-2')).toHaveAttribute('data-host-card-state', 'idle');
+    expect(card('host-1')).toHaveAttribute('data-host-card-state', 'selected');
+    expect(card('host-2')).toHaveAttribute('data-host-menu-target', 'true');
+  });
 });

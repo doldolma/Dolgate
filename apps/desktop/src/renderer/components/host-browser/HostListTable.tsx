@@ -41,9 +41,13 @@ export function HostListTable({ hb }: HostListTableProps) {
   } = hb;
 
   function openHostMenu(host: (typeof visibleHosts)[number], x: number, y: number) {
-    const targetHostIds = selectedHostIdSet.has(host.id)
+    const isAlreadySelected = selectedHostIdSet.has(host.id);
+    const targetHostIds = isAlreadySelected
       ? hb.getOrderedSelectedHostIds(selectedHostIds)
       : [host.id];
+    if (!isAlreadySelected) {
+      hb.selectSingleHost(host.id, 'menu');
+    }
     hb.setContextMenu({ kind: 'host', hostIds: targetHostIds, x, y });
   }
 
@@ -116,6 +120,9 @@ export function HostListTable({ hb }: HostListTableProps) {
                     selectedHostId === host.id)
                 }
                 isFavorite={favoriteHostIdSet.has(host.id)}
+                isMenuTarget={
+                  hb.contextMenu?.kind === 'host' && hb.contextMenu.hostIds.includes(host.id)
+                }
                 onOpenMenu={openHostMenu}
               />
             )}
@@ -131,12 +138,15 @@ function HostListTableRow({
   hb,
   isSelected,
   isFavorite,
+  isMenuTarget,
   onOpenMenu,
 }: {
   host: HostRecord;
   hb: HostBrowserModel;
   isSelected: boolean;
   isFavorite: boolean;
+  /** 지금 열린 메뉴가 이 행을 대상으로 하는가(선택과 다른 표시 — 카드 쪽 주석 참고). */
+  isMenuTarget: boolean;
   onOpenMenu: (host: HostRecord, x: number, y: number) => void;
 }) {
   const { t: translate } = useTranslation();
@@ -152,6 +162,7 @@ function HostListTableRow({
               data-host-card="true"
               data-host-id={host.id}
               data-host-card-state={isSelected ? 'selected' : 'idle'}
+              data-host-menu-target={isMenuTarget ? 'true' : undefined}
               role="button"
               tabIndex={0}
               draggable
@@ -160,6 +171,8 @@ function HostListTableRow({
                 isSelected
                   ? 'bg-[var(--selection-tint)]'
                   : 'hover:bg-[color-mix(in_srgb,var(--surface-elevated)_70%,transparent_30%)]',
+                isMenuTarget &&
+                  'ring-2 ring-inset ring-[color-mix(in_srgb,var(--accent-strong)_45%,transparent)]',
               )}
               style={{ gridTemplateColumns: GRID_TEMPLATE }}
               onClick={(event) => hb.handleHostSelection(host.id, event)}

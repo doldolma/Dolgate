@@ -360,6 +360,8 @@ export interface HostFormActionState {
 
 export interface HostFormHandle {
   submitCreate: () => Promise<boolean>;
+  /** 저장되지 않은 변경이 있는가. 편집 대상을 갈아탈 때 물어볼지 정하는 데 쓴다. */
+  isDirty: () => boolean;
   /** 편집 폼을 명시적으로 저장(연결하지 않음). 호스트 필드 + 환경변수 모두 반영. */
   submit: () => Promise<boolean>;
   submitAndConnect: () => Promise<boolean>;
@@ -1889,6 +1891,69 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     return true;
   }, [host, isEditMode, onConnect, persistChanges, reportCurrentValidity]);
 
+  /**
+   * 저장되지 않은 변경이 있는가.
+   *
+   * 저장 경로가 no-op 판정에 쓰는 스냅샷 비교를 그대로 쓴다([[persistChanges]]) — 판정 기준이
+   * 갈라지면 "변경 없음" 이라고 넘어간 뒤 저장 때는 변경으로 잡히는(또는 그 반대) 일이 생긴다.
+   *
+   * 생성 모드에서는 비교 기준이 없다. 한 글자라도 입력했으면 버릴 것이 있다고 본다.
+   */
+  const isDirty = useCallback(() => {
+    const submission = buildHostFormSubmission({
+      draft,
+      tags: tagTokens,
+      credentialMode,
+      selectedSecretRef,
+      credentialUsername,
+      credentialDomain,
+      password,
+      passphrase,
+      privateKeyPem: privateKeyFile?.content,
+      certificateText: certificateFile?.content,
+      env: envVars,
+    });
+    const currentKey = serializeHostFormSubmission(submission);
+    if (!isEditMode) {
+      // 생성 모드에는 "저장된 상태" 가 없다. 손대지 않은 새 폼과 비교해, 아무것도 입력하지 않았으면
+      // 버릴 것이 없다고 본다 — New Host 를 눌러 두고 다른 데를 클릭할 때마다 확인 창이 뜨면
+      // 그 창은 곧 아무도 읽지 않는 창이 된다.
+      //
+      // 종류(SSH·RDP…)는 지금 폼의 종류로 맞춰 비교한다. 탭만 바꾼 것은 버릴 내용이 아니다.
+      const pristineKind =
+        draft.kind === 'rdp' || draft.kind === 'vnc' || draft.kind === 'serial'
+          ? draft.kind
+          : 'ssh';
+      const pristineKey = serializeHostFormSubmission(
+        buildHostFormSubmission({
+          draft: createDraft(defaultGroupPath, pristineKind),
+          tags: [],
+          credentialMode: 'new',
+          selectedSecretRef: '',
+          password: '',
+          passphrase: '',
+        }),
+      );
+      return currentKey !== pristineKey;
+    }
+    return currentKey !== lastSavedSubmissionKey;
+  }, [
+    certificateFile?.content,
+    credentialDomain,
+    credentialMode,
+    credentialUsername,
+    defaultGroupPath,
+    draft,
+    envVars,
+    isEditMode,
+    lastSavedSubmissionKey,
+    passphrase,
+    password,
+    privateKeyFile?.content,
+    selectedSecretRef,
+    tagTokens,
+  ]);
+
   const submit = useCallback(async () => {
     if (!isEditMode) {
       return false;
@@ -1908,8 +1973,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     submitCreate,
     submit,
     submitAndConnect,
+    isDirty,
     setLabel: (label: string) => setDraft((prev) => ({ ...prev, label }))
-  }), [submit, submitAndConnect, submitCreate]);
+  }), [isDirty, submit, submitAndConnect, submitCreate]);
 
   useEffect(() => {
     onActionStateChange?.({

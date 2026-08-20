@@ -18,6 +18,13 @@ interface HostListCardProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
   selected?: boolean;
   /** Single-focused card (drives the detail panel) — stronger emphasis than `selected`. */
   focused?: boolean;
+  /**
+   * 지금 열린 컨텍스트 메뉴가 이 카드를 대상으로 하는가.
+   *
+   * 선택과 **다른 표시**여야 한다 — 같은 색으로 칠하면 "선택된 건가?" 를 다시 묻게 된다. 편집
+   * 중에는 우클릭이 선택을 옮기지 않으므로(HomeShell 의 menu 예외), 이 표시가 유일한 단서다.
+   */
+  menuTarget?: boolean;
   favorite?: boolean;
   favoriteLabel?: string;
   onToggleFavorite?: () => void;
@@ -31,6 +38,7 @@ export function HostListCard({
   host,
   selected = false,
   focused = false,
+  menuTarget = false,
   favorite = false,
   favoriteLabel,
   onToggleFavorite,
@@ -54,6 +62,7 @@ export function HostListCard({
       data-host-card="true"
       data-host-id={host.id}
       data-host-card-state={selected ? 'selected' : 'idle'}
+      data-host-menu-target={menuTarget ? 'true' : undefined}
       className={cn(
         'flex h-full min-h-[7.75rem] cursor-pointer flex-col gap-[0.4rem] overflow-hidden rounded-[10px] border bg-[var(--surface-elevated)] px-[0.9rem] py-[0.7rem] text-left transition-[background-color,border-color,box-shadow] duration-150',
         focused
@@ -61,6 +70,9 @@ export function HostListCard({
           : selected
             ? 'border-[var(--selection-border)] bg-[var(--selection-tint)]'
             : 'border-[var(--border)] hover:border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] hover:bg-[color-mix(in_srgb,var(--surface-elevated)_92%,var(--accent-strong)_8%)]',
+        // 링은 테두리(선택)와 겹치지 않는 층이라, 선택 여부와 무관하게 대상을 알려 준다.
+        menuTarget &&
+          'ring-2 ring-[color-mix(in_srgb,var(--accent-strong)_45%,transparent)]',
         className,
       )}
       {...props}

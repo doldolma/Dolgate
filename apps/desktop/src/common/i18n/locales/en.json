@@ -3179,6 +3179,10 @@
     "unusedSecrets": "Some saved credentials become unused after deleting the host.",
     "secretsKept": "Linked saved credentials are kept."
   },
+  "hostEditSwitch": {
+    "eyebrow": "Editing",
+    "title": "You have unsaved changes"
+  },
   "select": {
     "search": "Search",
     "noResults": "No search results.",

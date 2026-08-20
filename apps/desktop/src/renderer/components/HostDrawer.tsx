@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { LEGACY_TOLERATED_HOST_KINDS, getHostBadgeLabel } from '@shared';
 import type { HostRecord, SecretMetadataRecord, SnippetRecord } from '@shared';
 import { HostForm, type HostFormActionState, type HostFormHandle, type HostFormProps } from './HostForm';
@@ -103,7 +103,20 @@ interface HostDrawerProps {
   onOpenTailnets?: () => void;
 }
 
-export function HostDrawer({
+/**
+ * 상위(HomeShell)가 편집 상태를 물어볼 창구.
+ *
+ * 편집 중에 목록에서 다른 호스트를 고르면 편집 대상을 갈아타는데, 자동저장이 아니라서 저장하지
+ * 않은 변경이 있는지 먼저 알아야 한다. dirty 를 렌더마다 위로 올리면(콜백) 타이핑마다 상위가
+ * 다시 그려지므로, 필요한 순간에만 물어보는 명령형 창구로 둔다.
+ */
+export interface HostDrawerHandle {
+  isDirty: () => boolean;
+  /** 편집 중인 내용을 저장한다. 저장했으면 true. */
+  save: () => Promise<boolean>;
+}
+
+export const HostDrawer = forwardRef<HostDrawerHandle, HostDrawerProps>(function HostDrawer({
   open,
   mode,
   host,
@@ -122,7 +135,7 @@ export function HostDrawer({
   onConnect,
   onEditExistingSecret,
   onOpenTailnets
-}: HostDrawerProps) {
+}: HostDrawerProps, ref) {
   const { t: translate } = useTranslation();
   const drawerRef = useRef<HTMLElement | null>(null);
   const hostFormRef = useRef<HostFormHandle | null>(null);
@@ -185,6 +198,20 @@ export function HostDrawer({
   const headerBadgeLabel = formHost
     ? getHostBadgeLabel(formHost)
     : HOST_KIND_BADGE_LABELS[selectedKind];
+
+  useImperativeHandle(ref, () => ({
+    isDirty: () => hostFormRef.current?.isDirty() ?? false,
+    save: async () => {
+      if (!hostFormRef.current) {
+        return false;
+      }
+      // 생성 중이면 저장이 곧 "만들기" 다. 확인 창의 선택지가 취소/저장 둘뿐이라, 여기서 막으면
+      // 작성 중인 내용을 들고 앞으로 갈 방법이 없어진다(버리려면 X 로 닫는다).
+      return mode === 'create'
+        ? hostFormRef.current.submitCreate()
+        : hostFormRef.current.submit();
+    },
+  }), [mode]);
 
   async function handlePrimaryAction() {
     if (!hostFormRef.current) {
@@ -354,4 +381,4 @@ export function HostDrawer({
       </div>
     </aside>
   );
-}
+});

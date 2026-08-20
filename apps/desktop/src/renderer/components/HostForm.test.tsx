@@ -1584,4 +1584,28 @@ describe('HostForm RDP credential selection', () => {
     );
   });
 
+  // 편집 대상을 갈아탈 때 "저장 안 된 변경" 을 물어볼지 정하는 근거다. 저장 경로와 같은 스냅샷
+  // 비교를 쓰므로, 여기서 clean 이라고 한 상태는 저장해도 no-op 이어야 한다.
+  it('reports unsaved changes through the form handle', async () => {
+    const ref = { current: null as HostFormHandle | null };
+
+    render(
+      <HostForm
+        ref={ref}
+        host={createHost()}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await waitFor(() => expect(ref.current?.isDirty()).toBe(false));
+
+    fireEvent.change(screen.getByLabelText('호스트 이름'), {
+      target: { value: 'renamed.example.com' },
+    });
+
+    expect(ref.current?.isDirty()).toBe(true);
+  });
 });

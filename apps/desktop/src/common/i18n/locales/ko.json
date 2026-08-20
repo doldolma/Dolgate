@@ -3179,6 +3179,10 @@
     "unusedSecrets": "호스트를 삭제한 뒤 더 이상 사용되지 않는 저장된 인증 정보가 있습니다.",
     "secretsKept": "연결된 저장된 인증 정보는 유지됩니다."
   },
+  "hostEditSwitch": {
+    "eyebrow": "편집 중",
+    "title": "저장하지 않은 변경사항이 있습니다"
+  },
   "select": {
     "search": "검색",
     "noResults": "검색 결과가 없습니다.",

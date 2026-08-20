@@ -15,7 +15,8 @@ import {
 } from '@shared';
 import { AwsImportDialog } from '../components/AwsImportDialog';
 import { HostBrowser } from '../components/HostBrowser';
-import { HostDrawer } from '../components/HostDrawer';
+import { HostDrawer, type HostDrawerHandle } from '../components/HostDrawer';
+import { HostEditSwitchConfirmDialog } from '../components/HostEditSwitchConfirmDialog';
 import { DolgateImportDialog, HostExportDialog } from '../components/HostTransferDialogs';
 import { changeVaultPassphrase, resetVault } from '../services/desktop/auth-window-updater';
 import { getJumpHostCandidates } from '../components/HostForm';
@@ -122,6 +123,18 @@ export function HomeShell({
       ? homeViewModel.hostDrawer.hostId
       : null;
   const currentHost = findHost(homeViewModel.hosts, editingHostId);
+  const hostDrawerRef = useRef<HostDrawerHandle | null>(null);
+  /**
+   * 편집기를 떠나려는 동작. 저장하지 않은 변경이 있어서 확인을 기다리는 동안만 값이 있다.
+   *
+   * 떠나는 경로는 하나가 아니다 — 다른 호스트 선택, 그룹 이동, All Hosts 복귀, 섹션 이동. 각
+   * 경로마다 따로 막으면 하나를 빠뜨리고, 빠뜨린 곳에서 편집 내용이 조용히 사라진다.
+   */
+  const [pendingEditorExit, setPendingEditorExit] = useState<{ run: () => void } | null>(
+    null,
+  );
+  const [isEditorExitSaving, setIsEditorExitSaving] = useState(false);
+  const [editorExitError, setEditorExitError] = useState<string | null>(null);
   const groupOptions = useMemo(
     () =>
       buildGroupOptions(homeViewModel.groups, homeViewModel.hosts, [
@@ -280,13 +293,63 @@ export function HomeShell({
   }
 
   function handleSelectHost(hostId: string) {
-    // 편집/생성 중에는 다른 호스트를 눌러도 이동/전환하지 않는다(작업 중 실수로 벗어나는 것 방지).
-    // 다른 호스트로 가려면 먼저 편집 폼을 닫거나, 우클릭 → 수정으로 명시적으로 전환한다.
-    if (homeViewModel.hostDrawer.mode !== 'closed') {
-      return;
-    }
     resetHostBrowserMessages();
     setSelectedHostId(hostId);
+  }
+
+  /** 편집 대상을 이 호스트로 옮긴다. 목록 하이라이트는 selectedHostId 를 따라온다. */
+  function switchEditTargetTo(hostId: string) {
+    resetHostBrowserMessages();
+    setSelectedHostId(hostId);
+    homeViewModel.openEditHostDrawer(hostId);
+  }
+
+  /**
+   * 편집기를 떠나는 동작을 감싼다. 저장하지 않은 변경이 있으면 먼저 묻고, 없으면 그냥 실행한다.
+   *
+   * 반환값은 "지금 실행했는가" 다 — 호출부(선택 veto)가 내부 상태를 움직여도 되는지 판단한다.
+   */
+  function guardEditorExit(run: () => void): boolean {
+    if (
+      homeViewModel.hostDrawer.mode === 'closed' ||
+      !hostDrawerRef.current?.isDirty()
+    ) {
+      run();
+      return true;
+    }
+    setPendingEditorExit({ run });
+    setEditorExitError(null);
+    return false;
+  }
+
+  /**
+   * 편집 중에 목록에서 다른 호스트를 고를 수 있는가.
+   *
+   * 예전에는 편집 중 선택을 무시했는데, 무시한 쪽이 절반이었다 — 목록 하이라이트(HostBrowser 내부
+   * 상태)는 움직이고 우측이 쓰는 selectedHostId 는 그대로여서, 편집을 닫으면 센터와 우측이 다른
+   * 호스트를 가리켰다. 이제 편집 대상을 그 호스트로 갈아탄다(우리는 자동저장이 아니므로, 저장하지
+   * 않은 변경이 있으면 먼저 묻는다).
+   */
+  function canSelectHostWhileEditing(
+    hostId: string,
+    options?: { reason?: 'click' | 'menu' },
+  ): boolean {
+    if (homeViewModel.hostDrawer.mode === 'closed') {
+      return true;
+    }
+    if (hostId === editingHostId) {
+      return true;
+    }
+    // 우클릭은 메뉴를 열려는 동작이다. 그것 때문에 "저장하시겠습니까" 가 뜨면 메뉴를 한 번 열려고
+    // 편집 흐름을 끊게 된다 — 편집 중에는 선택을 옮기지 않고 조용히 넘긴다(메뉴 대상 표시가
+    // 무엇에 걸리는지 알려 준다).
+    if (options?.reason === 'menu') {
+      return false;
+    }
+    guardEditorExit(() => switchEditTargetTo(hostId));
+    // 선택은 selectedHostId 로 옮긴다(가드가 통과했으면 이미 옮겼다). 내부 상태까지 여기서 또
+    // 움직이면 경로가 둘이 되고, 확인 대기 중에는 하이라이트만 먼저 튄다.
+    return false;
   }
 
   function handleEditHost(hostId: string) {
@@ -384,6 +447,7 @@ export function HomeShell({
   // 호스트 편집/생성 폼은 별도 오버레이가 아니라 우측 상세 영역(HostBrowser aside) 안에 표시한다.
   const hostEditor = isDrawerOpen ? (
     <HostDrawer
+      ref={hostDrawerRef}
       open={isDrawerOpen}
       mode={homeViewModel.hostDrawer.mode === 'create' ? 'create' : 'edit'}
       host={currentHost}
@@ -567,10 +631,19 @@ export function HomeShell({
               setSelectedHostId(null);
               homeViewModel.navigateGroup(path);
             }}
+            // 그룹 이동·All Hosts 복귀도 편집기를 떠나는 동작이다. 막기만 하면 확인을 받은 뒤
+            // 이동을 다시 실행할 주체가 없어 편집기만 닫힌다 — 이동 자체를 이어서 실행한다.
+            onLeaveGroupScope={(proceed) => {
+              guardEditorExit(() => {
+                homeViewModel.closeHostDrawer();
+                proceed();
+              });
+            }}
             onClearHostSelection={() => {
               setSelectedHostId(null);
             }}
             onSelectHost={handleSelectHost}
+            canSelectHost={canSelectHostWhileEditing}
             onEditHost={handleEditHost}
             onDuplicateHosts={async (hostIds) => {
               resetHostBrowserMessages();
@@ -887,6 +960,38 @@ export function HomeShell({
         onClose={() => setIsWarpgateImportOpen(false)}
         onImport={async (draft) => {
           await homeViewModel.saveHost(null, draft);
+        }}
+      />
+      <HostEditSwitchConfirmDialog
+        open={pendingEditorExit !== null}
+        isSaving={isEditorExitSaving}
+        errorMessage={editorExitError}
+        onCancel={() => {
+          setPendingEditorExit(null);
+          setEditorExitError(null);
+        }}
+        onSave={async () => {
+          if (!pendingEditorExit) {
+            return;
+          }
+          setIsEditorExitSaving(true);
+          setEditorExitError(null);
+          try {
+            const saved = await hostDrawerRef.current?.save();
+            if (!saved) {
+              // 저장이 막혔다(필수 칸 등) — 폼이 그 이유를 자기 자리에서 표시하므로 다이얼로그를
+              // 닫고 편집 화면에 머문다. 여기서 문구를 또 만들면 같은 말을 두 번 하게 된다.
+              setPendingEditorExit(null);
+              return;
+            }
+            const exit = pendingEditorExit;
+            setPendingEditorExit(null);
+            exit.run();
+          } catch (error) {
+            setEditorExitError(error instanceof Error ? error.message : null);
+          } finally {
+            setIsEditorExitSaving(false);
+          }
         }}
       />
     </section>

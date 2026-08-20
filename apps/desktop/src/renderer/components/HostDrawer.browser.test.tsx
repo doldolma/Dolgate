@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { HostRecord, SecretMetadataRecord } from '@shared';
-import { HostDrawer } from './HostDrawer';
+import { HostDrawer, type HostDrawerHandle } from './HostDrawer';
 
 const editHost: HostRecord = {
   id: 'host-1',
@@ -28,6 +28,7 @@ function renderDrawer(options?: {
   keychainEntries?: SecretMetadataRecord[];
   /** RDP 는 서버가 계정 데이터 수준을 저장할 수 있을 때만 만들 수 있다. 기본은 지원하는 서버. */
   serverSupportsDataFloor?: boolean;
+  handleRef?: { current: HostDrawerHandle | null };
 }) {
   const onClose = options?.onClose ?? vi.fn();
   const onSubmit = vi.fn().mockResolvedValue(undefined);
@@ -39,6 +40,7 @@ function renderDrawer(options?: {
     onConnect,
     ...render(
       <HostDrawer
+        ref={options?.handleRef}
         open={options?.open ?? true}
         mode={options?.mode ?? 'edit'}
         host={options?.host ?? (options?.mode === 'create' ? null : editHost)}
@@ -298,3 +300,50 @@ describe('HostDrawer host kinds by server capability', () => {
   });
 });
 
+// 편집 중에 다른 호스트를 고르면 상위가 이 값을 보고 "저장 안 된 변경" 을 물어볼지 정한다.
+// 열자마자 dirty 로 보이면 아무것도 건드리지 않았는데 매번 확인 창이 뜬다.
+describe('HostDrawer 편집 상태 보고', () => {
+  it('열린 직후에는 저장할 변경이 없다고 답한다', async () => {
+    const handleRef = { current: null as HostDrawerHandle | null };
+    renderDrawer({ handleRef });
+
+    await waitFor(() => expect(handleRef.current).not.toBeNull());
+    await waitFor(() => expect(handleRef.current?.isDirty()).toBe(false));
+  });
+
+  it('값을 바꾸면 변경이 있다고 답한다', async () => {
+    const handleRef = { current: null as HostDrawerHandle | null };
+    renderDrawer({ handleRef });
+
+    await waitFor(() => expect(handleRef.current?.isDirty()).toBe(false));
+    fireEvent.change(screen.getByLabelText('호스트 이름'), {
+      target: { value: 'moved.example.com' },
+    });
+
+    expect(handleRef.current?.isDirty()).toBe(true);
+  });
+});
+
+// New Host 를 눌러 두고 다른 데를 클릭할 때마다 확인 창이 뜨면, 그 창은 곧 아무도 읽지 않는
+// 창이 된다. 손대지 않은 새 폼은 버릴 것이 없다.
+describe('HostDrawer 생성 모드의 변경 판정', () => {
+  it('아무것도 입력하지 않은 새 호스트 폼은 버릴 것이 없다고 답한다', async () => {
+    const handleRef = { current: null as HostDrawerHandle | null };
+    renderDrawer({ mode: 'create', handleRef });
+
+    await waitFor(() => expect(handleRef.current).not.toBeNull());
+    await waitFor(() => expect(handleRef.current?.isDirty()).toBe(false));
+  });
+
+  it('한 글자라도 입력하면 버릴 것이 있다고 답한다', async () => {
+    const handleRef = { current: null as HostDrawerHandle | null };
+    renderDrawer({ mode: 'create', handleRef });
+
+    await waitFor(() => expect(handleRef.current?.isDirty()).toBe(false));
+    fireEvent.change(screen.getByLabelText('호스트 이름'), {
+      target: { value: 'new.example.com' },
+    });
+
+    expect(handleRef.current?.isDirty()).toBe(true);
+  });
+});

@@ -135,11 +135,16 @@ export function HostListPanel({ hb }: HostListPanelProps) {
   }
 
   function openHostMenu(host: (typeof visibleHosts)[number], x: number, y: number) {
-    // 우클릭/⋮ 메뉴는 선택(상세 패널 포커스)을 바꾸지 않는다 — 메뉴 대상만 계산:
-    // 이미 다중선택에 든 호스트면 그 선택 전체, 아니면 클릭한 호스트 하나.
-    const targetHostIds = selectedHostIdSet.has(host.id)
+    // 우클릭 대상이 무엇인지 화면에 보이게, 선택도 함께 옮긴다 — 파일 탐색기와 같은 규칙이다:
+    // 이미 다중선택에 든 호스트면 그 선택 전체를 유지하고, 아니면 그 호스트 하나를 선택한다.
+    // (편집 중에는 상위가 이 선택을 조용히 거절한다 — 메뉴를 열려던 동작이 확인 창을 띄우면 안 된다.)
+    const isAlreadySelected = selectedHostIdSet.has(host.id);
+    const targetHostIds = isAlreadySelected
       ? hb.getOrderedSelectedHostIds(selectedHostIds)
       : [host.id];
+    if (!isAlreadySelected) {
+      hb.selectSingleHost(host.id, 'menu');
+    }
     hb.setContextMenu({ kind: 'host', hostIds: targetHostIds, x, y });
   }
 
@@ -165,6 +170,9 @@ export function HostListPanel({ hb }: HostListPanelProps) {
           selectedHostIds.length <= 1 &&
           selectedGroupPaths.length === 0 &&
           selectedHostId === host.id
+        }
+        menuTarget={
+          hb.contextMenu?.kind === 'host' && hb.contextMenu.hostIds.includes(host.id)
         }
         favorite={favoriteHostIdSet.has(host.id)}
         favoriteLabel={translate('hostListPanel.favoriteFor', { label: host.label })}
