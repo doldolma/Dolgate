@@ -29,6 +29,7 @@ interface AppModalsProps {
       privateKeyPem?: string;
       certificateText?: string;
     };
+    label?: string;
   }) => Promise<void>;
   isUpdateInstallConfirmOpen: boolean;
   onCloseUpdateInstallConfirm: () => void;

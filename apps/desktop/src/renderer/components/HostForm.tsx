@@ -5,7 +5,7 @@ import { useHostFormController } from '../controllers/useHostFormController';
 import { EnvironmentVariablesEditor } from './EnvironmentVariablesEditor';
 import { loadSavedCredential } from '../services/desktop/settings';
 import { pickRdpShareFolder } from '../services/desktop/rdp';
-import { formatRdpCredentialOptionLabel, formatSavedSecretOptionLabel } from '../lib/secret-display';
+import { CredentialSelect } from './CredentialSelect';
 import { terminalThemePresets } from '../lib/terminal-presets';
 import { listAwsProfiles } from '../services/desktop/imports';
 import { Button, IconButton, Input, SearchableSelect, SelectField, TagInputField, Textarea, ToggleSwitch } from '../ui';
@@ -390,7 +390,6 @@ export interface HostFormProps {
   onSubmit: (draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
   onConnect?: (hostId: string) => Promise<void>;
   onEditExistingSecret?: (secretRef: string) => void;
-  onOpenSecrets?: () => void;
   /** TAILNET 옆 Manage. 설정의 네트워크 섹션으로 보낸다. */
   onOpenTailnets?: () => void;
   onActionStateChange?: (state: HostFormActionState) => void;
@@ -690,7 +689,6 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   onSubmit,
   onConnect,
   onEditExistingSecret,
-  onOpenSecrets,
   onOpenTailnets,
   onActionStateChange,
   onLabelChange
@@ -1212,42 +1210,6 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     lastHydratedHostIdRef.current = host.id;
     lastHydratedHostKeyRef.current = nextHydrationKey;
   }, [createKind, defaultGroupPath, host, isEditDirty, saveInFlight]);
-
-  // 구버전 호스트(env가 아직 시크릿 번들에만 있는 경우)용 폴백: 호스트 레코드에 env가 없을 때만
-  // 시크릿을 복호화해 읽어와 보여준다. 저장하면 호스트 레코드(드래프트)로 이전된다.
-  useEffect(() => {
-    if (!sshDraft || credentialMode !== 'existing' || !selectedSecretRef) {
-      return;
-    }
-    if (host && host.kind === 'ssh' && Array.isArray(host.env) && host.env.length > 0) {
-      return;
-    }
-    if (envLoadedSecretRef.current === selectedSecretRef) {
-      return;
-    }
-    envLoadedSecretRef.current = selectedSecretRef;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const loaded = await loadSavedCredential(selectedSecretRef);
-        if (!cancelled) {
-          const nextEnv = loaded?.env ?? [];
-          setEnvVars(nextEnv);
-          loadedEnvSnapshotRef.current = JSON.stringify(nextEnv);
-        }
-      } catch {
-        if (!cancelled) {
-          setEnvVars([]);
-          loadedEnvSnapshotRef.current = JSON.stringify([]);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [host, sshDraft, credentialMode, selectedSecretRef]);
-
-  // 환경변수도 자동저장하지 않는다 — submit()에서 명시적으로 저장할 때 시크릿 번들에 함께 반영한다.
 
   useEffect(() => {
     if (!sshDraft) {
@@ -2371,41 +2333,23 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
 
             {sshDraft.authType !== 'agent' ? (
             <div className="grid gap-[0.55rem]">
-              <div className="flex items-center justify-between gap-3">
-                <span className={fieldLabelClassName}>{translate('hostForm.field.savedCredentials')}</span>
-                {onOpenSecrets && keychainEntries.length > 0 ? (
-                  <button
-                    type="button"
-                    className="border-0 bg-transparent p-0 text-[0.9rem] font-semibold text-[var(--accent-strong)]"
-                    onClick={onOpenSecrets}
-                  >
-                    {translate('hostForm.action.manage')}
-                  </button>
-                ) : null}
-              </div>
-              <SelectField
-                aria-label={translate('hostForm.field.savedCredentials')}
+              {/* 여기에 설정 화면으로 보내는 '관리' 링크가 있었다. 편집하려고 눌렀다가 폼을 벗어나
+                  버려서(작성 중이던 내용을 두고) 당황하는 자리였고, 바로 아래 '편집' 버튼과 역할이
+                  겹쳤다. 자격증명 편집은 그 '편집' 이 담당하고, 목록 관리는 설정에서 한다. */}
+              <span className={fieldLabelClassName}>{translate('hostForm.field.savedCredentials')}</span>
+              <CredentialSelect
+                ariaLabel={translate('hostForm.field.savedCredentials')}
                 value={credentialMode === 'existing' ? `existing:${selectedSecretRef}` : credentialMode}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (value === 'new') {
-                    setCredentialMode('new');
-                    setSelectedSecretRef('');
-                    return;
-                  }
-                  if (value.startsWith('existing:')) {
-                    setCredentialMode('existing');
-                    setSelectedSecretRef(value.slice('existing:'.length));
-                  }
+                entries={reusableEntries}
+                onSelectNew={() => {
+                  setCredentialMode('new');
+                  setSelectedSecretRef('');
                 }}
-              >
-                <option value="new">{translate('hostForm.auth.newCredential')}</option>
-                {reusableEntries.map((entry) => (
-                  <option key={entry.secretRef} value={`existing:${entry.secretRef}`}>
-                    {formatSavedSecretOptionLabel(entry)}
-                  </option>
-                ))}
-              </SelectField>
+                onSelectExisting={(secretRef) => {
+                  setCredentialMode('existing');
+                  setSelectedSecretRef(secretRef);
+                }}
+              />
             </div>
             ) : null}
 
@@ -2860,36 +2804,22 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   </button>
                 ) : null}
               </div>
-              <SelectField
-                aria-label={translate('hostForm.vnc.credential')}
+              <CredentialSelect
+                ariaLabel={translate('hostForm.vnc.credential')}
                 value={
                   credentialMode === 'existing' ? `existing:${selectedSecretRef}` : credentialMode
                 }
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (value === 'new') {
-                    setCredentialMode('new');
-                    setSelectedSecretRef('');
-                    return;
-                  }
-                  if (value.startsWith('existing:')) {
-                    setCredentialMode('existing');
-                    setSelectedSecretRef(value.slice('existing:'.length));
-                  }
+                entries={vncReusableEntries}
+                missingEntry={vncSelectedMissingEntry}
+                onSelectNew={() => {
+                  setCredentialMode('new');
+                  setSelectedSecretRef('');
                 }}
-              >
-                <option value="new">{translate('hostForm.auth.newCredential')}</option>
-                {vncSelectedMissingEntry ? (
-                  <option value={`existing:${vncSelectedMissingEntry.secretRef}`}>
-                    {vncSelectedMissingEntry.label}
-                  </option>
-                ) : null}
-                {vncReusableEntries.map((entry) => (
-                  <option key={entry.secretRef} value={`existing:${entry.secretRef}`}>
-                    {formatSavedSecretOptionLabel(entry)}
-                  </option>
-                ))}
-              </SelectField>
+                onSelectExisting={(secretRef) => {
+                  setCredentialMode('existing');
+                  setSelectedSecretRef(secretRef);
+                }}
+              />
             </div>
 
             {credentialMode === 'new' ? (
@@ -3097,36 +3027,23 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   </button>
                 ) : null}
               </div>
-              <SelectField
-                aria-label={translate('hostForm.rdp.credential')}
+              <CredentialSelect
+                ariaLabel={translate('hostForm.rdp.credential')}
                 value={
                   credentialMode === 'existing' ? `existing:${selectedSecretRef}` : credentialMode
                 }
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (value === 'new') {
-                    setCredentialMode('new');
-                    setSelectedSecretRef('');
-                    return;
-                  }
-                  if (value.startsWith('existing:')) {
-                    setCredentialMode('existing');
-                    setSelectedSecretRef(value.slice('existing:'.length));
-                  }
+                entries={rdpReusableEntries}
+                missingEntry={rdpSelectedMissingEntry}
+                accountFirst
+                onSelectNew={() => {
+                  setCredentialMode('new');
+                  setSelectedSecretRef('');
                 }}
-              >
-                <option value="new">{translate('hostForm.auth.newCredential')}</option>
-                {rdpSelectedMissingEntry ? (
-                  <option value={`existing:${rdpSelectedMissingEntry.secretRef}`}>
-                    {rdpSelectedMissingEntry.label}
-                  </option>
-                ) : null}
-                {rdpReusableEntries.map((entry) => (
-                  <option key={entry.secretRef} value={`existing:${entry.secretRef}`}>
-                    {formatRdpCredentialOptionLabel(entry)}
-                  </option>
-                ))}
-              </SelectField>
+                onSelectExisting={(secretRef) => {
+                  setCredentialMode('existing');
+                  setSelectedSecretRef(secretRef);
+                }}
+              />
             </div>
 
             {credentialMode === 'new' ? (

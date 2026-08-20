@@ -713,41 +713,14 @@ function buildConnectionRows(
 }
 
 /**
- * 환경 변수는 호스트 레코드(host.env)에 저장된다(자격증명과 분리 — 시크릿 공유로 번지지 않음).
- * 구버전 호스트는 env가 시크릿에만 있을 수 있어, host.env가 비면 secretRef로 복호화해 폴백 표시한다.
+ * 환경 변수는 호스트 레코드(host.env)에 저장된다. 자격증명은 여러 호스트가 공유하므로 거기에
+ * 두면 한 호스트의 값이 다른 호스트로 번졌다 — 그래서 호스트로 옮겼고 자격증명 쪽 필드는 없앴다.
  * 값에는 토큰/비밀번호가 들어갈 수 있어 기본 마스킹하고, 눈 아이콘으로 펼친다.
  */
 function EnvVarsSection({ host }: { host: SshHostRecord }) {
   const { t: translate } = useTranslation();
-  const directEnv = host.env ?? [];
-  const secretRef = host.secretRef ?? null;
-  const [fallbackEnv, setFallbackEnv] = useState<HostEnvVar[]>([]);
+  const envVars = host.env ?? [];
   const [revealed, setRevealed] = useState(false);
-
-  useEffect(() => {
-    if (directEnv.length > 0 || !secretRef) {
-      setFallbackEnv([]);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const loaded = await loadSavedCredential(secretRef);
-        if (!cancelled) {
-          setFallbackEnv(loaded?.env ?? []);
-        }
-      } catch {
-        if (!cancelled) {
-          setFallbackEnv([]);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [secretRef, directEnv.length]);
-
-  const envVars = directEnv.length > 0 ? directEnv : fallbackEnv;
 
   if (envVars.length === 0) {
     return null;

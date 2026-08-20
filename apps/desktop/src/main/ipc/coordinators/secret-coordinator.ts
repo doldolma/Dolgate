@@ -133,8 +133,7 @@ export function createSecretCoordinator(deps: {
       secrets.password ||
         secrets.passphrase ||
         secrets.privateKeyPem ||
-        secrets.certificateText ||
-        normalizeHostEnvVars(secrets.env).length > 0,
+        secrets.certificateText,
     );
 
   const mergeSecrets = (
@@ -184,7 +183,6 @@ export function createSecretCoordinator(deps: {
       patch.generatedByApp !== undefined
         ? patch.generatedByApp
         : current.generatedByApp,
-    env: patch.env !== undefined ? patch.env : current.env,
   });
 
   const persistSecret = async (
@@ -219,7 +217,6 @@ export function createSecretCoordinator(deps: {
         privateKeyKdfRounds: secrets.privateKeyKdfRounds,
         passphraseSaved: secrets.passphraseSaved,
         generatedByApp: secrets.generatedByApp,
-        env: normalizeHostEnvVars(secrets.env),
         updatedAt,
       } satisfies ManagedSecretPayload),
     );
@@ -308,7 +305,6 @@ export function createSecretCoordinator(deps: {
         typeof parsed.generatedByApp === "boolean"
           ? parsed.generatedByApp
           : undefined,
-      env: normalizeHostEnvVars(parsed.env as HostEnvVar[] | undefined),
       updatedAt:
         typeof parsed.updatedAt === "string"
           ? parsed.updatedAt

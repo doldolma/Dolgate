@@ -2881,11 +2881,6 @@ export interface ManagedSecretPayload {
   privateKeyKdfRounds?: number;
   passphraseSaved?: boolean;
   generatedByApp?: boolean;
-  /**
-   * @deprecated 환경변수는 이제 호스트 레코드([[SshHostRecord]].env)에 저장된다. 시크릿 공유 시
-   * 다른 호스트로 번지던 문제 때문에 분리했다. 이 필드는 구버전 데이터의 읽기 폴백/마이그레이션용으로만 남긴다.
-   */
-  env?: HostEnvVar[];
   updatedAt: string;
 }
 

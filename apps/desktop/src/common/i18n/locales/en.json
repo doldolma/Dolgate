@@ -2125,28 +2125,45 @@
       "account": "Enter an account."
     },
     "title": "Edit saved credential",
-    "intro": "Edits the whole saved credential <label>{{label}}</label>.",
     "mode": {
       "detach": "Detach only this host to a new credential",
       "shared": "Change every linked host",
-      "sharedHint": "All {{count}} hosts using this saved credential get the same change.",
-      "detachHint": "Only the host being edited moves to a new credential; the others keep the existing one."
+      "sharedHint": "Applies to all {{count}} hosts using this credential.",
+      "detachHint": "Creates a new credential for this host only; the others keep theirs.",
+      "detachHintPick": "Creates a new credential for the host you pick; the others keep theirs.",
+      "sharedHintNone": "Edits this credential in place."
     },
     "detachHostLabel": "Host to detach",
     "loading": "Loading the saved credential.",
     "passwordPlaceholder": "Enter a password",
     "filePlaceholder": "The file name appears after importing",
     "passphrasePlaceholder": "Enter the passphrase",
-    "envLabel": "Environment variables",
-    "envHint": "Injected into the shell on connect. Values are encrypted along with the password when stored and synced.",
     "saveFailed": "An error occurred while updating the saved credential.",
-    "submitShared": "Save shared credential",
-    "submitDetach": "Create a host-only credential",
+    "submitShared": "Save",
+    "submitDetach": "Save as separate",
     "account": "Account",
     "accountPlaceholderRdp": "Administrator",
     "accountPlaceholderVnc": "Only if the server uses account auth (optional)",
     "domain": "Domain",
-    "domainPlaceholder": "WORKGROUP (optional)"
+    "domainPlaceholder": "WORKGROUP (optional)",
+    "fields": {
+      "authType": "Auth type",
+      "password": "Password",
+      "privateKey": "Private key",
+      "certificate": "SSH certificate",
+      "passphrase": "Passphrase"
+    },
+    "authTypeOption": {
+      "password": "Password",
+      "privateKey": "Private key",
+      "certificate": "Certificate"
+    },
+    "importFile": "Import",
+    "closeLabel": "Close saved credentials editor",
+    "affectedHostsMore": "+{{count}} more",
+    "submitSharedCount": "Save for {{count}} hosts",
+    "modeLabel": "Scope",
+    "renameLabel": "Rename"
   },
   "containersStore": {
     "openingShell": "Opening the container shell for {{label}}.",
@@ -3261,6 +3278,7 @@
     "reopenBrowser": "Reopen browser",
     "tmuxPrefixDefault": "Ctrl-B (default)",
     "secretSummary": "{{label}} · {{type}} ({{count}} hosts)",
+    "secretOptionDetail": "{{type}} · {{count}} hosts",
     "snapshotRange": "lines {{from}}–{{to}} back",
     "updateActionFailed": "An error occurred during the update action.",
     "detachTitle": "detach — leaves the session running and detaches (Ctrl-b d). Re-attach to restore it.",

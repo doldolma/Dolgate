@@ -1058,11 +1058,13 @@ interface AppStateParts {
   updateKeychainSecret: (
     secretRef: string,
     secrets: HostSecretInput,
+    label?: string,
   ) => Promise<void>;
   cloneKeychainSecretForHost: (
     hostId: string,
     sourceSecretRef: string,
     secrets: HostSecretInput,
+    label?: string,
   ) => Promise<void>;
   generateSshKey: (input: SshKeyGenerateInput) => Promise<SshKeyMaterialResult>;
   copySshPublicKey: (secretRef: string) => Promise<void>;

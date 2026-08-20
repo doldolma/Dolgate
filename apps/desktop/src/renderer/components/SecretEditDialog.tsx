@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { HostEnvVar, HostSecretInput, LinkedHostSummary, SshCertificateInfo } from '@shared';
+import type { ReactNode } from 'react';
+import type { HostSecretInput, LinkedHostSummary, SshCertificateInfo } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
+import { Pencil } from 'lucide-react';
+import { cn } from '../lib/cn';
 import { describeCertificateInfo } from '../lib/certificate-info';
 import { loadSavedCredential } from '../services/desktop/settings';
 import { DialogBackdrop } from './DialogBackdrop';
-import { EnvironmentVariablesEditor } from './EnvironmentVariablesEditor';
 import {
   Button,
   CloseIcon,
@@ -15,13 +17,17 @@ import {
   ModalFooter,
   ModalHeader,
   ModalShell,
+  OptionCard,
   SectionLabel,
   SelectField,
   Textarea,
 } from '../ui';
-import { Trans, useTranslation } from 'react-i18next';
+import { useTranslation } from 'react-i18next';
 
 export type SecretEditMode = 'update-shared' | 'clone-for-host';
+
+/** 칩으로 이름을 보여 주는 최대 호스트 수. 넘는 만큼은 "외 N개" 로 접는다. */
+const MAX_AFFECTED_HOST_CHIPS = 3;
 
 export interface SecretEditDialogRequest {
   source: 'host' | 'keychain';
@@ -40,6 +46,8 @@ interface SecretEditDialogProps {
     secretRef: string;
     hostId: string | null;
     secrets: HostSecretInput;
+    /** 표시 이름. 자동 생성된 이름(가져오기의 "Termius • ubuntu" 등)을 고칠 수 있게 함께 보낸다. */
+    label: string;
   }) => Promise<void>;
 }
 
@@ -70,6 +78,10 @@ export function SecretEditDialog({
   const { t: translate } = useTranslation();
   const { pickPrivateKey, pickSshCertificate } = useHostFormController();
   const [mode, setMode] = useState<SecretEditMode>('update-shared');
+  // 이름은 폼 필드로 세우지 않는다. 자격증명당 한 번 고치는 값이라, 비밀번호·키처럼 자주 바뀌는
+  // 칸들과 같은 줄에 두면 매번 시선을 나눠 먹는다. 헤더의 이름 자리를 그대로 편집한다.
+  const [label, setLabel] = useState('');
+  const [labelEditing, setLabelEditing] = useState(false);
   const [targetHostId, setTargetHostId] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -95,7 +107,6 @@ export function SecretEditDialog({
     useState<SshCertificateInfo | null>(null);
   const [privateKeyFileName, setPrivateKeyFileName] = useState('');
   const [certificateFileName, setCertificateFileName] = useState('');
-  const [envVars, setEnvVars] = useState<HostEnvVar[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,11 +129,13 @@ export function SecretEditDialog({
         setCertificateInfo(null);
         setPrivateKeyFileName('');
         setCertificateFileName('');
-        setEnvVars([]);
+        setLabelEditing(false);
         return;
       }
 
       setMode(request.initialMode);
+      setLabel(request.label);
+      setLabelEditing(false);
       setTargetHostId(request.initialHostId ?? request.linkedHosts[0]?.id ?? '');
       setLoading(true);
       setLoadError(null);
@@ -162,7 +175,6 @@ export function SecretEditDialog({
         setPrivateKey(nextPrivateKey);
         setCertificate(nextCertificate);
         setCertificateInfo(loaded.certificateInfo ?? null);
-        setEnvVars(loaded.env ?? []);
       } catch (error) {
         if (cancelled) {
           return;
@@ -193,6 +205,58 @@ export function SecretEditDialog({
   const activeRequest = request;
 
   const linkedHostCount = activeRequest.linkedHosts.length;
+  // 함께 바뀌는 호스트는 공유 카드 **안에** 둔다. 밖에 따로 두면 어느 선택지에 딸린 설명인지
+  // 눈으로 이어야 하고, 라벨 한 줄이 더 붙는다.
+  const affectedHosts =
+    linkedHostCount > 1 ? (
+      <span className="mt-[0.35rem] flex flex-wrap gap-[0.3rem]">
+        {activeRequest.linkedHosts.slice(0, MAX_AFFECTED_HOST_CHIPS).map((host) => (
+          <span
+            key={host.id}
+            title={`${host.username}@${host.hostname}`}
+            className="rounded-full border border-[var(--border-subtle)] bg-[var(--surface)] px-[0.5rem] py-[0.1rem] text-[0.78rem] text-[var(--text-soft)]"
+          >
+            {host.label}
+          </span>
+        ))}
+        {linkedHostCount > MAX_AFFECTED_HOST_CHIPS ? (
+          <span className="px-[0.15rem] py-[0.1rem] text-[0.78rem] text-[var(--text-soft)]">
+            {translate('secretEdit.affectedHostsMore', {
+              count: linkedHostCount - MAX_AFFECTED_HOST_CHIPS,
+            })}
+          </span>
+        ) : null}
+      </span>
+    ) : null;
+
+  const modeOptions: Array<{
+    value: SecretEditMode;
+    title: string;
+    description: ReactNode;
+  }> = [
+    {
+      value: 'clone-for-host',
+      title: translate('secretEdit.mode.detach'),
+      // 설정에서 열면 "현재 편집 중인 호스트" 가 없다 — 아래 피커에서 고른 호스트가 대상이다.
+      description: translate(
+        activeRequest.source === 'host'
+          ? 'secretEdit.mode.detachHint'
+          : 'secretEdit.mode.detachHintPick',
+      ),
+    },
+    {
+      value: 'update-shared',
+      title: translate('secretEdit.mode.shared'),
+      description: (
+        <>
+          {linkedHostCount > 0
+            ? translate('secretEdit.mode.sharedHint', { count: linkedHostCount })
+            : translate('secretEdit.mode.sharedHintNone')}
+          {affectedHosts}
+        </>
+      ),
+    },
+  ];
   const certificateSummary =
     authType === 'certificate'
       ? describeCertificateInfo(certificateInfo)
@@ -232,7 +296,6 @@ export function SecretEditDialog({
             : undefined,
         certificateText:
           authType === 'certificate' ? certificate || undefined : undefined,
-        env: envVars.length > 0 ? envVars : undefined,
       };
 
   function validateSecrets(): string | null {
@@ -291,40 +354,104 @@ export function SecretEditDialog({
           <div>
             <SectionLabel>Saved Credentials</SectionLabel>
             <h3 id="secret-edit-title">{translate('secretEdit.title')}</h3>
+            {labelEditing ? (
+              <Input
+                autoFocus
+                className="mt-[0.15rem] h-[1.9rem] max-w-[18rem] text-[0.85rem]"
+                value={label}
+                aria-label={translate('secretEdit.renameLabel')}
+                placeholder={activeRequest.label}
+                onChange={(event) => setLabel(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    setLabelEditing(false);
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    // 취소는 편집 전 이름으로 되돌린다 — 저장 전이라 아직 아무것도 안 바뀌었다.
+                    setLabel(activeRequest.label);
+                    setLabelEditing(false);
+                  }
+                }}
+                onBlur={() => setLabelEditing(false)}
+              />
+            ) : (
+              <p className="mt-[0.15rem] flex items-center gap-[0.35rem] text-[0.85rem] text-[var(--text-soft)]">
+                <span className="truncate">{label || activeRequest.label}</span>
+                <button
+                  type="button"
+                  aria-label={translate('secretEdit.renameLabel')}
+                  className="shrink-0 rounded-[6px] p-[0.15rem] text-[var(--text-muted)] transition-colors duration-140 hover:bg-[var(--surface-muted)] hover:text-[var(--text)]"
+                  onClick={() => setLabelEditing(true)}
+                >
+                  <Pencil className="h-[0.85rem] w-[0.85rem]" />
+                </button>
+              </p>
+            )}
           </div>
-          <IconButton type="button" onClick={onClose} aria-label="Close saved credentials editor">
+          <IconButton type="button" onClick={onClose} aria-label={translate('secretEdit.closeLabel')}>
             <CloseIcon />
           </IconButton>
         </ModalHeader>
-        <ModalBody>
-          <p className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
-            <Trans
-              i18nKey="secretEdit.intro"
-              values={{ label: activeRequest.label }}
-              components={{ label: <strong /> }}
-            />
-          </p>
-
-          <div className="flex flex-wrap gap-3">
-            <Button variant="secondary" active={mode === 'clone-for-host'} onClick={() => setMode('clone-for-host')}>
-              {translate('secretEdit.mode.detach')}
-            </Button>
-            <Button variant="secondary" active={mode === 'update-shared'} onClick={() => setMode('update-shared')}>
-              {translate('secretEdit.mode.shared')}
-            </Button>
+        <ModalBody className="grid gap-4">
+          {/* 이건 라디오다. 버튼 두 개를 나란히 두면 "누르면 실행된다" 로 읽힌다. 카드는
+              하우스 프리미티브(OptionCard)를 그대로 쓴다 — 선택 색과 포커스 링이 제품의 다른
+              선택 화면과 같아야 "뭐가 선택된 건지" 를 배우지 않아도 안다. 점은 그 위에 얹는
+              최소한의 표시다(색만으로는 대비가 약하고 색각 이상에서 사라진다). */}
+          <div className="grid gap-[0.45rem]">
+            <SectionLabel className="mb-0">{translate('secretEdit.modeLabel')}</SectionLabel>
+            <div
+              role="radiogroup"
+              aria-label={translate('secretEdit.modeLabel')}
+              className="grid gap-[0.55rem] sm:grid-cols-2"
+            >
+              {modeOptions.map((option) => (
+                <OptionCard
+                  key={option.value}
+                  role="radio"
+                  aria-checked={mode === option.value}
+                  active={mode === option.value}
+                  className="min-h-0"
+                  onClick={() => setMode(option.value)}
+                  // 라디오는 방향키로 옮기는 것이 기본 동작이다. 선택지가 둘이라 어느 방향키든
+                  // 반대쪽으로 넘긴다(Tab 은 그대로 두 카드를 지나간다).
+                  onKeyDown={(event) => {
+                    if (
+                      event.key === 'ArrowLeft' ||
+                      event.key === 'ArrowRight' ||
+                      event.key === 'ArrowUp' ||
+                      event.key === 'ArrowDown'
+                    ) {
+                      event.preventDefault();
+                      setMode(
+                        option.value === 'update-shared' ? 'clone-for-host' : 'update-shared',
+                      );
+                    }
+                  }}
+                  title={
+                    <span className="flex items-center gap-[0.5rem]">
+                      <span
+                        aria-hidden
+                        className={cn(
+                          'grid h-[0.95rem] w-[0.95rem] shrink-0 place-items-center rounded-full border',
+                          mode === option.value
+                            ? 'border-[var(--accent-strong)]'
+                            : 'border-[var(--border)]',
+                        )}
+                      >
+                        {mode === option.value ? (
+                          <span className="h-[0.45rem] w-[0.45rem] rounded-full bg-[var(--accent-strong)]" />
+                        ) : null}
+                      </span>
+                      {option.title}
+                    </span>
+                  }
+                  description={option.description}
+                />
+              ))}
+            </div>
           </div>
-
-          {mode === 'update-shared' ? (
-            <p className="text-[var(--text-soft)] leading-[1.5]">
-              {translate('secretEdit.mode.sharedHint', { count: linkedHostCount })}
-            </p>
-          ) : null}
-
-          {mode === 'clone-for-host' && activeRequest.source === 'host' && activeRequest.initialHostId ? (
-            <p className="text-[var(--text-soft)] leading-[1.5]">
-              {translate('secretEdit.mode.detachHint')}
-            </p>
-          ) : null}
 
           {needsHostPicker ? (
             <FieldGroup label={translate('secretEdit.detachHostLabel')}>
@@ -348,10 +475,7 @@ export function SecretEditDialog({
                   자격증명이 만들어진다. */}
               {isRemoteScreenSecret ? (
                 <>
-                  <label className="grid gap-[0.4rem] text-[var(--text)]">
-                    <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
-                      {translate('secretEdit.account')}
-                    </span>
+                  <FieldGroup label={translate('secretEdit.account')}>
                     <Input
                       value={username}
                       onChange={(event) => {
@@ -364,13 +488,10 @@ export function SecretEditDialog({
                           : translate('secretEdit.accountPlaceholderVnc')
                       }
                     />
-                  </label>
+                  </FieldGroup>
                   {/* 도메인은 RDP 만 쓴다 — VNC 에는 개념이 없다. */}
                   {secretKind === 'rdp' ? (
-                    <label className="grid gap-[0.4rem] text-[var(--text)]">
-                      <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
-                        {translate('secretEdit.domain')}
-                      </span>
+                    <FieldGroup label={translate('secretEdit.domain')}>
                       <Input
                         value={domain}
                         onChange={(event) => {
@@ -379,12 +500,9 @@ export function SecretEditDialog({
                         }}
                         placeholder={translate('secretEdit.domainPlaceholder')}
                       />
-                    </label>
+                    </FieldGroup>
                   ) : null}
-                  <label className="grid gap-[0.4rem] text-[var(--text)]">
-                    <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
-                      Password
-                    </span>
+                  <FieldGroup label={translate('secretEdit.fields.password')}>
                     <Input
                       type="password"
                       value={password}
@@ -394,17 +512,14 @@ export function SecretEditDialog({
                       }}
                       placeholder={translate('secretEdit.passwordPlaceholder')}
                     />
-                  </label>
+                  </FieldGroup>
                 </>
               ) : null}
 
               {isRemoteScreenSecret ? null : (
-              <label className="grid gap-[0.4rem] text-[var(--text)]">
-                <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
-                  Auth Type
-                </span>
+              <FieldGroup label={translate('secretEdit.fields.authType')}>
                 <SelectField
-                  aria-label="Auth Type"
+                  aria-label={translate('secretEdit.fields.authType')}
                   value={authType}
                   onChange={(event) => {
                     const nextAuthType =
@@ -417,11 +532,11 @@ export function SecretEditDialog({
                     setSubmitError(null);
                   }}
                 >
-                  <option value="password">Password</option>
-                  <option value="privateKey">Private key</option>
-                  <option value="certificate">Certificate</option>
+                  <option value="password">{translate('secretEdit.authTypeOption.password')}</option>
+                  <option value="privateKey">{translate('secretEdit.authTypeOption.privateKey')}</option>
+                  <option value="certificate">{translate('secretEdit.authTypeOption.certificate')}</option>
                 </SelectField>
-              </label>
+              </FieldGroup>
               )}
 
               {certificateSummary ? (
@@ -440,10 +555,7 @@ export function SecretEditDialog({
               ) : null}
 
               {!isRemoteScreenSecret && authType === 'password' ? (
-                <label className="grid gap-[0.4rem] text-[var(--text)]">
-                  <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
-                    Password
-                  </span>
+                <FieldGroup label={translate('secretEdit.fields.password')}>
                   <Input
                     type="password"
                     value={password}
@@ -453,15 +565,12 @@ export function SecretEditDialog({
                     }}
                     placeholder={translate('secretEdit.passwordPlaceholder')}
                   />
-                </label>
+                </FieldGroup>
               ) : null}
 
               {authType === 'privateKey' || authType === 'certificate' ? (
                 <>
-                  <label className="grid gap-[0.4rem] text-[var(--text)]">
-                    <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
-                      Private key
-                    </span>
+                  <FieldGroup label={translate('secretEdit.fields.privateKey')}>
                     <div className="flex gap-[0.7rem]">
                       <Input
                         readOnly
@@ -469,11 +578,11 @@ export function SecretEditDialog({
                         placeholder={translate('secretEdit.filePlaceholder')}
                       />
                       <Button variant="secondary" onClick={() => void importPrivateKey()}>
-                        Import
+                        {translate('secretEdit.importFile')}
                       </Button>
                     </div>
                     <Textarea
-                      aria-label="Private key"
+                      aria-label={translate('secretEdit.fields.privateKey')}
                       rows={8}
                       value={privateKey}
                       onChange={(event) => {
@@ -482,13 +591,10 @@ export function SecretEditDialog({
                       }}
                       placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
                     />
-                  </label>
+                  </FieldGroup>
 
                   {authType === 'certificate' ? (
-                    <label className="grid gap-[0.4rem] text-[var(--text)]">
-                      <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
-                        SSH certificate
-                      </span>
+                    <FieldGroup label={translate('secretEdit.fields.certificate')}>
                       <div className="flex gap-[0.7rem]">
                         <Input
                           readOnly
@@ -496,11 +602,11 @@ export function SecretEditDialog({
                           placeholder={translate('secretEdit.filePlaceholder')}
                         />
                         <Button variant="secondary" onClick={() => void importCertificate()}>
-                          Import
+                          {translate('secretEdit.importFile')}
                         </Button>
                       </div>
                       <Textarea
-                        aria-label="SSH certificate"
+                        aria-label={translate('secretEdit.fields.certificate')}
                         rows={5}
                         value={certificate}
                         onChange={(event) => {
@@ -510,13 +616,10 @@ export function SecretEditDialog({
                         }}
                         placeholder="ssh-ed25519-cert-v01@openssh.com ..."
                       />
-                    </label>
+                    </FieldGroup>
                   ) : null}
 
-                  <label className="grid gap-[0.4rem] text-[var(--text)]">
-                    <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
-                      Passphrase
-                    </span>
+                  <FieldGroup label={translate('secretEdit.fields.passphrase')}>
                     <Input
                       type="password"
                       value={passphrase}
@@ -526,23 +629,10 @@ export function SecretEditDialog({
                       }}
                       placeholder={translate('secretEdit.passphrasePlaceholder')}
                     />
-                  </label>
+                  </FieldGroup>
                 </>
               ) : null}
             </div>
-          ) : null}
-
-          {!loading && !loadError ? (
-            <FieldGroup label={translate('secretEdit.envLabel')}>
-              <EnvironmentVariablesEditor
-                variables={envVars}
-                onChange={setEnvVars}
-                disabled={isSubmitting}
-              />
-              <p className="text-[0.82rem] leading-[1.5] text-[var(--text-soft)]">
-                {translate('secretEdit.envHint')}
-              </p>
-            </FieldGroup>
           ) : null}
 
           {submitError ? <p className="text-[0.9rem] text-[var(--danger-text)]">{submitError}</p> : null}
@@ -566,6 +656,7 @@ export function SecretEditDialog({
               try {
                 await onSubmit({
                   mode,
+                  label: label.trim() || activeRequest.label,
                   secretRef: activeRequest.secretRef,
                   hostId: mode === 'clone-for-host' ? activeRequest.initialHostId ?? targetHostId : null,
                   secrets: replacementSecrets,
@@ -582,7 +673,11 @@ export function SecretEditDialog({
               }
             }}
           >
-            {translate(mode === 'update-shared' ? 'secretEdit.submitShared' : 'secretEdit.submitDetach')}
+            {mode === 'clone-for-host'
+              ? translate('secretEdit.submitDetach')
+              : linkedHostCount > 1
+                ? translate('secretEdit.submitSharedCount', { count: linkedHostCount })
+                : translate('secretEdit.submitShared')}
           </Button>
         </ModalFooter>
       </ModalShell>

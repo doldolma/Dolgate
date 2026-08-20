@@ -2125,28 +2125,45 @@
       "account": "계정을 입력하세요."
     },
     "title": "저장된 인증 정보 편집",
-    "intro": "<label>{{label}}</label> 저장된 인증 정보 전체를 수정합니다.",
     "mode": {
       "detach": "이 호스트만 새 인증 정보로 분리",
       "shared": "연결된 호스트 전체 변경",
-      "sharedHint": "이 저장된 인증 정보를 쓰는 {{count}}개 호스트가 모두 같은 변경 내용을 사용합니다.",
-      "detachHint": "현재 편집 중인 호스트만 새 인증 정보로 분리하고, 다른 호스트들은 기존 인증 정보를 유지합니다."
+      "sharedHint": "이 인증 정보를 쓰는 {{count}}개 호스트에 함께 적용됩니다.",
+      "detachHint": "이 호스트만 새로 만들고, 다른 호스트는 그대로 둡니다.",
+      "detachHintPick": "고른 호스트만 새로 만들고, 나머지는 그대로 둡니다.",
+      "sharedHintNone": "이 인증 정보를 그대로 수정합니다."
     },
     "detachHostLabel": "분리할 호스트",
     "loading": "저장된 인증 정보를 불러오는 중입니다.",
     "passwordPlaceholder": "비밀번호를 입력하세요",
     "filePlaceholder": "파일을 가져오면 이름이 표시됩니다",
     "passphrasePlaceholder": "패스프레이즈를 입력하세요",
-    "envLabel": "환경 변수",
-    "envHint": "연결 시 셸에 주입됩니다. 값은 비밀번호와 함께 암호화되어 저장·동기화됩니다.",
     "saveFailed": "저장된 인증 정보를 수정하는 중 오류가 발생했습니다.",
-    "submitShared": "공유 인증 정보 저장",
-    "submitDetach": "호스트 전용 인증 정보 생성",
+    "submitShared": "저장",
+    "submitDetach": "분리해서 저장",
     "account": "계정",
     "accountPlaceholderRdp": "Administrator",
     "accountPlaceholderVnc": "서버가 계정 인증을 쓸 때만 (선택)",
     "domain": "도메인",
-    "domainPlaceholder": "WORKGROUP (선택)"
+    "domainPlaceholder": "WORKGROUP (선택)",
+    "fields": {
+      "authType": "인증 방식",
+      "password": "비밀번호",
+      "privateKey": "개인키",
+      "certificate": "SSH 인증서",
+      "passphrase": "패스프레이즈"
+    },
+    "authTypeOption": {
+      "password": "비밀번호",
+      "privateKey": "개인키",
+      "certificate": "인증서"
+    },
+    "importFile": "가져오기",
+    "closeLabel": "저장된 인증 정보 편집 닫기",
+    "affectedHostsMore": "외 {{count}}개",
+    "submitSharedCount": "{{count}}개 호스트에 저장",
+    "modeLabel": "적용 범위",
+    "renameLabel": "이름 바꾸기"
   },
   "containersStore": {
     "openingShell": "{{label}} 컨테이너 셸을 여는 중입니다.",
@@ -3261,6 +3278,7 @@
     "reopenBrowser": "브라우저 다시 열기",
     "tmuxPrefixDefault": "Ctrl-B (기본)",
     "secretSummary": "{{label}} · {{type}} ({{count}}개 호스트)",
+    "secretOptionDetail": "{{type}} · {{count}}개 호스트",
     "snapshotRange": "{{from}}~{{to}}줄 전",
     "updateActionFailed": "업데이트 작업 중 오류가 발생했습니다.",
     "detachTitle": "detach — 세션은 유지하고 분리(Ctrl-b d). 재접속으로 복원.",

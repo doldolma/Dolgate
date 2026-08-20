@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { listTailnets } from '../services/desktop/tailnet';
 import {
   buildGroupOptions,
@@ -429,7 +429,6 @@ export function HomeShell({
           : undefined
       }
       onEditExistingSecret={openHostSecretEditor}
-      onOpenSecrets={() => settingsViewModel.openSettingsSection('secrets')}
       onOpenTailnets={() => settingsViewModel.openSettingsSection('tailnet')}
     />
   ) : null;

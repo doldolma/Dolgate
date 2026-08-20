@@ -323,6 +323,7 @@ export function AppShell({
             await settingsViewModel.updateKeychainSecret(
               input.secretRef,
               input.secrets,
+              input.label,
             );
             return;
           }
@@ -333,6 +334,7 @@ export function AppShell({
             input.hostId,
             input.secretRef,
             input.secrets,
+            input.label,
           );
         }}
         isUpdateInstallConfirmOpen={isUpdateInstallConfirmOpen}

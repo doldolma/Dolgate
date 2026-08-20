@@ -80,3 +80,32 @@ export function formatSavedSecretOptionLabel(
     count: entry.linkedHostCount,
   });
 }
+
+/**
+ * 목록 항목의 둘째 줄. 첫 줄이 이름이므로 이름을 반복하지 않는다 — 무엇이 들었고 몇 대가 쓰는지만.
+ *
+ * 한 줄로 합친 `formatSavedSecretOptionLabel` 은 native select 처럼 한 줄만 쓸 수 있는 자리를
+ * 위해 남겨 둔다.
+ */
+export function formatSavedSecretOptionDetail(
+  entry: SecretMetadataRecord,
+): string {
+  return t('misc.secretOptionDetail', {
+    type: describeSecretType(entry),
+    count: entry.linkedHostCount,
+  });
+}
+
+/**
+ * RDP·VNC 목록의 둘째 줄. RDP 는 계정이 자격증명에 딸리므로 계정을 앞세운다 — 어느 계정으로
+ * 붙는지가 고를 때 가장 중요한 정보다.
+ */
+export function formatRdpCredentialOptionDetail(
+  entry: SecretMetadataRecord,
+): string {
+  const account = entry.domain?.trim()
+    ? `${entry.domain}\\${entry.username ?? ''}`
+    : (entry.username?.trim() ?? '');
+  const detail = formatSavedSecretOptionDetail(entry);
+  return account ? `${account} · ${detail}` : detail;
+}

@@ -52,7 +52,6 @@ function renderDrawer(options?: {
         onSubmit={onSubmit}
         onConnect={onConnect}
         onEditExistingSecret={vi.fn()}
-        onOpenSecrets={vi.fn()}
       />
     )
   };
@@ -298,3 +297,4 @@ describe('HostDrawer host kinds by server capability', () => {
     }
   });
 });
+

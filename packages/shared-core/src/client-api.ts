@@ -38,7 +38,6 @@ export interface HostSecretInput {
   privateKeyKdfRounds?: number;
   passphraseSaved?: boolean;
   generatedByApp?: boolean;
-  env?: HostEnvVar[];
 }
 
 export interface ClientSessionEvent {

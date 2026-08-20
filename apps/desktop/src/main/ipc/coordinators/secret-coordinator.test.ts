@@ -79,34 +79,6 @@ describe("secret coordinator", () => {
     ).rejects.toThrow("SSH 인증서가 만료되었습니다.");
   });
 
-  it("persists and round-trips env vars (env-only host still gets a secretRef)", async () => {
-    const saved: Record<string, string> = {};
-    const { deps, coordinator } = createCoordinator({
-      secretStore: {
-        save: vi.fn(async (ref: string, json: string) => {
-          saved[ref] = json;
-        }),
-        load: vi.fn(async (ref: string) => saved[ref] ?? null),
-      },
-    });
-
-    const secretRef = await coordinator.persistSecret("Prod", {
-      env: [
-        { key: "FOO", value: "bar" },
-        { key: "1BAD", value: "x" },
-        { key: "MULTI", value: "a\nb" },
-      ],
-    });
-    expect(secretRef).toBeTruthy();
-    expect(deps.secretStore.save).toHaveBeenCalledOnce();
-
-    const loaded = await coordinator.loadSecrets(secretRef);
-    expect(loaded.env).toEqual([
-      { key: "FOO", value: "bar" },
-      { key: "MULTI", value: "ab" },
-    ]);
-  });
-
   it("round-trips the account and mirrors it into plaintext metadata", async () => {
     // RDP 는 계정이 자격증명에 딸린다. 평문 메타데이터에도 같이 적어야 목록 표시와 접속이
     // 복호화 없이 계정을 알 수 있다 — 쓰는 곳이 persistSecret 하나뿐이라 값이 갈리지 않는다.
@@ -162,13 +134,6 @@ describe("secret coordinator", () => {
     ).toMatchObject({ username: "Administrator", domain: "CORP", password: "new" });
   });
 
-  it("preserves env when merging runtime secret patches", () => {
-    const { coordinator } = createCoordinator();
-    expect(
-      coordinator.mergeSecrets({ env: [{ key: "A", value: "1" }] }, { password: "pw" })
-        .env,
-    ).toEqual([{ key: "A", value: "1" }]);
-  });
 });
 
 describe("normalizeHostEnvVars", () => {

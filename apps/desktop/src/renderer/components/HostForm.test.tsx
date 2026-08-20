@@ -111,6 +111,11 @@ function createHost(overrides: Partial<SshHostRecord> = {}): SshHostRecord {
  * 평범한 select 가 아니라 버튼 + listbox 라 `change` 이벤트가 없다 — 열고 골라야 한다(점프 호스트
  * 목록과 같은 컴포넌트다).
  */
+/** 검색 가능한 목록의 현재 선택. native select 의 value 가 아니라 트리거 버튼의 글자다. */
+function selectedOptionText(ariaLabel: string): string {
+  return screen.getByRole('button', { name: ariaLabel }).textContent ?? '';
+}
+
 function pickFromSearchableSelect(ariaLabel: string, optionName: string) {
   fireEvent.click(screen.getByRole('button', { name: ariaLabel }));
   fireEvent.click(screen.getByRole('option', { name: new RegExp(optionName) }));
@@ -445,13 +450,13 @@ describe('HostForm', () => {
         keychainEntries={reusableKeychainEntries}
         groupOptions={groupOptions}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
-        onOpenSecrets={vi.fn()}
       />,
     );
 
     expect(screen.getByText('저장된 인증 정보')).toBeInTheDocument();
     expect(screen.getByLabelText('저장된 인증 정보')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '관리' })).toBeInTheDocument();
+    // 설정으로 보내는 '관리' 링크는 없다 — 편집은 아래 '편집' 버튼이 담당한다.
+    expect(screen.queryByRole('button', { name: '관리' })).not.toBeInTheDocument();
   });
 
   it('shows certificate-specific fields and filters saved secrets for certificate auth', () => {
@@ -461,7 +466,6 @@ describe('HostForm', () => {
         keychainEntries={reusableKeychainEntries}
         groupOptions={groupOptions}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
-        onOpenSecrets={vi.fn()}
       />,
     );
 
@@ -473,11 +477,14 @@ describe('HostForm', () => {
     expect(screen.getByLabelText('SSH 인증서 파일')).toBeInTheDocument();
     expect(screen.getByLabelText('패스프레이즈')).toBeInTheDocument();
 
-    const select = screen.getByLabelText('저장된 인증 정보');
-    expect(within(select).queryByRole('option', { name: '사용 안 함' })).not.toBeInTheDocument();
-    expect(within(select).getByRole('option', { name: /Shared Certificate · SSH certificate \+ Passphrase/ })).toBeInTheDocument();
-    expect(within(select).queryByRole('option', { name: /Shared Key/ })).not.toBeInTheDocument();
-    expect(within(select).queryByRole('option', { name: /Shared Password/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '저장된 인증 정보' }));
+    expect(screen.queryByRole('option', { name: '사용 안 함' })).not.toBeInTheDocument();
+    // 이름은 첫 줄, 종류·연결 수는 둘째 줄이다 — 접근성 이름에는 둘이 이어서 들어온다.
+    expect(
+      screen.getByRole('option', { name: /Shared Certificate.*SSH certificate \+ Passphrase/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Shared Key/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Shared Password/ })).not.toBeInTheDocument();
   });
 
   it('renders serial connection fields and hides auth controls when Serial is selected', async () => {
@@ -554,13 +561,13 @@ describe('HostForm', () => {
         keychainEntries={reusableKeychainEntries}
         groupOptions={groupOptions}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
-        onOpenSecrets={vi.fn()}
       />,
     );
 
-    const savedSecretSelect = screen.getByLabelText('저장된 인증 정보') as HTMLSelectElement;
-    await waitFor(() => expect(savedSecretSelect.value).toBe('existing:secret-password'));
-    expect(screen.getByRole('button', { name: '관리' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(selectedOptionText('저장된 인증 정보')).toContain('Shared Password'),
+    );
+    expect(screen.queryByRole('button', { name: '관리' })).not.toBeInTheDocument();
   });
 
   it('allows opening the full editor for an attached certificate secret', async () => {
@@ -577,9 +584,7 @@ describe('HostForm', () => {
     );
 
     await waitFor(() =>
-      expect((screen.getByLabelText('저장된 인증 정보') as HTMLSelectElement).value).toBe(
-        'existing:secret-certificate',
-      ),
+      expect(selectedOptionText('저장된 인증 정보')).toContain('Shared Certificate'),
     );
 
     fireEvent.click(screen.getByRole('button', { name: '편집' }));
@@ -594,12 +599,12 @@ describe('HostForm', () => {
         keychainEntries={reusableKeychainEntries}
         groupOptions={groupOptions}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
-        onOpenSecrets={vi.fn()}
       />,
     );
 
-    const savedSecretSelect = screen.getByLabelText('저장된 인증 정보') as HTMLSelectElement;
-    await waitFor(() => expect(savedSecretSelect.value).toBe('existing:secret-password'));
+    await waitFor(() =>
+      expect(selectedOptionText('저장된 인증 정보')).toContain('Shared Password'),
+    );
 
     rerender(
       <HostForm
@@ -607,11 +612,12 @@ describe('HostForm', () => {
         keychainEntries={reusableKeychainEntries.filter((entry) => entry.secretRef !== 'secret-password')}
         groupOptions={groupOptions}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
-        onOpenSecrets={vi.fn()}
       />,
     );
 
-    await waitFor(() => expect(savedSecretSelect.value).toBe('new'));
+    await waitFor(() =>
+      expect(selectedOptionText('저장된 인증 정보')).toContain('새 인증 정보 저장'),
+    );
   });
 
   it('falls back to no saved secret when the selected certificate secret disappears', async () => {
@@ -621,12 +627,12 @@ describe('HostForm', () => {
         keychainEntries={reusableKeychainEntries}
         groupOptions={groupOptions}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
-        onOpenSecrets={vi.fn()}
       />,
     );
 
-    const savedSecretSelect = screen.getByLabelText('저장된 인증 정보') as HTMLSelectElement;
-    await waitFor(() => expect(savedSecretSelect.value).toBe('existing:secret-certificate'));
+    await waitFor(() =>
+      expect(selectedOptionText('저장된 인증 정보')).toContain('Shared Certificate'),
+    );
 
     rerender(
       <HostForm
@@ -634,11 +640,12 @@ describe('HostForm', () => {
         keychainEntries={reusableKeychainEntries.filter((entry) => entry.secretRef !== 'secret-certificate')}
         groupOptions={groupOptions}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
-        onOpenSecrets={vi.fn()}
       />,
     );
 
-    await waitFor(() => expect(savedSecretSelect.value).toBe('new'));
+    await waitFor(() =>
+      expect(selectedOptionText('저장된 인증 정보')).toContain('새 인증 정보 저장'),
+    );
   });
 
   it('stores imported private key material in the submission instead of persisting the path', async () => {
@@ -690,7 +697,6 @@ describe('HostForm', () => {
         keychainEntries={reusableKeychainEntries}
         groupOptions={groupOptions}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
-        onOpenSecrets={vi.fn()}
       />,
     );
 
@@ -1085,8 +1091,7 @@ describe('HostForm RDP credential selection', () => {
       />,
     );
 
-    const select = screen.getByLabelText('인증 정보') as HTMLSelectElement;
-    expect(select.value).toBe('existing:secret:rdp');
+    expect(selectedOptionText('인증 정보')).toContain('Win admin');
   });
 
   // RDP 와 같은 증상이 VNC 에서도 났다. 같은 헬퍼를 쓰는지 여기서 본다 — 한쪽만 고치면 반복된다.
@@ -1120,8 +1125,7 @@ describe('HostForm RDP credential selection', () => {
       />,
     );
 
-    const select = screen.getByLabelText('VNC 비밀번호') as HTMLSelectElement;
-    expect(select.value).toBe('existing:secret:vnc');
+    expect(selectedOptionText('VNC 비밀번호')).toContain('VNC 화면');
   });
 
   it('saves a newly entered account and password', async () => {
@@ -1527,9 +1531,7 @@ describe('HostForm RDP credential selection', () => {
     fireEvent.change(screen.getByLabelText('호스트 이름'), {
       target: { value: '192.168.0.10' },
     });
-    fireEvent.change(screen.getByLabelText('VNC 비밀번호'), {
-      target: { value: 'existing:secret:vnc-1' },
-    });
+    pickFromSearchableSelect('VNC 비밀번호', 'Lab VNC');
 
     await act(async () => {
       await ref.current?.submitCreate();
@@ -1581,4 +1583,5 @@ describe('HostForm RDP credential selection', () => {
       expect.objectContaining({ kind: 'vnc', password: 'secret12' }),
     );
   });
+
 });

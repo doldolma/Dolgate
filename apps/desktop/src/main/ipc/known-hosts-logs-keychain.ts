@@ -7,7 +7,7 @@ import type {
   HostSecretInput,
   ManagedSecretPayload,
 } from "@shared";
-import { isSshHostRecord, normalizeHostEnvVars } from "@shared";
+import { isSshHostRecord } from "@shared";
 import { BrowserWindow, clipboard, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext, SshHostRecord } from "./context";
@@ -24,14 +24,11 @@ function normalizeReplacementSecrets(secrets: HostSecretInput): HostSecretInput 
       ? secrets.certificateText
       : undefined;
 
-  const env = normalizeHostEnvVars(secrets.env);
-
   return {
     password: secrets.password ? secrets.password : undefined,
     passphrase: secrets.passphrase ? secrets.passphrase : undefined,
     privateKeyPem,
     certificateText,
-    env: env.length > 0 ? env : undefined,
   };
 }
 
@@ -40,8 +37,7 @@ function validateReplacementSecrets(secrets: HostSecretInput): string | null {
     !secrets.password &&
     !secrets.passphrase &&
     !secrets.privateKeyPem &&
-    !secrets.certificateText &&
-    (!secrets.env || secrets.env.length === 0)
+    !secrets.certificateText
   ) {
     return t('knownHostsIpc.noSecrets');
   }
@@ -285,12 +281,15 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
       const keepPublicKeyMetadata =
         currentPayload?.privateKeyPem &&
         currentPayload.privateKeyPem === replacementSecrets.privateKeyPem;
+      // 이름은 암호화 레코드와 평문 메타데이터 양쪽에 있다. 한쪽만 바꾸면 목록과 편집 화면이
+      // 서로 다른 이름을 말한다. 빈 값은 "그대로" 로 본다 — 이름 없는 자격증명은 고를 수 없다.
+      const nextLabel = input.label?.trim() ? input.label.trim() : currentMetadata.label;
 
       await ctx.secretStore.save(
         input.secretRef,
         JSON.stringify({
           secretRef: input.secretRef,
-          label: currentMetadata.label,
+          label: nextLabel,
           password: replacementSecrets.password,
           passphrase: replacementSecrets.passphrase,
           privateKeyPem: replacementSecrets.privateKeyPem,
@@ -319,15 +318,12 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
           generatedByApp: keepPublicKeyMetadata
             ? currentPayload.generatedByApp
             : undefined,
-          // 환경변수는 이제 호스트 레코드에 저장된다. 자격증명만 수정할 땐 구버전 시크릿의 env를
-          // 지우지 않고 보존해, 아직 호스트로 이전되지 않은 호스트의 폴백 데이터를 잃지 않는다.
-          env: replacementSecrets.env !== undefined ? replacementSecrets.env : currentPayload?.env,
           updatedAt: new Date().toISOString(),
         } satisfies ManagedSecretPayload),
       );
       ctx.secretMetadata.upsert({
         secretRef: input.secretRef,
-        label: currentMetadata.label,
+        label: nextLabel,
         hasPassword: Boolean(replacementSecrets.password),
         hasPassphrase: Boolean(replacementSecrets.passphrase),
         hasManagedPrivateKey: Boolean(replacementSecrets.privateKeyPem),
@@ -373,7 +369,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
       }
 
       const nextSecretRef = await ctx.persistSecret(
-        ctx.describeHostLabel(sshHost),
+        input.label?.trim() ? input.label.trim() : ctx.describeHostLabel(sshHost),
         replacementSecrets,
       );
       if (!nextSecretRef) {

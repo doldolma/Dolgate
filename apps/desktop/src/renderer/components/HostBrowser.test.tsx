@@ -312,7 +312,7 @@ function renderBrowser({
   onOpenWarpgateImport = vi.fn(),
   onExportHosts = vi.fn(),
 }: RenderBrowserOptions = {}) {
-  return render(
+  const element = (
     <HostBrowser
       desktopPlatform={desktopPlatform}
       hosts={hostsOverride}
@@ -360,6 +360,7 @@ function renderBrowser({
       onSelectSection={onSelectSection}
     />
   );
+  return render(element);
 }
 
 function createDataTransfer(): DataTransfer {
@@ -1755,4 +1756,5 @@ describe('HostBrowser dialogs', () => {
     await waitFor(() => expect(onRemoveHost).toHaveBeenCalledWith('host-1'));
     await waitFor(() => expect(onRemoveSecret).toHaveBeenCalledWith('secret:host-1'));
   });
+
 });

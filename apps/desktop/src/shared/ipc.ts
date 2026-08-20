@@ -1176,12 +1176,16 @@ export interface PickedShellFile {
 export interface KeychainSecretUpdateInput {
   secretRef: string;
   secrets: HostSecretInput;
+  /** 표시 이름. 비면 기존 이름을 유지한다(이름은 조회 키가 아니라 표시용이다). */
+  label?: string;
 }
 
 export interface KeychainSecretCloneInput {
   hostId: string;
   sourceSecretRef: string;
   secrets: HostSecretInput;
+  /** 새로 만들 자격증명의 표시 이름. 비면 호스트 이름을 쓴다(기존 동작). */
+  label?: string;
 }
 
 export interface SshKeyGenerateInput {

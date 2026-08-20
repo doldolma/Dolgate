@@ -196,15 +196,16 @@ export function createSettingsSlice(deps: SliceDeps): SettingsSlice {
             await api.keychain.remove(secretRef);
             await refreshHostAndKeychainState(set);
           },
-    updateKeychainSecret: async (secretRef, secrets) => {
-            await api.keychain.update({ secretRef, secrets });
+    updateKeychainSecret: async (secretRef, secrets, label) => {
+            await api.keychain.update({ secretRef, secrets, label });
             await syncOperationalData(set);
           },
-    cloneKeychainSecretForHost: async (hostId, sourceSecretRef, secrets) => {
+    cloneKeychainSecretForHost: async (hostId, sourceSecretRef, secrets, label) => {
             await api.keychain.cloneForHost({
               hostId,
               sourceSecretRef,
               secrets,
+              label,
             });
             await refreshHostAndKeychainState(set);
           },
