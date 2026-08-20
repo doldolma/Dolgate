@@ -7,6 +7,7 @@ import {
   isRdpHostRecord,
   isVncHostRecord,
   isSshHostRecord,
+  getGroupLabel,
   normalizeGroupPath,
 } from '@shared';
 import type {
@@ -23,6 +24,7 @@ import type {
 import { listTailnets } from '../../services/desktop/tailnet';
 import { listAwsProfiles } from '../../services/desktop/imports';
 import { cn } from '../../lib/cn';
+import { collectScopedHostIds, resolveRecentLogScopeGroupPaths } from './recentLogScope';
 import { Button } from '../../ui';
 import {
   Columns2,
@@ -883,6 +885,21 @@ function EmptyDetail({
   // 그러면 같은 호스트의 리플레이가 있는 세션 로그가 그보다 최근의 다른 로그(전송·감사)에
   // 가려 사라졌고, 활동이 있는 호스트가 6개를 넘으면 아예 목록에서 빠졌다. 섹션 이름과
   // "View all"(로그 화면)이 가리키는 대로 로그 목록으로 맞춘다.
+  // 그룹 맥락이 있으면 최근 로그도 그 그룹으로 좁힌다(범위 규칙은 recentLogScope 주석 참고).
+  const scopeGroupPaths = useMemo(
+    () =>
+      resolveRecentLogScopeGroupPaths({
+        selectedGroupPaths: hb.selectedGroupPaths,
+        currentGroupPath: hb.currentGroupPath,
+      }),
+    [hb.currentGroupPath, hb.selectedGroupPaths],
+  );
+
+  const scopedHostIdSet = useMemo(
+    () => collectScopedHostIds(hb.hosts, scopeGroupPaths),
+    [hb.hosts, scopeGroupPaths],
+  );
+
   const recentLogs = useMemo(() => {
     const items: Array<{
       id: string;
@@ -896,6 +913,9 @@ function EmptyDetail({
     for (const log of hb.activityLogs ?? []) {
       const hostId = getLogHostId(log);
       if (!hostId) {
+        continue;
+      }
+      if (scopedHostIdSet && !scopedHostIdSet.has(hostId)) {
         continue;
       }
       const metadata = log.metadata as {
@@ -930,7 +950,20 @@ function EmptyDetail({
       }
     }
     return items;
-  }, [hb.activityLogs, hb.hosts]);
+  }, [hb.activityLogs, hb.hosts, scopedHostIdSet, translate]);
+
+  // 섹션 제목에 범위를 적는다. 목록이 짧아진 이유를 화면에서 알 수 있어야 한다.
+  const scopeLabel = useMemo(() => {
+    if (scopeGroupPaths.length === 0) {
+      return null;
+    }
+    if (scopeGroupPaths.length === 1) {
+      return getGroupLabel(scopeGroupPaths[0]);
+    }
+    return translate('hostDetail.empty.recentLogsGroupCount', {
+      count: scopeGroupPaths.length,
+    });
+  }, [scopeGroupPaths, translate]);
 
   return (
     <div className="flex h-full flex-col divide-y divide-[var(--border)] overflow-y-auto px-[0.9rem] pb-[1.3rem]">
@@ -978,11 +1011,15 @@ function EmptyDetail({
         </div>
       </div>
 
-      {recentLogs.length > 0 ? (
-        <div className="flex flex-col gap-[0.55rem] pt-[1.3rem]">
+      {/* 그룹이 잡혀 있으면 비어 있어도 섹션을 남긴다 — 사라지면 "로그가 없다" 와 "여기엔 없다" 를
+          구분할 수 없다. 범위가 없을 때(전체)는 예전처럼 로그가 없으면 섹션째 감춘다. */}
+      {recentLogs.length > 0 || scopedHostIdSet ? (
+        <div className="flex flex-col gap-[0.55rem] pt-[1.3rem]" data-testid="recent-logs">
           <div className="flex items-center justify-between">
             <span className="text-[0.76rem] font-bold uppercase tracking-[0.1em] text-[var(--text-soft)]">
-              {translate('hostDetail.empty.recentLogs')}
+              {scopeLabel
+                ? `${translate('hostDetail.empty.recentLogs')} · ${scopeLabel}`
+                : translate('hostDetail.empty.recentLogs')}
             </span>
             <button
               type="button"
@@ -993,6 +1030,11 @@ function EmptyDetail({
             </button>
           </div>
           <div className="flex flex-col">
+            {recentLogs.length === 0 ? (
+              <p className="py-[0.4rem] text-[0.8rem] text-[var(--text-soft)]">
+                {translate('hostDetail.empty.recentLogsGroupEmpty')}
+              </p>
+            ) : null}
             {recentLogs.map((item) => (
               <ActivityRow
                 key={item.id}

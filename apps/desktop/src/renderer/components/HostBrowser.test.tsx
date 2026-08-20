@@ -552,6 +552,60 @@ describe('HostBrowser helpers', () => {
     expect(onSelectSection).toHaveBeenCalledWith('logs');
   });
 
+  // 왼쪽 목록이 한 그룹으로 좁혀져 있는데 오른쪽 "최근 로그"가 전체를 늘어놓으면 같은 화면이
+  // 서로 다른 범위를 말한다. 그룹 맥락이 있으면 로그도 그 그룹으로 좁힌다.
+  const groupScopeLogs: ActivityLogRecord[] = [
+    {
+      id: 'log-app',
+      level: 'info',
+      category: 'session',
+      kind: 'session-lifecycle',
+      message: 'connected',
+      metadata: { hostId: 'host-1' },
+      createdAt: '2025-01-02T00:00:00.000Z',
+    },
+    {
+      id: 'log-db',
+      level: 'info',
+      category: 'session',
+      kind: 'session-lifecycle',
+      message: 'connected',
+      metadata: { hostId: 'host-2' },
+      createdAt: '2025-01-01T00:00:00.000Z',
+    },
+  ];
+
+  it('scopes recent logs to the group being viewed', () => {
+    renderBrowser({ currentGroupPath: 'Servers/Nested', activityLogs: groupScopeLogs });
+
+    const recentLogs = within(screen.getByTestId('recent-logs'));
+    expect(recentLogs.getByText('DB')).toBeInTheDocument();
+    expect(recentLogs.queryByText('App')).not.toBeInTheDocument();
+    // 어느 범위인지 제목에 남는다 — 목록이 짧아진 이유를 화면에서 알 수 있어야 한다.
+    expect(screen.getByText(/최근 로그 · Nested/)).toBeInTheDocument();
+  });
+
+  // 트리에서 부모를 고르면 그 아래가 다 보이는 것과 같아야 한다.
+  it('includes hosts from nested groups in the scoped recent logs', () => {
+    renderBrowser({ currentGroupPath: 'Servers', activityLogs: groupScopeLogs });
+
+    const recentLogs = within(screen.getByTestId('recent-logs'));
+    expect(recentLogs.getByText('App')).toBeInTheDocument();
+    expect(recentLogs.getByText('DB')).toBeInTheDocument();
+  });
+
+  // 섹션째 사라지면 "로그가 없다" 와 "이 그룹엔 없다" 를 구분할 수 없다.
+  it('keeps the recent logs section with an empty note when the group has none', () => {
+    renderBrowser({
+      currentGroupPath: 'Servers/Nested',
+      activityLogs: [groupScopeLogs[0]],
+    });
+
+    const recentLogs = within(screen.getByTestId('recent-logs'));
+    expect(recentLogs.getByText('이 그룹에는 최근 로그가 없습니다.')).toBeInTheDocument();
+    expect(recentLogs.queryByText('App')).not.toBeInTheDocument();
+  });
+
   it('shows settings sections in the command palette', () => {
     const onOpenSettingsSection = vi.fn();
     renderBrowser({ searchQuery: 'credentials', onOpenSettingsSection });
