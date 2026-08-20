@@ -2,10 +2,9 @@
 
 **English** | [한국어](./README.ko.md)
 
-Dolgate is an SSH workspace that carries the same server working environment across Windows, macOS, Linux, iOS and Android. On desktop, RDP and VNC remote desktops open in the same workspace.
-Hosts, sessions and snippets sync between devices — and you can self-host `sync-api` so your connection details and working data stay under your own control.
+Dolgate connects you to private infrastructure without extra tooling. It joins a **Tailscale tailnet without installing Tailscale**, reaches AWS EC2 instances over **SSM without the AWS CLI or session-manager-plugin**, and opens **RDP and VNC remote desktops alongside SSH** — all in one workspace that runs on Windows, macOS, Linux, iOS and Android.
 
-Two things set it apart from other SSH clients: **it joins a Tailscale tailnet without installing Tailscale**, and **it talks to AWS SSM without the AWS CLI or session-manager-plugin**.
+Hosts, credentials and snippets sync between devices with **end-to-end encryption**, and you can **self-host the sync server** so your connection data never leaves your own infrastructure.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/hosts-workspace-dark.png">

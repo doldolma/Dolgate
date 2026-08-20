@@ -2,8 +2,9 @@
 
 [English](./README.md) | **한국어**
 
-Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경을 이어 쓰는 SSH 워크스페이스입니다. 데스크톱 앱에서는 RDP와 VNC 원격 화면도 같은 워크스페이스에서 열 수 있습니다.
-호스트·세션·스니펫을 동기화하되, sync-api를 직접 호스팅해 접속 정보와 작업 데이터를 스스로 통제할 수 있습니다.
+Dolgate는 별도 도구 설치 없이 사설 인프라에 접속합니다. **Tailscale을 설치하지 않고 tailnet에 참여**하고, **AWS CLI나 session-manager-plugin 없이 EC2에 SSM으로 접속**하며, **SSH 옆에서 RDP·VNC 원격 화면**을 엽니다 — Windows, macOS, Linux, iOS, Android 한 워크스페이스에서.
+
+호스트·시크릿·스니펫은 **종단간 암호화**로 기기 간 동기화되고, **동기화 서버를 직접 운영**해 접속 정보가 외부로 나가지 않게 할 수 있습니다.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/hosts-workspace-dark.png">
