@@ -145,17 +145,40 @@ jobs:
         working-directory: services/ssh-core
         run: GOOS=ios GOARCH=arm64 CGO_ENABLED=1 go build $(go list ./... | grep -v '/cmd/')
 
+  # 사이드카가 **앱이 찾는 경로에 놓이는지** 보는 검사다. Go 테스트와 성격이 다르고(테스트가
+  # 아니라 패키징 레이아웃 회귀 검사) 필요한 도구도 달라서 잡을 나눴다 — 한 잡에 묶여 있을 때는
+  # Go 테스트 잡이 모노레포 전체를 npm ci 하느라 macOS 에서 94초를 더 썼다.
+  #
+  # npm 은 쓰지 않는다. build-ssh-core-dev.cjs 와 그것이 부르는 build-ssh-core.cjs 는 Node 내장
+  # 모듈만 쓰므로(외부 패키지 0개) 스크립트를 직접 부르면 설치가 필요 없다.
+  desktop-sidecar-layout:
+    name: desktop sidecar layout (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+          - ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: services/ssh-core/go.mod
+          cache-dependency-path: services/ssh-core/go.sum
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
           node-version: "24.15.0"
-          cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Prepare desktop dev ssh-core binaries
-        run: npm run prepare:ssh-core:dev --workspace @dolssh/desktop
+      - name: Build desktop dev sidecar binaries
+        working-directory: apps/desktop
+        run: node ./scripts/build-ssh-core-dev.cjs
 
       - name: Verify macOS desktop helper binaries
         if: matrix.os == 'macos-latest'

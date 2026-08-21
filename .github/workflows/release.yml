@@ -69,8 +69,17 @@ jobs:
           require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, `version=${rootVersion}\n`);
           NODE
 
-  ssh-core-test:
-    name: ssh-core test (${{ matrix.os }})
+  # 릴리즈가 지켜야 하는 것은 **배포물이 의존하는 사이드카 경로**다. 유닛 테스트는 test.yml 이
+  # 3-OS + race 로 이미 돌리므로 여기서 다시 돌리지 않는다 — macOS·Windows 에서 각 2.5분씩 같은
+  # 일을 반복하고, 릴리즈가 실패하는 이유만 하나 늘었다.
+  #
+  # npm ci 도 없앴다. 이 스크립트들은 Node 내장 모듈만 쓴다(외부 패키지 0개).
+  #
+  # **주의:** test.yml 은 태그에서 돌지 않는다(pull_request·push main 만). 그래서 손으로 돌리는
+  # workflow_dispatch 빌드는 유닛 테스트를 지나지 않은 커밋일 수 있다 — 그 경우의 안전망은 이
+  # 잡이 아니라 "그 SHA 에서 test.yml 이 성공했는지" 를 보는 게이트여야 한다(아직 없음).
+  desktop-sidecar-layout:
+    name: desktop sidecar layout (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     needs: verify-version
     strategy:
@@ -90,21 +99,14 @@ jobs:
           go-version-file: services/ssh-core/go.mod
           cache-dependency-path: services/ssh-core/go.sum
 
-      - name: Run ssh-core tests
-        working-directory: services/ssh-core
-        run: go test ./... -cover
-
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
           node-version: "24.15.0"
-          cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Prepare desktop dev ssh-core binaries
-        run: npm run prepare:ssh-core:dev --workspace @dolssh/desktop
+      - name: Build desktop dev sidecar binaries
+        working-directory: apps/desktop
+        run: node ./scripts/build-ssh-core-dev.cjs
 
       - name: Verify macOS desktop helper binaries
         if: matrix.os == 'macos-latest'
@@ -125,7 +127,6 @@ jobs:
         run: |
           test -f apps/desktop/release/resources/linux/x64/bin/ssh-core
           test -f apps/desktop/release/resources/linux/x64/bin/dolgate-dns-helper
-
   desktop-test:
     runs-on: ubuntu-latest
     needs: verify-version
@@ -204,7 +205,7 @@ jobs:
       - verify-version
       - desktop-test
       - mobile-test
-      - ssh-core-test
+      - desktop-sidecar-layout
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -340,7 +341,7 @@ jobs:
       - verify-version
       - desktop-test
       - mobile-test
-      - ssh-core-test
+      - desktop-sidecar-layout
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -466,7 +467,7 @@ jobs:
       - verify-version
       - desktop-test
       - mobile-test
-      - ssh-core-test
+      - desktop-sidecar-layout
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
