@@ -775,6 +775,49 @@ describe('SessionScreen', () => {
     });
   });
 
+  // 출력이 흐르는 동안 세션 레코드는 750ms 마다 새 객체로 바뀐다(스냅샷 플러시). 그때마다
+  // fit() 을 다시 부르면 안드로이드에서는 이미 떠 있는 IME 를 다시 띄우게 되어 화면이 깜빡였다
+  // — 실기기에서 "3~4글자마다 한 번" 으로 보였다. 세션 id 가 그대로면 다시 맞출 이유가 없다.
+  it('does not refit the terminal when only the session snapshot changes', async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+    });
+
+    // 마운트 때 한 번 맞추는 것은 정상이다 — 여기서부터 세 본다.
+    expect(mockTerminalHandle!.fit).toHaveBeenCalled();
+    mockTerminalHandle!.fit.mockClear();
+
+    // 같은 세션의 스냅샷·활동 시각만 바뀐 경우(= 타이핑 중 플러시).
+    await act(async () => {
+      useMobileAppStore.setState(state => ({
+        sessions: state.sessions.map(item =>
+          item.id === 'session-1'
+            ? {
+                ...item,
+                lastViewportSnapshot: `${item.lastViewportSnapshot}x`,
+                lastEventAt: new Date(Date.now() + 1_000).toISOString(),
+              }
+            : item,
+        ),
+      }));
+      jest.runOnlyPendingTimers();
+    });
+    // 이펙트는 act 가 끝날 때 흘러 rAF 를 예약한다. 그 rAF 까지 돌려야 fit 이 불렸는지 볼 수 있다.
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+    });
+
+    expect(mockTerminalHandle!.fit).not.toHaveBeenCalled();
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
   it('toggles the iOS keyboard through the native terminal input overlay', async () => {
     const dismissKeyboard = jest
       .spyOn(Keyboard, 'dismiss')

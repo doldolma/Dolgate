@@ -681,8 +681,14 @@ export function SessionScreen(): React.JSX.Element {
     useTerminalInputOverlay,
   ]);
 
+  // **세션 레코드가 아니라 id 를 본다.** 레코드는 출력이 흐르는 동안 750ms 마다 새 객체로
+  // 바뀌므로(스냅샷 플러시), 객체를 의존성에 두면 타이핑 중에 이 이펙트가 계속 다시 돌았다.
+  // 그때마다 fit() 이 터미널을 다시 재고, 안드로이드에서는 이미 떠 있는 IME 에게 다시 뜨라고
+  // 해서(syncFocus → showSoftInput + insets show) 화면이 한 번씩 깜빡였다 — 실기기에서
+  // "3~4글자마다 한 번" 으로 보였던 것이 이 주기다. 크기 맞추기와 포커스는 세션이나 보임
+  // 여부가 바뀔 때만 필요하다.
   useEffect(() => {
-    if (!terminalReady || !terminalVisible || !renderedTerminalSession) {
+    if (!terminalReady || !terminalVisible || !renderedTerminalSessionId) {
       return;
     }
 
@@ -695,7 +701,7 @@ export function SessionScreen(): React.JSX.Element {
   }, [
     focusRequestedTerminalInput,
     isAndroid,
-    renderedTerminalSession,
+    renderedTerminalSessionId,
     terminalReady,
     terminalVisible,
   ]);
