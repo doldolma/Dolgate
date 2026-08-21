@@ -293,6 +293,47 @@ describe("HomeScreen group browsing", () => {
   });
 
   // 영어에서 1개일 때 "1 hosts" 로 나오던 자리다 — 앱스토어 스크린샷에도 그대로 찍힌다.
+  // 정렬 기준이 "최근 활동" 이었을 때는 세션이 출력을 뿜는 동안 그 호스트가 목록에서 위로 튀었다.
+  // 목록 순서는 화면을 보는 동안 움직이지 않아야 한다 — 이름 오름차순 하나로만 정해진다.
+  it("orders hosts by name and does not hoist the one with a live session", async () => {
+    const orderedHosts: SshHostRecord[] = ["Zulu box", "Alpha box", "Bravo box"].map(
+      (label, index) => ({
+        ...hosts[0],
+        id: `host-order-${index}`,
+        label,
+        groupName: null,
+      }),
+    );
+    useMobileAppStore.setState({
+      groups: [],
+      hosts: orderedHosts,
+      // 가장 최근 활동을 가진 호스트다. 예전 규칙이라면 맨 위로 올라온다.
+      sessions: [
+        {
+          ...sessions[0],
+          hostId: "host-order-0",
+          lastEventAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    const text = collectText(tree!.toJSON());
+    const positionOf = (label: string) => text.indexOf(label);
+    expect(positionOf("Alpha box")).toBeGreaterThanOrEqual(0);
+    expect(positionOf("Alpha box")).toBeLessThan(positionOf("Bravo box"));
+    expect(positionOf("Bravo box")).toBeLessThan(positionOf("Zulu box"));
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+
   it("uses the singular wording for a folder holding one host in English", async () => {
     applyMobileLanguage("en");
     let tree: renderer.ReactTestRenderer;

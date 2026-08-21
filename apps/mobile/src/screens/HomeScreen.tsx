@@ -212,21 +212,15 @@ export function HomeScreen(): React.JSX.Element {
     }, [goBackInHome]),
   );
 
+  // **이름 오름차순 하나로 고정한다.** 예전에는 "활동이 있는 호스트 먼저(lastEventAt 내림차순)"
+  // 를 앞에 뒀는데, lastEventAt 은 원격 출력마다 갱신된다. 그래서 세션이 출력을 뿜는 동안 그
+  // 호스트가 목록에서 계속 위로 튀었고, 탭을 닫으면 활동 그룹에서 빠지며 또 순서가 바뀌었다 —
+  // 같은 호스트를 두 번 찾게 만드는 움직임이라 정렬 기준으로 쓸 수 없다. 세션 탭이 같은 이유로
+  // 정렬하지 않는다는 것은 이미 적혀 있다(useMobileAppStore 의 sortSessionsByRecency 주석:
+  // "타이핑하는 중에 탭이 손가락 밑에서 맨 왼쪽으로 튄다") — 이 목록도 같은 함정이었다.
+  // 최근 사용 시각은 부제(getCompactHostMeta)에 그대로 남으니 정보가 사라지는 것은 아니다.
   const sortHosts = (nextHosts: HostRecord[]) =>
-    [...nextHosts].sort((left, right) => {
-      const leftRecent = recentActivityByHostId.get(left.id) ?? "";
-      const rightRecent = recentActivityByHostId.get(right.id) ?? "";
-      if (leftRecent && rightRecent && leftRecent !== rightRecent) {
-        return rightRecent.localeCompare(leftRecent);
-      }
-      if (leftRecent && !rightRecent) {
-        return -1;
-      }
-      if (!leftRecent && rightRecent) {
-        return 1;
-      }
-      return left.label.localeCompare(right.label);
-    });
+    [...nextHosts].sort((left, right) => left.label.localeCompare(right.label));
 
   const visibleGroups = useMemo(() => {
     if (isSearching) {
@@ -242,7 +236,7 @@ export function HomeScreen(): React.JSX.Element {
   // 동기화로 넘어온다.
   const favoriteHosts = useMemo(
     () => sortHosts(hosts.filter((host) => host.favorite === true)),
-    [hosts, recentActivityByHostId],
+    [hosts],
   );
 
   const filteredHosts = useMemo(() => {
@@ -269,7 +263,6 @@ export function HomeScreen(): React.JSX.Element {
     isFavoritesView,
     isSearching,
     query,
-    recentActivityByHostId,
   ]);
 
   const listData = useMemo<HomeListItem[]>(() => {
