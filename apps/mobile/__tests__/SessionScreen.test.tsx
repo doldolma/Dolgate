@@ -818,6 +818,49 @@ describe('SessionScreen', () => {
     });
   });
 
+  // 패키지는 옵션 변경을 **얕은 비교**로 판단한다(dist 의 ee: 키 한 겹). theme 이 중첩 객체라
+  // 인라인으로 넘기면 렌더마다 비교가 실패해 WebView 로 setOptions 가 다시 나가고, xterm 은
+  // theme 을 다시 세울 때 값이 같아도 전체를 다시 그린다 — 실기기에서 주기적 깜빡임으로 보였다.
+  it('keeps terminal option identities stable across re-renders', async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+    });
+
+    const before = {
+      xtermOptions: mockCapturedXtermProps?.xtermOptions,
+      webViewOptions: mockCapturedXtermProps?.webViewOptions,
+    };
+    expect(before.xtermOptions).toBeDefined();
+    expect(before.webViewOptions).toBeDefined();
+
+    // 출력이 흐르는 동안 벌어지는 일: 스냅샷 플러시가 세션 레코드를 패치해 이 화면이 리렌더된다.
+    await act(async () => {
+      useMobileAppStore.setState(state => ({
+        sessions: state.sessions.map(item =>
+          item.id === 'session-1'
+            ? {
+                ...item,
+                lastViewportSnapshot: `${item.lastViewportSnapshot}y`,
+                lastEventAt: new Date(Date.now() + 2_000).toISOString(),
+              }
+            : item,
+        ),
+      }));
+      jest.runOnlyPendingTimers();
+    });
+
+    expect(mockCapturedXtermProps?.xtermOptions).toBe(before.xtermOptions);
+    expect(mockCapturedXtermProps?.webViewOptions).toBe(before.webViewOptions);
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
   it('toggles the iOS keyboard through the native terminal input overlay', async () => {
     const dismissKeyboard = jest
       .spyOn(Keyboard, 'dismiss')

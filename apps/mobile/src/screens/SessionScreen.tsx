@@ -556,6 +556,54 @@ export function SessionScreen(): React.JSX.Element {
     }),
     [reportTerminalGrid, handleTerminalGesture],
   );
+  // **터미널에 넘기는 옵션은 신원을 고정한다.**
+  //
+  // 패키지가 옵션 변경을 얕은 비교로 판단하는데(dist/index.js 의 ee: 키를 한 겹만 본다),
+  // theme 이 중첩 객체라 인라인으로 넘기면 렌더마다 비교가 실패한다. 그러면 매 렌더마다
+  // WebView 로 setOptions 를 보내고, xterm 은 theme 이 다시 세워질 때 값이 같아도 렌더러를
+  // 비우고 전체를 다시 그린다 — 실기기에서 출력이 흐를 때 화면이 주기적으로 깜빡인 이유다
+  // (스냅샷 플러시가 세션 레코드를 패치할 때마다 이 화면이 리렌더된다).
+  const terminalTheme = useMemo(
+    () => ({
+      background: palette.sessionTerminalBg,
+      foreground: palette.sessionTerminalFg,
+      cursor: palette.sessionTerminalCursor,
+      selectionBackground: palette.sessionTerminalSelection,
+    }),
+    [
+      palette.sessionTerminalBg,
+      palette.sessionTerminalFg,
+      palette.sessionTerminalCursor,
+      palette.sessionTerminalSelection,
+    ],
+  );
+  const terminalFontSize = width > height ? 12 : 11;
+  const xtermOptions = useMemo(
+    () => ({
+      fontSize: terminalFontSize,
+      scrollback: 2_000,
+      theme: terminalTheme,
+    }),
+    [terminalFontSize, terminalTheme],
+  );
+  const terminalInjectedJavaScript = useMemo(
+    () => `${TERMINAL_GRID_REPORT_SCRIPT}\n${terminalGestureScript}`,
+    [terminalGestureScript],
+  );
+  const terminalWebViewOptions = useMemo(
+    () => ({
+      hideKeyboardAccessoryView: true,
+      // 스크롤은 주입 스크립트가 term.scrollLines 로 직접 굴린다. WebView 자체 스크롤뷰를
+      // 켜 두면 방향키 제스처와 동시에 돌아 화면이 두 번 움직인다. CSS(touch-action·overflow)
+      // 만으로는 네이티브 스크롤뷰를 막지 못한다.
+      scrollEnabled: false,
+      // 실제 fit 된 그리드를 보고받아 PTY 크기를 맞춘다. onMessage 는 넘기면 안 된다 —
+      // 패키지 핸들러를 덮어써 입출력이 끊긴다.
+      injectedJavaScript: terminalInjectedJavaScript,
+    }),
+    [terminalInjectedJavaScript],
+  );
+
   const keyboardToggleActive = isAndroid
     ? keyboardVisible || keyboardRequestedVisible
     : keyboardVisible;
@@ -1394,16 +1442,7 @@ export function SessionScreen(): React.JSX.Element {
                   ref={terminalRef}
                   style={styles.terminal}
                   logger={terminalLogger}
-                  webViewOptions={{
-                    hideKeyboardAccessoryView: true,
-                    // 스크롤은 주입 스크립트가 term.scrollLines 로 직접 굴린다. WebView 자체
-                    // 스크롤뷰를 켜 두면 방향키 제스처와 동시에 돌아 화면이 두 번 움직인다.
-                    // CSS(touch-action·overflow)만으로는 네이티브 스크롤뷰를 막지 못한다.
-                    scrollEnabled: false,
-                    // 실제 fit 된 그리드를 보고받아 PTY 크기를 맞춘다. onMessage 는
-                    // 넘기면 안 된다 — 패키지 핸들러를 덮어써 입출력이 끊긴다.
-                    injectedJavaScript: `${TERMINAL_GRID_REPORT_SCRIPT}\n${terminalGestureScript}`,
-                  }}
+                  webViewOptions={terminalWebViewOptions}
                   onInitialized={() => setTerminalReady(true)}
                   // 링크는 xterm 의 web-links 애드온이 찾고, 여는 것은 여기서 정한다. 페이지가
                   // 직접 열면 WebView 가 그 주소로 이동해 터미널이 사라진다(세션도 함께).
@@ -1418,16 +1457,7 @@ export function SessionScreen(): React.JSX.Element {
                   onData={data => {
                     sendDirectTerminalInput(data);
                   }}
-                  xtermOptions={{
-                    fontSize: width > height ? 12 : 11,
-                    scrollback: 2_000,
-                    theme: {
-                      background: palette.sessionTerminalBg,
-                      foreground: palette.sessionTerminalFg,
-                      cursor: palette.sessionTerminalCursor,
-                      selectionBackground: palette.sessionTerminalSelection,
-                    },
-                  }}
+                  xtermOptions={xtermOptions}
                 />
                 {!terminalReady ? (
                   <View
