@@ -549,6 +549,23 @@ jobs:
       - name: Run mobile tests
         run: npm run test:mobile -- --runInBand
 
+      # 번들을 실제로 만들어 본다. 타입체크·jest 는 Metro 의 모듈 해석을 지나지 않으므로,
+      # 해석이 깨져도(예: AWS SDK 가 CJS 로 잡혀 node:stream 을 요구) CI 는 초록이고 릴리즈
+      # 빌드에서만 터진다 — 실제로 그렇게 통과한 커밋이 있었다. 에뮬레이터 없이 1~2분이다.
+      #
+      # --dev false 로 돈다: 릴리즈가 만드는 것과 같은 번들이어야 릴리즈를 대신 지킬 수 있다.
+      - name: Bundle mobile JS (android)
+        run: >-
+          npx react-native bundle --platform android --dev false
+          --entry-file index.js --bundle-output "$RUNNER_TEMP/android.bundle"
+        working-directory: apps/mobile
+
+      - name: Bundle mobile JS (ios)
+        run: >-
+          npx react-native bundle --platform ios --dev false
+          --entry-file index.js --bundle-output "$RUNNER_TEMP/ios.bundle"
+        working-directory: apps/mobile
+
   mobile-native-check:
     name: mobile native engine check
     runs-on: ubuntu-latest
