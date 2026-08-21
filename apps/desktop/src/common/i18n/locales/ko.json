@@ -1807,7 +1807,8 @@
       "logs": "로그",
       "recentLogs": "최근 로그",
       "recentLogsGroupCount": "그룹 {{count}}개",
-      "recentLogsGroupEmpty": "이 그룹에는 최근 로그가 없습니다."
+      "recentLogsGroupEmpty": "이 그룹에는 최근 로그가 없습니다.",
+      "recentLogsFavoritesEmpty": "즐겨찾기한 호스트에는 최근 로그가 없습니다."
     },
     "favorite": "{{label}} 즐겨찾기",
     "close": "상세 닫기",

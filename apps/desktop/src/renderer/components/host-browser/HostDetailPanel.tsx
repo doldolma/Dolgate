@@ -24,7 +24,7 @@ import type {
 import { listTailnets } from '../../services/desktop/tailnet';
 import { listAwsProfiles } from '../../services/desktop/imports';
 import { cn } from '../../lib/cn';
-import { collectScopedHostIds, resolveRecentLogScopeGroupPaths } from './recentLogScope';
+import { collectRecentLogScopeHostIds, resolveRecentLogScope } from './recentLogScope';
 import { Button } from '../../ui';
 import {
   Columns2,
@@ -858,19 +858,20 @@ function EmptyDetail({
   // 그러면 같은 호스트의 리플레이가 있는 세션 로그가 그보다 최근의 다른 로그(전송·감사)에
   // 가려 사라졌고, 활동이 있는 호스트가 6개를 넘으면 아예 목록에서 빠졌다. 섹션 이름과
   // "View all"(로그 화면)이 가리키는 대로 로그 목록으로 맞춘다.
-  // 그룹 맥락이 있으면 최근 로그도 그 그룹으로 좁힌다(범위 규칙은 recentLogScope 주석 참고).
-  const scopeGroupPaths = useMemo(
+  // 즐겨찾기나 그룹 맥락이 있으면 최근 로그도 그 범위로 좁힌다(규칙은 recentLogScope 주석 참고).
+  const scope = useMemo(
     () =>
-      resolveRecentLogScopeGroupPaths({
+      resolveRecentLogScope({
+        favoritesFilterActive: hb.favoritesFilterActive,
         selectedGroupPaths: hb.selectedGroupPaths,
         currentGroupPath: hb.currentGroupPath,
       }),
-    [hb.currentGroupPath, hb.selectedGroupPaths],
+    [hb.currentGroupPath, hb.favoritesFilterActive, hb.selectedGroupPaths],
   );
 
   const scopedHostIdSet = useMemo(
-    () => collectScopedHostIds(hb.hosts, scopeGroupPaths),
-    [hb.hosts, scopeGroupPaths],
+    () => collectRecentLogScopeHostIds(hb.hosts, scope),
+    [hb.hosts, scope],
   );
 
   const recentLogs = useMemo(() => {
@@ -927,16 +928,20 @@ function EmptyDetail({
 
   // 섹션 제목에 범위를 적는다. 목록이 짧아진 이유를 화면에서 알 수 있어야 한다.
   const scopeLabel = useMemo(() => {
-    if (scopeGroupPaths.length === 0) {
+    if (scope.kind === 'favorites') {
+      // 사이드바에서 누른 그 이름을 그대로 쓴다.
+      return translate('sidebar.favorites');
+    }
+    if (scope.kind !== 'groups') {
       return null;
     }
-    if (scopeGroupPaths.length === 1) {
-      return getGroupLabel(scopeGroupPaths[0]);
+    if (scope.groupPaths.length === 1) {
+      return getGroupLabel(scope.groupPaths[0]);
     }
     return translate('hostDetail.empty.recentLogsGroupCount', {
-      count: scopeGroupPaths.length,
+      count: scope.groupPaths.length,
     });
-  }, [scopeGroupPaths, translate]);
+  }, [scope, translate]);
 
   return (
     <div className="flex h-full flex-col divide-y divide-[var(--border)] overflow-y-auto px-[0.9rem] pb-[1.3rem]">
@@ -1005,7 +1010,9 @@ function EmptyDetail({
           <div className="flex flex-col">
             {recentLogs.length === 0 ? (
               <p className="py-[0.4rem] text-[0.8rem] text-[var(--text-soft)]">
-                {translate('hostDetail.empty.recentLogsGroupEmpty')}
+                {scope.kind === 'favorites'
+                  ? translate('hostDetail.empty.recentLogsFavoritesEmpty')
+                  : translate('hostDetail.empty.recentLogsGroupEmpty')}
               </p>
             ) : null}
             {recentLogs.map((item) => (

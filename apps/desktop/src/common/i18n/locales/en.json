@@ -1807,7 +1807,8 @@
       "logs": "Logs",
       "recentLogs": "Recent logs",
       "recentLogsGroupCount": "{{count}} groups",
-      "recentLogsGroupEmpty": "No recent logs in this group."
+      "recentLogsGroupEmpty": "No recent logs in this group.",
+      "recentLogsFavoritesEmpty": "No recent logs for your favorite hosts."
     },
     "favorite": "Favorite {{label}}",
     "close": "Close details",

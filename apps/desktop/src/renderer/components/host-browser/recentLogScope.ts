@@ -45,3 +45,47 @@ export function collectScopedHostIds(
   }
   return ids;
 }
+
+/**
+ * 최근 로그의 범위. **즐겨찾기·그룹·전체는 서로 배타적이다** — useHostBrowser 에서 즐겨찾기를
+ * 켜면 그룹 스코프가 풀리고, 그룹을 고르면 즐겨찾기가 꺼진다(toggleFavoritesFilter·
+ * handleSelectGroup 참고). 그 규칙을 타입으로 굳혀 둔다.
+ */
+export type RecentLogScope =
+  | { kind: 'none' }
+  | { kind: 'favorites' }
+  | { kind: 'groups'; groupPaths: string[] };
+
+/**
+ * 지금 화면이 말하는 범위를 고른다. 즐겨찾기가 먼저다 — 둘이 동시에 켜지는 상태는 없지만,
+ * 만약 생겨도 사용자가 마지막에 누른 쪽(즐겨찾기)을 따르는 편이 화면과 어긋나지 않는다.
+ */
+export function resolveRecentLogScope(input: {
+  favoritesFilterActive?: boolean;
+  selectedGroupPaths?: readonly string[] | null;
+  currentGroupPath?: string | null;
+}): RecentLogScope {
+  if (input.favoritesFilterActive) {
+    return { kind: 'favorites' };
+  }
+  const groupPaths = resolveRecentLogScopeGroupPaths(input);
+  return groupPaths.length > 0 ? { kind: 'groups', groupPaths } : { kind: 'none' };
+}
+
+/**
+ * 범위에 속한 호스트 id 집합. collectScopedHostIds 와 같은 규칙으로 **null 은 "범위 없음"(전체)**,
+ * 빈 Set 은 "범위는 있는데 그 안에 호스트가 없다" 다.
+ */
+export function collectRecentLogScopeHostIds(
+  hosts: readonly { id: string; groupName?: string | null; favorite?: boolean | null }[],
+  scope: RecentLogScope,
+): Set<string> | null {
+  if (scope.kind === 'favorites') {
+    // 즐겨찾기는 호스트 레코드의 favorite 에서 파생한다(useHostBrowser 의 favoriteHostIds 와 같은 출처).
+    return new Set(hosts.filter((host) => host.favorite === true).map((host) => host.id));
+  }
+  if (scope.kind === 'groups') {
+    return collectScopedHostIds(hosts, scope.groupPaths);
+  }
+  return null;
+}

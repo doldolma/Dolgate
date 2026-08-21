@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { collectScopedHostIds, resolveRecentLogScopeGroupPaths } from './recentLogScope';
+import {
+  collectRecentLogScopeHostIds,
+  collectScopedHostIds,
+  resolveRecentLogScope,
+  resolveRecentLogScopeGroupPaths,
+} from './recentLogScope';
 
 const hosts = [
   { id: 'host-app', groupName: 'Servers' },
@@ -69,5 +74,61 @@ describe('collectScopedHostIds', () => {
 
   it('is empty — not null — for a group without hosts', () => {
     expect(collectScopedHostIds(hosts, ['Empty'])).toEqual(new Set());
+  });
+});
+
+const hostsWithFavorites = [
+  { id: 'host-app', groupName: 'Servers', favorite: true },
+  { id: 'host-db', groupName: 'Servers/Nested' },
+  { id: 'host-lab', groupName: 'Lab', favorite: false },
+  { id: 'host-loose', groupName: null, favorite: true },
+];
+
+describe('resolveRecentLogScope', () => {
+  it('has no scope on All Hosts', () => {
+    expect(resolveRecentLogScope({})).toEqual({ kind: 'none' });
+  });
+
+  it('scopes to favorites when the favorites filter is on', () => {
+    expect(resolveRecentLogScope({ favoritesFilterActive: true })).toEqual({ kind: 'favorites' });
+  });
+
+  // 즐겨찾기와 그룹은 동시에 켜지지 않지만(useHostBrowser 가 서로를 끈다), 그래도 한쪽으로
+  // 정해져야 한다 — 두 범위가 겹치면 화면 제목과 목록이 다른 말을 한다.
+  it('prefers favorites over a leftover group path', () => {
+    expect(
+      resolveRecentLogScope({ favoritesFilterActive: true, currentGroupPath: 'Servers' }),
+    ).toEqual({ kind: 'favorites' });
+  });
+
+  it('scopes to the groups otherwise', () => {
+    expect(resolveRecentLogScope({ selectedGroupPaths: ['Lab'] })).toEqual({
+      kind: 'groups',
+      groupPaths: ['Lab'],
+    });
+  });
+});
+
+describe('collectRecentLogScopeHostIds', () => {
+  it('returns null for the unscoped view', () => {
+    expect(collectRecentLogScopeHostIds(hostsWithFavorites, { kind: 'none' })).toBeNull();
+  });
+
+  // 즐겨찾기는 그룹과 무관하다 — 그룹 없는 호스트도 들어온다.
+  it('collects favorites regardless of group', () => {
+    expect(collectRecentLogScopeHostIds(hostsWithFavorites, { kind: 'favorites' })).toEqual(
+      new Set(['host-app', 'host-loose']),
+    );
+  });
+
+  // 즐겨찾기가 하나도 없으면 빈 Set 이어야 한다. null 이면 전체 로그가 쏟아진다.
+  it('is empty — not null — when nothing is favorited', () => {
+    expect(collectRecentLogScopeHostIds(hosts, { kind: 'favorites' })).toEqual(new Set());
+  });
+
+  it('delegates to the group scope', () => {
+    expect(
+      collectRecentLogScopeHostIds(hostsWithFavorites, { kind: 'groups', groupPaths: ['Servers'] }),
+    ).toEqual(new Set(['host-app', 'host-db']));
   });
 });
