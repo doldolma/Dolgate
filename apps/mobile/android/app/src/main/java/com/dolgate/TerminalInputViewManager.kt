@@ -320,6 +320,15 @@ class TerminalInputEditText(
   private fun showKeyboard() {
     post {
       showSoftInputOnFocus = true
+      // **이미 떠 있으면 다시 띄우지 않는다.**
+      //
+      // 떠 있는 IME 에게 show 를 다시 보내면 안드로이드가 인셋 애니메이션을 다시 돌려 창
+      // 전체가 재배치되고, 실기기에서는 화면이 한 프레임 번쩍인다(이슈 #1). 출력이 흐르는
+      // 동안 JS 가 포커스를 반복 요청하던 것이 원인이었고 그쪽은 고쳤지만, 여기서 막아 두면
+      // 다른 경로로 다시 들어와도 번쩍임이 생기지 않는다.
+      if (hasFocus() && isImeVisible()) {
+        return@post
+      }
       if (!hasFocus()) {
         requestFocus()
       }
@@ -329,6 +338,17 @@ class TerminalInputEditText(
       }
       inputMethodManager.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
     }
+  }
+
+  /**
+   * IME 가 지금 보이는지. 알 수 없으면 false 를 돌려준다 — 모르면 띄우는 쪽이 안전하다
+   * (안 띄우면 사용자가 타이핑을 못 한다).
+   */
+  private fun isImeVisible(): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+      return false
+    }
+    return rootWindowInsets?.isVisible(WindowInsets.Type.ime()) == true
   }
 
   private fun hideKeyboard() {

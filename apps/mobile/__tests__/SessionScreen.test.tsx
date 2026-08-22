@@ -854,6 +854,114 @@ describe('SessionScreen', () => {
     });
   });
 
+  /**
+   * 이슈 #1 의 본체 — 출력이 흐르는 동안 화면 전체가 주기적으로 번쩍였다.
+   *
+   * 터미널 출력 구독 이펙트가 세션 레코드를 의존성에 두고 있었다. 그 이펙트는 다시 돌 때마다
+   * 구독을 끊고 **화면을 지운다**(ESC[3J ESC[2J ESC[H — 스크롤백까지). 레코드는 스냅샷
+   * 플러시마다 새 객체가 되므로, 750ms 마다 "지우고 리플레이로 되그리기"가 반복됐다. 키보드와
+   * 무관하고(그래서 키보드를 내려도 보였다), 에뮬레이터에서는 한 프레임에 끝나 안 보였다.
+   */
+  it('does not clear the terminal when only the session snapshot changes', async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+    });
+
+    // 마운트 때 한 번 지우고 리플레이하는 것은 정상이다 — 여기서부터 센다.
+    mockTerminalHandle!.write.mockClear();
+
+    await act(async () => {
+      useMobileAppStore.setState(state => ({
+        sessions: state.sessions.map(item =>
+          item.id === 'session-1'
+            ? {
+                ...item,
+                lastViewportSnapshot: `${item.lastViewportSnapshot}x`,
+                lastEventAt: new Date(Date.now() + 1_000).toISOString(),
+              }
+            : item,
+        ),
+      }));
+      jest.runOnlyPendingTimers();
+    });
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+    });
+
+    // 화면 클리어 시퀀스가 다시 나가면 그것이 번쩍임이다.
+    const reset = Buffer.from('\u001b[3J\u001b[2J\u001b[H', 'utf8').toString();
+    const wroteReset = mockTerminalHandle!.write.mock.calls.some(call => {
+      const payload = call[0] as Uint8Array | undefined;
+      return payload ? Buffer.from(payload).toString() === reset : false;
+    });
+    expect(wroteReset).toBe(false);
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  /**
+   * 이슈 #1 — 태블릿에서 화면 전체가 0.6~1.3초 간격으로 한 프레임 번쩍였다.
+   *
+   * 그 주기는 스냅샷 플러시(750ms)다. 세션 레코드를 의존성에 둔 이펙트가 그때마다 포커스를
+   * 다시 요청했고, 포커스 토큰이 올라가면 네이티브 입력 뷰가 showSoftInput 을 다시 부른다 —
+   * 이미 떠 있는 IME 가 다시 뜨며 창 전체가 재배치되는 것이 그 번쩍임이었다. claude-code·htop
+   * 처럼 출력이 끊이지 않는 화면에서 계속 보였고, 하드웨어 키보드를 쓰는 에뮬레이터에서는
+   * 보이지 않았다.
+   */
+  it('does not re-request input focus when only the session snapshot changes', async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+    });
+
+    function focusToken() {
+      const input = tree!.root.findAll(
+        node => (node.type as unknown) === 'TerminalInputView',
+      )[0];
+      return input?.props.focusToken as number | undefined;
+    }
+
+    // 마운트 때 한 번 잡는 것은 정상이다 — 여기서부터 센다.
+    const tokenBefore = focusToken();
+    mockNativeTerminalInputHandle!.focus.mockClear();
+
+    // 출력이 흐를 때 벌어지는 일: 스냅샷과 활동 시각만 바뀐 새 레코드.
+    await act(async () => {
+      useMobileAppStore.setState(state => ({
+        sessions: state.sessions.map(item =>
+          item.id === 'session-1'
+            ? {
+                ...item,
+                lastViewportSnapshot: `${item.lastViewportSnapshot}x`,
+                lastEventAt: new Date(Date.now() + 1_000).toISOString(),
+              }
+            : item,
+        ),
+      }));
+      jest.runOnlyPendingTimers();
+    });
+    // 이펙트는 rAF 안에서 포커스를 잡는다. 그 rAF 까지 돌려야 안 잡혔음을 볼 수 있다.
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+    });
+
+    expect(focusToken()).toBe(tokenBefore);
+    expect(mockNativeTerminalInputHandle!.focus).not.toHaveBeenCalled();
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
   // 패키지는 옵션 변경을 **얕은 비교**로 판단한다(dist 의 ee: 키 한 겹). theme 이 중첩 객체라
   // 인라인으로 넘기면 렌더마다 비교가 실패해 WebView 로 setOptions 가 다시 나가고, xterm 은
   // theme 을 다시 세울 때 값이 같아도 전체를 다시 그린다 — 실기기에서 주기적 깜빡임으로 보였다.

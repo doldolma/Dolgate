@@ -758,6 +758,16 @@ export function SessionScreen(): React.JSX.Element {
   // 오버레이가 남는데, WebView 를 리마운트하면 로드부터 다시 시도되어 회복된다
   // (홈→복귀 시 우연히 회복되던 것의 자동화). 세션당 제한 횟수만 재시도한다.
   const renderedTerminalSessionId = renderedTerminalSession?.id ?? null;
+  /**
+   * 활성 세션의 **정체와 상태만** 뽑아 둔다.
+   *
+   * 출력이 흐르는 동안 세션 레코드는 750ms 마다 새 객체가 된다(스냅샷 플러시 +
+   * lastEventAt). 그 객체를 이펙트 의존성에 두면 아무것도 달라지지 않았는데도 그 주기마다
+   * 이펙트가 다시 돌았다 — 아래 두 곳이 그랬다.
+   */
+  const renderedTerminalSessionStatus = renderedTerminalSession?.status ?? null;
+  const activeSessionId = activeSession?.id ?? null;
+  const activeSessionStatus = activeSession?.status ?? null;
 
   useEffect(() => {
     terminalRetryCountRef.current = 0;
@@ -810,11 +820,18 @@ export function SessionScreen(): React.JSX.Element {
     [focusTerminal, inputFocused, isAndroid, useTerminalInputOverlay],
   );
 
+  // **레코드가 아니라 id 를 본다.** 레코드를 의존성에 두면 스냅샷 플러시 주기마다 포커스를
+  // 다시 요청했다. 그러면 포커스 토큰이 올라가 네이티브 입력 뷰가 showSoftInput 을 다시
+  // 부르고, 이미 떠 있는 IME 가 다시 뜨면서 창 전체가 재배치돼 **한 프레임 번쩍였다**
+  // (이슈 #1: 태블릿에서 0.6~1.3초 간격, claude-code·htop 처럼 출력이 계속 흐를 때).
+  // 에뮬레이터는 하드웨어 키보드라 showSoftInput 이 눈에 보이지 않아 멀쩡해 보였다.
+  //
+  // 포커스는 세션이 바뀌거나 터미널이 준비·보임 상태로 바뀔 때만 필요하다.
   useEffect(() => {
     if (
       !useTerminalInputOverlay ||
       !terminalReady ||
-      !activeSession ||
+      !activeSessionId ||
       !terminalVisible
     ) {
       return;
@@ -822,7 +839,7 @@ export function SessionScreen(): React.JSX.Element {
 
     focusRequestedTerminalInput(true);
   }, [
-    activeSession,
+    activeSessionId,
     focusRequestedTerminalInput,
     terminalReady,
     terminalVisible,
@@ -932,8 +949,10 @@ export function SessionScreen(): React.JSX.Element {
     };
   }, [isAndroid]);
 
+  // 여기도 id·status 만 본다(위와 같은 이유). 판정 자체는 전환만 보므로 레코드가 새 객체가
+  // 될 때마다 다시 돌 이유가 없다.
   useEffect(() => {
-    if (!activeSession) {
+    if (!activeSessionId) {
       previousActiveSessionRef.current = {
         id: null,
         status: null,
@@ -944,14 +963,14 @@ export function SessionScreen(): React.JSX.Element {
 
     const previousActiveSession = previousActiveSessionRef.current;
     const shouldAutoOpenKeyboard =
-      previousActiveSession.id !== activeSession.id ||
-      (previousActiveSession.id === activeSession.id &&
+      previousActiveSession.id !== activeSessionId ||
+      (previousActiveSession.id === activeSessionId &&
         previousActiveSession.status !== 'connected' &&
-        activeSession.status === 'connected');
+        activeSessionStatus === 'connected');
 
     previousActiveSessionRef.current = {
-      id: activeSession.id,
-      status: activeSession.status,
+      id: activeSessionId,
+      status: activeSessionStatus,
     };
 
     if (!shouldAutoOpenKeyboard) {
@@ -960,7 +979,7 @@ export function SessionScreen(): React.JSX.Element {
 
     setInputFocused(true);
     focusRequestedTerminalInput(true);
-  }, [activeSession, focusRequestedTerminalInput]);
+  }, [activeSessionId, activeSessionStatus, focusRequestedTerminalInput]);
 
   useEffect(() => {
     if (
@@ -988,7 +1007,6 @@ export function SessionScreen(): React.JSX.Element {
       renderedTerminalSession.lastViewportSnapshot,
     );
   }, [
-    renderedTerminalSession,
     renderedTerminalSession?.id,
     renderedTerminalSession?.lastViewportSnapshot,
     renderedTerminalSession?.status,
@@ -1022,18 +1040,26 @@ export function SessionScreen(): React.JSX.Element {
       renderedTerminalSession.lastViewportSnapshot,
     );
   }, [
-    renderedTerminalSession,
     renderedTerminalSession?.id,
     renderedTerminalSession?.lastViewportSnapshot,
     renderedTerminalSession?.status,
     terminalReady,
   ]);
 
+  // **레코드가 아니라 id·status 를 본다.**
+  //
+  // 이 이펙트는 다시 돌 때마다 구독을 끊고 **화면을 지운다**(resetTerminalViewport =
+  // ESC[3J ESC[2J ESC[H — 스크롤백까지 클리어). 레코드를 의존성에 두면 출력이 흐르는 동안
+  // 750ms 마다(스냅샷 플러시) 지우고 리플레이로 되그리기를 반복했다 — 실기기에서 화면 전체가
+  // 주기적으로 번쩍인 원인이다(이슈 #1). 키보드와는 무관하고, 에뮬레이터에서는 지우고 다시
+  // 쓰는 것이 한 프레임에 끝나 보이지 않았다.
+  //
+  // 구독은 **세션이 바뀔 때만** 다시 걸면 된다.
   useEffect(() => {
     if (
       !terminalReady ||
-      !renderedTerminalSession ||
-      renderedTerminalSession.status !== 'connected'
+      !renderedTerminalSessionId ||
+      renderedTerminalSessionStatus !== 'connected'
     ) {
       return;
     }
@@ -1044,7 +1070,7 @@ export function SessionScreen(): React.JSX.Element {
     }
 
     resetTerminalViewport(terminal);
-    const unsubscribe = subscribeToSessionTerminal(renderedTerminalSession.id, {
+    const unsubscribe = subscribeToSessionTerminal(renderedTerminalSessionId, {
       onReplay: chunks => {
         resetTerminalViewport(terminal);
         if (chunks.length > 0) {
@@ -1062,9 +1088,8 @@ export function SessionScreen(): React.JSX.Element {
 
     return unsubscribe;
   }, [
-    renderedTerminalSession,
-    renderedTerminalSession?.id,
-    renderedTerminalSession?.status,
+    renderedTerminalSessionId,
+    renderedTerminalSessionStatus,
     isAndroid,
     subscribeToSessionTerminal,
     terminalReady,
