@@ -60,12 +60,48 @@ export const TERMINAL_GRID_REPORT_SCRIPT = `(function () {
       );
     } catch (error) {}
   };
+  // **페이지가 스스로 다시 맞춘다.**
+  //
+  // RN 쪽 onLayout 에서 fit() 을 부르면 늦거나 이르다 — 그 콜백은 네이티브 뷰가 커진 직후에
+  // 오는데 WebView 안쪽 HTML 뷰포트는 아직 옛 크기다. 그 크기로 fit 하면 줄 수가 그대로라
+  // 보고도 나가지 않고, 그 뒤에 다시 재는 사람이 없다. 실측: 카드가 248 → 590px 로 커졌는데
+  // 그리드는 18줄에 머물러, 키보드를 내린 뒤 화면 위쪽 18줄만 그려졌다.
+  //
+  // 여기서는 뷰포트가 **실제로** 바뀐 것을 보고 맞추므로 타이밍을 추측하지 않는다. 애니메이션
+  // 중에는 매 프레임 바뀌므로 잠깐 모아 마지막 크기로 한 번만 맞춘다.
+  var fitTimer = null;
+  var scheduleFit = function () {
+    if (fitTimer) { clearTimeout(fitTimer); }
+    fitTimer = setTimeout(function () {
+      fitTimer = null;
+      try {
+        var host = document.getElementById('terminal');
+        if (!window.fitAddon || !host) { return; }
+        if (host.clientWidth <= 0 || host.clientHeight <= 0) { return; }
+        window.fitAddon.fit();
+        post();
+      } catch (error) {}
+    }, 120);
+  };
+  var observeViewport = function () {
+    try {
+      var host = document.getElementById('terminal');
+      if (host && typeof ResizeObserver === 'function') {
+        new ResizeObserver(scheduleFit).observe(host);
+      }
+      window.addEventListener('resize', scheduleFit);
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', scheduleFit);
+      }
+    } catch (error) {}
+  };
   var attempts = 0;
   var timer = setInterval(function () {
     attempts += 1;
     if (window.terminal) {
       clearInterval(timer);
       try { window.terminal.onResize(post); } catch (error) {}
+      observeViewport();
       post();
       return;
     }

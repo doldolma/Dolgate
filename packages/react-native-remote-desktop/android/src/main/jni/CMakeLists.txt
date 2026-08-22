@@ -24,6 +24,14 @@ add_library(dvnc_jni SHARED
     dvnc_jni.cpp
 )
 
+# 16KB 페이지 기기에서 로드되게 세그먼트를 16KB 경계에 맞춘다.
+#
+# 안드로이드는 오래도록 4KB 페이지였고 NDK 기본값도 그렇다. 최근 ARM64 기기는 16KB 페이지로
+# 동작할 수 있는데, 그런 기기에서는 LOAD 세그먼트가 16KB 에 맞지 않은 .so 를 커널이 매핑하지
+# 못해 dlopen 이 실패한다 — 앱이 RDP/VNC 세션을 여는 순간 죽는다. 확인은
+# `llvm-readelf -lW libdvnc_jni.so` 의 LOAD Align 이 0x4000 인지 보면 된다.
+target_link_options(dvnc_jni PRIVATE "-Wl,-z,max-page-size=16384")
+
 target_include_directories(dvnc_jni PRIVATE
     ${CMAKE_SOURCE_DIR}
 )

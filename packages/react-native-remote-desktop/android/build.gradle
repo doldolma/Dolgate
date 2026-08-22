@@ -210,6 +210,9 @@ tasks.register('buildRustLibs') {
                 env.put('ANDROID_NDK_HOME', ndkDir.absolutePath)
                 env.put('ANDROID_NDK_ROOT', ndkDir.absolutePath)
                 env.put('OPENSSL_STATIC', '1')
+                // 16KB 페이지 기기에서 로드되게 세그먼트를 16KB 경계에 맞춘다(CMakeLists 의
+                // 같은 플래그와 짝이다). 맞지 않으면 그런 기기에서 dlopen 이 실패한다.
+                env.put('RUSTFLAGS', '-C link-arg=-Wl,-z,max-page-size=16384')
                 def existingPath = env.get('PATH') ?: ''
                 env.put('PATH', "${cargoBin}:${toolchainBin}:${existingPath}".toString())
 
