@@ -161,6 +161,15 @@ module.exports = {
     icon: path.resolve(__dirname, 'build/icons/dolssh.png'),
     category: 'Development',
     executableName: 'dolgate',
+    // 데스크톱 환경은 실행 중인 창을 .desktop 항목에 StartupWMClass ↔ 창의 WM_CLASS 로
+    // 묶는다. Electron 은 package.json 의 desktopName 을 app_id / WM_CLASS 로 쓰므로,
+    // 이 옵션으로 .desktop 파일명과 StartupWMClass 도 같은 값에서 뽑아 짝을 맞춘다.
+    // 끄면 StartupWMClass 가 productName('Dolgate')으로 폴백해 어긋나고, 도크 아이콘이
+    // 창 아이콘으로 떨어진다 — Windows 의 AppUserModelID 불일치와 같은 부류다.
+    //
+    // desktopName 이 'dolgate.desktop' 이라 파일명은 executableName 기준과 같은
+    // dolgate.desktop 그대로다. 기존 설치본에서 올라올 때 항목이 둘로 늘지 않는다.
+    syncDesktopName: true,
     // deb 의 Section. 없으면 fpm 기본값이 들어가 배포판 도구가 분류하지 못한다.
     packageCategory: 'net',
     // 짧은 줄과 긴 설명을 나눈다. 하나만 주면 control 의 Description 첫 줄과 본문이 같은 문장이

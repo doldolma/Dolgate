@@ -3,6 +3,7 @@
   "version": "1.9.5",
   "private": true,
   "description": "Dolgate desktop client",
+  "desktopName": "dolgate.desktop",
   "license": "MIT",
   "homepage": "https://github.com/doldolma/dolgate",
   "author": "doldolma <hdy@doldolma.com>",

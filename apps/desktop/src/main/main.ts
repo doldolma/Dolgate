@@ -58,6 +58,10 @@ import { XshellImportService } from './xshell-import-service';
 import { shouldRequestSingleInstanceLock } from './app-runtime-policy';
 import type { ActivityLogMessage } from './activity-log-message';
 
+// electron-builder.config.cjs 의 appId 와 반드시 같아야 한다 —
+// main.app-user-model-id.test.ts 가 두 값을 비교해 고정한다.
+const WINDOWS_APP_USER_MODEL_ID = 'com.doldolma.dolgate';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const TERMIUS_HELPER_FLAG = '--dolssh-termius-helper';
@@ -180,6 +184,20 @@ function installApplicationMenu(openNewWindow: () => void): void {
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+// 창 아이콘. AppUserModelID 로 바로가기를 찾지 못하면 작업표시줄이 이 창 아이콘을 쓰는데,
+// 지정하지 않으면 Electron 기본 아이콘이 뜬다.
+//
+// build/icons 는 패키징에 포함되지 않으므로 assets/icons 의 사본을 쓴다 — assets 는 forge
+// extraResources 이고, 릴리스는 electron-builder --prepackaged 로 그 산출물을 감싼다.
+function resolveAppIconPath(): string {
+  const filename = process.platform === 'win32' ? 'dolssh.ico' : 'dolssh-256.png';
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'assets', 'icons', filename);
+  }
+
+  return path.resolve(__dirname, '../../assets/icons', filename);
 }
 
 function resolveTermiusHelperAssetPath(filename: string): string {
@@ -531,6 +549,7 @@ if (termiusHelperArgIndex >= 0) {
     // renderer는 항상 preload를 거쳐서만 시스템 기능을 사용하게 강제한다.
     const window = new BrowserWindow({
       ...nextBounds,
+      icon: resolveAppIconPath(),
       minWidth: 1080,
       minHeight: 700,
       show: false,
@@ -739,9 +758,15 @@ if (termiusHelperArgIndex >= 0) {
     }
     // 앱 준비 이후에만 IPC와 창 생성을 시작한다.
     if (process.platform === 'win32') {
-      // Squirrel.Windows가 등록하는 AppUserModelID와 일치시켜야 토스트 알림이
-      // 올바른 앱으로 표시된다 (com.squirrel.<name>.<exe>).
-      app.setAppUserModelId('com.squirrel.dolgate.dolgate');
+      // Windows 는 창을 AppUserModelID 로 설치된 바로가기에 묶는다. 이 값이 설치 프로그램이
+      // 심은 것과 어긋나면 짝이 되는 바로가기를 찾지 못해 작업표시줄 아이콘이 창 아이콘으로
+      // 떨어지고, 토스트 알림도 앱에 귀속되지 않는다.
+      //
+      // 설치 프로그램은 electron-builder NSIS 이고 바로가기 AUMID 로 appId 를 쓴다. 예전에
+      // 여기 있던 'com.squirrel.dolgate.dolgate' 는 Squirrel.Windows 규약인데 forge 의
+      // makers 가 비어 있어 Squirrel 은 더 이상 쓰이지 않는다 — 그래서 값이 어긋나 있었다.
+      // 바꿀 때는 electron-builder.config.cjs 의 appId 와 함께 봐야 한다(테스트가 고정한다).
+      app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
     }
     authService.registerProtocolClient();
     registerIpcHandlers(
