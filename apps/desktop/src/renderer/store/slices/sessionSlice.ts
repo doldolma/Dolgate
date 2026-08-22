@@ -2150,16 +2150,63 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             }
             void api.ssh.tmuxKillSession(sessionId, sessionName);
           },
-    toggleWorkspaceBroadcast: (workspaceId) => {
+    toggleWorkspaceZoom: (workspaceId, sessionId) => {
             set((state) => ({
               workspaces: state.workspaces.map((workspace) =>
                 workspace.id === workspaceId
                   ? {
                       ...workspace,
-                      broadcastEnabled: !workspace.broadcastEnabled,
+                      zoomedSessionId:
+                        workspace.zoomedSessionId === sessionId ? null : sessionId,
+                      // 확대한 pane 이 활성이 아니면 이상하다 — 키운 것을 보고 있는데 입력은
+                      // 다른 pane 으로 가기 때문이다.
+                      activeSessionId:
+                        workspace.zoomedSessionId === sessionId
+                          ? workspace.activeSessionId
+                          : sessionId,
                     }
                   : workspace,
               ),
+            }));
+          },
+    toggleSessionBroadcast: (workspaceId, sessionId) => {
+            set((state) => ({
+              workspaces: state.workspaces.map((workspace) => {
+                if (workspace.id !== workspaceId) {
+                  return workspace;
+                }
+
+                // 꺼진 상태에서 아무 pane 이나 누르면 전부 켠다.
+                if (!workspace.broadcastEnabled) {
+                  return {
+                    ...workspace,
+                    broadcastEnabled: true,
+                    broadcastExcludedSessionIds: [],
+                  };
+                }
+
+                const excluded = workspace.broadcastExcludedSessionIds ?? [];
+                const nextExcluded = excluded.includes(sessionId)
+                  ? excluded.filter((id) => id !== sessionId)
+                  : [...excluded, sessionId];
+
+                // 참여가 1개 이하로 줄면 브로드캐스트를 끈다. 여기서 세는 것은 레이아웃에 있는
+                // pane 이지 "연결된" pane 이 아니다 — 연결 여부는 수시로 바뀌므로 그것까지
+                // 상태에 반영하면 연결이 끊길 때마다 사용자가 켠 적 없는 토글이 저절로 꺼진다.
+                // 실제 전송 대상은 컨트롤러가 다시 거른다.
+                const participating = listWorkspaceSessionIds(workspace.layout).filter(
+                  (id) => !nextExcluded.includes(id),
+                );
+                if (participating.length < 2) {
+                  return {
+                    ...workspace,
+                    broadcastEnabled: false,
+                    broadcastExcludedSessionIds: [],
+                  };
+                }
+
+                return { ...workspace, broadcastExcludedSessionIds: nextExcluded };
+              }),
             }));
           },
     resizeWorkspaceSplit: (workspaceId, splitId, ratio) => {

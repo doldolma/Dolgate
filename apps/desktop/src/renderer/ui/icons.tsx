@@ -56,6 +56,13 @@ export {
   Paperclip,
   FileText,
   Info,
+  Cloud,
+  Monitor,
+  Cable,
+  Maximize2,
+  Minimize2,
+  SquareArrowOutUpRight,
+  Radio,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';

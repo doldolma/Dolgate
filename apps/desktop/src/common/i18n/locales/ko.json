@@ -3064,10 +3064,10 @@
   },
   "paneHeader": {
     "closeSession": "{{title}} 세션 종료",
-    "splitHorizontalAria": "좌우로 분할",
-    "splitHorizontalTitle": "좌우 분할 (Ctrl-b %)",
-    "splitVerticalAria": "상하로 분할",
-    "splitVerticalTitle": "상하 분할 (Ctrl-b \")"
+    "latency": "왕복 지연 {{ms}}ms",
+    "zoomIn": "이 pane 만 크게 보기",
+    "zoomOut": "분할로 되돌리기",
+    "detachToTab": "독립 탭으로 빼내기"
   },
   "termiusImport": {
     "loadFailed": "Termius 데이터를 불러오지 못했습니다.",

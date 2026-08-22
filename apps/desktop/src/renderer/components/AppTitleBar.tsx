@@ -12,6 +12,7 @@ import { DesktopWindowControls, type DesktopPlatform } from './DesktopWindowCont
 import { listTailnets, snapshotTailnets } from '../services/desktop/tailnet';
 import { cidrPrefixLength, isAddressInCidr, isIpAddress } from '../lib/ip-prefix';
 import { cn } from '../lib/cn';
+import { rttColor } from '../lib/rtt';
 import { RdpMonitorPicker } from './rdp/RdpMonitorPicker';
 import { titleBarMode, useTitleBarAutoHide } from './useTitleBarAutoHide';
 import {
@@ -145,17 +146,6 @@ function combineDotState(
     return 'error';
   }
   return 'connected';
-}
-
-// 활성 탭 RTT 색: 빠름 초록 / 보통 주황 / 느림 빨강.
-function rttColor(ms: number): string {
-  if (ms < 80) {
-    return 'var(--success,#3fae8f)';
-  }
-  if (ms < 200) {
-    return 'var(--warning-text)';
-  }
-  return 'var(--danger,#e2504a)';
 }
 
 type TitlebarDynamicItem =

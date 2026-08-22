@@ -69,6 +69,19 @@ export function useTerminalWorkspaceController({
     );
   }, [activeWorkspace, tabsBySessionId]);
 
+  // 브로드캐스트 대상 = 연결된 host pane 중 사용자가 뺀 것을 제외한 나머지.
+  // 상태는 "제외 목록"만 들고 있고(WorkspaceTab.broadcastExcludedSessionIds), 연결 여부는
+  // 수시로 바뀌므로 전송 직전에 여기서 다시 거른다.
+  const broadcastSessionIds = useMemo(() => {
+    if (!activeWorkspace?.broadcastEnabled) {
+      return [] as string[];
+    }
+    const excluded = activeWorkspace.broadcastExcludedSessionIds ?? [];
+    return connectedWorkspaceHostSessionIds.filter(
+      (sessionId) => !excluded.includes(sessionId),
+    );
+  }, [activeWorkspace, connectedWorkspaceHostSessionIds]);
+
   const getInteractiveAuth = useCallback(
     (sessionId: string): PendingSessionInteractiveAuth | null => {
       // 이 탭의 것만 고른다. 다른 탭·SFTP 의 인증 요청이 이 카드를 밀어내지 않는다.
@@ -113,23 +126,16 @@ export function useTerminalWorkspaceController({
         () => undefined,
       );
 
+      // 입력한 pane 이 참여 중이 아니면 퍼뜨리지 않는다 — 브로드캐스트에서 뺀 pane 에서
+      // 친 것까지 나가면 "빼 놨는데 왜 같이 가지"가 된다.
       if (
-        !activeWorkspace ||
-        !activeWorkspace.broadcastEnabled ||
-        activeWorkspace.activeSessionId !== sourceSessionId
+        broadcastSessionIds.length < 2 ||
+        !broadcastSessionIds.includes(sourceSessionId)
       ) {
         return;
       }
 
-      const sourceTab = tabsBySessionId.get(sourceSessionId);
-      if (
-        !isConnectedHostSession(sourceTab) ||
-        connectedWorkspaceHostSessionIds.length < 2
-      ) {
-        return;
-      }
-
-      for (const targetSessionId of connectedWorkspaceHostSessionIds) {
+      for (const targetSessionId of broadcastSessionIds) {
         if (targetSessionId === sourceSessionId) {
           continue;
         }
@@ -139,7 +145,7 @@ export function useTerminalWorkspaceController({
         );
       }
     },
-    [activeWorkspace, connectedWorkspaceHostSessionIds, tabsBySessionId],
+    [broadcastSessionIds],
   );
 
   const sendSessionBinaryInput = useCallback(
@@ -148,23 +154,16 @@ export function useTerminalWorkspaceController({
         writeTerminalBinaryInput(sourceSessionId, data.slice()),
       ).catch(() => undefined);
 
+      // 입력한 pane 이 참여 중이 아니면 퍼뜨리지 않는다 — 브로드캐스트에서 뺀 pane 에서
+      // 친 것까지 나가면 "빼 놨는데 왜 같이 가지"가 된다.
       if (
-        !activeWorkspace ||
-        !activeWorkspace.broadcastEnabled ||
-        activeWorkspace.activeSessionId !== sourceSessionId
+        broadcastSessionIds.length < 2 ||
+        !broadcastSessionIds.includes(sourceSessionId)
       ) {
         return;
       }
 
-      const sourceTab = tabsBySessionId.get(sourceSessionId);
-      if (
-        !isConnectedHostSession(sourceTab) ||
-        connectedWorkspaceHostSessionIds.length < 2
-      ) {
-        return;
-      }
-
-      for (const targetSessionId of connectedWorkspaceHostSessionIds) {
+      for (const targetSessionId of broadcastSessionIds) {
         if (targetSessionId === sourceSessionId) {
           continue;
         }
@@ -174,7 +173,7 @@ export function useTerminalWorkspaceController({
         ).catch(() => undefined);
       }
     },
-    [activeWorkspace, connectedWorkspaceHostSessionIds, tabsBySessionId],
+    [broadcastSessionIds],
   );
 
   return useMemo(

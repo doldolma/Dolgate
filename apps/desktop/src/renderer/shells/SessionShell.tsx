@@ -216,7 +216,9 @@ export function SessionShell({
         )
       }
       onFocusWorkspaceSession={sessionViewModel.focusWorkspaceSession}
-      onToggleWorkspaceBroadcast={sessionViewModel.toggleWorkspaceBroadcast}
+      onToggleSessionBroadcast={sessionViewModel.toggleSessionBroadcast}
+      onToggleWorkspaceZoom={sessionViewModel.toggleWorkspaceZoom}
+      onDetachSessionToStandalone={sessionViewModel.detachSessionFromWorkspace}
       onResizeWorkspaceSplit={sessionViewModel.resizeWorkspaceSplit}
     />
   );

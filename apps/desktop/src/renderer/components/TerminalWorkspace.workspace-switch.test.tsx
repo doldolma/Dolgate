@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSettings, HostRecord, TerminalTab } from '@shared';
 import type { WorkspaceTab } from '../store/createAppStore';
@@ -129,6 +129,33 @@ const tabs: TerminalTab[] = [
     sessionId: 'session-2',
     source: 'local',
     hostId: null,
+    title: 'Session 2',
+    status: 'connected',
+    sessionShare: null,
+    hasReceivedOutput: true,
+    lastEventAt: '2025-01-01T00:00:00.000Z'
+  }
+];
+
+const splitHostTabs: TerminalTab[] = [
+  {
+    id: 'tab-1',
+    stableId: 'tab-1',
+    sessionId: 'session-1',
+    source: 'host',
+    hostId: 'host-1',
+    title: 'Session 1',
+    status: 'connected',
+    sessionShare: null,
+    hasReceivedOutput: true,
+    lastEventAt: '2025-01-01T00:00:00.000Z'
+  },
+  {
+    id: 'tab-2',
+    stableId: 'tab-2',
+    sessionId: 'session-2',
+    source: 'host',
+    hostId: 'host-2',
     title: 'Session 2',
     status: 'connected',
     sessionShare: null,
@@ -292,7 +319,9 @@ function renderWorkspace(input: {
   onSplitSessionDrop?: (sessionId: string, direction: any, targetSessionId?: string) => boolean;
   onMoveWorkspaceSession?: (workspaceId: string, sessionId: string, direction: any, targetSessionId: string) => boolean;
   onFocusWorkspaceSession?: (workspaceId: string, sessionId: string) => void;
-  onToggleWorkspaceBroadcast?: (workspaceId: string) => void;
+  onToggleSessionBroadcast?: (workspaceId: string, sessionId: string) => void;
+  onToggleWorkspaceZoom?: (workspaceId: string, sessionId: string) => void;
+  onDetachSessionToStandalone?: (workspaceId: string, sessionId: string) => void;
 }) {
   const renderTabs = input.tabs ?? tabs;
   const renderHosts = input.hosts ?? [];
@@ -325,7 +354,9 @@ function renderWorkspace(input: {
       onSplitSessionDrop={input.onSplitSessionDrop ?? vi.fn(() => false)}
       onMoveWorkspaceSession={input.onMoveWorkspaceSession ?? vi.fn(() => false)}
       onFocusWorkspaceSession={input.onFocusWorkspaceSession ?? vi.fn()}
-      onToggleWorkspaceBroadcast={input.onToggleWorkspaceBroadcast ?? vi.fn()}
+      onToggleSessionBroadcast={input.onToggleSessionBroadcast ?? vi.fn()}
+      onToggleWorkspaceZoom={input.onToggleWorkspaceZoom ?? vi.fn()}
+      onDetachSessionToStandalone={input.onDetachSessionToStandalone ?? vi.fn()}
       onResizeWorkspaceSplit={vi.fn()}
     />
   );
@@ -396,7 +427,9 @@ describe('TerminalWorkspace workspace switching', () => {
         onSplitSessionDrop={vi.fn(() => false)}
         onMoveWorkspaceSession={vi.fn(() => false)}
         onFocusWorkspaceSession={onFocusWorkspaceSession}
-        onToggleWorkspaceBroadcast={vi.fn()}
+        onToggleSessionBroadcast={vi.fn()}
+        onToggleWorkspaceZoom={vi.fn()}
+        onDetachSessionToStandalone={vi.fn()}
         onResizeWorkspaceSplit={vi.fn()}
       />
     );
@@ -443,7 +476,9 @@ describe('TerminalWorkspace workspace switching', () => {
         onSplitSessionDrop={vi.fn(() => false)}
         onMoveWorkspaceSession={vi.fn(() => false)}
         onFocusWorkspaceSession={vi.fn()}
-        onToggleWorkspaceBroadcast={vi.fn()}
+        onToggleSessionBroadcast={vi.fn()}
+        onToggleWorkspaceZoom={vi.fn()}
+        onDetachSessionToStandalone={vi.fn()}
         onResizeWorkspaceSplit={vi.fn()}
       />
     );
@@ -587,22 +622,26 @@ describe('TerminalWorkspace workspace switching', () => {
   });
 
   it('shows the broadcast control for split workspaces and keeps it unavailable without two connected remote panes', () => {
-    const onToggleWorkspaceBroadcast = vi.fn();
+    const onToggleSessionBroadcast = vi.fn();
     renderWorkspace({
       activeWorkspace: splitWorkspace,
       viewActivationKey: 'workspace:workspace-split',
-      onToggleWorkspaceBroadcast
+      onToggleSessionBroadcast
     });
 
-    const toggleButton = screen.getByRole('button', { name: '브로드캐스트 켜기' });
-    expect(toggleButton).toHaveAttribute('aria-disabled', 'true');
-    expect(toggleButton).toHaveAttribute('aria-pressed', 'false');
+    // 아이콘은 pane 헤더마다 하나씩 뜬다(예전에는 워크스페이스에 떠 있는 버튼 하나였다).
+    const toggleButtons = screen.getAllByRole('button', { name: '브로드캐스트 켜기' });
+    expect(toggleButtons).toHaveLength(2);
 
-    fireEvent.mouseEnter(toggleButton);
-    expect(screen.getByRole('tooltip')).toHaveTextContent('원격 pane 2개 이상 연결 시 사용 가능');
+    for (const button of toggleButtons) {
+      expect(button).toHaveAttribute('aria-disabled', 'true');
+      expect(button).toHaveAttribute('aria-pressed', 'false');
+      // 왜 눌리지 않는지는 title 로만 알린다 — 헤더는 좁아서 툴팁 상자를 띄울 자리가 없다.
+      expect(button).toHaveAttribute('title', '원격 pane 2개 이상 연결 시 사용 가능');
+    }
 
-    fireEvent.click(toggleButton);
-    expect(onToggleWorkspaceBroadcast).not.toHaveBeenCalled();
+    fireEvent.click(toggleButtons[0]!);
+    expect(onToggleSessionBroadcast).not.toHaveBeenCalled();
   });
 
   it('toggles broadcast button state and tooltip copy for split host workspaces', () => {
@@ -632,24 +671,28 @@ describe('TerminalWorkspace workspace switching', () => {
         lastEventAt: '2025-01-01T00:00:00.000Z'
       }
     ];
-    const onToggleWorkspaceBroadcast = vi.fn();
+    const onToggleSessionBroadcast = vi.fn();
     const { rerender } = renderWorkspace({
       activeWorkspace: splitWorkspace,
       tabs: hostTabs,
       hosts: hostRecords,
       viewActivationKey: 'workspace:workspace-split',
-      onToggleWorkspaceBroadcast
+      onToggleSessionBroadcast
     });
 
-    const enableButton = screen.getByRole('button', { name: '브로드캐스트 켜기' });
-    expect(enableButton).toHaveAttribute('aria-pressed', 'false');
-    expect(enableButton).toHaveAttribute('aria-disabled', 'false');
+    const enableButtons = screen.getAllByRole('button', { name: '브로드캐스트 켜기' });
+    expect(enableButtons).toHaveLength(2);
+    expect(enableButtons[0]).toHaveAttribute('aria-pressed', 'false');
+    expect(enableButtons[0]).toHaveAttribute('aria-disabled', 'false');
+    expect(enableButtons[0]).toHaveAttribute('title', '브로드캐스트 켜기');
 
-    fireEvent.focus(enableButton);
-    expect(screen.getByRole('tooltip')).toHaveTextContent('브로드캐스트 켜기');
-
-    fireEvent.click(enableButton);
-    expect(onToggleWorkspaceBroadcast).toHaveBeenCalledWith('workspace-split');
+    // 어느 pane 을 눌렀는지가 스토어까지 가야 한다 — 참여를 pane 단위로 관리하므로
+    // 워크스페이스 id 만으로는 어느 pane 을 뺄지 알 수 없다.
+    fireEvent.click(enableButtons[0]!);
+    expect(onToggleSessionBroadcast).toHaveBeenCalledWith(
+      'workspace-split',
+      'session-1',
+    );
 
     rerender(
       <TerminalWorkspace
@@ -674,17 +717,190 @@ describe('TerminalWorkspace workspace switching', () => {
         onSplitSessionDrop={vi.fn(() => false)}
         onMoveWorkspaceSession={vi.fn(() => false)}
         onFocusWorkspaceSession={vi.fn()}
-        onToggleWorkspaceBroadcast={onToggleWorkspaceBroadcast}
+        onToggleSessionBroadcast={onToggleSessionBroadcast}
+        onToggleWorkspaceZoom={vi.fn()}
+        onDetachSessionToStandalone={vi.fn()}
         onResizeWorkspaceSplit={vi.fn()}
       />
     );
 
-    const disableButton = screen.getByRole('button', { name: '브로드캐스트 끄기' });
-    expect(disableButton).toHaveAttribute('aria-pressed', 'true');
-    expect(disableButton).toHaveAttribute('aria-disabled', 'false');
+    // 켜면 두 pane 이 모두 참여 상태가 된다(제외 목록이 비어 있으므로).
+    const disableButtons = screen.getAllByRole('button', { name: '브로드캐스트 끄기' });
+    expect(disableButtons).toHaveLength(2);
+    for (const button of disableButtons) {
+      expect(button).toHaveAttribute('aria-pressed', 'true');
+      expect(button).toHaveAttribute('title', '브로드캐스트 활성 상태');
+    }
+  });
 
-    fireEvent.focus(disableButton);
-    expect(screen.getByRole('tooltip')).toHaveTextContent('브로드캐스트 활성 상태');
+  // 헤더와 터미널은 위아래로 맞붙어 한 상자로 읽혀야 한다 — 헤더가 border-b-0, 터미널이
+  // border-t-0 이라 둘이 붙어야 테두리가 이어진다. pane 루트에 flex gap 이 남아 있으면 그
+  // 사이가 벌어져 테두리가 끊긴 것처럼 보였다(실제로 그렇게 보였고 이 테스트가 그 재발을 막는다).
+  it('keeps the pane header flush with the terminal so the border reads as one box', () => {
+    renderWorkspace({
+      activeWorkspace: splitWorkspace,
+      viewActivationKey: 'workspace:workspace-split'
+    });
+
+    const headerTitle = screen.getAllByRole('button', { name: 'Session 1' })[0]!;
+    const header = headerTitle.closest('[draggable]');
+    expect(header).not.toBeNull();
+    expect(header!.className).toContain('border-b-0');
+
+    const paneRoot = header!.parentElement!;
+    expect(paneRoot.className).toContain('gap-0');
+  });
+
+  it('asks to zoom the pane that was clicked', () => {
+    const onToggleWorkspaceZoom = vi.fn();
+    renderWorkspace({
+      activeWorkspace: splitWorkspace,
+      viewActivationKey: 'workspace:workspace-split',
+      onToggleWorkspaceZoom
+    });
+
+    const zoomButtons = screen.getAllByRole('button', { name: '이 pane 만 크게 보기' });
+    expect(zoomButtons).toHaveLength(2);
+
+    fireEvent.click(zoomButtons[0]!);
+    expect(onToggleWorkspaceZoom).toHaveBeenCalledWith('workspace-split', 'session-1');
+  });
+
+  // 확대는 레이아웃 트리를 고치지 않고 배치만 갈아끼운다. 그래서 확인할 것은 두 가지다 —
+  // 확대한 pane 이 전체를 차지하는가, 그리고 나눌 경계가 없으니 크기 조절 핸들이 사라지는가.
+  it('gives the zoomed pane the whole workspace and drops the resize handles', () => {
+    const { container } = renderWorkspace({
+      activeWorkspace: { ...splitWorkspace, zoomedSessionId: 'session-2' },
+      viewActivationKey: 'workspace:workspace-split'
+    });
+
+    expect(
+      container.querySelectorAll('[data-workspace-split-handle="true"]'),
+    ).toHaveLength(0);
+
+    const slots = container.querySelectorAll('[data-terminal-pane-slot="true"]');
+    expect(slots).toHaveLength(1);
+    expect((slots[0] as HTMLElement).style.width).toBe('100%');
+    expect((slots[0] as HTMLElement).style.height).toBe('100%');
+
+    // 확대 중에는 그 pane 의 헤더만 남고, 아이콘이 되돌리기로 바뀐다.
+    expect(
+      screen.getByRole('button', { name: '분할로 되돌리기' }),
+    ).toBeTruthy();
+  });
+
+  // 분할에서 빼내 독립 탭으로 되돌리는 기능은 원래 있었지만 진입 경로가 드래그뿐이라
+  // 발견하기 어려웠다. 헤더 버튼이 같은 액션으로 이어지는지 고정한다.
+  it('detaches the pane to its own tab from the header button', () => {
+    const onDetachSessionToStandalone = vi.fn();
+    renderWorkspace({
+      activeWorkspace: splitWorkspace,
+      viewActivationKey: 'workspace:workspace-split',
+      onDetachSessionToStandalone
+    });
+
+    const detachButtons = screen.getAllByRole('button', { name: '독립 탭으로 빼내기' });
+    fireEvent.click(detachButtons[1]!);
+    expect(onDetachSessionToStandalone).toHaveBeenCalledWith(
+      'workspace-split',
+      'session-2',
+    );
+  });
+
+  // 분할된 좁은 pane 에서는 AI 토글을 감춘다 — AI 패널이 열리면 터미널을 좌우로 또 나눠
+  // 쓰는데 좁은 pane 에서는 둘 다 못 쓴다. 확대하면 다시 나타나므로 접근이 막히지는 않는다.
+  // Share 는 감추지 않는다: 공유를 시작하는 경로가 그 팝오버뿐이라 감추면 분할 pane 에서
+  // 기능 자체가 사라진다.
+  //
+  // 쿼리를 배치된 pane(`data-terminal-pane-slot`)으로 좁히는 이유: 배치되지 않은 pane 도
+  // DOM 에는 남고(display:none), 헤더가 없어 플로팅 버튼을 그린다. 실제 화면에서는 안 보이지만
+  // jsdom 은 Tailwind 를 적용하지 않아 그대로 잡힌다.
+  function placedPanes(container: HTMLElement) {
+    return Array.from(
+      container.querySelectorAll<HTMLElement>('[data-terminal-pane-slot="true"]'),
+    );
+  }
+
+  it('hides the AI toggle in split panes but keeps Share reachable', () => {
+    const { container } = renderWorkspace({
+      activeWorkspace: splitWorkspace,
+      tabs: splitHostTabs,
+      hosts: hostRecords,
+      viewActivationKey: 'workspace:workspace-split'
+    });
+
+    const panes = placedPanes(container);
+    expect(panes).toHaveLength(2);
+    for (const pane of panes) {
+      expect(
+        within(pane).queryByRole('button', { name: 'AI 어시스턴트 열기' }),
+      ).toBeNull();
+      expect(within(pane).getByRole('button', { name: 'Share' })).toBeTruthy();
+    }
+  });
+
+  it('brings the AI toggle back on the zoomed pane', () => {
+    const { container } = renderWorkspace({
+      activeWorkspace: { ...splitWorkspace, zoomedSessionId: 'session-1' },
+      tabs: splitHostTabs,
+      hosts: hostRecords,
+      viewActivationKey: 'workspace:workspace-split'
+    });
+
+    const panes = placedPanes(container);
+    expect(panes).toHaveLength(1);
+    expect(
+      within(panes[0]!).getByRole('button', { name: 'AI 어시스턴트 열기' }),
+    ).toBeTruthy();
+  });
+
+  it('shows a pane excluded from broadcast as not participating', () => {
+    const hostTabs: TerminalTab[] = [
+      {
+        id: 'tab-1',
+        stableId: 'tab-1',
+        sessionId: 'session-1',
+        source: 'host',
+        hostId: 'host-1',
+        title: 'Session 1',
+        status: 'connected',
+        sessionShare: null,
+        hasReceivedOutput: true,
+        lastEventAt: '2025-01-01T00:00:00.000Z'
+      },
+      {
+        id: 'tab-2',
+        stableId: 'tab-2',
+        sessionId: 'session-2',
+        source: 'host',
+        hostId: 'host-2',
+        title: 'Session 2',
+        status: 'connected',
+        sessionShare: null,
+        hasReceivedOutput: true,
+        lastEventAt: '2025-01-01T00:00:00.000Z'
+      }
+    ];
+
+    renderWorkspace({
+      activeWorkspace: {
+        ...splitWorkspace,
+        broadcastEnabled: true,
+        broadcastExcludedSessionIds: ['session-2']
+      },
+      tabs: hostTabs,
+      hosts: hostRecords,
+      viewActivationKey: 'workspace:workspace-split',
+      onToggleSessionBroadcast: vi.fn()
+    });
+
+    // 참여 pane 은 "끄기", 빠진 pane 은 "켜기" 로 갈린다 — 켜져 있어도 pane 마다 다르다.
+    expect(
+      screen.getAllByRole('button', { name: '브로드캐스트 끄기' }),
+    ).toHaveLength(1);
+    expect(
+      screen.getAllByRole('button', { name: '브로드캐스트 켜기' }),
+    ).toHaveLength(1);
   });
 
   it('fans out text input only when broadcast is enabled for the active connected host pane', async () => {
@@ -756,13 +972,17 @@ describe('TerminalWorkspace workspace switching', () => {
         onSplitSessionDrop={vi.fn(() => false)}
         onMoveWorkspaceSession={vi.fn(() => false)}
         onFocusWorkspaceSession={vi.fn()}
-        onToggleWorkspaceBroadcast={vi.fn()}
+        onToggleSessionBroadcast={vi.fn()}
+        onToggleWorkspaceZoom={vi.fn()}
+        onDetachSessionToStandalone={vi.fn()}
         onResizeWorkspaceSplit={vi.fn()}
       />
     );
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '브로드캐스트 끄기' })).toBeTruthy();
+      expect(
+        screen.getAllByRole('button', { name: '브로드캐스트 끄기' }).length,
+      ).toBeGreaterThan(0);
     });
 
     writeMock.mockClear();
@@ -1013,8 +1233,10 @@ describe('TerminalWorkspace workspace switching', () => {
           onSplitSessionDrop={vi.fn(() => false)}
           onMoveWorkspaceSession={vi.fn(() => false)}
           onFocusWorkspaceSession={vi.fn()}
-          onToggleWorkspaceBroadcast={vi.fn()}
-          onResizeWorkspaceSplit={vi.fn()}
+          onToggleSessionBroadcast={vi.fn()}
+          onToggleWorkspaceZoom={vi.fn()}
+        onDetachSessionToStandalone={vi.fn()}
+        onResizeWorkspaceSplit={vi.fn()}
         />
       );
 
@@ -1104,7 +1326,9 @@ describe('TerminalWorkspace workspace switching', () => {
         onSplitSessionDrop={vi.fn(() => false)}
         onMoveWorkspaceSession={vi.fn(() => false)}
         onFocusWorkspaceSession={vi.fn()}
-        onToggleWorkspaceBroadcast={vi.fn()}
+        onToggleSessionBroadcast={vi.fn()}
+        onToggleWorkspaceZoom={vi.fn()}
+        onDetachSessionToStandalone={vi.fn()}
         onResizeWorkspaceSplit={vi.fn()}
       />
     );
@@ -1183,7 +1407,9 @@ describe('TerminalWorkspace workspace switching', () => {
         onSplitSessionDrop={vi.fn(() => false)}
         onMoveWorkspaceSession={vi.fn(() => false)}
         onFocusWorkspaceSession={vi.fn()}
-        onToggleWorkspaceBroadcast={vi.fn()}
+        onToggleSessionBroadcast={vi.fn()}
+        onToggleWorkspaceZoom={vi.fn()}
+        onDetachSessionToStandalone={vi.fn()}
         onResizeWorkspaceSplit={vi.fn()}
       />
     );
@@ -1264,8 +1490,10 @@ describe('TerminalWorkspace workspace switching', () => {
           onSplitSessionDrop={vi.fn(() => false)}
           onMoveWorkspaceSession={vi.fn(() => false)}
           onFocusWorkspaceSession={vi.fn()}
-          onToggleWorkspaceBroadcast={vi.fn()}
-          onResizeWorkspaceSplit={vi.fn()}
+          onToggleSessionBroadcast={vi.fn()}
+          onToggleWorkspaceZoom={vi.fn()}
+        onDetachSessionToStandalone={vi.fn()}
+        onResizeWorkspaceSplit={vi.fn()}
         />
       )
     ).not.toThrow();

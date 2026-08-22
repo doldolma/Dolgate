@@ -3064,10 +3064,10 @@
   },
   "paneHeader": {
     "closeSession": "End the {{title}} session",
-    "splitHorizontalAria": "Split left/right",
-    "splitHorizontalTitle": "Split left/right (Ctrl-b %)",
-    "splitVerticalAria": "Split top/bottom",
-    "splitVerticalTitle": "Split top/bottom (Ctrl-b \")"
+    "latency": "Round-trip latency {{ms}}ms",
+    "zoomIn": "Maximize this pane",
+    "zoomOut": "Restore the split",
+    "detachToTab": "Move to its own tab"
   },
   "termiusImport": {
     "loadFailed": "Could not load the Termius data.",

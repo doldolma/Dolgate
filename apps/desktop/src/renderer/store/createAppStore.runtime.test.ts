@@ -347,7 +347,7 @@ describe("createAppStore runtime, workspaces, and sharing", () => {
     expect(workspaceId).toBeTruthy();
     expect(store.getState().workspaces[0]?.broadcastEnabled).toBe(false);
 
-    store.getState().toggleWorkspaceBroadcast(workspaceId!);
+    store.getState().toggleSessionBroadcast(workspaceId!, "session-1");
     expect(store.getState().workspaces[0]?.broadcastEnabled).toBe(true);
 
     const splitId =
@@ -509,7 +509,7 @@ describe("createAppStore runtime, workspaces, and sharing", () => {
     const workspaceId = store.getState().workspaces[0]?.id;
     expect(workspaceId).toBeTruthy();
 
-    store.getState().toggleWorkspaceBroadcast(workspaceId!);
+    store.getState().toggleSessionBroadcast(workspaceId!, "session-1");
     expect(store.getState().workspaces[0]?.broadcastEnabled).toBe(true);
 
     store.getState().detachSessionFromWorkspace(workspaceId!, "session-1");

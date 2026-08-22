@@ -45,8 +45,9 @@ export function useSessionWorkspaceViewModel() {
   const detachTmuxWorkspace = useAppStore(
     (state) => state.detachTmuxWorkspace,
   );
-  const toggleWorkspaceBroadcast = useAppStore(
-    (state) => state.toggleWorkspaceBroadcast,
+  const toggleWorkspaceZoom = useAppStore((state) => state.toggleWorkspaceZoom);
+  const toggleSessionBroadcast = useAppStore(
+    (state) => state.toggleSessionBroadcast,
   );
   const resizeWorkspaceSplit = useAppStore((state) => state.resizeWorkspaceSplit);
   const handleSessionShareEvent = useAppStore(
@@ -85,7 +86,8 @@ export function useSessionWorkspaceViewModel() {
     focusWorkspaceSession,
     tmuxNewWindowInWorkspace,
     detachTmuxWorkspace,
-    toggleWorkspaceBroadcast,
+    toggleSessionBroadcast,
+    toggleWorkspaceZoom,
     resizeWorkspaceSplit,
     handleSessionShareEvent,
     handleSessionShareChatEvent,

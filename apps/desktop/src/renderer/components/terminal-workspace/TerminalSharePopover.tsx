@@ -7,6 +7,14 @@ import { useTranslation } from 'react-i18next';
 interface TerminalSharePopoverProps {
   anchorRef: MutableRefObject<HTMLDivElement | null>;
   showHeader: boolean;
+  /**
+   * 이 묶음이 어디에 놓이는가.
+   *
+   * `inline` = pane 헤더 안(헤더가 있는 워크스페이스 pane). `floating` = 터미널 위에 뜨는
+   * 절대 위치(헤더가 없는 tmux·standalone 경로). 팝오버는 두 경우 모두 이 묶음을 기준으로
+   * 열리므로, 바뀌는 것은 묶음 자체의 위치와 버튼 크기뿐이다.
+   */
+  variant?: 'inline' | 'floating';
   open: boolean;
   actions?: ReactNode;
   // Share 버튼 왼쪽에 함께 놓이는 토글(AI 패널 등).
@@ -23,9 +31,15 @@ interface TerminalSharePopoverProps {
   canOpenChatWindow: boolean;
 }
 
+// 헤더 안에 놓일 때의 Share 버튼 스킨. 헤더는 한 줄 크롬이라 36px 알약이 들어가면 헤더가
+// 그만큼 두꺼워진다 — 닫기 아이콘(1.25rem)과 같은 높이로 맞춘다.
+const SHARE_INLINE_BUTTON =
+  'h-[1.25rem] min-h-0 rounded-[5px] border-0 bg-transparent px-[0.3rem] text-[0.65rem] font-semibold text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] hover:text-[var(--text)]';
+
 export function TerminalSharePopover({
   anchorRef,
   showHeader,
+  variant = 'floating',
   open,
   actions,
   aiToggle,
@@ -41,12 +55,15 @@ export function TerminalSharePopover({
   canOpenChatWindow,
 }: TerminalSharePopoverProps) {
   const { t: translate } = useTranslation();
+  const inline = variant === 'inline';
   return (
     <div
       ref={anchorRef}
       className={cn(
-        'absolute right-[0.85rem] top-[0.85rem] z-[4] flex items-center gap-2',
-        showHeader && 'right-[0.8rem] top-[0.8rem]',
+        inline
+          ? 'relative flex items-center gap-[0.15rem]'
+          : 'absolute right-[0.85rem] top-[0.85rem] z-[4] flex items-center gap-2',
+        !inline && showHeader && 'right-[0.8rem] top-[0.8rem]',
       )}
     >
       {actions}
@@ -54,7 +71,11 @@ export function TerminalSharePopover({
       <Button
         variant="secondary"
         size="sm"
-        className="min-h-9 rounded-full px-3.5"
+        className={
+          inline
+            ? SHARE_INLINE_BUTTON
+            : 'min-h-9 rounded-full px-3.5'
+        }
         onClick={onToggle}
       >
         Share

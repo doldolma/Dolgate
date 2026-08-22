@@ -47,6 +47,8 @@ import { TerminalCommandPalette } from './TerminalCommandPalette';
 import { SnippetVariablesDialog } from './SnippetVariablesDialog';
 import type { CommandFinishedInfo } from '../../lib/command-notification';
 import { supportsTmuxControlMode } from '../../lib/tmux-version';
+import { getHostSubtitle } from '@shared';
+import { hostSubtitleLabels } from '../../../common/shared-messages';
 import { useTranslation } from 'react-i18next';
 
 // PASSTHROUGH_TMUX_COMMAND: control mode floor(2.6) 미만 tmux 를 일반 SSH 세션으로 띄울
@@ -630,12 +632,19 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   );
 
   // Share 옆에 놓이는 AI 패널 토글(누르면 열림/닫힘). active=열림 상태 강조.
-  const aiToggleButton = (
+  //
+  // 헤더 안(inline)과 터미널 위(floating) 두 자리에 놓이고 크기만 다르다. 헤더는 한 줄
+  // 크롬이라 36px 알약이 들어가면 헤더가 그만큼 두꺼워지므로 닫기 아이콘과 높이를 맞춘다.
+  const renderAiToggle = (inline: boolean) => (
     <Button
       variant="secondary"
       size="sm"
       active={aiPanelOpen}
-      className="min-h-9 rounded-full px-3.5"
+      className={
+        inline
+          ? 'h-[1.25rem] min-h-0 rounded-[5px] border-0 bg-transparent px-[0.3rem] text-[0.65rem] font-semibold text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] hover:text-[var(--text)]'
+          : 'min-h-9 rounded-full px-3.5'
+      }
       onClick={() => toggleAiPanel(sessionId)}
       title={translate('sessionPane.aiTitle')}
       aria-label={translate(aiPanelOpen ? 'sessionPane.aiClose' : 'sessionPane.aiOpen')}
@@ -644,6 +653,51 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     </Button>
   );
 
+  // 시리얼 액션 · AI · Share 묶음. 헤더가 있으면 헤더 안, 없으면 터미널 위에 뜬다.
+  // 어느 쪽이든 같은 컴포넌트를 쓴다 — 예전에는 위치 좌표가 두 곳에 복사돼 있었다.
+  // AI 토글을 감출지. 분할된 좁은 pane 에서는 감추되, **이미 열려 있으면 남긴다** —
+  // 버튼이 사라지면 열린 패널을 닫을 방법이 없어진다. Share 는 항상 남긴다: 공유를 시작하는
+  // 경로가 이 팝오버뿐이라 감추면 분할 pane 에서 기능 자체가 사라진다.
+  const hideAiToggle = Boolean(props.compactActions) && !aiPanelOpen;
+
+  const renderPaneActions = (inline: boolean) =>
+    controller.canShareSession ? (
+      <TerminalSharePopover
+        variant={inline ? 'inline' : 'floating'}
+        anchorRef={controller.sharePopoverRef}
+        showHeader={showHeader}
+        open={controller.sharePopoverOpen}
+        actions={serialActions}
+        aiToggle={hideAiToggle ? undefined : renderAiToggle(inline)}
+        canStartShare={controller.canStartShare}
+        shareCopyStatus={controller.shareCopyStatus}
+        shareState={controller.shareState}
+        onToggle={controller.toggleSharePopover}
+        onStartShare={() => {
+          void controller.handleStartShare();
+        }}
+        onCopyShareUrl={() => {
+          void controller.handleCopyShareUrl();
+        }}
+        onSetInputEnabled={controller.handleSetSessionShareInputMode}
+        onOpenChatWindow={controller.handleOpenShareChatWindow}
+        onStopShare={controller.handleStopShare}
+        canOpenChatWindow={Boolean(onOpenSessionShareChatWindow)}
+      />
+    ) : inline ? (
+      // 공유 불가 세션(로컬 터미널 등)엔 Share 팝오버가 없다. AI 토글만 남는다.
+      hideAiToggle ? null : renderAiToggle(true)
+    ) : (
+      <div
+        className={cn(
+          'absolute right-[0.85rem] top-[0.85rem] z-[4] flex items-center',
+          showHeader && 'right-[0.8rem] top-[0.8rem]',
+        )}
+      >
+        {renderAiToggle(false)}
+      </div>
+    );
+
   return (
     <div
       className={cn(
@@ -651,7 +705,11 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         visible || active
           ? 'flex pointer-events-auto opacity-100'
           : 'hidden pointer-events-none opacity-0',
-        showHeader && 'p-[0.4rem]',
+        // 헤더가 있으면 gap 을 없앤다. 헤더와 터미널은 위아래로 맞붙어 한 상자로 읽혀야 하는데
+        // (헤더 border-b-0 + 터미널 border-t-0 이 이어지는 구조) flex gap 이 그 사이를 벌리면
+        // 테두리가 끊긴 것처럼 보인다. 사이가 필요한 요소(알림 카드 등)는 자기 margin 을 갖고
+        // 있으므로 gap 이 없어도 붙지 않는다. 헤더가 없는 경로(tmux·standalone)는 그대로 둔다.
+        showHeader && 'gap-0 p-[0.25rem]',
       )}
       style={style}
       onKeyDownCapture={handlePaneKeyDownCapture}
@@ -673,12 +731,24 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           active={active}
           draggingDisabled={draggingDisabled}
           closingDisabled={!onClose || tab?.status === 'disconnecting'}
+          kind={props.host?.kind}
+          // 대상 표기는 앱의 다른 목록과 같은 헬퍼를 쓴다 — pane 헤더만 따로 만들면 같은
+          // 호스트가 화면마다 다르게 적힌다(AWS·Warpgate·시리얼은 형식이 제각각이다).
+          subtitle={props.host ? getHostSubtitle(props.host, hostSubtitleLabels()) : undefined}
+          rttMs={tab?.lastRttMs ?? null}
+          zoomed={props.zoomed}
+          onToggleZoom={props.onToggleZoom}
+          onDetachToTab={props.onDetachToTab}
+          broadcastActive={props.broadcastActive}
+          broadcastDisabled={props.broadcastDisabled}
+          onToggleBroadcast={props.onToggleBroadcast}
           onFocus={onFocus}
           onClose={() => {
             void onClose?.();
           }}
           onStartDrag={props.onStartDrag}
           onEndDrag={props.onEndDrag}
+          actions={renderPaneActions(true)}
         />
       ) : null}
 
@@ -766,46 +836,21 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden">
         <div className="relative flex min-h-0 min-w-0 flex-1">
-          {controller.canShareSession ? (
-            <TerminalSharePopover
-              anchorRef={controller.sharePopoverRef}
-              showHeader={showHeader}
-              open={controller.sharePopoverOpen}
-              actions={serialActions}
-              aiToggle={aiToggleButton}
-              canStartShare={controller.canStartShare}
-              shareCopyStatus={controller.shareCopyStatus}
-              shareState={controller.shareState}
-              onToggle={controller.toggleSharePopover}
-              onStartShare={() => {
-                void controller.handleStartShare();
-              }}
-              onCopyShareUrl={() => {
-                void controller.handleCopyShareUrl();
-              }}
-              onSetInputEnabled={controller.handleSetSessionShareInputMode}
-              onOpenChatWindow={controller.handleOpenShareChatWindow}
-              onStopShare={controller.handleStopShare}
-              canOpenChatWindow={Boolean(onOpenSessionShareChatWindow)}
-            />
-          ) : (
-            // 공유 불가 세션엔 Share 팝오버가 없으므로 AI 토글만 같은 위치에 띄운다.
-            <div
-              className={cn(
-                'absolute right-[0.85rem] top-[0.85rem] z-[4] flex items-center',
-                showHeader && 'right-[0.8rem] top-[0.8rem]',
-              )}
-            >
-              {aiToggleButton}
-            </div>
-          )}
+          {showHeader ? null : renderPaneActions(false)}
 
           <div
             ref={controller.containerRef}
             className={cn(
               'relative mx-[0.35rem] mt-[0.35rem] mb-[0.2rem] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[6px] bg-[color-mix(in_srgb,var(--surface)_96%,transparent_4%)] p-0 [&_.xterm]:min-h-full [&_.xterm]:h-full [&_.xterm]:w-full [&_.xterm-viewport]:min-h-full [&_.xterm-viewport]:h-full [&_.xterm-viewport]:w-full [&_.xterm-viewport]:bg-transparent [&_.xterm-viewport]:rounded-none',
+              // 좌우 margin 을 두지 않는다 — 헤더는 margin 이 없어서 터미널만 안쪽으로 들어가면
+              // 세로 테두리가 어긋난다. 바깥 여백은 pane 루트의 padding 이 한 번만 준다.
               showHeader &&
-                'mx-[0.35rem] mb-[0.35rem] mt-0 rounded-b-[6px] rounded-t-none border border-[var(--border)] border-t-0',
+                'mx-0 mb-0 mt-0 rounded-b-[6px] rounded-t-none border border-t-0',
+              // 헤더가 활성 테두리를 두르므로 본문도 같이 둘러야 한 상자로 읽힌다.
+              showHeader &&
+                (active
+                  ? 'border-[color-mix(in_srgb,var(--accent-strong)_55%,var(--border))]'
+                  : 'border-[var(--border)]'),
               // 명령 블록 점 마커가 들어갈 왼쪽 거터. 이 여백이 없으면 마커가 열 0 위에 그려져
               // 글자와 겹친다(GUTTER_WIDTH_PX 와 맞춰야 함). FitAddon 은 부모의 content width 로
               // cols 를 계산하므로 패딩만큼 자동 반영된다. tmux pane 은 컨테이너 px = tmux 셀
@@ -936,7 +981,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           각 바가 아래 여백을 들고 있으면 여러 개가 쌓일 때 간격이 그만큼 배로 벌어진다.
           tmux 경로(SessionShell)도 같은 statusBarStack 을 쓴다 — 컨테이너가 갈리면 같은
           바가 연결 방식에 따라 다른 간격으로 놓인다. */}
-      <div className={statusBarStack}>
+      <div className={cn(statusBarStack, showHeader && 'px-0 pb-0 pt-[0.25rem]')}>
         {/* mosh 는 자기 줄에 둔다. tmux·자원 바와 같이 뜨는 조합이 아니라 어차피 한 줄이다. */}
         {tab?.moshState ? (
           <TerminalMoshStatusBar

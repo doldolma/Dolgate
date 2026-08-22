@@ -97,7 +97,10 @@ interface TerminalWorkspaceProps {
     targetSessionId: string,
   ) => boolean;
   onFocusWorkspaceSession: (workspaceId: string, sessionId: string) => void;
-  onToggleWorkspaceBroadcast: (workspaceId: string) => void;
+  onToggleSessionBroadcast: (workspaceId: string, sessionId: string) => void;
+  onToggleWorkspaceZoom: (workspaceId: string, sessionId: string) => void;
+  /** 분할에서 빼내 독립 탭으로. 로직은 이미 있고(드래그로만 되던 것) 버튼 경로를 추가한다. */
+  onDetachSessionToStandalone: (workspaceId: string, sessionId: string) => void;
   onResizeWorkspaceSplit: (
     workspaceId: string,
     splitId: string,
@@ -163,6 +166,8 @@ function resolveTerminalAppearanceForSession(
   };
 }
 
+const EMPTY_SESSION_IDS: string[] = [];
+
 export function TerminalWorkspace({
   tabs,
   hosts,
@@ -186,7 +191,9 @@ export function TerminalWorkspace({
   onSplitSessionDrop,
   onMoveWorkspaceSession,
   onFocusWorkspaceSession,
-  onToggleWorkspaceBroadcast,
+  onToggleSessionBroadcast,
+  onToggleWorkspaceZoom,
+  onDetachSessionToStandalone,
   onResizeWorkspaceSplit,
 }: TerminalWorkspaceProps) {
   const { t: translate } = useTranslation();
@@ -201,8 +208,7 @@ export function TerminalWorkspace({
   const tmuxResizeRef = useRef<{ firstSid: string; secondSid: string } | null>(
     null,
   );
-  const [isBroadcastTooltipVisible, setIsBroadcastTooltipVisible] =
-    useState(false);
+
   const terminalController = useTerminalWorkspaceController({
     activeWorkspace,
     tabs,
@@ -211,6 +217,27 @@ export function TerminalWorkspace({
   const workspaceLayout = useMemo(() => {
     if (!activeWorkspace) {
       return null;
+    }
+
+    // 확대 중이면 트리를 펼치지 않고 그 pane 하나에 전체를 준다. 레이아웃 트리는 그대로
+    // 두므로 풀면 원래 비율이 그대로 돌아온다. 확대한 세션이 레이아웃에 없으면(닫혔거나
+    // 탭으로 빠졌다) 무시하고 평소대로 편다 — 상태를 청소하는 경로를 일일이 좇지 않아도
+    // 화면이 멀쩡하다.
+    const zoomedSessionId = activeWorkspace.zoomedSessionId ?? null;
+    if (
+      zoomedSessionId &&
+      listWorkspaceSessionIds(activeWorkspace.layout).includes(zoomedSessionId)
+    ) {
+      return {
+        placements: [
+          {
+            sessionId: zoomedSessionId,
+            rect: { x: 0, y: 0, width: 1, height: 1 },
+          },
+        ],
+        // 확대 중에는 나눌 경계가 없으므로 크기 조절 핸들도 없다.
+        handles: [] as SplitHandlePlacement[],
+      };
     }
 
     const placements: SessionPlacement[] = [];
@@ -361,25 +388,22 @@ export function TerminalWorkspace({
     [activeWorkspaceSessionIds, tabsBySessionId],
   );
 
-  const shouldShowBroadcastControl = Boolean(
+  // 브로드캐스트는 pane 헤더의 아이콘으로 켠다(예전에는 워크스페이스 우상단에 떠 있는
+  // 버튼 하나였다). pane 이 2개 이상일 때만 의미가 있으므로 그때만 아이콘을 그린다.
+  // 확대·탭 복귀는 pane 이 2개 이상일 때만 의미가 있다. 혼자면 이미 전체이고, 빼낼 것도 없다.
+  const canZoom = Boolean(
+    activeWorkspace && activeWorkspaceSessionIds.length >= 2,
+  );
+  const canBroadcast = Boolean(
     activeWorkspace && activeWorkspaceSessionIds.length >= 2,
   );
   const isWorkspaceBroadcastEnabled = Boolean(
     activeWorkspace?.broadcastEnabled,
   );
+  const broadcastExcludedSessionIds =
+    activeWorkspace?.broadcastExcludedSessionIds ?? EMPTY_SESSION_IDS;
   const isBroadcastToggleDisabled =
     !isWorkspaceBroadcastEnabled && connectedWorkspaceHostSessionIds.length < 2;
-  const broadcastButtonLabel = isWorkspaceBroadcastEnabled
-    ? translate('workspace.broadcastOff')
-    : translate('workspace.broadcastOn');
-  const broadcastTooltipText = isWorkspaceBroadcastEnabled
-    ? translate('workspace.broadcastActive')
-    : isBroadcastToggleDisabled
-      ? translate('workspace.broadcastNeedsPanes')
-      : translate('workspace.broadcastOn');
-  const broadcastTooltipId = activeWorkspace
-    ? `workspace-broadcast-tooltip-${activeWorkspace.id}`
-    : undefined;
 
   useEffect(() => {
     if (draggedSession?.source !== 'standalone-tab' || !canDropDraggedSession) {
@@ -390,7 +414,6 @@ export function TerminalWorkspace({
   useEffect(() => {
     setDropPreview(null);
     setResizingHandle(null);
-    setIsBroadcastTooltipVisible(false);
   }, [viewActivationKey]);
 
   useEffect(() => {
@@ -727,6 +750,39 @@ export function TerminalWorkspace({
           // tmux pane 은 헤더 없이 슬롯을 꽉 채운다(컨테이너 px = tmux 셀 그리드 → 밑 짤림 제거).
           // pane 식별/조작은 상단 윈도우 바 + tmux 자체 경계선/단축키가 담당.
           showHeader={Boolean(activeWorkspace && placement) && !tab.tmux}
+          zoomed={activeWorkspace?.zoomedSessionId === tab.sessionId}
+          // 분할 중이고 확대도 아니면 pane 이 좁다. 이때는 AI 토글을 감춘다 — AI 패널이
+          // 열리면 터미널을 좌우로 또 나눠 쓰는데 좁은 pane 에서는 둘 다 못 쓴다.
+          // 확대하면 다시 나타나므로 접근이 막히지는 않는다.
+          compactActions={
+            canZoom && activeWorkspace?.zoomedSessionId !== tab.sessionId
+          }
+          onToggleZoom={
+            canZoom && activeWorkspace && placement && !tab.tmux
+              ? () => {
+                  onToggleWorkspaceZoom(activeWorkspace.id, tab.sessionId);
+                }
+              : undefined
+          }
+          onDetachToTab={
+            canZoom && activeWorkspace && placement && !tab.tmux
+              ? () => {
+                  onDetachSessionToStandalone(activeWorkspace.id, tab.sessionId);
+                }
+              : undefined
+          }
+          broadcastActive={
+            isWorkspaceBroadcastEnabled &&
+            !broadcastExcludedSessionIds.includes(tab.sessionId)
+          }
+          broadcastDisabled={isBroadcastToggleDisabled}
+          onToggleBroadcast={
+            canBroadcast && activeWorkspace && placement && !tab.tmux
+              ? () => {
+                  onToggleSessionBroadcast(activeWorkspace.id, tab.sessionId);
+                }
+              : undefined
+          }
           host={
             tab.source === 'host' && tab.hostId
               ? hosts.find((record) => record.id === tab.hostId)
@@ -817,26 +873,13 @@ export function TerminalWorkspace({
             }
           : undefined
       }
-      shouldShowBroadcastControl={shouldShowBroadcastControl && Boolean(activeWorkspace)}
-      isWorkspaceBroadcastEnabled={isWorkspaceBroadcastEnabled}
-      isBroadcastToggleDisabled={isBroadcastToggleDisabled}
-      broadcastButtonLabel={broadcastButtonLabel}
-      broadcastTooltipText={broadcastTooltipText}
-      broadcastTooltipId={broadcastTooltipId}
-      isBroadcastTooltipVisible={isBroadcastTooltipVisible}
-      onBroadcastTooltipVisibleChange={setIsBroadcastTooltipVisible}
-      onToggleBroadcast={() => {
-        if (!activeWorkspace) {
-          return;
-        }
-        onToggleWorkspaceBroadcast(activeWorkspace.id);
-      }}
       paneSlots={workspacePaneSlots}
       handles={activeWorkspace && workspaceLayout ? workspaceLayout.handles : []}
       // tmux 워크스페이스는 핸들의 보이는 액센트 바를 얇은 가운데 선으로 바꾼다(히트영역
       // 12px 은 유지). tmux pane 거터가 좁아 기존의 꽉 찬 12px 바가 경계 글자와 겹쳐
       // 보이던 것을 해소 — 크기/측정/key 는 일절 안 건드리는 순수 시각 변경.
       tmuxThinHandles={Boolean(activeWorkspace?.tmux)}
+      resizingSplitId={resizingHandle?.splitId ?? null}
       onStartResizeHandle={(handle) => {
         lastTmuxResizeRef.current = null;
         // tmux: 드래그 동안 split id 가 %layout-change 로 바뀌므로, 시작 시점에 양쪽

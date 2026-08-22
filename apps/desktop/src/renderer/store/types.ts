@@ -131,7 +131,26 @@ export interface WorkspaceTab {
   title: string;
   layout: WorkspaceLayoutNode;
   activeSessionId: string;
+  /**
+   * 브로드캐스트가 켜져 있는가. 켜져 있으면 이 워크스페이스의 연결된 pane 이 모두 참여하고,
+   * `broadcastExcludedSessionIds` 에 든 것만 빠진다.
+   */
   broadcastEnabled: boolean;
+  /**
+   * 브로드캐스트에서 뺀 pane.
+   *
+   * 참여를 "포함 목록"이 아니라 "제외 목록"으로 두는 이유: 켜면 전부 참여가 기본이고,
+   * pane 이 새로 붙어도(분할·드래그) 따로 등록하지 않아도 자동으로 참여한다. 포함 목록이면
+   * 새 pane 이 조용히 빠져 있어서 "왜 저기만 안 가지"가 된다.
+   */
+  broadcastExcludedSessionIds?: string[];
+  /**
+   * 잠깐 워크스페이스 전체로 키운 pane. null 이면 평소 분할 배치다.
+   *
+   * 레이아웃 트리는 건드리지 않는다 — 확대는 "보기"만 바꾸는 것이라, 풀면 원래 비율이
+   * 그대로 돌아와야 한다. 트리를 고치면 되돌릴 정보가 사라진다.
+   */
+  zoomedSessionId?: string | null;
   /**
    * control mode(tmux -CC) workspace(=하나의 tmux window)면 어느 control 세션·window인지.
    * index/name 은 윈도우 바 라벨용(list-windows 응답에서 채워짐). 평시엔 null/undefined.
@@ -1012,7 +1031,17 @@ interface AppStateParts {
   ) => void;
   /** tmux 세션 전체를 종료한다(kill-session). sessionId 는 그 control 세션의 pane id. */
   killTmuxSession: (sessionId: string, sessionName: string) => void;
-  toggleWorkspaceBroadcast: (workspaceId: string) => void;
+  /**
+   * pane 하나의 브로드캐스트 참여를 토글한다.
+   *
+   * 꺼져 있으면 **전부 켠다**(제외 목록을 비운다) — "다 같이 치기"가 압도적으로 흔한 쓰임이라
+   * 한 번에 되게 한다. 켜져 있을 때 참여 중인 pane 을 누르면 그 pane 만 빠지고, 빠져 있던
+   * pane 을 누르면 다시 들어온다. 참여가 2개 미만이 되면 브로드캐스트 자체를 끈다 —
+   * 혼자 남은 브로드캐스트는 켜져 있어도 하는 일이 없는데 켜진 표시만 남는다.
+   */
+  toggleSessionBroadcast: (workspaceId: string, sessionId: string) => void;
+  /** pane 확대 토글. 이미 그 pane 이 확대 중이면 해제한다. */
+  toggleWorkspaceZoom: (workspaceId: string, sessionId: string) => void;
   resizeWorkspaceSplit: (
     workspaceId: string,
     splitId: string,
@@ -1354,7 +1383,8 @@ export type SessionSlice = Pick<
   | "applyTmuxSessionName"
   | "applyTmuxSessionsList"
   | "killTmuxSession"
-  | "toggleWorkspaceBroadcast"
+  | "toggleSessionBroadcast"
+  | "toggleWorkspaceZoom"
   | "resizeWorkspaceSplit"
   | "dismissPendingCredentialRetry"
   | "submitCredentialRetry"
