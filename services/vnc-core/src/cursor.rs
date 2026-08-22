@@ -45,6 +45,16 @@ pub fn body_length(rect: Rect, format: PixelFormat) -> usize {
     pixels * format.bytes_per_pixel() + mask_length(rect.width, rect.height)
 }
 
+/// Validate the cursor dimensions before trusting them as an allocation length.
+pub fn checked_body_length(rect: Rect, format: PixelFormat) -> Option<usize> {
+    if rect.width > MAX_SIDE || rect.height > MAX_SIDE {
+        return None;
+    }
+    let pixels = usize::from(rect.width).checked_mul(usize::from(rect.height))?;
+    let pixel_bytes = pixels.checked_mul(format.bytes_per_pixel())?;
+    pixel_bytes.checked_add(mask_length(rect.width, rect.height))
+}
+
 fn mask_length(width: u16, height: u16) -> usize {
     // 한 행이 바이트 경계에서 끝난다 — 폭이 8의 배수가 아니면 남는 비트는 패딩이다.
     (usize::from(width) + 7) / 8 * usize::from(height)
@@ -125,6 +135,18 @@ mod tests {
         );
         assert_eq!(body_length(rect(0, 0, 8, 1), PixelFormat::rgba32()), 32 + 1);
         assert_eq!(body_length(rect(0, 0, 0, 0), PixelFormat::rgba32()), 0);
+    }
+
+    #[test]
+    fn checked_body_length_rejects_an_oversized_cursor() {
+        assert_eq!(
+            checked_body_length(rect(0, 0, 512, 512), PixelFormat::rgba32()),
+            Some(512 * 512 * 4 + 64 * 512)
+        );
+        assert_eq!(
+            checked_body_length(rect(0, 0, 513, 1), PixelFormat::rgba32()),
+            None
+        );
     }
 
     #[test]

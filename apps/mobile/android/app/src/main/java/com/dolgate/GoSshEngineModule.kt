@@ -11,6 +11,8 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import mobile.AwsSsmClosedCallback
 import mobile.Conn
@@ -42,6 +44,7 @@ class GoSshEngineModule(
 ) : ReactContextBaseJavaModule(reactContext) {
 
   private val executor: ExecutorService = Executors.newCachedThreadPool()
+  private val invalidated = AtomicBoolean(false)
 
   /**
    * The engine, with Android's network facts wired in before anything can use it.
@@ -215,7 +218,7 @@ class GoSshEngineModule(
         synchronized(registryLock) {
           callbackConnection = conn
           registrationComplete = true
-          if (disconnected) {
+          if (disconnected || invalidated.get()) {
             true
           } else {
             // A reconnect under the same handle must not orphan the previous one.
@@ -307,7 +310,7 @@ class GoSshEngineModule(
       val info = shell.infoJSON()
       val closedBeforeRegistration =
         synchronized(registryLock) {
-          if (closed) {
+          if (closed || invalidated.get()) {
             true
           } else {
             shells[shellId] = shell
@@ -368,7 +371,7 @@ class GoSshEngineModule(
       val info = shell.infoJSON()
       val closedBeforeRegistration =
         synchronized(registryLock) {
-          if (closed) {
+          if (closed || invalidated.get()) {
             true
           } else {
             shells[shellId] = shell
@@ -398,7 +401,21 @@ class GoSshEngineModule(
   fun startSsmPortForward(forwardId: String, requestJson: String, promise: Promise) {
     onWorker(promise) {
       val forward = engine.startSsmPortForward(requestJson)
-      synchronized(registryLock) { ssmForwards[forwardId] = forward }
+      var previous: SsmForward? = null
+      val rejected =
+        synchronized(registryLock) {
+          if (invalidated.get()) {
+            true
+          } else {
+            previous = ssmForwards.put(forwardId, forward)
+            false
+          }
+        }
+      if (rejected) {
+        closeQuietly { forward.stop() }
+        throw IllegalStateException(INVALIDATED_MESSAGE)
+      }
+      previous?.let { old -> closeQuietly { old.stop() } }
       Arguments.createMap().apply {
         putString("forwardId", forwardId)
         putInt("bindPort", forward.bindPort())
@@ -524,7 +541,20 @@ class GoSshEngineModule(
     onWorker(promise) {
       val conn = requireConnection(connectionId)
       val sftpId = "$connectionId~sftp${nextSftpSuffix.incrementAndGet()}"
-      sftpSessions[sftpId] = conn.startSFTP()
+      val sftp = conn.startSFTP()
+      val rejected =
+        synchronized(registryLock) {
+          if (invalidated.get()) {
+            true
+          } else {
+            sftpSessions[sftpId] = sftp
+            false
+          }
+        }
+      if (rejected) {
+        closeQuietly { sftp.close() }
+        throw IllegalStateException(INVALIDATED_MESSAGE)
+      }
       sftpId
     }
   }
@@ -660,18 +690,34 @@ class GoSshEngineModule(
 
   override fun invalidate() {
     super.invalidate()
-    sftpSessions.keys.toList().forEach { sftpId ->
-      sftpSessions.remove(sftpId)?.let { sftp -> closeQuietly { sftp.close() } }
-    }
-    shells.keys.toList().forEach { shellId ->
-      shells.remove(shellId)?.let { shell -> closeQuietly { shell.close() } }
-    }
-    shellListeners.clear()
-    connections.keys.toList().forEach { connectionId ->
-      connections.remove(connectionId)?.let { conn -> closeQuietly { conn.close() } }
-    }
-    closeQuietly { engine.closeTailnets() }
+    if (!invalidated.compareAndSet(false, true)) return
+
+    // Stop queued work before taking the ownership snapshot. Active creators
+    // re-check invalidated while registering and close what they just opened.
     executor.shutdownNow()
+    val openResources =
+      synchronized(registryLock) {
+        val snapshot =
+          NativeResourceSnapshot(
+            sftp = sftpSessions.values.toList(),
+            shells = shells.values.toList(),
+            connections = connections.values.toList(),
+            ssmForwards = ssmForwards.values.toList(),
+          )
+        sftpSessions.clear()
+        shells.clear()
+        shellListeners.clear()
+        connections.clear()
+        ssmForwards.clear()
+        snapshot
+      }
+
+    openResources.sftp.forEach { sftp -> closeQuietly { sftp.close() } }
+    openResources.shells.forEach { shell -> closeQuietly { shell.close() } }
+    openResources.connections.forEach { conn -> closeQuietly { conn.close() } }
+    closeQuietly { engine.closeAllRDTunnels() }
+    openResources.ssmForwards.forEach { forward -> closeQuietly { forward.stop() } }
+    closeQuietly { engine.closeTailnets() }
   }
 
   /**
@@ -754,12 +800,24 @@ class GoSshEngineModule(
    * JS side can surface the message without matching on strings.
    */
   private fun onWorker(promise: Promise, work: () -> Any?) {
-    executor.execute {
-      try {
-        promise.resolve(work())
-      } catch (error: Throwable) {
-        promise.reject(ERROR_CODE, error.message ?: "SSH 엔진 호출이 실패했습니다.", error)
+    if (invalidated.get()) {
+      promise.reject(ERROR_CODE, INVALIDATED_MESSAGE)
+      return
+    }
+    try {
+      executor.execute {
+        if (invalidated.get()) {
+          promise.reject(ERROR_CODE, INVALIDATED_MESSAGE)
+          return@execute
+        }
+        try {
+          promise.resolve(work())
+        } catch (error: Throwable) {
+          promise.reject(ERROR_CODE, error.message ?: "SSH 엔진 호출이 실패했습니다.", error)
+        }
       }
+    } catch (_: RejectedExecutionException) {
+      promise.reject(ERROR_CODE, INVALIDATED_MESSAGE)
     }
   }
 
@@ -771,8 +829,28 @@ class GoSshEngineModule(
     }
   }
 
+  // --- Remote Desktop Tunnel ---
+
+  @ReactMethod
+  fun openRemoteDesktopTunnel(requestJson: String, promise: Promise) {
+    onWorker(promise) { engine.openRemoteDesktopTunnel(requestJson) }
+  }
+
+  @ReactMethod
+  fun closeRemoteDesktopTunnel(tunnelId: String, promise: Promise) {
+    onWorker(promise) { engine.closeRemoteDesktopTunnel(tunnelId) }
+  }
+
+  private data class NativeResourceSnapshot(
+    val sftp: List<SFTPSession>,
+    val shells: List<Shell>,
+    val connections: List<Conn>,
+    val ssmForwards: List<SsmForward>,
+  )
+
   companion object {
     const val NAME = "GoSshEngineModule"
+    private const val INVALIDATED_MESSAGE = "SSH engine module has been invalidated."
     private const val ERROR_CODE = "go_ssh_engine_error"
     private const val EVENT_CHUNK = "GoSshEngine:chunk"
     private const val EVENT_DROPPED = "GoSshEngine:dropped"

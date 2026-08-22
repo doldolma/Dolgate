@@ -17,6 +17,7 @@ import { InteractiveAuthPromptModal } from "./components/InteractiveAuthPromptMo
 import { StartupVarsPromptModal } from "./components/StartupVarsPromptModal";
 import { AwsSsoWaitingModal } from "./components/AwsSsoWaitingModal";
 import { ServerKeyPromptModal } from "./components/ServerKeyPromptModal";
+import { RdpCertificatePromptModal } from "./components/RdpCertificatePromptModal";
 import { recordAwsSsoCallbackUrl } from "./lib/aws-session";
 import { RootNavigator } from "./navigation/RootNavigator";
 import { useMobileAppStore } from "./store/useMobileAppStore";
@@ -36,6 +37,9 @@ export function AppRoot(): React.JSX.Element {
     (state) => state.authGateResolved,
   );
   const auth = useMobileAppStore((state) => state.auth);
+  const remoteDesktopImmersive = useMobileAppStore(
+    (state) => state.remoteDesktopImmersive,
+  );
   const initializeApp = useMobileAppStore((state) => state.initializeApp);
   const handleAuthCallbackUrl = useMobileAppStore(
     (state) => state.handleAuthCallbackUrl,
@@ -54,6 +58,15 @@ export function AppRoot(): React.JSX.Element {
   );
   const rejectServerKeyPrompt = useMobileAppStore(
     (state) => state.rejectServerKeyPrompt,
+  );
+  const pendingRdpCertificatePrompt = useMobileAppStore(
+    (state) => state.pendingRdpCertificatePrompt,
+  );
+  const acceptRdpCertificatePrompt = useMobileAppStore(
+    (state) => state.acceptRdpCertificatePrompt,
+  );
+  const rejectRdpCertificatePrompt = useMobileAppStore(
+    (state) => state.rejectRdpCertificatePrompt,
   );
   const pendingInteractiveAuthPrompt = useMobileAppStore(
     (state) => state.pendingInteractiveAuthPrompt,
@@ -131,7 +144,13 @@ export function AppRoot(): React.JSX.Element {
   return (
     <GestureHandlerRootView style={styles.gestureRoot}>
       <SafeAreaProvider>
-        <StatusBar barStyle={barStyle} backgroundColor={palette.background} />
+        {/* 원격 데스크톱 전체화면에서는 상태바까지 감춘다 — 가로에서 세로 픽셀이 귀하고,
+            상태바만 남으면 "꽉 찬 화면" 이 아니라 어중간해 보인다. */}
+        <StatusBar
+          barStyle={barStyle}
+          backgroundColor={palette.background}
+          hidden={remoteDesktopImmersive}
+        />
         <NavigationContainer theme={navigationTheme}>
           {!hydrated || !authGateResolved ? (
             <View
@@ -172,6 +191,11 @@ export function AppRoot(): React.JSX.Element {
           prompt={pendingServerKeyPrompt}
           onAccept={() => void acceptServerKeyPrompt()}
           onReject={() => void rejectServerKeyPrompt()}
+        />
+        <RdpCertificatePromptModal
+          prompt={pendingRdpCertificatePrompt}
+          onAccept={() => void acceptRdpCertificatePrompt()}
+          onReject={() => void rejectRdpCertificatePrompt()}
         />
         <CredentialPromptModal
           prompt={pendingCredentialPrompt}

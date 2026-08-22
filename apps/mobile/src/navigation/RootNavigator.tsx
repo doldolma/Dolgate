@@ -91,6 +91,10 @@ function getTabIconName(
 
 function MainTabs(): React.JSX.Element {
   const palette = useMobilePalette();
+  // 원격 데스크톱 전체화면. 세션 화면이 스토어에 올리고 여기서 탭 바를 접는다 — 탭 바는
+  // 내비게이터 소유라 화면 안에서는 숨길 수 없다. 세션이 사라지거나 다른 탭으로 옮기면
+  // 스토어 값이 정리되므로(SessionScreen) 탭 바가 숨겨진 채 갇히지 않는다.
+  const immersive = useMobileAppStore(state => state.remoteDesktopImmersive);
 
   return (
     <Tab.Navigator
@@ -99,7 +103,7 @@ function MainTabs(): React.JSX.Element {
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarHideOnKeyboard: true,
-        tabBarStyle: {
+        tabBarStyle: immersive ? { display: 'none' } : {
           backgroundColor: palette.sessionToolbar,
           borderTopColor: palette.sessionToolbarBorder,
           borderTopWidth: 1,

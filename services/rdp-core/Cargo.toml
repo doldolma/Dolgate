@@ -6,6 +6,11 @@ rust-version = "1.94"
 publish = false
 description = "Headless RDP sidecar for the Dolgate desktop app"
 
+[lib]
+name = "rdp_core"
+path = "src/lib.rs"
+crate-type = ["lib", "staticlib", "cdylib"]
+
 [[bin]]
 name = "rdp-core"
 path = "src/main.rs"

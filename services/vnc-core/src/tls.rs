@@ -9,8 +9,8 @@
 //!
 //! **익명 경로의 보안 성질을 오해하지 않도록:** 인증서가 없으므로 중간자를 구분할 방법이 원리적으로
 //! 없다. 도청은 막지만 상대가 누구인지는 보장하지 않는다. 그래서 이 경로를 쓰는 세션은 신뢰하는
-//! 망(SSH 터널·tailnet)이나 인증서 기반(X509\*)으로 옮기는 것이 맞고, 그 사실을 호출부가 사용자에게
-//! 알려야 한다.
+//! 망(SSH 터널·tailnet)에서만 써야 한다. X509 계열은 TOFU 신뢰 판정이 완성될 때까지 호출부가
+//! 협상 전에 거부한다.
 
 use std::io;
 use std::net::TcpStream;
@@ -43,45 +43,6 @@ pub fn connect_anonymous(stream: TcpStream, host: &str) -> io::Result<SslStream<
     config
         .connect(host, stream)
         .map_err(|error| io::Error::other(format!("익명 TLS 핸드셰이크 실패: {error}")))
-}
-
-/// 인증서 기반으로 TLS 를 세운다(X509None·X509Vnc·X509Plain).
-///
-/// 검증은 여기서 하지 않고 지문을 돌려준다. RDP 와 같은 TOFU 모델을 쓰기 위한 것이다 — VNC 서버도
-/// 대개 자체 서명이라 CA 검증은 성립하지 않고, 처음 본 지문을 기억해 두고 달라질 때 묻는 편이
-/// 실제 위협(서버가 바뀜)을 잡는다.
-pub fn connect_with_certificate(
-    stream: TcpStream,
-    host: &str,
-) -> io::Result<(SslStream<TcpStream>, String)> {
-    let mut builder = SslConnector::builder(SslMethod::tls_client()).map_err(to_io)?;
-    // 검증은 우리가 지문으로 한다. 여기서 CA 검증을 켜면 자체 서명 서버를 전부 거절한다.
-    builder.set_verify(SslVerifyMode::NONE);
-    let connector = builder.build();
-    let mut config = connector.configure().map_err(to_io)?;
-    config.set_verify_hostname(false);
-    let session = config
-        .connect(host, stream)
-        .map_err(|error| io::Error::other(format!("TLS 핸드셰이크 실패: {error}")))?;
-
-    let fingerprint = session
-        .ssl()
-        .peer_certificate()
-        .ok_or_else(|| io::Error::other("서버가 인증서를 보내지 않았습니다"))
-        .and_then(|certificate| {
-            certificate
-                .digest(openssl::hash::MessageDigest::sha256())
-                .map_err(to_io)
-        })
-        .map(|digest| {
-            digest
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<Vec<_>>()
-                .join(":")
-        })?;
-
-    Ok((session, fingerprint))
 }
 
 fn to_io(error: openssl::error::ErrorStack) -> io::Error {

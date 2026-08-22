@@ -16,10 +16,12 @@ import androidx.appcompat.widget.AppCompatEditText
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReactContext
+import com.facebook.react.bridge.WritableMap
 import com.facebook.react.uimanager.SimpleViewManager
 import com.facebook.react.uimanager.ThemedReactContext
+import com.facebook.react.uimanager.UIManagerHelper
 import com.facebook.react.uimanager.annotations.ReactProp
-import com.facebook.react.uimanager.events.RCTEventEmitter
+import com.facebook.react.uimanager.events.Event
 
 class TerminalInputViewManager : SimpleViewManager<TerminalInputEditText>() {
   override fun getName(): String = "TerminalInputView"
@@ -378,15 +380,42 @@ class TerminalInputEditText(
     emitTerminalInput(payload)
   }
 
-  private fun emitTerminalInput(payload: com.facebook.react.bridge.WritableMap) {
+  /**
+   * 눌린 키를 JS 로 올린다.
+   *
+   * **`getJSModule(RCTEventEmitter)` 를 쓰지 않는다.** 그건 구 아키텍처 경로이고, 새 아키텍처
+   * 에서는 RN 이 soft exception 을 남기며 "interop 이 꺼지면 멈춘다" 고 경고한다. EventDispatcher
+   * 는 두 아키텍처 모두에서 정식 경로다.
+   */
+  private fun emitTerminalInput(payload: WritableMap) {
     val reactContext = context as? ReactContext ?: return
-    reactContext
-      .getJSModule(RCTEventEmitter::class.java)
-      .receiveEvent(id, EVENT_TERMINAL_INPUT, payload)
+    val dispatcher = UIManagerHelper.getEventDispatcherForReactTag(reactContext, id) ?: return
+    dispatcher.dispatchEvent(
+      TerminalInputEvent(UIManagerHelper.getSurfaceId(this), id, payload),
+    )
   }
 
   private companion object {
     const val EVENT_TERMINAL_INPUT = "onTerminalInput"
     const val MAX_BUFFER_LENGTH = 96
   }
+}
+
+/**
+ * 키 입력 하나를 담아 나르는 이벤트.
+ *
+ * **합치지 않는다(`canCoalesce = false`).** RN 의 기본값은 합치기이고, 그러면 같은 프레임에 들어온
+ * 두 입력 중 앞선 것이 버려진다 — 빠르게 타이핑하거나 붙여넣을 때 글자가 조용히 사라진다.
+ * 이 이벤트는 연속적인 값(스크롤 위치)이 아니라 하나하나가 사실이다.
+ */
+private class TerminalInputEvent(
+  surfaceId: Int,
+  viewTag: Int,
+  private val payload: WritableMap,
+) : Event<TerminalInputEvent>(surfaceId, viewTag) {
+  override fun getEventName(): String = "onTerminalInput"
+
+  override fun canCoalesce(): Boolean = false
+
+  override fun getEventData(): WritableMap = payload
 }

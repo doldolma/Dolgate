@@ -34,11 +34,15 @@ import type {
 import {
   formatSyncRevisionEtag,
   isAwsEc2HostRecord,
+  isRdpHostRecord,
   isSshHostRecord,
+  isVncHostRecord,
+  LEGACY_TOLERATED_HOST_KINDS,
   normalizeServerUrl,
   parseVaultCacheRecord,
   projectSecretMetadata,
   SYNC_DATA_FLOOR_HEADER,
+  SYNC_DATA_FLOOR_LEGACY_INTOLERANT_KINDS,
   VAULT_EPOCH_HEADER,
   type HostSecretInput,
   type MobileSettings,
@@ -977,10 +981,10 @@ export async function postSyncSnapshot(
   /**
    * 이 기기가 올리는 데이터가 요구하는 클라이언트 수준. 생략하면 0(요구 없음)이다.
    *
-   * **모바일은 지금 늘 0 이다.** 아는 종류만 로컬에 두기 때문에(decodeSupportedHosts) 옛 클라이언트를
-   * 곤란하게 하는 레코드를 애초에 들고 있지 않다. 인자를 남겨 두는 이유는 모바일이 나중에 그런
-   * 종류를 지원하게 되면 그 자리에서 값을 넘기면 되게 하려는 것이다 — 헤더를 안 보내는 클라이언트가
-   * 있으면, 그 기기가 새 종류를 올리는데 계정 수준은 안 올라가는 구멍이 생긴다.
+   * 모바일도 RDP/VNC 호스트를 보존하므로 호출자는 전체 로컬 호스트에서 계산한 수준을 넘긴다.
+   * 부분 mutation payload 만 보면 계정의 다른 호스트 종류를 놓칠 수 있어 payload 자체로 추론하지
+   * 않는다. 헤더를 안 보내거나 0 으로 보내면 서버 초기화 후 자연 복구가 옛 데스크톱에 새 종류를
+   * 노출할 수 있다.
    */
   syncDataFloor?: number | null,
 ): Promise<string | null> {
@@ -1045,11 +1049,22 @@ export function decodeSshHosts(
 export function decodeSupportedHosts(
   payload: SyncPayloadV2,
   keyBase64: string,
-): Array<SshHostRecord | AwsEc2HostRecord> {
+): HostRecord[] {
   return decodeSyncRecords<HostRecord>(payload.hosts, keyBase64).filter(
-    (host): host is SshHostRecord | AwsEc2HostRecord =>
-      isSshHostRecord(host) || isAwsEc2HostRecord(host),
+    host =>
+      isSshHostRecord(host) ||
+      isAwsEc2HostRecord(host) ||
+      isRdpHostRecord(host) ||
+      isVncHostRecord(host),
   );
+}
+
+export function resolveMobileSyncDataFloor(
+  hosts: readonly HostRecord[],
+): number {
+  return hosts.some(host => !LEGACY_TOLERATED_HOST_KINDS.has(host.kind))
+    ? SYNC_DATA_FLOOR_LEGACY_INTOLERANT_KINDS
+    : 0;
 }
 
 export function decodeGroups(

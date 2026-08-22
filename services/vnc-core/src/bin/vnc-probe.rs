@@ -88,6 +88,7 @@ fn main() {
         username: std::env::var("VNC_PROBE_USER").unwrap_or_default(),
         image_quality: String::new(),
         shared: true,
+        tunnel_auth_token: None,
     };
 
     let session = thread::spawn(move || {

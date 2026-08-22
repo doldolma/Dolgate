@@ -8,6 +8,14 @@
 //! 않은 패딩이다. 서버가 거기에 0 을 넣으면 알파 0 이 되어 화면이 통째로 투명해진다.
 
 use crate::rfb::PixelFormat;
+use core_framing::{checked_rgba_framebuffer_len, MAX_FRAMEBUFFER_PIXELS};
+#[cfg(test)]
+use core_framing::RGBA_BYTES_PER_PIXEL;
+
+fn checked_framebuffer_len(width: u16, height: u16) -> Result<usize, DecodeError> {
+    checked_rgba_framebuffer_len(usize::from(width), usize::from(height))
+        .ok_or(DecodeError::OversizedFramebuffer { width, height })
+}
 
 /// 화면에서 갱신된 영역. 이 좌표가 그대로 stream frame 메타데이터가 된다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,12 +35,19 @@ pub struct Framebuffer {
 }
 
 impl Framebuffer {
-    pub fn new(width: u16, height: u16) -> Self {
-        Self {
+    /// Allocate a production framebuffer only after validating its dimensions and byte length.
+    pub fn try_new(width: u16, height: u16) -> Result<Self, DecodeError> {
+        let len = checked_framebuffer_len(width, height)?;
+        Ok(Self {
             width,
             height,
-            pixels: vec![0_u8; usize::from(width) * usize::from(height) * 4],
-        }
+            pixels: vec![0_u8; len],
+        })
+    }
+
+    #[cfg(test)]
+    pub fn new(width: u16, height: u16) -> Self {
+        Self::try_new(width, height).expect("valid test framebuffer dimensions")
     }
 
     pub fn width(&self) -> u16 {
@@ -44,10 +59,20 @@ impl Framebuffer {
     }
 
     /// 크기를 바꾼다. 내용은 버린다 — 서버가 곧 전체를 다시 보낸다.
-    pub fn resize(&mut self, width: u16, height: u16) {
+    /// 검증이 실패하면 기존 화면은 그대로 유지한다.
+    pub fn try_resize(&mut self, width: u16, height: u16) -> Result<(), DecodeError> {
+        let len = checked_framebuffer_len(width, height)?;
+        let pixels = vec![0_u8; len];
         self.width = width;
         self.height = height;
-        self.pixels = vec![0_u8; usize::from(width) * usize::from(height) * 4];
+        self.pixels = pixels;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub fn resize(&mut self, width: u16, height: u16) {
+        self.try_resize(width, height)
+            .expect("valid test framebuffer dimensions");
     }
 
     fn offset(&self, x: u16, y: u16) -> usize {
@@ -61,6 +86,15 @@ impl Framebuffer {
     fn contains(&self, rect: Rect) -> bool {
         usize::from(rect.x) + usize::from(rect.width) <= usize::from(self.width)
             && usize::from(rect.y) + usize::from(rect.height) <= usize::from(self.height)
+    }
+
+    /// Validate before callers allocate a wire payload derived from untrusted rectangle dimensions.
+    pub fn validate_rect(&self, rect: Rect) -> Result<(), DecodeError> {
+        if self.contains(rect) {
+            Ok(())
+        } else {
+            Err(DecodeError::RectOutOfBounds(rect))
+        }
     }
 
     /// 사각형 영역을 빽빽한 RGBA 로 꺼낸다. 이게 stream frame 의 페이로드가 된다.
@@ -276,6 +310,7 @@ fn scale(value: u32, max: u16) -> u8 {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
     RectOutOfBounds(Rect),
+    OversizedFramebuffer { width: u16, height: u16 },
     ShortData { expected: usize, got: usize },
     UnsupportedPixelFormat(PixelFormat),
     /// 압축 스트림이나 타일 데이터가 규격과 맞지 않는다. 어디서 어긋났는지 이름을 남긴다.
@@ -291,6 +326,10 @@ impl std::fmt::Display for DecodeError {
                 f,
                 "서버가 화면 밖의 사각형을 보냈습니다({},{} {}x{})",
                 rect.x, rect.y, rect.width, rect.height
+            ),
+            Self::OversizedFramebuffer { width, height } => write!(
+                f,
+                "서버가 허용 범위를 넘는 화면 크기를 보냈습니다({width}x{height}, 최대 {MAX_FRAMEBUFFER_PIXELS} 픽셀)"
             ),
             Self::ShortData { expected, got } => {
                 write!(f, "사각형 데이터 길이가 맞지 않습니다(기대 {expected}, 받음 {got})")
@@ -456,6 +495,39 @@ mod tests {
             .apply_raw(rect(0, 0, 1, 1), format, &0xF800_u16.to_le_bytes())
             .unwrap();
         assert_eq!(framebuffer.pixel(0, 0), [255, 0, 0, 0xFF]);
+    }
+
+    #[test]
+    fn framebuffer_budget_accepts_the_limit_and_rejects_above_it() {
+        assert_eq!(
+            checked_framebuffer_len(4096, 4096),
+            Ok(MAX_FRAMEBUFFER_PIXELS * RGBA_BYTES_PER_PIXEL)
+        );
+        assert!(matches!(
+            checked_framebuffer_len(4097, 4096),
+            Err(DecodeError::OversizedFramebuffer {
+                width: 4097,
+                height: 4096
+            })
+        ));
+        assert!(matches!(
+            checked_framebuffer_len(0, 4096),
+            Err(DecodeError::OversizedFramebuffer { .. })
+        ));
+    }
+
+    #[test]
+    fn rejected_resize_preserves_the_existing_framebuffer() {
+        let mut framebuffer = Framebuffer::new(2, 2);
+        framebuffer
+            .apply_raw(rect(0, 0, 1, 1), PixelFormat::rgba32(), &[1, 2, 3, 0])
+            .unwrap();
+
+        let error = framebuffer.try_resize(4097, 4096).unwrap_err();
+
+        assert!(matches!(error, DecodeError::OversizedFramebuffer { .. }));
+        assert_eq!((framebuffer.width(), framebuffer.height()), (2, 2));
+        assert_eq!(framebuffer.pixel(0, 0), [1, 2, 3, 0xFF]);
     }
 
     #[test]

@@ -16,10 +16,12 @@ import type {
   LoadedManagedSecretPayload,
   MobileSessionRecord,
   ManagedAwsProfilePayload,
+  RdpHostRecord,
   SshHostRecord,
   SyncPayloadV2,
   SyncRecord,
   TailnetPayload,
+  VncHostRecord,
 } from "@dolssh/shared-core";
 import { fromByteArray, toByteArray } from "base64-js";
 import { Buffer } from "buffer";
@@ -28,6 +30,8 @@ import {
   createDefaultMobileSettings,
   createDefaultSyncStatus,
   createUnauthenticatedState,
+  decodeSupportedHosts,
+  resolveMobileSyncDataFloor,
 } from "../src/lib/mobile";
 import {
   resetReportedTerminalGridForTests,
@@ -1722,6 +1726,85 @@ describe("useMobileAppStore auth and sync flows", () => {
     ]);
     expect(state.hosts[0]?.groupName).toBe("Servers/NAS");
     expect(state.syncStatus.status).toBe("ready");
+  });
+
+  it("hydrates RDP and VNC hosts from sync payloads", async () => {
+    const keyBase64 = Buffer.from(
+      "12345678901234567890123456789012",
+      "utf8",
+    ).toString("base64");
+    const session = createAuthSession({
+      vaultBootstrap: { keyBase64 },
+    });
+    const remoteHosts: Array<RdpHostRecord | VncHostRecord> = [
+      {
+        id: "host-rdp-1",
+        kind: "rdp",
+        label: "Office Windows",
+        hostname: "windows.internal",
+        port: 3389,
+        secretRef: "secret-rdp-1",
+        groupName: null,
+        createdAt: "2026-04-13T00:00:00.000Z",
+        updatedAt: "2026-04-13T00:00:00.000Z",
+      },
+      {
+        id: "host-vnc-1",
+        kind: "vnc",
+        label: "Lab Console",
+        hostname: "console.internal",
+        port: 5900,
+        secretRef: "secret-vnc-1",
+        groupName: null,
+        createdAt: "2026-04-13T00:00:00.000Z",
+        updatedAt: "2026-04-13T00:00:00.000Z",
+      },
+    ];
+    const payload: SyncPayloadV2 = {
+      ...buildEmptySyncPayload(),
+      hosts: remoteHosts.map(host =>
+        createEncryptedRecord(host.id, host, keyBase64),
+      ),
+    };
+
+    const decodedHosts = decodeSupportedHosts(payload, keyBase64);
+    expect(decodedHosts.map(host => [host.kind, host.label])).toEqual([
+      ["rdp", "Office Windows"],
+      ["vnc", "Lab Console"],
+    ]);
+    expect(resolveMobileSyncDataFloor(decodedHosts)).toBe(1);
+
+    fetchMock.mockImplementation(async input => {
+      const requestPath = new URL(String(input)).pathname;
+      if (requestPath === "/api/info") {
+        return createJsonResponse({
+          serverVersion: "test",
+          capabilities: {
+            sync: { awsProfiles: true },
+            sessions: { awsSsm: true },
+          },
+        });
+      }
+      if (requestPath === "/sync") {
+        return createJsonResponse(payload);
+      }
+      throw new Error(`unexpected fetch path: ${requestPath}`);
+    });
+
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState(session) });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().syncNow();
+    });
+
+    expect(
+      useMobileAppStore.getState().hosts.map(host => [host.kind, host.label]),
+    ).toEqual([
+      ["vnc", "Lab Console"],
+      ["rdp", "Office Windows"],
+    ]);
   });
 
   it("hydrates AWS profiles and aws-ec2 hosts from sync payloads", async () => {

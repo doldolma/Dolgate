@@ -13,8 +13,13 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use core_framing::{
+    checked_rgba_framebuffer_len, MAX_FRAMEBUFFER_BYTES, MAX_FRAMEBUFFER_PIXELS,
+    RGBA_BYTES_PER_PIXEL,
+};
+
 /// 픽셀당 바이트. 렌더러가 RGBA 를 기대한다.
-const BYTES_PER_PIXEL: usize = 4;
+const BYTES_PER_PIXEL: usize = RGBA_BYTES_PER_PIXEL;
 
 /// 한 번에 들고 갈 변경 사각형의 최대 개수.
 ///
@@ -64,11 +69,30 @@ pub struct DirtyRect {
     pub height: u16,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FramebufferSizeError {
+    pub width: u16,
+    pub height: u16,
+}
+
+impl std::fmt::Display for FramebufferSizeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "remote framebuffer {}x{} exceeds the {} pixel limit",
+            self.width, self.height, MAX_FRAMEBUFFER_PIXELS
+        )
+    }
+}
+
+impl std::error::Error for FramebufferSizeError {}
+
 pub struct EgfxSurface {
     width: u16,
     height: u16,
     pixels: Vec<u8>,
     cache: HashMap<u16, CachedTile>,
+    cache_bytes: usize,
     /// 마지막으로 내보낸 뒤에 바뀐 영역들. left, top, right, bottom(열린 구간).
     ///
     /// 하나로 합치지 않는다. 화면 위쪽 한 줄과 아래쪽 한 줄이 바뀌었을 뿐인데 하나로 뭉치면
@@ -92,23 +116,42 @@ impl EgfxSurface {
             height: 0,
             pixels: Vec::new(),
             cache: HashMap::new(),
+            cache_bytes: 0,
             dirty: Vec::new(),
             scratch: Vec::new(),
         }
     }
 
     /// 화면 크기가 정해졌다. 내용은 사라진다 — 서버가 곧 전부 다시 그린다.
-    pub fn resize(&mut self, width: u16, height: u16) {
+    pub fn try_resize(
+        &mut self,
+        width: u16,
+        height: u16,
+    ) -> Result<bool, FramebufferSizeError> {
+        let len = checked_rgba_framebuffer_len(usize::from(width), usize::from(height))
+            .ok_or(FramebufferSizeError { width, height })?;
         if self.width == width && self.height == height {
-            return;
+            return Ok(false);
         }
+
+        // Allocate first: if validation/allocation fails, callers never observe dimensions that do
+        // not match the backing buffer.
+        let pixels = vec![0; len];
         self.width = width;
         self.height = height;
-        self.pixels = vec![0; usize::from(width) * usize::from(height) * BYTES_PER_PIXEL];
+        self.pixels = pixels;
         self.dirty.clear();
         // 캐시는 화면과 함께 버린다. 크기가 바뀌었다는 것은 서버가 세션을 다시 그린다는 뜻이라,
         // 옛 화면에서 떠 둔 조각을 들고 있어 봐야 엉뚱한 그림만 나온다.
         self.cache.clear();
+        self.cache_bytes = 0;
+        Ok(true)
+    }
+
+    #[cfg(test)]
+    pub fn resize(&mut self, width: u16, height: u16) {
+        self.try_resize(width, height)
+            .expect("valid test framebuffer dimensions");
     }
 
     pub fn size(&self) -> (u16, u16) {
@@ -273,18 +316,37 @@ impl EgfxSurface {
         self.mark_dirty(x, y, width, height);
     }
 
-    /// 화면 조각을 캐시 칸에 떠 둔다.
-    pub fn cache_store(&mut self, slot: u16, source_x: u16, source_y: u16, width: u16, height: u16) {
+    /// 화면 조각을 캐시 칸에 떠 둔다. 전체 캐시도 프레임버퍼 한 장보다 커지지 않는다.
+    pub fn cache_store(
+        &mut self,
+        slot: u16,
+        source_x: u16,
+        source_y: u16,
+        width: u16,
+        height: u16,
+    ) -> bool {
         let Some((source_x, source_y, width, height)) = self.clip(source_x, source_y, width, height)
         else {
-            return;
+            return true;
         };
+
+        let Some(tile_bytes) =
+            checked_rgba_framebuffer_len(usize::from(width), usize::from(height))
+        else {
+            return false;
+        };
+        let replaced_bytes = self.cache.get(&slot).map_or(0, |tile| tile.pixels.len());
+        let retained_bytes = self.cache_bytes.saturating_sub(replaced_bytes);
+        if tile_bytes > MAX_FRAMEBUFFER_BYTES.saturating_sub(retained_bytes) {
+            return false;
+        }
 
         let stride = self.stride();
         let row_bytes = usize::from(width) * BYTES_PER_PIXEL;
-        let mut pixels = Vec::with_capacity(row_bytes * usize::from(height));
+        let mut pixels = Vec::with_capacity(tile_bytes);
         for row in 0..usize::from(height) {
-            let from = (usize::from(source_y) + row) * stride + usize::from(source_x) * BYTES_PER_PIXEL;
+            let from =
+                (usize::from(source_y) + row) * stride + usize::from(source_x) * BYTES_PER_PIXEL;
             pixels.extend_from_slice(&self.pixels[from..from + row_bytes]);
         }
 
@@ -296,6 +358,8 @@ impl EgfxSurface {
                 pixels,
             },
         );
+        self.cache_bytes = retained_bytes + tile_bytes;
+        true
     }
 
     /// 캐시 칸의 조각을 화면에 놓는다. 모르는 칸이면 false.
@@ -338,7 +402,9 @@ impl EgfxSurface {
     }
 
     pub fn cache_evict(&mut self, slot: u16) {
-        self.cache.remove(&slot);
+        if let Some(tile) = self.cache.remove(&slot) {
+            self.cache_bytes = self.cache_bytes.saturating_sub(tile.pixels.len());
+        }
     }
 
     /// 화면 전체를 다시 내보내야 한다고 표시한다.
@@ -434,6 +500,19 @@ mod tests {
             .take(usize::from(width) * usize::from(height) * BYTES_PER_PIXEL)
             .copied()
             .collect()
+    }
+
+    #[test]
+    fn rejected_resize_preserves_the_existing_surface() {
+        let mut surface = EgfxSurface::new();
+        surface.resize(2, 2);
+        surface.write(0, 0, 1, 1, &solid(1, 1, [1, 2, 3, 255]));
+
+        let error = surface.try_resize(4097, 4096).unwrap_err();
+
+        assert_eq!(error.width, 4097);
+        assert_eq!(surface.size(), (2, 2));
+        assert_eq!(pixel(&surface, 0, 0), [1, 2, 3, 255]);
     }
 
     // EC2 Windows Server 에서 실제로 터진 케이스. 한 프레임에 겹치는 사각형이 쌓이면

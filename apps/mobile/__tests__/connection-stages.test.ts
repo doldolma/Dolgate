@@ -93,7 +93,12 @@ describe('모바일 연결 단계', () => {
     const stages = resolveMobileConnectionStages({
       view: createView({
         hasTailnet: true,
-        tailnetStatus: { id: 'corp', state: 'running', authorized: true, ready: true },
+        tailnetStatus: {
+          id: 'corp',
+          state: 'running',
+          authorized: true,
+          ready: true,
+        },
         failureLayer: 'ssh',
         failureMessage: '비밀번호가 거부되었습니다.',
       }),
@@ -179,7 +184,9 @@ describe('모바일 연결 단계', () => {
       status: 'connecting',
     });
 
-    expect(describeConnectionStage(stageById(stages, 'ssh')!).detail).toBeUndefined();
+    expect(
+      describeConnectionStage(stageById(stages, 'ssh')!).detail,
+    ).toBeUndefined();
   });
 
   // 실패했으면 그 자리에는 실패 이유가 있어야 한다. 홉 표시로 덮으면 왜 안 됐는지가 사라진다.
@@ -203,6 +210,58 @@ describe('모바일 연결 단계', () => {
     );
   });
 
+  it('VNC-over-SSH는 gateway와 target tunnel을 VNC 협상 앞에 둔다', () => {
+    const opening = resolveMobileConnectionStages({
+      view: createView({
+        hostKind: 'vnc',
+        tunnelLabel: 'VNC bastion',
+        stage: 'ssh-tunnel-gateway',
+      }),
+      status: 'connecting',
+    });
+
+    expect(stageById(opening, 'host-key')?.state).toBe('done');
+    expect(stageById(opening, 'ssh-tunnel-gateway')?.state).toBe('active');
+    expect(stageById(opening, 'ssh-tunnel')?.state).toBe('pending');
+    expect(stageById(opening, 'vnc')?.state).toBe('pending');
+
+    const opened = resolveMobileConnectionStages({
+      view: createView({
+        hostKind: 'vnc',
+        tunnelLabel: 'VNC bastion',
+        stage: 'ssh-tunnel-open',
+      }),
+      status: 'connecting',
+    });
+    expect(stageById(opened, 'ssh-tunnel-gateway')?.state).toBe('done');
+    expect(stageById(opened, 'ssh-tunnel')?.state).toBe('done');
+    expect(stageById(opened, 'vnc')?.state).toBe('active');
+  });
+
+  it('RDP-over-SSM은 SSM forward가 열린 뒤에 RDP 협상을 시작한다', () => {
+    const opening = resolveMobileConnectionStages({
+      view: createView({
+        hostKind: 'rdp',
+        ssmTunnel: true,
+        stage: 'ssm-tunnel',
+      }),
+      status: 'connecting',
+    });
+    expect(stageById(opening, 'ssm-tunnel')?.state).toBe('active');
+    expect(stageById(opening, 'rdp')?.state).toBe('pending');
+
+    const opened = resolveMobileConnectionStages({
+      view: createView({
+        hostKind: 'rdp',
+        ssmTunnel: true,
+        stage: 'connecting',
+      }),
+      status: 'connecting',
+    });
+    expect(stageById(opened, 'ssm-tunnel')?.state).toBe('done');
+    expect(stageById(opened, 'rdp')?.state).toBe('active');
+  });
+
   it('라벨은 이 앱의 카탈로그에서 나온다', () => {
     const stages = resolveMobileConnectionStages({
       view: createView(),
@@ -213,6 +272,8 @@ describe('모바일 연결 단계', () => {
     expect(labels).toContain(t('connectStages.hostKey'));
     expect(labels).toContain(t('connectStages.ssh'));
     // 키가 그대로 보이면 카탈로그에 그 문구가 없다는 뜻이다.
-    expect(labels.some(label => label.startsWith('connectStages.'))).toBe(false);
+    expect(labels.some(label => label.startsWith('connectStages.'))).toBe(
+      false,
+    );
   });
 });

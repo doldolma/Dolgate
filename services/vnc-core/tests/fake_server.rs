@@ -614,6 +614,7 @@ fn run_session_as(
         username: username.to_owned(),
         image_quality: String::new(),
         shared: true,
+        tunnel_auth_token: None,
     };
     let (close_tx, close_rx) = channel::<()>();
     let (handle_tx, handle_rx) = channel::<session::SessionHandle>();
@@ -830,6 +831,7 @@ fn pointer_state_carries_the_pressed_button_into_later_moves() {
         username: String::new(),
         image_quality: String::new(),
         shared: true,
+        tunnel_auth_token: None,
     };
     let (handle_tx, handle_rx) = channel();
     let session = thread::spawn(move || {

@@ -5,7 +5,9 @@ import type {
   AuthState,
   GroupRecord,
   MobileSessionRecord,
+  RdpHostRecord,
   SshHostRecord,
+  VncHostRecord,
 } from "@dolssh/shared-core";
 import {
   createDefaultMobileSettings,
@@ -285,6 +287,50 @@ describe("HomeScreen group browsing", () => {
     expect(() =>
       tree!.root.findByProps({ accessibilityLabel: "NAS 그룹 열기" }),
     ).toThrow();
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+
+  it("shows RDP and VNC hosts with remote desktop badges", async () => {
+    const remoteHosts: Array<RdpHostRecord | VncHostRecord> = [
+      {
+        id: "host-rdp",
+        kind: "rdp",
+        label: "Office Windows",
+        hostname: "windows.internal",
+        port: 3389,
+        secretRef: null,
+        groupName: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: "host-vnc",
+        kind: "vnc",
+        label: "Lab Console",
+        hostname: "console.internal",
+        port: 5900,
+        secretRef: null,
+        groupName: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+    useMobileAppStore.setState({ groups: [], hosts: remoteHosts, sessions: [] });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    const text = collectText(tree!.toJSON());
+    expect(text).toContain("Office Windows");
+    expect(text).toContain("Lab Console");
+    expect(text).toContain("RDP");
+    expect(text).toContain("VNC");
 
     await act(async () => {
       jest.runOnlyPendingTimers();

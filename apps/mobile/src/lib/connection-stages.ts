@@ -29,7 +29,7 @@ function stageOf(view: MobileConnectionViewState): string {
     // 인증까지 왔다는 뜻이다. 키 관문은 그 앞에 끝났다.
     return 'waiting-interactive-auth';
   }
-  return 'host-key-check';
+  return view.stage ?? 'host-key-check';
 }
 
 export function resolveMobileConnectionStages(input: {
@@ -41,16 +41,56 @@ export function resolveMobileConnectionStages(input: {
   if (!view) {
     return [];
   }
+  const currentStage = stageOf(view);
   const stages = resolveConnectionStages({
-    subject: { status: input.status, stage: stageOf(view) },
+    subject: {
+      status: input.status,
+      stage: currentStage,
+      paneKind: view.hostKind,
+    },
     hasTailscale: view.hasTailnet,
     tailnetStatus: view.tailnetStatus,
     targetAddress: view.targetAddress,
-    // 모바일이 붙는 것은 SSH 뿐이다(AWS 는 자기 화면을 쓴다). 종류를 넘기지 않으면 SSH 로 본다.
+    hostKind: view.hostKind,
+    tunnelLabel: view.tunnelLabel,
     failureLayer: view.failureLayer ?? null,
     failureMessage: view.failureMessage,
     hostKeyPrompted: view.hostKeyPrompted,
   });
+
+  // RDP-over-SSM already owns a first-class SSM port-forward lifecycle in the
+  // mobile store. Put that observed hop before the shared RDP protocol stage;
+  // direct RDP has no view and therefore keeps the old one-line loader only.
+  if (view.ssmTunnel) {
+    const ssmOpen =
+      input.status === 'connected' ||
+      currentStage === 'ssm-tunnel-open' ||
+      currentStage === 'connecting';
+    const ssmFailed = input.status === 'error' && !ssmOpen;
+    const protocolStage = stages.find(stage => stage.id === 'rdp');
+    if (protocolStage && !ssmOpen) {
+      protocolStage.state = 'pending';
+      protocolStage.detail = undefined;
+    }
+    const protocolIndex = protocolStage
+      ? stages.indexOf(protocolStage)
+      : stages.length;
+    stages.splice(protocolIndex, 0, {
+      id: 'ssm-tunnel',
+      group: 'host',
+      label: { key: 'connectStages.ssm' },
+      state: ssmFailed
+        ? 'failed'
+        : ssmOpen
+          ? 'done'
+          : currentStage === 'ssm-tunnel'
+            ? 'active'
+            : 'pending',
+      ...(ssmFailed && view.failureMessage
+        ? { detail: [{ text: view.failureMessage }] }
+        : {}),
+    });
+  }
 
   // 어느 홉을 붙고 있는지를 SSH 관문에 붙인다.
   //

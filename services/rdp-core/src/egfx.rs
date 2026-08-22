@@ -719,18 +719,22 @@ impl GraphicsPipelineHandler for EgfxHandler {
     }
 
     fn on_reset_graphics(&mut self, width: u32, height: u32) {
-        let width = u16::try_from(width).unwrap_or(u16::MAX);
-        let height = u16::try_from(height).unwrap_or(u16::MAX);
+        let (Ok(width), Ok(height)) = (u16::try_from(width), u16::try_from(height)) else {
+            self.give_up("ResetGraphics dimensions exceed u16");
+            return;
+        };
 
         // 여기가 화면 전체 크기다. 프레임버퍼를 여기에 맞춘다 — 같은 크기로 다시 오면 그대로
         // 두어야 한다(접속 때 두 번 온다). 다시 잡으면 그리던 화면이 날아간다.
-        let changed = self
-            .with_surface(|surface| {
-                let before = surface.size();
-                surface.resize(width, height);
-                before != surface.size()
-            })
-            .unwrap_or(false);
+        let changed = match self.with_surface(|surface| surface.try_resize(width, height)) {
+            Some(Ok(changed)) => changed,
+            Some(Err(error)) => {
+                warn!(session_id = %self.session_id, %error, "rejecting oversized egfx surface");
+                self.give_up("ResetGraphics exceeds the framebuffer budget");
+                return;
+            }
+            None => false,
+        };
 
         if changed {
             // 크기가 바뀌면 화면을 나르던 코덱들도 처음부터 다시 시작한다.
@@ -903,21 +907,27 @@ impl GraphicsPipelineHandler for EgfxHandler {
         }
 
         self.counts.cache_stores += 1;
-        self.counts.stored_slots.insert(pdu.cache_slot);
 
-        self.with_surface(|surface| {
-            surface.cache_store(
-                pdu.cache_slot,
-                origin_x.saturating_add(pdu.source_rectangle.left),
-                origin_y.saturating_add(pdu.source_rectangle.top),
-                pdu.source_rectangle
-                    .right
-                    .saturating_sub(pdu.source_rectangle.left),
-                pdu.source_rectangle
-                    .bottom
-                    .saturating_sub(pdu.source_rectangle.top),
-            );
-        });
+        let stored = self
+            .with_surface(|surface| {
+                surface.cache_store(
+                    pdu.cache_slot,
+                    origin_x.saturating_add(pdu.source_rectangle.left),
+                    origin_y.saturating_add(pdu.source_rectangle.top),
+                    pdu.source_rectangle
+                        .right
+                        .saturating_sub(pdu.source_rectangle.left),
+                    pdu.source_rectangle
+                        .bottom
+                        .saturating_sub(pdu.source_rectangle.top),
+                )
+            })
+            .unwrap_or(true);
+        if stored {
+            self.counts.stored_slots.insert(pdu.cache_slot);
+        } else {
+            self.give_up("egfx bitmap cache exceeds the framebuffer budget");
+        }
     }
 
     fn on_cache_to_surface(&mut self, pdu: &CacheToSurfacePdu) {
@@ -1189,6 +1199,17 @@ mod tests {
                 height: 1
             })
         );
+    }
+
+    #[test]
+    fn gives_up_on_an_oversized_reset_without_replacing_the_surface() {
+        let (mut handler, surface, unusable) = two_monitors_with_flag();
+        let before = surface.lock().unwrap().size();
+
+        handler.on_reset_graphics(4097, 4096);
+
+        assert!(unusable.load(Ordering::Relaxed));
+        assert_eq!(surface.lock().unwrap().size(), before);
     }
 
     #[test]

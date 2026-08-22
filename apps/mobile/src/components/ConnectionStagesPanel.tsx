@@ -1,17 +1,19 @@
-import React from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import React from 'react';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import {
   describeConnectionStage,
   describeStageGroup,
   type ConnectionStage,
-} from "../lib/connection-stages";
-import { useMobilePalette } from "../theme";
+} from '../lib/connection-stages';
+import { useMobilePalette } from '../theme';
 
 interface ConnectionStagesPanelProps {
   title: string;
   stages: readonly ConnectionStage[];
   /** 아직 붙는 중인지. 끝난 뒤에도 실패한 단계를 남겨 보여주므로 따로 받는다. */
   busy: boolean;
+  /** 통합 Remote Desktop loader가 자기 header를 이미 그릴 때는 숨긴다. */
+  showHeader?: boolean;
 }
 
 /**
@@ -25,14 +27,15 @@ export function ConnectionStagesPanel({
   title,
   stages,
   busy,
+  showHeader = true,
 }: ConnectionStagesPanelProps): React.JSX.Element | null {
   const palette = useMobilePalette();
   if (stages.length === 0) {
     return null;
   }
 
-  const failed = stages.some(stage => stage.state === "failed");
-  let lastGroup: ConnectionStage["group"] | null = null;
+  const failed = stages.some(stage => stage.state === 'failed');
+  let lastGroup: ConnectionStage['group'] | null = null;
 
   return (
     <View
@@ -46,10 +49,14 @@ export function ConnectionStagesPanel({
         },
       ]}
     >
-      <View style={styles.header}>
-        {busy ? <ActivityIndicator size="small" color={palette.accent} /> : null}
-        <Text style={[styles.title, { color: palette.text }]}>{title}</Text>
-      </View>
+      {showHeader ? (
+        <View style={styles.header}>
+          {busy ? (
+            <ActivityIndicator size="small" color={palette.accent} />
+          ) : null}
+          <Text style={[styles.title, { color: palette.text }]}>{title}</Text>
+        </View>
+      ) : null}
 
       {stages.map(stage => {
         const described = describeConnectionStage(stage);
@@ -63,15 +70,24 @@ export function ConnectionStagesPanel({
               </Text>
             ) : null}
             <View style={styles.stageRow}>
-              <Text style={[styles.mark, { color: stageColor(stage, palette) }]}>
+              <Text
+                style={[styles.mark, { color: stageColor(stage, palette) }]}
+              >
                 {STAGE_MARK[stage.state]}
               </Text>
               <View style={styles.stageCopy}>
-                <Text style={[styles.stageLabel, { color: stageColor(stage, palette) }]}>
+                <Text
+                  style={[
+                    styles.stageLabel,
+                    { color: stageColor(stage, palette) },
+                  ]}
+                >
                   {described.label}
                 </Text>
                 {described.detail ? (
-                  <Text style={[styles.stageDetail, { color: palette.mutedText }]}>
+                  <Text
+                    style={[styles.stageDetail, { color: palette.mutedText }]}
+                  >
                     {described.detail}
                   </Text>
                 ) : null}
@@ -80,20 +96,19 @@ export function ConnectionStagesPanel({
           </View>
         );
       })}
-
     </View>
   );
 }
 
 /** 상태를 한 글자로. 화면이 좁아 아이콘 대신 이 표시를 쓴다. */
-const STAGE_MARK: Record<ConnectionStage["state"], string> = {
-  pending: "·",
-  active: "…",
+const STAGE_MARK: Record<ConnectionStage['state'], string> = {
+  pending: '·',
+  active: '…',
   // 사람이 무언가 해야 진행되는 단계. 기다림(…)과 구분되어야 사용자가 자기 차례임을 안다.
-  blocked: "!",
-  done: "✓",
-  failed: "✕",
-  warn: "!",
+  blocked: '!',
+  done: '✓',
+  failed: '✕',
+  warn: '!',
 };
 
 function stageColor(
@@ -101,14 +116,14 @@ function stageColor(
   palette: ReturnType<typeof useMobilePalette>,
 ): string {
   switch (stage.state) {
-    case "done":
+    case 'done':
       return palette.sessionStatusConnected;
-    case "failed":
+    case 'failed':
       return palette.sessionStatusError;
-    case "blocked":
-    case "warn":
+    case 'blocked':
+    case 'warn':
       return palette.sessionStatusWarning;
-    case "pending":
+    case 'pending':
       return palette.mutedText;
     default:
       return palette.text;
@@ -125,33 +140,33 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   header: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
   },
   title: {
     fontSize: 15,
-    fontWeight: "700",
+    fontWeight: '700',
     flex: 1,
   },
   group: {
     fontSize: 11,
-    fontWeight: "700",
+    fontWeight: '700',
     letterSpacing: 0.5,
-    textTransform: "uppercase",
+    textTransform: 'uppercase',
     marginTop: 6,
   },
   stageRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: 8,
     paddingVertical: 1,
   },
   mark: {
     width: 14,
-    textAlign: "center",
+    textAlign: 'center',
     fontSize: 13,
-    fontWeight: "700",
+    fontWeight: '700',
   },
   stageCopy: {
     flex: 1,

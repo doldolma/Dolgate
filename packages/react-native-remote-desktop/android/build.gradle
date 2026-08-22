@@ -1,0 +1,249 @@
+buildscript {
+    ext.safeExtGet = { prop, fallback ->
+        rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+    }
+}
+
+def isNewArchitectureEnabled() {
+    project.hasProperty('newArchEnabled') && project.newArchEnabled == 'true'
+}
+
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+if (isNewArchitectureEnabled()) {
+    apply plugin: 'com.facebook.react'
+    react {
+        jsRootDir = file('../src/')
+        libraryName = 'RemoteDesktopViewSpec'
+        codegenJavaPackageName = 'com.dolssh.remotedesktop'
+    }
+}
+
+// Rust cross-compile ABI map. Mobile release artifacts intentionally support
+// only the two 64-bit ABIs validated by CI/device builds.
+// 이 모듈이 Rust 코어를 줄 수 있는 ABI. abiFilters 와 같은 집합이다.
+def supportedRustTargets = [
+    'arm64-v8a': 'aarch64-linux-android',
+    'x86_64'   : 'x86_64-linux-android',
+]
+
+/**
+ * 실제로 컴파일할 ABI. 요청된 목록(`-PreactNativeArchitectures`)과 위 집합의 교집합이다.
+ *
+ * **하드코딩하면 안 쓰는 ABI 까지 컴파일한다.** 릴리스는 `-PreactNativeArchitectures=arm64-v8a`
+ * 로 한 ABI 만 패키징하는데, 두 코어(벤더 OpenSSL 포함)를 x86_64 로도 빌드하고 그 산출물은
+ * 패키징에서 버려졌다 — 릴리스 잡의 시간과 디스크가 두 배였고, 그 잡은 실제로 디스크 부족으로
+ * 죽은 적이 있다.
+ *
+ * 속성이 없으면(직접 gradle 을 부르는 경우) 지원하는 ABI 를 모두 만든다.
+ */
+def requestedAbis = (project.findProperty('reactNativeArchitectures') ?: '')
+    .toString()
+    .split(',')
+    .collect { it.trim() }
+    .findAll { !it.isEmpty() }
+def rustTargets = requestedAbis.isEmpty()
+    ? supportedRustTargets
+    : supportedRustTargets.findAll { abi, triple -> requestedAbis.contains(abi) }
+def rustChannel = '1.97.1'
+def rustCores = [
+    [label: 'vnc-core', path: file("${projectDir}/../../../../services/vnc-core").canonicalPath,
+     library: 'libvnc_core.so'],
+    [label: 'rdp-core', path: file("${projectDir}/../../../../services/rdp-core").canonicalPath,
+     library: 'librdp_core.so'],
+]
+def rustJniLibsDir = "${layout.buildDirectory.get().asFile}/rustJniLibs"
+
+android {
+    namespace 'com.dolssh.remotedesktop'
+    compileSdk safeExtGet('compileSdkVersion', 36)
+
+    defaultConfig {
+        minSdk safeExtGet('minSdkVersion', 24)
+        targetSdk safeExtGet('targetSdkVersion', 36)
+
+        ndk {
+            abiFilters 'arm64-v8a', 'x86_64'
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags '-std=c++17'
+                arguments '-DANDROID_STL=c++_shared'
+            }
+        }
+    }
+
+    buildFeatures {
+        buildConfig false
+        prefab false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += 'src/main/kotlin'
+            jniLibs.srcDirs += rustJniLibsDir
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path 'src/main/jni/CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+}
+
+tasks.register('buildRustLibs') {
+    description = 'Cross-compile VNC and RDP Rust cdylibs for Android ABIs'
+    def outDir = file(rustJniLibsDir)
+    outputs.dir(outDir)
+    // Cargo performs its own precise incremental build. Always enter this task
+    // so a stale Gradle output directory cannot hide changed Rust sources.
+    outputs.upToDateWhen { false }
+
+    doLast {
+        if (rustTargets.isEmpty()) {
+            logger.lifecycle(
+                "No remote-desktop Rust core for the requested ABIs (${requestedAbis.join(', ')}) — skipping."
+            )
+            return
+        }
+        logger.lifecycle("Building remote-desktop Rust cores for: ${rustTargets.keySet().join(', ')}")
+        def ndkVersion = safeExtGet('ndkVersion', '27.1.12297006')
+        def ndkDir = file("${android.sdkDirectory}/ndk/${ndkVersion}")
+        if (!ndkDir.exists()) {
+            throw new GradleException("NDK not found at ${ndkDir}. Install NDK ${ndkVersion}.")
+        }
+
+        def cargoHome = System.getenv('CARGO_HOME') ?: "${System.getProperty('user.home')}/.cargo"
+        def cargoBin = "${cargoHome}/bin"
+        def cargoCmd = "${cargoBin}/cargo"
+        def rustupCmd = "${cargoBin}/rustup"
+        if (!file(cargoCmd).exists() || !file(rustupCmd).exists()) {
+            throw new GradleException("cargo/rustup not found under ${cargoBin}.")
+        }
+
+        def osName = System.getProperty('os.name').toLowerCase()
+        def hostTag = osName.contains('mac') ? 'darwin-x86_64' :
+            (osName.contains('linux') ? 'linux-x86_64' : 'windows-x86_64')
+        def toolchainBin = "${ndkDir}/toolchains/llvm/prebuilt/${hostTag}/bin"
+        def minApi = safeExtGet('minSdkVersion', 24)
+
+        def captureCommand = { List<String> command ->
+            def process = new ProcessBuilder(command)
+                .redirectErrorStream(true)
+                .start()
+            def output = process.inputStream.getText('UTF-8').trim()
+            [exitCode: process.waitFor(), output: output]
+        }
+        def installedToolchain = captureCommand([
+            rustupCmd.toString(), 'run', rustChannel, 'rustc', '--version'
+        ])
+        if (installedToolchain.exitCode != 0) {
+            def installToolchain = new ProcessBuilder(
+                rustupCmd.toString(), 'toolchain', 'install', rustChannel,
+                '--profile', 'minimal'
+            )
+            installToolchain.inheritIO()
+            if (installToolchain.start().waitFor() != 0) {
+                throw new GradleException("Could not install Rust ${rustChannel}")
+            }
+        }
+        def sysrootResult = captureCommand([
+            rustupCmd.toString(), 'run', rustChannel, 'rustc', '--print', 'sysroot'
+        ])
+        if (sysrootResult.exitCode != 0 || !sysrootResult.output) {
+            throw new GradleException("Could not resolve Rust ${rustChannel} sysroot")
+        }
+        def rustSysroot = file(sysrootResult.output)
+
+        rustTargets.each { abi, rustTriple ->
+            def targetRoot = file("${rustSysroot}/lib/rustlib/${rustTriple}")
+            if (!targetRoot.exists()) {
+                def addTarget = new ProcessBuilder(
+                    rustupCmd.toString(), 'target', 'add', rustTriple.toString(),
+                    '--toolchain', rustChannel
+                )
+                addTarget.inheritIO()
+                if (addTarget.start().waitFor() != 0) {
+                    throw new GradleException("Could not install Rust target ${rustTriple}")
+                }
+            }
+
+            def abiOutDir = file("${rustJniLibsDir}/${abi}")
+            abiOutDir.mkdirs()
+            def clangPrefix = abi == 'arm64-v8a'
+                ? "aarch64-linux-android${minApi}"
+                : "x86_64-linux-android${minApi}"
+            def cc = "${toolchainBin}/${clangPrefix}-clang"
+            def cxx = "${toolchainBin}/${clangPrefix}-clang++"
+            def ar = "${toolchainBin}/llvm-ar"
+            def ranlib = "${toolchainBin}/llvm-ranlib"
+            def envTarget = rustTriple.toUpperCase().replace('-', '_')
+            def envTargetLower = rustTriple.replace('-', '_')
+
+            rustCores.each { core ->
+                logger.lifecycle("Building ${core.label} for ${abi} (${rustTriple})...")
+                def pb = new ProcessBuilder(
+                    cargoCmd.toString(), "+${rustChannel}", 'build', '--lib',
+                    '--target', rustTriple.toString(), '--release'
+                )
+                pb.directory(file(core.path))
+                pb.inheritIO()
+                def env = pb.environment()
+                env.put("CC_${envTargetLower}".toString(), cc.toString())
+                env.put("CXX_${envTargetLower}".toString(), cxx.toString())
+                env.put("AR_${envTargetLower}".toString(), ar.toString())
+                env.put("RANLIB_${envTargetLower}".toString(), ranlib.toString())
+                env.put("CARGO_TARGET_${envTarget}_LINKER".toString(), cc.toString())
+                env.put('ANDROID_NDK_HOME', ndkDir.absolutePath)
+                env.put('ANDROID_NDK_ROOT', ndkDir.absolutePath)
+                env.put('OPENSSL_STATIC', '1')
+                def existingPath = env.get('PATH') ?: ''
+                env.put('PATH', "${cargoBin}:${toolchainBin}:${existingPath}".toString())
+
+                def exitCode = pb.start().waitFor()
+                if (exitCode != 0) {
+                    throw new GradleException(
+                        "cargo build failed for ${core.label}/${abi} with exit code ${exitCode}"
+                    )
+                }
+
+                def source = file("${core.path}/target/${rustTriple}/release/${core.library}")
+                if (!source.exists()) {
+                    throw new GradleException(
+                        "Rust build produced no ${core.library} for ${core.label}/${abi}."
+                    )
+                }
+                ant.copy(file: source.absolutePath, todir: abiOutDir.absolutePath)
+                logger.lifecycle("  -> ${abiOutDir}/${core.library}")
+            }
+        }
+    }
+}
+
+tasks.configureEach { task ->
+    if (task.name.startsWith('externalNativeBuild') ||
+        task.name.startsWith('buildCMake') ||
+        task.name.contains('MergeJniLibFolders') ||
+        task.name.contains('mergeJniLibs') ||
+        task.name.contains('mergeDebugJniLibFolders') ||
+        task.name.contains('mergeReleaseJniLibFolders')) {
+        task.dependsOn('buildRustLibs')
+    }
+}
+
+dependencies {
+    implementation 'com.facebook.react:react-android:+'
+}

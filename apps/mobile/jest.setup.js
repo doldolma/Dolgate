@@ -96,3 +96,48 @@ jest.mock('@react-native-clipboard/clipboard', () => ({
   __esModule: true,
   default: { setString: jest.fn(), getString: jest.fn(async () => '') },
 }));
+
+// Remote Desktop native session module mock
+NativeModules.RemoteDesktopSessionModule = NativeModules.RemoteDesktopSessionModule ?? {
+  isAvailable: jest.fn(async () => true),
+  connect: jest.fn(async () => undefined),
+  disconnect: jest.fn(async () => undefined),
+  setActive: jest.fn(async () => undefined),
+  pointerMove: jest.fn(async () => undefined),
+  pointerButton: jest.fn(async () => undefined),
+  scroll: jest.fn(async () => undefined),
+  keyEvent: jest.fn(async () => undefined),
+  unicodeEvent: jest.fn(async () => undefined),
+  trustCertificate: jest.fn(async () => undefined),
+  sendClipboard: jest.fn(async () => undefined),
+  refresh: jest.fn(async () => undefined),
+  resize: jest.fn(async () => undefined),
+  addListener: jest.fn(),
+  removeListeners: jest.fn(),
+};
+
+// Mock the @dolssh/react-native-remote-desktop package exports for mobile tests
+jest.mock('@dolssh/react-native-remote-desktop', () => {
+  const React = require('react');
+  return {
+    __esModule: true,
+    RemoteDesktopView: React.forwardRef((props, ref) =>
+      React.createElement('RemoteDesktopSurface', { ...props, ref }),
+    ),
+    isNativeSessionAvailable: jest.fn(async () => true),
+    nativeConnect: jest.fn(async () => undefined),
+    nativeDisconnect: jest.fn(async () => undefined),
+    nativeSetActive: jest.fn(async () => undefined),
+    nativePointerMove: jest.fn(async () => undefined),
+    nativePointerButton: jest.fn(async () => undefined),
+    nativeScroll: jest.fn(async () => undefined),
+    nativeKeyEvent: jest.fn(async () => undefined),
+    nativeUnicodeEvent: jest.fn(async () => undefined),
+    nativeTrustCertificate: jest.fn(async () => undefined),
+    nativeSendClipboard: jest.fn(async () => undefined),
+    nativeRefresh: jest.fn(async () => undefined),
+    nativeResize: jest.fn(async () => undefined),
+    subscribeToSessionEvents: jest.fn(() => jest.fn()),
+    _resetEmitterForTests: jest.fn(),
+  };
+});

@@ -692,6 +692,42 @@ jobs:
           echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${MOBILE_ENGINE_NDK_VERSION}" >> "${GITHUB_ENV}"
           echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/${MOBILE_ENGINE_NDK_VERSION}" >> "${GITHUB_ENV}"
 
+      # RDP/VNC 코어는 Rust 다. gradle 의 buildRustLibs 태스크가 NDK 툴체인으로 크로스
+      # 컴파일하는데, 그 태스크는 rustup/cargo 가 이미 있다고 가정한다 — 러너 이미지에 딸려
+      # 오는 것에 기대면 이미지가 바뀌는 날 릴리스가 죽는다. 채널은 각 크레이트의
+      # rust-toolchain.toml 이 정한다(1.97.1).
+      - name: Set up Rust for the remote desktop cores
+        shell: bash
+        run: |
+          (cd services/rdp-core && (rustup show active-toolchain || rustup toolchain install))
+          for abi in ${DOLGATE_ANDROID_RELEASE_ARCHES//,/ }; do
+            case "${abi}" in
+              arm64-v8a) target=aarch64-linux-android ;;
+              x86_64) target=x86_64-linux-android ;;
+              *)
+                echo "No remote desktop Rust core for ${abi} — skipping."
+                continue
+                ;;
+            esac
+            (cd services/rdp-core && rustup target add "${target}")
+          done
+
+      # 릴리스마다 두 코어를 처음부터 컴파일하던 것을 캐시로 덮는다(벤더 OpenSSL 포함이라
+      # 이게 이 잡에서 가장 무겁다). 키에 ABI 목록을 넣어, 아치를 늘린 릴리스가 예전 캐시를
+      # 반쯤 쓰다 어긋나지 않게 한다.
+      - name: Cache cargo build (Android cores)
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/rdp-core/target/aarch64-linux-android
+            services/vnc-core/target/aarch64-linux-android
+          key: ${{ runner.os }}-cargo-android-${{ env.DOLGATE_ANDROID_RELEASE_ARCHES }}-${{ hashFiles('services/rdp-core/Cargo.lock', 'services/vnc-core/Cargo.lock', 'services/rdp-core/rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-android-${{ env.DOLGATE_ANDROID_RELEASE_ARCHES }}-
+            ${{ runner.os }}-cargo-android-
+
       - name: Install dependencies
         run: npm ci
 

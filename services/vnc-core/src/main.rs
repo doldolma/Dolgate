@@ -13,6 +13,8 @@ mod output;
 mod protocol;
 mod rfb;
 mod session;
+mod session_output;
+mod sink;
 mod tight;
 mod tls;
 mod transport;

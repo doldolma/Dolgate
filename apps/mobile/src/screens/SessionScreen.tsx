@@ -8,6 +8,7 @@ import React, {
 import { Buffer } from 'buffer';
 import {
   ActivityIndicator,
+  BackHandler,
   Keyboard,
   Modal,
   Platform,
@@ -18,14 +19,22 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { useNavigation, type NavigationProp } from '@react-navigation/native';
+import {
+  useIsFocused,
+  useNavigation,
+  type NavigationProp,
+} from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import {
   isAwsEc2HostRecord,
   isSshHostRecord,
+  isVncHostRecord,
   type MobileSessionRecord,
+  type MobileRemoteDesktopSessionRecord,
+  type MobileSftpSessionRecord,
 } from '@dolssh/shared-core';
+import { setOrientationUnlocked } from '@dolssh/react-native-remote-desktop';
 import {
   XtermJsWebView,
   type XtermWebViewHandle,
@@ -40,6 +49,7 @@ import {
 } from '../components/TerminalInputView';
 import { RemoteFileEditorModal } from '../components/RemoteFileEditorModal';
 import { SftpBrowserView } from '../components/SftpBrowserView';
+import { RemoteDesktopSurface } from '../components/RemoteDesktopSurface';
 import { useScreenPadding } from '../lib/screen-layout';
 import {
   TERMINAL_PRIMARY_SHORTCUTS,
@@ -64,10 +74,9 @@ import {
 } from '../lib/terminal-gestures';
 import Clipboard from '@react-native-clipboard/clipboard';
 import type { MainTabParamList } from '../navigation/RootNavigator';
-import {
-  sortSessionsByRecency,
-  useMobileAppStore,
-} from '../store/useMobileAppStore';
+import { useMobileAppStore } from '../store/useMobileAppStore';
+import { getLiveRemoteDesktopSessions } from '../store/remoteDesktopSlice';
+import { buildRecentConnections } from '../lib/recent-connections';
 import type { MobilePalette } from '../theme';
 import { useMobilePalette } from '../theme';
 import { useTranslation } from 'react-i18next';
@@ -151,17 +160,29 @@ function renderShortcutFace(item: TerminalShortcutItem, color: string) {
   if (item.icon) {
     return <Ionicons name={item.icon} size={16} color={color} />;
   }
-  return <Text style={[styles.toolbarButtonText, { color }]}>{item.label}</Text>;
+  return (
+    <Text style={[styles.toolbarButtonText, { color }]}>{item.label}</Text>
+  );
 }
 
 function isLiveSession(status: string) {
   return status !== 'closed';
 }
 
+type ConnectionTab =
+  | { kind: 'terminal'; id: string; session: MobileSessionRecord }
+  | { kind: 'sftp'; id: string; session: MobileSftpSessionRecord }
+  | {
+      kind: 'rdp' | 'vnc';
+      id: string;
+      session: MobileRemoteDesktopSessionRecord;
+    };
+
 export function SessionScreen(): React.JSX.Element {
   const { t: translate } = useTranslation();
   const palette = useMobilePalette();
   const navigation = useNavigation<NavigationProp<MainTabParamList>>();
+  const isFocused = useIsFocused();
   const safeAreaInsets = useSafeAreaInsets();
   const screenPadding = useScreenPadding({
     horizontal: 0,
@@ -217,6 +238,15 @@ export function SessionScreen(): React.JSX.Element {
   const hosts = useMobileAppStore(state => state.hosts);
   const sftpSessions = useMobileAppStore(state => state.sftpSessions);
   const sftpTransfers = useMobileAppStore(state => state.sftpTransfers);
+  const remoteDesktopSessions = useMobileAppStore(
+    state => state.remoteDesktopSessions,
+  );
+  const updateRemoteDesktopSession = useMobileAppStore(
+    state => state.updateRemoteDesktopSession,
+  );
+  const disconnectRemoteDesktopSession = useMobileAppStore(
+    state => state.disconnectRemoteDesktopSession,
+  );
   const activeSessionTabId = useMobileAppStore(
     state => state.activeSessionTabId,
   );
@@ -230,6 +260,7 @@ export function SessionScreen(): React.JSX.Element {
     state => state.setActiveSessionTab,
   );
   const resumeSession = useMobileAppStore(state => state.resumeSession);
+  const connectToHost = useMobileAppStore(state => state.connectToHost);
   const disconnectSession = useMobileAppStore(state => state.disconnectSession);
   const duplicateSession = useMobileAppStore(state => state.duplicateSession);
   const openSftpEditor = useMobileAppStore(state => state.openSftpEditor);
@@ -281,23 +312,13 @@ export function SessionScreen(): React.JSX.Element {
   // leaves a closed session behind each time, so without this the list fills up
   // with the same name repeated — and `sessions` is in tab order, not recency,
   // so the five it used to show were an arbitrary five.
-  const reconnectableSessions = useMemo(() => {
-    const restorable = sortSessionsByRecency(
-      sessions.filter(
-        session => !isLiveSession(session.status) && session.isRestorable,
-      ),
-    );
-    const seenHosts = new Set<string>();
-    const newestPerHost: typeof restorable = [];
-    for (const session of restorable) {
-      if (seenHosts.has(session.hostId)) {
-        continue;
-      }
-      seenHosts.add(session.hostId);
-      newestPerHost.push(session);
-    }
-    return newestPerHost.slice(0, 5);
-  }, [sessions]);
+  //
+  // RDP/VNC 도 함께 보여준다. RD 는 끊을 때 기록을 지우지 않고 closed 로 남기므로(탭은 live
+  // 만 본다) 여기에 걸린다 — 예전에는 지워 버려서 최근 목록에 아예 나타나지 않았다.
+  const recentConnections = useMemo(
+    () => buildRecentConnections({ sessions, remoteDesktopSessions }),
+    [remoteDesktopSessions, sessions],
+  );
   const liveSessions = useMemo(
     () => sessions.filter(session => isLiveSession(session.status)),
     [sessions],
@@ -306,12 +327,16 @@ export function SessionScreen(): React.JSX.Element {
     () => sftpSessions.filter(session => session.status !== 'closed'),
     [sftpSessions],
   );
+  const liveRdSessions = useMemo(
+    () => getLiveRemoteDesktopSessions(remoteDesktopSessions),
+    [remoteDesktopSessions],
+  );
 
   // 탭은 연 순서로 늘어서고 그 뒤로 움직이지 않는다. 터미널·SFTP 를 종류별로 이어 붙이면
   // 터미널 다음에 SFTP 를 열고 또 터미널을 열었을 때 새 터미널이 SFTP 앞으로 끼어든다 —
   // 두 종류를 openedAt 하나로 섞어 정렬한다(lastEventAt 은 활동마다 바뀌어 기준이 못 된다).
   const connectionTabs = useMemo(() => {
-    const tabs = [
+    const tabs: ConnectionTab[] = [
       ...liveSessions.map(session => ({
         kind: 'terminal' as const,
         id: session.id,
@@ -319,6 +344,11 @@ export function SessionScreen(): React.JSX.Element {
       })),
       ...liveSftpSessions.map(session => ({
         kind: 'sftp' as const,
+        id: session.id,
+        session,
+      })),
+      ...liveRdSessions.map(session => ({
+        kind: session.protocol,
         id: session.id,
         session,
       })),
@@ -337,7 +367,7 @@ export function SessionScreen(): React.JSX.Element {
         );
       })
       .map(entry => entry.tab);
-  }, [liveSessions, liveSftpSessions]);
+  }, [liveSessions, liveSftpSessions, liveRdSessions]);
 
   useEffect(() => {
     const tabStillExists =
@@ -347,7 +377,12 @@ export function SessionScreen(): React.JSX.Element {
           ? liveSftpSessions.some(
               session => session.id === activeConnectionTab.id,
             )
-          : false;
+          : activeConnectionTab?.kind === 'rdp' ||
+              activeConnectionTab?.kind === 'vnc'
+            ? liveRdSessions.some(
+                session => session.id === activeConnectionTab.id,
+              )
+            : false;
     if (tabStillExists) {
       return;
     }
@@ -360,13 +395,19 @@ export function SessionScreen(): React.JSX.Element {
       ? { kind: 'terminal' as const, id: fallbackTerminalId }
       : liveSftpSessions[0]
         ? { kind: 'sftp' as const, id: liveSftpSessions[0].id }
-        : null;
+        : liveRdSessions[0]
+          ? {
+              kind: liveRdSessions[0].protocol as 'rdp' | 'vnc',
+              id: liveRdSessions[0].id,
+            }
+          : null;
     setActiveConnectionTab(nextTab);
   }, [
     activeConnectionTab,
     activeSessionTabId,
     liveSessions,
     liveSftpSessions,
+    liveRdSessions,
     setActiveConnectionTab,
   ]);
 
@@ -389,9 +430,74 @@ export function SessionScreen(): React.JSX.Element {
     activeTab?.kind === 'sftp'
       ? (liveSftpSessions.find(session => session.id === activeTab.id) ?? null)
       : null;
+  const activeRdSession =
+    activeTab?.kind === 'rdp' || activeTab?.kind === 'vnc'
+      ? (liveRdSessions.find(session => session.id === activeTab.id) ?? null)
+      : null;
+  const remoteDesktopOrientationUnlocked =
+    isFocused && activeRdSession !== null;
+
+  // 전체화면은 RD 세션을 실제로 보고 있을 때만 성립한다. 다른 탭으로 옮기거나 세션이
+  // 사라지면 스토어 값이 남아 있어도 화면은 평소대로 그린다 — 탭 바가 숨겨진 채로 다른
+  // 화면에 갇히지 않게 하는 것이 여기서 가장 중요하다.
+  const immersiveRequested = useMobileAppStore(
+    state => state.remoteDesktopImmersive,
+  );
+  const setRemoteDesktopImmersive = useMobileAppStore(
+    state => state.setRemoteDesktopImmersive,
+  );
+  const immersive = immersiveRequested && activeRdSession !== null;
+
+  // 활성 탭이 RD 가 아니게 되면 스토어 값도 정리한다(다음 진입이 전체화면으로 시작하지 않게).
+  useEffect(() => {
+    if (immersiveRequested && activeRdSession === null) {
+      setRemoteDesktopImmersive(false);
+    }
+  }, [activeRdSession, immersiveRequested, setRemoteDesktopImmersive]);
+
+  // 안드로이드 back 은 전체화면을 먼저 벗긴다. 툴바 버튼 하나만 나가는 길이면, 툴바가 화면
+  // 밖으로 밀렸거나 못 찾은 사용자가 갇힌다 — 기기 back 은 그 상황의 기본 탈출구다.
+  useEffect(() => {
+    if (!immersive) {
+      return;
+    }
+    const subscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      () => {
+        setRemoteDesktopImmersive(false);
+        return true;
+      },
+    );
+    return () => subscription.remove();
+  }, [immersive, setRemoteDesktopImmersive]);
+
+  useEffect(() => {
+    void setOrientationUnlocked(remoteDesktopOrientationUnlocked).catch(
+      () => undefined,
+    );
+  }, [remoteDesktopOrientationUnlocked]);
+
+  useEffect(
+    () => () => {
+      void setOrientationUnlocked(false).catch(() => undefined);
+    },
+    [],
+  );
+
+  const activeRdHost = activeRdSession
+    ? hosts.find(host => host.id === activeRdSession.hostId)
+    : undefined;
+  const activeRdViewOnly =
+    activeRdHost !== undefined &&
+    isVncHostRecord(activeRdHost) &&
+    activeRdHost.viewOnly === true;
   // 붙는 중에만 값이 있다. 실패하면 실패한 단계가 남는다 — 그때가 이 화면이 가장 필요한 순간이다.
   const activeConnectionView = useMobileAppStore(state =>
-    activeSession ? state.connectionViews[activeSession.id] : undefined,
+    activeSession
+      ? state.connectionViews[activeSession.id]
+      : activeRdSession
+        ? state.connectionViews[activeRdSession.id]
+        : undefined,
   );
   // 서버 배너는 여기서 터미널에 쓰지 않는다. 스토어가 세션 스냅샷에 합쳐 두고
   // (lib/terminal-banner), 아래 스냅샷 복원 effect 들이 그리므로 백그라운드 탭·늦은
@@ -412,9 +518,9 @@ export function SessionScreen(): React.JSX.Element {
     () =>
       resolveMobileConnectionStages({
         view: activeConnectionView,
-        status: activeSession?.status,
+        status: activeSession?.status ?? activeRdSession?.status,
       }),
-    [activeConnectionView, activeSession?.status],
+    [activeConnectionView, activeRdSession?.status, activeSession?.status],
   );
   // 내장 편집기는 엔진 SFTP 에만 있다 — AWS SFTP 는 sync-api 브로커를 지나며 파일
   // 읽기/쓰기 연산이 없어 편집 항목을 내보내지 않는다.
@@ -677,12 +783,6 @@ export function SessionScreen(): React.JSX.Element {
     }
     requestAnimationFrame(() => {
       terminalRef.current?.focus();
-    });
-  }, []);
-
-  const blurTerminal = useCallback(() => {
-    requestAnimationFrame(() => {
-      terminalRef.current?.blur();
     });
   }, []);
 
@@ -1072,25 +1172,36 @@ export function SessionScreen(): React.JSX.Element {
             ]}
           >
             <Text style={[styles.emptyTitle, { color: palette.text }]}>
-              {translate("session.noSessionsTitle")}
+              {translate('session.noSessionsTitle')}
             </Text>
             <Text style={[styles.emptyBody, { color: palette.mutedText }]}>
-              {translate("session.noSessionsBody")}
+              {translate('session.noSessionsBody')}
             </Text>
-            {reconnectableSessions.length > 0 ? (
+            {recentConnections.length > 0 ? (
               <View style={styles.reconnectList}>
                 <Text
-                  style={[styles.reconnectHeading, { color: palette.mutedText }]}
+                  style={[
+                    styles.reconnectHeading,
+                    { color: palette.mutedText },
+                  ]}
                 >
-                  {translate("session.recentSessions")}
+                  {translate('session.recentSessions')}
                 </Text>
-                {reconnectableSessions.map(session => (
+                {recentConnections.map(entry => (
                   <Pressable
-                    key={session.id}
+                    key={`${entry.kind}:${entry.id}`}
                     accessibilityRole="button"
-                    accessibilityLabel={translate("session.reconnectAria", { title: session.title })}
+                    accessibilityLabel={translate('session.reconnectAria', {
+                      title: entry.title,
+                    })}
                     onPress={() => {
-                      void resumeSession(session.id);
+                      // 터미널은 그 세션을 되살리고, RDP/VNC 는 호스트에 새로 붙는다 —
+                      // 원격 데스크톱에는 이어 붙일 상태가 없다(화면은 서버가 다시 그린다).
+                      if (entry.kind === 'terminal') {
+                        void resumeSession(entry.id);
+                        return;
+                      }
+                      void connectToHost(entry.hostId);
                     }}
                     style={[
                       styles.reconnectRow,
@@ -1104,12 +1215,25 @@ export function SessionScreen(): React.JSX.Element {
                       numberOfLines={1}
                       style={[styles.reconnectTitle, { color: palette.text }]}
                     >
-                      {session.title}
+                      {entry.title}
                     </Text>
+                    {entry.kind === 'terminal' ? null : (
+                      <Text
+                        style={[
+                          styles.reconnectProtocol,
+                          { color: palette.mutedText },
+                        ]}
+                      >
+                        {entry.kind.toUpperCase()}
+                      </Text>
+                    )}
                     <Text
-                      style={[styles.reconnectAction, { color: palette.accent }]}
+                      style={[
+                        styles.reconnectAction,
+                        { color: palette.accent },
+                      ]}
                     >
-                      {translate("session.reconnect")}
+                      {translate('session.reconnect')}
                     </Text>
                   </Pressable>
                 ))}
@@ -1127,484 +1251,603 @@ export function SessionScreen(): React.JSX.Element {
           styles.screen,
           {
             backgroundColor: palette.sessionChrome,
-            paddingTop: screenPadding.paddingTop,
+            paddingTop: immersive ? 0 : screenPadding.paddingTop,
           },
         ]}
       >
-      <View style={styles.tabStripShell}>
-        <ScrollView
-          horizontal
-          contentContainerStyle={styles.tabStrip}
-          showsHorizontalScrollIndicator={false}
-        >
-          {connectionTabs.map(tab => {
-            const isTerminal = tab.kind === 'terminal';
-            const session = tab.session;
-            const droppedReason = isTerminal
-              ? (session as MobileSessionRecord).disconnectReason
-              : undefined;
-            const tabStatus = getSessionStatusMeta(
-              session.status,
-              palette,
-              droppedReason,
-            );
-            const isActive =
-              activeTab.kind === tab.kind && activeTab.id === tab.id;
-            const title = isTerminal ? session.title : session.title;
-            return (
-              <Pressable
-                key={`${tab.kind}:${session.id}`}
-                accessibilityRole="button"
-                accessibilityLabel={translate("session.tabAria", { title, status: tabStatus.label })}
-                accessibilityState={{ selected: isActive }}
-                onPress={() => {
-                  if (isTerminal) {
-                    // 밖에서 끊긴 탭은 탭하면 다시 붙인다. 전에는 전환만 되어 빈 화면을
-                    // 보게 됐고, 재연결하려면 오류 배너나 "최근 세션" 까지 가야 했다.
-                    // 표시와 같은 조건을 쓴다 — 이미 붙는 중인 탭을 탭했다고 재연결을
-                    // 다시 걸지 않는다.
-                    if (droppedReason === 'dropped' && session.status === 'error') {
-                      void resumeSession(session.id);
+        {immersive ? null : (
+        <View style={styles.tabStripShell}>
+          <ScrollView
+            horizontal
+            contentContainerStyle={styles.tabStrip}
+            showsHorizontalScrollIndicator={false}
+          >
+            {connectionTabs.map(tab => {
+              const isTerminal = tab.kind === 'terminal';
+              const isSftp = tab.kind === 'sftp';
+              const isRd = tab.kind === 'rdp' || tab.kind === 'vnc';
+              const session = tab.session;
+              const droppedReason =
+                tab.kind === 'terminal'
+                  ? tab.session.disconnectReason
+                  : undefined;
+              const tabStatus = getSessionStatusMeta(
+                session.status,
+                palette,
+                droppedReason,
+              );
+              const isActive =
+                activeTab.kind === tab.kind && activeTab.id === tab.id;
+              const title = session.title;
+              return (
+                <Pressable
+                  key={`${tab.kind}:${session.id}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={translate('session.tabAria', {
+                    title,
+                    status: tabStatus.label,
+                  })}
+                  accessibilityState={{ selected: isActive }}
+                  onPress={() => {
+                    if (isTerminal) {
+                      if (
+                        droppedReason === 'dropped' &&
+                        session.status === 'error'
+                      ) {
+                        void resumeSession(session.id);
+                      } else {
+                        setActiveSessionTab(session.id);
+                      }
                     } else {
-                      setActiveSessionTab(session.id);
+                      setActiveConnectionTab({
+                        kind: tab.kind,
+                        id: session.id,
+                      });
                     }
-                  } else {
-                    setActiveConnectionTab({ kind: tab.kind, id: session.id });
-                  }
-                  if (isTerminal) {
-                    focusRequestedTerminalInput(true);
-                  }
-                }}
-                style={[
-                  styles.sessionTab,
-                  {
-                    backgroundColor: isActive
-                      ? palette.accentSoft
-                      : palette.surfaceAlt,
-                    borderColor: isActive
-                      ? palette.accent
-                      : palette.sessionToolbarBorder,
-                    borderWidth: isActive ? 2 : 1,
-                  },
-                ]}
-              >
-                <View
+                    if (isTerminal) {
+                      focusRequestedTerminalInput(true);
+                    }
+                  }}
                   style={[
-                    styles.sessionTabStatusDot,
-                    { backgroundColor: tabStatus.color },
-                  ]}
-                />
-                {!isTerminal ? (
-                  <Ionicons
-                    name="folder"
-                    size={15}
-                    color={isActive ? palette.accent : palette.mutedText}
-                  />
-                ) : null}
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    styles.sessionTabTitle,
+                    styles.sessionTab,
                     {
-                      color: isActive ? palette.text : palette.mutedText,
-                      fontWeight: isActive ? '800' : '700',
+                      backgroundColor: isActive
+                        ? palette.accentSoft
+                        : palette.surfaceAlt,
+                      borderColor: isActive
+                        ? palette.accent
+                        : palette.sessionToolbarBorder,
+                      borderWidth: isActive ? 2 : 1,
                     },
                   ]}
                 >
-                  {title}
-                </Text>
+                  <View
+                    style={[
+                      styles.sessionTabStatusDot,
+                      { backgroundColor: tabStatus.color },
+                    ]}
+                  />
+                  {isSftp ? (
+                    <Ionicons
+                      name="folder"
+                      size={15}
+                      color={isActive ? palette.accent : palette.mutedText}
+                    />
+                  ) : isRd ? (
+                    <Ionicons
+                      name="desktop-outline"
+                      size={15}
+                      color={isActive ? palette.accent : palette.mutedText}
+                    />
+                  ) : null}
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.sessionTabTitle,
+                      {
+                        color: isActive ? palette.text : palette.mutedText,
+                        fontWeight: isActive ? '800' : '700',
+                      },
+                    ]}
+                  >
+                    {title}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      isTerminal
+                        ? translate('session.menuAria', {
+                            title: session.title,
+                          })
+                        : translate('session.closeAria', {
+                            title: session.title,
+                          })
+                    }
+                    hitSlop={8}
+                    onPress={async event => {
+                      event.stopPropagation();
+                      if (isTerminal) {
+                        setMenuSessionId(session.id);
+                        return;
+                      }
+                      if (isRd) {
+                        await disconnectRemoteDesktopSession(session.id);
+                        return;
+                      }
+                      await disconnectSftpSession(session.id);
+                    }}
+                    style={styles.sessionTabCloseButton}
+                  >
+                    <Ionicons
+                      name={isTerminal ? 'ellipsis-vertical' : 'close'}
+                      size={14}
+                      color={isActive ? palette.accent : palette.mutedText}
+                    />
+                  </Pressable>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+        )}
+
+        <Modal
+          transparent
+          animationType="fade"
+          visible={Boolean(menuSession)}
+          onRequestClose={() => setMenuSessionId(null)}
+        >
+          <Pressable
+            style={[
+              styles.sessionMenuOverlay,
+              { backgroundColor: palette.overlay },
+            ]}
+            onPress={() => setMenuSessionId(null)}
+          >
+            <View
+              style={[
+                styles.sessionMenuCard,
+                {
+                  backgroundColor: palette.sessionMenuSurface,
+                  borderColor: palette.sessionSurfaceBorder,
+                },
+              ]}
+            >
+              {menuSession ? (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={
-                    isTerminal
-                      ? translate("session.menuAria", { title: session.title })
-                      : translate("session.closeAria", { title: session.title })
-                  }
-                  hitSlop={8}
-                  onPress={async event => {
-                    event.stopPropagation();
-                    if (isTerminal) {
-                      setMenuSessionId(session.id);
-                      return;
-                    }
-                    await disconnectSftpSession(session.id);
+                  accessibilityLabel={translate('session.duplicateAria', {
+                    title: menuSession.title,
+                  })}
+                  onPress={async () => {
+                    const sessionId = menuSession.id;
+                    setMenuSessionId(null);
+                    await duplicateSession(sessionId);
                   }}
-                  style={styles.sessionTabCloseButton}
+                  style={styles.sessionMenuItem}
                 >
-                  <Ionicons
-                    name={isTerminal ? 'ellipsis-vertical' : 'close'}
-                    size={14}
-                    color={isActive ? palette.accent : palette.mutedText}
-                  />
+                  <Ionicons name="copy" size={22} color={palette.mutedText} />
+                  <Text
+                    style={[styles.sessionMenuText, { color: palette.text }]}
+                  >
+                    Duplicate
+                  </Text>
                 </Pressable>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </View>
+              ) : null}
+              {menuSession && canOpenSftpFromMenu ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Connect via SFTP"
+                  onPress={async () => {
+                    const sessionId = menuSession.id;
+                    setMenuSessionId(null);
+                    await openSftpForSession(sessionId);
+                  }}
+                  style={styles.sessionMenuItem}
+                >
+                  <Ionicons name="folder" size={22} color={palette.mutedText} />
+                  <Text
+                    style={[styles.sessionMenuText, { color: palette.text }]}
+                  >
+                    Connect via SFTP
+                  </Text>
+                </Pressable>
+              ) : null}
+              {menuSession ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={translate('session.closeSessionAria', {
+                    title: menuSession.title,
+                  })}
+                  onPress={async () => {
+                    const sessionId = menuSession.id;
+                    setMenuSessionId(null);
+                    await disconnectSession(sessionId);
+                  }}
+                  style={styles.sessionMenuItem}
+                >
+                  <Ionicons name="close" size={22} color={palette.mutedText} />
+                  <Text
+                    style={[styles.sessionMenuText, { color: palette.text }]}
+                  >
+                    Close
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </Pressable>
+        </Modal>
 
-      <Modal
-        transparent
-        animationType="fade"
-        visible={Boolean(menuSession)}
-        onRequestClose={() => setMenuSessionId(null)}
-      >
-        <Pressable
-          style={[
-            styles.sessionMenuOverlay,
-            { backgroundColor: palette.overlay },
-          ]}
-          onPress={() => setMenuSessionId(null)}
-        >
+        {/* 연결이 어디까지 갔는지. 한 줄 문구였을 때는 지나간 관문이 사라져서, 실패했을 때
+          tailnet 인지 SSH 인지 구분할 수 없었다 — 데스크톱과 같은 단계 목록을 쓴다. 실패한
+          뒤에도 남겨 보여준다(그때가 가장 필요하다). */}
+        {activeSession && connectionStages.length > 0 ? (
+          <ConnectionStagesPanel
+            title={activeSession.title}
+            stages={connectionStages}
+            busy={activeSession.status === 'connecting'}
+          />
+        ) : null}
+
+        {activeSession?.errorMessage ? (
           <View
             style={[
-              styles.sessionMenuCard,
+              styles.inlineBanner,
               {
-                backgroundColor: palette.sessionMenuSurface,
-                borderColor: palette.sessionSurfaceBorder,
+                backgroundColor: palette.surface,
+                borderColor: palette.sessionStatusError,
+                marginHorizontal: 4,
               },
             ]}
           >
-            {menuSession ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={translate("session.duplicateAria", { title: menuSession.title })}
-                onPress={async () => {
-                  const sessionId = menuSession.id;
-                  setMenuSessionId(null);
-                  await duplicateSession(sessionId);
-                }}
-                style={styles.sessionMenuItem}
+            <View style={styles.inlineBannerCopy}>
+              <Text style={[styles.inlineBannerTitle, { color: palette.text }]}>
+                {activeSession.title}
+              </Text>
+              <Text
+                style={[styles.inlineBannerText, { color: palette.mutedText }]}
               >
-                <Ionicons name="copy" size={22} color={palette.mutedText} />
-                <Text style={[styles.sessionMenuText, { color: palette.text }]}>
-                  Duplicate
-                </Text>
-              </Pressable>
-            ) : null}
-            {menuSession && canOpenSftpFromMenu ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Connect via SFTP"
-                onPress={async () => {
-                  const sessionId = menuSession.id;
-                  setMenuSessionId(null);
-                  await openSftpForSession(sessionId);
-                }}
-                style={styles.sessionMenuItem}
+                {activeSession.errorMessage}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={translate('session.reconnectAria', {
+                title: activeSession.title,
+              })}
+              onPress={async () => {
+                await resumeSession(activeSession.id);
+                focusRequestedTerminalInput(true);
+              }}
+              style={[
+                styles.inlineBannerButton,
+                {
+                  backgroundColor: palette.surfaceAlt,
+                  borderColor: palette.sessionSurfaceBorder,
+                },
+              ]}
+            >
+              <Text
+                style={[styles.inlineBannerButtonText, { color: palette.text }]}
               >
-                <Ionicons name="folder" size={22} color={palette.mutedText} />
-                <Text style={[styles.sessionMenuText, { color: palette.text }]}>
-                  Connect via SFTP
-                </Text>
-              </Pressable>
-            ) : null}
-            {menuSession ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={translate("session.closeSessionAria", { title: menuSession.title })}
-                onPress={async () => {
-                  const sessionId = menuSession.id;
-                  setMenuSessionId(null);
-                  await disconnectSession(sessionId);
-                }}
-                style={styles.sessionMenuItem}
-              >
-                <Ionicons name="close" size={22} color={palette.mutedText} />
-                <Text style={[styles.sessionMenuText, { color: palette.text }]}>
-                  Close
-                </Text>
-              </Pressable>
-            ) : null}
+                {translate('session.reconnect')}
+              </Text>
+            </Pressable>
           </View>
-        </Pressable>
-      </Modal>
+        ) : null}
 
-      {/* 연결이 어디까지 갔는지. 한 줄 문구였을 때는 지나간 관문이 사라져서, 실패했을 때
-          tailnet 인지 SSH 인지 구분할 수 없었다 — 데스크톱과 같은 단계 목록을 쓴다. 실패한
-          뒤에도 남겨 보여준다(그때가 가장 필요하다). */}
-      {activeSession && connectionStages.length > 0 ? (
-        <ConnectionStagesPanel
-          title={activeSession.title}
-          stages={connectionStages}
-          busy={activeSession.status === 'connecting'}
-        />
-      ) : null}
-
-      {activeSession?.errorMessage ? (
         <View
+          testID="session-screen-body"
           style={[
-            styles.inlineBanner,
+            styles.screenBody,
             {
-              backgroundColor: palette.surface,
-              borderColor: palette.sessionStatusError,
-              marginHorizontal: 4,
+              paddingBottom:
+                activeTab.kind === 'terminal'
+                  ? toolbarHeight + toolbarKeyboardInset
+                  : screenPadding.paddingBottom,
             },
           ]}
         >
-          <View style={styles.inlineBannerCopy}>
-            <Text style={[styles.inlineBannerTitle, { color: palette.text }]}>
-              {activeSession.title}
-            </Text>
-            <Text
-              style={[styles.inlineBannerText, { color: palette.mutedText }]}
-            >
-              {activeSession.errorMessage}
-            </Text>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={translate("session.reconnectAria", { title: activeSession.title })}
-            onPress={async () => {
-              await resumeSession(activeSession.id);
-              focusRequestedTerminalInput(true);
-            }}
-            style={[
-              styles.inlineBannerButton,
-              {
-                backgroundColor: palette.surfaceAlt,
-                borderColor: palette.sessionSurfaceBorder,
-              },
-            ]}
-          >
-            <Text
-              style={[styles.inlineBannerButtonText, { color: palette.text }]}
-            >
-              {translate("session.reconnect")}
-            </Text>
-          </Pressable>
-        </View>
-      ) : null}
+          <View style={styles.connectionLayerShell}>
+            {renderedTerminalSession ? (
+              <View
+                pointerEvents={terminalVisible ? 'auto' : 'none'}
+                style={[
+                  styles.connectionLayer,
+                  terminalVisible
+                    ? styles.activeConnectionLayer
+                    : styles.inactiveConnectionLayer,
+                ]}
+              >
+                <View
+                  testID="session-terminal-card"
+                  onLayout={event => {
+                    const nextWidth = Math.ceil(event.nativeEvent.layout.width);
+                    const nextHeight = Math.ceil(
+                      event.nativeEvent.layout.height,
+                    );
+                    if (nextWidth <= 0 || nextHeight <= 0) {
+                      return;
+                    }
+                    const current = terminalViewportSizeRef.current;
+                    if (
+                      current?.width === nextWidth &&
+                      current?.height === nextHeight
+                    ) {
+                      return;
+                    }
+                    terminalViewportSizeRef.current = {
+                      width: nextWidth,
+                      height: nextHeight,
+                    };
+                    if (!terminalReady) {
+                      return;
+                    }
+                    terminalRef.current?.fit();
+                  }}
+                  style={[
+                    styles.terminalCard,
+                    {
+                      backgroundColor: palette.sessionTerminalBg,
+                      borderColor: palette.sessionSurfaceBorder,
+                      marginHorizontal: 2,
+                    },
+                  ]}
+                  onTouchEnd={
+                    terminalVisible
+                      ? () => focusRequestedTerminalInput(true)
+                      : undefined
+                  }
+                >
+                  <XtermJsWebView
+                    key={`terminal-retry-${terminalRetryNonce}`}
+                    ref={terminalRef}
+                    style={styles.terminal}
+                    logger={terminalLogger}
+                    webViewOptions={terminalWebViewOptions}
+                    onInitialized={() => setTerminalReady(true)}
+                    // 링크는 xterm 의 web-links 애드온이 찾고, 여는 것은 여기서 정한다. 페이지가
+                    // 직접 열면 WebView 가 그 주소로 이동해 터미널이 사라진다(세션도 함께).
+                    // 계정·tailnet 로그인과 같은 인앱 시트로 연다 — 앱을 벗어나지 않아야 승인이
+                    // 필요한 연결을 그 자리에서 끝낼 수 있다.
+                    onLinkActivated={uri => {
+                      void openInAppBrowser(uri).catch(() => {
+                        // 열 수 없는 주소는 그대로 둔다. 글은 터미널에 남아 있으므로 사용자가
+                        // 직접 옮겨 적을 수 있고, 여기서 오류창을 띄우면 화면을 가린다.
+                      });
+                    }}
+                    onData={data => {
+                      sendDirectTerminalInput(data);
+                    }}
+                    xtermOptions={xtermOptions}
+                  />
+                  {!terminalReady ? (
+                    <View
+                      pointerEvents="none"
+                      style={[
+                        styles.terminalLoadingOverlay,
+                        { backgroundColor: palette.sessionTerminalBg },
+                      ]}
+                    >
+                      <ActivityIndicator size="small" color={palette.accent} />
+                      <Text
+                        style={[
+                          styles.terminalLoadingTitle,
+                          { color: palette.text },
+                        ]}
+                      >
+                        {translate('session.terminalPreparing')}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.terminalLoadingBody,
+                          { color: palette.mutedText },
+                        ]}
+                      >
+                        {activeSession?.connectionStatusMessage ??
+                          translate('session.loadingScreen')}
+                      </Text>
+                    </View>
+                  ) : null}
+                  {useTerminalInputOverlay && terminalVisible ? (
+                    <View
+                      pointerEvents="none"
+                      style={styles.nativeTerminalInputShell}
+                    >
+                      <TerminalInputView
+                        ref={nativeTerminalInputRef}
+                        clearToken={nativeInputClearToken}
+                        focusToken={nativeInputFocusToken}
+                        focused={inputFocused}
+                        softKeyboardEnabled={
+                          isAndroid ? keyboardRequestedVisible : undefined
+                        }
+                        onTerminalInput={event => {
+                          sendTranslatedInput(event.nativeEvent);
+                          if (event.nativeEvent.kind === 'special-key') {
+                            resetNativeInputBuffer();
+                          }
+                        }}
+                        style={styles.nativeTerminalInput}
+                      />
+                    </View>
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
 
-      <View
-        testID="session-screen-body"
-        style={[
-          styles.screenBody,
-          {
-            paddingBottom:
-              activeTab.kind === 'terminal'
-                ? toolbarHeight + toolbarKeyboardInset
-                : screenPadding.paddingBottom,
-          },
-        ]}
-      >
-        <View style={styles.connectionLayerShell}>
-          {renderedTerminalSession ? (
+            {activeSftpSession ? (
+              <View
+                style={[styles.connectionLayer, styles.activeConnectionLayer]}
+              >
+                <SftpBrowserView
+                  palette={palette}
+                  session={activeSftpSession}
+                  transfers={sftpTransfers}
+                  onNavigate={path =>
+                    listSftpDirectory(activeSftpSession.id, path)
+                  }
+                  onRefresh={() => listSftpDirectory(activeSftpSession.id)}
+                  onUpload={() => uploadSftpFile(activeSftpSession.id)}
+                  onDownload={path =>
+                    downloadSftpFile(activeSftpSession.id, path)
+                  }
+                  onDownloadEntries={paths =>
+                    downloadSftpEntries(activeSftpSession.id, paths)
+                  }
+                  onMkdir={name =>
+                    createSftpDirectory(activeSftpSession.id, name)
+                  }
+                  onRename={(sourcePath, nextName) =>
+                    renameSftpEntry(activeSftpSession.id, sourcePath, nextName)
+                  }
+                  onChmod={(path, mode) =>
+                    chmodSftpEntry(activeSftpSession.id, path, mode)
+                  }
+                  onDelete={paths =>
+                    deleteSftpEntries(activeSftpSession.id, paths)
+                  }
+                  onEdit={
+                    canEditSftpFiles
+                      ? path => void openSftpEditor(activeSftpSession.id, path)
+                      : undefined
+                  }
+                  copyBufferCount={
+                    sftpCopyBuffer?.sftpSessionId === activeSftpSession.id
+                      ? sftpCopyBuffer.entries.length
+                      : 0
+                  }
+                  onCopy={paths => copySftpEntries(activeSftpSession.id, paths)}
+                  onPaste={() => pasteSftpEntries(activeSftpSession.id)}
+                  onClearCopy={clearSftpCopyBuffer}
+                />
+              </View>
+            ) : null}
+
+            {activeRdSession ? (
+              <View
+                style={[styles.connectionLayer, styles.activeConnectionLayer]}
+              >
+                <RemoteDesktopSurface
+                  sessionId={activeRdSession.id}
+                  protocol={activeRdSession.protocol}
+                  status={activeRdSession.status}
+                  testPattern={false}
+                  isActiveTab={true}
+                  errorMessage={activeRdSession.errorMessage}
+                  title={activeRdSession.title}
+                  hostAddress={
+                    activeRdHost &&
+                    (isVncHostRecord(activeRdHost) ||
+                      activeRdHost.kind === 'rdp')
+                      ? activeRdHost.hostname
+                      : undefined
+                  }
+                  connectionStatusMessage={
+                    activeRdSession.connectionStatusMessage
+                  }
+                  connectionStages={connectionStages}
+                  inputMode={activeRdSession.inputMode}
+                  scaleMode={activeRdSession.scaleMode}
+                  desktopWidth={activeRdSession.desktopWidth}
+                  desktopHeight={activeRdSession.desktopHeight}
+                  viewOnly={activeRdViewOnly}
+                  onInputModeChange={inputMode =>
+                    updateRemoteDesktopSession(activeRdSession.id, {
+                      inputMode,
+                    })
+                  }
+                  onScaleModeChange={scaleMode =>
+                    updateRemoteDesktopSession(activeRdSession.id, {
+                      scaleMode,
+                    })
+                  }
+                  immersive={immersive}
+                  onToggleImmersive={() =>
+                    setRemoteDesktopImmersive(!immersive)
+                  }
+                  onDisconnect={() => {
+                    void disconnectRemoteDesktopSession(activeRdSession.id);
+                  }}
+                />
+              </View>
+            ) : null}
+          </View>
+
+          {activeSession ? (
             <View
-              pointerEvents={terminalVisible ? 'auto' : 'none'}
+              testID="session-toolbar-shell"
+              onLayout={event => {
+                const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+                if (nextHeight > 0 && nextHeight !== toolbarHeight) {
+                  setToolbarHeight(nextHeight);
+                }
+              }}
               style={[
-                styles.connectionLayer,
-                terminalVisible
-                  ? styles.activeConnectionLayer
-                  : styles.inactiveConnectionLayer,
+                styles.toolbarShell,
+                {
+                  backgroundColor: palette.sessionToolbar,
+                  borderTopColor: palette.sessionToolbarBorder,
+                  paddingBottom: screenPadding.paddingBottom,
+                  bottom: toolbarKeyboardInset,
+                },
               ]}
             >
-              <View
-                testID="session-terminal-card"
-                onLayout={event => {
-                  const nextWidth = Math.ceil(event.nativeEvent.layout.width);
-                  const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-                  if (nextWidth <= 0 || nextHeight <= 0) {
-                    return;
-                  }
-                  const current = terminalViewportSizeRef.current;
-                  if (
-                    current?.width === nextWidth &&
-                    current?.height === nextHeight
-                  ) {
-                    return;
-                  }
-                  terminalViewportSizeRef.current = {
-                    width: nextWidth,
-                    height: nextHeight,
-                  };
-                  if (!terminalReady) {
-                    return;
-                  }
-                  terminalRef.current?.fit();
-                }}
-                style={[
-                  styles.terminalCard,
-                  {
-                    backgroundColor: palette.sessionTerminalBg,
-                    borderColor: palette.sessionSurfaceBorder,
-                    marginHorizontal: 2,
-                  },
-                ]}
-                onTouchEnd={
-                  terminalVisible
-                    ? () => focusRequestedTerminalInput(true)
-                    : undefined
-                }
-              >
-                <XtermJsWebView
-                  key={`terminal-retry-${terminalRetryNonce}`}
-                  ref={terminalRef}
-                  style={styles.terminal}
-                  logger={terminalLogger}
-                  webViewOptions={terminalWebViewOptions}
-                  onInitialized={() => setTerminalReady(true)}
-                  // 링크는 xterm 의 web-links 애드온이 찾고, 여는 것은 여기서 정한다. 페이지가
-                  // 직접 열면 WebView 가 그 주소로 이동해 터미널이 사라진다(세션도 함께).
-                  // 계정·tailnet 로그인과 같은 인앱 시트로 연다 — 앱을 벗어나지 않아야 승인이
-                  // 필요한 연결을 그 자리에서 끝낼 수 있다.
-                  onLinkActivated={uri => {
-                    void openInAppBrowser(uri).catch(() => {
-                      // 열 수 없는 주소는 그대로 둔다. 글은 터미널에 남아 있으므로 사용자가
-                      // 직접 옮겨 적을 수 있고, 여기서 오류창을 띄우면 화면을 가린다.
-                    });
-                  }}
-                  onData={data => {
-                    sendDirectTerminalInput(data);
-                  }}
-                  xtermOptions={xtermOptions}
-                />
-                {!terminalReady ? (
-                  <View
-                    pointerEvents="none"
-                    style={[
-                      styles.terminalLoadingOverlay,
-                      { backgroundColor: palette.sessionTerminalBg },
+              {showMoreShortcuts ? (
+                <View
+                  style={[
+                    styles.toolbarSecondaryShell,
+                    {
+                      borderBottomColor: palette.sessionToolbarBorder,
+                    },
+                  ]}
+                >
+                  <ScrollView
+                    horizontal
+                    style={styles.toolbarScroll}
+                    contentContainerStyle={[
+                      styles.toolbar,
+                      styles.toolbarSecondaryContent,
                     ]}
+                    showsHorizontalScrollIndicator={false}
                   >
-                    <ActivityIndicator size="small" color={palette.accent} />
-                    <Text
-                      style={[
-                        styles.terminalLoadingTitle,
-                        { color: palette.text },
-                      ]}
-                    >
-                      {translate("session.terminalPreparing")}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.terminalLoadingBody,
-                        { color: palette.mutedText },
-                      ]}
-                    >
-                      {activeSession?.connectionStatusMessage ??
-                        translate("session.loadingScreen")}
-                    </Text>
-                  </View>
-                ) : null}
-                {useTerminalInputOverlay && terminalVisible ? (
-                  <View
-                    pointerEvents="none"
-                    style={styles.nativeTerminalInputShell}
-                  >
-                    <TerminalInputView
-                      ref={nativeTerminalInputRef}
-                      clearToken={nativeInputClearToken}
-                      focusToken={nativeInputFocusToken}
-                      focused={inputFocused}
-                      softKeyboardEnabled={
-                        isAndroid ? keyboardRequestedVisible : undefined
-                      }
-                      onTerminalInput={event => {
-                        sendTranslatedInput(event.nativeEvent);
-                        if (event.nativeEvent.kind === 'special-key') {
-                          resetNativeInputBuffer();
-                        }
-                      }}
-                      style={styles.nativeTerminalInput}
-                    />
-                  </View>
-                ) : null}
-              </View>
-            </View>
-          ) : null}
-
-          {activeSftpSession ? (
-            <View
-              style={[styles.connectionLayer, styles.activeConnectionLayer]}
-            >
-              <SftpBrowserView
-                palette={palette}
-                session={activeSftpSession}
-                transfers={sftpTransfers}
-                onNavigate={path =>
-                  listSftpDirectory(activeSftpSession.id, path)
-                }
-                onRefresh={() => listSftpDirectory(activeSftpSession.id)}
-                onUpload={() => uploadSftpFile(activeSftpSession.id)}
-                onDownload={path =>
-                  downloadSftpFile(activeSftpSession.id, path)
-                }
-                onDownloadEntries={paths =>
-                  downloadSftpEntries(activeSftpSession.id, paths)
-                }
-                onMkdir={name =>
-                  createSftpDirectory(activeSftpSession.id, name)
-                }
-                onRename={(sourcePath, nextName) =>
-                  renameSftpEntry(activeSftpSession.id, sourcePath, nextName)
-                }
-                onChmod={(path, mode) =>
-                  chmodSftpEntry(activeSftpSession.id, path, mode)
-                }
-                onDelete={paths =>
-                  deleteSftpEntries(activeSftpSession.id, paths)
-                }
-                onEdit={
-                  canEditSftpFiles
-                    ? path => void openSftpEditor(activeSftpSession.id, path)
-                    : undefined
-                }
-                copyBufferCount={
-                  sftpCopyBuffer?.sftpSessionId === activeSftpSession.id
-                    ? sftpCopyBuffer.entries.length
-                    : 0
-                }
-                onCopy={paths => copySftpEntries(activeSftpSession.id, paths)}
-                onPaste={() => pasteSftpEntries(activeSftpSession.id)}
-                onClearCopy={clearSftpCopyBuffer}
-              />
-            </View>
-          ) : null}
-        </View>
-
-        {activeSession ? (
-          <View
-            testID="session-toolbar-shell"
-            onLayout={event => {
-              const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-              if (nextHeight > 0 && nextHeight !== toolbarHeight) {
-                setToolbarHeight(nextHeight);
-              }
-            }}
-            style={[
-              styles.toolbarShell,
-              {
-                backgroundColor: palette.sessionToolbar,
-                borderTopColor: palette.sessionToolbarBorder,
-                paddingBottom: screenPadding.paddingBottom,
-                bottom: toolbarKeyboardInset,
-              },
-            ]}
-          >
-            {showMoreShortcuts ? (
-              <View
-                style={[
-                  styles.toolbarSecondaryShell,
-                  {
-                    borderBottomColor: palette.sessionToolbarBorder,
-                  },
-                ]}
-              >
+                    {TERMINAL_SECONDARY_SHORTCUTS.map(item => (
+                      <Pressable
+                        key={item.label}
+                        accessibilityRole="button"
+                        accessibilityLabel={translate(
+                          'session.controlKeyAria',
+                          { label: item.label },
+                        )}
+                        onPress={() => sendShortcut(item.event)}
+                        style={[
+                          styles.toolbarButton,
+                          {
+                            backgroundColor: palette.surfaceAlt,
+                            borderColor: palette.sessionToolbarBorder,
+                          },
+                        ]}
+                      >
+                        {renderShortcutFace(item, palette.text)}
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
+              <View style={styles.toolbarPrimaryRow}>
                 <ScrollView
                   horizontal
-                  style={styles.toolbarScroll}
-                  contentContainerStyle={[
-                    styles.toolbar,
-                    styles.toolbarSecondaryContent,
-                  ]}
+                  style={styles.toolbarPrimaryScroll}
+                  contentContainerStyle={styles.toolbar}
                   showsHorizontalScrollIndicator={false}
                 >
-                  {TERMINAL_SECONDARY_SHORTCUTS.map(item => (
+                  {TERMINAL_PRIMARY_SHORTCUTS.map(item => (
                     <Pressable
                       key={item.label}
                       accessibilityRole="button"
-                      accessibilityLabel={translate("session.controlKeyAria", { label: item.label })}
+                      accessibilityLabel={translate('session.controlKeyAria', {
+                        label: item.label,
+                      })}
                       onPress={() => sendShortcut(item.event)}
                       style={[
                         styles.toolbarButton,
@@ -1617,108 +1860,87 @@ export function SessionScreen(): React.JSX.Element {
                       {renderShortcutFace(item, palette.text)}
                     </Pressable>
                   ))}
-                </ScrollView>
-              </View>
-            ) : null}
-            <View style={styles.toolbarPrimaryRow}>
-              <ScrollView
-                horizontal
-                style={styles.toolbarPrimaryScroll}
-                contentContainerStyle={styles.toolbar}
-                showsHorizontalScrollIndicator={false}
-              >
-                {TERMINAL_PRIMARY_SHORTCUTS.map(item => (
                   <Pressable
-                    key={item.label}
                     accessibilityRole="button"
-                    accessibilityLabel={translate("session.controlKeyAria", { label: item.label })}
-                    onPress={() => sendShortcut(item.event)}
+                    accessibilityLabel={
+                      showMoreShortcuts
+                        ? translate('session.hideExtraKeys')
+                        : translate('session.showExtraKeys')
+                    }
+                    onPress={() => setShowMoreShortcuts(value => !value)}
                     style={[
                       styles.toolbarButton,
+                      styles.toolbarActionButton,
                       {
-                        backgroundColor: palette.surfaceAlt,
-                        borderColor: palette.sessionToolbarBorder,
+                        backgroundColor: showMoreShortcuts
+                          ? palette.accentSoft
+                          : palette.surfaceAlt,
+                        borderColor: showMoreShortcuts
+                          ? palette.accent
+                          : palette.sessionToolbarBorder,
                       },
                     ]}
                   >
-                    {renderShortcutFace(item, palette.text)}
+                    <Ionicons
+                      name={
+                        showMoreShortcuts
+                          ? 'chevron-down'
+                          : 'ellipsis-horizontal'
+                      }
+                      size={14}
+                      color={
+                        showMoreShortcuts ? palette.accent : palette.mutedText
+                      }
+                    />
+                    <Text
+                      style={[
+                        styles.toolbarButtonText,
+                        {
+                          color: palette.text,
+                          fontWeight: showMoreShortcuts ? '800' : '700',
+                        },
+                      ]}
+                    >
+                      {translate('session.more')}
+                    </Text>
                   </Pressable>
-                ))}
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    showMoreShortcuts
-                      ? translate("session.hideExtraKeys")
-                      : translate("session.showExtraKeys")
-                  }
-                  onPress={() => setShowMoreShortcuts(value => !value)}
-                  style={[
-                    styles.toolbarButton,
-                    styles.toolbarActionButton,
-                    {
-                      backgroundColor: showMoreShortcuts
-                        ? palette.accentSoft
-                        : palette.surfaceAlt,
-                      borderColor: showMoreShortcuts
-                        ? palette.accent
-                        : palette.sessionToolbarBorder,
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name={
-                      showMoreShortcuts ? 'chevron-down' : 'ellipsis-horizontal'
-                    }
-                    size={14}
-                    color={
-                      showMoreShortcuts ? palette.accent : palette.mutedText
-                    }
-                  />
-                  <Text
+                </ScrollView>
+                <View style={styles.toolbarKeyboardDock}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={translate(
+                      keyboardToggleActive
+                        ? 'session.closeKeyboard'
+                        : 'session.openKeyboard',
+                    )}
+                    onPress={toggleKeyboard}
                     style={[
-                      styles.toolbarButtonText,
+                      styles.toolbarKeyboardButton,
                       {
-                        color: palette.text,
-                        fontWeight: showMoreShortcuts ? '800' : '700',
+                        backgroundColor: keyboardToggleActive
+                          ? palette.accentSoft
+                          : palette.surfaceAlt,
+                        borderColor: keyboardToggleActive
+                          ? palette.accent
+                          : palette.sessionToolbarBorder,
                       },
                     ]}
                   >
-                    {translate("session.more")}
-                  </Text>
-                </Pressable>
-              </ScrollView>
-              <View style={styles.toolbarKeyboardDock}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    translate(keyboardToggleActive ? "session.closeKeyboard" : "session.openKeyboard")
-                  }
-                  onPress={toggleKeyboard}
-                  style={[
-                    styles.toolbarKeyboardButton,
-                    {
-                      backgroundColor: keyboardToggleActive
-                        ? palette.accentSoft
-                        : palette.surfaceAlt,
-                      borderColor: keyboardToggleActive
-                        ? palette.accent
-                        : palette.sessionToolbarBorder,
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name="keypad-outline"
-                    size={18}
-                    color={
-                      keyboardToggleActive ? palette.accent : palette.mutedText
-                    }
-                  />
-                </Pressable>
+                    <Ionicons
+                      name="keypad-outline"
+                      size={18}
+                      color={
+                        keyboardToggleActive
+                          ? palette.accent
+                          : palette.mutedText
+                      }
+                    />
+                  </Pressable>
+                </View>
               </View>
             </View>
-          </View>
-        ) : null}
-      </View>
+          ) : null}
+        </View>
       </View>
       {/* 편집기는 전체화면 모달이라 SFTP 브라우저 위에 얹는다 — 열려 있을 때만 렌더된다. */}
       <RemoteFileEditorModal />
@@ -1770,6 +1992,12 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     fontWeight: '600',
+  },
+  // 프로토콜 꼬리표. 터미널 항목에는 붙지 않으므로 제목과 재연결 사이의 폭만 차지한다.
+  reconnectProtocol: {
+    fontSize: 11,
+    fontWeight: '700',
+    marginRight: 8,
   },
   reconnectAction: {
     fontSize: 14,

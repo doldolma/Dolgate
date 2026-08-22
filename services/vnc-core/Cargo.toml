@@ -6,6 +6,9 @@ rust-version = "1.94"
 publish = false
 description = "Headless VNC/RFB sidecar for the Dolgate desktop app"
 
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
+
 [dependencies]
 core-framing = { path = "../core-framing" }
 serde = { version = "1", features = ["derive"] }

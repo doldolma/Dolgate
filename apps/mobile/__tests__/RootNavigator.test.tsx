@@ -73,6 +73,24 @@ function resetStore(
   });
 }
 
+/** display:none 이 걸린 노드가 있는지. 탭 바 숨김은 스타일로만 나타난다. */
+function hasHiddenTabBar(tree: renderer.ReactTestRenderer): boolean {
+  const flatten = (style: unknown): Array<Record<string, unknown>> => {
+    if (Array.isArray(style)) {
+      return style.flatMap(flatten);
+    }
+    return style && typeof style === "object"
+      ? [style as Record<string, unknown>]
+      : [];
+  };
+  return tree.root.findAll(
+    (node) =>
+      typeof node.type === "string" &&
+      flatten(node.props?.style).some((entry) => entry.display === "none"),
+    { deep: true },
+  ).length > 0;
+}
+
 describe("RootNavigator auth gating", () => {
   beforeEach(async () => {
     await act(async () => {
@@ -169,6 +187,64 @@ describe("RootNavigator auth gating", () => {
     expect(
       tree!.root.findAll((node) => String(node.type) === "Ionicons").length,
     ).toBeGreaterThanOrEqual(3);
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  // 전체화면은 탭 바를 숨긴다. 탭 바는 내비게이터 소유라 세션 화면에서 못 감추므로 이
+  // 연결(스토어 → screenOptions)이 끊기면 화면에서는 아무 일도 일어나지 않는다.
+  it("hides the bottom tab labels while a remote desktop session is immersive", async () => {
+    const authenticatedState: AuthState = {
+      status: "authenticated",
+      session: {
+        user: { id: "user-1", email: "mobile@example.com" },
+        tokens: {
+          accessToken: "access-token",
+          refreshToken: "refresh-token",
+          expiresInSeconds: 900,
+        },
+        vaultBootstrap: { keyBase64: "a2V5" },
+        offlineLease: {
+          token: "offline-token",
+          issuedAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          verificationPublicKeyPem: "public-key",
+        },
+        syncServerTime: new Date().toISOString(),
+      },
+      offline: null,
+      errorMessage: null,
+    };
+    await act(async () => {
+      resetStore(authenticatedState);
+      useMobileAppStore.setState({ remoteDesktopImmersive: true });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    const safeAreaMetrics = {
+      frame: { x: 0, y: 0, width: 844, height: 390 },
+      insets: { top: 0, left: 0, right: 0, bottom: 0 },
+    };
+    await act(async () => {
+      tree = renderer.create(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <NavigationContainer>
+            <RootNavigator authState={authenticatedState} />
+          </NavigationContainer>
+        </SafeAreaProvider>,
+      );
+    });
+
+    // 라벨 텍스트는 트리에 남는다(display:none 은 스타일이다). 그래서 스타일로 단정한다.
+    expect(hasHiddenTabBar(tree!)).toBe(true);
+
+    // 전체화면을 끄면 다시 나온다 — 숨김이 단방향이면 나갈 길이 없어진다.
+    await act(async () => {
+      useMobileAppStore.setState({ remoteDesktopImmersive: false });
+    });
+    expect(hasHiddenTabBar(tree!)).toBe(false);
 
     await act(async () => {
       tree!.unmount();

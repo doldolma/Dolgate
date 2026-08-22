@@ -14,6 +14,7 @@ const rootNodeModules = path.resolve(workspaceRoot, 'node_modules');
 const workspacePackages = [
   path.resolve(workspaceRoot, 'packages', 'shared-core'),
   path.resolve(workspaceRoot, 'packages', 'fressh-react-native-xtermjs-webview'),
+  path.resolve(workspaceRoot, 'packages', 'react-native-remote-desktop'),
 ];
 
 /** AWS SDK 를 ESM 빌드로 해석할 때 쓰는 순서. 아래 resolveRequest 주석 참고. */

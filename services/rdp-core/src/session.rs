@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use anyhow::Context as _;
+use core_framing::{checked_rgba_framebuffer_len, MAX_FRAMEBUFFER_PIXELS};
 use ironrdp::connector::{self, ConnectionResult, Credentials};
 use ironrdp::pdu::gcc::KeyboardType;
 use ironrdp::pdu::rdp::capability_sets::MajorPlatformType;
@@ -95,6 +96,16 @@ impl std::fmt::Display for Cancelled {
 }
 
 impl std::error::Error for Cancelled {}
+
+fn validate_framebuffer_size(width: u16, height: u16) -> anyhow::Result<()> {
+    checked_rgba_framebuffer_len(usize::from(width), usize::from(height))
+        .map(|_| ())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "remote framebuffer {width}x{height} exceeds the {MAX_FRAMEBUFFER_PIXELS} pixel limit"
+            )
+        })
+}
 
 pub fn run(
     session_id: String,
@@ -265,6 +276,7 @@ fn connect_and_pump(
         payload.host.clone(),
         payload.port,
         payload.dial_address.clone(),
+        payload.tunnel_auth_token.clone(),
         session_id,
         request_id,
         output,
@@ -301,6 +313,8 @@ fn connect_and_pump(
     .context("connect")?;
 
     let desktop = connection_result.desktop_size;
+    validate_framebuffer_size(desktop.width, desktop.height)
+        .context("server desktop size")?;
     // 어떤 정적 채널이 실제로 join 됐는지 남긴다. 클립보드가 조용히 안 되는 경우 여기서
     // cliprdr 가 빠졌는지 바로 보인다.
     let joined: Vec<String> = connection_result
@@ -449,8 +463,13 @@ fn pump(
     // 잘라낸 사각형이 멀쩡한 화면 위에 얹혀 검은 구멍이 뚫린다.
     //
     // 크기는 서버가 확정한 값이다. ResetGraphics 가 같은 크기로 와도 다시 잡지 않는다.
-    if let Ok(mut surface) = egfx.lock() {
-        surface.resize(egfx_size.0, egfx_size.1);
+    {
+        let mut surface = egfx
+            .lock()
+            .map_err(|_| anyhow::anyhow!("egfx surface lock poisoned"))?;
+        surface
+            .try_resize(egfx_size.0, egfx_size.1)
+            .context("initialize egfx framebuffer")?;
     }
     // 마지막으로 화면을 내보낸 시각.
     let mut last_flush = std::time::Instant::now();
@@ -668,6 +687,8 @@ fn pump(
                         &mut active_stage,
                         &mut deferred,
                     )?;
+                    validate_framebuffer_size(desktop.width, desktop.height)
+                        .context("reactivated desktop size")?;
 
                     *image = DecodedImage::new(
                         ironrdp_graphics::image_processing::PixelFormat::RgbA32,
@@ -683,9 +704,14 @@ fn pump(
                     //
                     // 서버가 곧 ResetGraphics 로 같은 크기를 알려 주지만, 그 사이에 새로고침
                     // 요청이 오면 늦다.
-                    if let Ok(mut surface) = egfx.lock() {
+                    {
+                        let mut surface = egfx
+                            .lock()
+                            .map_err(|_| anyhow::anyhow!("egfx surface lock poisoned"))?;
                         if surface.size() != (0, 0) {
-                            surface.resize(desktop.width, desktop.height);
+                            surface
+                                .try_resize(desktop.width, desktop.height)
+                                .context("resize egfx framebuffer after reactivation")?;
                         }
                     }
 
@@ -851,7 +877,9 @@ fn flush_local_clipboard(
     if let Some(backend) = processor
         .downcast_backend_mut::<TextClipboardBackend>()
     {
-        backend.set_local_text(text);
+        if !backend.set_local_text(text) {
+            return Ok(());
+        }
     }
 
     let messages = processor
@@ -1270,6 +1298,11 @@ fn flush_resize_requests(
     // 여기서 맞춰 보낸다.
     let width = width.clamp(200, 8192) & !1;
     let height = height.clamp(200, 8192);
+    if let Err(error) = validate_framebuffer_size(width, height) {
+        warn!(width, height, %error, "dropping oversized desktop resize request");
+        *pending = None;
+        return Ok(());
+    }
 
     // None 이면 DISP 채널이 아직 안 열렸다는 뜻이다. 채널은 접속 직후 조금 뒤에 열리는데, 앱은
     // 붙자마자 한 번만 크기를 요청한다 — 여기서 버리면 그 뒤로 크기가 바뀌지 않는 한 다시 오지
@@ -1740,6 +1773,8 @@ pub fn build_monitor_layout(monitors: &[crate::protocol::MonitorRequest]) -> any
         .context("virtual desktop width exceeds u16")?;
     let desktop_height = u16::try_from(max_bottom - min_top + 1)
         .context("virtual desktop height exceeds u16")?;
+    validate_framebuffer_size(desktop_width, desktop_height)
+        .context("virtual desktop framebuffer")?;
 
     let declared = declared_rects
         .iter()
@@ -1825,11 +1860,20 @@ fn build_config(
 
         #[cfg(target_os = "windows")]
         platform: MajorPlatformType::WINDOWS,
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         platform: MajorPlatformType::MACINTOSH,
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         platform: MajorPlatformType::UNIX,
 
+        // **서버 포인터는 받지 않는다.**
+        //
+        // 켜 봤지만 모바일에서는 소용이 없었다. IronRDP 는 서버가 `SetDefault`(= 클라이언트의
+        // 기본 커서를 써라)를 보내면 합성 커서를 숨기는데(fast_path.rs 의 `hide_pointer`),
+        // 윈도우 바탕화면 위 포인터가 바로 그 기본 화살표다. 그리고 `show_pointer` 는
+        // `pub(crate)` 라 우리가 되켤 수 없다 — 폰에는 그릴 시스템 커서가 없으니 그대로 사라진다.
+        //
+        // 그래서 모바일 커서는 앱이 직접 그린다(RemoteDesktopSurface 의 트랙패드 커서).
+        // 여기서 합성까지 켜면 커스텀 모양일 때 커서가 두 개로 보인다.
         enable_server_pointer: false,
         request_data: None,
         autologon: false,
@@ -1864,6 +1908,8 @@ fn connect(
     // server_name 은 여기서도 TLS 서버 이름·인증서 핀 키로 계속 쓰인다 — 주소와 신원을
     // 분리하는 것이 이 인자의 목적이다.
     dial_address: Option<String>,
+    // Secret preface expected by the Go mobile loopback tunnel.
+    tunnel_auth_token: Option<String>,
     session_id: &str,
     request_id: &str,
     output: &Output,
@@ -1895,7 +1941,7 @@ fn connect(
     crate::egfx::EgfxUnusable,
 )> {
     let server_addr = match dial_address.as_deref() {
-        Some(address) => resolve_dial_address(address).context("lookup dial address")?,
+        Some(address) => resolve_dial_address(address, port).context("lookup dial address")?,
         None => lookup_addr(&server_name, port).context("lookup addr")?,
     };
 
@@ -1913,10 +1959,23 @@ fn connect(
         "dialing"
     );
 
-    let tcp_stream = dial(server_addr, stop).context("TCP connect")?;
+    let mut tcp_stream = dial(server_addr, stop).context("TCP connect")?;
     tcp_stream
         .set_read_timeout(Some(HANDSHAKE_READ_TIMEOUT))
         .context("set handshake read timeout")?;
+    if tunnel_auth_token.is_some() {
+        tcp_stream
+            .set_write_timeout(Some(HANDSHAKE_READ_TIMEOUT))
+            .context("set tunnel authentication write timeout")?;
+        core_framing::write_rd_tunnel_auth_preface(
+            &mut tcp_stream,
+            tunnel_auth_token.as_deref(),
+        )
+        .context("authenticate local remote desktop tunnel")?;
+        tcp_stream
+            .set_write_timeout(None)
+            .context("clear tunnel authentication write timeout")?;
+    }
 
     // **소켓 사본을 취소 슬롯에 넣는다.** 이때부터 disconnect 가 이 소켓을 shutdown 할 수 있고,
     // 핸드셰이크 중이던 블로킹 읽기가 즉시 돌아온다(CancelSocket 주석 참고).
@@ -2132,11 +2191,11 @@ fn await_dial(
     }
 }
 
-fn resolve_dial_address(address: &str) -> anyhow::Result<core::net::SocketAddr> {
+fn resolve_dial_address(address: &str, port: u16) -> anyhow::Result<core::net::SocketAddr> {
     use std::net::ToSocketAddrs as _;
-    address
+    (address, port)
         .to_socket_addrs()
-        .with_context(|| format!("resolve {address}"))?
+        .with_context(|| format!("resolve {address}:{port}"))?
         .next()
         .context("socket address not found")
 }
@@ -2155,9 +2214,15 @@ fn tls_upgrade(
     stream: TcpStream,
     server_name: String,
 ) -> anyhow::Result<(TlsStream, Vec<u8>, CertificatePayload)> {
-    let mut config = rustls::client::ClientConfig::builder()
+    let builder = rustls::client::ClientConfig::builder();
+    let signature_algorithms = rustls::crypto::CryptoProvider::get_default()
+        .context("rustls crypto provider is not installed")?
+        .signature_verification_algorithms;
+    let mut config = builder
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(danger::NoCertificateVerification))
+        .with_custom_certificate_verifier(Arc::new(
+            danger::NoCertificateVerification::new(signature_algorithms),
+        ))
         .with_no_client_auth();
 
     // Disable TLS resumption because CredSSP does not support it.
@@ -2221,27 +2286,27 @@ fn extract_tls_server_public_key(cert: &[u8]) -> anyhow::Result<Vec<u8>> {
 }
 
 mod danger {
-    use tokio_rustls::rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+    use tokio_rustls::rustls::client::danger::{
+        HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
+    };
+    use tokio_rustls::rustls::crypto::{
+        verify_tls12_signature, verify_tls13_signature, WebPkiSupportedAlgorithms,
+    };
     use tokio_rustls::rustls::{DigitallySignedStruct, Error, SignatureScheme, pki_types};
 
-    /// Accepts any certificate **on purpose**: RDP servers normally present a self-signed
-    /// certificate, so a CA check would reject every real server. Trust is decided one layer up by
-    /// fingerprint pinning, the same model as SSH known-hosts:
-    ///
-    ///   1. this verifier lets the TLS handshake finish so we can see the certificate at all,
-    ///   2. the fingerprint is computed (`tls_upgrade`) and compared with the approved one,
-    ///   3. a mismatch (or a first-ever connection) asks the user and waits for the verdict —
-    ///      `anyhow::bail!` on refusal, and CredSSP runs inside `connect_finalize` afterwards, so
-    ///      **no credential byte leaves this process before the approval**,
-    ///   4. the app persists the approved fingerprint on the host record
-    ///      (`certificateFingerprint`) and syncs it, so later connections do not ask again.
-    ///
-    /// Residual risk is the one trust-on-first-use always has: the very first connection to a host
-    /// cannot tell a real server from an impostor. Every connection after that detects a changed
-    /// certificate. Do not "fix" this by enabling a CA check — that breaks self-signed servers
-    /// without adding anything pinning does not already give.
+    /// Skips CA/name validation so the caller can apply TOFU, but still proves that the peer owns
+    /// the private key for the certificate it presented. TLS handshake signatures are never part
+    /// of the TOFU exception.
     #[derive(Debug)]
-    pub(super) struct NoCertificateVerification;
+    pub(super) struct NoCertificateVerification {
+        supported: WebPkiSupportedAlgorithms,
+    }
+
+    impl NoCertificateVerification {
+        pub(super) fn new(supported: WebPkiSupportedAlgorithms) -> Self {
+            Self { supported }
+        }
+    }
 
     impl ServerCertVerifier for NoCertificateVerification {
         fn verify_server_cert(
@@ -2257,36 +2322,159 @@ mod danger {
 
         fn verify_tls12_signature(
             &self,
-            _: &[u8],
-            _: &pki_types::CertificateDer<'_>,
-            _: &DigitallySignedStruct,
+            message: &[u8],
+            cert: &pki_types::CertificateDer<'_>,
+            dss: &DigitallySignedStruct,
         ) -> Result<HandshakeSignatureValid, Error> {
-            Ok(HandshakeSignatureValid::assertion())
+            verify_tls12_signature(message, cert, dss, &self.supported)
         }
 
         fn verify_tls13_signature(
             &self,
-            _: &[u8],
-            _: &pki_types::CertificateDer<'_>,
-            _: &DigitallySignedStruct,
+            message: &[u8],
+            cert: &pki_types::CertificateDer<'_>,
+            dss: &DigitallySignedStruct,
         ) -> Result<HandshakeSignatureValid, Error> {
-            Ok(HandshakeSignatureValid::assertion())
+            verify_tls13_signature(message, cert, dss, &self.supported)
         }
 
         fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-            vec![
-                SignatureScheme::RSA_PKCS1_SHA256,
-                SignatureScheme::ECDSA_NISTP256_SHA256,
-                SignatureScheme::RSA_PKCS1_SHA384,
-                SignatureScheme::ECDSA_NISTP384_SHA384,
-                SignatureScheme::RSA_PKCS1_SHA512,
-                SignatureScheme::ECDSA_NISTP521_SHA512,
-                SignatureScheme::RSA_PSS_SHA256,
-                SignatureScheme::RSA_PSS_SHA384,
-                SignatureScheme::RSA_PSS_SHA512,
-                SignatureScheme::ED25519,
-            ]
+            self.supported.supported_schemes()
         }
+    }
+}
+
+#[cfg(test)]
+mod tls_signature_tests {
+    use super::tls_upgrade;
+    use std::net::TcpListener;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio_rustls::rustls;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+    use rustls::server::{ClientHello, ResolvesServerCert};
+    use rustls::sign::CertifiedKey;
+
+    const CERT_DER_BASE64: &str = concat!(
+        "MIIBfDCCASOgAwIBAgIUChBw6sYz2eueY3jYP0HgJwtOpeswCgYIKoZIzj0EAwIw",
+        "FDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI2MDgyMTE0MTEzNFoXDTM2MDgxODE0",
+        "MTEzNFowFDESMBAGA1UEAwwJbG9jYWxob3N0MFkwEwYHKoZIzj0CAQYIKoZIzj0D",
+        "AQcDQgAEMeo/fpE8ntXC34qf09DN9bQoT0EU7aTOewVBfByT2sYZP4iKeZVNWUVe",
+        "0QQ8vvLDy6wi+jh4JSgdhzDWZSEzeKNTMFEwHQYDVR0OBBYEFNmGO2DXzgnPsnEj",
+        "bsGtiFdTU4V4MB8GA1UdIwQYMBaAFNmGO2DXzgnPsnEjbsGtiFdTU4V4MA8GA1Ud",
+        "EwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDRwAwRAIgX/oKgpVsRota+mHEbXrePAih",
+        "J/GkZUgSK5Or+x/SCxgCIEL3ujSjHLefeIyz8gcf5Jq4HIc44/5tFHH5wB9SVzAi",
+    );
+    const WRONG_KEY_DER_BASE64: &str = concat!(
+        "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQglkyNjD3Ch30PdBT9",
+        "SHD347q7E1dn6NOgfcIyPZg2/RqhRANCAAQVP1GPBpj3GROUoIIJsSBIo5oejmEp",
+        "AeEI6ARIU5PDVYRDZ5Eluhtc6L2RYjrX01Dihro1NWIkN/UzSiteOYpa",
+    );
+
+    fn decode_base64(encoded: &str) -> Vec<u8> {
+        let mut decoded = Vec::with_capacity(encoded.len() * 3 / 4);
+        let mut accumulator = 0_u32;
+        let mut bits = 0_u8;
+        for byte in encoded.bytes() {
+            let value = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a' + 26,
+                b'0'..=b'9' => byte - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                b'=' => break,
+                _ => panic!("invalid base64 fixture"),
+            };
+            accumulator = (accumulator << 6) | u32::from(value);
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                decoded.push((accumulator >> bits) as u8);
+                accumulator &= (1_u32 << bits) - 1;
+            }
+        }
+        decoded
+    }
+
+    #[derive(Debug)]
+    struct MismatchedResolver {
+        certified_key: Arc<CertifiedKey>,
+    }
+
+    impl ResolvesServerCert for MismatchedResolver {
+        fn resolve(&self, _: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
+            Some(Arc::clone(&self.certified_key))
+        }
+    }
+
+    fn mismatched_server_config() -> Arc<rustls::ServerConfig> {
+        // builder() installs the process-default crypto provider when one has not been set yet.
+        let builder = rustls::ServerConfig::builder();
+        let provider = rustls::crypto::CryptoProvider::get_default()
+            .expect("rustls default crypto provider");
+        let private_key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(decode_base64(
+            WRONG_KEY_DER_BASE64,
+        )));
+        let signing_key = provider
+            .key_provider
+            .load_private_key(private_key)
+            .expect("load mismatched test key");
+        let certified_key = Arc::new(CertifiedKey::new(
+            vec![CertificateDer::from(decode_base64(CERT_DER_BASE64))],
+            signing_key,
+        ));
+        assert!(
+            certified_key.keys_match().is_err(),
+            "the fixture must keep the certificate and private key unrelated"
+        );
+
+        Arc::new(
+            builder
+                .with_no_client_auth()
+                .with_cert_resolver(Arc::new(MismatchedResolver { certified_key })),
+        )
+    }
+
+    #[test]
+    fn rejects_a_peer_that_signs_with_a_key_other_than_its_certificate_key() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind TLS test server");
+        let address = listener.local_addr().expect("TLS test address");
+        let server_config = mismatched_server_config();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept TLS client");
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("server read timeout");
+            socket
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .expect("server write timeout");
+            let mut connection =
+                rustls::ServerConnection::new(server_config).expect("TLS server connection");
+            while connection.is_handshaking() {
+                if connection.complete_io(&mut socket).is_err() {
+                    break;
+                }
+            }
+        });
+
+        let stream = std::net::TcpStream::connect(address).expect("connect TLS test server");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("client read timeout");
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .expect("client write timeout");
+        let error = match tls_upgrade(stream, "localhost".to_owned()) {
+            Ok(_) => panic!("a mismatched TLS CertificateVerify signature must be rejected"),
+            Err(error) => error,
+        };
+        let message = format!("{error:#}").to_ascii_lowercase();
+        assert!(
+            message.contains("signature"),
+            "the handshake must fail on certificate signature verification: {message}"
+        );
+
+        server.join().expect("TLS test server");
     }
 }
 
@@ -2409,6 +2597,7 @@ mod admin_session_tests {
             clipboard: true,
             color_depth: None,
             dial_address: None,
+            tunnel_auth_token: None,
             admin_session,
             drives: Vec::new(),
         }
@@ -2483,6 +2672,23 @@ mod session_option_tests {
         assert!(parsed.clipboard);
     }
 
+    /// 커서가 보이려면 **두 플래그가 함께** 켜져 있어야 한다.
+    ///
+    /// IronRDP 는 `enable_server_pointer` 가 false 면 포인터 업데이트를 처리 첫 줄에서 버리고
+    /// `pointer_software_rendering` 을 평가하지도 않는다. 한때 앞쪽이 false 여서 모바일 RDP 에
+    /// 커서가 전혀 그려지지 않았다 — 한쪽만 보는 단정으로는 그 상태를 잡지 못한다.
+    /// **서버 포인터를 켜지 않는다.**
+    ///
+    /// 한 번 켜 봤지만 모바일에서는 소용이 없었다 — IronRDP 는 `SetDefault` 를 받으면 합성
+    /// 커서를 숨기고(`hide_pointer`), 윈도우 바탕화면의 포인터가 바로 그 기본 화살표다.
+    /// `show_pointer` 는 `pub(crate)` 라 되켤 수도 없다. 켜 두면 커스텀 모양일 때만 서버 커서가
+    /// 나타나 앱이 그리는 커서와 둘이 보인다.
+    #[test]
+    fn does_not_take_the_server_pointer() {
+        let config = build_config(true, &payload(serde_json::json!({})), 1920, 1080, Vec::new());
+        assert!(!config.enable_server_pointer);
+    }
+
     #[test]
     fn audio_off_is_declared_to_the_server() {
         // 채널만 안 붙이면 서버는 계속 인코딩해 보낸다. 선언까지 내려야 안 보낸다.
@@ -2520,28 +2726,36 @@ mod session_option_tests {
     fn keeps_the_logical_host_as_the_tls_identity() {
         // tailnet 경유일 때 접속은 127.0.0.1 로 하지만 신원은 논리 이름이어야 한다. 여기가
         // 섞이면 서로 다른 tailnet 호스트가 모두 같은 서버로 보이고 인증서 핀이 무의미해진다.
+        let tunnel_auth_token = "ab".repeat(32);
         let parsed = payload(serde_json::json!({
             "host": "winbox.example.ts.net",
-            "dialAddress": "127.0.0.1:52341",
+            "dialAddress": "127.0.0.1",
+            "tunnelAuthToken": tunnel_auth_token.clone(),
         }));
-        assert_eq!(parsed.dial_address.as_deref(), Some("127.0.0.1:52341"));
+        assert_eq!(parsed.dial_address.as_deref(), Some("127.0.0.1"));
+        assert_eq!(
+            parsed.tunnel_auth_token.as_deref(),
+            Some(tunnel_auth_token.as_str())
+        );
         assert_eq!(parsed.host, "winbox.example.ts.net");
     }
 
     #[test]
-    fn resolves_a_local_forward_address() {
+    fn resolves_a_local_forward_with_the_separate_port() {
         use super::resolve_dial_address;
 
-        let addr = resolve_dial_address("127.0.0.1:52341").expect("resolve");
+        let addr = resolve_dial_address("127.0.0.1", 52341).expect("resolve");
         assert_eq!(addr.port(), 52341);
         assert!(addr.ip().is_loopback());
     }
 
     #[test]
-    fn refuses_an_address_without_a_port() {
-        // 기본 포트를 붙여 추측하면 엉뚱한 곳으로 붙는다.
+    fn resolves_an_ipv6_host_without_string_concatenation() {
         use super::resolve_dial_address;
-        assert!(resolve_dial_address("127.0.0.1").is_err());
+
+        let addr = resolve_dial_address("::1", 52342).expect("resolve");
+        assert_eq!(addr.port(), 52342);
+        assert!(addr.ip().is_loopback());
     }
 
     #[test]
@@ -2581,7 +2795,7 @@ mod session_option_tests {
 
 #[cfg(test)]
 mod layout_tests {
-    use super::build_monitor_layout;
+    use super::{build_monitor_layout, validate_framebuffer_size};
     use crate::protocol::MonitorRequest;
 
     fn monitor(width: u16, height: u16, left: i32, top: i32, primary: bool) -> MonitorRequest {
@@ -2592,6 +2806,22 @@ mod layout_tests {
             top,
             primary,
         }
+    }
+
+    #[test]
+    fn framebuffer_budget_accepts_the_limit_and_rejects_above_it() {
+        assert!(validate_framebuffer_size(4096, 4096).is_ok());
+        assert!(validate_framebuffer_size(4097, 4096).is_err());
+        assert!(validate_framebuffer_size(0, 4096).is_err());
+    }
+
+    #[test]
+    fn rejects_a_monitor_layout_above_the_framebuffer_budget() {
+        let error = match build_monitor_layout(&[monitor(4097, 4096, 0, 0, true)]) {
+            Ok(_) => panic!("layout must be rejected before connection"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("framebuffer"));
     }
 
     #[test]

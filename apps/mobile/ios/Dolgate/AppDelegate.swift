@@ -6,6 +6,13 @@ import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
 
+private enum RemoteDesktopOrientationPolicy {
+  static let didChangeNotification = Notification.Name(
+    "com.dolgate.remoteDesktopOrientation"
+  )
+  static let unlockedUserInfoKey = "unlocked"
+}
+
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
   var window: UIWindow?
@@ -13,10 +20,26 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
   var reactNativeDelegate: ReactNativeDelegate?
   var reactNativeFactory: RCTReactNativeFactory?
 
+  private var remoteDesktopOrientationUnlocked = false
+
+  private var supportedOrientationMask: UIInterfaceOrientationMask {
+    guard remoteDesktopOrientationUnlocked else {
+      return .portrait
+    }
+    return UIDevice.current.userInterfaceIdiom == .pad ? .all : .allButUpsideDown
+  }
+
   func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(remoteDesktopOrientationDidChange(_:)),
+      name: RemoteDesktopOrientationPolicy.didChangeNotification,
+      object: nil
+    )
+
     let delegate = ReactNativeDelegate()
     let factory = RCTReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()
@@ -33,6 +56,49 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     )
 
     return true
+  }
+
+  func application(
+    _ application: UIApplication,
+    supportedInterfaceOrientationsFor window: UIWindow?
+  ) -> UIInterfaceOrientationMask {
+    supportedOrientationMask
+  }
+
+  @objc private func remoteDesktopOrientationDidChange(_ notification: Notification) {
+    guard let unlocked = notification.userInfo?[
+      RemoteDesktopOrientationPolicy.unlockedUserInfoKey
+    ] as? Bool else {
+      return
+    }
+
+    if Thread.isMainThread {
+      applyRemoteDesktopOrientationUnlocked(unlocked)
+    } else {
+      DispatchQueue.main.async { [weak self] in
+        self?.applyRemoteDesktopOrientationUnlocked(unlocked)
+      }
+    }
+  }
+
+  private func applyRemoteDesktopOrientationUnlocked(_ unlocked: Bool) {
+    guard remoteDesktopOrientationUnlocked != unlocked else {
+      return
+    }
+    remoteDesktopOrientationUnlocked = unlocked
+
+    if #available(iOS 16.0, *) {
+      window?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+      guard !unlocked, let windowScene = window?.windowScene else {
+        return
+      }
+      let preferences = UIWindowScene.GeometryPreferences.iOS(
+        interfaceOrientations: .portrait
+      )
+      windowScene.requestGeometryUpdate(preferences) { _ in }
+    } else {
+      UIViewController.attemptRotationToDeviceOrientation()
+    }
   }
 
   func application(

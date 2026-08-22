@@ -20,6 +20,7 @@
 //! 풀리지 않는다. 그래서 스트림을 세션이 들고 있고 이 모듈은 이미 풀린 바이트만 받는다.
 
 use flate2::{Decompress, FlushDecompress, Status};
+use core_framing::MAX_FRAMEBUFFER_BYTES;
 
 use crate::decode::{DecodeError, Framebuffer, Rect};
 use crate::rfb::PixelFormat;
@@ -53,18 +54,29 @@ impl ZlibStream {
         loop {
             let before_in = self.inner.total_in();
             let before_out = self.inner.total_out();
-            // 남은 자리가 없으면 늘린다. 첫 회는 압축비를 6배로 어림잡는다.
+            // 남은 자리가 없으면 늘린다. 첫 회는 압축비를 6배로 어림잡되, 프레임버퍼 한 장
+            // 이상의 출력은 허용하지 않는다.
             if self.out.len() == self.out.capacity() {
-                self.out.reserve(if self.out.is_empty() {
+                if self.out.len() >= MAX_FRAMEBUFFER_BYTES {
+                    return Err(DecodeError::CorruptStream("zlib output exceeds framebuffer budget"));
+                }
+                let requested = if self.out.is_empty() {
                     input.len().saturating_mul(6).max(4096)
                 } else {
                     self.out.capacity()
-                });
+                };
+                let growth = requested.min(MAX_FRAMEBUFFER_BYTES - self.out.len());
+                self.out
+                    .try_reserve(growth)
+                    .map_err(|_| DecodeError::CorruptStream("zlib output allocation"))?;
             }
             let status = self
                 .inner
                 .decompress_vec(&input[consumed..], &mut self.out, FlushDecompress::Sync)
                 .map_err(|_| DecodeError::CorruptStream("zlib"))?;
+            if self.out.len() > MAX_FRAMEBUFFER_BYTES {
+                return Err(DecodeError::CorruptStream("zlib output exceeds framebuffer budget"));
+            }
             consumed += (self.inner.total_in() - before_in) as usize;
             let produced = self.inner.total_out() - before_out;
 

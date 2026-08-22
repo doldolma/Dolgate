@@ -566,6 +566,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check remote desktop FFI header copies
+        run: npm run ffi:headers:check --workspace @dolssh/react-native-remote-desktop
+
       - name: Run mobile typecheck
         run: npm run typecheck:mobile
 
@@ -589,12 +592,27 @@ jobs:
           --entry-file index.js --bundle-output "$RUNNER_TEMP/ios.bundle"
         working-directory: apps/mobile
 
+  # Go 엔진과 원격 데스크톱(Rust + JNI + Kotlin)을 **한 잡에서** 본다. 환경(Go·gomobile·Java·
+  # SDK·NDK·node_modules)이 그대로 재사용되므로, 잡을 새로 만드는 것보다 훨씬 싸다.
   mobile-native-check:
-    name: mobile native engine check
+    name: mobile native check (Go engine + remote desktop)
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+
+      # SDK+NDK+node_modules+Gradle+cargo target 을 다 얹으면 ubuntu 러너의 여유(~14GB)로는
+      # 빠듯하다. 릴리스 잡이 같은 이유로 이미 이 액션을 쓴다.
+      - name: Free up runner disk space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        with:
+          tool-cache: false
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -639,3 +657,45 @@ jobs:
       # would otherwise reach a release unnoticed.
       - name: Bind the Go SSH engine for every Android ABI
         run: npm run mobile:engine:build -- android "arm64-v8a,armeabi-v7a,x86_64,x86"
+
+      # 여기서부터 원격 데스크톱(RDP/VNC) 네이티브다.
+      #
+      # **이 게이트가 없으면 Kotlin·JNI·안드로이드 타깃 Rust 가 깨져도 태그 빌드에서야 안다.**
+      # 실제로 그랬다 — 뷰 매니저를 Fabric 이벤트 경로로 옮기다 낸 Kotlin 오류를 PR 단계에서
+      # 잡을 방법이 없었다. 채널은 크레이트의 rust-toolchain.toml 이 정한다.
+      - name: Set up Rust for the remote desktop cores
+        shell: bash
+        run: |
+          (cd services/rdp-core && (rustup show active-toolchain || rustup toolchain install))
+          (cd services/rdp-core && rustup target add aarch64-linux-android)
+
+      # 키를 릴리스 잡(build-android)과 같은 모양으로 둔다 — 기본 브랜치에서 만든 이 캐시를
+      # 태그 릴리스가 그대로 복원한다(호스트 타깃에서 이미 쓰는 방식과 같다).
+      #
+      # **target 전체가 아니라 안드로이드 트리플만 담는다.** 저장소 캐시 총량은 10GB 이고 이미
+      # 3-OS 의 rdp/vnc 호스트 캐시가 그 안에 있다. 비싼 것(벤더 OpenSSL 빌드 산출물)은 트리플
+      # 디렉터리 안에 있고, 호스트용 빌드 스크립트·proc-macro 는 다시 컴파일해도 1~2분이다.
+      - name: Cache cargo build (Android cores)
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/rdp-core/target/aarch64-linux-android
+            services/vnc-core/target/aarch64-linux-android
+          key: ${{ runner.os }}-cargo-android-arm64-v8a-${{ hashFiles('services/rdp-core/Cargo.lock', 'services/vnc-core/Cargo.lock', 'services/rdp-core/rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-android-arm64-v8a-
+            ${{ runner.os }}-cargo-android-
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+
+      # 라이브러리 모듈 하나만 조립한다 — 그 안에 이 스택이 다 들어 있다: cargo 크로스컴파일
+      # (buildRustLibs) → CMake JNI(libdvnc_jni.so) → Kotlin. 릴리스가 실제로 패키징하는
+      # ABI 하나로만 돌려 시간을 아낀다.
+      - name: Build the remote desktop Android module (Rust + JNI + Kotlin)
+        working-directory: apps/mobile/android
+        run: ./gradlew :dolssh_react-native-remote-desktop:assembleDebug -PreactNativeArchitectures=arm64-v8a

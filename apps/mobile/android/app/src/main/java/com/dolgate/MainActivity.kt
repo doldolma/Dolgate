@@ -29,6 +29,8 @@ class MainActivity : ReactActivity() {
    * never be restored"). RN 화면 상태는 JS 쪽에서 복원하므로 여기서 버려도 안전하다.
    */
   override fun onCreate(savedInstanceState: Bundle?) {
+    requestedOrientation =
+        android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
     super.onCreate(null)
   }
 

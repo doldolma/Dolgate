@@ -118,6 +118,9 @@ pub struct ConnectPayload {
     /// 같은 서버로 보이고 핀이 무의미해진다.
     #[serde(default)]
     pub dial_address: Option<String>,
+    /// Private preface for an authenticated mobile loopback tunnel.
+    #[serde(default)]
+    pub tunnel_auth_token: Option<String>,
     /// 원격에 공유할 로컬 폴더들. 비어 있으면 드라이브를 붙이지 않는다.
     #[serde(default)]
     pub drives: Vec<DriveShare>,

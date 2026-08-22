@@ -9,7 +9,7 @@
 #![warn(clippy::fn_to_numeric_cast_any)]
 #![warn(clippy::ptr_cast_constness)]
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(unix)]
 mod nix;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(unix)]
 pub use nix::backend;

@@ -7,6 +7,7 @@ import type {
   AuthState,
   MobileSessionRecord,
   MobileSftpSessionRecord,
+  MobileRemoteDesktopSessionRecord,
   SshHostRecord,
 } from '@dolssh/shared-core';
 import {
@@ -24,6 +25,10 @@ import { getPalette } from '../src/theme';
 const mockNavigationGoBack = jest.fn();
 const mockNavigationCanGoBack = jest.fn(() => true);
 const mockNavigationNavigate = jest.fn();
+let mockScreenFocused = true;
+const mockSetOrientationUnlocked = jest.fn<Promise<void>, [boolean]>(
+  async () => undefined,
+);
 
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({
@@ -31,6 +36,7 @@ jest.mock('@react-navigation/native', () => ({
     canGoBack: mockNavigationCanGoBack,
     navigate: mockNavigationNavigate,
   }),
+  useIsFocused: () => mockScreenFocused,
 }));
 jest.mock('react-native-vector-icons/Ionicons', () => 'Ionicons');
 let mockCapturedXtermProps: Record<string, unknown> | null = null;
@@ -93,7 +99,9 @@ jest.mock('@fressh/react-native-xtermjs-webview', () => {
     ),
   };
 });
-const mockOpenInAppBrowser = jest.fn<Promise<void>, [string]>(async () => undefined);
+const mockOpenInAppBrowser = jest.fn<Promise<void>, [string]>(
+  async () => undefined,
+);
 jest.mock('../src/lib/in-app-browser', () => ({
   openInAppBrowser: (url: string) => mockOpenInAppBrowser(url),
 }));
@@ -125,14 +133,32 @@ jest.mock('../src/lib/screen-layout', () => ({
     paddingBottom: 12,
   }),
 }));
-jest.mock('react-native-safe-area-context', () => ({
-  useSafeAreaInsets: () => ({
-    top: 0,
-    bottom: 24,
-    left: 0,
-    right: 0,
-  }),
-}));
+jest.mock('react-native-safe-area-context', () => {
+  const insets = { top: 0, bottom: 24, left: 0, right: 0 };
+  return {
+    useSafeAreaInsets: () => insets,
+    // 컨텍스트를 직접 읽는 화면도 있다(RemoteDesktopSurface). 훅만 흉내내면 그쪽이 죽는다.
+    SafeAreaInsetsContext: (require('react') as typeof React).createContext(
+      insets,
+    ),
+  };
+});
+
+jest.mock('@dolssh/react-native-remote-desktop', () => {
+  const mockReact = require('react') as typeof React;
+  return {
+    RemoteDesktopView: (props: any) =>
+      mockReact.createElement('RemoteDesktopView', props),
+    nativeSetActive: jest.fn(async () => undefined),
+    setOrientationUnlocked: (unlocked: boolean) =>
+      mockSetOrientationUnlocked(unlocked),
+    nativePointerMove: jest.fn(),
+    nativePointerButton: jest.fn(),
+    nativeScroll: jest.fn(),
+    nativeKeyEvent: jest.fn(),
+    nativeRefresh: jest.fn(async () => undefined),
+  };
+});
 
 function collectText(
   node:
@@ -257,6 +283,8 @@ describe('SessionScreen', () => {
     mockNavigationCanGoBack.mockReset();
     mockNavigationCanGoBack.mockReturnValue(true);
     mockNavigationNavigate.mockReset();
+    mockScreenFocused = true;
+    mockSetOrientationUnlocked.mockClear();
     keyboardListeners.clear();
     jest
       .spyOn(Keyboard, 'addListener')
@@ -306,6 +334,7 @@ describe('SessionScreen', () => {
         sftpSessions: [],
         sftpTransfers: [],
         sftpCopyBuffer: null,
+        remoteDesktopSessions: [],
         activeSessionTabId: 'session-1',
         activeConnectionTab: { kind: 'terminal', id: 'session-1' },
         secretsByRef: {},
@@ -332,6 +361,8 @@ describe('SessionScreen', () => {
         copySftpEntries: jest.fn(),
         pasteSftpEntries: jest.fn(async () => undefined),
         clearSftpCopyBuffer: jest.fn(),
+        updateRemoteDesktopSession: jest.fn(),
+        disconnectRemoteDesktopSession: jest.fn(async () => undefined),
       });
     });
   });
@@ -506,7 +537,12 @@ describe('SessionScreen', () => {
     act(() => {
       useMobileAppStore.setState({
         sessions: [
-          { ...session, id: 'session-1', title: 'First', openedAt: openedAt(0) },
+          {
+            ...session,
+            id: 'session-1',
+            title: 'First',
+            openedAt: openedAt(0),
+          },
           // 나중에 연 터미널 — SFTP 보다 뒤에 와야 한다.
           {
             ...secondSession,
@@ -1599,7 +1635,9 @@ describe('SessionScreen', () => {
     );
 
     await act(async () => {
-      tree!.root.findByProps({ accessibilityLabel: '다운로드' }).props.onPress();
+      tree!.root
+        .findByProps({ accessibilityLabel: '다운로드' })
+        .props.onPress();
     });
     expect(downloadSftpEntries).toHaveBeenCalledWith('sftp-1', [
       '/home/doyoung/notes.txt',
@@ -1634,7 +1672,9 @@ describe('SessionScreen', () => {
       });
     });
     await act(async () => {
-      tree!.root.findByProps({ accessibilityLabel: '붙여넣기' }).props.onPress();
+      tree!.root
+        .findByProps({ accessibilityLabel: '붙여넣기' })
+        .props.onPress();
     });
     expect(pasteSftpEntries).toHaveBeenCalledWith('sftp-1');
 
@@ -1964,6 +2004,137 @@ describe('SessionScreen', () => {
     ).toBeGreaterThan(focusCallCountBeforeClose);
     expect(mockNativeTerminalInputHandle!.blur).not.toHaveBeenCalled();
     expect(mockTerminalHandle!.blur).not.toHaveBeenCalled();
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it.each(['rdp', 'vnc'] as const)(
+    'unlocks orientation only while the focused %s tab is active',
+    async protocol => {
+      const remoteSession: MobileRemoteDesktopSessionRecord = {
+        id: `${protocol}-orientation`,
+        hostId: 'host-1',
+        protocol,
+        title: `${protocol.toUpperCase()} orientation`,
+        status: 'error',
+        inputMode: 'trackpad',
+        scaleMode: 'fit',
+        errorMessage: 'Test session',
+        openedAt: '2024-01-01T00:00:02.000Z',
+        lastEventAt: '2024-01-01T00:00:02.000Z',
+        lastConnectedAt: null,
+        lastDisconnectedAt: null,
+      };
+
+      act(() => {
+        useMobileAppStore.setState({
+          remoteDesktopSessions: [remoteSession],
+          activeConnectionTab: { kind: protocol, id: remoteSession.id },
+        });
+      });
+
+      let tree: renderer.ReactTestRenderer;
+      await act(async () => {
+        tree = renderer.create(<SessionScreen />);
+      });
+      expect(mockSetOrientationUnlocked).toHaveBeenLastCalledWith(true);
+
+      await act(async () => {
+        useMobileAppStore.setState({
+          activeConnectionTab: { kind: 'terminal', id: session.id },
+        });
+      });
+      expect(mockSetOrientationUnlocked).toHaveBeenLastCalledWith(false);
+
+      await act(async () => {
+        useMobileAppStore.setState({
+          activeConnectionTab: { kind: protocol, id: remoteSession.id },
+        });
+      });
+      expect(mockSetOrientationUnlocked).toHaveBeenLastCalledWith(true);
+
+      await act(async () => {
+        mockScreenFocused = false;
+        tree!.update(<SessionScreen />);
+      });
+      expect(mockSetOrientationUnlocked).toHaveBeenLastCalledWith(false);
+
+      await act(async () => {
+        mockScreenFocused = true;
+        tree!.update(<SessionScreen />);
+      });
+      expect(mockSetOrientationUnlocked).toHaveBeenLastCalledWith(true);
+
+      await act(async () => {
+        tree!.unmount();
+      });
+      expect(mockSetOrientationUnlocked).toHaveBeenLastCalledWith(false);
+    },
+  );
+
+  it('renders RDP session tab and handles close', async () => {
+    const rdSession: MobileRemoteDesktopSessionRecord = {
+      id: 'rd-1',
+      hostId: 'host-1',
+      protocol: 'rdp',
+      title: 'My RDP',
+      status: 'error',
+      inputMode: 'trackpad',
+      scaleMode: 'fit',
+      errorMessage: 'Native RDP engine is not available on this build.',
+      openedAt: '2024-01-01T00:00:02.000Z',
+      lastEventAt: '2024-01-01T00:00:02.000Z',
+      lastConnectedAt: null,
+      lastDisconnectedAt: null,
+    };
+
+    const disconnectRd = jest.fn(async () => undefined);
+    act(() => {
+      useMobileAppStore.setState(state => ({
+        ...state,
+        remoteDesktopSessions: [rdSession],
+        activeConnectionTab: { kind: 'rdp', id: 'rd-1' },
+        connectionViews: {
+          'rd-1': {
+            hostId: 'host-1',
+            hasTailnet: false,
+            hostKind: 'rdp',
+            stage: 'ssm-tunnel',
+            ssmTunnel: true,
+            failureMessage: rdSession.errorMessage ?? undefined,
+          },
+        },
+        disconnectRemoteDesktopSession: disconnectRd,
+      }));
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+
+    // The RD surface should be rendered
+    const surface = tree!.root.findByProps({
+      testID: 'remote-desktop-surface-rd-1',
+    });
+    expect(surface).toBeTruthy();
+    const rendered = collectText(tree!.toJSON());
+    expect(rendered).toContain('My RDP');
+    expect(rendered).toContain('RDP');
+    expect(rendered).toContain('SSM 연결');
+    expect(rendered).toContain(rdSession.errorMessage);
+
+    const tabCloseButton = tree!.root.find(
+      node => node.props.accessibilityLabel === 'My RDP 닫기',
+    );
+    const stopPropagation = jest.fn();
+    await act(async () => {
+      await tabCloseButton.props.onPress({ stopPropagation });
+    });
+    expect(stopPropagation).toHaveBeenCalled();
+    expect(disconnectRd).toHaveBeenCalledWith('rd-1');
 
     await act(async () => {
       tree!.unmount();

@@ -23,6 +23,7 @@ const outputApkPath = path.join(
 );
 const cmakeBuildPath = path.join(androidRoot, "app", ".cxx");
 const defaultReleaseArchitectures = "arm64-v8a";
+const remoteDesktopArchitectures = new Set(["arm64-v8a", "x86_64"]);
 
 function resolveReleaseArchitectures() {
   const value =
@@ -35,7 +36,16 @@ function resolveReleaseArchitectures() {
   if (architectures.length === 0) {
     throw new Error("At least one Android release architecture is required.");
   }
-  return architectures.join(",");
+  const unsupported = architectures.filter(
+    (architecture) => !remoteDesktopArchitectures.has(architecture),
+  );
+  if (unsupported.length > 0) {
+    throw new Error(
+      `Remote desktop native libraries do not support Android release ABI(s): ${unsupported.join(", ")}. ` +
+        `Expected only: ${[...remoteDesktopArchitectures].join(", ")}.`,
+    );
+  }
+  return [...new Set(architectures)].join(",");
 }
 
 function resolveApkSigner(androidEnv) {

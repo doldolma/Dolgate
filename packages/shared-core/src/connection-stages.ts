@@ -85,7 +85,9 @@ export interface ConnectionStageRawText {
   text: string;
 }
 
-export type ConnectionStageDetailPart = ConnectionStageText | ConnectionStageRawText;
+export type ConnectionStageDetailPart =
+  | ConnectionStageText
+  | ConnectionStageRawText;
 
 export interface ConnectionStage {
   /** 목록 안에서 고유한 값. 화면이 키로 쓴다. */
@@ -132,7 +134,10 @@ export interface ConnectionStageSubject {
   source?: string | null;
 }
 
-function text(key: string, params?: Record<string, string | number>): ConnectionStageText {
+function text(
+  key: string,
+  params?: Record<string, string | number>,
+): ConnectionStageText {
   return params ? { key, params } : { key };
 }
 
@@ -192,7 +197,9 @@ export function resolveConnectionTransport(
 }
 
 /** 호스트에 실제로 붙는 마지막 단계의 라벨. 없는 종류(로컬)는 null. */
-function transportStageLabel(transport: ConnectionTransport): ConnectionStageText | null {
+function transportStageLabel(
+  transport: ConnectionTransport,
+): ConnectionStageText | null {
   switch (transport) {
     case "local":
       return null;
@@ -420,13 +427,24 @@ export interface ConnectionStagesInput {
 export function resolveConnectionStages(
   input: ConnectionStagesInput,
 ): ConnectionStage[] {
-  const { subject, tailnetStatus, hasTailscale, failureLayer, failureMessage } = input;
-  const transport = resolveConnectionTransport(subject, input.hostKind, input.awsPlatform);
+  const { subject, tailnetStatus, hasTailscale, failureLayer, failureMessage } =
+    input;
+  const transport = resolveConnectionTransport(
+    subject,
+    input.hostKind,
+    input.awsPlatform,
+  );
   const stages: ConnectionStage[] = hasTailscale
-    ? resolveTailscaleStages(tailnetStatus, failureLayer === "tailscale", input.targetAddress)
+    ? resolveTailscaleStages(
+        tailnetStatus,
+        failureLayer === "tailscale",
+        input.targetAddress,
+      )
     : [];
 
-  const stage = (subject?.stage ?? undefined) as TerminalConnectionStage | undefined;
+  const stage = (subject?.stage ?? undefined) as
+    | TerminalConnectionStage
+    | undefined;
   const failed = subject?.status === "error";
   const connected = subject?.status === "connected";
   // Tailscale 을 쓰는 호스트는 그 계층을 통과해야 호스트 키를 확인할 수 있다. 판정은 코어가 한
@@ -435,7 +453,9 @@ export function resolveConnectionStages(
   // degraded 를 함께 보는 이유: 코어가 동기화 없이 진행하기로 했으면 다음 관문은 실제로 진행 중이다.
   // 그것을 "아직" 으로 그리면 코어가 넘긴 연결을 화면이 되돌려 세워 둔 것처럼 보인다.
   const tailscaleReady =
-    !hasTailscale || tailnetStatus?.ready === true || tailnetStatus?.degraded === true;
+    !hasTailscale ||
+    tailnetStatus?.ready === true ||
+    tailnetStatus?.degraded === true;
 
   // SSH 가 실패했다는 것은 그 앞의 키 확인은 통과했다는 뜻이다. 아직 안 한 것처럼 두면 사용자는
   // 키 문제를 의심하러 간다.
@@ -444,10 +464,12 @@ export function resolveConnectionStages(
     failureLayer === "ssh" ||
     stage === "connecting" ||
     stage === "waiting-shell" ||
-    stage === "waiting-interactive-auth";
+    stage === "waiting-interactive-auth" ||
+    stage === "ssh-tunnel-gateway" ||
+    stage === "ssh-tunnel-open";
   // 호스트 키는 SSH 를 타는 종류만 확인한다. RDP 는 서버 인증서를 쓰지만 그 확인은 이 화면이
   // 아니라 전용 화면에서 받으므로, 여기서 관문으로 세우면 상태를 알 수 없는 줄이 하나 늘어난다.
-  const checksHostKey = transport === "ssh";
+  const checksHostKey = transport === "ssh" || Boolean(input.tunnelLabel);
   if (checksHostKey) {
     stages.push({
       id: "host-key",
@@ -482,7 +504,13 @@ export function resolveConnectionStages(
   // 못 붙은 것이면 그쪽 자격증명 문제이고, 통로는 열렸는데 그 뒤가 막힌 것이면 원격에 VNC 가
   // 안 떠 있다는 뜻이다. 상태는 코어가 보내는 진행 단계로만 채운다(추측하지 않는다).
   const tunnelStages = input.tunnelLabel
-    ? resolveTunnelStages(input.tunnelLabel, stage, tailscaleReady, connected, failed)
+    ? resolveTunnelStages(
+        input.tunnelLabel,
+        stage,
+        tailscaleReady,
+        connected,
+        failed,
+      )
     : [];
   stages.push(...tunnelStages);
   const tunnelOpen =

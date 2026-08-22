@@ -1,4 +1,3 @@
-use std::ffi::CString;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::fd::{AsFd, AsRawFd};
 use std::os::unix::fs::MetadataExt;
@@ -25,6 +24,23 @@ pub struct DriveRoot {
     pub read_only: bool,
 }
 
+#[derive(Debug, Clone)]
+struct OpenFileContext {
+    device_id: u32,
+    root: DriveRoot,
+    path: String,
+}
+
+/// Bound every server-controlled read before allocating its response buffer.
+const MAX_DEVICE_READ_BYTES: u32 = 1024 * 1024;
+
+fn checked_device_read_length(length: u32) -> Option<usize> {
+    if length > MAX_DEVICE_READ_BYTES {
+        return None;
+    }
+    usize::try_from(length).ok()
+}
+
 #[derive(Debug, Default)]
 pub struct NixRdpdrBackend {
     file_id: u32,
@@ -35,7 +51,9 @@ pub struct NixRdpdrBackend {
     /// 보여 줬다. 요청의 device_id 로 루트를 골라야 폴더별로 갈린다.
     roots: std::collections::HashMap<u32, DriveRoot>,
     file_map: std::collections::HashMap<u32, std::fs::File>,
-    file_path_map: std::collections::HashMap<u32, String>,
+    /// The device/root/policy that authorized each open file ID. Follow-up
+    /// requests must match this owner instead of trusting their claimed device.
+    file_context_map: std::collections::HashMap<u32, OpenFileContext>,
     file_dir_map: std::collections::HashMap<u32, OwningIter>,
 }
 
@@ -62,6 +80,38 @@ impl NixRdpdrBackend {
     /// 이 장치가 읽기 전용인지. 모르는 장치는 쓰기를 막는다(안전한 쪽).
     fn is_read_only(&self, device_id: u32) -> bool {
         self.root_of(device_id).map(|root| root.read_only).unwrap_or(true)
+    }
+
+    fn file_context_for_ids(&self, device_id: u32, file_id: u32) -> Option<&OpenFileContext> {
+        self.file_context_map
+            .get(&file_id)
+            .filter(|context| context.device_id == device_id)
+    }
+
+    fn file_context_for(&self, request: &DeviceIoRequest) -> Option<&OpenFileContext> {
+        self.file_context_for_ids(request.device_id, request.file_id)
+    }
+
+    fn register_file(&mut self, file_id: u32, device_id: u32, path: String, file: std::fs::File) {
+        let root = self
+            .root_of(device_id)
+            .cloned()
+            .expect("device root was validated before opening a file");
+        self.file_map.insert(file_id, file);
+        self.file_context_map.insert(
+            file_id,
+            OpenFileContext {
+                device_id,
+                root,
+                path,
+            },
+        );
+    }
+
+    fn remove_file(&mut self, file_id: u32) {
+        self.file_map.remove(&file_id);
+        self.file_context_map.remove(&file_id);
+        self.file_dir_map.remove(&file_id);
     }
 }
 
@@ -106,8 +156,12 @@ impl RdpdrBackend for NixRdpdrBackend {
 }
 
 pub(crate) fn write_device(backend: &mut NixRdpdrBackend, req_inner: DeviceWriteRequest) -> PduResult<Vec<SvcMessage>> {
-    // PATCH (Dolgate): 읽기 전용 공유에서는 쓰기를 거절한다. 장치별로 다르다.
-    if backend.is_read_only(req_inner.device_io_request.device_id) {
+    // Mutation policy belongs to the opened handle. A server must not pair a
+    // read-only handle with another drive's writable device ID.
+    if backend
+        .file_context_for(&req_inner.device_io_request)
+        .is_some_and(|context| context.root.read_only)
+    {
         return Ok(vec![SvcMessage::from(RdpdrPdu::DeviceWriteResponse(
             DeviceWriteResponse {
                 device_io_reply: DeviceIoResponse::new(
@@ -171,6 +225,19 @@ pub(crate) fn write_device(backend: &mut NixRdpdrBackend, req_inner: DeviceWrite
 }
 
 pub(crate) fn read_device(backend: &mut NixRdpdrBackend, req_inner: DeviceReadRequest) -> PduResult<Vec<SvcMessage>> {
+    let Some(read_length) = checked_device_read_length(req_inner.length) else {
+        warn!(length = req_inner.length, "Refusing oversized drive read");
+        return Ok(vec![SvcMessage::from(RdpdrPdu::DeviceReadResponse(
+            DeviceReadResponse {
+                device_io_reply: DeviceIoResponse::new(
+                    req_inner.device_io_request,
+                    NtStatus::UNSUCCESSFUL,
+                ),
+                read_data: Vec::new(),
+            },
+        ))]);
+    };
+
     return process_dependent_file(
         backend,
         req_inner.device_io_request,
@@ -181,7 +248,7 @@ pub(crate) fn read_device(backend: &mut NixRdpdrBackend, req_inner: DeviceReadRe
             });
             Ok(vec![SvcMessage::from(res)])
         },
-        |file, request| match read_inner(file, req_inner.offset, usize::try_from(req_inner.length).unwrap()) {
+        |file, request| match read_inner(file, req_inner.offset, read_length) {
             Ok(buf) => {
                 let res = RdpdrPdu::DeviceReadResponse(DeviceReadResponse {
                     device_io_reply: DeviceIoResponse::new(request, NtStatus::SUCCESS),
@@ -199,6 +266,7 @@ pub(crate) fn read_device(backend: &mut NixRdpdrBackend, req_inner: DeviceReadRe
             }
         },
     );
+
     fn read_inner(file: &mut std::fs::File, offset: u64, length: usize) -> std::io::Result<Vec<u8>> {
         let sf = SeekFrom::Start(offset);
         file.seek(sf)?;
@@ -211,11 +279,15 @@ pub(crate) fn read_device(backend: &mut NixRdpdrBackend, req_inner: DeviceReadRe
 }
 
 pub(crate) fn close_device(backend: &mut NixRdpdrBackend, req_inner: DeviceCloseRequest) -> PduResult<Vec<SvcMessage>> {
-    backend.file_map.remove(&req_inner.device_io_request.file_id);
-    backend.file_path_map.remove(&req_inner.device_io_request.file_id);
-    backend.file_dir_map.remove(&req_inner.device_io_request.file_id);
+    let status = if backend.file_context_for(&req_inner.device_io_request).is_some() {
+        backend.remove_file(req_inner.device_io_request.file_id);
+        NtStatus::SUCCESS
+    } else {
+        // Do not let one drive close or probe another drive's handle.
+        NtStatus::NO_SUCH_FILE
+    };
     let res = RdpdrPdu::DeviceCloseResponse(DeviceCloseResponse {
-        device_io_response: DeviceIoResponse::new(req_inner.device_io_request, NtStatus::SUCCESS),
+        device_io_response: DeviceIoResponse::new(req_inner.device_io_request, status),
     });
     Ok(vec![SvcMessage::from(res)])
 }
@@ -224,14 +296,18 @@ pub(crate) fn query_information(
     backend: &mut NixRdpdrBackend,
     req_inner: ServerDriveQueryInformationRequest,
 ) -> PduResult<Vec<SvcMessage>> {
-    match backend.file_map.get(&req_inner.device_io_request.file_id) {
-        Some(file) => match file.metadata() {
+    match backend
+        .file_context_for(&req_inner.device_io_request)
+        .and_then(|context| {
+            backend
+                .file_map
+                .get(&req_inner.device_io_request.file_id)
+                .map(|file| (context, file))
+        })
+    {
+        Some((context, file)) => match file.metadata() {
             Ok(meta) => {
-                let path = backend
-                    .file_path_map
-                    .get(&req_inner.device_io_request.file_id)
-                    .cloned()
-                    .unwrap_or_default();
+                let path = context.path.clone();
                 let name_index = match path.rfind('/') {
                     // in fact, index only needs to be different for existing requests
                     #[expect(clippy::arithmetic_side_effects)]
@@ -310,11 +386,14 @@ pub(crate) fn query_volume_information(
     backend: &mut NixRdpdrBackend,
     req_inner: ServerDriveQueryVolumeInformationRequest,
 ) -> PduResult<Vec<SvcMessage>> {
-    match backend.file_map.get(&req_inner.device_io_request.file_id) {
+    match backend
+        .file_context_for(&req_inner.device_io_request)
+        .and_then(|_| backend.file_map.get(&req_inner.device_io_request.file_id))
+    {
         Some(file) => {
             if let Ok(statvfs) = nix::sys::statvfs::fstatvfs(file.as_fd()) {
                 if FileSystemInformationClassLevel::FILE_FS_FULL_SIZE_INFORMATION == req_inner.fs_info_class_lvl {
-                    #[cfg_attr(target_os = "macos", expect(clippy::unnecessary_fallible_conversions))]
+                    #[cfg_attr(target_vendor = "apple", expect(clippy::unnecessary_fallible_conversions))]
                     let info = FileFsFullSizeInformation {
                         total_alloc_units: i64::try_from(statvfs.blocks()).unwrap(),
                         caller_available_alloc_units: i64::try_from(statvfs.blocks_available()).unwrap(),
@@ -378,7 +457,7 @@ pub(crate) fn query_volume_information(
                         RdpdrPdu::ClientDriveQueryVolumeInformationResponse(
                             ClientDriveQueryVolumeInformationResponse {
                                 device_io_reply: DeviceIoResponse::new(req_inner.device_io_request, NtStatus::SUCCESS),
-                                #[cfg_attr(target_os = "macos", expect(clippy::unnecessary_fallible_conversions))]
+                                #[cfg_attr(target_vendor = "apple", expect(clippy::unnecessary_fallible_conversions))]
                                 buffer: Some(FileSystemInformationClass::FileFsSizeInformation(
                                     FileFsSizeInformation {
                                         total_alloc_units: i64::try_from(statvfs.blocks()).unwrap(),
@@ -424,86 +503,78 @@ pub(crate) fn query_volume_information(
     }
 }
 
+
+fn make_set_information_resp(
+    request: &ServerDriveSetInformationRequest,
+    status: NtStatus,
+) -> PduResult<Vec<SvcMessage>> {
+    let response = ClientDriveSetInformationResponse::new(request, status)
+        .map_err(|error| encode_err!(error))?;
+    Ok(vec![SvcMessage::from(
+        RdpdrPdu::ClientDriveSetInformationResponse(response),
+    )])
+}
 pub(crate) fn set_information(
     backend: &mut NixRdpdrBackend,
     req_inner: ServerDriveSetInformationRequest,
 ) -> PduResult<Vec<SvcMessage>> {
-    match backend.file_path_map.get(&req_inner.device_io_request.file_id) {
-        Some(file) => {
-            match &req_inner.set_buffer {
-                FileInformationClass::Rename(info) => {
-                    // PATCH (Dolgate): 이름 변경의 대상도 원격이 정한다. 봉쇄하지 않으면
-                    // 공유 폴더 안의 파일을 밖으로 옮길 수 있다.
-                    let Some(base) = backend.base_of(req_inner.device_io_request.device_id)
-                    else {
-                        warn!("rename for an unknown device; refusing");
-                        return Ok(Vec::new());
-                    };
-                    let Some(to) = contained_path(base, &info.file_name) else {
-                        warn!("rename target escapes the shared folder; refusing");
-                        return Ok(Vec::new());
-                    };
-                    if let Err(error) = std::fs::rename(file, to) {
-                        warn!(?error, "Rename file error");
-                        let res = RdpdrPdu::ClientDriveSetInformationResponse(
-                            ClientDriveSetInformationResponse::new(&req_inner, NtStatus::UNSUCCESSFUL)
-                                .map_err(|e| encode_err!(e))?,
-                        );
-                        return Ok(vec![SvcMessage::from(res)]);
-                    }
-                }
-                FileInformationClass::Allocation(_) => {
-                    //nothing to do
-                }
-                FileInformationClass::Disposition(_) => {
-                    if let Err(error) = std::fs::remove_file(file) {
-                        warn!(?error, "Remove file error");
-                        let res = RdpdrPdu::ClientDriveSetInformationResponse(
-                            ClientDriveSetInformationResponse::new(&req_inner, NtStatus::UNSUCCESSFUL)
-                                .map_err(|e| encode_err!(e))?,
-                        );
-                        return Ok(vec![SvcMessage::from(res)]);
-                    }
-                }
-                FileInformationClass::EndOfFile(info) => {
-                    if let Some(file) = backend.file_map.get(&req_inner.device_io_request.file_id) {
-                        // SAFETY: the file must has been opened with write access in the last steps, since rdp prepares to set information. In addition it is a regular file.
-                        let set_end_res = unsafe { nix::libc::ftruncate(file.as_raw_fd(), info.end_of_file) };
-                        if set_end_res < 0 {
-                            let error = nix::errno::Errno::last();
-                            warn!(%error, "Failed to set end of file");
-                            let res = RdpdrPdu::ClientDriveSetInformationResponse(
-                                ClientDriveSetInformationResponse::new(&req_inner, NtStatus::UNSUCCESSFUL)
-                                    .map_err(|e| encode_err!(e))?,
-                            );
-                            return Ok(vec![SvcMessage::from(res)]);
-                        }
-                    } else {
-                        warn!("no such file");
-                        let res = RdpdrPdu::ClientDriveSetInformationResponse(
-                            ClientDriveSetInformationResponse::new(&req_inner, NtStatus::NO_SUCH_FILE)
-                                .map_err(|e| encode_err!(e))?,
-                        );
-                        return Ok(vec![SvcMessage::from(res)]);
-                    }
-                }
-                _ => {
-                    // TODO
-                }
+    let Some(context) = backend
+        .file_context_for(&req_inner.device_io_request)
+        .cloned()
+    else {
+        return make_set_information_resp(&req_inner, NtStatus::NO_SUCH_FILE);
+    };
+    if context.root.read_only {
+        return make_set_information_resp(&req_inner, NtStatus::ACCESS_DENIED);
+    }
+
+    match &req_inner.set_buffer {
+        FileInformationClass::Rename(info) => {
+            // Resolve the target against the handle owner's root, never the
+            // device ID claimed by this follow-up request.
+            let Some(to) = contained_path(&context.root.path, &info.file_name) else {
+                warn!("rename target escapes the shared folder; refusing");
+                return make_set_information_resp(&req_inner, NtStatus::ACCESS_DENIED);
+            };
+            if let Err(error) = std::fs::rename(&context.path, &to) {
+                warn!(?error, "Rename file error");
+                return make_set_information_resp(&req_inner, NtStatus::UNSUCCESSFUL);
+            }
+            if let Some(current) = backend
+                .file_context_map
+                .get_mut(&req_inner.device_io_request.file_id)
+            {
+                current.path = to;
             }
         }
-        None => {
-            warn!("no such file");
-            let res = RdpdrPdu::ClientDriveSetInformationResponse(
-                ClientDriveSetInformationResponse::new(&req_inner, NtStatus::NO_SUCH_FILE)
-                    .map_err(|e| encode_err!(e))?,
-            );
-            return Ok(vec![SvcMessage::from(res)]);
+        FileInformationClass::Allocation(_) => {
+            // Nothing to do.
+        }
+        FileInformationClass::Disposition(_) => {
+            if let Err(error) = std::fs::remove_file(&context.path) {
+                warn!(?error, "Remove file error");
+                return make_set_information_resp(&req_inner, NtStatus::UNSUCCESSFUL);
+            }
+        }
+        FileInformationClass::EndOfFile(info) => {
+            if let Some(file) = backend.file_map.get(&req_inner.device_io_request.file_id) {
+                // SAFETY: the handle was opened with write access for this operation and is a regular file.
+                let set_end_res = unsafe { nix::libc::ftruncate(file.as_raw_fd(), info.end_of_file) };
+                if set_end_res < 0 {
+                    let error = nix::errno::Errno::last();
+                    warn!(%error, "Failed to set end of file");
+                    return make_set_information_resp(&req_inner, NtStatus::UNSUCCESSFUL);
+                }
+            } else {
+                return make_set_information_resp(&req_inner, NtStatus::NO_SUCH_FILE);
+            }
+        }
+        _ => {
+            // TODO
         }
     }
-    Ok(vec![SvcMessage::from(RdpdrPdu::ClientDriveSetInformationResponse(
-        ClientDriveSetInformationResponse::new(&req_inner, NtStatus::SUCCESS).map_err(|e| encode_err!(e))?,
-    ))])
+
+    make_set_information_resp(&req_inner, NtStatus::SUCCESS)
 }
 
 // in fact, it is time in secs which is very small
@@ -603,92 +674,93 @@ pub(crate) fn make_query_dir_resp(
     }
 }
 
+fn next_contained_directory_entry(
+    base: &str,
+    parent: &str,
+    iter: &mut OwningIter,
+) -> Option<String> {
+    let canonical_base = std::fs::canonicalize(base).ok()?;
+    while let Some(entry) = iter.next() {
+        let Ok(entry) = entry else { continue };
+        let file_name = entry.file_name();
+        if file_name.to_bytes() == b"." || file_name.to_bytes() == b".." {
+            continue;
+        }
+        let Ok(file_name) = file_name.to_str() else {
+            continue;
+        };
+        let candidate = std::path::Path::new(parent).join(file_name);
+        if resolve_contained_candidate(&canonical_base, &candidate).is_some() {
+            if let Some(candidate) = candidate.to_str() {
+                return Some(candidate.to_owned());
+            }
+        }
+    }
+    None
+}
+
 pub(crate) fn query_directory(
     backend: &mut NixRdpdrBackend,
     req_inner: ServerDriveQueryDirectoryRequest,
 ) -> PduResult<Vec<SvcMessage>> {
-    match backend.file_path_map.get(&req_inner.device_io_request.file_id) {
-        Some(parent_pos_for_next) => {
-            let mut find_file_name = None;
-            if req_inner.initial_query > 0 {
-                if req_inner.path.ends_with('*') {
-                    let Some(base) = backend.base_of(req_inner.device_io_request.device_id)
-                    else {
-                        warn!("directory query for an unknown device; refusing");
-                        return Ok(Vec::new());
-                    };
-                    let mut parent = base.to_owned();
-                    let query_path = req_inner.path.replace('\\', "/");
-                    let len = query_path.len();
-                    // path ends with *, so its len > 0
-                    #[expect(clippy::arithmetic_side_effects)]
-                    parent.push_str(&query_path[0..len - 1]);
-                    if let Ok(dirp) = Dir::open(
-                        parent.as_str(),
-                        nix::fcntl::OFlag::O_RDONLY,
-                        nix::sys::stat::Mode::empty(),
-                    ) {
-                        let mut iter = dirp.into_iter();
-                        while let Some(Ok(first)) = iter.next() {
-                            let file_name = first.file_name();
-                            if CString::new(".").unwrap().as_c_str() == file_name
-                                || CString::new("..").unwrap().as_c_str() == file_name
-                            {
-                                continue;
-                            }
-                            parent.push_str(file_name.to_string_lossy().into_owned().as_str());
-                            find_file_name = Some(parent);
-                            break;
-                        }
-                        backend.file_dir_map.insert(req_inner.device_io_request.file_id, iter);
-                    }
-                } else {
-                    // PATCH (Dolgate): 질의 경로도 봉쇄한다.
-                    let Some(full_path) = backend
-                        .base_of(req_inner.device_io_request.device_id)
-                        .and_then(|base| contained_path(base, &req_inner.path))
-                    else {
-                        warn!("query path escapes the shared folder; refusing");
-                        return Ok(Vec::new());
-                    };
-                    find_file_name = Some(full_path);
-                }
-                make_query_dir_resp(
-                    find_file_name,
+    let Some(context) = backend
+        .file_context_for(&req_inner.device_io_request)
+        .cloned()
+    else {
+        warn!("directory query for an unknown or mismatched handle; refusing");
+        return make_query_dir_resp(
+            None,
+            req_inner.device_io_request,
+            req_inner.file_info_class_lvl,
+            req_inner.initial_query > 0,
+        );
+    };
+    let base = context.root.path;
+    let parent_for_next = context.path;
+
+    let mut find_file_name = None;
+    if req_inner.initial_query > 0 {
+        if req_inner.path.ends_with('*') {
+            let query_parent = req_inner.path.trim_end_matches('*');
+            let Some(parent) = contained_path(&base, query_parent) else {
+                warn!("directory query escapes the shared folder; refusing");
+                return make_query_dir_resp(
+                    None,
                     req_inner.device_io_request,
                     req_inner.file_info_class_lvl,
                     true,
-                )
-            } else {
-                if let Some(dirp_iter) = backend.file_dir_map.get_mut(&req_inner.device_io_request.file_id) {
-                    if let Some(Ok(next)) = dirp_iter.next() {
-                        let file_name = next.file_name();
-                        let mut full_path = parent_pos_for_next.clone();
-                        if !full_path.ends_with('/') {
-                            full_path.push('/');
-                        }
-                        full_path.push_str(file_name.to_string_lossy().into_owned().as_str());
-                        find_file_name = Some(full_path);
-                    }
-                }
-                make_query_dir_resp(
-                    find_file_name,
-                    req_inner.device_io_request,
-                    req_inner.file_info_class_lvl,
-                    false,
-                )
+                );
+            };
+            if let Ok(dir) = Dir::open(
+                parent.as_str(),
+                nix::fcntl::OFlag::O_RDONLY,
+                nix::sys::stat::Mode::empty(),
+            ) {
+                let mut iter = dir.into_iter();
+                find_file_name = next_contained_directory_entry(&base, &parent, &mut iter);
+                backend
+                    .file_dir_map
+                    .insert(req_inner.device_io_request.file_id, iter);
+            }
+        } else {
+            find_file_name = contained_path(&base, &req_inner.path);
+            if find_file_name.is_none() {
+                warn!("query path escapes the shared folder; refusing");
             }
         }
-        None => {
-            warn!("no file to query directory");
-            Ok(vec![SvcMessage::from(RdpdrPdu::ClientDriveQueryDirectoryResponse(
-                ClientDriveQueryDirectoryResponse {
-                    device_io_reply: DeviceIoResponse::new(req_inner.device_io_request, NtStatus::NO_SUCH_FILE),
-                    buffer: None,
-                },
-            ))])
-        }
+    } else if let Some(iter) = backend
+        .file_dir_map
+        .get_mut(&req_inner.device_io_request.file_id)
+    {
+        find_file_name = next_contained_directory_entry(&base, &parent_for_next, iter);
     }
+
+    make_query_dir_resp(
+        find_file_name,
+        req_inner.device_io_request,
+        req_inner.file_info_class_lvl,
+        req_inner.initial_query > 0,
+    )
 }
 
 fn make_create_drive_resp(
@@ -711,41 +783,81 @@ fn make_create_drive_resp(
     });
     Ok(vec![SvcMessage::from(res)])
 }
+fn make_create_error_resp(
+    device_io_request: DeviceIoRequest,
+    file_id: u32,
+    status: NtStatus,
+) -> PduResult<Vec<SvcMessage>> {
+    Ok(vec![SvcMessage::from(RdpdrPdu::DeviceCreateResponse(
+        DeviceCreateResponse {
+            device_io_reply: DeviceIoResponse::new(device_io_request, status),
+            file_id,
+            information: Information::empty(),
+        },
+    ))])
+}
+
 // in fact, index only needs to be different, so it is ok
 #[expect(clippy::arithmetic_side_effects)]
 
-/// PATCH (Dolgate): 공유 폴더 밖으로 나가는 경로를 막는다.
+/// PATCH (Dolgate): resolve an already joined candidate under one canonical share root.
 ///
-/// 상류는 `file_base` 에 원격이 준 경로를 그대로 이어붙인다. 그 경로는 원격이 통제하므로
-/// `..` 가 섞여 있으면 공유 폴더 밖의 파일이 열린다 — 사용자는 폴더 하나를 공유했다고 믿는데
-/// 홈 디렉터리 전체가 노출될 수 있다.
-///
-/// 이어붙인 뒤 정규화해서 base 안에 남는지 확인하고, 벗어나면 None 을 돌려준다. 심링크까지는
-/// 막지 못하므로(정규화는 파일시스템을 보지 않는다) 완전한 봉쇄는 아니지만, 원격이 직접
-/// 요청으로 빠져나가는 경로는 닫힌다.
+/// Existing components are canonicalized, so a symlink to a path outside the share is rejected.
+/// A not-yet-existing create/rename target is rebuilt from its nearest existing canonical parent;
+/// dangling symlinks are rejected rather than mistaken for missing path components.
+fn resolve_contained_candidate(
+    canonical_base: &std::path::Path,
+    candidate: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let mut probe = candidate;
+    let mut missing = Vec::new();
+    loop {
+        match std::fs::canonicalize(probe) {
+            Ok(mut resolved) => {
+                if !resolved.starts_with(canonical_base) {
+                    return None;
+                }
+                for component in missing.iter().rev() {
+                    resolved.push(component);
+                }
+                return resolved.starts_with(canonical_base).then_some(resolved);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // canonicalize also reports NotFound for dangling symlinks. Following one during a
+                // later create could leave the share, so distinguish it from a genuinely absent path.
+                if std::fs::symlink_metadata(probe).is_ok() {
+                    return None;
+                }
+                missing.push(probe.file_name()?.to_os_string());
+                probe = probe.parent()?;
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+/// Convert a remote Windows-style path into a canonical path confined to `file_base`.
 fn contained_path(file_base: &str, remote_path: &str) -> Option<String> {
     use std::path::{Component, PathBuf};
 
-    let mut joined = PathBuf::from(file_base);
+    let canonical_base = std::fs::canonicalize(file_base).ok()?;
+    if !canonical_base.is_dir() {
+        return None;
+    }
+    let mut joined = canonical_base.clone();
     let relative = remote_path.replace('\\', "/");
 
     for component in PathBuf::from(&relative).components() {
         match component {
             Component::Normal(part) => joined.push(part),
-            // 앞의 "/" 나 "." 은 무해하다.
             Component::RootDir | Component::CurDir => {}
-            // ".." 는 base 위로 올라가려는 시도다. 어떤 형태로든 허용하지 않는다.
-            Component::ParentDir => return None,
-            Component::Prefix(_) => return None,
+            Component::ParentDir | Component::Prefix(_) => return None,
         }
     }
 
-    let base = PathBuf::from(file_base);
-    if joined.starts_with(&base) {
-        Some(joined.to_string_lossy().into_owned())
-    } else {
-        None
-    }
+    resolve_contained_candidate(&canonical_base, &joined)?
+        .to_str()
+        .map(str::to_owned)
 }
 
 pub(crate) fn create_drive(
@@ -770,6 +882,19 @@ pub(crate) fn create_drive(
             },
         ))]);
     };
+    if backend.is_read_only(req_inner.device_io_request.device_id) {
+        let opens_existing = matches!(
+            req_inner.create_disposition,
+            CreateDisposition::FILE_OPEN | CreateDisposition::FILE_OPEN_IF
+        ) && std::fs::metadata(&path).is_ok();
+        if !opens_existing {
+            return make_create_error_resp(
+                req_inner.device_io_request,
+                file_id,
+                NtStatus::ACCESS_DENIED,
+            );
+        }
+    }
     // first process directory
     match std::fs::metadata(&path) {
         Ok(meta) => {
@@ -817,8 +942,12 @@ pub(crate) fn create_drive(
                     match fs.read(true).open(&path) {
                         Ok(file) => {
                             debug!("create drive file_id:{},path:{}", file_id, path);
-                            backend.file_map.insert(file_id, file);
-                            backend.file_path_map.insert(file_id, path.clone());
+                            backend.register_file(
+                                file_id,
+                                req_inner.device_io_request.device_id,
+                                path.clone(),
+                                file,
+                            );
                             return make_create_drive_resp(
                                 req_inner.device_io_request,
                                 req_inner.create_disposition,
@@ -844,30 +973,38 @@ pub(crate) fn create_drive(
     }
 
     let mut fs = std::fs::OpenOptions::new();
-    if CreateDisposition::FILE_OPEN_IF == req_inner.create_disposition {
-        fs.create(true).write(true).read(true);
-    }
-    if CreateDisposition::FILE_CREATE == req_inner.create_disposition {
-        fs.create_new(true).write(true).read(true);
-    }
-    if CreateDisposition::FILE_SUPERSEDE == req_inner.create_disposition {
-        fs.create(true).write(true).append(true).read(true);
-    }
-    if CreateDisposition::FILE_OPEN == req_inner.create_disposition {
+    if backend.is_read_only(req_inner.device_io_request.device_id) {
         fs.read(true);
-    }
-    if CreateDisposition::FILE_OVERWRITE == req_inner.create_disposition {
-        fs.write(true).truncate(true).read(true);
-    }
-    if CreateDisposition::FILE_OVERWRITE_IF == req_inner.create_disposition {
-        fs.write(true).truncate(true).create(true).read(true);
+    } else {
+        if CreateDisposition::FILE_OPEN_IF == req_inner.create_disposition {
+            fs.create(true).write(true).read(true);
+        }
+        if CreateDisposition::FILE_CREATE == req_inner.create_disposition {
+            fs.create_new(true).write(true).read(true);
+        }
+        if CreateDisposition::FILE_SUPERSEDE == req_inner.create_disposition {
+            fs.create(true).write(true).append(true).read(true);
+        }
+        if CreateDisposition::FILE_OPEN == req_inner.create_disposition {
+            fs.read(true);
+        }
+        if CreateDisposition::FILE_OVERWRITE == req_inner.create_disposition {
+            fs.write(true).truncate(true).read(true);
+        }
+        if CreateDisposition::FILE_OVERWRITE_IF == req_inner.create_disposition {
+            fs.write(true).truncate(true).create(true).read(true);
+        }
     }
 
     match fs.open(&path) {
         Ok(file) => {
             debug!("create drive file_id:{},path:{}", file_id, path);
-            backend.file_map.insert(file_id, file);
-            backend.file_path_map.insert(file_id, path.clone());
+            backend.register_file(
+                file_id,
+                req_inner.device_io_request.device_id,
+                path.clone(),
+                file,
+            );
             make_create_drive_resp(req_inner.device_io_request, req_inner.create_disposition, file_id)
         }
         Err(error) => {
@@ -889,6 +1026,9 @@ pub(crate) fn process_dependent_file(
     error_fx: impl Fn(DeviceIoRequest) -> PduResult<Vec<SvcMessage>>,
     fx: impl Fn(&mut std::fs::File, DeviceIoRequest) -> PduResult<Vec<SvcMessage>>,
 ) -> PduResult<Vec<SvcMessage>> {
+    if backend.file_context_for(&request).is_none() {
+        return error_fx(request);
+    }
     match backend.file_map.get_mut(&request.file_id) {
         None => error_fx(request),
         Some(file) => fx(file, request),
@@ -901,7 +1041,9 @@ pub(crate) fn process_dependent_file(
 /// 원격에 노출된다. 상류에는 루트가 하나뿐이라 이 개념 자체가 없었다.
 #[cfg(test)]
 mod root_tests {
-    use super::{DriveRoot, NixRdpdrBackend};
+    use super::{
+        DriveRoot, MAX_DEVICE_READ_BYTES, NixRdpdrBackend, checked_device_read_length,
+    };
 
     fn backend() -> NixRdpdrBackend {
         let mut roots = std::collections::HashMap::new();
@@ -947,58 +1089,232 @@ mod root_tests {
         // 쓰기를 막는 쪽이 안전하다. 어차피 경로 해석도 실패한다.
         assert!(backend().is_read_only(99));
     }
+
+    #[test]
+    fn binds_an_open_handle_to_its_original_device_policy() {
+        let mut backend = backend();
+        backend.register_file(
+            42,
+            2,
+            "/share/b/file.txt".to_owned(),
+            std::fs::File::open("/dev/null").unwrap(),
+        );
+
+        let owner = backend.file_context_for_ids(2, 42).unwrap();
+        assert!(owner.root.read_only);
+        assert_eq!(owner.path, "/share/b/file.txt");
+        assert!(backend.file_context_for_ids(1, 42).is_none());
+    }
+
+    #[test]
+    fn caps_each_server_controlled_read_before_allocation() {
+        assert_eq!(
+            checked_device_read_length(MAX_DEVICE_READ_BYTES),
+            Some(MAX_DEVICE_READ_BYTES as usize)
+        );
+        assert_eq!(checked_device_read_length(MAX_DEVICE_READ_BYTES + 1), None);
+        assert_eq!(checked_device_read_length(u32::MAX), None);
+    }
 }
 
 #[cfg(test)]
 mod containment_tests {
-    use super::contained_path;
+    use super::{contained_path, next_contained_directory_entry};
+    use nix::dir::Dir;
+    use nix::fcntl::OFlag;
+    use nix::sys::stat::Mode;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TREE: AtomicU64 = AtomicU64::new(1);
+
+    struct TestTree {
+        parent: PathBuf,
+        share: PathBuf,
+        outside: PathBuf,
+    }
+
+    impl TestTree {
+        fn new() -> Self {
+            let id = NEXT_TREE.fetch_add(1, Ordering::Relaxed);
+            let parent = std::env::temp_dir().join(format!(
+                "dolgate-rdpdr-{}-{id}",
+                std::process::id()
+            ));
+            let share = parent.join("share");
+            let outside = parent.join("outside");
+            std::fs::create_dir_all(&share).unwrap();
+            std::fs::create_dir_all(&outside).unwrap();
+            Self {
+                parent,
+                share,
+                outside,
+            }
+        }
+
+        fn share_str(&self) -> &str {
+            self.share.to_str().unwrap()
+        }
+
+        fn canonical_share(&self) -> PathBuf {
+            std::fs::canonicalize(&self.share).unwrap()
+        }
+    }
+
+    impl Drop for TestTree {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.parent);
+        }
+    }
 
     #[test]
     fn joins_a_normal_path_under_the_share() {
+        let tree = TestTree::new();
         assert_eq!(
-            contained_path("/share", "\\docs\\a.txt").as_deref(),
-            Some("/share/docs/a.txt")
+            contained_path(tree.share_str(), "\\docs\\a.txt"),
+            Some(
+                tree.canonical_share()
+                    .join("docs/a.txt")
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
+            )
         );
     }
 
     #[test]
     fn refuses_a_parent_traversal() {
-        // 원격이 통제하는 값이다. 막지 않으면 공유 폴더 밖 파일이 열린다.
-        assert_eq!(contained_path("/share", "\\..\\..\\etc\\passwd"), None);
-        assert_eq!(contained_path("/share", "..\\secret"), None);
-        assert_eq!(contained_path("/share", "\\docs\\..\\..\\secret"), None);
+        let tree = TestTree::new();
+        assert_eq!(contained_path(tree.share_str(), "\\..\\..\\etc\\passwd"), None);
+        assert_eq!(contained_path(tree.share_str(), "..\\secret"), None);
+        assert_eq!(contained_path(tree.share_str(), "\\docs\\..\\..\\secret"), None);
     }
 
     #[test]
     fn ignores_harmless_leading_separators_and_dots() {
-        assert_eq!(contained_path("/share", "\\").as_deref(), Some("/share"));
+        let tree = TestTree::new();
+        let canonical = tree.canonical_share();
         assert_eq!(
-            contained_path("/share", "\\.\\a.txt").as_deref(),
-            Some("/share/a.txt")
+            contained_path(tree.share_str(), "\\").as_deref(),
+            canonical.to_str()
+        );
+        assert_eq!(
+            contained_path(tree.share_str(), "\\.\\a.txt"),
+            Some(canonical.join("a.txt").to_str().unwrap().to_owned())
+        );
+    }
+
+    #[test]
+    fn refuses_existing_and_dangling_symlinks_that_leave_the_share() {
+        use std::os::unix::fs::symlink;
+
+        let tree = TestTree::new();
+        let outside_file = tree.outside.join("secret.txt");
+        std::fs::write(&outside_file, b"secret").unwrap();
+        symlink(&outside_file, tree.share.join("escape")).unwrap();
+        symlink(tree.outside.join("missing"), tree.share.join("dangling")).unwrap();
+
+        assert_eq!(contained_path(tree.share_str(), "escape"), None);
+        assert_eq!(contained_path(tree.share_str(), "dangling"), None);
+    }
+
+    #[test]
+    fn allows_a_symlink_only_when_its_resolved_target_stays_inside() {
+        use std::os::unix::fs::symlink;
+
+        let tree = TestTree::new();
+        let actual = tree.share.join("actual");
+        std::fs::create_dir(&actual).unwrap();
+        std::fs::write(actual.join("ok.txt"), b"ok").unwrap();
+        symlink(&actual, tree.share.join("inside")).unwrap();
+
+        assert_eq!(
+            contained_path(tree.share_str(), "inside\\ok.txt"),
+            Some(
+                std::fs::canonicalize(actual.join("ok.txt"))
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn directory_enumeration_skips_symlinks_that_leave_the_share() {
+        use std::os::unix::fs::symlink;
+
+        let tree = TestTree::new();
+        let safe_file = tree.share.join("safe.txt");
+        std::fs::write(&safe_file, b"safe").unwrap();
+        std::fs::write(tree.outside.join("secret.txt"), b"secret").unwrap();
+        symlink(&safe_file, tree.share.join("inside-link")).unwrap();
+        symlink(
+            tree.outside.join("secret.txt"),
+            tree.share.join("outside-link"),
+        )
+        .unwrap();
+        symlink(
+            tree.outside.join("missing.txt"),
+            tree.share.join("dangling-link"),
+        )
+        .unwrap();
+
+        let parent = tree.canonical_share();
+        let mut iter = Dir::open(parent.as_path(), OFlag::O_RDONLY, Mode::empty())
+            .unwrap()
+            .into_iter();
+        let mut names = Vec::new();
+        while let Some(path) = next_contained_directory_entry(
+            tree.share_str(),
+            parent.to_str().unwrap(),
+            &mut iter,
+        ) {
+            names.push(
+                Path::new(&path)
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+            );
+        }
+        names.sort();
+
+        assert_eq!(
+            names,
+            vec!["inside-link".to_owned(), "safe.txt".to_owned()]
         );
     }
 
     #[test]
     fn keeps_a_windows_style_absolute_path_inside_the_share() {
-        // Unix 에서 "C:" 는 Prefix 가 아니라 평범한 이름이라 공유 폴더 안의 디렉터리가 된다.
-        // 밖으로 나가지 않으므로 봉쇄는 성립한다 — 막을 이유가 없다.
+        let tree = TestTree::new();
         assert_eq!(
-            contained_path("/share", "C:\\Windows").as_deref(),
-            Some("/share/C:/Windows")
+            contained_path(tree.share_str(), "C:\\Windows"),
+            Some(
+                tree.canonical_share()
+                    .join("C:/Windows")
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
+            )
         );
     }
 
     #[test]
     fn never_escapes_the_share_for_any_input() {
+        let tree = TestTree::new();
+        let canonical = tree.canonical_share();
         for probe in [
             "\\..\\..\\..\\etc\\passwd",
             "....\\\\..\\secret",
             "\\docs\\..\\..\\..\\..\\root",
             "/../../etc/shadow",
         ] {
-            if let Some(joined) = contained_path("/share", probe) {
+            if let Some(joined) = contained_path(tree.share_str(), probe) {
                 assert!(
-                    joined.starts_with("/share"),
+                    Path::new(&joined).starts_with(&canonical),
                     "{probe:?} escaped to {joined}"
                 );
             }

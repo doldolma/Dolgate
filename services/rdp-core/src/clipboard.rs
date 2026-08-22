@@ -18,10 +18,23 @@ use ironrdp_cliprdr::pdu::{
     FileContentsResponse, FormatDataRequest, FormatDataResponse, LockDataId,
     OwnedFormatDataResponse,
 };
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::output::Output;
 use crate::protocol::{ClipboardTextPayload, Event};
+
+/// Match the VNC clipboard ceiling and reject before UTF-16/String/event copies.
+const MAX_CLIPBOARD_BYTES: usize = 8 * 1024 * 1024;
+
+fn clipboard_payload_is_allowed(length: usize) -> bool {
+    length <= MAX_CLIPBOARD_BYTES
+}
+
+fn encoded_utf16_len(text: &str) -> Option<usize> {
+    text.encode_utf16()
+        .try_fold(2_usize, |length, _| length.checked_add(2))
+        .filter(|length| clipboard_payload_is_allowed(*length))
+}
 
 /// [MS-RDPECLIP] 2.2.5.1.1 — UTF-16LE text, the format every Windows app offers for plain text.
 fn cf_unicodetext() -> ClipboardFormatId {
@@ -143,10 +156,11 @@ impl CliprdrBackend for TextClipboardBackend {
             "remote requested our clipboard"
         );
         // The remote is pasting and wants our data now.
-        let response = match self.local_text.as_deref() {
-            Some(text) => OwnedFormatDataResponse::new_data(encode_utf16_nul(text)),
-            None => OwnedFormatDataResponse::new_error(),
-        };
+        let response = self
+            .local_text
+            .as_deref()
+            .and_then(encode_utf16_nul)
+            .map_or_else(OwnedFormatDataResponse::new_error, OwnedFormatDataResponse::new_data);
         let _ = self.outbound.send(ClipboardMessage::SendFormatData(response));
     }
 
@@ -160,7 +174,17 @@ impl CliprdrBackend for TextClipboardBackend {
         if response.is_error() {
             return;
         }
-        let Some(text) = decode_utf16_nul(response.data()) else {
+        let data = response.data();
+        if !clipboard_payload_is_allowed(data.len()) {
+            warn!(
+                session_id = %self.session_id,
+                bytes = data.len(),
+                limit = MAX_CLIPBOARD_BYTES,
+                "dropping oversized remote clipboard"
+            );
+            return;
+        }
+        let Some(text) = decode_utf16_nul(data) else {
             return;
         };
 
@@ -180,25 +204,37 @@ impl CliprdrBackend for TextClipboardBackend {
 }
 
 impl TextClipboardBackend {
-    /// Records the local clipboard text so a later paste on the remote can be answered.
-    pub fn set_local_text(&mut self, text: String) {
+    /// Records bounded local clipboard text so a later paste on the remote can be answered.
+    pub fn set_local_text(&mut self, text: String) -> bool {
+        let Some(bytes) = encoded_utf16_len(&text) else {
+            warn!(
+                session_id = %self.session_id,
+                utf8_bytes = text.len(),
+                limit = MAX_CLIPBOARD_BYTES,
+                "dropping oversized local clipboard"
+            );
+            return false;
+        };
+        debug!(session_id = %self.session_id, bytes, "stored local clipboard");
         self.local_text = Some(text);
+        true
     }
 }
 
 /// Windows expects UTF-16LE terminated by a NUL. Omitting the terminator makes some applications
 /// paste trailing garbage.
-fn encode_utf16_nul(text: &str) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(text.len() * 2 + 2);
+fn encode_utf16_nul(text: &str) -> Option<Vec<u8>> {
+    let length = encoded_utf16_len(text)?;
+    let mut bytes = Vec::with_capacity(length);
     for unit in text.encode_utf16() {
         bytes.extend_from_slice(&unit.to_le_bytes());
     }
     bytes.extend_from_slice(&[0, 0]);
-    bytes
+    Some(bytes)
 }
 
 fn decode_utf16_nul(data: &[u8]) -> Option<String> {
-    if data.len() % 2 != 0 {
+    if !clipboard_payload_is_allowed(data.len()) || data.len() % 2 != 0 {
         return None;
     }
 
@@ -216,21 +252,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn clipboard_byte_cap_checks_limit_minus_one_limit_and_limit_plus_one() {
+        assert!(clipboard_payload_is_allowed(MAX_CLIPBOARD_BYTES - 1));
+        assert!(clipboard_payload_is_allowed(MAX_CLIPBOARD_BYTES));
+        assert!(!clipboard_payload_is_allowed(MAX_CLIPBOARD_BYTES + 1));
+    }
+
+    #[test]
+    fn utf16_length_includes_the_terminator_at_the_boundary() {
+        let mut text = "a".repeat(MAX_CLIPBOARD_BYTES / 2 - 1);
+        assert_eq!(encoded_utf16_len(&text), Some(MAX_CLIPBOARD_BYTES));
+        text.push('a');
+        assert_eq!(encoded_utf16_len(&text), None);
+    }
+
+    #[test]
     fn round_trips_text_through_the_windows_encoding() {
-        let encoded = encode_utf16_nul("hello 안녕");
+        let encoded = encode_utf16_nul("hello 안녕").unwrap();
         assert_eq!(decode_utf16_nul(&encoded).as_deref(), Some("hello 안녕"));
     }
 
     #[test]
     fn terminates_the_encoded_text_with_nul() {
-        let encoded = encode_utf16_nul("ab");
+        let encoded = encode_utf16_nul("ab").unwrap();
         // 'a', 'b', NUL — 종단자가 없으면 붙여넣을 때 뒤에 쓰레기가 딸려간다.
         assert_eq!(encoded, vec![b'a', 0, b'b', 0, 0, 0]);
     }
 
     #[test]
     fn stops_decoding_at_the_terminator() {
-        let mut data = encode_utf16_nul("keep");
+        let mut data = encode_utf16_nul("keep").unwrap();
         data.extend_from_slice(&[b'x', 0]);
         assert_eq!(decode_utf16_nul(&data).as_deref(), Some("keep"));
     }

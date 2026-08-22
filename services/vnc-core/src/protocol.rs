@@ -87,6 +87,9 @@ pub struct ConnectPayload {
     /// 일반적인 사용 방식이고, 남의 세션을 끊는 것은 사용자가 명시적으로 고를 일이다.
     #[serde(default = "default_shared")]
     pub shared: bool,
+    /// Private preface for an authenticated mobile loopback tunnel.
+    #[serde(default)]
+    pub tunnel_auth_token: Option<String>,
 }
 
 /// 입력 이벤트 묶음. 렌더러가 한 번에 여러 개를 보낸다(마우스 이동이 특히 잦다).

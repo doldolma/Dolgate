@@ -105,7 +105,73 @@ export type MobileConnectionTabRef =
   | {
       kind: "sftp";
       id: string;
+    }
+  | {
+      kind: "rdp";
+      id: string;
+    }
+  | {
+      kind: "vnc";
+      id: string;
     };
+
+// ---------------------------------------------------------------------------
+// Remote Desktop (RDP/VNC) Mobile Session Types
+// ---------------------------------------------------------------------------
+
+/** The protocol used for a remote desktop session. */
+export type RemoteDesktopProtocol = "rdp" | "vnc";
+
+/**
+ * Status lifecycle for a mobile remote desktop session. Mirrors terminal session
+ * states but avoids coupling to TerminalTab["status"].
+ */
+export type MobileRemoteDesktopSessionStatus =
+  | "connecting"
+  | "connected"
+  | "disconnecting"
+  | "error"
+  | "closed";
+
+/**
+ * Input mode for the remote desktop surface. Controls how touch events are
+ * interpreted by the native layer.
+ */
+export type RemoteDesktopInputMode = "touch" | "trackpad" | "none";
+
+/**
+ * Scale mode for the remote desktop surface.
+ */
+export type RemoteDesktopScaleMode = "fit" | "fill" | "native";
+
+/**
+ * Session record for a mobile remote desktop connection. Kept separate from
+ * MobileSessionRecord to avoid terminal-specific fields leaking in (viewport
+ * snapshot, hasReceivedOutput, isRestorable, etc.).
+ */
+export interface MobileRemoteDesktopSessionRecord {
+  id: string;
+  hostId: string;
+  protocol: RemoteDesktopProtocol;
+  title: string;
+  status: MobileRemoteDesktopSessionStatus;
+  /** Current input mode. Native layer interprets touch according to this. */
+  inputMode: RemoteDesktopInputMode;
+  /** Current scale mode for the framebuffer display. */
+  scaleMode: RemoteDesktopScaleMode;
+  /** Native framebuffer metadata; pixel bytes remain native-only. */
+  desktopWidth?: number | null;
+  desktopHeight?: number | null;
+  desktopName?: string | null;
+  /** Ephemeral connection progress shown while the session is opening. */
+  connectionStatusMessage?: string | null;
+  errorMessage?: string | null;
+  /** Tab ordering — same basis as terminal/sftp openedAt. */
+  openedAt?: string;
+  lastEventAt: string;
+  lastConnectedAt?: string | null;
+  lastDisconnectedAt?: string | null;
+}
 
 export type MobileSftpSessionStatus =
   | "connecting"

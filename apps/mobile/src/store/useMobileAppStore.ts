@@ -2,6 +2,7 @@ import { Buffer } from 'buffer';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { AppState } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import type {
   AwsProfilesServerSupport,
   AwsSftpCreateSessionRequest,
@@ -19,6 +20,7 @@ import type {
   KnownHostRecord,
   LoadedManagedSecretPayload,
   MobileConnectionTabRef,
+  MobileRemoteDesktopSessionRecord,
   ManagedAwsProfilePayload,
   MobileSessionRecord,
   MobileSettings,
@@ -28,6 +30,8 @@ import type {
   SecretMetadataRecord,
   SnippetRecord,
   SshHostRecord,
+  RdpHostRecord,
+  VncHostRecord,
   SyncPayloadV2,
   SyncStatus,
   TailnetPayload,
@@ -36,6 +40,7 @@ import type {
 } from '@dolssh/shared-core';
 import {
   buildAwsSsmKnownHostIdentity,
+  describeRdpDrives,
   computeVaultDekVerifier,
   createVaultDek,
   createVaultKdfDescriptor,
@@ -45,7 +50,6 @@ import {
   normalizeJumpHostIds,
   resolveSshHostTailnetId,
   type ConnectionFailureLayer,
-  formatSyncRevisionEtag,
   isVaultEpochRejectionCode,
   parseSyncRevisionEtag,
   getAwsEc2HostSshPort,
@@ -56,7 +60,9 @@ import {
   usesAwsServerProxy,
   type AwsSshOverSsmFallbackMemo,
   isAwsEc2HostRecord,
+  isRdpHostRecord,
   isSshHostRecord,
+  isVncHostRecord,
   MAX_HOST_STARTUP_COMMAND_LENGTH,
   normalizeServerUrl,
   resolveVaultDescriptorState,
@@ -110,6 +116,7 @@ import {
   getVaultMutationTimeoutMessage,
   VAULT_MUTATION_TIMEOUT_MS,
   refreshAuthSession,
+  resolveMobileSyncDataFloor,
   saveStoredVaultDek,
   sanitizeTerminalSnapshot,
   saveStoredAuthSession,
@@ -184,6 +191,8 @@ import {
 } from '../lib/mobile-file-transfer';
 import {
   getEngine,
+  openRemoteDesktopTunnel,
+  closeRemoteDesktopTunnel,
   type EngineConnection,
   type EngineSsmForward,
   type EngineCredential,
@@ -196,12 +205,36 @@ import {
   type EngineTailnetStatus,
 } from '../engine';
 import {
+  isNativeSessionAvailable,
+  nativeConnect,
+  nativeDisconnect,
+  nativeRefresh,
+  nativeSetActive,
+  nativeTrustCertificate,
+  subscribeToSessionEvents,
+  type RemoteDesktopConnectOptions,
+  type RemoteDesktopSessionEvent,
+} from '@dolssh/react-native-remote-desktop';
+import {
   getAwsEc2SftpDisabledMessage,
   getConnectFailureLayer,
   getConnectFailureMessage,
   getNewVaultPassphraseMessage,
 } from '../i18n/shared-messages';
 import { t } from '../i18n';
+import {
+  createRemoteDesktopSlice,
+  compactPersistedRemoteDesktopSessions,
+  getLiveRemoteDesktopSessions,
+  guardRemoteDesktopEngine,
+  setRemoteDesktopHandle,
+  removeRemoteDesktopHandle,
+  getRemoteDesktopHandle,
+  getAllRemoteDesktopHandles,
+  type RemoteDesktopRuntimeHandle,
+  type RemoteDesktopSlice,
+  type RemoteDesktopSliceState,
+} from './remoteDesktopSlice';
 
 // shared-core 는 코드만 돌려주므로, 사용자에게 보일 문구는 이 앱에서 만들어 던진다.
 function assertVaultPassphrase(passphrase: string): void {
@@ -217,6 +250,15 @@ const SFTP_TRANSFER_CHUNK_SIZE = 256 * 1024;
 const SESSION_SNAPSHOT_FLUSH_MS = 750;
 const STARTUP_REFRESH_TIMEOUT_MS = 3_000;
 const MOBILE_TAILNET_START_TIMEOUT_MS = 3 * 60 * 1_000;
+
+function canonicalizeRdpFingerprint(value: string | null | undefined): string {
+  const normalized = value?.trim().toUpperCase() ?? '';
+  const withoutPrefix = normalized.replace(/^SHA256:/, '');
+  const hex = withoutPrefix.replace(/[^0-9A-F]/g, '');
+  if (hex.length !== 64) return normalized;
+  return hex.match(/.{2}/g)?.join(':') ?? normalized;
+}
+
 /** ProxyJump 다단 깊이 상한. 데스크톱과 같은 값이다(안전장치). */
 const MOBILE_MAX_JUMP_CHAIN = 8;
 // 모듈 로드 시점에는 i18n 초기화 전이고 언어를 바꿔도 갱신되지 않으므로 호출 시점에 번역한다.
@@ -261,6 +303,18 @@ interface PendingServerKeyPromptState {
   existing?: KnownHostRecord | null;
 }
 
+interface PendingRdpCertificatePromptState {
+  sessionId: string;
+  hostId: string;
+  hostLabel: string;
+  logicalHost: string;
+  fingerprint: string;
+  previousFingerprint?: string | null;
+  subject?: string;
+  issuer?: string;
+  notAfter?: string;
+}
+
 interface PendingCredentialPromptState {
   hostId: string;
   hostLabel: string;
@@ -294,6 +348,14 @@ export interface MobileConnectionViewState {
   hasTailnet: boolean;
   /** 대상 주소. 넷맵에서 그 기기를 찾아 경로를 보여주는 데 쓴다. */
   targetAddress?: string;
+  /** Remote Desktop이면 마지막 protocol 단계를 SSH로 잘못 그리지 않게 한다. */
+  hostKind?: 'rdp' | 'vnc';
+  /** 코어/연결 배선이 확정한 현재 단계. 문구로 추측하지 않는다. */
+  stage?: string;
+  /** VNC가 SSH gateway를 거칠 때 두 tunnel 관문을 세우는 라벨. */
+  tunnelLabel?: string;
+  /** RDP가 기존 SSM port forward를 거치는지. */
+  ssmTunnel?: boolean;
   /** 사람이 호스트 키를 판단하는 중인지. */
   hostKeyPrompted?: boolean;
   /** 사람이 대화형 인증에 답하는 중인지. */
@@ -710,12 +772,16 @@ interface MobileAppState {
   sftpEditor: MobileSftpEditorState | null;
   sftpTransfers: MobileSftpTransferRecord[];
   sftpCopyBuffer: SftpCopyBuffer | null;
+  /** Remote desktop (RDP/VNC) sessions — separate lifecycle from terminal. */
+  remoteDesktopSessions: MobileRemoteDesktopSessionRecord[];
+  remoteDesktopImmersive: boolean;
   activeSessionTabId: string | null;
   activeConnectionTab: MobileConnectionTabRef | null;
   secretsByRef: Record<string, LoadedManagedSecretPayload>;
   pendingBrowserLoginState: string | null;
   pendingAwsSsoLogin: PendingAwsSsoLoginState | null;
   pendingServerKeyPrompt: PendingServerKeyPromptState | null;
+  pendingRdpCertificatePrompt: PendingRdpCertificatePromptState | null;
   pendingCredentialPrompt: PendingCredentialPromptState | null;
   pendingInteractiveAuthPrompt: PendingInteractiveAuthPromptState | null;
   /** 세션·SFTP 레코드 ID 별 연결 진행. 붙는 중에만 값이 있다. */
@@ -752,7 +818,10 @@ interface MobileAppState {
    * `saveHost` 는 SSH 호스트 전용이라(다른 종류는 거절한다) 이 한 필드만 다루는 자리를 따로
    * 둔다. 켜면 SSH 전송이 sync-api WebSocket 을 타고, 끄면 기기에서 직접 SSM 으로 붙는다.
    */
-  setAwsSsmServerProxyEnabled: (hostId: string, enabled: boolean) => Promise<void>;
+  setAwsSsmServerProxyEnabled: (
+    hostId: string,
+    enabled: boolean,
+  ) => Promise<void>;
   toggleHostFavorite: (hostId: string) => Promise<void>;
   deleteHost: (hostId: string) => Promise<void>;
   duplicateSession: (sessionId: string) => Promise<string | null>;
@@ -772,6 +841,8 @@ interface MobileAppState {
   ) => () => void;
   acceptServerKeyPrompt: () => Promise<void>;
   rejectServerKeyPrompt: () => Promise<void>;
+  acceptRdpCertificatePrompt: () => Promise<void>;
+  rejectRdpCertificatePrompt: () => Promise<void>;
   submitCredentialPrompt: (input: HostSecretInput) => Promise<void>;
   cancelCredentialPrompt: () => void;
   submitInteractiveAuthPrompt: (answer: EngineInteractiveAnswer) => void;
@@ -818,6 +889,13 @@ interface MobileAppState {
   copySftpEntries: (sftpSessionId: string, paths: string[]) => void;
   pasteSftpEntries: (sftpSessionId: string) => Promise<void>;
   clearSftpCopyBuffer: () => void;
+  // Remote Desktop (RDP/VNC) actions
+  createRemoteDesktopSession: RemoteDesktopSlice['createRemoteDesktopSession'];
+  updateRemoteDesktopSession: RemoteDesktopSlice['updateRemoteDesktopSession'];
+  removeRemoteDesktopSession: RemoteDesktopSlice['removeRemoteDesktopSession'];
+  activateRemoteDesktopSession: RemoteDesktopSlice['activateRemoteDesktopSession'];
+  setRemoteDesktopImmersive: RemoteDesktopSlice['setRemoteDesktopImmersive'];
+  disconnectRemoteDesktopSession: (sessionId: string) => Promise<void>;
 }
 
 const runtimeSessions = new Map<string, RuntimeSession>();
@@ -843,9 +921,11 @@ const pendingTailnetConnections = new Map<string, PendingTailnetConnection>();
 // Native in-app browsers have one presentation slot. Joined callers may share
 // the same URL, but a different Tailnet must not replace an authorization page
 // the user is already completing.
-let activeTailnetAuthorization:
-  | { requestIds: Set<string>; tailnetId: string; url: string }
-  | null = null;
+let activeTailnetAuthorization: {
+  requestIds: Set<string>;
+  tailnetId: string;
+  url: string;
+} | null = null;
 const runtimeSessionSnapshots = new Map<string, string>();
 const runtimeSnapshotFlushTimers = new Map<
   string,
@@ -1044,8 +1124,31 @@ function ensureSyncPollingLifecycle(): void {
           resumeSession: sessionId =>
             state.resumeSession(sessionId, { auto: true }),
         });
+        // Resume presentation only for the currently selected remote tab.
+        //
+        // 되살리는 탭은 화면을 통째로 다시 받는다. 백그라운드 동안 놓친 갱신은 damage rect 로
+        // 다시 오지 않으므로(그 픽셀이 또 바뀔 때까지) 낡은 그림이 남는다. setActive 는 표시
+        // 정책만 되돌린다.
+        for (const rdSession of getLiveRemoteDesktopSessions(
+          state.remoteDesktopSessions,
+        )) {
+          const active =
+            state.activeConnectionTab?.kind === rdSession.protocol &&
+            state.activeConnectionTab.id === rdSession.id;
+          void nativeSetActive(rdSession.id, active).catch(() => undefined);
+          if (active) {
+            void nativeRefresh(rdSession.id).catch(() => undefined);
+          }
+        }
       } else {
         stopSyncPolling();
+        // Pause all live remote desktop sessions on background
+        const state = useMobileAppStore.getState();
+        for (const rdSession of getLiveRemoteDesktopSessions(
+          state.remoteDesktopSessions,
+        )) {
+          void nativeSetActive(rdSession.id, false).catch(() => undefined);
+        }
         // Do not close Tailnet here. Browser authorization intentionally sends
         // the app to the background, and live SSH/SFTP sessions hold Tailnet
         // leases that should survive a brief app switch. The mobile Go runtime
@@ -1380,7 +1483,6 @@ async function resolveStoredVaultState(
   );
 }
 
-
 function getLiveSessions(
   sessions: MobileSessionRecord[],
 ): MobileSessionRecord[] {
@@ -1402,9 +1504,11 @@ function normalizeActiveConnectionTab(
   sftpSessions: MobileSftpSessionRecord[],
   currentTab: MobileConnectionTabRef | null,
   preferredTab?: MobileConnectionTabRef | null,
+  rdSessions?: MobileRemoteDesktopSessionRecord[],
 ): MobileConnectionTabRef | null {
   const liveSessions = getLiveSessions(sessions);
   const liveSftpSessions = getLiveSftpSessions(sftpSessions);
+  const liveRdSessions = getLiveRemoteDesktopSessions(rdSessions ?? []);
   const isValidTab = (tab: MobileConnectionTabRef | null | undefined) => {
     if (!tab) {
       return false;
@@ -1412,7 +1516,13 @@ function normalizeActiveConnectionTab(
     if (tab.kind === 'terminal') {
       return liveSessions.some(session => session.id === tab.id);
     }
-    return liveSftpSessions.some(session => session.id === tab.id);
+    if (tab.kind === 'sftp') {
+      return liveSftpSessions.some(session => session.id === tab.id);
+    }
+    if (tab.kind === 'rdp' || tab.kind === 'vnc') {
+      return liveRdSessions.some(session => session.id === tab.id);
+    }
+    return false;
   };
 
   if (isValidTab(preferredTab)) {
@@ -1428,6 +1538,10 @@ function normalizeActiveConnectionTab(
   const firstSftp = liveSftpSessions[0];
   if (firstSftp) {
     return { kind: 'sftp', id: firstSftp.id };
+  }
+  const firstRd = liveRdSessions[0];
+  if (firstRd) {
+    return { kind: firstRd.protocol, id: firstRd.id };
   }
   return null;
 }
@@ -2027,6 +2141,8 @@ function createEmptyProtectedState(): Pick<
   | 'sftpSessions'
   | 'sftpTransfers'
   | 'sftpCopyBuffer'
+  | 'remoteDesktopSessions'
+  | 'remoteDesktopImmersive'
   | 'activeSessionTabId'
   | 'activeConnectionTab'
 > {
@@ -2044,6 +2160,8 @@ function createEmptyProtectedState(): Pick<
     sftpSessions: [],
     sftpTransfers: [],
     sftpCopyBuffer: null,
+    remoteDesktopSessions: [],
+    remoteDesktopImmersive: false,
     activeSessionTabId: null,
     activeConnectionTab: null,
   };
@@ -2188,6 +2306,33 @@ async function disconnectAllRuntimeSessions(): Promise<void> {
   for (const sessionId of [...runtimeSftpSessions.keys()]) {
     await disposeRuntimeSftpSession(sessionId);
   }
+
+  const pendingCertificate =
+    useMobileAppStore.getState().pendingRdpCertificatePrompt;
+  if (pendingCertificate) {
+    useMobileAppStore.setState({ pendingRdpCertificatePrompt: null });
+    await nativeTrustCertificate(pendingCertificate.sessionId, false).catch(
+      () => undefined,
+    );
+  }
+
+  // Native session first, then every transport resource, then its listener.
+  for (const [sessionId, handle] of [...getAllRemoteDesktopHandles()]) {
+    handle.cancelled = true;
+    if (handle.dispose) {
+      await handle.dispose();
+      continue;
+    }
+
+    // Compatibility fallback for a handle created before the unified disposer was installed.
+    removeRemoteDesktopHandle(sessionId);
+    await nativeDisconnect(sessionId).catch(() => undefined);
+    if (handle.tunnelId) {
+      await closeRemoteDesktopTunnel(handle.tunnelId).catch(() => undefined);
+    }
+    await handle.ssmForward?.stop().catch(() => undefined);
+    handle.eventUnsubscribe?.();
+  }
 }
 
 export const useMobileAppStore = create<MobileAppState>()(
@@ -2246,6 +2391,12 @@ export const useMobileAppStore = create<MobileAppState>()(
       };
 
       const clearPromptState = () => {
+        const rdpCertificate = get().pendingRdpCertificatePrompt;
+        if (rdpCertificate) {
+          void nativeTrustCertificate(rdpCertificate.sessionId, false).catch(
+            () => undefined,
+          );
+        }
         pendingServerKeyResolver?.(false);
         pendingServerKeyResolver = null;
         pendingCredentialResolver?.(null);
@@ -2257,6 +2408,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         set({
           pendingAwsSsoLogin: null,
           pendingServerKeyPrompt: null,
+          pendingRdpCertificatePrompt: null,
           pendingCredentialPrompt: null,
           pendingInteractiveAuthPrompt: null,
           pendingStartupCommandPrompt: null,
@@ -2290,6 +2442,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           pendingBrowserLoginState: null,
           pendingAwsSsoLogin: null,
           pendingServerKeyPrompt: null,
+          pendingRdpCertificatePrompt: null,
           pendingCredentialPrompt: null,
           pendingInteractiveAuthPrompt: null,
           pendingStartupCommandPrompt: null,
@@ -2908,6 +3061,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               resolveVaultKeyForPush(session),
             ),
             resolveVaultEpochForPush(),
+            resolveMobileSyncDataFloor(get().hosts),
           );
           storePushedRevision(pushedRevision);
           set(state => ({
@@ -3037,20 +3191,22 @@ export const useMobileAppStore = create<MobileAppState>()(
         if (recordId) {
           patchConnectionView(recordId, { interactiveAuthPending: true });
         }
-        const answer = await new Promise<EngineInteractiveAnswer | null>(resolve => {
-          // 앞의 물음이 아직 떠 있으면 그것부터 접는다. 슬롯이 하나뿐이라 덮어쓰면 앞의 것을
-          // 아무도 답할 수 없고, 그 연결이 예산까지 멈춘다.
-          pendingInteractiveAuthResolver?.(null);
-          pendingInteractiveAuthResolver = resolve;
-          set({
-            pendingInteractiveAuthPrompt: {
-              hostId: host.id,
-              hostLabel: host.label,
-              challenge,
-              hopLabel,
-            },
-          });
-        });
+        const answer = await new Promise<EngineInteractiveAnswer | null>(
+          resolve => {
+            // 앞의 물음이 아직 떠 있으면 그것부터 접는다. 슬롯이 하나뿐이라 덮어쓰면 앞의 것을
+            // 아무도 답할 수 없고, 그 연결이 예산까지 멈춘다.
+            pendingInteractiveAuthResolver?.(null);
+            pendingInteractiveAuthResolver = resolve;
+            set({
+              pendingInteractiveAuthPrompt: {
+                hostId: host.id,
+                hostLabel: host.label,
+                challenge,
+                hopLabel,
+              },
+            });
+          },
+        );
         if (recordId) {
           patchConnectionView(recordId, { interactiveAuthPending: false });
         }
@@ -3110,7 +3266,8 @@ export const useMobileAppStore = create<MobileAppState>()(
           if (!sshUsername || !availabilityZone) {
             // 계정·AZ 는 인스턴스 메타데이터에서 온다. 없으면 SSH 로 갈 수 없다 — 폴백 사유로
             // 남기고 SSM 셸로 간다(데스크톱도 이 경우 SSH 를 시도하지 않는다).
-            sshFailure = host.awsSshMetadataError || t('store.awsSftpUsernameRequired');
+            sshFailure =
+              host.awsSshMetadataError || t('store.awsSftpUsernameRequired');
           } else {
             let forward: EngineSsmForward | null = null;
             try {
@@ -3643,7 +3800,7 @@ export const useMobileAppStore = create<MobileAppState>()(
       };
 
       const setConnectionProgress = (
-        kind: 'terminal' | 'sftp',
+        kind: 'terminal' | 'sftp' | 'remoteDesktop',
         recordId: string,
         message: string | null,
       ) => {
@@ -3655,6 +3812,12 @@ export const useMobileAppStore = create<MobileAppState>()(
               lastEventAt: now,
             }),
           }));
+          return;
+        }
+        if (kind === 'remoteDesktop') {
+          get().updateRemoteDesktopSession(recordId, {
+            connectionStatusMessage: message,
+          });
           return;
         }
         set(state => ({
@@ -3710,11 +3873,13 @@ export const useMobileAppStore = create<MobileAppState>()(
       };
 
       const prepareTailnetForConnection = async (input: {
-        kind: 'terminal' | 'sftp';
+        kind: 'terminal' | 'sftp' | 'remoteDesktop';
         recordId: string;
         hostId: string;
         resolution: Extract<SyncedTailnetRouteResolution, { kind: 'tailnet' }>;
-      }): Promise<Extract<SyncedTailnetRouteResolution, { kind: 'tailnet' }>> => {
+      }): Promise<
+        Extract<SyncedTailnetRouteResolution, { kind: 'tailnet' }>
+      > => {
         tailnetRequestCounter += 1;
         const requestId = `mobile-${input.kind}-${input.recordId}-${tailnetRequestCounter}`;
         const pendingRequest: PendingTailnetConnection = {
@@ -3797,17 +3962,24 @@ export const useMobileAppStore = create<MobileAppState>()(
             }
             throw new Error(t('store.tailnetBrowserOpenFailed'));
           }
-          const currentHost = get().hosts.find(host => host.id === input.hostId);
+          const currentHost = get().hosts.find(
+            host => host.id === input.hostId,
+          );
           // **처음 정할 때와 같은 규칙으로 다시 정해야 한다.** 여기서 대상의 tailnetId 를 직접
           // 읽으면, 첫 홉의 tailnet 으로 노드를 올려놓고 대상 기준으로 검사하게 된다 — 대상에
           // 설정이 없는 경유 구성에서는 그 둘이 언제나 달라서 붙을 때마다 "설정이 변경되었습니다"
           // 로 끝났다. 같은 것을 두 곳에서 다르게 판정한 것이 원인이다.
           const currentResolution = currentHost
             ? resolveSyncedTailnetRoute(
-                { tailnetId: resolveSshHostTailnetId(currentHost, get().hosts) },
+                {
+                  tailnetId: resolveSshHostTailnetId(currentHost, get().hosts),
+                },
                 get().tailnets,
               )
-            : { kind: 'missing' as const, tailnetId: input.resolution.tailnetId };
+            : {
+                kind: 'missing' as const,
+                tailnetId: input.resolution.tailnetId,
+              };
           if (
             !isSyncedTailnetConfigCurrent(
               input.resolution.tailnetId,
@@ -3815,7 +3987,8 @@ export const useMobileAppStore = create<MobileAppState>()(
             ) ||
             currentResolution.kind !== 'tailnet' ||
             currentResolution.tailnetId !== input.resolution.tailnetId ||
-            currentResolution.configSignature !== input.resolution.configSignature
+            currentResolution.configSignature !==
+              input.resolution.configSignature
           ) {
             throw new TailnetConfigurationChangedError();
           }
@@ -4093,7 +4266,8 @@ export const useMobileAppStore = create<MobileAppState>()(
             // 실패한 뒤에 말해 주면 이미 끊긴 연결을 다시 시작해야 한다.
             onBanner: bannerText =>
               patchConnectionView(sftpSessionRecord.id, { banner: bannerText }),
-            onHopProgress: hop => patchConnectionView(sftpSessionRecord.id, { hop }),
+            onHopProgress: hop =>
+              patchConnectionView(sftpSessionRecord.id, { hop }),
             onDisconnected: () => {
               closedDuringConnect = true;
               if (runtimeSftpSessions.has(sftpSessionRecord.id)) {
@@ -4406,6 +4580,724 @@ export const useMobileAppStore = create<MobileAppState>()(
         );
       };
 
+      // ------------------------------------------------------------------
+      // Remote Desktop (VNC/RDP) connection path
+      // ------------------------------------------------------------------
+
+      const rejectPendingRdpCertificateForSession = async (rdId: string) => {
+        const prompt = get().pendingRdpCertificatePrompt;
+        if (!prompt || prompt.sessionId !== rdId) return;
+        set({ pendingRdpCertificatePrompt: null });
+        await nativeTrustCertificate(rdId, false).catch(() => undefined);
+      };
+
+      const releaseRemoteDesktopRuntime = async (
+        rdId: string,
+        expectedRuntime?: RemoteDesktopRuntimeHandle,
+      ) => {
+        const runtime = expectedRuntime ?? getRemoteDesktopHandle(rdId);
+        if (!runtime) {
+          await rejectPendingRdpCertificateForSession(rdId);
+          return;
+        }
+
+        runtime.cancelled = true;
+        if (runtime.disposePromise) {
+          await runtime.disposePromise;
+          return;
+        }
+        if (getRemoteDesktopHandle(rdId) === runtime) {
+          removeRemoteDesktopHandle(rdId);
+        }
+
+        runtime.disposePromise = (async () => {
+          await rejectPendingRdpCertificateForSession(rdId);
+
+          // An SSH-backed tunnel can still be inside host-key/auth/dial before
+          // OpenRemoteDesktopTunnel has returned an owned tunnel ID.
+          const sshConnectId = runtime.sshConnectId;
+          runtime.sshConnectId = null;
+          if (sshConnectId) {
+            await getEngine()
+              .cancelConnect(sshConnectId)
+              .catch(() => undefined);
+          }
+
+          await nativeDisconnect(rdId).catch(() => undefined);
+
+          const tunnelId = runtime.tunnelId;
+          runtime.tunnelId = null;
+          if (tunnelId) {
+            await closeRemoteDesktopTunnel(tunnelId).catch(() => undefined);
+          }
+
+          const ssmForward = runtime.ssmForward;
+          runtime.ssmForward = null;
+          await ssmForward?.stop().catch(() => undefined);
+
+          const unsubscribe = runtime.eventUnsubscribe;
+          runtime.eventUnsubscribe = null;
+          unsubscribe?.();
+        })();
+        await runtime.disposePromise;
+      };
+
+      const persistRdpCertificateFingerprint = async (
+        hostId: string,
+        fingerprint: string,
+      ) => {
+        const current = get().hosts.find(item => item.id === hostId);
+        if (!current || !isRdpHostRecord(current)) return;
+
+        const record: RdpHostRecord = {
+          ...current,
+          certificateFingerprint: fingerprint,
+          updatedAt: new Date().toISOString(),
+        };
+        set(state => ({
+          hosts: sortHosts([
+            ...state.hosts.filter(item => item.id !== record.id),
+            record,
+          ]),
+          syncStatus: { ...state.syncStatus, pendingPush: true },
+        }));
+
+        // Trust is already explicit at this point. Keep the local pin even if
+        // the network is down, and retry its encrypted sync through normal sync.
+        if (!get().auth.session) return;
+        try {
+          await callWithFreshAccessToken(async accessToken => {
+            const currentSession = get().auth.session;
+            if (!currentSession) return;
+            const pushedRevision = await postSyncSnapshot(
+              get().settings.serverUrl,
+              accessToken,
+              buildHostMutationSyncPayload(
+                { hosts: [record], secrets: [] },
+                resolveVaultKeyForPush(currentSession),
+              ),
+              resolveVaultEpochForPush(),
+              resolveMobileSyncDataFloor(get().hosts),
+            );
+            storePushedRevision(pushedRevision);
+          });
+        } catch (error) {
+          await handleVaultDekMismatchError(error).catch(() => undefined);
+          set(state => ({
+            syncStatus: { ...state.syncStatus, pendingPush: true },
+          }));
+        }
+      };
+
+      const handleRdpCertificateEvent = async (
+        rdId: string,
+        hostId: string,
+        event: RemoteDesktopSessionEvent,
+      ) => {
+        const fingerprint = canonicalizeRdpFingerprint(event.fingerprint);
+        if (!fingerprint) {
+          await nativeTrustCertificate(rdId, false).catch(() => undefined);
+          throw new Error(t('session.rdpCertificateMissing'));
+        }
+
+        const current = get().hosts.find(item => item.id === hostId);
+        if (!current || !isRdpHostRecord(current)) {
+          await nativeTrustCertificate(rdId, false).catch(() => undefined);
+          return;
+        }
+
+        const previous = current.certificateFingerprint?.trim() || null;
+        if (previous && canonicalizeRdpFingerprint(previous) === fingerprint) {
+          await nativeTrustCertificate(rdId, true);
+          return;
+        }
+
+        const pending = get().pendingRdpCertificatePrompt;
+        if (pending?.sessionId === rdId) return;
+        if (pending) {
+          set({ pendingRdpCertificatePrompt: null });
+          await nativeTrustCertificate(pending.sessionId, false).catch(
+            () => undefined,
+          );
+        }
+
+        // The Rust core is paused between TLS and CredSSP here. No credential
+        // bytes are sent until one of the explicit actions supplies a verdict.
+        set({
+          pendingRdpCertificatePrompt: {
+            sessionId: rdId,
+            hostId: current.id,
+            hostLabel: current.label,
+            logicalHost: current.hostname,
+            fingerprint,
+            previousFingerprint: previous,
+            subject: event.subject,
+            issuer: event.issuer,
+            notAfter: event.notAfter,
+          },
+        });
+      };
+
+      const connectRemoteDesktopSession = async (
+        rdId: string,
+        host: RdpHostRecord | VncHostRecord,
+      ) => {
+        const protocol = host.kind;
+        const runtime: RemoteDesktopRuntimeHandle = {
+          sessionId: rdId,
+          cancelled: false,
+          nativeStarted: false,
+          tunnelId: null,
+          sshConnectId: null,
+          ssmForward: null,
+          eventUnsubscribe: null,
+          disposePromise: null,
+        };
+        runtime.dispose = () => releaseRemoteDesktopRuntime(rdId, runtime);
+        setRemoteDesktopHandle(rdId, runtime);
+
+        const assertRuntimeCurrent = () => {
+          if (runtime.cancelled || getRemoteDesktopHandle(rdId) !== runtime) {
+            throw new Error(t('store.connectCancelled'));
+          }
+        };
+
+        try {
+          assertRuntimeCurrent();
+          if (!(await isNativeSessionAvailable(protocol))) {
+            throw new Error(t('session.remoteDesktopNativeUnavailable'));
+          }
+          assertRuntimeCurrent();
+
+          const secret = host.secretRef
+            ? get().secretsByRef[host.secretRef]
+            : undefined;
+          if (host.secretRef && !secret) {
+            throw new Error(t('session.remoteDesktopCredentialsUnavailable'));
+          }
+          if (
+            protocol === 'rdp' &&
+            (!secret?.username?.trim() || !secret.password)
+          ) {
+            throw new Error(t('session.remoteDesktopCredentialsUnavailable'));
+          }
+
+          let endpoint: {
+            host: string;
+            port: number;
+            tunnelAuthToken?: string;
+          } = { host: host.hostname, port: host.port };
+          const requestedTunnelId = `rd-tunnel:${rdId}`;
+          const sshTunnelHostId =
+            protocol === 'vnc' ? host.sshTunnelHostId?.trim() : undefined;
+
+          if (protocol === 'vnc' && sshTunnelHostId) {
+            const tunnelHost = get().hosts.find(
+              item => item.id === sshTunnelHostId,
+            );
+            if (!tunnelHost || !isSshHostRecord(tunnelHost)) {
+              throw new Error(t('session.remoteDesktopTunnelHostMissing'));
+            }
+            if (
+              tunnelHost.authType !== 'password' &&
+              tunnelHost.authType !== 'privateKey' &&
+              tunnelHost.authType !== 'certificate'
+            ) {
+              throw new Error(
+                getUnsupportedAuthTypeMessage(
+                  tunnelHost,
+                  'store.authKindUnsupported',
+                ),
+              );
+            }
+
+            get().updateRemoteDesktopSession(rdId, {
+              connectionStatusMessage: t(
+                'session.remoteDesktopPreparingTunnel',
+              ),
+            });
+            const credentials = await resolveHostCredentials(tunnelHost);
+            if (!credentials) throw new Error(t('store.connectCancelled'));
+            const credential = buildEngineCredential(tunnelHost, credentials);
+            if (!credential) {
+              throw new Error(getMissingCredentialMessage(tunnelHost));
+            }
+            const validationMessage =
+              await validateEngineCredential(credential);
+            if (validationMessage) throw new Error(validationMessage);
+
+            const route = resolveSyncedTailnetRoute(
+              { tailnetId: resolveSshHostTailnetId(tunnelHost, get().hosts) },
+              get().tailnets,
+            );
+            if (route.kind === 'missing') {
+              throw new Error(t('store.tailnetMissing'));
+            }
+            beginConnectionView(rdId, {
+              hostId: host.id,
+              hasTailnet: route.kind === 'tailnet',
+              targetAddress: tunnelHost.hostname,
+              hostKind: protocol,
+              stage: route.kind === 'tailnet' ? 'tailnet' : 'host-key-check',
+              tunnelLabel: tunnelHost.label,
+            });
+            let tailnet:
+              | { tailnetId: string; tailnetName?: string }
+              | undefined;
+            if (route.kind === 'tailnet') {
+              const prepared = await prepareTailnetForConnection({
+                kind: 'remoteDesktop',
+                recordId: rdId,
+                hostId: tunnelHost.id,
+                resolution: route,
+              });
+              tailnet = {
+                tailnetId: prepared.tailnetId,
+                ...(prepared.tailnetName
+                  ? { tailnetName: prepared.tailnetName }
+                  : {}),
+              };
+            }
+
+            const jump = await resolveJumpChain(tunnelHost);
+            patchConnectionView(rdId, { stage: 'ssh-tunnel-gateway' });
+            get().updateRemoteDesktopSession(rdId, {
+              connectionStatusMessage: t(
+                'session.remoteDesktopPreparingTunnel',
+              ),
+            });
+            runtime.sshConnectId = requestedTunnelId;
+            const opened = await openRemoteDesktopTunnel({
+              tunnelId: requestedTunnelId,
+              host: host.hostname,
+              port: host.port,
+              transport: 'ssh',
+              ssh: {
+                host: tunnelHost.hostname,
+                port: tunnelHost.port,
+                username: tunnelHost.username,
+                credential,
+                targetHost: host.hostname,
+                targetPort: host.port,
+                ...(tailnet ? { tailnet } : {}),
+                onServerKey: async info =>
+                  resolveKnownHostTrust(tunnelHost, info, rdId),
+                onInteractiveChallenge: challenge =>
+                  askInteractiveAuth(tunnelHost, challenge, rdId),
+                onBanner: banner => patchConnectionView(rdId, { banner }),
+                onHopProgress: hop => patchConnectionView(rdId, { hop }),
+                trustedHostKeysBase64: trustedHostKeysFor(
+                  tunnelHost.hostname,
+                  tunnelHost.port,
+                  tunnelHost.tailnetId,
+                ),
+                ...(jump ? { jump } : {}),
+              },
+            });
+            runtime.sshConnectId = null;
+            if (runtime.cancelled || getRemoteDesktopHandle(rdId) !== runtime) {
+              await closeRemoteDesktopTunnel(opened.tunnelId).catch(
+                () => undefined,
+              );
+              throw new Error(t('store.connectCancelled'));
+            }
+            endpoint = {
+              host: opened.host,
+              port: opened.port,
+              tunnelAuthToken: opened.authToken,
+            };
+            runtime.tunnelId = opened.tunnelId;
+          } else {
+            const route = resolveSyncedTailnetRoute(
+              { tailnetId: host.tailnetId?.trim() || undefined },
+              get().tailnets,
+            );
+            if (route.kind === 'missing') {
+              throw new Error(t('store.tailnetMissing'));
+            }
+            if (route.kind === 'tailnet') {
+              beginConnectionView(rdId, {
+                hostId: host.id,
+                hasTailnet: true,
+                targetAddress: host.hostname,
+                hostKind: protocol,
+                stage: 'tailnet',
+              });
+              const prepared = await prepareTailnetForConnection({
+                kind: 'remoteDesktop',
+                recordId: rdId,
+                hostId: host.id,
+                resolution: route,
+              });
+              const opened = await openRemoteDesktopTunnel({
+                tunnelId: requestedTunnelId,
+                host: host.hostname,
+                port: host.port,
+                transport: 'tailscale',
+                tailscale: {
+                  tailnetId: prepared.tailnetId,
+                  ...(prepared.tailnetName
+                    ? { tailnetName: prepared.tailnetName }
+                    : {}),
+                },
+              });
+              if (
+                runtime.cancelled ||
+                getRemoteDesktopHandle(rdId) !== runtime
+              ) {
+                await closeRemoteDesktopTunnel(opened.tunnelId).catch(
+                  () => undefined,
+                );
+                throw new Error(t('store.connectCancelled'));
+              }
+              endpoint = {
+                host: opened.host,
+                port: opened.port,
+                tunnelAuthToken: opened.authToken,
+              };
+              runtime.tunnelId = opened.tunnelId;
+            } else if (protocol === 'rdp' && host.awsSsm) {
+              beginConnectionView(rdId, {
+                hostId: host.id,
+                hasTailnet: false,
+                targetAddress: host.hostname,
+                hostKind: protocol,
+                stage: 'ssm-tunnel',
+                ssmTunnel: true,
+              });
+              get().updateRemoteDesktopSession(rdId, {
+                connectionStatusMessage: t(
+                  'session.remoteDesktopPreparingTunnel',
+                ),
+              });
+              const awsSsm = host.awsSsm;
+              const explicitProfileId = awsSsm.profileId?.trim() || null;
+              const profile = explicitProfileId
+                ? get().awsProfiles.find(item => item.id === explicitProfileId)
+                : get().awsProfiles.find(
+                    item => item.name === awsSsm.profileName,
+                  );
+              if (!profile) throw new Error(t('aws.profileNotFound'));
+
+              const awsHost: AwsEc2HostRecord = {
+                id: `rdp-ssm:${host.id}`,
+                kind: 'aws-ec2',
+                label: host.label,
+                awsProfileId: profile.id,
+                awsProfileName: awsSsm.profileName,
+                awsRegion: awsSsm.region,
+                awsInstanceId: awsSsm.instanceId,
+                awsInstanceName: host.label,
+                createdAt: host.createdAt,
+                updatedAt: host.updatedAt,
+              };
+              let accessToken = get().auth.session?.tokens.accessToken;
+              if (!accessToken) throw new Error(t('store.onlineOnly'));
+              let resolvedSession: ResolvedAwsSessionResult | null = null;
+              let retriedAuth = false;
+              while (!resolvedSession) {
+                try {
+                  resolvedSession = await resolveAwsSessionForHost({
+                    host: awsHost,
+                    profiles: get().awsProfiles,
+                    serverUrl: get().settings.serverUrl,
+                    authAccessToken: accessToken,
+                    presentLoginPrompt: prompt => {
+                      pendingAwsSsoCancelHandler = prompt.onCancel;
+                      set({ pendingAwsSsoLogin: prompt });
+                    },
+                    dismissLoginPrompt: () => {
+                      pendingAwsSsoCancelHandler = null;
+                      set({ pendingAwsSsoLogin: null });
+                    },
+                  });
+                } catch (error) {
+                  if (isAuthExpiredError(error) && !retriedAuth) {
+                    const refreshed = await refreshAuthForConnection();
+                    if (!refreshed) throw error;
+                    accessToken = refreshed.tokens.accessToken;
+                    retriedAuth = true;
+                    continue;
+                  }
+                  if (isAuthExpiredError(error)) await expireAuthSession();
+                  throw error;
+                }
+              }
+
+              assertRuntimeCurrent();
+              const token = await startSsmPortForwardSession({
+                credentials: resolvedSession.credentials,
+                region: resolvedSession.region,
+                instanceId: awsSsm.instanceId,
+                remotePort: host.port,
+                localPort: 0,
+              });
+              assertRuntimeCurrent();
+              const openedSsmForward = await getEngine().startSsmPortForward({
+                forwardId: `ssm-rdp:${rdId}`,
+                request: {
+                  region: resolvedSession.region,
+                  targetId: awsSsm.instanceId,
+                  targetPort: host.port,
+                  bindPort: 0,
+                  streamUrl: token.streamUrl,
+                  tokenValue: token.tokenValue,
+                  ssmSessionId: token.sessionId,
+                },
+              });
+              if (
+                runtime.cancelled ||
+                getRemoteDesktopHandle(rdId) !== runtime
+              ) {
+                await openedSsmForward.stop().catch(() => undefined);
+                throw new Error(t('store.connectCancelled'));
+              }
+              runtime.ssmForward = openedSsmForward;
+
+              const opened = await openRemoteDesktopTunnel({
+                tunnelId: requestedTunnelId,
+                host: host.hostname,
+                port: host.port,
+                transport: 'ssm',
+                ssm: { localPort: openedSsmForward.bindPort },
+              });
+              if (
+                runtime.cancelled ||
+                getRemoteDesktopHandle(rdId) !== runtime
+              ) {
+                await closeRemoteDesktopTunnel(opened.tunnelId).catch(
+                  () => undefined,
+                );
+                throw new Error(t('store.connectCancelled'));
+              }
+              endpoint = {
+                host: opened.host,
+                port: opened.port,
+                tunnelAuthToken: opened.authToken,
+              };
+              runtime.tunnelId = opened.tunnelId;
+            }
+          }
+
+          patchConnectionView(rdId, { stage: 'connecting' });
+          runtime.eventUnsubscribe = subscribeToSessionEvents(event => {
+            if (event.sessionId !== rdId) return;
+            if (runtime.cancelled || getRemoteDesktopHandle(rdId) !== runtime) {
+              return;
+            }
+            if (event.type === 'status') {
+              get().updateRemoteDesktopSession(rdId, {
+                status: event.status ?? 'connecting',
+                connectionStatusMessage: null,
+                ...(event.status === 'connected'
+                  ? {
+                      lastConnectedAt: new Date().toISOString(),
+                      // **크기를 안 실은 이벤트는 크기에 손대지 않는다.** 예전에는
+                      // `event.width ?? null` 이어서, 크기 없는 connected 가 한 번만 흘러도
+                      // 이미 받아 둔 원격 해상도가 지워졌다. 그러면 좌표 변환의 기준이
+                      // 뷰포트 크기로 폴백해 클릭이 엉뚱한 데로 가고 Fit 배율이 1 이 된다.
+                      ...(event.width !== undefined
+                        ? { desktopWidth: event.width }
+                        : {}),
+                      ...(event.height !== undefined
+                        ? { desktopHeight: event.height }
+                        : {}),
+                      ...(event.name !== undefined
+                        ? { desktopName: event.name }
+                        : {}),
+                    }
+                  : {}),
+              });
+              if (event.status === 'connected') {
+                clearConnectionView(rdId);
+              }
+              return;
+            }
+            if (event.type === 'resize') {
+              get().updateRemoteDesktopSession(rdId, {
+                desktopWidth: event.width ?? null,
+                desktopHeight: event.height ?? null,
+              });
+              return;
+            }
+            if (event.type === 'clipboard' && event.text !== undefined) {
+              const active = get().activeConnectionTab;
+              if (active?.kind !== protocol || active.id !== rdId) return;
+              Clipboard.setString(event.text);
+              return;
+            }
+            if (event.type === 'certificate' && protocol === 'rdp') {
+              void handleRdpCertificateEvent(rdId, host.id, event).catch(
+                error => {
+                  if (
+                    runtime.cancelled ||
+                    getRemoteDesktopHandle(rdId) !== runtime
+                  ) {
+                    return;
+                  }
+                  const errorMessage =
+                    error instanceof Error
+                      ? error.message
+                      : t('session.remoteDesktopError');
+                  get().updateRemoteDesktopSession(rdId, {
+                    status: 'error',
+                    errorMessage,
+                    connectionStatusMessage: null,
+                  });
+                  patchConnectionView(rdId, {
+                    failureLayer: null,
+                    failureMessage: errorMessage,
+                  });
+                  void releaseRemoteDesktopRuntime(rdId, runtime);
+                },
+              );
+              return;
+            }
+            if (event.type === 'error') {
+              const errorMessage =
+                event.message ?? t('session.remoteDesktopError');
+              get().updateRemoteDesktopSession(rdId, {
+                status: 'error',
+                errorMessage,
+                connectionStatusMessage: null,
+                lastDisconnectedAt: new Date().toISOString(),
+              });
+              patchConnectionView(rdId, {
+                failureLayer: null,
+                failureMessage: errorMessage,
+              });
+              void (async () => {
+                await releaseRemoteDesktopRuntime(rdId, runtime);
+                get().updateRemoteDesktopSession(rdId, {
+                  status: 'error',
+                  errorMessage,
+                  connectionStatusMessage: null,
+                  lastDisconnectedAt: new Date().toISOString(),
+                });
+              })();
+              return;
+            }
+            if (event.type === 'closed') {
+              get().updateRemoteDesktopSession(rdId, {
+                status: 'closed',
+                connectionStatusMessage: null,
+                lastDisconnectedAt: new Date().toISOString(),
+              });
+              clearConnectionView(rdId);
+              void releaseRemoteDesktopRuntime(rdId, runtime);
+            }
+          });
+
+          assertRuntimeCurrent();
+          get().updateRemoteDesktopSession(rdId, {
+            status: 'connecting',
+            errorMessage: null,
+            connectionStatusMessage: t('session.remoteDesktopConnecting'),
+          });
+
+          const connectOptions: RemoteDesktopConnectOptions =
+            protocol === 'vnc'
+              ? {
+                  protocol,
+                  host: endpoint.host,
+                  port: endpoint.port,
+                  password: secret?.password,
+                  username: secret?.username,
+                  viewOnly: host.viewOnly ?? false,
+                  shared: host.shared ?? true,
+                  imageQuality: host.imageQuality ?? undefined,
+                  ...(endpoint.tunnelAuthToken
+                    ? { tunnelAuthToken: endpoint.tunnelAuthToken }
+                    : {}),
+                }
+              : {
+                  protocol,
+                  // TLS identity/pin always stays on the original logical host.
+                  host: host.hostname,
+                  port: endpoint.port,
+                  ...(endpoint.host !== host.hostname ||
+                  endpoint.port !== host.port
+                    ? { dialAddress: endpoint.host }
+                    : {}),
+                  ...(endpoint.tunnelAuthToken
+                    ? { tunnelAuthToken: endpoint.tunnelAuthToken }
+                    : {}),
+                  username: secret?.username?.trim(),
+                  password: secret?.password,
+                  domain: secret?.domain?.trim() || undefined,
+                  audioEnabled: host.audioEnabled ?? true,
+                  clipboardEnabled: host.clipboardEnabled ?? true,
+                  microphoneEnabled: host.microphoneEnabled ?? false,
+                  cameraEnabled: host.cameraEnabled ?? false,
+                  adminSession: host.adminSession ?? false,
+                  colorDepth: host.colorDepth ?? 32,
+                  drives: describeRdpDrives(host.drives).map(drive => ({
+                    label: drive.name,
+                    path: drive.path,
+                    readOnly: drive.readOnly,
+                  })),
+                };
+          await nativeConnect(rdId, connectOptions);
+          runtime.nativeStarted = true;
+          if (runtime.cancelled || getRemoteDesktopHandle(rdId) !== runtime) {
+            const currentRuntime = getRemoteDesktopHandle(rdId);
+            // disconnect may have run while nativeConnect was still pending. If this generation
+            // materialized afterwards, destroy it again. Never target a newer same-ID generation.
+            if (!currentRuntime || currentRuntime === runtime) {
+              await nativeDisconnect(rdId).catch(() => undefined);
+            }
+            await releaseRemoteDesktopRuntime(rdId, runtime);
+          }
+        } catch (error) {
+          const wasCancelled =
+            runtime.cancelled || getRemoteDesktopHandle(rdId) !== runtime;
+          await releaseRemoteDesktopRuntime(rdId, runtime);
+          if (wasCancelled) return;
+
+          const errorMessage =
+            error instanceof Error
+              ? error.message
+              : t('session.remoteDesktopError');
+          get().updateRemoteDesktopSession(rdId, {
+            status: 'error',
+            errorMessage,
+            connectionStatusMessage: null,
+            lastDisconnectedAt: new Date().toISOString(),
+          });
+          const currentView = get().connectionViews[rdId];
+          patchConnectionView(rdId, {
+            failureLayer: currentView?.stage === 'tailnet' ? 'tailscale' : null,
+            failureMessage: errorMessage,
+            hostKeyPrompted: false,
+            interactiveAuthPending: false,
+          });
+        } finally {
+          pendingTailnetConnections.delete(rdId);
+        }
+      };
+
+      const closeRemoteDesktopSession = async (rdId: string) => {
+        get().updateRemoteDesktopSession(rdId, {
+          status: 'disconnecting',
+          connectionStatusMessage: t('session.remoteDesktopDisconnecting'),
+        });
+        const runtime = getRemoteDesktopHandle(rdId);
+        if (runtime) runtime.cancelled = true;
+        await cancelPendingTailnetConnection(rdId);
+        if (runtime) {
+          await releaseRemoteDesktopRuntime(rdId, runtime);
+        } else {
+          await nativeDisconnect(rdId).catch(() => undefined);
+          await rejectPendingRdpCertificateForSession(rdId);
+        }
+        get().updateRemoteDesktopSession(rdId, {
+          status: 'closed',
+          connectionStatusMessage: null,
+          lastDisconnectedAt: new Date().toISOString(),
+        });
+        clearConnectionView(rdId);
+      };
+
       const connectSessionRecord = async (
         sessionRecord: MobileSessionRecord,
         host: HostRecord,
@@ -4440,6 +5332,20 @@ export const useMobileAppStore = create<MobileAppState>()(
             host,
             promptForStartupVars,
           );
+          return;
+        }
+        // Explicit guard: remote desktop records are never terminal records, even
+        // if a stale persisted session accidentally points at one.
+        if (isRdpHostRecord(host) || isVncHostRecord(host)) {
+          const engineError = guardRemoteDesktopEngine(
+            host.kind as 'rdp' | 'vnc',
+          );
+          markSessionState(
+            sessionRecord.id,
+            'error',
+            engineError?.message ?? t('store.hostKindUnsupported'),
+          );
+          pendingSessionConnections.delete(sessionRecord.id);
           return;
         }
         markSessionState(
@@ -4652,7 +5558,8 @@ export const useMobileAppStore = create<MobileAppState>()(
               // 디바운스를 기다리지 않고 바로 반영한다.
               flushSessionSnapshot(sessionRecord.id);
             },
-            onHopProgress: hop => patchConnectionView(sessionRecord.id, { hop }),
+            onHopProgress: hop =>
+              patchConnectionView(sessionRecord.id, { hop }),
             onDisconnected: markDropped,
           });
           pendingConnection = connection;
@@ -4860,7 +5767,10 @@ export const useMobileAppStore = create<MobileAppState>()(
 
           // **서버 프록시를 켠 호스트만 서버 능력에 묶인다.** 직접 붙는 호스트는 서버가
           // SSM 을 못 해도 상관없다 — 기기가 직접 AWS 를 부른다.
-          if (usesAwsServerProxy(host) && awsSsmServerSupport === 'unsupported') {
+          if (
+            usesAwsServerProxy(host) &&
+            awsSsmServerSupport === 'unsupported'
+          ) {
             markSessionState(
               sessionRecord.id,
               'error',
@@ -5531,6 +6441,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                   vaultKeyBase64,
                 ),
                 vaultState.status === 'unlocked' ? vaultState.epoch : null,
+                resolveMobileSyncDataFloor(get().hosts),
               );
               if (isStaleSync()) {
                 return;
@@ -5848,12 +6759,15 @@ export const useMobileAppStore = create<MobileAppState>()(
           sftpEditor: null,
           sftpTransfers: [],
           sftpCopyBuffer: null,
+          remoteDesktopSessions: [],
+          remoteDesktopImmersive: false,
           activeSessionTabId: null,
           activeConnectionTab: null,
           syncStatus: createDefaultSyncStatus(),
           pendingBrowserLoginState: null,
           pendingAwsSsoLogin: null,
           pendingServerKeyPrompt: null,
+          pendingRdpCertificatePrompt: null,
           pendingCredentialPrompt: null,
           pendingInteractiveAuthPrompt: null,
           pendingStartupCommandPrompt: null,
@@ -5906,12 +6820,26 @@ export const useMobileAppStore = create<MobileAppState>()(
         sftpEditor: null,
         sftpTransfers: [],
         sftpCopyBuffer: null,
+        // Remote desktop slice (spread into the single store)
+        // Zustand's set/get for the full store is structurally compatible with the
+        // slice's narrower view (contravariant set, covariant get) — no unsafe cast.
+        ...createRemoteDesktopSlice(
+          set as (
+            partial:
+              | Partial<RemoteDesktopSliceState>
+              | ((
+                  state: RemoteDesktopSliceState,
+                ) => Partial<RemoteDesktopSliceState>),
+          ) => void,
+          get as () => RemoteDesktopSliceState,
+        ),
         activeSessionTabId: null,
         activeConnectionTab: null,
         secretsByRef: {},
         pendingBrowserLoginState: null,
         pendingAwsSsoLogin: null,
         pendingServerKeyPrompt: null,
+        pendingRdpCertificatePrompt: null,
         pendingCredentialPrompt: null,
         pendingInteractiveAuthPrompt: null,
         pendingStartupCommandPrompt: null,
@@ -6338,6 +7266,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                       dekBase64,
                     ),
                     epoch,
+                    resolveMobileSyncDataFloor(get().hosts),
                   ),
                 operationContext,
               );
@@ -6837,7 +7766,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               secretsByRef: {},
               sessions: [],
               sftpSessions: [],
-          sftpEditor: null,
+              sftpEditor: null,
               sftpTransfers: [],
               sftpCopyBuffer: null,
               activeSessionTabId: null,
@@ -6967,6 +7896,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                   resolveVaultKeyForPush(currentSession),
                 ),
                 resolveVaultEpochForPush(),
+                resolveMobileSyncDataFloor(get().hosts),
               );
               storePushedRevision(pushedRevision);
             });
@@ -7017,6 +7947,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                   resolveVaultKeyForPush(currentSession),
                 ),
                 resolveVaultEpochForPush(),
+                resolveMobileSyncDataFloor(get().hosts),
               );
               storePushedRevision(pushedRevision);
             });
@@ -7034,7 +7965,10 @@ export const useMobileAppStore = create<MobileAppState>()(
         },
         // EC2 서버 프록시 토글. 즐겨찾기와 같은 경로를 쓴다 — 먼저 로컬만 바꾸면 push 가
         // 실패했을 때 이 기기만 다른 상태로 남고, 그러면 데스크톱과 접속 경로가 갈린다.
-        setAwsSsmServerProxyEnabled: async (hostId: string, enabled: boolean) => {
+        setAwsSsmServerProxyEnabled: async (
+          hostId: string,
+          enabled: boolean,
+        ) => {
           const host = get().hosts.find(item => item.id === hostId);
           if (!host || host.kind !== 'aws-ec2') {
             throw new Error(t('store.hostToEditNotFound'));
@@ -7059,6 +7993,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                   resolveVaultKeyForPush(currentSession),
                 ),
                 resolveVaultEpochForPush(),
+                resolveMobileSyncDataFloor(get().hosts),
               );
               storePushedRevision(pushedRevision);
             });
@@ -7098,6 +8033,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                   resolveVaultKeyForPush(currentSession),
                 ),
                 resolveVaultEpochForPush(),
+                resolveMobileSyncDataFloor(get().hosts),
               );
               storePushedRevision(pushedRevision);
             });
@@ -7111,6 +8047,12 @@ export const useMobileAppStore = create<MobileAppState>()(
             hosts: nextHosts,
             secretMetadata: deriveSecretMetadata(nextHosts, get().secretsByRef),
           });
+        },
+        disconnectRemoteDesktopSession: async (sessionId: string) => {
+          // 기록을 **지우지 않는다.** closeRemoteDesktopSession 이 status 를 'closed' 로
+          // 내려 탭에서는 사라지고(탭은 live 만 본다), 최근 세션 목록에는 남는다. 지우면
+          // RDP/VNC 는 재연결 목록에 아예 나타나지 않는다.
+          await closeRemoteDesktopSession(sessionId);
         },
         connectToHost: async (hostId: string) => {
           if (!get().secureStateReady) {
@@ -7126,6 +8068,55 @@ export const useMobileAppStore = create<MobileAppState>()(
           const host = get().hosts.find(item => item.id === hostId);
           if (!host) {
             return null;
+          }
+
+          // RDP/VNC hosts route to the remote desktop session path, never terminal.
+          if (isRdpHostRecord(host) || isVncHostRecord(host)) {
+            const protocol = host.kind as 'rdp' | 'vnc';
+            // Check for an existing live RD session for this host.
+            const liveRd = get().remoteDesktopSessions.find(
+              session =>
+                session.hostId === hostId && session.status !== 'closed',
+            );
+            if (liveRd) {
+              get().setActiveConnectionTab({ kind: protocol, id: liveRd.id });
+              return liveRd.id;
+            }
+            const rdId = createLocalId('rd');
+            get().createRemoteDesktopSession({
+              id: rdId,
+              hostId: host.id,
+              protocol,
+              title: host.label,
+            });
+            const engineError = guardRemoteDesktopEngine(protocol);
+            if (engineError) {
+              get().updateRemoteDesktopSession(rdId, {
+                status: 'error',
+                errorMessage: engineError.message,
+              });
+              set(state => ({
+                activeConnectionTab: normalizeActiveConnectionTab(
+                  state.sessions,
+                  state.sftpSessions,
+                  state.activeConnectionTab,
+                  { kind: protocol, id: rdId },
+                  state.remoteDesktopSessions,
+                ),
+              }));
+              return rdId;
+            }
+            set(state => ({
+              activeConnectionTab: normalizeActiveConnectionTab(
+                state.sessions,
+                state.sftpSessions,
+                state.activeConnectionTab,
+                { kind: protocol, id: rdId },
+                state.remoteDesktopSessions,
+              ),
+            }));
+            void connectRemoteDesktopSession(rdId, host);
+            return rdId;
           }
 
           const liveSession = get().sessions.find(
@@ -7224,6 +8215,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               state.sftpSessions,
               state.activeConnectionTab,
               tab,
+              state.remoteDesktopSessions,
             );
             return {
               activeConnectionTab: nextTab,
@@ -7246,6 +8238,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               state.sftpSessions,
               state.activeConnectionTab,
               sessionId ? { kind: 'terminal', id: sessionId } : null,
+              state.remoteDesktopSessions,
             ),
           }));
         },
@@ -7546,7 +8539,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             const loaded = await read(remotePath);
             set(state =>
               // 불러오는 동안 사용자가 닫았거나 다른 파일을 열었으면 버린다.
-              isSameEditorTarget(state.sftpEditor, { sftpSessionId, path: remotePath })
+              isSameEditorTarget(state.sftpEditor, {
+                sftpSessionId,
+                path: remotePath,
+              })
                 ? {
                     sftpEditor: {
                       ...state.sftpEditor,
@@ -7562,7 +8558,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             );
           } catch (error) {
             set(state =>
-              isSameEditorTarget(state.sftpEditor, { sftpSessionId, path: remotePath })
+              isSameEditorTarget(state.sftpEditor, {
+                sftpSessionId,
+                path: remotePath,
+              })
                 ? {
                     sftpEditor: {
                       ...state.sftpEditor,
@@ -7658,7 +8657,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           let nextSize = utf8ByteLength(saved);
           let nextMtime = editor.mtime;
           try {
-            const restated = await runtime?.connection.readTextFile?.(editor.path);
+            const restated = await runtime?.connection.readTextFile?.(
+              editor.path,
+            );
             if (restated) {
               nextSize = restated.size;
               nextMtime = restated.mtime;
@@ -8320,6 +9321,62 @@ export const useMobileAppStore = create<MobileAppState>()(
           pendingServerKeyResolver = null;
           set({ pendingServerKeyPrompt: null });
         },
+        acceptRdpCertificatePrompt: async () => {
+          const prompt = get().pendingRdpCertificatePrompt;
+          if (!prompt) return;
+          const runtime = getRemoteDesktopHandle(prompt.sessionId);
+          set({ pendingRdpCertificatePrompt: null });
+          if (!runtime || runtime.cancelled) {
+            await nativeTrustCertificate(prompt.sessionId, false).catch(
+              () => undefined,
+            );
+            return;
+          }
+          const current = get().hosts.find(item => item.id === prompt.hostId);
+          if (!current || !isRdpHostRecord(current)) {
+            await nativeTrustCertificate(prompt.sessionId, false).catch(
+              () => undefined,
+            );
+            return;
+          }
+          try {
+            await nativeTrustCertificate(prompt.sessionId, true);
+            if (
+              runtime.cancelled ||
+              getRemoteDesktopHandle(prompt.sessionId) !== runtime
+            ) {
+              return;
+            }
+            await persistRdpCertificateFingerprint(
+              prompt.hostId,
+              prompt.fingerprint,
+            );
+          } catch (error) {
+            if (
+              runtime.cancelled ||
+              getRemoteDesktopHandle(prompt.sessionId) !== runtime
+            ) {
+              return;
+            }
+            await releaseRemoteDesktopRuntime(prompt.sessionId, runtime);
+            get().updateRemoteDesktopSession(prompt.sessionId, {
+              status: 'error',
+              errorMessage:
+                error instanceof Error
+                  ? error.message
+                  : t('session.remoteDesktopError'),
+              connectionStatusMessage: null,
+            });
+          }
+        },
+        rejectRdpCertificatePrompt: async () => {
+          const prompt = get().pendingRdpCertificatePrompt;
+          if (!prompt) return;
+          set({ pendingRdpCertificatePrompt: null });
+          await nativeTrustCertificate(prompt.sessionId, false).catch(
+            () => undefined,
+          );
+        },
         submitCredentialPrompt: async (input: HostSecretInput) => {
           pendingCredentialResolver?.(input);
           pendingCredentialResolver = null;
@@ -8369,6 +9426,10 @@ export const useMobileAppStore = create<MobileAppState>()(
         snippets: state.snippets,
         knownHosts: state.knownHosts,
         sessions: compactPersistedSessions(state.sessions),
+        // 닫힌 RD 기록만 남는다 — 최근 세션에서 재연결할 근거다.
+        remoteDesktopSessions: compactPersistedRemoteDesktopSessions(
+          state.remoteDesktopSessions,
+        ),
         activeSessionTabId: resolveActiveSessionTabId(
           state.sessions,
           state.activeSessionTabId,
@@ -8393,6 +9454,12 @@ export const useMobileAppStore = create<MobileAppState>()(
           useMobileAppStore.setState(state => ({
             hydrated: true,
             sessions: nextSessions,
+            // RD 는 자동 재연결이 없다. 살아 있는 것처럼 남으면 붙지 않는 유령 탭이 되므로
+            // 전부 닫힌 기록으로 둔다 — 최근 세션에서 사용자가 눌러 새로 붙는다.
+            remoteDesktopSessions: compactPersistedRemoteDesktopSessions(
+              state.remoteDesktopSessions,
+            ),
+            remoteDesktopImmersive: false,
             sftpSessions: [],
             sftpEditor: null,
             sftpTransfers: [],
@@ -8442,6 +9509,14 @@ export function resetMobileStoreRuntimeForTests(): void {
   offlineRecoveryAttempt = 0;
   offlineRecoveryInFlight = false;
   offlineRecoveryKey = null;
+  const pendingRdpCertificate =
+    useMobileAppStore.getState().pendingRdpCertificatePrompt;
+  if (pendingRdpCertificate) {
+    void nativeTrustCertificate(pendingRdpCertificate.sessionId, false).catch(
+      () => undefined,
+    );
+    useMobileAppStore.setState({ pendingRdpCertificatePrompt: null });
+  }
   pendingServerKeyResolver = null;
   pendingCredentialResolver = null;
   pendingStartupCommandResolver = null;
@@ -8466,6 +9541,20 @@ export function resetMobileStoreRuntimeForTests(): void {
     } catch {}
   }
   runtimeSftpSessions.clear();
+  for (const [sessionId, handle] of [...getAllRemoteDesktopHandles()]) {
+    handle.cancelled = true;
+    if (handle.dispose) {
+      void handle.dispose();
+      continue;
+    }
+    removeRemoteDesktopHandle(sessionId);
+    handle.eventUnsubscribe?.();
+    void nativeDisconnect(sessionId).catch(() => undefined);
+    if (handle.tunnelId) {
+      void closeRemoteDesktopTunnel(handle.tunnelId).catch(() => undefined);
+    }
+    void handle.ssmForward?.stop().catch(() => undefined);
+  }
   pendingSessionConnections.clear();
   pendingSftpConnections.clear();
   pendingTailnetConnections.clear();
@@ -8481,6 +9570,7 @@ export function resetMobileStoreRuntimeForTests(): void {
 export type {
   MobileAppState,
   PendingCredentialPromptState,
+  PendingRdpCertificatePromptState,
   PendingServerKeyPromptState,
   PendingStartupCommandPromptState,
 };

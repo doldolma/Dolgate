@@ -17,6 +17,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"sync"
@@ -53,6 +54,9 @@ type Options struct {
 	// guess which field it belongs to), so it is the shape where the app has to
 	// point at the field itself.
 	CombinedPrompts bool
+	// AllowDirectTCPIP lets integration tests exercise SSH local forwarding.
+	// It is opt-in so ordinary shell/SFTP fixtures keep rejecting other channels.
+	AllowDirectTCPIP bool
 }
 
 // StderrTrigger, written to the shell's stdin, makes the fake shell emit
@@ -98,8 +102,9 @@ type WindowChange struct {
 
 // Server is a running fixture. Close it when the test finishes.
 type Server struct {
-	listener      net.Listener
-	hostKeyBase64 string
+	listener         net.Listener
+	hostKeyBase64    string
+	allowDirectTCPIP bool
 
 	mu       sync.Mutex
 	ptyReqs  []PtyRequest
@@ -183,8 +188,9 @@ func NewServerWithOptions(options Options) (*Server, error) {
 	}
 
 	server := &Server{
-		listener:      listener,
-		hostKeyBase64: base64.StdEncoding.EncodeToString(hostSigner.PublicKey().Marshal()),
+		listener:         listener,
+		hostKeyBase64:    base64.StdEncoding.EncodeToString(hostSigner.PublicKey().Marshal()),
+		allowDirectTCPIP: options.AllowDirectTCPIP,
 	}
 
 	go func() {
@@ -282,6 +288,10 @@ func (s *Server) handle(raw net.Conn, config *ssh.ServerConfig) {
 	go ssh.DiscardRequests(reqs)
 
 	for newChannel := range chans {
+		if newChannel.ChannelType() == "direct-tcpip" && s.allowDirectTCPIP {
+			go s.serveDirectTCPIP(newChannel)
+			continue
+		}
 		if newChannel.ChannelType() != "session" {
 			_ = newChannel.Reject(ssh.UnknownChannelType, "only session channels")
 			continue
@@ -292,6 +302,50 @@ func (s *Server) handle(raw net.Conn, config *ssh.ServerConfig) {
 		}
 		go s.serveSession(channel, requests)
 	}
+}
+
+type directTCPIPRequest struct {
+	DestinationHost string
+	DestinationPort uint32
+	OriginHost      string
+	OriginPort      uint32
+}
+
+func (s *Server) serveDirectTCPIP(newChannel ssh.NewChannel) {
+	var request directTCPIPRequest
+	if err := ssh.Unmarshal(newChannel.ExtraData(), &request); err != nil {
+		_ = newChannel.Reject(ssh.ConnectionFailed, "invalid direct-tcpip request")
+		return
+	}
+	target, err := net.Dial(
+		"tcp",
+		net.JoinHostPort(request.DestinationHost, strconv.Itoa(int(request.DestinationPort))),
+	)
+	if err != nil {
+		_ = newChannel.Reject(ssh.ConnectionFailed, err.Error())
+		return
+	}
+	channel, requests, err := newChannel.Accept()
+	if err != nil {
+		_ = target.Close()
+		return
+	}
+	go ssh.DiscardRequests(requests)
+	go func() {
+		defer channel.Close()
+		defer target.Close()
+		remoteDone := make(chan struct{})
+		go func() {
+			_, _ = io.Copy(target, channel)
+			if tcp, ok := target.(*net.TCPConn); ok {
+				_ = tcp.CloseWrite()
+			}
+			close(remoteDone)
+		}()
+		_, _ = io.Copy(channel, target)
+		_ = channel.CloseWrite()
+		<-remoteDone
+	}()
 }
 
 func (s *Server) serveSession(channel ssh.Channel, requests <-chan *ssh.Request) {

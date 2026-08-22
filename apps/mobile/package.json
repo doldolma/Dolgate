@@ -16,6 +16,7 @@
     "@aws-sdk/client-sso": "3.1032.0",
     "@aws-sdk/client-sso-oidc": "3.1032.0",
     "@aws-sdk/client-sts": "3.1032.0",
+    "@dolssh/react-native-remote-desktop": "*",
     "@dolssh/shared-core": "*",
     "@fressh/react-native-xtermjs-webview": "^0.0.8",
     "@noble/ciphers": "^2.2.0",

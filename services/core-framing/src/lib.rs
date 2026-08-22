@@ -24,6 +24,52 @@ pub const HEADER_SIZE: usize = 9;
 pub const KIND_CONTROL: u8 = 1;
 pub const KIND_STREAM: u8 = 2;
 
+/// Maximum decoded RGBA surface accepted by either remote-desktop core.
+/// This mirrors the iOS and Android renderer budget.
+
+/// Private preface consumed by the Go mobile loopback tunnel before any VNC/RDP bytes.
+pub const RD_TUNNEL_AUTH_PREFIX: &[u8] = b"DOLGATE-RD-TUNNEL/1 ";
+pub const RD_TUNNEL_AUTH_TOKEN_LEN: usize = 64;
+
+/// Write the authenticated mobile-loopback preface when a token is present.
+/// Direct TCP connections pass `None` and remain byte-for-byte unchanged.
+pub fn write_rd_tunnel_auth_preface(
+    writer: &mut impl Write,
+    token: Option<&str>,
+) -> io::Result<()> {
+    let Some(token) = token.filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+    let valid = token.len() == RD_TUNNEL_AUTH_TOKEN_LEN
+        && token
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+    if !valid {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "remote desktop tunnel token must be 64 lowercase hexadecimal characters",
+        ));
+    }
+    writer.write_all(RD_TUNNEL_AUTH_PREFIX)?;
+    writer.write_all(token.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()
+}
+pub const MAX_FRAMEBUFFER_PIXELS: usize = 16_777_216;
+pub const RGBA_BYTES_PER_PIXEL: usize = 4;
+pub const MAX_FRAMEBUFFER_BYTES: usize = MAX_FRAMEBUFFER_PIXELS * RGBA_BYTES_PER_PIXEL;
+
+/// Return the RGBA byte length only when dimensions are non-zero, arithmetic is safe, and the
+/// shared framebuffer budget is respected.
+pub fn checked_rgba_framebuffer_len(width: usize, height: usize) -> Option<usize> {
+    let pixels = width.checked_mul(height)?;
+    if width == 0 || height == 0 || pixels > MAX_FRAMEBUFFER_PIXELS {
+        return None;
+    }
+    let bytes = pixels.checked_mul(RGBA_BYTES_PER_PIXEL)?;
+    (bytes <= MAX_FRAMEBUFFER_BYTES).then_some(bytes)
+}
+
 /// Refuse absurd frames rather than trying to allocate for them.
 const MAX_METADATA: u32 = 8 * 1024 * 1024;
 const MAX_PAYLOAD: u32 = 256 * 1024 * 1024;
@@ -69,7 +115,11 @@ pub fn read_frame(reader: &mut impl Read) -> io::Result<Frame> {
     })
 }
 
-fn encode_header(kind: u8, metadata_length: usize, payload_length: usize) -> io::Result<[u8; HEADER_SIZE]> {
+fn encode_header(
+    kind: u8,
+    metadata_length: usize,
+    payload_length: usize,
+) -> io::Result<[u8; HEADER_SIZE]> {
     let metadata_length = u32::try_from(metadata_length)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "metadata too large for u32"))?;
     let payload_length = u32::try_from(payload_length)
@@ -84,7 +134,12 @@ fn encode_header(kind: u8, metadata_length: usize, payload_length: usize) -> io:
 
 /// Writes one frame. The header, metadata and payload go out under a single lock so concurrent
 /// senders cannot interleave halves of a frame — the reader has no way to resynchronize if they do.
-pub fn write_frame(writer: &mut impl Write, kind: u8, metadata: &[u8], payload: &[u8]) -> io::Result<()> {
+pub fn write_frame(
+    writer: &mut impl Write,
+    kind: u8,
+    metadata: &[u8],
+    payload: &[u8],
+) -> io::Result<()> {
     let header = encode_header(kind, metadata.len(), payload.len())?;
     writer.write_all(&header)?;
     writer.write_all(metadata)?;
@@ -97,6 +152,43 @@ pub fn write_frame(writer: &mut impl Write, kind: u8, metadata: &[u8], payload: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn framebuffer_budget_checks_boundaries_and_overflow() {
+        assert_eq!(
+            checked_rgba_framebuffer_len(4096, 4096),
+            Some(MAX_FRAMEBUFFER_BYTES)
+        );
+        assert_eq!(checked_rgba_framebuffer_len(4097, 4096), None);
+        assert_eq!(checked_rgba_framebuffer_len(0, 4096), None);
+        assert_eq!(checked_rgba_framebuffer_len(usize::MAX, 2), None);
+    }
+
+    #[test]
+    fn writes_authenticated_remote_desktop_tunnel_preface() {
+        let token = "ab".repeat(32);
+        let mut buffer = Vec::new();
+        write_rd_tunnel_auth_preface(&mut buffer, Some(&token)).unwrap();
+        assert_eq!(
+            buffer,
+            [RD_TUNNEL_AUTH_PREFIX, token.as_bytes(), b"\n"].concat()
+        );
+    }
+
+    #[test]
+    fn direct_connections_write_no_tunnel_preface() {
+        let mut buffer = Vec::new();
+        write_rd_tunnel_auth_preface(&mut buffer, None).unwrap();
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn rejects_malformed_remote_desktop_tunnel_tokens() {
+        let mut buffer = Vec::new();
+        assert!(write_rd_tunnel_auth_preface(&mut buffer, Some("short")).is_err());
+        assert!(write_rd_tunnel_auth_preface(&mut buffer, Some(&"GG".repeat(32))).is_err());
+        assert!(buffer.is_empty());
+    }
 
     #[test]
     fn round_trips_a_control_frame() {
@@ -112,7 +204,13 @@ mod tests {
     #[test]
     fn round_trips_a_stream_frame() {
         let mut buffer = Vec::new();
-        write_frame(&mut buffer, KIND_STREAM, br#"{"type":"rdpFrame"}"#, &[1, 2, 3, 4]).unwrap();
+        write_frame(
+            &mut buffer,
+            KIND_STREAM,
+            br#"{"type":"rdpFrame"}"#,
+            &[1, 2, 3, 4],
+        )
+        .unwrap();
 
         let frame = read_frame(&mut buffer.as_slice()).unwrap();
         assert_eq!(frame.kind, KIND_STREAM);

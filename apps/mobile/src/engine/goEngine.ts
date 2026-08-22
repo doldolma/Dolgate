@@ -72,6 +72,17 @@ type NativeConnectionEvent = {
 
 type ConnectionEventHandler = (event: NativeConnectionEvent) => void;
 
+type ConnectionEventOptions = Pick<
+  ConnectOptions,
+  | 'connectionId'
+  | 'host'
+  | 'port'
+  | 'onServerKey'
+  | 'onInteractiveChallenge'
+  | 'onBanner'
+  | 'onHopProgress'
+>;
+
 type NativeReadResult = {
   dataBase64: string;
   nextSeq: number;
@@ -96,11 +107,17 @@ type GoSshEngineNativeModule = NativeModule & {
   respondHostKeyTrust(challengeId: string, trust: boolean): Promise<void>;
   cancelConnect(connectionId: string): Promise<void>;
   disconnect(connectionId: string): Promise<void>;
-  startShell(connectionId: string, optionsJson: string): Promise<NativeStartShellResult>;
+  startShell(
+    connectionId: string,
+    optionsJson: string,
+  ): Promise<NativeStartShellResult>;
   /** SSH over SSM 에 쓸 임시 키쌍(JSON: privateKeyPem·publicKey). */
   generateEphemeralSshKey(): Promise<string>;
   /** AWS SSM 셸. SSH 셸과 같은 shellId 체계로 돌아오므로 아래 셸 조작이 그대로 쓰인다. */
-  startAwsSsmShell(sessionId: string, requestJson: string): Promise<NativeStartShellResult>;
+  startAwsSsmShell(
+    sessionId: string,
+    requestJson: string,
+  ): Promise<NativeStartShellResult>;
   startSsmPortForward(
     forwardId: string,
     requestJson: string,
@@ -144,7 +161,11 @@ type GoSshEngineNativeModule = NativeModule & {
     dataBase64: string,
   ): Promise<void>;
   sftpMkdir(sftpId: string, path: string): Promise<void>;
-  sftpRename(sftpId: string, sourcePath: string, targetPath: string): Promise<void>;
+  sftpRename(
+    sftpId: string,
+    sourcePath: string,
+    targetPath: string,
+  ): Promise<void>;
   sftpChmod(sftpId: string, path: string, mode: number): Promise<void>;
   sftpRemove(sftpId: string, path: string): Promise<void>;
   sftpStat(sftpId: string, path: string): Promise<string>;
@@ -169,7 +190,10 @@ type GoSshEngineNativeModule = NativeModule & {
 };
 
 function nativeModule(): GoSshEngineNativeModule | null {
-  return (NativeModules.GoSshEngineModule as GoSshEngineNativeModule | undefined) ?? null;
+  return (
+    (NativeModules.GoSshEngineModule as GoSshEngineNativeModule | undefined) ??
+    null
+  );
 }
 
 /**
@@ -219,7 +243,9 @@ function credentialFields(options: ConnectOptions): Record<string, unknown> {
 }
 
 /** 자격증명을 코어의 필드 이름으로. 대상과 점프 홉이 같은 모양을 쓴다. */
-function credentialFieldsOf(credential: EngineCredential): Record<string, unknown> {
+function credentialFieldsOf(
+  credential: EngineCredential,
+): Record<string, unknown> {
   switch (credential.type) {
     case 'password':
       return { authType: 'password', password: credential.password };
@@ -266,9 +292,7 @@ function connectPayload(
     // ssh-core takes the plural list in preference to the single key, and
     // accepts the connection if the presented key matches any entry. Omitted
     // when empty so the singular field stays in charge.
-    ...(trustedHostKeysBase64?.length
-      ? { trustedHostKeysBase64 }
-      : {}),
+    ...(trustedHostKeysBase64?.length ? { trustedHostKeysBase64 } : {}),
     ...(options.jump ? { jump: jumpPayload(options.jump) } : {}),
     rows: options.size?.rows ?? 0,
     cols: options.size?.cols ?? 0,
@@ -292,7 +316,9 @@ function hopOf(raw: unknown): EngineConnectionHop | undefined {
   };
 }
 
-function interactiveChallengeOf(raw: Record<string, unknown>): EngineInteractiveChallenge {
+function interactiveChallengeOf(
+  raw: Record<string, unknown>,
+): EngineInteractiveChallenge {
   const prompts = Array.isArray(raw.prompts) ? raw.prompts : [];
   return {
     challengeId: String(raw.challengeId ?? ''),
@@ -327,7 +353,7 @@ function interactiveChallengeOf(raw: Record<string, unknown>): EngineInteractive
  */
 async function answerHostKeyChallenge(
   native: GoSshEngineNativeModule,
-  options: ConnectOptions,
+  options: ConnectionEventOptions,
   raw: Record<string, unknown>,
   onDecision: (accepted: boolean) => void,
 ): Promise<void> {
@@ -367,7 +393,7 @@ async function answerHostKeyChallenge(
 
 async function answerInteractiveChallenge(
   native: GoSshEngineNativeModule,
-  options: ConnectOptions,
+  options: ConnectionEventOptions,
   raw: Record<string, unknown>,
 ): Promise<void> {
   const challenge = interactiveChallengeOf(raw);
@@ -447,8 +473,12 @@ class GoEngineEvents {
     const native = requireNative();
     this.emitter = new NativeEventEmitter(native);
     this.subscriptions = [
-      this.emitter.addListener(EVENT_CHUNK, payload => this.handleChunk(payload)),
-      this.emitter.addListener(EVENT_DROPPED, payload => this.handleDropped(payload)),
+      this.emitter.addListener(EVENT_CHUNK, payload =>
+        this.handleChunk(payload),
+      ),
+      this.emitter.addListener(EVENT_DROPPED, payload =>
+        this.handleDropped(payload),
+      ),
       this.emitter.addListener(EVENT_SHELL_CLOSED, payload => {
         const shellId = String(payload?.shellId);
         const handler = this.shellClosedHandlers.get(shellId);
@@ -469,16 +499,22 @@ class GoEngineEvents {
         this.pendingShellClosedIds.add(shellId);
       }),
       this.emitter.addListener(EVENT_DISCONNECTED, payload => {
-        const handler = this.disconnectHandlers.get(String(payload?.connectionId));
+        const handler = this.disconnectHandlers.get(
+          String(payload?.connectionId),
+        );
         handler?.();
       }),
-      this.emitter.addListener(EVENT_CONNECTION, payload => this.handleConnectionEvent(payload)),
+      this.emitter.addListener(EVENT_CONNECTION, payload =>
+        this.handleConnectionEvent(payload),
+      ),
       this.emitter.addListener(EVENT_TAILNET, payload => {
         if (!this.tailnetHandler) {
           return;
         }
         try {
-          this.tailnetHandler(JSON.parse(String(payload?.eventJson ?? '')) as EngineTailnetEvent);
+          this.tailnetHandler(
+            JSON.parse(String(payload?.eventJson ?? '')) as EngineTailnetEvent,
+          );
         } catch {
           // A malformed native event is ignored; the request promise still
           // carries operation failures and a later snapshot repairs UI state.
@@ -495,7 +531,10 @@ class GoEngineEvents {
     handler.onChunk({
       seq: Number(payload?.seq ?? 0),
       tMs: Number(payload?.tMs ?? 0),
-      stream: Number(payload?.stream) === STREAM_STDERR ? ('stderr' as const) : ('stdout' as const),
+      stream:
+        Number(payload?.stream) === STREAM_STDERR
+          ? ('stderr' as const)
+          : ('stdout' as const),
       bytes: toByteArray(String(payload?.dataBase64 ?? '')),
     });
   }
@@ -503,7 +542,9 @@ class GoEngineEvents {
   private handleConnectionEvent(payload: any): void {
     let event: NativeConnectionEvent;
     try {
-      event = JSON.parse(String(payload?.eventJson ?? '')) as NativeConnectionEvent;
+      event = JSON.parse(
+        String(payload?.eventJson ?? ''),
+      ) as NativeConnectionEvent;
     } catch {
       // A malformed native event is dropped. The prompt it carried goes
       // unanswered, and the connect fails on its own budget rather than here.
@@ -531,7 +572,10 @@ class GoEngineEvents {
    * deliver replay chunks as soon as it exists — a token minted afterwards would
    * miss them.
    */
-  registerOutput(subscriptionToken: string, handler: EngineOutputHandler): void {
+  registerOutput(
+    subscriptionToken: string,
+    handler: EngineOutputHandler,
+  ): void {
     this.ensureAttached();
     this.chunkHandlers.set(subscriptionToken, handler);
   }
@@ -578,7 +622,10 @@ class GoEngineEvents {
    * first OTP round are raised during the dial, so a handler attached once
    * connect resolves would arrive after the questions it exists to answer.
    */
-  registerConnectionEvents(connectionId: string, handler: ConnectionEventHandler): void {
+  registerConnectionEvents(
+    connectionId: string,
+    handler: ConnectionEventHandler,
+  ): void {
     this.ensureAttached();
     this.connectionHandlers.set(connectionId, handler);
   }
@@ -619,6 +666,59 @@ export function resetGoEngineEvents(): void {
   events.reset();
 }
 
+/**
+ * Runs one native SSH dial operation with the exact event/prompt plumbing used
+ * by normal mobile terminal connections. Remote Desktop uses this while the Go
+ * tunnel performs its eager SSH + direct-tcpip dial, so host trust, OTP, banners
+ * and hop progress do not fork into a second implementation.
+ */
+export async function runWithGoConnectionEvents<T>(
+  options: ConnectionEventOptions,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const native = requireNative();
+  let declined = false;
+  events.registerConnectionEvents(options.connectionId, event => {
+    const payload = (event.payload ?? {}) as Record<string, unknown>;
+    switch (event.type) {
+      case 'hostKeyTrustChallenge':
+        void answerHostKeyChallenge(native, options, payload, accepted => {
+          declined = declined || !accepted;
+        });
+        return;
+      case 'keyboardInteractiveChallenge':
+        void answerInteractiveChallenge(native, options, payload);
+        return;
+      case 'sshBanner': {
+        const text = String(payload.text ?? '');
+        if (text) options.onBanner?.(text);
+        return;
+      }
+      case 'connectionHopProgress': {
+        const hopLabel = String(payload.hopLabel ?? '');
+        if (!hopLabel) return;
+        options.onHopProgress?.({
+          hopLabel,
+          hopIndex: typeof payload.hopIndex === 'number' ? payload.hopIndex : 1,
+          hopCount: typeof payload.hopCount === 'number' ? payload.hopCount : 1,
+          stage: String(payload.stage ?? ''),
+        });
+        return;
+      }
+      default:
+        return;
+    }
+  });
+
+  try {
+    return await operation();
+  } catch (error) {
+    throw declined ? new HostKeyRejectedError() : error;
+  } finally {
+    events.forgetConnectionEvents(options.connectionId);
+  }
+}
+
 let nextSubscriptionToken = 0;
 
 class GoShell implements EngineShell {
@@ -637,7 +737,14 @@ class GoShell implements EngineShell {
   async readBuffer(cursor: EngineCursor): Promise<EngineReadResult> {
     const [mode, seq, tailBytes, timeMs] = cursorArgs(cursor);
     // maxBytes 0 lets the engine apply its own cap.
-    const result = await requireNative().readBuffer(this.id, mode, seq, tailBytes, timeMs, 0);
+    const result = await requireNative().readBuffer(
+      this.id,
+      mode,
+      seq,
+      tailBytes,
+      timeMs,
+      0,
+    );
     return {
       bytes: toByteArray(result.dataBase64 ?? ''),
       nextSeq: Number(result.nextSeq ?? 0),
@@ -652,7 +759,10 @@ class GoShell implements EngineShell {
     };
   }
 
-  async follow(handler: EngineOutputHandler, options: EngineFollowOptions): Promise<number> {
+  async follow(
+    handler: EngineOutputHandler,
+    options: EngineFollowOptions,
+  ): Promise<number> {
     const [mode, seq, tailBytes, timeMs] = cursorArgs(options.cursor);
 
     // Minted here and handed to the engine, so the handler is in place before
@@ -727,7 +837,6 @@ class GoConnection implements EngineConnection {
   }
 }
 
-
 class GoSftp implements EngineSftpConnection {
   constructor(
     readonly id: string,
@@ -739,13 +848,34 @@ class GoSftp implements EngineSftpConnection {
     return JSON.parse(raw) as EngineDirectoryListing;
   }
 
-  async readChunk(path: string, offset: number, length: number): Promise<EngineSftpReadChunk> {
-    const result = await requireNative().sftpReadChunk(this.id, path, offset, length);
-    return { bytes: toByteArray(result.dataBase64 ?? ''), eof: Boolean(result.eof) };
+  async readChunk(
+    path: string,
+    offset: number,
+    length: number,
+  ): Promise<EngineSftpReadChunk> {
+    const result = await requireNative().sftpReadChunk(
+      this.id,
+      path,
+      offset,
+      length,
+    );
+    return {
+      bytes: toByteArray(result.dataBase64 ?? ''),
+      eof: Boolean(result.eof),
+    };
   }
 
-  async writeChunk(path: string, offset: number, bytes: Uint8Array): Promise<void> {
-    await requireNative().sftpWriteChunk(this.id, path, offset, fromByteArray(bytes));
+  async writeChunk(
+    path: string,
+    offset: number,
+    bytes: Uint8Array,
+  ): Promise<void> {
+    await requireNative().sftpWriteChunk(
+      this.id,
+      path,
+      offset,
+      fromByteArray(bytes),
+    );
   }
 
   async mkdir(path: string): Promise<void> {
@@ -800,7 +930,10 @@ export class GoSshEngineAdapter implements MobileSshEngine {
   ): Promise<void> {
     events.registerTailnet(onEvent);
     try {
-      await requireNative().configureTailnets(stateScope, JSON.stringify({ configs }));
+      await requireNative().configureTailnets(
+        stateScope,
+        JSON.stringify({ configs }),
+      );
     } catch (error) {
       events.forgetTailnet(onEvent);
       throw error;
@@ -812,7 +945,10 @@ export class GoSshEngineAdapter implements MobileSshEngine {
     config: EngineTailnetConfig,
     timeoutMs = 0,
   ): Promise<void> {
-    await requireNative().startTailnet(requestId, JSON.stringify({ config, timeoutMs }));
+    await requireNative().startTailnet(
+      requestId,
+      JSON.stringify({ config, timeoutMs }),
+    );
   }
 
   async cancelTailnet(requestId: string, tailnetId: string): Promise<void> {
@@ -851,6 +987,10 @@ export class GoSshEngineAdapter implements MobileSshEngine {
    * not asked about. A key outside that list raises the question — as a new host
    * if the list was empty, as a changed key if it was not.
    */
+  async cancelConnect(connectionId: string): Promise<void> {
+    await requireNative().cancelConnect(connectionId);
+  }
+
   async connect(options: ConnectOptions): Promise<EngineConnection> {
     const native = requireNative();
     const onFile = options.trustedHostKeysBase64?.filter(Boolean) ?? [];
@@ -858,58 +998,16 @@ export class GoSshEngineAdapter implements MobileSshEngine {
       events.registerDisconnected(options.connectionId, options.onDisconnected);
     }
 
-    // Tracked so a decline can be reported as itself. The engine ends the dial
-    // with a trust error, and "you said no" reads differently from a host key
-    // that could not be verified.
-    let declined = false;
-    events.registerConnectionEvents(options.connectionId, event => {
-      const payload = (event.payload ?? {}) as Record<string, unknown>;
-      switch (event.type) {
-        case 'hostKeyTrustChallenge':
-          void answerHostKeyChallenge(native, options, payload, accepted => {
-            declined = declined || !accepted;
-          });
-          return;
-        case 'keyboardInteractiveChallenge':
-          void answerInteractiveChallenge(native, options, payload);
-          return;
-        case 'sshBanner': {
-          const text = String(payload.text ?? '');
-          if (text) {
-            options.onBanner?.(text);
-          }
-          return;
-        }
-        case 'connectionHopProgress': {
-          const hopLabel = String(payload.hopLabel ?? '');
-          if (!hopLabel) {
-            return;
-          }
-          options.onHopProgress?.({
-            hopLabel,
-            hopIndex: typeof payload.hopIndex === 'number' ? payload.hopIndex : 1,
-            hopCount: typeof payload.hopCount === 'number' ? payload.hopCount : 1,
-            stage: String(payload.stage ?? ''),
-          });
-          return;
-        }
-        default:
-          // 남는 것은 이 연결이 쓰지 않는 이벤트다(대화형 인증이 풀렸다는 알림 등). 화면이 그리는
-          // 것은 위 네 가지로 충분하다.
-          return;
-      }
-    });
-
     try {
-      await native.connect(
-        options.connectionId,
-        JSON.stringify(connectPayload(options, onFile[0] ?? '', onFile)),
+      await runWithGoConnectionEvents(options, () =>
+        native.connect(
+          options.connectionId,
+          JSON.stringify(connectPayload(options, onFile[0] ?? '', onFile)),
+        ),
       );
     } catch (error) {
       events.forgetConnection(options.connectionId);
-      throw declined ? new HostKeyRejectedError() : error;
-    } finally {
-      events.forgetConnectionEvents(options.connectionId);
+      throw error;
     }
 
     return new GoConnection(options.connectionId, options.size);
@@ -997,12 +1095,17 @@ export class GoSshEngineAdapter implements MobileSshEngine {
     };
   }
 
-  async validatePrivateKey(privateKeyPem: string, passphrase?: string): Promise<string | null> {
+  async validatePrivateKey(
+    privateKeyPem: string,
+    passphrase?: string,
+  ): Promise<string | null> {
     try {
       await requireNative().inspectPrivateKey(privateKeyPem, passphrase ?? '');
       return null;
     } catch (error) {
-      return error instanceof Error ? error.message : t('engine.privateKeyUnreadable');
+      return error instanceof Error
+        ? error.message
+        : t('engine.privateKeyUnreadable');
     }
   }
 
@@ -1017,7 +1120,9 @@ export class GoSshEngineAdapter implements MobileSshEngine {
       }
       return null;
     } catch (error) {
-      return error instanceof Error ? error.message : t('engine.certificateUnreadable');
+      return error instanceof Error
+        ? error.message
+        : t('engine.certificateUnreadable');
     }
   }
 }

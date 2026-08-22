@@ -1,4 +1,4 @@
-import { t } from "../i18n";
+import { t } from '../i18n';
 // The engine-neutral SSH surface the session flow talks to.
 //
 // One implementation backs it: the Go engine (gomobile bindings over
@@ -272,7 +272,10 @@ export interface EngineShell {
   resize(size: EngineTerminalSize): Promise<void>;
   readBuffer(cursor: EngineCursor): Promise<EngineReadResult>;
   /** Replays from a cursor then follows live output; resolves to a listener id. */
-  follow(handler: EngineOutputHandler, options: EngineFollowOptions): Promise<number>;
+  follow(
+    handler: EngineOutputHandler,
+    options: EngineFollowOptions,
+  ): Promise<number>;
   unfollow(listenerId: number): Promise<void>;
   close(): Promise<void>;
 }
@@ -322,7 +325,11 @@ export type EngineSftpReadChunk = {
 export interface EngineSftpConnection {
   readonly id: string;
   list(path: string): Promise<EngineDirectoryListing>;
-  readChunk(path: string, offset: number, length: number): Promise<EngineSftpReadChunk>;
+  readChunk(
+    path: string,
+    offset: number,
+    length: number,
+  ): Promise<EngineSftpReadChunk>;
   writeChunk(path: string, offset: number, bytes: Uint8Array): Promise<void>;
   mkdir(path: string): Promise<void>;
   rename(sourcePath: string, targetPath: string): Promise<void>;
@@ -482,6 +489,8 @@ export interface MobileSshEngine {
   snapshotTailnets(requestId: string): Promise<void>;
   forgetTailnet(tailnetId: string): Promise<void>;
   closeTailnets(): Promise<void>;
+  /** Cancels an SSH connection that is still inside dial/authentication. */
+  cancelConnect(connectionId: string): Promise<void>;
   connect(options: ConnectOptions): Promise<EngineConnection>;
   /**
    * SSH over SSM 에 쓸 임시 키쌍을 만든다.
@@ -489,7 +498,10 @@ export interface MobileSshEngine {
    * EC2 Instance Connect 는 공개키를 60초만 인스턴스에 올려 주므로 세션마다 새 키가 필요하다.
    * 기기에 crypto 가 없어 엔진이 만든다.
    */
-  generateEphemeralSshKey(): Promise<{ privateKeyPem: string; publicKey: string }>;
+  generateEphemeralSshKey(): Promise<{
+    privateKeyPem: string;
+    publicKey: string;
+  }>;
   /**
    * AWS SSM 셸을 연다. **돌아오는 것은 SSH 셸과 같은 `EngineShell`** 이라 터미널 화면을 그대로
    * 붙일 수 있다.
@@ -529,7 +541,10 @@ export interface MobileSshEngine {
     params: EngineArgon2idParams,
   ): Promise<Uint8Array>;
   /** Returns a human-readable problem, or null when the key is usable. */
-  validatePrivateKey(privateKeyPem: string, passphrase?: string): Promise<string | null>;
+  validatePrivateKey(
+    privateKeyPem: string,
+    passphrase?: string,
+  ): Promise<string | null>;
   /** Returns a human-readable problem, or null when the certificate is usable. */
   validateCertificate(certificateText: string): Promise<string | null>;
 }

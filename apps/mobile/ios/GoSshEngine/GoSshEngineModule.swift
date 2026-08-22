@@ -33,6 +33,7 @@ final class GoSshEngineModule: RCTEventEmitter {
   /// Guards the registries only; engine calls happen outside it so a slow
   /// network operation cannot block an unrelated lookup.
   private let registryLock = NSLock()
+  private var invalidated = false
   private var connections: [String: MobileConn] = [:]
   private var shells: [String: MobileShell] = [:]
   private var sftpSessions: [String: MobileSFTPSession] = [:]
@@ -72,17 +73,26 @@ final class GoSshEngineModule: RCTEventEmitter {
     super.invalidate()
 
     registryLock.lock()
+    if invalidated {
+      registryLock.unlock()
+      return
+    }
+    invalidated = true
     let openShells = Array(shells.values)
     let openSftp = Array(sftpSessions.values)
     let openConnections = Array(connections.values)
+    let openSsmForwards = Array(ssmForwards.values)
     shells.removeAll()
     sftpSessions.removeAll()
     connections.removeAll()
+    ssmForwards.removeAll()
     registryLock.unlock()
 
     for sftp in openSftp { try? sftp.close() }
     for shell in openShells { try? shell.close() }
     for connection in openConnections { try? connection.close() }
+    engine?.closeAllRDTunnels()
+    for forward in openSsmForwards { try? forward.stop() }
     try? engine?.closeTailnets()
   }
 
@@ -286,7 +296,7 @@ final class GoSshEngineModule: RCTEventEmitter {
       self.registryLock.lock()
       callbackConnection = connection
       registrationComplete = true
-      let closedBeforeRegistration = disconnected
+      let closedBeforeRegistration = disconnected || self.invalidated
       let previous = closedBeforeRegistration
         ? nil
         : self.connections.updateValue(connection, forKey: connectionId)
@@ -410,7 +420,7 @@ final class GoSshEngineModule: RCTEventEmitter {
       let info = try callReturningString { shell.infoJSON($0) }
 
       self.registryLock.lock()
-      let closedBeforeRegistration = closed
+      let closedBeforeRegistration = closed || self.invalidated
       if !closedBeforeRegistration {
         self.shells[shellId] = shell
       }
@@ -479,7 +489,7 @@ final class GoSshEngineModule: RCTEventEmitter {
       let info = try callReturningString { shell.infoJSON($0) }
 
       self.registryLock.lock()
-      let closedBeforeRegistration = closed
+      let closedBeforeRegistration = closed || self.invalidated
       if !closedBeforeRegistration {
         self.shells[shellId] = shell
       }
@@ -511,8 +521,14 @@ final class GoSshEngineModule: RCTEventEmitter {
       let engine = try requireEngine(self.engine)
       let forward = try engine.startSsmPortForward(requestJson)
       self.registryLock.lock()
-      self.ssmForwards[forwardId] = forward
+      let rejected = self.invalidated
+      let previous = rejected ? nil : self.ssmForwards.updateValue(forward, forKey: forwardId)
       self.registryLock.unlock()
+      if rejected {
+        try? forward.stop()
+        throw EngineError.moduleInvalidated
+      }
+      try? previous?.stop()
       return [
         "forwardId": forwardId,
         "bindPort": Int(forward.bindPort()),
@@ -740,8 +756,15 @@ final class GoSshEngineModule: RCTEventEmitter {
       let sftp = try connection.startSFTP()
 
       self.registryLock.lock()
-      self.sftpSessions[sftpId] = sftp
+      let rejected = self.invalidated
+      if !rejected {
+        self.sftpSessions[sftpId] = sftp
+      }
       self.registryLock.unlock()
+      if rejected {
+        try? sftp.close()
+        throw EngineError.moduleInvalidated
+      }
 
       return sftpId
     }
@@ -999,7 +1022,38 @@ final class GoSshEngineModule: RCTEventEmitter {
     _ reject: @escaping RCTPromiseRejectBlock,
     _ work: @escaping () throws -> Any?
   ) {
-    worker.async {
+    registryLock.lock()
+    let rejectedImmediately = invalidated
+    registryLock.unlock()
+    if rejectedImmediately {
+      reject(
+        GoSshEngineModule.errorCode,
+        EngineError.moduleInvalidated.localizedDescription,
+        EngineError.moduleInvalidated
+      )
+      return
+    }
+
+    worker.async { [weak self] in
+      guard let self else {
+        reject(
+          GoSshEngineModule.errorCode,
+          EngineError.moduleInvalidated.localizedDescription,
+          EngineError.moduleInvalidated
+        )
+        return
+      }
+      self.registryLock.lock()
+      let rejectedAfterQueueing = self.invalidated
+      self.registryLock.unlock()
+      if rejectedAfterQueueing {
+        reject(
+          GoSshEngineModule.errorCode,
+          EngineError.moduleInvalidated.localizedDescription,
+          EngineError.moduleInvalidated
+        )
+        return
+      }
       do {
         resolve(try work())
       } catch {
@@ -1007,9 +1061,39 @@ final class GoSshEngineModule: RCTEventEmitter {
       }
     }
   }
+
+  // MARK: - Remote Desktop Tunnel
+
+  @objc(openRemoteDesktopTunnel:resolve:reject:)
+  func openRemoteDesktopTunnel(
+    requestJson: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      let engine = try requireEngine(self?.engine)
+      return try callReturningString { error in
+        engine.openRemoteDesktopTunnel(requestJson, error: error)
+      }
+    }
+  }
+
+  @objc(closeRemoteDesktopTunnel:resolve:reject:)
+  func closeRemoteDesktopTunnel(
+    tunnelId: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      let engine = try requireEngine(self?.engine)
+      try engine.closeRemoteDesktopTunnel(tunnelId)
+      return nil
+    }
+  }
 }
 
 private enum EngineError: LocalizedError {
+  case moduleInvalidated
   case engineUnavailable
   case missingConnection(String)
   case missingShell(String)
@@ -1019,6 +1103,7 @@ private enum EngineError: LocalizedError {
 
   var errorDescription: String? {
     switch self {
+    case .moduleInvalidated: return "SSH engine module has been invalidated."
     case .engineUnavailable: return "SSH 엔진을 초기화하지 못했습니다."
     case .missingConnection(let id): return "연결을 찾을 수 없습니다: \(id)"
     case .missingShell(let id): return "셸을 찾을 수 없습니다: \(id)"

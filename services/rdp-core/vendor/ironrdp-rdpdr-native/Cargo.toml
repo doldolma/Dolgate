@@ -48,25 +48,25 @@ path = "src/lib.rs"
 test = true
 doctest = false
 
-[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies.ironrdp-core]
+[target.'cfg(unix)'.dependencies.ironrdp-core]
 version = "0.2"
 
-[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies.ironrdp-pdu]
+[target.'cfg(unix)'.dependencies.ironrdp-pdu]
 version = "0.9"
 
-[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies.ironrdp-rdpdr]
+[target.'cfg(unix)'.dependencies.ironrdp-rdpdr]
 version = "0.7"
 
-[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies.ironrdp-svc]
+[target.'cfg(unix)'.dependencies.ironrdp-svc]
 version = "0.8"
 
-[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies.nix]
+[target.'cfg(unix)'.dependencies.nix]
 version = "0.31"
 features = [
     "fs",
     "dir",
 ]
 
-[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies.tracing]
+[target.'cfg(unix)'.dependencies.tracing]
 version = "0.1"
 features = ["log"]

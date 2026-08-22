@@ -6,18 +6,7 @@
 //!
 //! Logs go to stderr only. stdout is the frame channel and a stray `println!` would corrupt it.
 
-mod audio;
-mod audio_input;
-mod audio_output_dvc;
-mod camera;
-mod camera_pdu;
-mod clipboard;
-mod drive;
-mod egfx;
-mod egfx_surface;
-mod output;
-mod protocol;
-mod session;
+use rdp_core::{output, protocol, session};
 
 use std::collections::HashMap;
 use std::io::{self, BufReader};

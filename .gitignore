@@ -11,6 +11,8 @@ apps/desktop/.cache
 apps/desktop/out
 apps/desktop/test-results
 apps/desktop/playwright-report
+# 브라우저 도구가 남기는 스크린샷·페이지 덤프. 저장소 루트에 쌓인다.
+.playwright-mcp
 apps/desktop/release
 apps/desktop/src/renderer/vite-env.d.ts
 services/ssh-core/bin
@@ -52,3 +54,7 @@ web/en/
 apps/desktop/build/icons/dolssh.iconset
 
 .kiro
+
+# react-native-remote-desktop Android native/Gradle build outputs.
+packages/react-native-remote-desktop/android/.cxx
+packages/react-native-remote-desktop/android/build

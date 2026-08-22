@@ -109,11 +109,19 @@ type Engine struct {
 
 	connectionListenerMu sync.RWMutex
 	connectionListener   ConnectionEventListener
+
+	// Remote Desktop loopback tunnels (rdtunnel.go). The gate makes opening and
+	// sweeping atomic with respect to each other, including the first use.
+	rdTunnelGate sync.RWMutex
+	rdTunnels    *rdTunnelRegistry
 }
 
 // NewEngine returns an engine.
 func NewEngine() *Engine {
-	engine := &Engine{hostTrust: hostkeytrust.New()}
+	engine := &Engine{
+		hostTrust: hostkeytrust.New(),
+		rdTunnels: newRDTunnelRegistry(),
+	}
 	engine.dialer = sshdial.New(engine.emitConnectionEvent)
 	// The tailnet runtime is created later, when the app configures it, so the
 	// resolver is a method that looks it up at dial time rather than a value.

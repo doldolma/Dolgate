@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, ensure, Context as _, Result};
+use core_framing::MAX_FRAMEBUFFER_BYTES;
 use tracing::{debug, trace, warn};
 
 use crate::ard;
@@ -27,18 +28,16 @@ use crate::auth;
 use crate::clipboard;
 use crate::cursor;
 use crate::decode::{Framebuffer, Rect};
-use crate::zrle::ZlibStream;
 use crate::output::Output;
-use crate::protocol::{
-    CapabilitiesPayload, ClipboardLossyPayload, ClipboardPayload, ConnectPayload,
-    ConnectedPayload, CursorPayload, EmptyPayload, ErrorPayload, Event, FramePayload, InputEvent,
-    ResizedPayload,
-};
+use crate::protocol::{CapabilitiesPayload, ConnectPayload, InputEvent};
 use crate::rfb::{self, encoding, PixelFormat, SecurityType};
+use crate::session_output::SessionOutput;
+use crate::sink::{VncEvent, VncSink};
 use crate::tight;
 use crate::tls;
 use crate::transport::{is_idle_timeout, Transport};
 use crate::vencrypt;
+use crate::zrle::ZlibStream;
 
 /// TCP 연결 제한. 닿지 않는 주소에서 무한정 기다리지 않는다.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -121,9 +120,7 @@ impl SessionHandle {
         if self.is_closed() || width == 0 || height == 0 {
             return Ok(());
         }
-        let _ = self
-            .outbound
-            .send(Outbound::DesktopSize { width, height });
+        let _ = self.outbound.send(Outbound::DesktopSize { width, height });
         Ok(())
     }
 
@@ -153,7 +150,10 @@ enum Outbound {
     Input(Vec<InputEvent>),
     Clipboard(String),
     /// 원격 화면 크기 요청. 서버가 확장을 쓰는 것을 본 뒤에만 실제로 나간다.
-    DesktopSize { width: u16, height: u16 },
+    DesktopSize {
+        width: u16,
+        height: u16,
+    },
     /// 화면 전체를 다시 보내 달라.
     ///
     /// **가진 그림을 잃은 쪽이 부른다.** 캔버스는 크기가 바뀌면 내용이 지워지는데, 그 리사이즈는
@@ -267,7 +267,10 @@ fn drain_outbound(
             Ok(Outbound::DesktopSize { width, height }) => {
                 // 증거를 못 봤으면 보내지 않는다. 보내면 세션이 깨진다(위 주석 참고).
                 if !desktop_size.supported {
-                    debug!(width, height, "서버가 크기 변경을 지원하지 않아 요청을 버린다");
+                    debug!(
+                        width,
+                        height, "서버가 크기 변경을 지원하지 않아 요청을 버린다"
+                    );
                     continue;
                 }
                 // 같은 크기를 다시 요청하면 서버가 화면을 또 재활성화해서 눈에 보이게 멈춘다.
@@ -366,17 +369,18 @@ fn drain_outbound(
 fn report_clipboard_loss(
     clip: &mut ClipboardState,
     session_id: &str,
-    output: &Output,
+    output: &SessionOutput,
 ) -> Result<()> {
     if clip.lossy_chars == 0 {
         return Ok(());
     }
     let replaced = clip.lossy_chars;
     clip.lossy_chars = 0;
-    debug!(replaced, "고전 클립보드로 보내며 담을 수 없는 글자를 바꿨다");
-    output.send_event(
-        &Event::new("clipboardLossy", ClipboardLossyPayload { replaced }).session(session_id),
-    )?;
+    debug!(
+        replaced,
+        "고전 클립보드로 보내며 담을 수 없는 글자를 바꿨다"
+    );
+    output.emit_event(session_id, VncEvent::ClipboardLossy { replaced })?;
     Ok(())
 }
 
@@ -423,8 +427,7 @@ fn send_clipboard_text(
 
     // 요청 없이 받아 주는 한도를 넘으면 확장은 보내지 않는다(잘라 보내면 사용자가 모른 채
     // 반쪽을 붙여넣는다). 고전은 이미 나갔다.
-    let too_big =
-        clip.peer_max_unsolicited > 0 && text.len() as u32 > clip.peer_max_unsolicited;
+    let too_big = clip.peer_max_unsolicited > 0 && text.len() as u32 > clip.peer_max_unsolicited;
     if clip.peer_actions & clipboard::ACTION_PROVIDE != 0 && !too_big {
         if let Some(body) = clipboard::encode_provide(text) {
             rfb::write_client_cut_text_extended(transport, &body)?;
@@ -443,6 +446,43 @@ pub fn run(
     request_id: String,
     payload: ConnectPayload,
     output: Output,
+    register: impl FnOnce(SessionHandle),
+) -> Result<()> {
+    run_inner(
+        session_id,
+        request_id,
+        payload,
+        SessionOutput::from_output(output),
+        register,
+    )
+}
+
+/// 라이브러리 소비자용 진입점. `VncSink` trait 을 통해 프레임·이벤트를 직접 받는다.
+///
+/// 사이드카의 JSON/framing 오버헤드 없이 RGBA 슬라이스를 그대로 전달받을 수 있다.
+/// 이 함수는 반환될 때까지 현재 스레드를 차지한다(사이드카의 `run` 과 같은 계약).
+#[allow(dead_code)]
+pub fn run_with_sink(
+    session_id: String,
+    request_id: String,
+    payload: ConnectPayload,
+    sink: Arc<dyn VncSink>,
+    register: impl FnOnce(SessionHandle),
+) -> Result<()> {
+    run_inner(
+        session_id,
+        request_id,
+        payload,
+        SessionOutput::from_sink(sink),
+        register,
+    )
+}
+
+fn run_inner(
+    session_id: String,
+    request_id: String,
+    payload: ConnectPayload,
+    output: SessionOutput,
     register: impl FnOnce(SessionHandle),
 ) -> Result<()> {
     // **핸들을 붙기 전에 만들어 등록한다.**
@@ -470,7 +510,7 @@ pub fn run(
         outbound_rx,
     ) {
         Ok(()) => {
-            output.send_event(&Event::new("closed", EmptyPayload {}).session(&session_id))?;
+            output.emit_event(&session_id, VncEvent::Closed)?;
             Ok(())
         }
         // 사용자가 연결 도중 닫았다. 오류가 아니므로 메시지를 올리지 않는다 — 닫아 버린 탭의
@@ -478,18 +518,15 @@ pub fn run(
         // 온다(그것이 취소의 실제 모양이다).
         Err(error) if handle.is_closed() => {
             debug!(session = %session_id, %error, "연결 도중 닫혀 중단했다");
-            output.send_event(&Event::new("closed", EmptyPayload {}).session(&session_id))?;
+            output.emit_event(&session_id, VncEvent::Closed)?;
             Ok(())
         }
         Err(error) => {
-            output.send_event(
-                &Event::new(
-                    "error",
-                    ErrorPayload {
-                        message: format!("{error:#}"),
-                    },
-                )
-                .session(&session_id),
+            output.emit_event(
+                &session_id,
+                VncEvent::Error {
+                    message: format!("{error:#}"),
+                },
             )?;
             Err(error)
         }
@@ -512,7 +549,7 @@ fn connect_and_run(
     session_id: &str,
     request_id: &str,
     payload: ConnectPayload,
-    output: &Output,
+    output: &SessionOutput,
     // 이미 등록된 핸들. 만드는 자리가 `run` 인 이유는 그쪽 주석에 있다.
     handle: &SessionHandle,
     outbound_rx: Receiver<Outbound>,
@@ -520,10 +557,19 @@ fn connect_and_run(
     let address = format!("{}:{}", payload.host, payload.port);
 
     // 소켓 사본은 잡히는 대로 채워 넣는다 — 이 슬롯이 협상 중 취소를 가능하게 한다.
-    let socket = connect(&address, handle)
-        .with_context(|| format!("{address} 에 연결할 수 없습니다"))?;
+    let mut socket =
+        connect(&address, handle).with_context(|| format!("{address} 에 연결할 수 없습니다"))?;
     socket.set_nodelay(true).ok();
     socket.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).ok();
+    if payload.tunnel_auth_token.is_some() {
+        socket.set_write_timeout(Some(HANDSHAKE_TIMEOUT)).ok();
+        core_framing::write_rd_tunnel_auth_preface(
+            &mut socket,
+            payload.tunnel_auth_token.as_deref(),
+        )
+        .context("authenticate local remote desktop tunnel")?;
+        socket.set_write_timeout(None).ok();
+    }
     if let Ok(mut slot) = handle.shutdown.lock() {
         *slot = socket.try_clone().ok();
     }
@@ -566,20 +612,18 @@ fn connect_and_run(
         height = init.height,
         "세션 준비 완료"
     );
-    output.send_event(
-        &Event::new(
-            "connected",
-            ConnectedPayload {
-                desktop_width: init.width,
-                desktop_height: init.height,
-                name: init.name.clone(),
-            },
-        )
-        .session(session_id)
-        .request(request_id),
+    output.emit_event_with_request(
+        session_id,
+        request_id,
+        VncEvent::Connected {
+            desktop_width: init.width,
+            desktop_height: init.height,
+            name: init.name.clone(),
+        },
     )?;
 
-    let mut framebuffer = Framebuffer::new(init.width, init.height);
+    let mut framebuffer = Framebuffer::try_new(init.width, init.height)
+        .context("서버가 알린 초기 화면 크기")?;
     // **세션당 하나다.** ZRLE 의 zlib 사전이 사각형을 넘어 이어지므로 여기서 살아 있어야 한다.
     let mut zlib = ZlibStream::new();
     // Tight 는 스트림이 **네 개**다. 사각형마다 어느 것을 쓸지 control 바이트가 정하고, 서버가
@@ -699,11 +743,7 @@ fn authenticate(
 }
 
 /// VncAuth 챌린지 응답. TLS 안에서도 같은 절차라 따로 빼 둔다.
-fn vnc_auth(
-    transport: &mut Transport,
-    version: rfb::Version,
-    password: &str,
-) -> Result<()> {
+fn vnc_auth(transport: &mut Transport, version: rfb::Version, password: &str) -> Result<()> {
     if password.is_empty() {
         bail!("이 서버는 비밀번호를 요구합니다");
     }
@@ -798,6 +838,10 @@ fn vencrypt_authenticate(
     // 인증서 기반을 먼저 고른다 — 익명 DH 는 중간자를 구분할 방법이 원리적으로 없다.
     let chosen = pick_vencrypt_subtype(&offered, &payload.password, &payload.username)
         .ok_or_else(|| anyhow::anyhow!(describe_vencrypt_refusal(&offered, &payload.username)))?;
+    ensure!(
+        !chosen.is_certificate_tls(),
+        "X509 VeNCrypt 인증서 신뢰 검증이 구현되지 않아 연결을 거부합니다"
+    );
     vencrypt::select(&mut transport, chosen)?;
 
     // 통로를 TLS 로 감싼다. 여기서 바탕 소켓만 꺼내 쓰고, 끊기용 복제본은 그대로 유효하다.
@@ -806,15 +850,7 @@ fn vencrypt_authenticate(
         // VeNCrypt 안에서 다시 VeNCrypt 가 나오는 경우는 규격에 없다.
         Transport::Tls(_) => bail!("VeNCrypt 협상이 이미 TLS 위에서 일어났습니다"),
     };
-    let mut secured = if chosen.is_certificate_tls() {
-        let (session, fingerprint) = tls::connect_with_certificate(socket, &payload.host)?;
-        // TODO 로 남기지 않고 사실을 적는다: 지문 고정은 호출부(데스크톱)가 판정해야 한다. 지금은
-        // 지문을 진단으로 남기고 통과시킨다 — 이 경로를 쓰는 서버가 아직 실측되지 않았다.
-        debug!(%fingerprint, "X509 VeNCrypt 인증서 지문");
-        Transport::Tls(Box::new(session))
-    } else {
-        Transport::Tls(Box::new(tls::connect_anonymous(socket, &payload.host)?))
-    };
+    let mut secured = Transport::Tls(Box::new(tls::connect_anonymous(socket, &payload.host)?));
     // 끊기용 복제본을 새 통로의 소켓으로 갈아 준다(TLS 가 소켓을 옮겨 갖는다).
     if let Ok(mut slot) = handle.shutdown.lock() {
         *slot = secured.clone_for_shutdown().ok();
@@ -830,11 +866,7 @@ fn vencrypt_authenticate(
         }
         vencrypt::SubType::TlsPlain | vencrypt::SubType::X509Plain => {
             // 계정 기반 인증. 8자 제한이 없다 — 통로가 이미 TLS 라서 평문으로 보내도 된다.
-            vencrypt::write_plain_credentials(
-                &mut secured,
-                &payload.username,
-                &payload.password,
-            )?;
+            vencrypt::write_plain_credentials(&mut secured, &payload.username, &payload.password)?;
             rfb::read_security_result(&mut secured, version).map_err(|error| {
                 // 서버는 이유를 말하지 않는다. Plain 은 계정도 틀릴 수 있으니 둘 다 짚어 준다.
                 anyhow::anyhow!("{error} (계정 또는 비밀번호를 확인하세요)")
@@ -851,27 +883,45 @@ fn vencrypt_authenticate(
 /// 경우는 사용자가 할 일이 다르다 — 앞쪽은 계정 한 줄이면 붙고, 뒤쪽은 서버 설정을 바꿔야 한다.
 /// 두 경우에 같은 문구를 내면 계정을 넣어야 하는 사용자가 서버 설정을 뒤진다(실제로 그랬다).
 fn describe_vencrypt_refusal(offered: &[vencrypt::SubType], username: &str) -> String {
-    let needs_account = username.is_empty()
-        && offered.iter().any(|subtype| {
-            matches!(
-                subtype,
-                vencrypt::SubType::TlsPlain | vencrypt::SubType::X509Plain
-            )
-        });
+    // **계정 안내가 X509 안내보다 앞선다.** X509 가 함께 제시돼도, 우리가 쓸 수 있는 방식이
+    // TLSPlain 뿐이고 계정만 비어 있는 경우가 있다 — 그때 인증서 이야기를 하면 사용자가 계정
+    // 한 줄이면 되는 일을 두고 서버 설정을 뒤진다.
+    let needs_account =
+        username.is_empty() && offered.contains(&vencrypt::SubType::TlsPlain);
     if needs_account {
         return "이 서버는 계정 기반 인증(VeNCrypt Plain)을 요구합니다 — 자격증명에 계정을 \
                 입력하세요"
             .to_owned();
     }
+
+    if offered.iter().any(|subtype| subtype.is_certificate_tls()) {
+        return format!(
+            "이 서버가 제시한 방식 중 우리가 세울 수 있는 것이 없습니다 — X509 VeNCrypt({})는 \
+             인증서 신뢰 검증이 구현되지 않아 자격 증명을 보내기 전에 거부합니다",
+            offered
+                .iter()
+                .filter(|subtype| subtype.is_certificate_tls())
+                .map(|subtype| subtype.label())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
     vencrypt::describe_unsupported(offered)
 }
 
-/// 우리가 세울 수 있는 서브타입 중 가장 나은 것.
+/// 우리가 안전하게 세울 수 있는 서브타입 중 가장 나은 것.
 ///
-/// 인증서 기반을 먼저 고른다. 익명 DH 는 도청은 막지만 상대가 누구인지 보장하지 않으므로, 같은
-/// 서버가 둘 다 제시하면 인증서 쪽이 낫다.
+/// **X509 계열은 고르지 않는다** — 인증서 TOFU 판정이 코어·FFI·앱 저장소까지 연결되기 전에는
+/// 검증하지 않은 인증서로 자격 증명을 보내게 된다. 하지만 X509 가 제시됐다는 이유로 **다른
+/// 서브타입까지 버리지는 않는다.** 서버가 X509Vnc 와 TLSVnc 를 함께 켜는 것은 흔한 설정이고
+/// (TigerVNC 기본 조합), 그때 전부 거부하면 붙던 서버가 안 붙는다.
 ///
-/// **계정이 있으면 Plain 계열을 먼저 본다.** 사용자가 계정을 적었다는 것은 그 방식으로 붙겠다는
+/// "인증서 방식을 제시했으니 익명 TLS 로 낮추면 안 된다" 는 방어로는 성립하지 않는다. 서브타입
+/// 목록은 TLS 이전 평문 구간에 오므로 인증되지 않았다 — 목록을 고칠 수 있는 공격자는 애초에
+/// X509 를 알리지 않으면 되고, 그러면 이 검사는 아무것도 막지 못한다. 얻는 것 없이 정상 서버만
+/// 잃는 거래여서, X509 **전용** 서버만 거부한다.
+///
+/// **계정이 있으면 TLSPlain 을 먼저 본다.** 사용자가 계정을 적었다는 것은 그 방식으로 붙겠다는
 /// 뜻이고, VncAuth 로는 그 계정을 쓸 수 없다(비밀번호만 있고 계정 개념이 없다). 계정이 없으면
 /// 고르지 않는다 — 빈 계정을 보내면 서버가 거절하는데 그 실패가 비밀번호 오류와 구분되지 않는다.
 ///
@@ -881,23 +931,17 @@ fn pick_vencrypt_subtype(
     password: &str,
     username: &str,
 ) -> Option<vencrypt::SubType> {
-    let has = |subtype: vencrypt::SubType| offered.contains(&subtype);
+    // X509 는 후보에서 빼고 나머지로만 고른다. 전부 X509 뿐이면 아래에서 None 이 되고,
+    // describe_vencrypt_refusal 이 "인증서 신뢰 검증이 없어 거부한다" 를 말한다.
+    let has = |subtype: vencrypt::SubType| {
+        offered
+            .iter()
+            .any(|candidate| *candidate == subtype && !candidate.is_certificate_tls())
+    };
     let with_password = !password.is_empty();
     let with_account = !username.is_empty();
-    if with_account && has(vencrypt::SubType::X509Plain) {
-        return Some(vencrypt::SubType::X509Plain);
-    }
     if with_account && has(vencrypt::SubType::TlsPlain) {
         return Some(vencrypt::SubType::TlsPlain);
-    }
-    if with_password && has(vencrypt::SubType::X509Vnc) {
-        return Some(vencrypt::SubType::X509Vnc);
-    }
-    if has(vencrypt::SubType::X509None) {
-        return Some(vencrypt::SubType::X509None);
-    }
-    if has(vencrypt::SubType::X509Vnc) {
-        return Some(vencrypt::SubType::X509Vnc);
     }
     if with_password && has(vencrypt::SubType::TlsVnc) {
         return Some(vencrypt::SubType::TlsVnc);
@@ -1007,7 +1051,7 @@ fn pump(
     tight_streams: &mut [ZlibStream; 4],
     format: PixelFormat,
     session_id: &str,
-    output: &Output,
+    output: &SessionOutput,
 ) -> Result<()> {
     let mut pointer = PointerState::default();
     // 서버가 크기 변경 확장을 쓰는지. 첫 -308 사각형을 볼 때 켜진다.
@@ -1030,9 +1074,7 @@ fn pump(
     let mut pixel_encoding = "";
     // 서버가 QEMU 확장 키를 쓰는지. 그 사각형을 본 뒤에만 스캔코드를 실어 보낸다.
     let mut qemu_keys = false;
-    output.send_event(
-        &Event::new("capabilities", capabilities).session(session_id),
-    )?;
+    output.emit_event(session_id, VncEvent::Capabilities(capabilities))?;
     // 지금 화면을 한 장이라도 받았나. 접속 직후와 크기 변경 직후에 false 다.
     //
     // **전체 재요청은 이 상태에서만 한다.** 예전에는 "픽셀 없는 갱신" 이면 무조건 전체를 다시
@@ -1135,15 +1177,12 @@ fn pump(
                     rollup_since = Instant::now();
                 }
                 if let Some((width, height)) = outcome.resized {
-                    output.send_event(
-                        &Event::new(
-                            "resized",
-                            ResizedPayload {
-                                desktop_width: width,
-                                desktop_height: height,
-                            },
-                        )
-                        .session(session_id),
+                    output.emit_event(
+                        session_id,
+                        VncEvent::Resized {
+                            desktop_width: width,
+                            desktop_height: height,
+                        },
                     )?;
                     // 크기가 바뀌면 이전 화면은 전부 무효다. 증분으로 요청하면 서버는 "바뀐 것이
                     // 없다" 고 보고 아무것도 보내지 않아 화면이 빈 채로 남는다.
@@ -1190,10 +1229,7 @@ fn pump(
                     clipboard::Incoming::Classic(text) => {
                         debug!(len = text.len(), "서버 클립보드(고전)");
                         // 빈 것도 올린다 — 원격이 클립보드를 비운 것도 상태 변화다.
-                        output.send_event(
-                            &Event::new("clipboard", ClipboardPayload { text })
-                                .session(session_id),
-                        )?;
+                        output.emit_event(session_id, VncEvent::Clipboard { text })?;
                     }
                     clipboard::Incoming::Caps {
                         formats,
@@ -1225,10 +1261,7 @@ fn pump(
                     }
                     clipboard::Incoming::Provide { text } => {
                         debug!(len = text.len(), "서버 클립보드(확장)");
-                        output.send_event(
-                            &Event::new("clipboard", ClipboardPayload { text })
-                                .session(session_id),
-                        )?;
+                        output.emit_event(session_id, VncEvent::Clipboard { text })?;
                     }
                     clipboard::Incoming::Notify { .. } => {
                         // 상대가 "가진 것이 있다" 고 알렸다. 우리는 항상 텍스트를 원한다.
@@ -1298,9 +1331,7 @@ fn pump(
         if next != capabilities {
             capabilities = next;
             debug!(?capabilities, "협상 결과가 바뀌었다");
-            output.send_event(
-                &Event::new("capabilities", capabilities).session(session_id),
-            )?;
+            output.emit_event(session_id, VncEvent::Capabilities(capabilities))?;
         }
     }
 }
@@ -1325,6 +1356,21 @@ struct UpdateOutcome {
     saw_qemu_keys: bool,
 }
 
+/// Compute an untrusted rectangle payload length without overflowing or exceeding one RGBA frame.
+fn checked_rect_payload_len(rect: Rect, bytes_per_pixel: usize) -> Result<usize> {
+    let pixels = usize::from(rect.width)
+        .checked_mul(usize::from(rect.height))
+        .context("rectangle pixel count overflow")?;
+    let bytes = pixels
+        .checked_mul(bytes_per_pixel)
+        .context("rectangle byte length overflow")?;
+    ensure!(
+        bytes <= MAX_FRAMEBUFFER_BYTES,
+        "rectangle payload exceeds framebuffer budget ({bytes} bytes)"
+    );
+    Ok(bytes)
+}
+
 /// 한 FramebufferUpdate 를 처리한다.
 fn handle_framebuffer_update(
     stream: &mut Transport,
@@ -1333,7 +1379,7 @@ fn handle_framebuffer_update(
     tight_streams: &mut [ZlibStream; 4],
     format: PixelFormat,
     session_id: &str,
-    output: &Output,
+    output: &SessionOutput,
     desktop_size: &mut DesktopSizeState,
 ) -> Result<UpdateOutcome> {
     let mut head = [0_u8; 3];
@@ -1356,13 +1402,13 @@ fn handle_framebuffer_update(
             width: u16::from_be_bytes([header[4], header[5]]),
             height: u16::from_be_bytes([header[6], header[7]]),
         };
-        let encoding_kind =
-            i32::from_be_bytes([header[8], header[9], header[10], header[11]]);
+        let encoding_kind = i32::from_be_bytes([header[8], header[9], header[10], header[11]]);
 
         match encoding_kind {
             encoding::RAW => {
-                let mut data =
-                    vec![0_u8; usize::from(rect.width) * usize::from(rect.height) * format.bytes_per_pixel()];
+                framebuffer.validate_rect(rect)?;
+                let length = checked_rect_payload_len(rect, format.bytes_per_pixel())?;
+                let mut data = vec![0_u8; length];
                 stream.read_exact(&mut data)?;
                 counts.raw += 1;
                 counts.wire_bytes += data.len();
@@ -1372,6 +1418,7 @@ fn handle_framebuffer_update(
                 send_rect(framebuffer, rect, session_id, output)?;
             }
             encoding::COPY_RECT => {
+                framebuffer.validate_rect(rect)?;
                 let mut source = [0_u8; 4];
                 stream.read_exact(&mut source)?;
                 counts.copy_rect += 1;
@@ -1386,13 +1433,8 @@ fn handle_framebuffer_update(
                 send_rect(framebuffer, rect, session_id, output)?;
             }
             encoding::TIGHT => {
-                let wire = read_tight_rect(
-                    stream,
-                    framebuffer,
-                    tight_streams,
-                    format,
-                    rect,
-                )?;
+                framebuffer.validate_rect(rect)?;
+                let wire = read_tight_rect(stream, framebuffer, tight_streams, format, rect)?;
                 counts.tight += 1;
                 counts.wire_bytes += wire;
                 outcome.drew_pixels = true;
@@ -1400,6 +1442,7 @@ fn handle_framebuffer_update(
                 send_rect(framebuffer, rect, session_id, output)?;
             }
             encoding::ZRLE => {
+                framebuffer.validate_rect(rect)?;
                 // u32 길이 + zlib 데이터. 길이는 압축된 크기다.
                 let mut length = [0_u8; 4];
                 stream.read_exact(&mut length)?;
@@ -1420,9 +1463,12 @@ fn handle_framebuffer_update(
             }
             encoding::CURSOR => {
                 // 의사 인코딩이다. 사각형의 x·y 는 좌표가 아니라 **핫스팟**이고, 본문은 커서
-                // 모양이다. 길이 필드가 없으므로 크기에서 계산한 만큼을 **반드시** 다 읽는다 —
-                // 남기면 다음 사각형 경계가 어긋난다.
-                let mut body = vec![0_u8; cursor::body_length(rect, format)];
+                // 모양이다. 길이 필드가 없으므로 정상 크기는 계산한 만큼을 **반드시** 다 읽는다 —
+                // 남기면 다음 사각형 경계가 어긋난다. 상한을 넘으면 안전하게 건너뛸 길이를 알 수
+                // 없으므로 할당하지 않고 세션 자체를 닫는다.
+                let length = cursor::checked_body_length(rect, format)
+                    .context("cursor dimensions exceed the 512x512 limit")?;
+                let mut body = vec![0_u8; length];
                 stream.read_exact(&mut body)?;
                 counts.wire_bytes += body.len();
                 outcome.saw_cursor = true;
@@ -1434,15 +1480,12 @@ fn handle_framebuffer_update(
                             hidden = shape.is_hidden(),
                             "커서 모양"
                         );
-                        output.send_cursor(
-                            &CursorPayload {
-                                kind: "vncCursor",
-                                session_id: session_id.to_owned(),
-                                hotspot_x: shape.hotspot_x,
-                                hotspot_y: shape.hotspot_y,
-                                width: shape.width,
-                                height: shape.height,
-                            },
+                        output.emit_cursor(
+                            session_id,
+                            shape.hotspot_x,
+                            shape.hotspot_y,
+                            shape.width,
+                            shape.height,
                             &shape.rgba,
                         )?;
                     }
@@ -1462,7 +1505,9 @@ fn handle_framebuffer_update(
             }
             encoding::DESKTOP_SIZE => {
                 // 의사 인코딩이다. 픽셀이 따라오지 않고 사각형의 크기가 새 화면 크기다.
-                framebuffer.resize(rect.width, rect.height);
+                framebuffer
+                    .try_resize(rect.width, rect.height)
+                    .context("서버가 알린 변경 화면 크기")?;
                 outcome.resized = Some((rect.width, rect.height));
             }
             encoding::EXTENDED_DESKTOP_SIZE => {
@@ -1514,7 +1559,9 @@ fn handle_framebuffer_update(
                     continue;
                 }
 
-                framebuffer.resize(rect.width, rect.height);
+                framebuffer
+                    .try_resize(rect.width, rect.height)
+                    .context("서버가 알린 변경 화면 크기")?;
                 outcome.resized = Some((rect.width, rect.height));
             }
             #[allow(unreachable_patterns)]
@@ -1650,7 +1697,7 @@ fn send_rect(
     framebuffer: &Framebuffer,
     rect: Rect,
     session_id: &str,
-    output: &Output,
+    output: &SessionOutput,
 ) -> Result<()> {
     let Some(pixels) = framebuffer.extract(rect) else {
         warn!(
@@ -1662,17 +1709,7 @@ fn send_rect(
         );
         return Ok(());
     };
-    output.send_frame(
-        &FramePayload {
-            kind: "vncFrame",
-            session_id: session_id.to_owned(),
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height,
-        },
-        &pixels,
-    )?;
+    output.emit_frame(session_id, rect.x, rect.y, rect.width, rect.height, &pixels)?;
     Ok(())
 }
 
@@ -1699,7 +1736,9 @@ fn read_server_cut_text(stream: &mut Transport) -> Result<clipboard::Incoming> {
     if raw < 0 {
         Ok(clipboard::decode_extended(&body))
     } else {
-        Ok(clipboard::Incoming::Classic(clipboard::decode_classic(&body)))
+        Ok(clipboard::Incoming::Classic(clipboard::decode_classic(
+            &body,
+        )))
     }
 }
 
@@ -1718,6 +1757,26 @@ fn read_and_discard_colour_map(stream: &mut Transport) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rectangle_payload_budget_checks_the_exact_boundary() {
+        let at_limit = Rect {
+            x: 0,
+            y: 0,
+            width: 4096,
+            height: 4096,
+        };
+        let above_limit = Rect {
+            width: 4097,
+            ..at_limit
+        };
+
+        assert_eq!(
+            checked_rect_payload_len(at_limit, 4).unwrap(),
+            MAX_FRAMEBUFFER_BYTES
+        );
+        assert!(checked_rect_payload_len(above_limit, 4).is_err());
+    }
 
     /// 서브타입 선택은 **보안 결정**이다. 잘못 고르면 비밀번호가 평문으로 나가거나, 붙을 수 있는
     /// 서버에 못 붙는다. 와이어를 태우지 않고 이 함수만 따로 본다.
@@ -1753,25 +1812,72 @@ mod tests {
     }
 
     #[test]
-    fn prefers_plain_when_an_account_is_given() {
-        // 계정을 적었다는 것은 그 방식으로 붙겠다는 뜻이다. VncAuth 로는 계정을 쓸 수 없다.
+    fn never_selects_x509_without_tofu() {
+        // TOFU 신뢰 저장소가 연결되기 전에는 인증서 방식 자체를 고르지 않는다.
         assert_eq!(
             pick_vencrypt_subtype(
                 &[vencrypt::SubType::X509Vnc, vencrypt::SubType::X509Plain],
                 "secret",
                 "operator",
             ),
-            Some(vencrypt::SubType::X509Plain)
+            None
         );
-        // 인증서 쪽을 먼저 고른다 — 익명 DH 는 상대가 누구인지 보장하지 않는다.
+
+        let message = describe_vencrypt_refusal(
+            &[vencrypt::SubType::X509Vnc, vencrypt::SubType::X509Plain],
+            "operator",
+        );
+        assert!(message.contains("신뢰 검증"), "{message}");
+        assert!(message.contains("자격 증명을 보내기 전에"), "{message}");
+    }
+
+    /// X509 가 함께 제시됐다는 이유로 **쓸 수 있는 서브타입을 버리지 않는다.** TigerVNC 는
+    /// X509Vnc 와 TLSVnc 를 함께 켜는 것이 기본 조합이라, 전부 거부하면 붙던 서버가 안 붙는다.
+    #[test]
+    fn still_connects_when_x509_is_offered_alongside_a_usable_subtype() {
+        assert_eq!(
+            pick_vencrypt_subtype(
+                &[vencrypt::SubType::X509Vnc, vencrypt::SubType::TlsVnc],
+                "secret",
+                "",
+            ),
+            Some(vencrypt::SubType::TlsVnc)
+        );
+        assert_eq!(
+            pick_vencrypt_subtype(
+                &[vencrypt::SubType::X509Plain, vencrypt::SubType::TlsPlain],
+                "secret",
+                "operator",
+            ),
+            Some(vencrypt::SubType::TlsPlain)
+        );
+        // 인증서 쪽만 있는 이름은 고르지 않는다 — 같은 이름이 없으면 다음 후보로 내려간다.
+        assert_eq!(
+            pick_vencrypt_subtype(
+                &[vencrypt::SubType::X509Plain, vencrypt::SubType::TlsNone],
+                "",
+                "operator",
+            ),
+            Some(vencrypt::SubType::TlsNone)
+        );
+    }
+
+    /// 계정만 비어 있어 못 고른 경우에는 인증서 이야기 대신 계정 안내를 준다.
+    #[test]
+    fn prefers_the_account_hint_over_the_certificate_hint() {
         assert_eq!(
             pick_vencrypt_subtype(
                 &[vencrypt::SubType::TlsPlain, vencrypt::SubType::X509Plain],
                 "secret",
-                "operator",
+                "",
             ),
-            Some(vencrypt::SubType::X509Plain)
+            None
         );
+        let message = describe_vencrypt_refusal(
+            &[vencrypt::SubType::TlsPlain, vencrypt::SubType::X509Plain],
+            "",
+        );
+        assert!(message.contains("계정"), "{message}");
     }
 
     #[test]
@@ -1786,18 +1892,18 @@ mod tests {
     }
 
     #[test]
-    fn ignores_plain_without_an_account() {
-        // 빈 계정을 보내면 서버가 거절하고, 그 실패는 "비밀번호가 틀렸다" 와 구분되지 않는다.
+    fn anonymous_plain_requires_an_account() {
+        // 빈 계정으로 TLSPlain 을 보내지 않고, 함께 제시된 비밀번호 방식으로만 붙는다.
         assert_eq!(
             pick_vencrypt_subtype(
-                &[vencrypt::SubType::X509Plain, vencrypt::SubType::X509Vnc],
+                &[vencrypt::SubType::TlsPlain, vencrypt::SubType::TlsVnc],
                 "secret",
                 "",
             ),
-            Some(vencrypt::SubType::X509Vnc)
+            Some(vencrypt::SubType::TlsVnc)
         );
         assert_eq!(
-            pick_vencrypt_subtype(&[vencrypt::SubType::X509Plain], "secret", ""),
+            pick_vencrypt_subtype(&[vencrypt::SubType::TlsPlain], "secret", ""),
             None
         );
     }

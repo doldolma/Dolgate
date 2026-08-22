@@ -3,10 +3,9 @@
 //! The redirected drive is a folder on THIS machine (the client), exposed to the remote as a
 //! network drive. That is the opposite of Guacamole's model, where the "drive" lives on the proxy.
 //!
-//! Platform reality: the upstream filesystem backend (`ironrdp-rdpdr-native`) is gated to macOS and
-//! Linux. There is no Windows backend published yet — the work is in flight upstream as stacked
-//! PRs. Rather than announce a drive we cannot serve (which makes the remote show a drive that
-//! errors on every access), Windows clients get a clear refusal.
+//! Platform reality: the native filesystem backend works on Unix targets, including mobile
+//! iOS/Android sandboxes. Windows still has no published backend; rather than announce a drive we
+//! cannot serve, Windows clients get a clear refusal.
 
 use ironrdp_rdpdr::Rdpdr;
 
@@ -27,32 +26,46 @@ pub struct DriveShareConfig {
 /// `label` 은 원격에 보이는 드라이브 이름이다. 이름을 여기서 만들지 않는 이유: 편집 화면이 같은
 /// 이름을 보여주므로, 규칙이 두 곳에 있으면 보여준 것과 원격에 뜨는 것이 갈린다.
 ///
-/// `path` 는 호출부가 고른 값이라 존재 여부를 여기서 검사하지 않는다.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+/// `path` 는 announce 전에 절대 경로인지, 접근 가능한 디렉터리인지 확인하고 canonicalize한다.
+/// 검증에 실패한 항목은 backend root와 원격 장치 목록 양쪽에서 제외한다.
+#[cfg(unix)]
 pub fn build_rdpdr(computer_name: String, drives: Vec<DriveShareConfig>) -> Rdpdr {
     use ironrdp_rdpdr_native::backend::{DriveRoot, NixRdpdrBackend};
 
     let assigned = assign_device_ids(&drives);
-    // 공유 폴더가 없으면 채널 자체를 붙이지 않는 편이 낫지만, 호출부가 항상 Rdpdr 를
-    // 기대하므로 드라이브 없는 채널을 만든다. 서버에는 아무 장치도 announce 되지 않는다.
-    let roots = assigned
-        .iter()
-        .map(|(device_id, drive)| {
-            (
-                *device_id,
-                DriveRoot {
-                    path: drive.path.clone(),
-                    read_only: drive.read_only,
-                },
-            )
-        })
-        .collect();
+    let mut roots = std::collections::HashMap::new();
+    let mut announced = Vec::new();
+    for (device_id, drive) in assigned {
+        let requested = std::path::Path::new(drive.path.trim());
+        if !requested.is_absolute() {
+            tracing::warn!(path = %drive.path, "shared drive path is not absolute; skipping");
+            continue;
+        }
+        let canonical = match std::fs::canonicalize(requested) {
+            Ok(path) if path.is_dir() => path,
+            Ok(_) => {
+                tracing::warn!(path = %drive.path, "shared drive path is not a directory; skipping");
+                continue;
+            }
+            Err(error) => {
+                tracing::warn!(path = %drive.path, %error, "shared drive path is unavailable; skipping");
+                continue;
+            }
+        };
+        let Some(canonical) = canonical.to_str() else {
+            tracing::warn!(path = %drive.path, "shared drive path is not valid UTF-8; skipping");
+            continue;
+        };
+        roots.insert(
+            device_id,
+            DriveRoot {
+                path: canonical.to_owned(),
+                read_only: drive.read_only,
+            },
+        );
+        announced.push((device_id, drive.label.clone()));
+    }
     let backend = NixRdpdrBackend::new(roots);
-
-    let announced: Vec<(u32, String)> = assigned
-        .into_iter()
-        .map(|(device_id, drive)| (device_id, drive.label.clone()))
-        .collect();
 
     let rdpdr = Rdpdr::new(Box::new(backend), computer_name);
     if announced.is_empty() {
@@ -79,7 +92,7 @@ fn assign_device_ids(drives: &[DriveShareConfig]) -> Vec<(u32, &DriveShareConfig
         .collect()
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(not(unix))]
 pub fn build_rdpdr(computer_name: String, drives: Vec<DriveShareConfig>) -> Rdpdr {
     use ironrdp_rdpdr::NoopRdpdrBackend;
 
@@ -96,7 +109,7 @@ pub fn build_rdpdr(computer_name: String, drives: Vec<DriveShareConfig>) -> Rdpd
 
 /// Whether this platform can actually serve a redirected folder.
 pub const fn is_supported() -> bool {
-    cfg!(any(target_os = "macos", target_os = "linux"))
+    cfg!(unix)
 }
 
 #[cfg(test)]
@@ -150,9 +163,9 @@ mod tests {
     fn reports_support_matching_the_upstream_backend_gate() {
         // ironrdp-rdpdr-native 가 macOS/Linux 로만 컴파일된다. 이 상수가 그것과 어긋나면
         // Windows 에서 붙지 않는 드라이브를 announce 하게 된다.
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(unix)]
         assert!(is_supported());
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(not(unix))]
         assert!(!is_supported());
     }
 }

@@ -466,6 +466,10 @@ export function HomeScreen(): React.JSX.Element {
         return "WARP";
       case "serial":
         return "SER";
+      case "rdp":
+        return "RDP";
+      case "vnc":
+        return "VNC";
       default:
         return "SSH";
     }

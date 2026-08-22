@@ -6,7 +6,9 @@ import {
   getHostSubtitle,
   type HostRecord,
   isAwsEc2HostRecord,
+  isRdpHostRecord,
   isSshHostRecord,
+  isVncHostRecord,
 } from "@dolssh/shared-core";
 import { useMobilePalette } from "../theme";
 import { getAwsEc2SftpDisabledMessage, hostSubtitleLabels } from '../i18n/shared-messages';
@@ -50,23 +52,27 @@ export function HostActionSheet({
 
   const actions: SheetAction[] = [];
   if (host) {
+    const isRdHost = isRdpHostRecord(host) || isVncHostRecord(host);
     const sftpDisabledReason = isAwsEc2HostRecord(host)
       ? getAwsEc2SftpDisabledMessage(host)
       : null;
 
     actions.push({
       key: "connect",
-      icon: "flash-outline",
+      icon: isRdHost ? "desktop-outline" : "flash-outline",
       label: translate("hostActions.connect"),
       onPress: () => onConnect(host),
     });
-    actions.push({
-      key: "sftp",
-      icon: "folder-open-outline",
-      label: translate("hostActions.sftp"),
-      disabledReason: sftpDisabledReason,
-      onPress: () => onConnectSftp(host),
-    });
+    // SFTP is not applicable to RDP/VNC hosts.
+    if (!isRdHost) {
+      actions.push({
+        key: "sftp",
+        icon: "folder-open-outline",
+        label: translate("hostActions.sftp"),
+        disabledReason: sftpDisabledReason,
+        onPress: () => onConnectSftp(host),
+      });
+    }
     const isFavorite = host.favorite === true;
     actions.push({
       key: "favorite",

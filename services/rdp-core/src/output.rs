@@ -1,23 +1,39 @@
-//! Stdout writer.
+//! RDP output routing.
 //!
-//! Sessions run on their own threads but share one stdout, and a frame's header/metadata/payload
-//! must not be split by another writer — the desktop side reads frames sequentially and cannot
-//! resynchronize after an interleave.
+//! The desktop sidecar writes length-prefixed frames to stdout. Native consumers install an
+//! [`OutputSink`] instead, so decoded pixels can go straight to an iOS/Android framebuffer without
+//! serialization or a JavaScript/base64 hop.
 //!
-//! 쓰기는 전용 스레드가 맡는다. 세션 스레드가 직접 쓰면 파이프가 찰 때마다 그 자리에서 막히는데,
-//! 그 스레드는 RDP 소켓 읽기도 같이 하고 있어서 읽기까지 멈춘다. 프레임 하나가 수백 KB 이고
-//! 파이프 버퍼는 64KiB 라 이 일은 자주 일어나고, 그동안 서버 쪽이 밀렸다가 풀리면 한꺼번에
-//! 쏟아진다 — 화면이 뭉텅이로 왔다 멎기를 반복하는 원인이다.
+//! Sidecar writes are owned by dedicated threads. If a session thread wrote directly, a full pipe
+//! would also stop socket reads and make the display arrive in bursts.
 
 use std::io::{self, Write as _};
-use std::sync::mpsc::{SyncSender, TrySendError, sync_channel};
+use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
+use std::sync::Arc;
 use std::thread;
 
 use serde::Serialize;
 use tracing::warn;
 
 use core_framing::{write_frame, KIND_CONTROL, KIND_STREAM};
+
 use crate::protocol::{AudioFramePayload, Event, FramePayload};
+
+/// A native output target. Frame and audio byte slices are borrowed only for the duration of the
+/// call; implementations that need them afterwards must copy them before returning.
+pub trait OutputSink: Send + Sync {
+    /// Receives a serialized control [`Event`]. Control JSON contains no framebuffer bytes.
+    fn send_event(&self, event_json: &[u8]) -> io::Result<()>;
+
+    /// Receives one decoded RGBA framebuffer rectangle.
+    fn send_frame(&self, meta: &FramePayload, pixels: &[u8]) -> io::Result<()>;
+
+    /// Receives decoded remote audio. Native clients may ignore it until an audio renderer is
+    /// installed, while the desktop sidecar keeps its existing stream framing path.
+    fn send_audio(&self, _meta: &AudioFramePayload, _samples: &[u8]) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 /// 쓰기 대기열 깊이(프레임 수).
 ///
@@ -37,17 +53,21 @@ struct Outgoing {
     payload: Vec<u8>,
 }
 
+enum OutputBackend {
+    Sidecar {
+        tx: SyncSender<Outgoing>,
+        /// 소리 전용 줄. 화면이 붐빌 때 소리가 그 뒤에 줄을 서지 않게 한다.
+        audio_tx: SyncSender<Outgoing>,
+    },
+    Sink(Arc<dyn OutputSink>),
+}
+
 pub struct Output {
-    tx: SyncSender<Outgoing>,
-    /// 소리 전용 줄.
-    ///
-    /// 한 줄로 같이 보내면 화면이 붐빌 때 소리가 그 뒤에 줄을 선다. 화면은 늦으면 늦은 대로
-    /// 보이지만 소리는 늦으면 끊긴 것으로 들린다 — 0.19초짜리 조각이 0.47초마다 도착하면
-    /// 재생이 계속 끊긴다(실측).
-    audio_tx: SyncSender<Outgoing>,
+    backend: OutputBackend,
 }
 
 impl Output {
+    /// Creates the existing desktop stdout backend.
     pub fn new() -> Self {
         let (tx, rx) = sync_channel::<Outgoing>(QUEUE_DEPTH);
         let (audio_tx, audio_rx) = sync_channel::<Outgoing>(AUDIO_QUEUE_DEPTH);
@@ -95,11 +115,19 @@ impl Output {
             })
             .expect("spawn stdout writer");
 
-        Self { tx, audio_tx }
+        Self {
+            backend: OutputBackend::Sidecar { tx, audio_tx },
+        }
+    }
+
+    /// Creates an in-process backend used by native mobile FFI.
+    pub fn with_sink(sink: Arc<dyn OutputSink>) -> Self {
+        Self {
+            backend: OutputBackend::Sink(sink),
+        }
     }
 
     fn send_on(
-        &self,
         channel: &SyncSender<Outgoing>,
         kind: u8,
         metadata: Vec<u8>,
@@ -120,23 +148,34 @@ impl Output {
         }
     }
 
-    fn send(&self, kind: u8, metadata: Vec<u8>, payload: Vec<u8>) -> io::Result<()> {
-        self.send_on(&self.tx, kind, metadata, payload)
-    }
-
     pub fn send_event<T: Serialize>(&self, event: &Event<T>) -> io::Result<()> {
         let metadata = serde_json::to_vec(event).map_err(io::Error::other)?;
-        self.send(KIND_CONTROL, metadata, Vec::new())
+        match &self.backend {
+            OutputBackend::Sidecar { tx, .. } => {
+                Self::send_on(tx, KIND_CONTROL, metadata, Vec::new())
+            }
+            OutputBackend::Sink(sink) => sink.send_event(&metadata),
+        }
     }
 
     pub fn send_audio(&self, meta: &AudioFramePayload, samples: &[u8]) -> io::Result<()> {
-        let metadata = serde_json::to_vec(meta).map_err(io::Error::other)?;
-        self.send_on(&self.audio_tx, KIND_STREAM, metadata, samples.to_vec())
+        match &self.backend {
+            OutputBackend::Sidecar { audio_tx, .. } => {
+                let metadata = serde_json::to_vec(meta).map_err(io::Error::other)?;
+                Self::send_on(audio_tx, KIND_STREAM, metadata, samples.to_vec())
+            }
+            OutputBackend::Sink(sink) => sink.send_audio(meta, samples),
+        }
     }
 
     pub fn send_frame(&self, meta: &FramePayload, pixels: &[u8]) -> io::Result<()> {
-        let metadata = serde_json::to_vec(meta).map_err(io::Error::other)?;
-        self.send(KIND_STREAM, metadata, pixels.to_vec())
+        match &self.backend {
+            OutputBackend::Sidecar { tx, .. } => {
+                let metadata = serde_json::to_vec(meta).map_err(io::Error::other)?;
+                Self::send_on(tx, KIND_STREAM, metadata, pixels.to_vec())
+            }
+            OutputBackend::Sink(sink) => sink.send_frame(meta, pixels),
+        }
     }
 }
 
