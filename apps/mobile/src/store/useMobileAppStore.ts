@@ -15,6 +15,7 @@ import type {
   DirectoryListing,
   FileEntry,
   GroupRecord,
+  GroupRemoveMode,
   HostRecord,
   HostSecretInput,
   KnownHostRecord,
@@ -37,6 +38,13 @@ import type {
   TailnetPayload,
   VaultCacheOwner,
   VaultKdfDescriptor,
+} from '@dolssh/shared-core';
+// 그룹 트리 변형 규칙. 데스크톱 메인도 같은 함수를 쓴다 — 두 벌이 되면 같은 그룹을 폰에서
+// 지운 것과 PC 에서 지운 것이 다른 결과를 낳는다.
+import {
+  createGroupIn,
+  removeGroupFrom,
+  renameGroupIn,
 } from '@dolssh/shared-core';
 import {
   buildAwsSsmKnownHostIdentity,
@@ -833,6 +841,15 @@ interface MobileAppState {
   ) => Promise<void>;
   toggleHostFavorite: (hostId: string) => Promise<void>;
   deleteHost: (hostId: string) => Promise<void>;
+  /**
+   * 그룹을 새로 만든다. 호스트가 없는 빈 그룹으로 시작한다 — 홈 목록은 호스트가 0개인
+   * 그룹도 그대로 보여 준다(buildVisibleGroups 가 거르지 않는다).
+   */
+  createGroup: (name: string, parentPath: string | null) => Promise<void>;
+  /** 그룹 이름 변경. 그 아래 호스트의 groupName(경로)도 함께 다시 쓰인다. */
+  renameGroup: (path: string, name: string) => Promise<void>;
+  /** 그룹 삭제. mode 가 하위 항목을 지울지 한 단계 끌어올릴지 정한다. */
+  removeGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
   duplicateSession: (sessionId: string) => Promise<string | null>;
   setActiveConnectionTab: (tab: MobileConnectionTabRef | null) => void;
   setActiveSessionTab: (sessionId: string | null) => void;
@@ -3045,6 +3062,55 @@ export const useMobileAppStore = create<MobileAppState>()(
         }));
         return true;
       };
+
+      /**
+       * 그룹 편집을 서버에 민다.
+       *
+       * `deleteHost` 와 같은 모양이다 — 온라인 전용이고, 볼트 세대 거부(409)는 공통 처리로
+       * 넘긴다. 그룹 하나를 고쳐도 그 아래 호스트가 함께 바뀌므로 둘을 한 번에 보낸다.
+       * 나눠 보내면 중간에 실패했을 때 그룹만 바뀌고 호스트는 옛 경로에 남는다.
+       */
+      const pushGroupMutation = async (input: {
+        groups?: GroupRecord[];
+        deletedGroups?: Array<{ id: string; deletedAt: string }>;
+        hosts?: HostRecord[];
+        deletedHosts?: Array<{ id: string; deletedAt: string }>;
+      }) => {
+        try {
+          await callWithFreshAccessToken(async accessToken => {
+            const currentSession = get().auth.session;
+            if (!currentSession) {
+              throw new Error(t('store.onlineOnly'));
+            }
+            const pushedRevision = await postSyncSnapshot(
+              get().settings.serverUrl,
+              accessToken,
+              buildHostMutationSyncPayload(
+                input,
+                resolveVaultKeyForPush(currentSession),
+              ),
+              resolveVaultEpochForPush(),
+              resolveMobileSyncDataFloor(get().hosts),
+            );
+            storePushedRevision(pushedRevision);
+          });
+        } catch (error) {
+          await handleVaultDekMismatchError(error);
+          throw error;
+        }
+      };
+
+      /** 변형 뒤 사라진 그룹 레코드의 id. 서버에는 삭제로 알려야 한다. */
+      const collectRemovedGroupIds = (
+        before: GroupRecord[],
+        after: GroupRecord[],
+      ): string[] => {
+        const survivingIds = new Set(after.map(record => record.id));
+        return before
+          .filter(record => !survivingIds.has(record.id))
+          .map(record => record.id);
+      };
+
 
       const pushKnownHosts = async (
         knownHosts: KnownHostRecord[],
@@ -8077,6 +8143,66 @@ export const useMobileAppStore = create<MobileAppState>()(
           set({
             hosts: nextHosts,
             secretMetadata: deriveSecretMetadata(nextHosts, get().secretsByRef),
+          });
+        },
+        // ── 그룹 편집 ───────────────────────────────────────────────────────
+        //
+        // 규칙은 shared-core 의 순수 함수가 갖고 있다(데스크톱 메인도 같은 것을 쓴다).
+        // 여기서는 다음 상태를 만들어 **서버에 먼저 밀고, 성공한 뒤에 로컬을 바꾼다** —
+        // 순서가 반대면 푸시가 실패했을 때 폰만 바뀐 채로 남아 되돌릴 방법이 없다.
+        //
+        // 그룹 이름을 바꾸면 그 아래 호스트의 groupName(경로 문자열)이 전부 다시 쓰이므로
+        // 한 번에 수십 개가 갈 수 있다. 그래서 바뀐 것만 골라 보낸다(updatedAt 대조).
+        createGroup: async (name: string, parentPath: string | null) => {
+          const timestamp = new Date().toISOString();
+          const { groups, created } = createGroupIn(get().groups, {
+            id: createLocalId('group'),
+            name,
+            parentPath,
+            timestamp,
+          });
+
+          await pushGroupMutation({ groups: [created] });
+          set({ groups: sortGroups(groups) });
+        },
+        renameGroup: async (path: string, name: string) => {
+          const timestamp = new Date().toISOString();
+          const before = get();
+          const result = renameGroupIn(before.groups, before.hosts, path, name, {
+            timestamp,
+          });
+
+          const removedGroupIds = collectRemovedGroupIds(before.groups, result.groups);
+          await pushGroupMutation({
+            groups: result.groups.filter(record => record.updatedAt === timestamp),
+            deletedGroups: removedGroupIds.map(id => ({ id, deletedAt: timestamp })),
+            hosts: result.hosts.filter(record => record.updatedAt === timestamp),
+          });
+
+          set({
+            groups: sortGroups(result.groups),
+            hosts: sortHosts(result.hosts),
+            secretMetadata: deriveSecretMetadata(result.hosts, get().secretsByRef),
+          });
+        },
+        removeGroup: async (path: string, mode: GroupRemoveMode) => {
+          const timestamp = new Date().toISOString();
+          const before = get();
+          const result = removeGroupFrom(before.groups, before.hosts, path, mode, {
+            timestamp,
+          });
+
+          await pushGroupMutation({
+            groups: result.groups.filter(record => record.updatedAt === timestamp),
+            deletedGroups: result.removedGroupIds.map(id => ({ id, deletedAt: timestamp })),
+            hosts: result.hosts.filter(record => record.updatedAt === timestamp),
+            deletedHosts: result.removedHostIds.map(id => ({ id, deletedAt: timestamp })),
+          });
+
+          set({
+            groups: sortGroups(result.groups),
+            hosts: sortHosts(result.hosts),
+            secretMetadata: deriveSecretMetadata(result.hosts, get().secretsByRef),
           });
         },
         disconnectRemoteDesktopSession: async (sessionId: string) => {

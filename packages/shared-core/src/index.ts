@@ -6,6 +6,7 @@ export * from "./connection-failure";
 export * from "./aws-ssm-attempt";
 export * from "./connection-stages";
 export * from "./group-paths";
+export * from "./group-mutations";
 export * from "./interactive-hop";
 export * from "./locale";
 export * from "./models";

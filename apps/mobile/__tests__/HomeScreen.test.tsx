@@ -14,6 +14,8 @@ import {
   createDefaultSyncStatus,
 } from "../src/lib/mobile";
 import { applyMobileLanguage } from "../src/i18n";
+import { GroupActionSheet } from "../src/components/GroupActionSheet";
+import { GroupNamePromptModal } from "../src/components/GroupNamePromptModal";
 import { HomeScreen } from "../src/screens/HomeScreen";
 import { useMobileAppStore } from "../src/store/useMobileAppStore";
 
@@ -722,6 +724,47 @@ describe("HomeScreen group browsing", () => {
     });
   });
 
+  // 그룹 꾹 누르기 → 이름 변경. **시트를 먼저 닫아야 한다** — React Native 는 Modal 두 개가
+  // 겹치면 나중 것이 아래 깔려, 입력 모달을 띄워도 탭이 전부 시트로 가 "눌러도 아무 일이
+  // 없는" 상태가 된다. iOS 는 닫히는 도중 띄우기도 무시하므로 onDismiss 를 기다린다.
+  it("closes the group sheet before opening the rename prompt", async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    const groupCard = tree!.root.findAll(
+      (node) =>
+        typeof node.props.onLongPress === "function" &&
+        node.props.accessibilityLabel === "Servers 그룹 열기",
+    )[0];
+    await act(async () => {
+      groupCard.props.onLongPress();
+    });
+
+    const sheet = tree!.root.findAllByType(GroupActionSheet)[0]!;
+    expect(sheet.props.group?.path).toBe("Servers");
+
+    await act(async () => {
+      sheet.props.onRename(sheet.props.group);
+    });
+
+    // 시트가 먼저 닫힌다.
+    expect(tree!.root.findAllByType(GroupActionSheet)[0]!.props.group).toBeNull();
+    // 아직 입력 모달은 뜨지 않는다 — 시트가 사라졌다는 신호를 기다린다(iOS).
+    expect(
+      tree!.root.findAllByType(GroupNamePromptModal)[0]!.props.visible,
+    ).toBe(false);
+
+    await act(async () => {
+      tree!.root.findAllByType(GroupActionSheet)[0]!.props.onDismissed();
+    });
+
+    const prompt = tree!.root.findAllByType(GroupNamePromptModal)[0]!;
+    expect(prompt.props.visible).toBe(true);
+    expect(prompt.props.initialValue).toBe("Servers");
+  });
+
   // 즐겨찾기는 목록 화면 말고 호스트 꾹 누르기에서도 켜고 끌 수 있어야 한다. 라벨은 현재
   // 상태에 따라 바뀌고, 실패하면(오프라인 등) 조용히 넘기지 않고 알린다.
   it("toggles the favorite from the long-press sheet", async () => {
@@ -736,8 +779,12 @@ describe("HomeScreen group browsing", () => {
     });
 
     // 루트에 호스트는 Root Host 하나뿐이다(나머지는 그룹 안).
+    // 그룹 카드도 길게 누를 수 있으므로(그룹 편집) 라벨로 호스트를 집는다.
     const hostCard = tree!.root.findAll(
-      (node) => typeof node.props.onLongPress === "function",
+      (node) =>
+        typeof node.props.onLongPress === "function" &&
+        typeof node.props.accessibilityLabel === "string" &&
+        node.props.accessibilityLabel.includes("Root Host"),
     )[0];
     await act(async () => {
       hostCard.props.onLongPress();
@@ -791,6 +838,7 @@ describe("HomeScreen group browsing", () => {
       addButton.props.onPress();
     });
 
+    // 가장 흔한 동작이라 한 탭으로 간다 — 무엇을 추가할지 먼저 묻지 않는다.
     expect(mockNavigate).toHaveBeenCalledWith("HostForm", undefined);
 
     await act(async () => {
@@ -817,8 +865,12 @@ describe("HomeScreen group browsing", () => {
       tree = renderer.create(<HomeScreen />);
     });
 
+    // 그룹 카드도 길게 누를 수 있으므로(그룹 편집) 라벨로 호스트를 집는다.
     const hostCard = tree!.root.findAll(
-      (node) => typeof node.props.onLongPress === "function",
+      (node) =>
+        typeof node.props.onLongPress === "function" &&
+        typeof node.props.accessibilityLabel === "string" &&
+        node.props.accessibilityLabel.includes("Root Host"),
     )[0];
     expect(hostCard).toBeTruthy();
     await act(async () => {

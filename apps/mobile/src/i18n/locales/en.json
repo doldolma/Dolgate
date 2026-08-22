@@ -418,7 +418,8 @@
     "openGroup": "Open group {{name}}",
     "groupHostCount": "{{count}} hosts",
     "groupHostCountOne": "{{count}} host",
-    "groupMeta": "Groups {{meta}}"
+    "groupMeta": "Groups {{meta}}",
+    "connectHost": "Connect to {{name}}"
   },
   "session": {
     "noSessionsTitle": "No open sessions.",
@@ -675,5 +676,23 @@
     "tailscaleTargetNotInTailnet": "Not a device address in this tailnet — reached through a jump host or the local network.",
     "tailscaleTargetTraffic": "sent {{tx}} · received {{rx}}",
     "hopDetail": "Hop {{index}}/{{count}} · {{label}}"
+  },
+  "groupActions": {
+    "create": "New group",
+    "createTitle": "Create a group",
+    "createHint": "Created under {{path}}.",
+    "rename": "Rename",
+    "renameTitle": "Rename group",
+    "namePlaceholder": "Group name",
+    "delete": "Delete",
+    "deleteTitle": "Delete the {{name}} group?",
+    "deleteBody": "{{groups}} nested group(s) and {{hosts}} host(s) are affected.",
+    "deleteEmptyBody": "This group is empty. Deleting it removes it right away.",
+    "keepChildren": "Keep contents",
+    "deleteChildren": "Delete contents",
+    "hostCount": "{{count}} host(s)",
+    "closeAria": "Close group menu",
+    "failedTitle": "Could not change the group",
+    "failed": "Please try again in a moment."
   }
 }

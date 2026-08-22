@@ -3,6 +3,7 @@ import {
   Alert,
   BackHandler,
   FlatList,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -19,6 +20,7 @@ import {
   isDirectHostChild,
   normalizeGroupPath,
   type GroupCardView,
+  type GroupRemoveMode,
 } from "@dolssh/shared-core";
 import {
   useFocusEffect,
@@ -27,6 +29,8 @@ import {
 } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
 import Ionicons from "react-native-vector-icons/Ionicons";
+import { GroupActionSheet } from "../components/GroupActionSheet";
+import { GroupNamePromptModal } from "../components/GroupNamePromptModal";
 import { HostActionSheet } from "../components/HostActionSheet";
 import { IosEdgeSwipeBack } from "../components/IosEdgeSwipeBack";
 import { formatRelativeTime } from "../lib/mobile";
@@ -58,6 +62,10 @@ type HomeListItem =
       kind: "host";
       host: HostRecord;
       showGroupMeta: boolean;
+    }
+  | {
+      /** 그룹 목록을 닫는 "새 그룹" 줄. 지금 보고 있는 경로의 하위로 만든다. */
+      kind: "new-group";
     };
 
 export function HomeScreen(): React.JSX.Element {
@@ -84,9 +92,24 @@ export function HomeScreen(): React.JSX.Element {
     (state) => state.openSftpForHost,
   );
   const deleteHost = useMobileAppStore((state) => state.deleteHost);
+  const createGroup = useMobileAppStore((state) => state.createGroup);
+  const renameGroup = useMobileAppStore((state) => state.renameGroup);
+  const removeGroup = useMobileAppStore((state) => state.removeGroup);
   const toggleHostFavorite = useMobileAppStore(
     (state) => state.toggleHostFavorite,
   );
+  const [actionSheetGroup, setActionSheetGroup] = useState<GroupCardView | null>(
+    null,
+  );
+  /** 이름 입력 모달. 새로 만들기와 이름 변경이 같은 모달을 쓴다. */
+  const [groupPrompt, setGroupPrompt] = useState<
+    { mode: "create" } | { mode: "rename"; group: GroupCardView } | null
+  >(null);
+  const [groupBusy, setGroupBusy] = useState(false);
+  /** 시트가 닫히기를 기다리는 입력 모달(iOS). 위 onRename 주석 참고. */
+  const [pendingGroupPrompt, setPendingGroupPrompt] = useState<
+    { mode: "rename"; group: GroupCardView } | null
+  >(null);
   const [actionSheetHost, setActionSheetHost] = useState<HostRecord | null>(
     null,
   );
@@ -284,6 +307,22 @@ export function HomeScreen(): React.JSX.Element {
         kind: "group" as const,
         group,
       })),
+      // 그룹 목록의 마지막 줄로 둔다 — 그룹을 만드는 일은 그룹을 보고 있을 때 생각난다.
+      //
+      // 카드가 아니라 조용한 한 줄이다. 처음에는 그룹 카드와 같은 크기의 점선 상자로
+      // 만들었는데, 진짜 그룹처럼 보이면서 그룹·호스트 이음새에 끼어 어색했다.
+      //
+      // 넣지 않는 경우가 둘이다:
+      //  - 검색 중·즐겨찾기 화면 — 경로가 없는 가상 목록이라 "어디에 만들지" 가 안 정해진다
+      //  - 뿌리에 아무것도 없을 때 — 이 줄이 있으면 목록이 비지 않아 **빈 화면 안내가 영영
+      //    안 뜬다.** 처음 쓰는 사람에게 필요한 것은 호스트를 추가하라는 안내다.
+      //    (그룹 안에서는 비어 있어도 남긴다 — 방금 만든 그룹에 하위 그룹을 만들 수 있어야 한다.)
+      ...(isFavoritesView ||
+      (currentGroupPath === null &&
+        visibleGroups.length === 0 &&
+        filteredHosts.length === 0)
+        ? []
+        : [{ kind: "new-group" as const }]),
       ...filteredHosts.map((host) => ({
         kind: "host" as const,
         host,
@@ -383,6 +422,88 @@ export function HomeScreen(): React.JSX.Element {
       });
     },
     [toggleHostFavorite, translate],
+  );
+
+  /**
+   * 그룹 편집 결과를 화면에 반영한다.
+   *
+   * 지운 그룹 안에 들어와 있으면 그 자리에 남을 수 없다. 이름이 바뀐 경우도 마찬가지다 —
+   * 옛 경로는 더 이상 없다. 뒤로 가기 기록에도 그 경로가 남아 있으므로 같이 정리한다.
+   */
+  const leaveGroupPath = useCallback((removedPath: string) => {
+    const isGone = (path: string | null) =>
+      path !== null && (path === removedPath || path.startsWith(`${removedPath}/`));
+    setCurrentGroupPath((current) => (isGone(current) ? null : current));
+    setGroupHistory((history) => history.filter((path) => !isGone(path)));
+  }, []);
+
+  const runGroupMutation = useCallback(
+    async (run: () => Promise<void>) => {
+      setGroupBusy(true);
+      try {
+        await run();
+        setGroupPrompt(null);
+        setActionSheetGroup(null);
+      } catch (error) {
+        Alert.alert(
+          translate("groupActions.failedTitle"),
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : translate("groupActions.failed"),
+        );
+      } finally {
+        setGroupBusy(false);
+      }
+    },
+    [translate],
+  );
+
+  const handleDeleteGroup = useCallback(
+    (group: GroupCardView) => {
+      const childGroupCount = visibleGroups.filter((candidate) =>
+        candidate.path.startsWith(`${group.path}/`),
+      ).length;
+      const isEmpty = childGroupCount === 0 && group.hostCount === 0;
+
+      const remove = (mode: GroupRemoveMode) => {
+        void runGroupMutation(async () => {
+          await removeGroup(group.path, mode);
+          leaveGroupPath(group.path);
+        });
+      };
+
+      Alert.alert(
+        translate("groupActions.deleteTitle", { name: group.name }),
+        isEmpty
+          ? translate("groupActions.deleteEmptyBody")
+          : translate("groupActions.deleteBody", {
+              groups: childGroupCount,
+              hosts: group.hostCount,
+            }),
+        isEmpty
+          ? [
+              { text: translate("common.cancel"), style: "cancel" },
+              {
+                text: translate("groupActions.delete"),
+                style: "destructive",
+                onPress: () => remove("delete-subtree"),
+              },
+            ]
+          : [
+              { text: translate("common.cancel"), style: "cancel" },
+              {
+                text: translate("groupActions.keepChildren"),
+                onPress: () => remove("reparent-descendants"),
+              },
+              {
+                text: translate("groupActions.deleteChildren"),
+                style: "destructive",
+                onPress: () => remove("delete-subtree"),
+              },
+            ],
+      );
+    },
+    [leaveGroupPath, removeGroup, runGroupMutation, translate, visibleGroups],
   );
 
   const handleDeleteHost = useCallback(
@@ -579,7 +700,9 @@ export function HomeScreen(): React.JSX.Element {
               ? "favorites"
               : item.kind === "group"
                 ? `group:${item.group.path}`
-                : `host:${item.host.id}`
+                : item.kind === "new-group"
+                  ? "new-group"
+                  : `host:${item.host.id}`
           }
           initialNumToRender={12}
           maxToRenderPerBatch={12}
@@ -654,6 +777,34 @@ export function HomeScreen(): React.JSX.Element {
                 </Pressable>
               );
             }
+            if (item.kind === "new-group") {
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={translate("groupActions.create")}
+                  onPress={() => setGroupPrompt({ mode: "create" })}
+                  style={[
+                    styles.newGroupRow,
+                    { borderColor: palette.accentBorder },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.newGroupIcon,
+                      { backgroundColor: palette.accentSoft },
+                    ]}
+                  >
+                    <Ionicons name="add" size={16} color={palette.accent} />
+                  </View>
+                  <Text
+                    style={[styles.newGroupLabel, { color: palette.accent }]}
+                  >
+                    {translate("groupActions.create")}
+                  </Text>
+                </Pressable>
+              );
+            }
+
             if (item.kind === "group") {
               return (
                 <Pressable
@@ -662,6 +813,7 @@ export function HomeScreen(): React.JSX.Element {
                   onPress={() => {
                     openGroup(item.group.path);
                   }}
+                  onLongPress={() => setActionSheetGroup(item.group)}
                   style={[
                     styles.groupCard,
                     {
@@ -715,6 +867,12 @@ export function HomeScreen(): React.JSX.Element {
 
             return (
               <Pressable
+                accessibilityRole="button"
+                // 그룹 카드에는 라벨이 있는데 호스트 카드에는 없었다. 스크린리더가 카드 안의
+                // 글자를 죄다 읽어 주는 대신 무엇을 누르는 것인지 먼저 알려 준다.
+                accessibilityLabel={translate("home.connectHost", {
+                  name: item.host.label,
+                })}
                 onPress={() => void handleConnect(item.host)}
                 onLongPress={() => setActionSheetHost(item.host)}
                 style={[
@@ -761,6 +919,68 @@ export function HomeScreen(): React.JSX.Element {
                 </Text>
               </Pressable>
             );
+          }}
+        />
+
+        <GroupActionSheet
+          group={actionSheetGroup}
+          onClose={() => setActionSheetGroup(null)}
+          onRename={(group) => {
+            // 시트를 **반드시 먼저 닫는다.** Modal 두 개가 겹치면 시트가 위를 덮어 입력
+            // 모달의 탭이 전부 시트로 간다(눌러도 아무 일이 없는 것처럼 보인다).
+            setActionSheetGroup(null);
+            const next = { mode: "rename" as const, group };
+            if (Platform.OS === "ios") {
+              // iOS 는 닫히는 도중에 띄우면 무시한다 — onDismissed 를 기다린다.
+              setPendingGroupPrompt(next);
+              return;
+            }
+            setGroupPrompt(next);
+          }}
+          onDismissed={() => {
+            if (pendingGroupPrompt) {
+              setGroupPrompt(pendingGroupPrompt);
+              setPendingGroupPrompt(null);
+            }
+          }}
+          onDelete={handleDeleteGroup}
+        />
+
+        <GroupNamePromptModal
+          visible={groupPrompt !== null}
+          busy={groupBusy}
+          title={
+            groupPrompt?.mode === "rename"
+              ? translate("groupActions.renameTitle")
+              : translate("groupActions.createTitle")
+          }
+          initialValue={
+            groupPrompt?.mode === "rename" ? groupPrompt.group.name : ""
+          }
+          hint={
+            groupPrompt?.mode === "create" && currentGroupPath
+              ? translate("groupActions.createHint", { path: currentGroupPath })
+              : null
+          }
+          submitLabel={
+            groupPrompt?.mode === "rename"
+              ? translate("groupActions.rename")
+              : translate("groupActions.create")
+          }
+          onClose={() => setGroupPrompt(null)}
+          onSubmit={(name) => {
+            if (!groupPrompt) {
+              return;
+            }
+            void runGroupMutation(async () => {
+              if (groupPrompt.mode === "rename") {
+                await renameGroup(groupPrompt.group.path, name);
+                // 이름이 바뀌면 옛 경로는 사라진다. 그 안에 들어와 있었다면 나와야 한다.
+                leaveGroupPath(groupPrompt.group.path);
+                return;
+              }
+              await createGroup(name, currentGroupPath);
+            });
           }}
         />
 
@@ -862,6 +1082,32 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
+  },
+  // 그룹 카드와 같은 알약 모양이되 **높이를 낮추고 점선**으로 둔다 — 채워진 카드가 아니라
+  // "여기에 하나 만들 수 있다" 는 자리로 읽혀야 한다. 아이콘 타일도 40 이 아니라 28 이다.
+  //
+  // 참고: 안드로이드는 borderRadius 가 있으면 점선을 실선으로 그린다(RN 제약). 그때는
+  // 연한 실선 테두리 알약으로 보이며, 그래도 카드와는 구분된다.
+  newGroupRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+  },
+  newGroupIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  newGroupLabel: {
+    fontSize: 14,
+    fontWeight: "700",
   },
   groupIcon: {
     width: 40,

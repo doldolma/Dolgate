@@ -418,7 +418,8 @@
     "openGroup": "{{name}} 그룹 열기",
     "groupHostCount": "{{count}}개 호스트",
     "groupHostCountOne": "{{count}}개 호스트",
-    "groupMeta": "그룹 {{meta}}"
+    "groupMeta": "그룹 {{meta}}",
+    "connectHost": "{{name}} 접속"
   },
   "session": {
     "noSessionsTitle": "열린 세션이 없습니다.",
@@ -675,5 +676,23 @@
     "tailscaleTargetNotInTailnet": "이 tailnet 의 기기 주소가 아닙니다 — 점프 호스트나 지금 붙어 있는 망으로 갑니다.",
     "tailscaleTargetTraffic": "보냄 {{tx}} · 받음 {{rx}}",
     "hopDetail": "홉 {{index}}/{{count}} · {{label}}"
+  },
+  "groupActions": {
+    "create": "새 그룹",
+    "createTitle": "새 그룹 만들기",
+    "createHint": "{{path}} 아래에 만들어집니다.",
+    "rename": "이름 변경",
+    "renameTitle": "그룹 이름 변경",
+    "namePlaceholder": "그룹 이름",
+    "delete": "삭제",
+    "deleteTitle": "{{name}} 그룹을 삭제할까요?",
+    "deleteBody": "하위 그룹 {{groups}}개와 호스트 {{hosts}}개가 함께 영향을 받습니다.",
+    "deleteEmptyBody": "이 그룹은 비어 있습니다. 삭제하면 바로 사라집니다.",
+    "keepChildren": "하위 항목 유지",
+    "deleteChildren": "하위 항목까지 삭제",
+    "hostCount": "호스트 {{count}}개",
+    "closeAria": "그룹 메뉴 닫기",
+    "failedTitle": "그룹을 바꾸지 못했습니다",
+    "failed": "잠시 후 다시 시도해 주세요."
   }
 }

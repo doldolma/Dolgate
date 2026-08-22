@@ -1,7 +1,5 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
-import Ionicons from "react-native-vector-icons/Ionicons";
 import {
   getHostSubtitle,
   type HostRecord,
@@ -10,7 +8,7 @@ import {
   isSshHostRecord,
   isVncHostRecord,
 } from "@dolssh/shared-core";
-import { useMobilePalette } from "../theme";
+import { ActionSheet, type ActionSheetItem } from "./ActionSheet";
 import { getAwsEc2SftpDisabledMessage, hostSubtitleLabels } from '../i18n/shared-messages';
 
 interface HostActionSheetProps {
@@ -21,15 +19,6 @@ interface HostActionSheetProps {
   onEdit: (host: HostRecord) => void;
   onDelete: (host: HostRecord) => void;
   onToggleFavorite: (host: HostRecord) => void;
-}
-
-interface SheetAction {
-  key: string;
-  icon: string;
-  label: string;
-  danger?: boolean;
-  disabledReason?: string | null;
-  onPress: () => void;
 }
 
 // 호스트 롱터치 액션 시트.
@@ -47,10 +36,9 @@ export function HostActionSheet({
   onDelete,
   onToggleFavorite,
 }: HostActionSheetProps): React.JSX.Element {
-  const palette = useMobilePalette();
   const { t: translate } = useTranslation();
 
-  const actions: SheetAction[] = [];
+  const actions: ActionSheetItem[] = [];
   if (host) {
     const isRdHost = isRdpHostRecord(host) || isVncHostRecord(host);
     const sftpDisabledReason = isAwsEc2HostRecord(host)
@@ -102,133 +90,14 @@ export function HostActionSheet({
   }
 
   return (
-    <Modal
+    <ActionSheet
       visible={host !== null}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <Pressable
-        style={[styles.backdrop, { backgroundColor: palette.overlay }]}
-        accessibilityLabel={translate("hostActions.closeAria")}
-        onPress={onClose}
-      >
-        <Pressable
-          style={[
-            styles.sheet,
-            {
-              backgroundColor: palette.surfaceSolid,
-              borderColor: palette.border,
-            },
-          ]}
-          onPress={(event) => event.stopPropagation()}
-        >
-          {host ? (
-            <View style={styles.header}>
-              <Text
-                numberOfLines={1}
-                style={[styles.title, { color: palette.text }]}
-              >
-                {host.label}
-              </Text>
-              <Text
-                numberOfLines={1}
-                style={[styles.subtitle, { color: palette.mutedText }]}
-              >
-                {getHostSubtitle(host, hostSubtitleLabels())}
-              </Text>
-            </View>
-          ) : null}
-          {actions.map((action) => {
-            const disabled = Boolean(action.disabledReason);
-            const color = action.danger
-              ? palette.danger
-              : disabled
-                ? palette.mutedText
-                : palette.text;
-            return (
-              <Pressable
-                key={action.key}
-                accessibilityRole="button"
-                accessibilityLabel={action.label}
-                disabled={disabled}
-                onPress={action.onPress}
-                style={[
-                  styles.actionRow,
-                  { borderTopColor: palette.border },
-                  disabled ? styles.actionRowDisabled : null,
-                ]}
-              >
-                <Ionicons name={action.icon} size={20} color={color} />
-                <View style={styles.actionCopy}>
-                  <Text style={[styles.actionLabel, { color }]}>
-                    {action.label}
-                  </Text>
-                  {action.disabledReason ? (
-                    <Text
-                      style={[
-                        styles.actionReason,
-                        { color: palette.mutedText },
-                      ]}
-                    >
-                      {action.disabledReason}
-                    </Text>
-                  ) : null}
-                </View>
-              </Pressable>
-            );
-          })}
-        </Pressable>
-      </Pressable>
-    </Modal>
+      closeAccessibilityLabel={translate("hostActions.closeAria")}
+      title={host?.label ?? null}
+      subtitle={host ? getHostSubtitle(host, hostSubtitleLabels()) : null}
+      items={actions}
+      onClose={onClose}
+    />
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    justifyContent: "flex-end",
-    padding: 14,
-  },
-  sheet: {
-    borderWidth: 1,
-    borderRadius: 22,
-    paddingBottom: 8,
-    overflow: "hidden",
-  },
-  header: {
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    gap: 3,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: "800",
-  },
-  subtitle: {
-    fontSize: 12,
-  },
-  actionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    borderTopWidth: 1,
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-  },
-  actionRowDisabled: {
-    opacity: 0.55,
-  },
-  actionCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  actionLabel: {
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  actionReason: {
-    fontSize: 11,
-    lineHeight: 15,
-  },
-});

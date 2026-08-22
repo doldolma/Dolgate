@@ -13,41 +13,45 @@ import {
   clampAutoReconnectDelayMs,
   clampAutoReconnectMaxAttempts,
   clampCommandNotificationThresholdSeconds,
-  isDnsOverrideEligiblePortForwardRule,
-  isLinkedDnsOverrideDraft,
-  isLinkedDnsOverrideRecord,
-  isStaticDnsOverrideDraft,
+  createGroupIn,
   getGroupLabel,
   getParentGroupPath,
   isAwsEc2HostDraft,
   isAwsEcsHostDraft,
+  isDnsOverrideEligiblePortForwardRule,
   isGroupWithinPath,
-  isWarpgateSshHostDraft,
+  isLinkedDnsOverrideDraft,
+  isLinkedDnsOverrideRecord,
   isRdpHostDraft,
-  isVncHostDraft,
-  type RdpHostDraft,
-  type RdpHostRecord,
-  type VncHostDraft,
-  type VncHostRecord,
-  isSerialHostDraft,
-  isSshHostDraft,
   isRdpHostRecord,
-  isVncHostRecord,
-  type VncImageQuality,
-  isSshHostRecord,
+  isSerialHostDraft,
   isSerialHostRecord,
+  isSshHostDraft,
+  isSshHostRecord,
+  isStaticDnsOverrideDraft,
+  isVncHostDraft,
+  isVncHostRecord,
+  isWarpgateSshHostDraft,
+  moveGroupIn,
   normalizeAiBaseUrl,
   normalizeAiTokenLimit,
-  normalizeSftpBrowserColumnWidths,
-  normalizeServerUrl,
   normalizeGroupPath,
   normalizeHostEnvVars,
   normalizeJumpHostIds,
+  normalizeServerUrl,
+  normalizeSftpBrowserColumnWidths,
   rebaseGroupPath,
+  removeGroupFrom,
+  renameGroupIn,
   stripRemovedGroupSegment,
   type RdpAwsSsmTarget,
   type RdpDriveShare,
-  type RdpMonitorSelection
+  type RdpHostDraft,
+  type RdpHostRecord,
+  type RdpMonitorSelection,
+  type VncHostDraft,
+  type VncHostRecord,
+  type VncImageQuality
 } from '@shared';
 import type {
   ActivityLogCategory,
@@ -1288,137 +1292,53 @@ export class GroupRepository {
   }
 
   create(id: string, name: string, parentPath?: string | null): GroupRecord {
-    const cleanedName = name.trim();
-    if (!cleanedName) {
-      throw new Error('Group name is required');
-    }
-
-    const normalizedParentPath = normalizeGroupPath(parentPath);
-    const nextPath = normalizeGroupPath(normalizedParentPath ? `${normalizedParentPath}/${cleanedName}` : cleanedName);
-    if (!nextPath) {
-      throw new Error('Group path is invalid');
-    }
-    if (this.getByPath(nextPath)) {
-      throw new Error('Group already exists');
-    }
-
-    const timestamp = nowIso();
-    const record: GroupRecord = {
+    const { created } = createGroupIn(stateStorage.getState().data.groups, {
       id,
-      name: cleanedName,
-      path: nextPath,
-      parentPath: normalizedParentPath,
-      createdAt: timestamp,
-      updatedAt: timestamp
-    };
+      name,
+      parentPath,
+      timestamp: nowIso()
+    });
 
     stateStorage.updateState((state) => {
-      state.data.groups.push(record);
+      state.data.groups.push(created);
     });
-    return record;
+    return created;
   }
 
   move(targetPath: string, targetParentPath: string | null): GroupPathMutationResult {
-    const normalizedTargetPath = normalizeGroupPath(targetPath);
-    if (!normalizedTargetPath) {
-      throw new Error('Group path is invalid');
-    }
-
-    const normalizedTargetParentPath = normalizeGroupPath(targetParentPath);
-    if (normalizedTargetParentPath && isGroupWithinPath(normalizedTargetParentPath, normalizedTargetPath)) {
-      throw new Error('Group cannot be moved into itself or one of its descendants');
-    }
-
-    const nextPath = normalizeGroupPath(
-      normalizedTargetParentPath
-        ? `${normalizedTargetParentPath}/${getGroupLabel(normalizedTargetPath)}`
-        : getGroupLabel(normalizedTargetPath)
+    return this.applyPathMutation((groups, hosts, options) =>
+      moveGroupIn(groups, hosts, targetPath, targetParentPath, options)
     );
-    if (!nextPath) {
-      throw new Error('Group path is invalid');
-    }
-    if (nextPath === normalizedTargetPath) {
-      throw new Error('Group path is unchanged');
-    }
-
-    return this.mutatePath(normalizedTargetPath, nextPath);
   }
 
   rename(targetPath: string, name: string): GroupPathMutationResult {
-    const normalizedTargetPath = normalizeGroupPath(targetPath);
-    if (!normalizedTargetPath) {
-      throw new Error('Group path is invalid');
-    }
-
-    const cleanedName = name.trim();
-    if (!cleanedName) {
-      throw new Error('Group name is required');
-    }
-
-    const nextPath = normalizeGroupPath(
-      getParentGroupPath(normalizedTargetPath)
-        ? `${getParentGroupPath(normalizedTargetPath)}/${cleanedName}`
-        : cleanedName
+    return this.applyPathMutation((groups, hosts, options) =>
+      renameGroupIn(groups, hosts, targetPath, name, options)
     );
-    if (!nextPath) {
-      throw new Error('Group path is invalid');
-    }
-    if (nextPath === normalizedTargetPath) {
-      throw new Error('Group path is unchanged');
-    }
-
-    return this.mutatePath(normalizedTargetPath, nextPath);
   }
 
-  private mutatePath(targetPath: string, nextPath: string): GroupPathMutationResult {
+  /**
+   * 경로를 바꾸는 변형(이동·이름 변경)을 상태에 적용한다.
+   *
+   * 규칙 자체는 shared-core 의 순수 함수가 갖고 있다 — 모바일도 같은 것을 쓴다. 여기서는
+   * 상태를 읽어 넘기고, 결과를 저장하고, 정렬해서 돌려주는 것만 한다.
+   */
+  private applyPathMutation(
+    mutate: (
+      groups: GroupRecord[],
+      hosts: HostRecord[],
+      options: { timestamp: string; normalizeHost: (host: HostRecord) => HostRecord }
+    ) => { groups: GroupRecord[]; hosts: HostRecord[]; nextPath: string }
+  ): GroupPathMutationResult {
+    let nextPath = '';
     const nextState = stateStorage.updateState((state) => {
-      const timestamp = nowIso();
-      const affectedGroups = state.data.groups.filter((record) => isGroupWithinPath(record.path, targetPath));
-      const affectedHosts = state.data.hosts.filter((record) => isGroupWithinPath(normalizeGroupPath(record.groupName), targetPath));
-
-      if (affectedGroups.length === 0 && affectedHosts.length === 0) {
-        throw new Error('Group not found');
-      }
-
-      const nextGroupsByPath = new Map<string, GroupRecord>();
-      for (const record of state.data.groups) {
-        if (!isGroupWithinPath(record.path, targetPath)) {
-          nextGroupsByPath.set(record.path, record);
-        }
-      }
-      if (nextGroupsByPath.has(nextPath)) {
-        throw new Error('Group already exists');
-      }
-
-      for (const record of affectedGroups) {
-        const rebasedPath = rebaseGroupPath(record.path, targetPath, nextPath);
-        if (!rebasedPath) {
-          throw new Error('Group path is invalid');
-        }
-        if (nextGroupsByPath.has(rebasedPath)) {
-          throw new Error('Group already exists');
-        }
-        nextGroupsByPath.set(rebasedPath, {
-          ...record,
-          name: getGroupLabel(rebasedPath),
-          path: rebasedPath,
-          parentPath: getParentGroupPath(rebasedPath),
-          updatedAt: timestamp
-        });
-      }
-
-      state.data.groups = [...nextGroupsByPath.values()];
-      state.data.hosts = state.data.hosts.map((record) => {
-        const hostGroupPath = normalizeGroupPath(record.groupName);
-        if (!isGroupWithinPath(hostGroupPath, targetPath)) {
-          return record;
-        }
-        return normalizeIncomingHostRecord({
-          ...record,
-          groupName: rebaseGroupPath(hostGroupPath, targetPath, nextPath),
-          updatedAt: timestamp
-        });
+      const result = mutate(state.data.groups, state.data.hosts, {
+        timestamp: nowIso(),
+        normalizeHost: normalizeIncomingHostRecord
       });
+      state.data.groups = result.groups;
+      state.data.hosts = result.hosts;
+      nextPath = result.nextPath;
     });
 
     return {
@@ -1435,69 +1355,17 @@ export class GroupRepository {
     removedGroupIds: string[];
     removedHostIds: string[];
   } {
-    const normalizedTargetPath = normalizeGroupPath(targetPath);
-    if (!normalizedTargetPath) {
-      throw new Error('Group path is invalid');
-    }
-
-    const removedGroupIds: string[] = [];
-    const removedHostIds: string[] = [];
+    let removedGroupIds: string[] = [];
+    let removedHostIds: string[] = [];
     const nextState = stateStorage.updateState((state) => {
-      const timestamp = nowIso();
-
-      const affectedGroups = state.data.groups.filter((record) => isGroupWithinPath(record.path, normalizedTargetPath));
-      const affectedHosts = state.data.hosts.filter((record) => isGroupWithinPath(normalizeGroupPath(record.groupName), normalizedTargetPath));
-
-      if (affectedGroups.length === 0 && affectedHosts.length === 0) {
-        throw new Error('Group not found');
-      }
-
-      if (mode === 'delete-subtree') {
-        removedGroupIds.push(...affectedGroups.map((record) => record.id));
-        removedHostIds.push(...affectedHosts.map((record) => record.id));
-        state.data.groups = state.data.groups.filter((record) => !isGroupWithinPath(record.path, normalizedTargetPath));
-        state.data.hosts = state.data.hosts.filter((record) => !isGroupWithinPath(normalizeGroupPath(record.groupName), normalizedTargetPath));
-        return;
-      }
-
-      const remainingGroups = state.data.groups.filter((record) => !isGroupWithinPath(record.path, normalizedTargetPath));
-      const nextGroupsByPath = new Map<string, GroupRecord>();
-      for (const record of remainingGroups) {
-        nextGroupsByPath.set(record.path, record);
-      }
-
-      for (const record of affectedGroups) {
-        if (record.path === normalizedTargetPath) {
-          removedGroupIds.push(record.id);
-          continue;
-        }
-        const rebasedPath = stripRemovedGroupSegment(record.path, normalizedTargetPath);
-        if (!rebasedPath || nextGroupsByPath.has(rebasedPath)) {
-          removedGroupIds.push(record.id);
-          continue;
-        }
-        nextGroupsByPath.set(rebasedPath, {
-          ...record,
-          name: getGroupLabel(rebasedPath),
-          path: rebasedPath,
-          parentPath: getParentGroupPath(rebasedPath),
-          updatedAt: timestamp
-        });
-      }
-
-      state.data.groups = [...nextGroupsByPath.values()];
-      state.data.hosts = state.data.hosts.map((record) => {
-        const hostGroupPath = normalizeGroupPath(record.groupName);
-        if (!isGroupWithinPath(hostGroupPath, normalizedTargetPath)) {
-          return record;
-        }
-        const nextGroupPath = stripRemovedGroupSegment(hostGroupPath, normalizedTargetPath);
-        return normalizeIncomingHostRecord({
-          ...record,
-          groupName: nextGroupPath,
-          updatedAt: timestamp
-        });
+      const result = removeGroupFrom(state.data.groups, state.data.hosts, targetPath, mode, {
+        timestamp: nowIso(),
+        normalizeHost: normalizeIncomingHostRecord
       });
+      state.data.groups = result.groups;
+      state.data.hosts = result.hosts;
+      removedGroupIds = result.removedGroupIds;
+      removedHostIds = result.removedHostIds;
     });
 
     return {

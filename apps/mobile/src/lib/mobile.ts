@@ -1151,11 +1151,30 @@ export function buildHostMutationSyncPayload(
     hosts?: HostRecord[];
     secrets?: ManagedSecretPayload[];
     deletedHosts?: Array<{ id: string; deletedAt: string }>;
+    /**
+     * 바뀐 그룹. 그룹 이름을 바꾸면 그 아래 호스트의 `groupName`(경로 문자열)도 함께
+     * 바뀌므로, 보통 `hosts` 와 같이 넘어온다.
+     */
+    groups?: GroupRecord[];
+    deletedGroups?: Array<{ id: string; deletedAt: string }>;
   },
   keyBase64: string,
 ): SyncPayloadV2 {
   return {
     ...buildEmptySyncPayload(),
+    groups: [
+      ...(input.groups ?? []).map(record => ({
+        id: record.id,
+        encrypted_payload: encodeEncryptedPayload(record, keyBase64),
+        updated_at: record.updatedAt,
+      })),
+      ...(input.deletedGroups ?? []).map(record => ({
+        id: record.id,
+        encrypted_payload: '',
+        updated_at: record.deletedAt,
+        deleted_at: record.deletedAt,
+      })),
+    ],
     hosts: [
       ...(input.hosts ?? []).map(record => ({
         id: record.id,

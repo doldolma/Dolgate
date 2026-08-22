@@ -21,6 +21,8 @@ export interface MobilePalette {
   mutedText: string;
   accent: string;
   accentSoft: string;
+  /** 액센트 색 테두리. accent 는 글자용이라 테두리로 쓰면 너무 무겁고, accentSoft 는 채움용이라 안 보인다. */
+  accentBorder: string;
   success: string;
   warning: string;
   danger: string;
@@ -54,6 +56,7 @@ const darkPalette: MobilePalette = {
   mutedText: "#9DAFC3",
   accent: "#5F7FE0",
   accentSoft: "rgba(95, 127, 224, 0.18)",
+  accentBorder: "rgba(95, 127, 224, 0.42)",
   success: "#54C792",
   warning: "#F0BE67",
   danger: "#F17C87",
@@ -87,6 +90,7 @@ const lightPalette: MobilePalette = {
   mutedText: "#66788F",
   accent: "#3457B3",
   accentSoft: "rgba(52, 87, 179, 0.1)",
+  accentBorder: "rgba(52, 87, 179, 0.38)",
   success: "#1E8A59",
   warning: "#B27A19",
   danger: "#B54856",
