@@ -3734,8 +3734,13 @@ export const useMobileAppStore = create<MobileAppState>()(
        * 레코드를 750ms 마다 새 객체로 만들고, 그러면 이 레코드를 구독하는 모든 화면이 그 주기로
        * 리렌더되고 persist 가 스토어 전체를 다시 직렬화해 디스크에 쓴다. 출력이 흐르는 내내다.
        *
-       * 화면 복원에 필요한 것은 **끝나는 순간의 화면**이고, 그건 세션이 live 를 벗어날 때·백그라운드로
-       * 갈 때 등에서 부르는 직접 호출이 게시한다(runtimeSessionSnapshots 는 그동안 계속 쌓인다).
+       * 화면 복원에 필요한 것은 **끝나는 순간의 화면**이고, 그건 세션이 live 를 벗어날 때 부르는
+       * 직접 호출이 게시한다(runtimeSessionSnapshots 는 그동안 계속 쌓인다).
+       *
+       * 백그라운드 전환에서는 게시하지 않는다. 그때는 프로세스가 살아 있어 런타임 Map 이 그대로
+       * 남고, persist 는 스냅샷을 빈 문자열로 비워 저장하므로(compactPersistedSessions) 레코드에
+       * 옮겨 적어도 디스크로 나가지 않는다 — 하는 일 없이 리렌더만 만든다. 스냅샷을 실제로
+       * 저장하게 바꾸는 날에는 그때 백그라운드 게시를 함께 넣어야 한다.
        * 살아 있는 세션의 화면은 구독 리플레이가 런타임 값에서 바로 준다.
        */
       const flushSessionSnapshot = (
@@ -5414,11 +5419,19 @@ export const useMobileAppStore = create<MobileAppState>()(
           return;
         }
         pendingSessionConnections.add(sessionRecord.id);
-        runtimeSessionSnapshots.set(
-          sessionRecord.id,
-          get().sessions.find(item => item.id === sessionRecord.id)
-            ?.lastViewportSnapshot ?? sessionRecord.lastViewportSnapshot,
-        );
+        // 다시 붙을 때 이전 화면을 이어서 쌓는다.
+        //
+        // **런타임 값이 있으면 그것을 쓴다.** 레코드의 사본은 세션이 끝나는 순간에 게시되므로
+        // 그 경로를 지나지 않고 끊긴 세션에서는 낡아 있을 수 있고, 그걸로 덮으면 메모리에
+        // 남아 있던 더 최신 화면을 잃는다. 콜드스타트에서는 런타임 Map 이 비어 있으므로
+        // 레코드에서 시드한다(persist 는 스냅샷을 비워 저장하니 대개 빈 문자열이다).
+        if (!runtimeSessionSnapshots.has(sessionRecord.id)) {
+          runtimeSessionSnapshots.set(
+            sessionRecord.id,
+            get().sessions.find(item => item.id === sessionRecord.id)
+              ?.lastViewportSnapshot ?? sessionRecord.lastViewportSnapshot,
+          );
+        }
         if (isAwsEc2HostRecord(host)) {
           void connectAwsSessionRecord(sessionRecord, host);
           return;
