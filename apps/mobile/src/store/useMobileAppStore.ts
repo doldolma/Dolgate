@@ -248,6 +248,15 @@ const MAX_TERMINAL_SNAPSHOT_CHARS = 8_000;
 const MAX_PERSISTED_SESSIONS = 24;
 const SFTP_TRANSFER_CHUNK_SIZE = 256 * 1024;
 const SESSION_SNAPSHOT_FLUSH_MS = 750;
+/**
+ * 출력이 흐르는 동안 활동 시각을 다시 쓰는 최소 간격.
+ *
+ * 이 값은 세 곳에서만 쓰인다 — 호스트 카드의 "최근 사용 N분 전" 라벨, 최근 세션 목록 정렬,
+ * persist 할 세션 고르기. 전부 분 단위면 충분하다(홈 호스트 순서는 이름순으로 고정돼 있어
+ * 여기에 영향받지 않는다). 750ms 마다 쓰면 그때마다 세션 레코드가 새 객체가 되어, 이 레코드를
+ * 구독하는 화면들이 그 주기로 리렌더되고 persist 가 스토어 전체를 다시 직렬화해 디스크에 쓴다.
+ */
+const SESSION_ACTIVITY_THROTTLE_MS = 30_000;
 const STARTUP_REFRESH_TIMEOUT_MS = 3_000;
 const MOBILE_TAILNET_START_TIMEOUT_MS = 3 * 60 * 1_000;
 
@@ -3652,10 +3661,22 @@ export const useMobileAppStore = create<MobileAppState>()(
         return null;
       };
 
+      /**
+       * 런타임 스냅샷을 세션 레코드에 게시한다.
+       *
+       * **주기 호출(`periodic: true`)에서는 스냅샷을 쓰지 않는다.** 그 문자열은 출력마다 바뀌어서
+       * 레코드를 750ms 마다 새 객체로 만들고, 그러면 이 레코드를 구독하는 모든 화면이 그 주기로
+       * 리렌더되고 persist 가 스토어 전체를 다시 직렬화해 디스크에 쓴다. 출력이 흐르는 내내다.
+       *
+       * 화면 복원에 필요한 것은 **끝나는 순간의 화면**이고, 그건 세션이 live 를 벗어날 때·백그라운드로
+       * 갈 때 등에서 부르는 직접 호출이 게시한다(runtimeSessionSnapshots 는 그동안 계속 쌓인다).
+       * 살아 있는 세션의 화면은 구독 리플레이가 런타임 값에서 바로 준다.
+       */
       const flushSessionSnapshot = (
         sessionId: string,
         options?: {
           markActivity?: boolean;
+          periodic?: boolean;
         },
       ) => {
         const pendingFlush = runtimeSnapshotFlushTimers.get(sessionId);
@@ -3678,14 +3699,24 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
 
           const patch: Partial<MobileSessionRecord> = {};
-          if (snapshot !== current.lastViewportSnapshot) {
+          if (!options?.periodic && snapshot !== current.lastViewportSnapshot) {
             patch.lastViewportSnapshot = snapshot;
           }
           if (!current.hasReceivedOutput && snapshot.length > 0) {
             patch.hasReceivedOutput = true;
           }
           if (options?.markActivity !== false) {
-            patch.lastEventAt = new Date().toISOString();
+            const now = Date.now();
+            const previous = Date.parse(current.lastEventAt);
+            // 주기 갱신만 스로틀한다. 직접 호출(세션 종료·백그라운드 등)은 그 순간의 시각이
+            // 의미가 있으므로 그대로 쓴다.
+            const staleEnough =
+              !options?.periodic ||
+              Number.isNaN(previous) ||
+              now - previous >= SESSION_ACTIVITY_THROTTLE_MS;
+            if (staleEnough) {
+              patch.lastEventAt = new Date(now).toISOString();
+            }
           }
 
           if (Object.keys(patch).length === 0) {
@@ -3714,7 +3745,7 @@ export const useMobileAppStore = create<MobileAppState>()(
 
         const timer = setTimeout(() => {
           runtimeSnapshotFlushTimers.delete(sessionId);
-          flushSessionSnapshot(sessionId);
+          flushSessionSnapshot(sessionId, { periodic: true });
         }, SESSION_SNAPSHOT_FLUSH_MS);
         runtimeSnapshotFlushTimers.set(sessionId, timer);
       };
@@ -8468,9 +8499,13 @@ export const useMobileAppStore = create<MobileAppState>()(
               : sessionId
                 ? [
                     Uint8Array.from(
+                      // **런타임 값에서 읽는다.** 레코드의 사본은 세션이 끝나는 순간에만
+                      // 게시되므로(주기 게시를 끊었다) 살아 있는 세션에서는 낡아 있다.
                       Buffer.from(
-                        get().sessions.find(item => item.id === sessionId)
-                          ?.lastViewportSnapshot ?? '',
+                        runtimeSessionSnapshots.get(sessionId) ??
+                          get().sessions.find(item => item.id === sessionId)
+                            ?.lastViewportSnapshot ??
+                          '',
                         'utf8',
                       ),
                     ),

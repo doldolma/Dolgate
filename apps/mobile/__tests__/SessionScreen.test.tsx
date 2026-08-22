@@ -855,6 +855,68 @@ describe('SessionScreen', () => {
   });
 
   /**
+   * 트립와이어 — 출력이 흐를 때 세션 레코드가 갱신되는 것만으로 **터미널에 아무 일도
+   * 일어나지 않아야 한다.**
+   *
+   * 이 규칙이 깨진 것을 지금까지 세 번 고쳤다: 터미널 옵션 신원(73e57335), 주기적 fit
+   * (26a6e460), 화면 클리어(이슈 #1). 매번 "그 이펙트의 의존성을 좁힌다" 로 대응했으므로,
+   * 새 이펙트가 같은 실수를 하면 또 재발한다. 개별 증상이 아니라 **경로 전체**를 여기서 막는다.
+   */
+  it('touches nothing in the terminal when only session activity changes', async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+    });
+
+    function focusToken() {
+      const input = tree!.root.findAll(
+        node => (node.type as unknown) === 'TerminalInputView',
+      )[0];
+      return input?.props.focusToken as number | undefined;
+    }
+
+    // 마운트 때 하는 일(클리어·리플레이·fit·포커스)은 정상이다 — 여기서부터 센다.
+    const tokenBefore = focusToken();
+    mockTerminalHandle!.write.mockClear();
+    mockTerminalHandle!.writeMany.mockClear();
+    mockTerminalHandle!.fit.mockClear();
+    mockNativeTerminalInputHandle!.focus.mockClear();
+
+    // 출력이 흐르는 동안 스토어가 하는 일: 스냅샷과 활동 시각만 바뀐다.
+    await act(async () => {
+      useMobileAppStore.setState(state => ({
+        sessions: state.sessions.map(item =>
+          item.id === 'session-1'
+            ? {
+                ...item,
+                lastViewportSnapshot: `${item.lastViewportSnapshot}x`,
+                lastEventAt: new Date(Date.now() + 1_000).toISOString(),
+              }
+            : item,
+        ),
+      }));
+      jest.runOnlyPendingTimers();
+    });
+    // 이펙트는 rAF 안에서 일하는 것도 있다. 그것까지 흘려보낸 뒤에 센다.
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+    });
+
+    expect(mockTerminalHandle!.write).not.toHaveBeenCalled();
+    expect(mockTerminalHandle!.writeMany).not.toHaveBeenCalled();
+    expect(mockTerminalHandle!.fit).not.toHaveBeenCalled();
+    expect(mockNativeTerminalInputHandle!.focus).not.toHaveBeenCalled();
+    expect(focusToken()).toBe(tokenBefore);
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  /**
    * 이슈 #1 의 본체 — 출력이 흐르는 동안 화면 전체가 주기적으로 번쩍였다.
    *
    * 터미널 출력 구독 이펙트가 세션 레코드를 의존성에 두고 있었다. 그 이펙트는 다시 돌 때마다
