@@ -15,7 +15,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "ffi:headers:check": "node ./scripts/check-ffi-headers.cjs",
-    "test": "npm run ffi:headers:check && jest"
+    "test": "npm run ffi:headers:check && jest",
+    "so:alignment:check": "node ./scripts/check-so-alignment.cjs"
   },
   "peerDependencies": {
     "react": ">=18.0.0",

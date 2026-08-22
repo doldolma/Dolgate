@@ -699,3 +699,9 @@ jobs:
       - name: Build the remote desktop Android module (Rust + JNI + Kotlin)
         working-directory: apps/mobile/android
         run: ./gradlew :dolssh_react-native-remote-desktop:assembleDebug -PreactNativeArchitectures=arm64-v8a
+
+      # 최근 ARM64 기기는 16KB 페이지로 동작할 수 있고, 그런 기기에서는 LOAD 세그먼트가 4KB 로
+      # 맞은 .so 를 커널이 매핑하지 못해 dlopen 이 실패한다 — 세션을 여는 순간 죽는다. NDK
+      # 기본값이 4KB 라서 링커 플래그를 빼먹으면 조용히 되돌아가므로 산출물에서 확인한다.
+      - name: Check native library page alignment
+        run: npm run so:alignment:check --workspace @dolssh/react-native-remote-desktop
