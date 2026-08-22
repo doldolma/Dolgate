@@ -584,6 +584,9 @@ export function registerRdpIpcHandlers(
       //
       // 포워드를 여는 주체를 메인에 두는 이유: 세션 수명(끊기·앱 종료)을 여기서 관리하므로
       // 닫기를 빠뜨릴 자리가 적다. 렌더러에 두면 창이 죽을 때 포워드가 남는다.
+      //
+      // dialAddress 는 `호스트:포트` 다. 포워드는 OS 가 고른 임의 포트에 열리므로 포트까지 실어야
+      // 한다 — 코어는 주소에 실린 포트를 쓴다(rdp-core 의 resolve_dial_address).
       const dialAddress = await openSessionForward(sessionId, host);
 
       // 이 창이 이 세션의 주인이다. 창이 닫히면 세션도 끊는다(아래 destroyed 훅).

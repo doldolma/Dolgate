@@ -2191,8 +2191,32 @@ fn await_dial(
     }
 }
 
+/// dial 주소를 붙을 소켓 주소로 바꾼다.
+///
+/// **주소에 포트가 실려 있으면 그 포트가 이긴다.** 로컬 포워드(tailnet·AWS SSM)는 OS 가 고른 임의
+/// 포트에 열리고, 데스크톱은 `127.0.0.1:59390` 처럼 그 포트까지 담아 보낸다. 여기서 호스트의 RDP
+/// 포트를 덧붙이면 `127.0.0.1:59390:3389` 라는 이름을 찾게 되는데, Windows 리졸버는 그것을 거부하고
+/// (WSAHOST_NOT_FOUND, os error 11001) macOS 는 통과시켜서 같은 코드가 한쪽에서만 깨졌다. 덧붙이기가
+/// 성공했더라도 3389 로 붙어 엉뚱한 포트였다.
+///
+/// 포트가 없는 주소(`127.0.0.1`, `::1`, 호스트 이름)는 예전처럼 인자의 포트를 쓴다.
 fn resolve_dial_address(address: &str, port: u16) -> anyhow::Result<core::net::SocketAddr> {
     use std::net::ToSocketAddrs as _;
+
+    // 숫자 주소는 리졸버를 거치지 않는다. 로컬 포워드는 항상 숫자(127.0.0.1·::1)라, 이 두 갈래가
+    // 실제 경로 전부를 덮고 플랫폼 차이가 낄 자리가 없다.
+    //
+    // `str` 의 ToSocketAddrs 로 넘기지 않는 이유: 그 impl 은 마지막 콜론에서 자르므로 `::1` 을
+    // 호스트 `::` + 포트 1 로 읽고, 그 이름을 리졸버에 묻는다(Windows 는 거부한다). 즉 손으로
+    // 자르지 않아도 std 가 대신 잘못 자른다.
+    if let Ok(resolved) = address.parse::<core::net::SocketAddr>() {
+        return Ok(resolved);
+    }
+    if let Ok(ip) = address.parse::<core::net::IpAddr>() {
+        return Ok(core::net::SocketAddr::new(ip, port));
+    }
+
+    // 이름이다. 포트는 인자의 것을 쓴다 — 우리가 만드는 dial 주소에 "이름:포트" 는 없다.
     (address, port)
         .to_socket_addrs()
         .with_context(|| format!("resolve {address}:{port}"))?
@@ -2746,6 +2770,28 @@ mod session_option_tests {
 
         let addr = resolve_dial_address("127.0.0.1", 52341).expect("resolve");
         assert_eq!(addr.port(), 52341);
+        assert!(addr.ip().is_loopback());
+    }
+
+    // 로컬 포워드는 임의 포트에 열린다. 그 포트를 무시하고 호스트의 RDP 포트를 덧붙이면
+    // `127.0.0.1:59390:3389` 라는 이름을 찾게 되고, Windows 에서만 거부당했다(os error 11001).
+    //
+    // 숫자 주소는 리졸버를 거치지 않고 파싱된다 — 그래서 이 판정에는 플랫폼 차이가 없다.
+    #[test]
+    fn a_dial_address_with_a_port_keeps_that_port() {
+        use super::resolve_dial_address;
+
+        let addr = resolve_dial_address("127.0.0.1:59390", 3389).expect("resolve");
+        assert_eq!(addr.port(), 59390);
+        assert!(addr.ip().is_loopback());
+    }
+
+    #[test]
+    fn an_ipv6_dial_address_with_a_port_keeps_that_port() {
+        use super::resolve_dial_address;
+
+        let addr = resolve_dial_address("[::1]:59391", 3389).expect("resolve");
+        assert_eq!(addr.port(), 59391);
         assert!(addr.ip().is_loopback());
     }
 
