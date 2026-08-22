@@ -3337,7 +3337,8 @@ export class CoreManager {
   }
 
   async stopSsmTunnel(ruleId: string): Promise<void> {
-    if (!this.process) {
+    // 종료 중이면 코어가 이미 이 터널을 접었다. 여기서 요청을 보내려 하면 닫힌 stdin 에 쓴다.
+    if (!this.writableCoreStdin()) {
       return;
     }
     await this.requestResponse(
@@ -5523,18 +5524,37 @@ export class CoreManager {
     };
   }
 
+  /**
+   * 지금 코어에 프레임을 보낼 수 있는지.
+   *
+   * `this.process` 만 보면 안 된다 — 종료는 stdin 을 먼저 닫고 exit 이벤트까지 기다리므로(shutdown
+   * 참고) 그 사이에는 프로세스 참조가 남아 있는데 쓰기는 실패한다. 그 창에서 들어온 정리 요청이
+   * ERR_STREAM_WRITE_AFTER_END 로 터졌다 — RDP 세션을 켠 채 앱을 끄면 세션 종료 이벤트가 SSM 터널
+   * 정리를 부르고, 그 오류가 메인 프로세스의 예외 창으로 올라왔다(실기기).
+   */
+  private writableCoreStdin(): NodeJS.WritableStream | null {
+    const stdin = this.process?.stdin;
+    if (!stdin || !stdin.writable || stdin.destroyed) {
+      return null;
+    }
+    return stdin;
+  }
+
   private sendControl<TPayload>(request: CoreRequest<TPayload>): void {
-    if (!this.process) {
+    const stdin = this.writableCoreStdin();
+    if (!stdin) {
+      // 문구를 바꾸지 않는다 — 정리 경로들이 이 오류를 "코어가 없다" 로 읽고 조용히 넘긴다.
       throw new Error("SSH core process is not running");
     }
-    this.process.stdin.write(encodeControlFrame(request));
+    stdin.write(encodeControlFrame(request));
   }
 
   private sendStream(metadata: CoreStreamFrame, payload: Uint8Array): void {
-    if (!this.process) {
+    const stdin = this.writableCoreStdin();
+    if (!stdin) {
       throw new Error("SSH core process is not running");
     }
-    this.process.stdin.write(encodeStreamFrame(metadata, payload));
+    stdin.write(encodeStreamFrame(metadata, payload));
   }
 
   private broadcastTerminalEvent(

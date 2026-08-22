@@ -30,14 +30,26 @@ function createFakeChildProcess() {
   stderr.setEncoding = vi.fn();
 
   const child = new EventEmitter() as EventEmitter & {
-    stdin: { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> };
+    stdin: {
+      writable: boolean;
+      destroyed: boolean;
+      write: ReturnType<typeof vi.fn>;
+      end: ReturnType<typeof vi.fn>;
+    };
     stdout: typeof stdout;
     stderr: typeof stderr;
     kill: ReturnType<typeof vi.fn>;
     exitCode: number | null;
     killed: boolean;
   };
-  child.stdin = { write: vi.fn(() => true), end: vi.fn() };
+  child.stdin = {
+    writable: true,
+    destroyed: false,
+    write: vi.fn(() => true),
+    end: vi.fn(() => {
+      child.stdin.writable = false;
+    }),
+  };
   child.stdout = stdout;
   child.stderr = stderr;
   child.kill = vi.fn(() => true);

@@ -82,7 +82,12 @@ function createFakeChildProcess() {
 
   const writes: Buffer[] = [];
   const child = new EventEmitter() as EventEmitter & {
-    stdin: { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> };
+    stdin: {
+      writable: boolean;
+      destroyed: boolean;
+      write: ReturnType<typeof vi.fn>;
+      end: ReturnType<typeof vi.fn>;
+    };
     stdout: typeof stdout;
     stderr: typeof stderr;
     kill: ReturnType<typeof vi.fn>;
@@ -90,12 +95,25 @@ function createFakeChildProcess() {
     killed: boolean;
   };
 
+  // 실제 stdin 과 같은 성질을 준다 — 종료는 stdin 을 먼저 닫고, 코어 매니저는 그것을 보고
+  // 프레임 보내기를 멈춘다(writableCoreStdin).
   child.stdin = {
+    writable: true,
+    destroyed: false,
     write: vi.fn((chunk: Uint8Array) => {
+      // 닫힌 뒤의 쓰기는 실제 스트림처럼 던진다. 조용히 받아 주면 "종료 중에는 안 보낸다" 를
+      // 테스트가 통과시켜 버린다(실기기에서 터진 그 오류를 못 잡는다).
+      if (!child.stdin.writable) {
+        const error = new Error("write after end") as Error & { code?: string };
+        error.code = "ERR_STREAM_WRITE_AFTER_END";
+        throw error;
+      }
       writes.push(Buffer.from(chunk));
       return true;
     }),
-    end: vi.fn(),
+    end: vi.fn(() => {
+      child.stdin.writable = false;
+    }),
   };
   child.stdout = stdout;
   child.stderr = stderr;
@@ -1326,6 +1344,30 @@ describe("CoreManager AWS SSM sessions", () => {
     });
 
     await stopPromise;
+  });
+
+  // 앱을 끄는 동안 도착한 정리 요청은 조용히 끝나야 한다.
+  //
+  // 종료는 stdin 을 먼저 닫고 exit 이벤트까지 기다린다. 그 사이에도 this.process 는 남아 있어서,
+  // 예전에는 닫힌 stdin 에 프레임을 써서 ERR_STREAM_WRITE_AFTER_END 가 메인 프로세스의 예외 창으로
+  // 올라왔다 — RDP 세션을 켠 채 앱을 끄면 세션 종료 이벤트가 SSM 터널 정리를 부른다. 창이 좁아서
+  // macOS 에서는 잘 드러나지 않고 Windows 에서만 매번 터졌다(실기기).
+  it("종료 중에 들어온 SSM 터널 정리는 닫힌 stdin 에 쓰지 않는다", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    await manager.start();
+
+    // 실기기의 그 창을 그대로 만든다: stdin 은 닫혔고 프로세스는 아직 살아 있다.
+    //
+     // shutdown() 을 태우지 않는 이유는 이 하네스의 kill 이 exit 을 곧바로 알려서 프로세스 참조가
+    // 즉시 비기 때문이다 — Windows 에서는 exit 이 다음 tick 에 오고, 그 사이가 문제의 창이었다.
+    fakeProcess.child.stdin.end();
+    const writesBefore = fakeProcess.child.stdin.write.mock.calls.length;
+
+    await expect(manager.stopSsmTunnel("rdp:sess-1")).resolves.toBeUndefined();
+    expect(fakeProcess.child.stdin.write.mock.calls.length).toBe(writesBefore);
   });
 
   it("runs endpoint-scoped SSM tunnels without registering port-forward runtimes", async () => {
