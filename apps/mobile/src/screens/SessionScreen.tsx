@@ -821,14 +821,39 @@ export function SessionScreen(): React.JSX.Element {
     return () => clearTimeout(timer);
   }, [terminalReady, renderedTerminalSessionId, terminalRetryNonce]);
 
+  /**
+   * 다음 프레임에 할 일을 예약하고, 화면이 사라지면 취소한다.
+   *
+   * 언마운트 직후에 깨어난 프레임은 없는 뷰에 포커스·fit 을 요청하며 state 를 건드린다.
+   * 테스트에서는 정리된 Jest 환경을 건드려 "environment has been torn down" 으로 잡을
+   * 실패시켰고(릴리스 워크플로에서 실제로 그랬다), 실제 기기에서도 할 일이 없는 호출이다.
+   */
+  const pendingFramesRef = useRef<Set<number>>(new Set());
+  const scheduleFrame = useCallback((callback: () => void) => {
+    const id = requestAnimationFrame(() => {
+      pendingFramesRef.current.delete(id);
+      callback();
+    });
+    pendingFramesRef.current.add(id);
+  }, []);
+  useEffect(
+    () => () => {
+      for (const id of pendingFramesRef.current) {
+        cancelAnimationFrame(id);
+      }
+      pendingFramesRef.current.clear();
+    },
+    [],
+  );
+
   const focusTerminal = useCallback(() => {
     if (Platform.OS === 'android') {
       return;
     }
-    requestAnimationFrame(() => {
+    scheduleFrame(() => {
       terminalRef.current?.focus();
     });
-  }, []);
+  }, [scheduleFrame]);
 
   const focusRequestedTerminalInput = useCallback(
     (force = false) => {
@@ -841,7 +866,7 @@ export function SessionScreen(): React.JSX.Element {
         return;
       }
 
-      requestAnimationFrame(() => {
+      scheduleFrame(() => {
         if (isAndroid && !force) {
           return;
         }
@@ -851,7 +876,13 @@ export function SessionScreen(): React.JSX.Element {
         nativeTerminalInputRef.current?.focus();
       });
     },
-    [focusTerminal, inputFocused, isAndroid, useTerminalInputOverlay],
+    [
+      focusTerminal,
+      inputFocused,
+      isAndroid,
+      scheduleFrame,
+      useTerminalInputOverlay,
+    ],
   );
 
   // **레코드가 아니라 id 를 본다.** 레코드를 의존성에 두면 스냅샷 플러시 주기마다 포커스를
@@ -891,7 +922,7 @@ export function SessionScreen(): React.JSX.Element {
       return;
     }
 
-    requestAnimationFrame(() => {
+    scheduleFrame(() => {
       terminalRef.current?.fit();
       if (isAndroid) {
         focusRequestedTerminalInput(true);
@@ -901,6 +932,7 @@ export function SessionScreen(): React.JSX.Element {
     focusRequestedTerminalInput,
     isAndroid,
     renderedTerminalSessionId,
+    scheduleFrame,
     terminalReady,
     terminalVisible,
   ]);
@@ -1015,18 +1047,23 @@ export function SessionScreen(): React.JSX.Element {
     focusRequestedTerminalInput(true);
   }, [activeSessionId, activeSessionStatus, focusRequestedTerminalInput]);
 
+  // 레코드 객체가 아니라 **필요한 필드만** 읽는다 — 객체를 읽으면 그것이 의존성이 되어 출력이
+  // 흐를 때마다 이펙트가 다시 돌고, 그 결과가 화면 클리어 반복이었다(4925f7fe).
+  const renderedTerminalSnapshot =
+    renderedTerminalSession?.lastViewportSnapshot;
+
   useEffect(() => {
     if (
       !terminalReady ||
-      !renderedTerminalSession ||
-      renderedTerminalSession.status === 'connected'
+      !renderedTerminalSessionId ||
+      renderedTerminalSessionStatus === 'connected'
     ) {
       return;
     }
 
     if (
       restoredConnectedSnapshotSessionIdRef.current ===
-      renderedTerminalSession.id
+      renderedTerminalSessionId
     ) {
       restoredConnectedSnapshotSessionIdRef.current = null;
     }
@@ -1036,29 +1073,26 @@ export function SessionScreen(): React.JSX.Element {
       return;
     }
 
-    restoreTerminalSnapshot(
-      terminal,
-      renderedTerminalSession.lastViewportSnapshot,
-    );
+    restoreTerminalSnapshot(terminal, renderedTerminalSnapshot);
   }, [
-    renderedTerminalSession?.id,
-    renderedTerminalSession?.lastViewportSnapshot,
-    renderedTerminalSession?.status,
+    renderedTerminalSessionId,
+    renderedTerminalSnapshot,
+    renderedTerminalSessionStatus,
     terminalReady,
   ]);
 
   useEffect(() => {
     if (
       !terminalReady ||
-      !renderedTerminalSession ||
-      renderedTerminalSession.status !== 'connected'
+      !renderedTerminalSessionId ||
+      renderedTerminalSessionStatus !== 'connected'
     ) {
       return;
     }
 
     if (
       restoredConnectedSnapshotSessionIdRef.current ===
-      renderedTerminalSession.id
+      renderedTerminalSessionId
     ) {
       return;
     }
@@ -1068,15 +1102,12 @@ export function SessionScreen(): React.JSX.Element {
       return;
     }
 
-    restoredConnectedSnapshotSessionIdRef.current = renderedTerminalSession.id;
-    restoreTerminalSnapshot(
-      terminal,
-      renderedTerminalSession.lastViewportSnapshot,
-    );
+    restoredConnectedSnapshotSessionIdRef.current = renderedTerminalSessionId;
+    restoreTerminalSnapshot(terminal, renderedTerminalSnapshot);
   }, [
-    renderedTerminalSession?.id,
-    renderedTerminalSession?.lastViewportSnapshot,
-    renderedTerminalSession?.status,
+    renderedTerminalSessionId,
+    renderedTerminalSnapshot,
+    renderedTerminalSessionStatus,
     terminalReady,
   ]);
 

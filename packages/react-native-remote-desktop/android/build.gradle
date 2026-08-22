@@ -43,9 +43,19 @@ def requestedAbis = (project.findProperty('reactNativeArchitectures') ?: '')
     .split(',')
     .collect { it.trim() }
     .findAll { !it.isEmpty() }
-def rustTargets = requestedAbis.isEmpty()
+/**
+ * **Rust 와 CMake 가 같은 ABI 집합을 봐야 한다.** CMake 는 Rust cdylib 을 IMPORTED 로 링크하므로,
+ * abiFilters 에 있는데 Rust 를 안 만든 ABI 가 있으면 ninja 가 "그 .so 가 없다" 로 죽는다. CI 가
+ * 실제로 그렇게 깨졌다(로컬에는 예전 빌드의 x86_64 산출물이 남아 있어 통과했다).
+ *
+ * 요청 목록과의 교집합이 비면(지원하지 않는 ABI 만 요청된 경우) 지원하는 전체를 쓴다 —
+ * 빈 집합을 abiFilters 에 주면 AGP 가 "필터 없음" 으로 읽어 모든 ABI 를 빌드해 같은 불일치가
+ * 생긴다.
+ */
+def selectedAbis = requestedAbis.isEmpty()
     ? supportedRustTargets
     : supportedRustTargets.findAll { abi, triple -> requestedAbis.contains(abi) }
+def rustTargets = selectedAbis.isEmpty() ? supportedRustTargets : selectedAbis
 def rustChannel = '1.97.1'
 def rustCores = [
     [label: 'vnc-core', path: file("${projectDir}/../../../../services/vnc-core").canonicalPath,
@@ -64,7 +74,8 @@ android {
         targetSdk safeExtGet('targetSdkVersion', 36)
 
         ndk {
-            abiFilters 'arm64-v8a', 'x86_64'
+            // rustTargets 와 같은 집합이어야 한다(위 주석 참고).
+            abiFilters rustTargets.keySet().toArray(new String[0])
         }
 
         externalNativeBuild {

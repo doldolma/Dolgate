@@ -141,12 +141,29 @@ export function RemoteDesktopKeyboardInput({
    * blur 에서는 되찾지 않는다 — focus↔blur 가 서로를 불러 IME 세션이 끊겼고 입력이 하나도
    * 들어오지 않았다.
    */
+  const focusFrameRef = useRef<number | null>(null);
   const requestFocus = useCallback(() => {
-    requestAnimationFrame(() => {
+    if (focusFrameRef.current !== null) {
+      cancelAnimationFrame(focusFrameRef.current);
+    }
+    focusFrameRef.current = requestAnimationFrame(() => {
+      focusFrameRef.current = null;
       setFocusToken(value => value + 1);
       nativeInputRef.current?.focus();
     });
   }, []);
+
+  // 예약해 둔 프레임은 사라질 때 취소한다. 언마운트 직후에 깨어나면 없는 뷰에 포커스를
+  // 요청하며 state 를 건드린다 — 테스트에서는 정리된 환경을 건드려 잡을 실패시켰다.
+  useEffect(
+    () => () => {
+      if (focusFrameRef.current !== null) {
+        cancelAnimationFrame(focusFrameRef.current);
+        focusFrameRef.current = null;
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!visible) return;
