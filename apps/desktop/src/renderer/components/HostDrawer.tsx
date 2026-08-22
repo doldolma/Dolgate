@@ -100,7 +100,8 @@ interface HostDrawerProps {
   onSubmit: HostFormProps['onSubmit'];
   onConnect?: HostFormProps['onConnect'];
   onEditExistingSecret?: (secretRef: string) => void;
-  onOpenTailnets?: () => void;
+  /** tailnet 이 새로 추가됐을 때 — 상위가 목록을 다시 읽는다. */
+  onTailnetAdded?: () => void | Promise<void>;
 }
 
 /**
@@ -134,7 +135,7 @@ export const HostDrawer = forwardRef<HostDrawerHandle, HostDrawerProps>(function
   onSubmit,
   onConnect,
   onEditExistingSecret,
-  onOpenTailnets
+  onTailnetAdded
 }: HostDrawerProps, ref) {
   const { t: translate } = useTranslation();
   const drawerRef = useRef<HTMLElement | null>(null);
@@ -345,7 +346,7 @@ export const HostDrawer = forwardRef<HostDrawerHandle, HostDrawerProps>(function
           onSubmit={onSubmit}
           onConnect={onConnect}
           onEditExistingSecret={onEditExistingSecret}
-          onOpenTailnets={onOpenTailnets}
+          onTailnetAdded={onTailnetAdded}
           onActionStateChange={setFormActionState}
           onLabelChange={handleFormLabelChange}
         />

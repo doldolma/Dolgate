@@ -15,6 +15,7 @@ import { ArrowDown, ArrowUp, X } from '../ui/icons';
 import { useTranslation } from 'react-i18next';
 import { t } from "../i18n";
 import { getAwsEc2HostSshMetadataStatusLabel } from '../../common/aws-diagnostics';
+import { TailnetAddDialog } from './tailnet/TailnetAddDialog';
 
 function agentStatusColor(
   status: SshAgentProbeResult['status'] | undefined,
@@ -393,7 +394,13 @@ export interface HostFormProps {
   onConnect?: (hostId: string) => Promise<void>;
   onEditExistingSecret?: (secretRef: string) => void;
   /** TAILNET 옆 Manage. 설정의 네트워크 섹션으로 보낸다. */
-  onOpenTailnets?: () => void;
+  /**
+   * tailnet 이 새로 추가됐을 때. 상위가 자기 목록을 다시 읽게 하는 용도다.
+   *
+   * 없으면 "추가" 버튼을 그리지 않는다 — 추가해도 목록이 갱신되지 않는 화면에서는
+   * 버튼이 있어도 반쪽이다.
+   */
+  onTailnetAdded?: () => void | Promise<void>;
   onActionStateChange?: (state: HostFormActionState) => void;
   /** draft.label 이 바뀔 때마다 호출 — 드로어 헤더의 편집 가능한 타이틀과 동기화한다. */
   onLabelChange?: (label: string) => void;
@@ -691,7 +698,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   onSubmit,
   onConnect,
   onEditExistingSecret,
-  onOpenTailnets,
+  onTailnetAdded,
   onActionStateChange,
   onLabelChange
 }: HostFormProps, ref) {
@@ -740,11 +747,22 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const isEditMode = Boolean(host);
 
   const sshDraft = isSshHostDraft(draft) ? draft : null;
+  const [tailnetDialogOpen, setTailnetDialogOpen] = useState(false);
+  /**
+   * 팝업에서 방금 만든 tailnet.
+   *
+   * 상위가 목록을 다시 읽어 내려주기를 기다리면 그 사이 한 프레임 동안 선택된 id 가 목록에
+   * 없어서 "이 기기에 없는 tailnet" 경고가 번쩍인다. 받은 값을 여기 담아 바로 그린다.
+   */
+  const [addedTailnets, setAddedTailnets] = useState<Array<{ id: string; label: string }>>([]);
+  const tailnetChoices = useMemo(() => {
+    const extra = addedTailnets.filter(
+      (added) => !tailnetOptions.some((option) => option.id === added.id),
+    );
+    return extra.length > 0 ? [...tailnetOptions, ...extra] : tailnetOptions;
+  }, [addedTailnets, tailnetOptions]);
+
   const selectedTailnetId = sshDraft?.tailnetId?.trim() ?? '';
-  const missingTailnetId =
-    selectedTailnetId && !tailnetOptions.some((option) => option.id === selectedTailnetId)
-      ? selectedTailnetId
-      : '';
   // SSH Agent 인증 선택 시 로컬 agent 상태를 조회해 설정 시점에 표시(설정 실수를 미리 잡음).
   const [agentProbe, setAgentProbe] = useState<SshAgentProbeResult | null>(null);
   const isAgentAuthDraft = sshDraft?.authType === 'agent';
@@ -1583,7 +1601,10 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           ? translate('hostForm.save.error')
           : null;
   /**
-   * tailnet 선택 칸. SSH·RDP 가 같은 필드를 쓰므로 한 곳에서 그린다.
+   * tailnet 선택 칸. SSH·RDP·VNC 세 종류가 모두 이것을 쓴다.
+   *
+   * 예전에는 SSH 만 자기 인라인 복사본을 들고 있었다. 그래서 이 칸을 고칠 때 한쪽만 고치면
+   * 종류에 따라 다르게 보였다 — 실제로 그렇게 갈라져 있었다. 한 곳으로 모은다.
    *
    * 등록된 tailnet 이 없어도 칸은 보여 준다 — 숨기면 이 기능이 있다는 것 자체를 알 수 없고,
    * 기기마다 따로 등록하는 구조라 "다른 PC 에서는 없다"로 보인다.
@@ -1603,33 +1624,34 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     // 저장된 tailnet 이 이 기기에 없을 수 있다(다른 기기에서 등록). 지워진 것처럼 보이지 않게
     // 항목을 만들어 그대로 보여 주고 경고한다.
     const missing =
-      selected && !tailnetOptions.some((option) => option.id === selected) ? selected : '';
+      selected && !tailnetChoices.some((option) => option.id === selected) ? selected : '';
     return (
       <div className={fieldClassName}>
         <div className="flex items-center justify-between gap-3">
           <span className={fieldLabelClassName}>{translate('hostForm.field.tailnet')}</span>
-          {/* 자격증명 쪽과 달리 목록이 비어도 보여 준다 — 등록된 tailnet 이 없을 때가
-              오히려 여기로 갈 이유가 가장 큰 순간이다. */}
-          {onOpenTailnets ? (
+          {/* 목록이 비어도 보여 준다 — 등록된 tailnet 이 없을 때가 여기를 누를 이유가 가장
+              큰 순간이다. 설정으로 보내지 않고 팝업에서 바로 만든다: 호스트를 고치다 말고
+              화면을 옮기면 하던 편집이 어정쩡해진다. 이름 변경·삭제는 설정에 남는다. */}
+          {onTailnetAdded ? (
             <button
               type="button"
               className="border-0 bg-transparent p-0 text-[0.9rem] font-semibold text-[var(--accent-strong)]"
-              onClick={onOpenTailnets}
+              onClick={() => setTailnetDialogOpen(true)}
             >
-              {translate('hostForm.action.manage')}
+              {translate('hostForm.action.add')}
             </button>
           ) : null}
         </div>
         <SelectField
           value={selected}
-          disabled={Boolean(lockedReason) || (tailnetOptions.length === 0 && !missing)}
+          disabled={Boolean(lockedReason) || (tailnetChoices.length === 0 && !missing)}
           onChange={(event) => onChange(event.target.value || null)}
         >
           <option value="">{translate('hostForm.tailnet.none')}</option>
           {missing ? (
             <option value={missing}>{translate('hostForm.tailnet.missingOption')}</option>
           ) : null}
-          {tailnetOptions.map((option) => (
+          {tailnetChoices.map((option) => (
             <option key={option.id} value={option.id}>
               {option.label}
             </option>
@@ -1643,7 +1665,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           <span className="text-[0.82rem] text-[var(--danger)]">
             {translate('hostForm.tailnet.missing')}
           </span>
-        ) : tailnetOptions.length === 0 ? (
+        ) : tailnetChoices.length === 0 ? (
           <span className="text-[0.82rem] text-[var(--text-soft)]">
             {translate('hostForm.tailnet.empty')}
           </span>
@@ -1651,6 +1673,29 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       </div>
     );
   };
+
+  /** 종류마다 tailnetId 를 담는 자리가 달라, 지금 draft 종류에 맞춰 넣는다. */
+  const applyTailnetSelection = (tailnetId: string) => {
+    setDraft((current) => {
+      if (!current || !('tailnetId' in current)) {
+        return current;
+      }
+      return { ...current, tailnetId } as typeof current;
+    });
+  };
+
+  const tailnetAddDialog = tailnetDialogOpen ? (
+    <TailnetAddDialog
+      onClose={() => setTailnetDialogOpen(false)}
+      onAdded={async (tailnet) => {
+        // 먼저 이 폼이 바로 그릴 수 있게 담고 고른다. 상위 목록 갱신은 그다음이다 —
+        // 순서가 반대면 갱신이 도착하기 전 한 프레임 동안 "없는 tailnet" 경고가 뜬다.
+        setAddedTailnets((current) => [...current, tailnet]);
+        applyTailnetSelection(tailnet.id);
+        await onTailnetAdded?.();
+      }}
+    />
+  ) : null;
 
   const metadataFields = (
     <>
@@ -2435,55 +2480,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             {/* 등록된 tailnet 이 없어도 칸은 보여 준다. 숨기면 이 기능이 있다는 것 자체를
                 알 수 없고, 기기마다 따로 등록해야 하는 구조라 "다른 PC 에서는 없다"로
                 보이기 때문이다. 대신 어디서 등록하는지 알려 준다. */}
-            <div className={fieldClassName}>
-              <div className="flex items-center justify-between gap-3">
-                <span className={fieldLabelClassName}>{translate('hostForm.field.tailnet')}</span>
-                {/* 자격증명 쪽과 달리 목록이 비어도 보여 준다 — 등록된 tailnet 이 없을 때가
-                    오히려 여기로 갈 이유가 가장 큰 순간이다. */}
-                {onOpenTailnets ? (
-                  <button
-                    type="button"
-                    className="border-0 bg-transparent p-0 text-[0.9rem] font-semibold text-[var(--accent-strong)]"
-                    onClick={onOpenTailnets}
-                  >
-                    {translate('hostForm.action.manage')}
-                  </button>
-                ) : null}
-              </div>
-              <SelectField
-                value={selectedTailnetId}
-                disabled={tailnetOptions.length === 0 && !missingTailnetId}
-                onChange={(event) =>
-                  setDraft({
-                    ...sshDraft,
-                    tailnetId: event.target.value || null,
-                  })
-                }
-              >
-                <option value="">{translate('hostForm.tailnet.none')}</option>
-                {missingTailnetId ? (
-                  <option value={missingTailnetId}>
-                    {translate('hostForm.tailnet.missingOption')}
-                  </option>
-                ) : null}
-                {tailnetOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </SelectField>
-              {/* 고를 것이 있으면 설명을 붙이지 않는다. 비어 있을 때만 안내가 필요하다 —
-                  tailnet 은 기기마다 따로 등록해야 해서 "다른 PC 에는 있는데" 로 헷갈린다. */}
-              {missingTailnetId ? (
-                <span className="text-[0.82rem] text-[var(--danger)]">
-                  {translate('hostForm.tailnet.missing')}
-                </span>
-              ) : tailnetOptions.length === 0 ? (
-                <span className="text-[0.82rem] text-[var(--text-soft)]">
-                  {translate('hostForm.tailnet.empty')}
-                </span>
-              ) : null}
-            </div>
+            {renderTailnetField(sshDraft.tailnetId, (tailnetId) =>
+              setDraft({ ...sshDraft, tailnetId }),
+            )}
 
             <div className={fieldClassName}>
               <span className={fieldLabelClassName}>{translate('hostForm.field.jumpHosts')}</span>
@@ -3346,6 +3345,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       ) : null}
 
     </form>
+    {/* 폼 바깥에 둔다 — form 안에 두면 팝업 안의 버튼이 이 폼의 submit 을 건드린다. */}
+    {tailnetAddDialog}
     </>
   );
 });

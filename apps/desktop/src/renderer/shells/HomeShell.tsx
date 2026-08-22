@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listTailnets } from '../services/desktop/tailnet';
 import {
   buildGroupOptions,
@@ -182,30 +182,40 @@ export function HomeShell({
     }
     return names;
   }, [homeViewModel.hosts, tailnetOptions]);
+  // 드로어가 열릴 때, 그리고 폼 안의 팝업에서 tailnet 을 추가한 직후에 다시 읽는다.
+  //
+  // 마운트에 한 번만 읽으면 안 되는 이유는 아래 useEffect 주석에 있고, **드로어 열림에만
+  // 걸어도 부족하다** — 팝업은 드로어가 이미 열린 상태에서 뜨므로 그 조건이 다시 참이 되지
+  // 않는다. 추가한 tailnet 이 목록에 없으면 폼이 "이 기기에 없는 tailnet" 으로 표시한다.
+  const refreshTailnetOptions = useCallback(async (isCancelled?: () => boolean) => {
+    // Promise 로 감싸는 이유: 브리지가 없으면 listTailnets 가 동기적으로 던지고, 그러면
+    // .catch 가 잡지 못해 셸 전체가 죽는다. tailnet 을 못 읽는 것이 호스트 편집을 막을
+    // 이유는 없다.
+    await Promise.resolve()
+      .then(listTailnets)
+      .then((records) => {
+        if (isCancelled?.()) {
+          return;
+        }
+        setTailnetOptions(
+          records.map((record) => ({ id: record.id, label: record.label })),
+        );
+      })
+      .catch(() => {
+        // tailnet 을 못 읽어도 호스트 편집 자체는 되어야 한다.
+      });
+  }, []);
+
   useEffect(() => {
     if (!isDrawerOpen) {
       return;
     }
     let cancelled = false;
-    // Promise 로 감싸는 이유: 브리지가 없으면 listTailnets 가 동기적으로 던지고, 그러면
-    // .catch 가 잡지 못해 셸 전체가 죽는다. tailnet 을 못 읽는 것이 호스트 편집을 막을
-    // 이유는 없다.
-    void Promise.resolve()
-      .then(listTailnets)
-      .then((records) => {
-        if (!cancelled) {
-          setTailnetOptions(
-            records.map((record) => ({ id: record.id, label: record.label })),
-          );
-        }
-      })
-      .catch(() => {
-        // tailnet 을 못 읽어도 호스트 편집 자체는 되어야 한다.
-      });
+    void refreshTailnetOptions(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [isDrawerOpen]);
+  }, [isDrawerOpen, refreshTailnetOptions]);
   const highlightedHostId = editingHostId ?? selectedHostId;
   const sectionTitle =
     homeViewModel.homeSection === 'portForwarding'
@@ -493,7 +503,7 @@ export function HomeShell({
           : undefined
       }
       onEditExistingSecret={openHostSecretEditor}
-      onOpenTailnets={() => settingsViewModel.openSettingsSection('tailnet')}
+      onTailnetAdded={() => refreshTailnetOptions()}
     />
   ) : null;
 

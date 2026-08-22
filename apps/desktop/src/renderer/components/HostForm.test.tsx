@@ -285,10 +285,11 @@ describe('HostForm', () => {
     );
   });
 
-  // 자격증명 옆 Manage 와 같은 자리다. 등록된 tailnet 이 없을 때가 오히려 여기로 갈 이유가
-  // 가장 큰 순간이므로, 목록이 비어도 보여야 한다.
-  it('offers a tailnet manage link even when nothing is registered', () => {
-    const onOpenTailnets = vi.fn();
+  // 등록된 tailnet 이 없을 때가 오히려 여기를 누를 이유가 가장 큰 순간이므로, 목록이 비어도
+  // 버튼이 보여야 한다. 설정 화면으로 보내지 않고 그 자리에서 팝업으로 만든다 — 호스트를
+  // 고치다 말고 화면을 옮기면 하던 편집이 어정쩡해진다.
+  it('opens the tailnet add dialog even when nothing is registered', () => {
+    const onTailnetAdded = vi.fn();
 
     const { unmount } = render(
       <HostForm
@@ -296,14 +297,15 @@ describe('HostForm', () => {
         keychainEntries={keychainEntries}
         groupOptions={groupOptions}
         tailnetOptions={[]}
-        onOpenTailnets={onOpenTailnets}
+        onTailnetAdded={onTailnetAdded}
         onSubmit={vi.fn()}
       />,
     );
 
-    const manageButtons = screen.getAllByRole('button', { name: '관리' });
-    fireEvent.click(manageButtons[manageButtons.length - 1] as HTMLElement);
-    expect(onOpenTailnets).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    // 아직 만들지 않았으므로 상위 목록 갱신은 부르지 않는다.
+    expect(onTailnetAdded).not.toHaveBeenCalled();
     unmount();
   });
 

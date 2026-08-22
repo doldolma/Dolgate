@@ -1499,9 +1499,9 @@
       "error": "Couldn't save changes"
     },
     "action": {
-      "manage": "Manage",
       "refresh": "Refresh",
-      "import": "Import"
+      "import": "Import",
+      "add": "Add"
     },
     "placeholder": {
       "keepBlank": "Leave blank to keep"
@@ -3442,7 +3442,8 @@
       "headscale": "The node key was expired. Removing the entry itself is up to the control plane, though — unless the node was registered as ephemeral it stays in the device list, marked expired. Delete it on the server if it lingers (headscale nodes delete)."
     },
     "localNodeName": "This device registers as",
-    "unknownError": "Something went wrong."
+    "unknownError": "Something went wrong.",
+    "addTitle": "Add a tailnet"
   },
   "tailnetIpc": {
     "nodeInUse": "Something is still connected through this tailnet. Close those sessions, SFTP tabs, or port forwards first.",
