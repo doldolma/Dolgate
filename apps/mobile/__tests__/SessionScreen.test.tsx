@@ -144,6 +144,9 @@ jest.mock('react-native-safe-area-context', () => {
   };
 });
 
+// 화면이 꺼지지 않게 잡는 호출. 살아 있는 세션을 보고 있을 때만 켜져야 한다.
+const mockSetKeepAwake = jest.fn(async (_enabled: boolean) => undefined);
+
 jest.mock('@dolssh/react-native-remote-desktop', () => {
   const mockReact = require('react') as typeof React;
   return {
@@ -152,6 +155,7 @@ jest.mock('@dolssh/react-native-remote-desktop', () => {
     nativeSetActive: jest.fn(async () => undefined),
     setOrientationUnlocked: (unlocked: boolean) =>
       mockSetOrientationUnlocked(unlocked),
+    setKeepAwake: (enabled: boolean) => mockSetKeepAwake(enabled),
     nativePointerMove: jest.fn(),
     nativePointerButton: jest.fn(),
     nativeScroll: jest.fn(),
@@ -848,6 +852,62 @@ describe('SessionScreen', () => {
     });
 
     expect(mockTerminalHandle!.fit).not.toHaveBeenCalled();
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  /**
+   * 살아 있는 세션을 보고 있는 동안에는 화면이 꺼지지 않아야 한다.
+   *
+   * 명령이 끝나기를 기다리며 터미널을 보는 것이 이 화면의 주 용도인데 그때 화면이 꺼지면
+   * 진행을 놓친다. 반대로 끊긴 탭에서는 잡지 않는다 — 볼 것이 늘지 않고 배터리만 쓴다.
+   */
+  it('keeps the screen awake while a live session is visible', async () => {
+    mockSetKeepAwake.mockClear();
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+
+    expect(mockSetKeepAwake).toHaveBeenLastCalledWith(true);
+
+    // 세션이 모두 끊기면 놓아 준다.
+    mockSetKeepAwake.mockClear();
+    await act(async () => {
+      useMobileAppStore.setState(state => ({
+        sessions: state.sessions.map(item => ({
+          ...item,
+          status: 'closed' as const,
+        })),
+      }));
+    });
+
+    expect(mockSetKeepAwake).toHaveBeenLastCalledWith(false);
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  // 기기의 자동 꺼짐 설정을 앱이 덮는 동작이라 끌 수 있어야 한다. 끈 사용자에게는 살아 있는
+  // 세션을 보고 있어도 잡지 않는다.
+  it('does not keep the screen awake when the setting is off', async () => {
+    act(() => {
+      useMobileAppStore.setState(state => ({
+        settings: { ...state.settings, keepScreenAwake: false },
+      }));
+    });
+    mockSetKeepAwake.mockClear();
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+
+    expect(mockSetKeepAwake).toHaveBeenLastCalledWith(false);
 
     await act(async () => {
       tree!.unmount();

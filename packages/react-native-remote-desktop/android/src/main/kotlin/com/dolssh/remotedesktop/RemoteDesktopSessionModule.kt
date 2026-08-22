@@ -244,6 +244,40 @@ class RemoteDesktopSessionModule(
         promise.resolve(null)
     }
 
+    /**
+     * 화면이 저절로 꺼지지 않게 잡아 둔다.
+     *
+     * 창 플래그를 쓴다 — `PowerManager.WakeLock` 과 달리 권한이 필요 없고, 이 창이 앞에 있는
+     * 동안에만 효력이 있다. 앱이 백그라운드로 가면 저절로 풀리므로 기기를 영구히 깨워 둘
+     * 위험이 없다.
+     */
+    @ReactMethod
+    fun setKeepAwake(enabled: Boolean, promise: Promise) {
+        reactContext.runOnUiQueueThread {
+            val activity = reactContext.currentActivity
+            if (activity == null || activity.isFinishing || activity.isDestroyed) {
+                // 화면이 이미 내려갔으면 잡아 둘 대상도 없다 — 실패가 아니다.
+                promise.resolve(null)
+                return@runOnUiQueueThread
+            }
+
+            try {
+                if (enabled) {
+                    activity.window.addFlags(
+                        android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                    )
+                } else {
+                    activity.window.clearFlags(
+                        android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                    )
+                }
+                promise.resolve(null)
+            } catch (error: Throwable) {
+                promise.reject("KEEP_AWAKE_FAILED", error)
+            }
+        }
+    }
+
     @ReactMethod
     fun setOrientationUnlocked(unlocked: Boolean, promise: Promise) {
         reactContext.runOnUiQueueThread {

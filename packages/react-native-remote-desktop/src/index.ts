@@ -11,6 +11,7 @@ export {
   nativeConnect,
   nativeDisconnect,
   nativeSetActive,
+  setKeepAwake,
   setOrientationUnlocked,
   nativePointerMove,
   nativePointerButton,

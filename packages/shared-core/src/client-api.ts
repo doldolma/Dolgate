@@ -56,6 +56,13 @@ export interface MobileSettings {
   theme: AppTheme;
   /** UI 언어. 생략/undefined 는 'system'(기기 언어 따르기). */
   language?: AppLanguage;
+  /**
+   * 세션을 보고 있는 동안 화면이 꺼지지 않게 잡아 둔다. 생략/undefined 는 켜짐.
+   *
+   * 명령이 끝나기를 기다리며 터미널을 보는 것이 이 앱의 주 용도라 기본은 켜 둔다. 다만 기기의
+   * 자동 꺼짐 설정을 앱이 덮는 것이므로, 그것을 원하지 않는 사용자가 끌 수 있어야 한다.
+   */
+  keepScreenAwake?: boolean;
 }
 
 export interface MobileSessionRecord {

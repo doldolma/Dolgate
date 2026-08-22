@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useMobilePalette } from '../theme';
 
@@ -97,8 +97,19 @@ interface SettingsRowProps {
   chevron?: boolean;
   // 선택된 항목 표시 — 목록에서 하나를 고르는 시트에서 쓴다.
   check?: boolean;
+  /**
+   * 켜고 끄는 행. 값을 주면 오른쪽에 스위치가 붙고 행 전체가 그 스위치를 누른다.
+   *
+   * 체크 표시(`check`)와 다르다 — 체크는 "여럿 중 하나를 골랐다" 는 표시고, 스위치는 "이
+   * 기능이 켜져 있다" 는 상태다. 둘을 섞으면 사용자가 목록에서 하나를 고르는 것인지 켜는
+   * 것인지 알 수 없다.
+   */
+  toggle?: {
+    value: boolean;
+    onValueChange: (value: boolean) => void;
+  };
   disabled?: boolean;
-  accessibilityRole?: 'button' | 'link';
+  accessibilityRole?: 'button' | 'link' | 'switch';
   accessibilityLabel?: string;
   accessibilityValue?: { text: string };
   onPress?: () => void;
@@ -115,6 +126,7 @@ export function SettingsRow({
   align = 'left',
   chevron = false,
   check = false,
+  toggle,
   disabled = false,
   accessibilityRole,
   accessibilityLabel,
@@ -181,6 +193,17 @@ export function SettingsRow({
           {check ? (
             <Ionicons name="checkmark" size={19} color={palette.accent} />
           ) : null}
+          {toggle ? (
+            // 켜진 트랙만 강조색으로 바꾸고 나머지는 플랫폼 기본을 쓴다. 꺼진 트랙·손잡이까지
+            // 우리 색으로 덮으면(우리 팔레트의 테두리색은 알파가 0.08 이라) 꺼진 상태가 거의
+            // 보이지 않고, 두 플랫폼의 익숙한 모양에서 멀어진다.
+            <Switch
+              disabled={disabled}
+              value={toggle.value}
+              onValueChange={toggle.onValueChange}
+              trackColor={{ true: palette.accent }}
+            />
+          ) : null}
           {chevron ? (
             <Ionicons
               name="chevron-forward"
@@ -193,17 +216,25 @@ export function SettingsRow({
     </>
   );
 
-  if (!onPress) {
+  // 스위치 행은 행 전체를 눌러도 토글된다 — 스위치만 누를 수 있게 두면 조준해야 한다.
+  const handlePress = toggle
+    ? () => toggle.onValueChange(!toggle.value)
+    : onPress;
+
+  if (!handlePress) {
     return <View style={styles.row}>{content}</View>;
   }
 
   return (
     <Pressable
-      accessibilityRole={accessibilityRole ?? 'button'}
+      accessibilityRole={
+        accessibilityRole ?? (toggle ? 'switch' : 'button')
+      }
+      accessibilityState={toggle ? { checked: toggle.value } : undefined}
       accessibilityLabel={accessibilityLabel}
       accessibilityValue={accessibilityValue}
       disabled={disabled}
-      onPress={onPress}
+      onPress={handlePress}
       style={({ pressed }) => [
         styles.row,
         pressed ? { backgroundColor: palette.surfaceAlt } : null,

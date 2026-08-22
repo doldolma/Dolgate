@@ -87,6 +87,7 @@ interface RemoteDesktopSessionNativeModule extends NativeModule {
   ): Promise<void>;
   disconnect(sessionId: string): Promise<void>;
   setActive(sessionId: string, active: boolean): Promise<void>;
+  setKeepAwake(enabled: boolean): Promise<void>;
   setOrientationUnlocked(unlocked: boolean): Promise<void>;
   pointerMove(sessionId: string, x: number, y: number): void;
   pointerButton(
@@ -159,6 +160,18 @@ export async function nativeSetActive(
   active: boolean,
 ): Promise<void> {
   await getNativeModule()?.setActive(sessionId, active);
+}
+
+/**
+ * 화면이 저절로 꺼지지 않게 잡아 둔다.
+ *
+ * 권한이 필요 없고(안드로이드는 창 플래그, iOS 는 idle timer) 앱이 앞에 있는 동안에만
+ * 효력이 있다. 모듈이 없는 빌드에서는 조용히 넘긴다 — 화면이 꺼지는 것은 기능 손실이 아니다.
+ */
+export async function setKeepAwake(enabled: boolean): Promise<void> {
+  const mod = getNativeModule();
+  if (!mod || typeof mod.setKeepAwake !== "function") return;
+  await mod.setKeepAwake(enabled);
 }
 
 export async function setOrientationUnlocked(unlocked: boolean): Promise<void> {

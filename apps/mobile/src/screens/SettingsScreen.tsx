@@ -81,6 +81,8 @@ function SettingsContent({
     (state) => state.changeVaultPassphrase,
   );
   const updateSettings = useMobileAppStore((state) => state.updateSettings);
+  // 생략된 설정은 켜짐이다(shared-core 의 MobileSettings 주석 참고).
+  const keepScreenAwake = settings.keepScreenAwake ?? true;
 
   const [serverUrlDraft, setServerUrlDraft] = useState(settings.serverUrl);
   const [savingServerUrl, setSavingServerUrl] = useState(false);
@@ -571,6 +573,20 @@ function SettingsContent({
       ) : null}
 
       <SettingsGroup header={translate("settings.sections.app")}>
+        {/* 세션을 보고 있는 동안 화면이 꺼지지 않게 잡아 둔다. 기기의 자동 꺼짐 설정을 앱이
+            덮는 동작이라 끌 수 있어야 한다. */}
+        <SettingsRow
+          accessibilityLabel={translate("settings.keepScreenAwake.title")}
+          icon="sunny-outline"
+          label={translate("settings.keepScreenAwake.title")}
+          subtitle={translate("settings.keepScreenAwake.description")}
+          toggle={{
+            value: keepScreenAwake,
+            onValueChange: (next) => {
+              void updateSettings({ keepScreenAwake: next });
+            },
+          }}
+        />
         <SettingsRow
           icon="information-circle-outline"
           label={translate("settings.version")}

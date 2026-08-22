@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import React
 
 /// React Native Native Module for VNC session lifecycle and input.
@@ -233,6 +234,23 @@ final class RemoteDesktopSessionModule: RCTEventEmitter {
     entry.setActive(active)
     DispatchQueue.main.async {
       entry.attachedView?.setActiveState(active)
+      resolve(nil)
+    }
+  }
+
+  /**
+   * 화면이 저절로 꺼지지 않게 잡아 둔다.
+   *
+   * `isIdleTimerDisabled` 는 권한도 프롬프트도 없고, 앱이 앞에 있는 동안에만 효력이 있다 —
+   * 백그라운드로 가면 시스템이 알아서 되돌린다.
+   */
+  @objc func setKeepAwake(
+    _ enabled: Bool,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      UIApplication.shared.isIdleTimerDisabled = enabled
       resolve(nil)
     }
   }

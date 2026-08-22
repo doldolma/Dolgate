@@ -114,14 +114,20 @@
     },
     "knownHosts": "저장된 호스트 키",
     "credentials": "저장된 자격증명",
-    "version": "버전"
+    "version": "버전",
+    "keepScreenAwake": {
+      "title": "화면 꺼짐 방지",
+      "description": "세션을 보고 있는 동안 화면을 켜 둡니다."
+    }
   },
   "common": {
     "cancel": "취소",
     "close": "닫기",
     "delete": "삭제",
     "edit": "수정",
-    "privacyPolicy": "개인정보 처리방침"
+    "privacyPolicy": "개인정보 처리방침",
+    "on": "켬",
+    "off": "끔"
   },
   "connectFailure": {
     "agentUnreachable": "ssh-agent 에 연결할 수 없습니다. 데스크톱에서 agent 를 확인해 주세요.",

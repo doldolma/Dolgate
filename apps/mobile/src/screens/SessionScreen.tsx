@@ -34,7 +34,10 @@ import {
   type MobileRemoteDesktopSessionRecord,
   type MobileSftpSessionRecord,
 } from '@dolssh/shared-core';
-import { setOrientationUnlocked } from '@dolssh/react-native-remote-desktop';
+import {
+  setKeepAwake,
+  setOrientationUnlocked,
+} from '@dolssh/react-native-remote-desktop';
 import {
   XtermJsWebView,
   type XtermWebViewHandle,
@@ -470,6 +473,37 @@ export function SessionScreen(): React.JSX.Element {
     );
     return () => subscription.remove();
   }, [immersive, setRemoteDesktopImmersive]);
+
+  /**
+   * 살아 있는 세션을 보고 있는 동안 화면이 꺼지지 않게 잡아 둔다.
+   *
+   * 명령이 끝나기를 기다리며 터미널을 보는 것이 이 화면의 주 용도인데, 그때 화면이 꺼지면
+   * 진행을 놓친다. 반대로 **끊긴 탭을 보고 있을 때는 잡지 않는다** — 볼 것이 늘지 않는데
+   * 배터리만 쓴다.
+   *
+   * 권한은 필요 없다(안드로이드는 창 플래그, iOS 는 idle timer). 둘 다 앱이 앞에 있는 동안만
+   * 효력이 있어서, 화면을 떠나거나 백그라운드로 가면 저절로 풀린다. 그래도 화면을 벗어날 때
+   * 명시적으로 풀어 둔다 — 다른 화면으로 옮긴 뒤에도 켜져 있으면 원인을 짚기 어렵다.
+   */
+  const hasLiveSession =
+    liveSessions.length > 0 ||
+    liveSftpSessions.length > 0 ||
+    liveRdSessions.length > 0;
+  // 생략된 설정은 켜짐이다 — 예전 설치본에도 기본 동작이 그대로 적용된다.
+  const keepScreenAwakeEnabled = useMobileAppStore(
+    state => state.settings.keepScreenAwake ?? true,
+  );
+
+  useEffect(() => {
+    const keepAwake = keepScreenAwakeEnabled && isFocused && hasLiveSession;
+    void setKeepAwake(keepAwake).catch(() => undefined);
+    if (!keepAwake) {
+      return;
+    }
+    return () => {
+      void setKeepAwake(false).catch(() => undefined);
+    };
+  }, [hasLiveSession, isFocused, keepScreenAwakeEnabled]);
 
   useEffect(() => {
     void setOrientationUnlocked(remoteDesktopOrientationUnlocked).catch(

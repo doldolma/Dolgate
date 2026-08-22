@@ -114,14 +114,20 @@
     },
     "knownHosts": "Known hosts",
     "credentials": "Stored credentials",
-    "version": "Version"
+    "version": "Version",
+    "keepScreenAwake": {
+      "title": "Keep the screen awake",
+      "description": "Keeps the screen on while you are viewing a session."
+    }
   },
   "common": {
     "cancel": "Cancel",
     "close": "Close",
     "delete": "Delete",
     "edit": "Edit",
-    "privacyPolicy": "Privacy Policy"
+    "privacyPolicy": "Privacy Policy",
+    "on": "On",
+    "off": "Off"
   },
   "connectFailure": {
     "agentUnreachable": "Could not reach ssh-agent. Check the agent on your desktop.",
