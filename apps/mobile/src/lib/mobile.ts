@@ -1037,6 +1037,18 @@ export function decodeSyncRecords<T>(
     );
 }
 
+/**
+ * 서버가 알려 준 삭제(tombstone). `decodeSyncRecords` 가 이것을 걸러 내므로, 병합이
+ * "서버에 없다 = 지워졌다" 와 "서버에 없다 = 아직 안 올렸다" 를 구분하려면 따로 꺼내야 한다.
+ */
+export function decodeSyncTombstones(
+  records: SyncRecord[],
+): Array<{ id: string; deletedAt: string }> {
+  return records
+    .filter(record => Boolean(record.deleted_at))
+    .map(record => ({ id: record.id, deletedAt: record.deleted_at as string }));
+}
+
 export function decodeSshHosts(
   payload: SyncPayloadV2,
   keyBase64: string,
@@ -1157,6 +1169,8 @@ export function buildHostMutationSyncPayload(
      */
     groups?: GroupRecord[];
     deletedGroups?: Array<{ id: string; deletedAt: string }>;
+    /** 바뀐 것만 보낸다. 예전에는 신뢰할 때마다 전체 목록을 밀었다. */
+    knownHosts?: KnownHostRecord[];
   },
   keyBase64: string,
 ): SyncPayloadV2 {
@@ -1190,6 +1204,11 @@ export function buildHostMutationSyncPayload(
     ],
     secrets: (input.secrets ?? []).map(record => ({
       id: record.secretRef,
+      encrypted_payload: encodeEncryptedPayload(record, keyBase64),
+      updated_at: record.updatedAt,
+    })),
+    knownHosts: (input.knownHosts ?? []).map(record => ({
+      id: record.id,
       encrypted_payload: encodeEncryptedPayload(record, keyBase64),
       updated_at: record.updatedAt,
     })),

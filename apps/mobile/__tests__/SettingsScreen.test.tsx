@@ -1,6 +1,6 @@
 import React from "react";
 import renderer, { act } from "react-test-renderer";
-import { Alert, Modal, Platform, TextInput } from "react-native";
+import { Alert, Modal, Platform, ScrollView, Text, TextInput } from "react-native";
 import type { AuthState } from "@dolssh/shared-core";
 import { APP_VERSION } from "../src/lib/app-metadata";
 import {
@@ -17,6 +17,9 @@ import { useMobileAppStore } from "../src/store/useMobileAppStore";
 const mockGoBack = jest.fn();
 const mockCanGoBack = jest.fn(() => true);
 const mockNavigate = jest.fn();
+const mockSetParams = jest.fn();
+// 홈 검색의 "설정 — 보안" 같은 항목이 넘겨 주는 라우트 파라미터. 기본은 비어 있다.
+let mockRoute: { params?: { section?: string } } = { params: undefined };
 const platformOsDescriptor = Object.getOwnPropertyDescriptor(Platform, "OS");
 
 function setPlatformOs(os: "ios" | "android") {
@@ -31,7 +34,9 @@ jest.mock("@react-navigation/native", () => ({
     goBack: mockGoBack,
     canGoBack: mockCanGoBack,
     navigate: mockNavigate,
+    setParams: mockSetParams,
   }),
+  useRoute: () => mockRoute,
 }));
 jest.mock("@react-native-async-storage/async-storage", () => ({
   getItem: jest.fn(async () => null),
@@ -162,6 +167,8 @@ describe("SettingsScreen server save navigation", () => {
     mockCanGoBack.mockReset();
     mockCanGoBack.mockReturnValue(true);
     mockNavigate.mockReset();
+    mockSetParams.mockReset();
+    mockRoute = { params: undefined };
     resetStore();
   });
 
@@ -671,6 +678,59 @@ describe("SettingsScreen server save navigation", () => {
       useMobileAppStore.setState({
         changeVaultPassphrase: originalChangeVaultPassphrase,
       });
+      tree!.unmount();
+    });
+  });
+  it("scrolls to the section the home search asked for and clears the parameter", async () => {
+    useMobileAppStore.setState({ auth: createAuthenticatedState() });
+    mockRoute = { params: { section: "security" } };
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SettingsScreen />);
+    });
+
+    const scrollView = tree!.root.findByType(ScrollView);
+    const scrollTo = jest.fn();
+    // ScrollView 의 ref 는 테스트 렌더러에서 비어 있다 — 화면이 실제로 부르는 메서드만 심는다.
+    scrollView.instance.scrollTo = scrollTo;
+
+    // 그룹이 배치되기 전에는 갈 곳을 모른다. onLayout 이 오고 나서야 스크롤한다.
+    expect(scrollTo).not.toHaveBeenCalled();
+
+    // 그룹마다 다른 y 를 준다 — 아무 데나 스크롤해도 통과하는 시험이 되지 않게.
+    // 같은 onLayout 이 컴포넌트·View·호스트 뷰 세 겹으로 잡힌다 — 호스트 뷰만 남긴다.
+    const groups = tree!.root.findAll(
+      (node) =>
+        typeof node.props.onLayout === "function" &&
+        typeof node.type === "string",
+    );
+    // SettingsGroup 은 머리글 Text 를 맨 앞에 렌더한다.
+    const securityIndex = groups.findIndex((node) => {
+      const [header] = node.findAllByType(Text);
+      return header ? collectText(header) === "보안" : false;
+    });
+    expect(securityIndex).toBeGreaterThanOrEqual(0);
+
+    await act(async () => {
+      groups.forEach((node, index) => {
+        node.props.onLayout({
+          nativeEvent: {
+            layout: { x: 0, y: (index + 1) * 400, width: 320, height: 200 },
+          },
+        });
+      });
+    });
+
+    // 머리글이 화면 맨 위에 붙지 않게 12 만큼 위를 남긴다.
+    expect(scrollTo).toHaveBeenCalledWith({
+      y: (securityIndex + 1) * 400 - 12,
+      animated: true,
+    });
+    // 파라미터를 비워 두지 않으면 다음에 탭으로 들어와도 이 섹션으로 끌려간다.
+    expect(mockSetParams).toHaveBeenCalledWith({ section: undefined });
+
+    await act(async () => {
       tree!.unmount();
     });
   });

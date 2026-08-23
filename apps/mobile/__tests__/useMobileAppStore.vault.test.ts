@@ -268,6 +268,22 @@ function serverInfoResponse() {
   });
 }
 
+function offlineEditedHost(): SshHostRecord {
+  return {
+    id: 'host-1',
+    kind: 'ssh',
+    label: 'Offline edit',
+    hostname: 'offline.example.com',
+    port: 22,
+    username: 'ubuntu',
+    authType: 'password',
+    secretRef: null,
+    groupName: null,
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+  };
+}
+
 function resetStore(overrides?: {
   auth?: AuthState;
   vault?: ReturnType<typeof useMobileAppStore.getState>['vault'];
@@ -297,6 +313,9 @@ function resetStore(overrides?: {
     pendingBrowserLoginState: null,
     pendingServerKeyPrompt: null,
     pendingCredentialPrompt: null,
+    pendingCredentialRetry: null,
+    syncOutbox: [],
+    syncOutboxFailure: null,
   });
 }
 
@@ -2214,5 +2233,252 @@ describe('useMobileAppStore vault flows', () => {
     expect(useMobileAppStore.getState().syncStatus.status).toBe('error');
     expect(appStateSpy).toHaveBeenCalledWith('change', expect.any(Function));
     appStateSpy.mockRestore();
+  });
+  it('pushes the outbox before pulling so an offline edit is not overwritten', async () => {
+    // 앱을 켜 둔 채 네트워크가 돌아오면 30초 폴링이 pull 만 했다 — 큐는 영영 안 밀리고,
+    // 화면은 "동기화 최신" 이라고 말하면서 대기 건수만 남았다. 더 나쁜 것은 순서다:
+    // pull 이 먼저 로컬을 덮으면 큐에 남은 항목이 방금 덮인 서버 값을 되돌려 보낸다.
+    const keyBase64 = Buffer.alloc(32, 3).toString('base64');
+    const session = createLegacyAuthSession(keyBase64);
+    const calls: string[] = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/info') {
+        return serverInfoResponse();
+      }
+      if (path === '/sync') {
+        calls.push(init?.method === 'POST' ? 'push' : 'pull');
+        if (init?.method === 'POST') {
+          return createJsonResponse('', 202);
+        }
+        return createJsonResponse(buildEmptySyncPayload(), 200, '"9"');
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(session),
+        vault: { status: 'legacy', epoch: 0, migrationRequired: false },
+      });
+      useMobileAppStore.setState({
+        hosts: [offlineEditedHost()],
+        syncOutbox: [{ kind: 'hosts', id: 'host-1', op: 'upsert' }],
+      });
+      await useMobileAppStore.getState().syncNow();
+    });
+
+    // 미는 것이 먼저다. (뒤에 push 가 하나 더 붙는 것은 별개의 기존 동작 — 서버 스냅샷이
+    // 통째로 비어 있으면 로컬을 지우는 대신 재업로드한다. 이 시험의 서버가 빈 응답이라 걸린다.)
+    expect(calls.slice(0, 2)).toEqual(['push', 'pull']);
+    // 밀고 나면 대기 표시가 사라져야 한다 — 이 줄이 안 사라지는 것이 사용자가 본 증상이다.
+    expect(useMobileAppStore.getState().syncOutbox).toEqual([]);
+    expect(useMobileAppStore.getState().syncStatus.pendingPush).toBe(false);
+  });
+
+  it('keeps unpushed local changes on top of a pulled snapshot', async () => {
+    // 밀지 못해도 **당기기를 막지 않는다** — 못 미는 이유가 볼트가 아직 확정되지 않아서일
+    // 수 있고(그 확정을 pull 이 한다), 그때 pull 까지 멈추면 서로를 기다리다 동기화가 죽는다.
+    // 대신 아직 못 올린 변경은 서버 값 위에 다시 얹어 지킨다.
+    const keyBase64 = Buffer.alloc(32, 4).toString('base64');
+    const session = createLegacyAuthSession(keyBase64);
+    const calls: string[] = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/info') {
+        return serverInfoResponse();
+      }
+      if (path === '/sync') {
+        calls.push(init?.method === 'POST' ? 'push' : 'pull');
+        if (init?.method === 'POST') {
+          throw new Error('network down');
+        }
+        return createJsonResponse(buildEmptySyncPayload(), 200, '"9"');
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(session),
+        vault: { status: 'legacy', epoch: 0, migrationRequired: false },
+      });
+      useMobileAppStore.setState({
+        hosts: [offlineEditedHost()],
+        syncOutbox: [{ kind: 'hosts', id: 'host-1', op: 'upsert' }],
+      });
+      await useMobileAppStore.getState().syncNow();
+    });
+
+    // 밀기가 실패해도 당기기는 돈다.
+    expect(calls.slice(0, 2)).toEqual(['push', 'pull']);
+    // 서버에 없는 로컬 변경이 살아남아야 한다. 지워지면 큐도 그 레코드를 못 찾아 버려진다.
+    expect(useMobileAppStore.getState().hosts).toHaveLength(1);
+    expect(useMobileAppStore.getState().syncOutbox).toHaveLength(1);
+    // 이유는 남기되 화면에 떠벌리지 않는다 — 상태 한 줄이 말해 준다.
+    expect(useMobileAppStore.getState().syncOutboxFailure?.message).toContain(
+      'network down',
+    );
+  });
+  it('keeps an unpushed secret from being wiped by a pulled snapshot', async () => {
+    // pull 은 비밀 맵을 서버 것으로 통째로 덮는다. 아직 못 올린 비밀이 여기서 사라지면
+    // 큐 항목은 보낼 것을 못 찾아 조용히 버려진다 — 호스트만 남고 비밀번호가 증발한다.
+    const keyBase64 = Buffer.alloc(32, 6).toString('base64');
+    const session = createLegacyAuthSession(keyBase64);
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/info') {
+        return serverInfoResponse();
+      }
+      if (path === '/sync') {
+        if (init?.method === 'POST') {
+          throw new Error('network down');
+        }
+        return createJsonResponse(buildEmptySyncPayload(), 200, '"9"');
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(session),
+        vault: { status: 'legacy', epoch: 0, migrationRequired: false },
+      });
+      useMobileAppStore.setState({
+        hosts: [{ ...offlineEditedHost(), secretRef: 'secret-1' }],
+        secretsByRef: {
+          'secret-1': {
+            secretRef: 'secret-1',
+            label: 'Offline edit',
+            updatedAt: '2026-08-01T00:00:00.000Z',
+            password: 'hunter2',
+          },
+        },
+        syncOutbox: [
+          { kind: 'hosts', id: 'host-1', op: 'upsert' },
+          { kind: 'secrets', id: 'secret-1', op: 'upsert' },
+        ],
+      });
+      await useMobileAppStore.getState().syncNow();
+    });
+
+    expect(
+      useMobileAppStore.getState().secretsByRef['secret-1']?.password,
+    ).toBe('hunter2');
+    expect(useMobileAppStore.getState().syncOutbox).toHaveLength(2);
+  });
+
+  it('shows a sync error once retrying the push did not help', async () => {
+    // 밀기가 계속 실패해도 당기기만 되면 화면이 "최신" 이라고 말하던 것을 막는다.
+    const keyBase64 = Buffer.alloc(32, 7).toString('base64');
+    const session = createLegacyAuthSession(keyBase64);
+    let pushFails = true;
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/info') {
+        return serverInfoResponse();
+      }
+      if (path === '/sync') {
+        if (init?.method === 'POST') {
+          if (pushFails) {
+            throw new Error('push rejected');
+          }
+          return createJsonResponse('', 202);
+        }
+        return createJsonResponse(buildEmptySyncPayload(), 200, '"9"');
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(session),
+        vault: { status: 'legacy', epoch: 0, migrationRequired: false },
+      });
+      useMobileAppStore.setState({
+        hosts: [offlineEditedHost()],
+        syncOutbox: [{ kind: 'hosts', id: 'host-1', op: 'upsert' }],
+      });
+      // 밀기만 시킨다. syncNow 로 돌리면 당기기 쪽 실패까지 섞여 무엇이 상태를 바꿨는지
+      // 가려진다(서버 스냅샷이 비면 로컬 재업로드가 따로 돌아 그것도 실패한다).
+      await useMobileAppStore.getState().flushSyncOutbox();
+    });
+    // 한 번 실패로는 오류라고 하지 않는다.
+    expect(useMobileAppStore.getState().syncStatus.status).not.toBe('error');
+
+    await act(async () => {
+      await useMobileAppStore.getState().flushSyncOutbox();
+    });
+    expect(useMobileAppStore.getState().syncStatus.status).toBe('error');
+    expect(useMobileAppStore.getState().syncStatus.errorMessage).toContain(
+      'push rejected',
+    );
+
+    // 올라가고 나면 오류 표시가 걷히고 마지막 동기화 시각이 움직인다.
+    pushFails = false;
+    await act(async () => {
+      await useMobileAppStore.getState().flushSyncOutbox();
+    });
+    expect(useMobileAppStore.getState().syncStatus.status).toBe('ready');
+    expect(useMobileAppStore.getState().syncStatus.errorMessage).toBeNull();
+    expect(
+      useMobileAppStore.getState().syncStatus.lastSuccessfulSyncAt,
+    ).toBeTruthy();
+  });
+  it('does not apply a pulled snapshot before the keychain secrets are restored', async () => {
+    // 콜드스타트에서는 Keychain 복원과 동기화가 같이 시작된다. 복원 전에 적용하면 그 시점의
+    // secretsByRef 가 비어 있어 병합이 "로컬에 없다" 고 보고, 서버 것으로 Keychain 까지
+    // 덮어쓴다 — 오프라인에서 만든 비밀이 지워지고 큐 항목은 보낼 것을 못 찾아 버려진다.
+    // 그래서 호스트만 올라가고 비밀번호는 사라졌다.
+    const keyBase64 = Buffer.alloc(32, 8).toString('base64');
+    const session = createLegacyAuthSession(keyBase64);
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/info') {
+        return serverInfoResponse();
+      }
+      if (path === '/sync') {
+        if (init?.method === 'POST') {
+          throw new Error('offline');
+        }
+        return createJsonResponse(buildEmptySyncPayload(), 200, '"9"');
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(session),
+        vault: { status: 'legacy', epoch: 0, migrationRequired: false },
+      });
+      useMobileAppStore.setState({
+        secureStateReady: false,
+        hosts: [{ ...offlineEditedHost(), secretRef: 'secret-1' }],
+        secretsByRef: {
+          'secret-1': {
+            secretRef: 'secret-1',
+            label: 'Offline edit',
+            updatedAt: '2026-08-01T00:00:00.000Z',
+            password: 'hunter2',
+          },
+        },
+        syncOutbox: [
+          { kind: 'hosts', id: 'host-1', op: 'upsert' },
+          { kind: 'secrets', id: 'secret-1', op: 'upsert' },
+        ],
+      });
+      await useMobileAppStore.getState().syncNow();
+    });
+
+    // 비밀도 큐도 그대로 살아 있어야 한다.
+    expect(
+      useMobileAppStore.getState().secretsByRef['secret-1']?.password,
+    ).toBe('hunter2');
+    expect(
+      useMobileAppStore
+        .getState()
+        .syncOutbox.map(entry => entry.kind)
+        .sort(),
+    ).toEqual(['hosts', 'secrets']);
   });
 });

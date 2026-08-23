@@ -1,5 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import type { LayoutChangeEvent } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useMobilePalette } from '../theme';
 
@@ -21,6 +22,8 @@ interface SettingsGroupProps {
   footerTone?: 'muted' | 'danger' | 'warning';
   // 모달·시트 위에 놓이는 그룹 — 기본 surface 는 0.96 알파라 뒤 화면 글자가 비친다.
   solid?: boolean;
+  // 검색에서 이 그룹으로 바로 스크롤하려면 화면 안에서의 위치를 알아야 한다.
+  onLayout?: (event: LayoutChangeEvent) => void;
   children: React.ReactNode;
 }
 
@@ -29,6 +32,7 @@ export function SettingsGroup({
   footer,
   footerTone = 'muted',
   solid = false,
+  onLayout,
   children,
 }: SettingsGroupProps): React.JSX.Element {
   const palette = useMobilePalette();
@@ -42,7 +46,7 @@ export function SettingsGroup({
       : palette.mutedText;
 
   return (
-    <View style={styles.group}>
+    <View style={styles.group} onLayout={onLayout}>
       {header ? (
         <Text style={[styles.header, { color: palette.text }]}>{header}</Text>
       ) : null}

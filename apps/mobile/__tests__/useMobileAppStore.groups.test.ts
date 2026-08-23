@@ -231,7 +231,8 @@ describe("useMobileAppStore group mutations", () => {
   });
 
   // push 가 실패하면 로컬도 그대로여야 한다. 폰만 바뀌면 되돌릴 방법이 없다.
-  it("leaves local state untouched when the push fails", async () => {
+  // 로컬 우선이다 — 서버가 죽어 있어도 이름은 바뀌고, 못 민 변경은 큐에 남는다.
+  it("keeps the rename locally and queues it when the push fails", async () => {
     fetchMock.mockImplementation(async () => createJsonResponse("nope", 500));
     await act(async () => {
       resetStore({
@@ -242,13 +243,12 @@ describe("useMobileAppStore group mutations", () => {
     });
 
     await act(async () => {
-      await expect(
-        useMobileAppStore.getState().renameGroup("work", "office"),
-      ).rejects.toBeTruthy();
+      await useMobileAppStore.getState().renameGroup("work", "office");
     });
 
-    expect(useMobileAppStore.getState().groups[0]?.path).toBe("work");
-    expect(useMobileAppStore.getState().hosts[0]?.groupName).toBe("work");
+    expect(useMobileAppStore.getState().groups[0]?.path).toBe("office");
+    expect(useMobileAppStore.getState().hosts[0]?.groupName).toBe("office");
+    expect(useMobileAppStore.getState().syncOutbox.length).toBeGreaterThan(0);
   });
 
   // 하위 항목까지 삭제하면 그룹과 호스트 모두 삭제 표식(deleted_at)으로 나가야 한다.
@@ -302,16 +302,18 @@ describe("useMobileAppStore group mutations", () => {
     ).toEqual(["aws"]);
   });
 
-  it("refuses to work while signed out", async () => {
+  // 로그아웃 상태에서도 편집된다. 서버에는 닿지 않고 큐에만 남는다.
+  it("edits locally while signed out without touching the server", async () => {
     await act(async () => {
-      resetStore({ groups: [group("work")] });
+      resetStore({ groups: [group("work")], hosts: [host("h1", "work")] });
     });
 
     await act(async () => {
-      await expect(
-        useMobileAppStore.getState().renameGroup("work", "office"),
-      ).rejects.toBeTruthy();
+      await useMobileAppStore.getState().renameGroup("work", "office");
     });
+
+    expect(useMobileAppStore.getState().groups[0]?.path).toBe("office");
+    expect(useMobileAppStore.getState().syncOutbox.length).toBeGreaterThan(0);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

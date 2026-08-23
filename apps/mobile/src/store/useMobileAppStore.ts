@@ -17,6 +17,7 @@ import type {
   GroupRecord,
   GroupRemoveMode,
   HostRecord,
+  ParsedQuickSshCommand,
   HostSecretInput,
   KnownHostRecord,
   LoadedManagedSecretPayload,
@@ -42,10 +43,19 @@ import type {
 // 그룹 트리 변형 규칙. 데스크톱 메인도 같은 함수를 쓴다 — 두 벌이 되면 같은 그룹을 폰에서
 // 지운 것과 PC 에서 지운 것이 다른 결과를 낳는다.
 import {
+  buildQuickSshHostLabel,
   createGroupIn,
+  findExistingQuickSshHost,
   removeGroupFrom,
   renameGroupIn,
 } from '@dolssh/shared-core';
+import {
+  buildSyncOutboxPayload,
+  enqueueManySyncOutbox,
+  removeSyncOutbox,
+  type SyncOutboxEntry,
+} from '../lib/sync-outbox';
+import { mergeSyncedState } from '../lib/sync-merge';
 import {
   buildAwsSsmKnownHostIdentity,
   describeRdpDrives,
@@ -85,7 +95,6 @@ import {
   clearStoredTailnets,
   buildHostMutationSyncPayload,
   buildKnownHostRecord,
-  buildKnownHostsSyncPayload,
   buildLocalStateSyncPayload,
   clearStoredAuthSession,
   clearStoredSecrets,
@@ -102,6 +111,7 @@ import {
   decodeManagedSecrets,
   decodeSnippets,
   decodeSupportedHosts,
+  decodeSyncTombstones,
   decodeTailnets,
   deleteRemoteAccount,
   deriveSecretMetadata,
@@ -229,6 +239,11 @@ import {
   getConnectFailureMessage,
   getNewVaultPassphraseMessage,
 } from '../i18n/shared-messages';
+import {
+  buildCredentialRetryRequest,
+  type CredentialRetryRequest,
+  type CredentialRetryTarget,
+} from '../lib/credential-retry';
 import { t } from '../i18n';
 import {
   createRemoteDesktopSlice,
@@ -338,7 +353,21 @@ interface PendingCredentialPromptState {
   authType: 'password' | 'privateKey' | 'certificate';
   message?: string | null;
   initialValue: HostSecretInput;
+  /**
+   * 호스트에 저장된 SSH 사용자명. 이 창에서도 고칠 수 있어야 한다 — 사용자명이 틀렸을 때
+   * 붙어 보고 실패할 때까지 기다렸다 고치게 하면, 눈앞에 자격증명 창을 두고도 못 고친다.
+   */
+  initialUsername: string;
 }
+
+/**
+ * 인증이 깨진 뒤 계정·비밀을 다시 받는 창. 데스크톱 `CredentialRetryDialog` 와 같은 자리다.
+ *
+ * 위의 프롬프트와 다르다. 프롬프트는 **저장된 비밀이 없어서** 붙기 전에 묻는 것이라 사용자명을
+ * 묻지 않는다(호스트에 있다). 이쪽은 이미 붙어 보고 인증이 깨진 뒤라서, 틀린 것이 비밀인지
+ * 사용자명인지 알 수 없다 — 그래서 **둘 다** 받고, 저장된 비밀도 덮어쓴다.
+ */
+type PendingCredentialRetryState = CredentialRetryRequest;
 
 /**
  * 연결 도중 서버가 낸 대화형 인증 물음(OTP·SSH 쪽 비밀번호 등).
@@ -773,6 +802,13 @@ interface MobileAppState {
   settings: MobileSettings;
   syncStatus: SyncStatus;
   groups: GroupRecord[];
+  /**
+   * 아직 서버에 밀지 못한 변경.
+   *
+   * 쓰기는 **로컬에 먼저** 반영하고 여기 쌓은 뒤 밀어 본다. 오프라인·로그아웃이면 큐에
+   * 남았다가 다음 기회에 나간다 — 데스크톱이 로컬 DB 에 쓰고 나중에 동기화하는 것과 같다.
+   */
+  syncOutbox: SyncOutboxEntry[];
   hosts: HostRecord[];
   awsProfiles: ManagedAwsProfilePayload[];
   tailnets: TailnetPayload[];
@@ -800,6 +836,14 @@ interface MobileAppState {
   pendingServerKeyPrompt: PendingServerKeyPromptState | null;
   pendingRdpCertificatePrompt: PendingRdpCertificatePromptState | null;
   pendingCredentialPrompt: PendingCredentialPromptState | null;
+  pendingCredentialRetry: PendingCredentialRetryState | null;
+  /**
+   * 큐를 밀다 **연달아** 실패한 횟수와 마지막 이유.
+   *
+   * 한 번 실패는 흔하다(잠깐 끊김). 사람에게 알릴 값어치가 있는 것은 다시 시도해도 안 될
+   * 때다. 예전에는 이유를 통째로 삼켜서, 영영 안 올라가는 계정도 화면상으로는 "최신" 이었다.
+   */
+  syncOutboxFailure: { count: number; message: string } | null;
   pendingInteractiveAuthPrompt: PendingInteractiveAuthPromptState | null;
   /** 세션·SFTP 레코드 ID 별 연결 진행. 붙는 중에만 값이 있다. */
   connectionViews: Record<string, MobileConnectionViewState>;
@@ -826,6 +870,19 @@ interface MobileAppState {
     nextPassphrase: string,
   ) => Promise<void>;
   syncNow: () => Promise<void>;
+  /**
+   * 아직 밀지 못한 변경을 서버로 민다. 실패해도 던지지 않고 큐에 남긴다.
+   *
+   * 포그라운드 복귀와 로그인 직후에 부른다 — 오프라인에서 한 편집이 그때 나간다.
+   */
+  flushSyncOutbox: () => Promise<void>;
+  /**
+   * 비밀 복원이 실패한 채로 남아 있으면 다시 시도한다.
+   *
+   * 복원 전에는 큐를 밀지 않으므로(비밀 값 없이 밀면 secrets 항목이 버려진다), 실패가
+   * 그대로 남으면 동기화가 멈춘 채로 있다. 포그라운드 복귀 때 불러 앱 재시작 없이 푼다.
+   */
+  ensureSecureStateRestored: () => void;
   updateSettings: (input: Partial<MobileSettings>) => Promise<void>;
   connectToHost: (hostId: string) => Promise<string | null>;
   saveHost: (input: MobileHostDraftInput) => Promise<void>;
@@ -845,6 +902,13 @@ interface MobileAppState {
    * 그룹을 새로 만든다. 호스트가 없는 빈 그룹으로 시작한다 — 홈 목록은 호스트가 0개인
    * 그룹도 그대로 보여 준다(buildVisibleGroups 가 거르지 않는다).
    */
+  /**
+   * 등록하지 않은 서버에 주소만으로 붙는다(`user@host[:port]`).
+   *
+   * 같은 주소의 호스트가 이미 있으면 그것으로 붙고, 없으면 만들어 붙는다 — 데스크톱 명령
+   * 팔레트의 즉석 접속과 같은 규칙이다. 쓰기는 로컬 우선이라 오프라인에서도 된다.
+   */
+  quickConnectSsh: (input: ParsedQuickSshCommand) => Promise<string | null>;
   createGroup: (name: string, parentPath: string | null) => Promise<void>;
   /** 그룹 이름 변경. 그 아래 호스트의 groupName(경로)도 함께 다시 쓰인다. */
   renameGroup: (path: string, name: string) => Promise<void>;
@@ -856,7 +920,7 @@ interface MobileAppState {
   /** auto 는 포그라운드 복귀 자동 재연결이다 — startup 변수 값을 묻지 않는다. */
   resumeSession: (
     sessionId: string,
-    options?: { auto?: boolean },
+    options?: { auto?: boolean; credentialOverride?: HostSecretInput },
   ) => Promise<string | null>;
   disconnectSession: (sessionId: string) => Promise<void>;
   removeSession: (sessionId: string) => Promise<void>;
@@ -869,8 +933,14 @@ interface MobileAppState {
   rejectServerKeyPrompt: () => Promise<void>;
   acceptRdpCertificatePrompt: () => Promise<void>;
   rejectRdpCertificatePrompt: () => Promise<void>;
-  submitCredentialPrompt: (input: HostSecretInput) => Promise<void>;
+  submitCredentialPrompt: (
+    input: HostSecretInput & { username?: string },
+  ) => Promise<void>;
   cancelCredentialPrompt: () => void;
+  submitCredentialRetry: (
+    input: HostSecretInput & { username: string },
+  ) => Promise<void>;
+  cancelCredentialRetry: () => void;
   submitInteractiveAuthPrompt: (answer: EngineInteractiveAnswer) => void;
   /** 닫으면 그 연결을 접는다 — 답 없이 두면 코어가 예산까지 기다린다. */
   cancelInteractiveAuthPrompt: () => void;
@@ -924,6 +994,9 @@ interface MobileAppState {
   disconnectRemoteDesktopSession: (sessionId: string) => Promise<void>;
 }
 
+/** 프롬프트로 받았지만 아직 연결 성공을 못 본 자격증명. 성공하면 저장하고 지운다. */
+const promptedSecretsByHostId = new Map<string, HostSecretInput>();
+
 const runtimeSessions = new Map<string, RuntimeSession>();
 /**
  * SSH over SSM 이 실패한 호스트의 기억. 앱이 도는 동안만 산다.
@@ -969,6 +1042,10 @@ let offlineRecoveryAttempt = 0;
 let offlineRecoveryInFlight = false;
 let offlineRecoveryKey: string | null = null;
 let secureStateRestoreVersion = 0;
+// 진행 중인 비밀 복원. pull 이 복원보다 먼저 도착하면 그 시점의 secretsByRef 가 비어 있어,
+// 병합이 "로컬에 없다" 고 보고 서버 것으로 Keychain 을 덮어쓴다 — 아직 안 올린 비밀이
+// 저장소에서 지워진다. 적용 전에 이 프라미스를 기다려 그 경합을 없앤다.
+let secureStateRestorePromise: Promise<void> | null = null;
 // 마지막으로 서버와 맞춘 리비전(ETag). 폴링의 If-None-Match 로 보내 변경 없으면 304 로
 // 조기 종료한다. 메모리에만 두고, 로그아웃/계정교체 시 초기화한다.
 let lastSyncRevision: string | null = null;
@@ -1141,6 +1218,10 @@ function ensureSyncPollingLifecycle(): void {
         // 로그아웃 상태에서 포그라운드 복귀 시 유휴 타이머를 돌리지 않는다.
         if (shouldPollSync(state)) {
           startSyncPolling();
+          // 비밀 복원이 실패한 채였다면 여기서 다시 시도한다. 그것이 안 풀리면 큐를
+          // 밀지 않으므로, 이 한 줄이 없으면 앱을 껐다 켜기 전엔 동기화가 멈춰 있다.
+          state.ensureSecureStateRestored();
+          // 큐를 먼저 미는 것은 syncNow 가 보장한다(syncWithSession 앞머리).
           void state.syncNow().catch(() => undefined);
         }
         resumeDroppedActiveSession({
@@ -2156,6 +2237,7 @@ function createEmptyProtectedState(): Pick<
   MobileAppState,
   | 'vault'
   | 'groups'
+  | 'syncOutbox'
   | 'hosts'
   | 'awsProfiles'
   | 'tailnets'
@@ -2175,6 +2257,7 @@ function createEmptyProtectedState(): Pick<
   return {
     vault: { status: 'none' },
     groups: [],
+    syncOutbox: [],
     hosts: [],
     awsProfiles: [],
     tailnets: [],
@@ -2436,6 +2519,8 @@ export const useMobileAppStore = create<MobileAppState>()(
           pendingServerKeyPrompt: null,
           pendingRdpCertificatePrompt: null,
           pendingCredentialPrompt: null,
+          pendingCredentialRetry: null,
+          syncOutboxFailure: null,
           pendingInteractiveAuthPrompt: null,
           pendingStartupCommandPrompt: null,
           connectionViews: {},
@@ -2470,6 +2555,8 @@ export const useMobileAppStore = create<MobileAppState>()(
           pendingServerKeyPrompt: null,
           pendingRdpCertificatePrompt: null,
           pendingCredentialPrompt: null,
+          pendingCredentialRetry: null,
+          syncOutboxFailure: null,
           pendingInteractiveAuthPrompt: null,
           pendingStartupCommandPrompt: null,
           connectionViews: {},
@@ -2704,6 +2791,24 @@ export const useMobileAppStore = create<MobileAppState>()(
           // 이미 한다. 사용자가 그 탭을 누르면 그때는 터미널 뷰가 살아 있어 정상적으로 붙는다.
           // 자동 재연결은 AppState 전환(포그라운드 복귀)에만 걸어 둔다 — 그 경로는 화면이 이미
           // 마운트돼 있어 이 교착이 없고, 원래 보고된 증상이기도 하다.
+        } catch (error) {
+          // **삼키면 안 된다.** 여기서 던지면 위의 `secureStateReady: true` 에 도달하지
+          // 못하고, 그 플래그가 false 인 동안은 큐를 밀지 않는다(비밀 값을 못 읽는 채로
+          // 밀면 secrets 항목이 버려져 비밀번호가 사라진다). 즉 실패가 곧 **동기화 정지**다.
+          //
+          // 막는 것은 맞지만 조용히·영구히 막으면 안 된다. 상태에 남겨 화면이 "최신" 이라고
+          // 거짓말하지 않게 하고, 포그라운드로 돌아올 때 ensureSecureStateRestored 가
+          // 다시 시도해 앱 재시작 없이 풀리게 한다.
+          set(state => ({
+            syncStatus: {
+              ...state.syncStatus,
+              status: 'error',
+              errorMessage:
+                error instanceof Error && error.message.trim()
+                  ? error.message
+                  : t('store.vaultStateRestoreFailed'),
+            },
+          }));
         } finally {
           finishSecureRestoreTiming?.();
         }
@@ -3064,18 +3169,41 @@ export const useMobileAppStore = create<MobileAppState>()(
       };
 
       /**
-       * 그룹 편집을 서버에 민다.
+       * 못 민 로컬 변경을 서버로 올린다.
        *
-       * `deleteHost` 와 같은 모양이다 — 온라인 전용이고, 볼트 세대 거부(409)는 공통 처리로
-       * 넘긴다. 그룹 하나를 고쳐도 그 아래 호스트가 함께 바뀌므로 둘을 한 번에 보낸다.
-       * 나눠 보내면 중간에 실패했을 때 그룹만 바뀌고 호스트는 옛 경로에 남는다.
+       * **바뀐 레코드만 보낸다.** 데스크톱(sync-service)은 밀 것이 있으면 로컬 전체
+       * 스냅샷을 올리는데, 그 규칙은 여기서 쓰면 안 된다 — 모바일은 아는 종류만 남기고
+       * 버리므로(decodeSupportedHosts: ssh·ec2·rdp·vnc) 폰의 로컬은 계정의 부분집합이다.
+       * 전체 스냅샷으로 밀면 serial·warpgate·ECS 호스트가 서버에서 지워진다.
+       *
+       * 페이로드는 **지금 로컬 상태에서 다시 만든다**(buildSyncOutboxPayload). 큐가 값을
+       * 들고 있지 않으므로 같은 레코드를 여러 번 고쳐도 마지막 값 하나만 나간다.
+       *
+       * **던지지 않는다.** 오프라인·로그아웃·서버 오류면 큐를 그대로 두고 이유만 남긴다.
        */
-      const pushGroupMutation = async (input: {
-        groups?: GroupRecord[];
-        deletedGroups?: Array<{ id: string; deletedAt: string }>;
-        hosts?: HostRecord[];
-        deletedHosts?: Array<{ id: string; deletedAt: string }>;
-      }) => {
+      const drainSyncOutbox = async (): Promise<void> => {
+        const queued = get().syncOutbox;
+        if (queued.length === 0) {
+          return;
+        }
+        if (!get().auth.session) {
+          return;
+        }
+        // 비밀은 Keychain 에서 **뒤늦게** 복원된다(secureStateReady 가 그때 켜진다).
+        // 그 전에 밀면 secrets 항목이 보낼 것을 못 찾아 큐에서 조용히 빠지고, 호스트만
+        // 올라가고 비밀번호는 영영 안 올라간다. 복원될 때까지 기다린다 — 다음 회차가 민다.
+        if (!get().secureStateReady) {
+          return;
+        }
+
+        const local = get();
+        const { payload, drained } = buildSyncOutboxPayload(queued, {
+          hosts: local.hosts,
+          groups: local.groups,
+          knownHosts: local.knownHosts,
+          secretsByRef: local.secretsByRef,
+        });
+
         try {
           await callWithFreshAccessToken(async accessToken => {
             const currentSession = get().auth.session;
@@ -3086,7 +3214,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               get().settings.serverUrl,
               accessToken,
               buildHostMutationSyncPayload(
-                input,
+                payload,
                 resolveVaultKeyForPush(currentSession),
               ),
               resolveVaultEpochForPush(),
@@ -3095,75 +3223,67 @@ export const useMobileAppStore = create<MobileAppState>()(
             storePushedRevision(pushedRevision);
           });
         } catch (error) {
-          await handleVaultDekMismatchError(error);
-          throw error;
-        }
-      };
-
-      /** 변형 뒤 사라진 그룹 레코드의 id. 서버에는 삭제로 알려야 한다. */
-      const collectRemovedGroupIds = (
-        before: GroupRecord[],
-        after: GroupRecord[],
-      ): string[] => {
-        const survivingIds = new Set(after.map(record => record.id));
-        return before
-          .filter(record => !survivingIds.has(record.id))
-          .map(record => record.id);
-      };
-
-
-      const pushKnownHosts = async (
-        knownHosts: KnownHostRecord[],
-        sessionOverride?: AuthSession | null,
-      ) => {
-        const session = sessionOverride ?? get().auth.session ?? null;
-        if (!session) {
-          set(state => ({
-            syncStatus: {
-              ...state.syncStatus,
-              pendingPush: true,
-            },
-          }));
+          // 볼트 세대 문제는 재시도해도 영원히 실패한다 — 공통 처리가 상태를 정리한다.
+          // 그 밖의 실패(네트워크 등)는 큐를 그대로 두고 다음 기회를 기다린다.
+          await handleVaultDekMismatchError(error).catch(() => undefined);
+          // **이유를 남긴다.** 예전에는 여기서 통째로 삼켰고, 그래서 영영 안 올라가는 계정도
+          // 화면상으로는 "최신" 이었다. 조용한 실패가 제일 나쁜 결말이다.
+          const message =
+            error instanceof Error && error.message.trim()
+              ? error.message
+              : t('store.syncFailed');
+          set(state => {
+            const count = (state.syncOutboxFailure?.count ?? 0) + 1;
+            return {
+              syncOutboxFailure: { count, message },
+              syncStatus: {
+                ...state.syncStatus,
+                pendingPush: true,
+                // 한 번 실패는 흔하다(잠깐 끊김) — 다음 회차가 조용히 다시 민다.
+                // 다시 시도해도 안 되면 그때는 상태에 드러내야 한다. 안 그러면 밀기가
+                // 계속 실패해도 당기기만 되면 화면이 "최신" 이라고 말한다.
+                ...(count >= 2
+                  ? { status: 'error' as const, errorMessage: message }
+                  : {}),
+              },
+            };
+          });
           return;
         }
 
-        try {
-          const pushedRevision = await postSyncSnapshot(
-            get().settings.serverUrl,
-            session.tokens.accessToken,
-            buildKnownHostsSyncPayload(
-              knownHosts,
-              resolveVaultKeyForPush(session),
-            ),
-            resolveVaultEpochForPush(),
-            resolveMobileSyncDataFloor(get().hosts),
-          );
-          storePushedRevision(pushedRevision);
-          set(state => ({
+        // 미는 동안 사용자가 또 고쳤을 수 있다. 그 항목은 남겨야 한다.
+        set(state => {
+          const next = removeSyncOutbox(state.syncOutbox, drained);
+          const cleared = next.length === 0;
+          return {
+            syncOutbox: next,
             syncStatus: {
               ...state.syncStatus,
-              pendingPush: false,
-              errorMessage: null,
-              status: 'ready',
-              lastSuccessfulSyncAt: new Date().toISOString(),
+              pendingPush: !cleared,
+              // 다 올렸으면 앞선 실패 표시를 걷는다. 안 걷으면 이미 해결된 오류가 화면에
+              // 남고, 당기기가 없는 회차에서는 마지막 동기화 시각도 안 움직인다.
+              ...(cleared && state.syncStatus.status === 'error'
+                ? { status: 'ready' as const, errorMessage: null }
+                : {}),
+              ...(cleared
+                ? { lastSuccessfulSyncAt: new Date().toISOString() }
+                : {}),
             },
-          }));
-        } catch (error) {
-          if (await handleVaultDekMismatchError(error)) {
-            return;
-          }
-          set(state => ({
-            syncStatus: {
-              ...state.syncStatus,
-              pendingPush: true,
-              status: 'error',
-              errorMessage:
-                error instanceof Error
-                  ? error.message
-                  : t('store.knownHostSyncFailed'),
-            },
-          }));
-        }
+            syncOutboxFailure: null,
+          };
+        });
+      };
+
+      /** 로컬을 먼저 바꾸고 큐에 넣은 뒤 밀어 본다. 오프라인이면 큐에 남는다. */
+      const enqueueAndDrain = (entries: SyncOutboxEntry[]) => {
+        set(state => {
+          const next = enqueueManySyncOutbox(state.syncOutbox, entries);
+          return {
+            syncOutbox: next,
+            syncStatus: { ...state.syncStatus, pendingPush: next.length > 0 },
+          };
+        });
+        void drainSyncOutbox();
       };
 
       // Every key on file for an address, so the engine can connect without
@@ -3217,18 +3337,23 @@ export const useMobileAppStore = create<MobileAppState>()(
 
         let resolved: EngineJumpTarget | undefined;
         for (const jumpHostId of chain) {
-          const jumpHost = get().hosts.find(record => record.id === jumpHostId);
-          if (!jumpHost) {
+          const jumpHostRecord = get().hosts.find(
+            record => record.id === jumpHostId,
+          );
+          if (!jumpHostRecord) {
             throw new Error(t('store.jumpHostMissing'));
           }
-          if (!isSshHostRecord(jumpHost)) {
+          if (!isSshHostRecord(jumpHostRecord)) {
             throw new Error(t('store.jumpHostMustBeSsh'));
           }
+          let jumpHost = jumpHostRecord;
           const credentials = await resolveHostCredentials(jumpHost);
           if (!credentials) {
             // 사용자가 홉의 자격증명 입력을 접었다. 취소로 끝낸다.
             throw new TailnetPreparationCancelledError();
           }
+          // 창에서 사용자명을 고쳤을 수 있다 — 고친 값으로 이 홉을 지나가야 한다.
+          jumpHost = refreshSshHost(jumpHost);
           const credential = buildEngineCredential(jumpHost, credentials);
           if (!credential) {
             throw new Error(
@@ -3415,6 +3540,8 @@ export const useMobileAppStore = create<MobileAppState>()(
                 backgroundListenerId: null,
                 ssmForward: forward,
               });
+              // 연결에 성공했으니 방금 쓴 자격증명을 저장한다(데스크톱과 같은 시점).
+              commitConnectionSecrets(host);
               awsSshOverSsmFallbacks.delete(host.id);
               console.info(
                 `[mobile-aws] direct connected=ssh-over-ssm user=${sshUsername} ` +
@@ -3497,6 +3624,8 @@ export const useMobileAppStore = create<MobileAppState>()(
             backgroundListenerId: null,
             ssmForward: null,
           });
+          // 연결에 성공했으니 방금 쓴 자격증명을 저장한다(데스크톱과 같은 시점).
+          commitConnectionSecrets(host);
           set(state => ({
             sessions: patchSessionRecord(state.sessions, sessionRecordId, {
               status: 'connected',
@@ -3598,14 +3727,13 @@ export const useMobileAppStore = create<MobileAppState>()(
           trustedRecord,
         ]);
 
-        set(state => ({
-          knownHosts: mergedKnownHosts,
-          syncStatus: {
-            ...state.syncStatus,
-            pendingPush: true,
-          },
-        }));
-        await pushKnownHosts(mergedKnownHosts);
+        // 신뢰는 이미 명시적이다. 로컬에 먼저 남기고 아웃박스가 나른다 — 예전에는 여기서
+        // 바로 밀고 실패하면 pendingPush 만 세웠는데, 그 플래그를 읽는 곳이 없어 오프라인에서
+        // 신뢰한 호스트키가 그 기기에만 남았다.
+        set({ knownHosts: mergedKnownHosts });
+        enqueueAndDrain([
+          { kind: 'knownHosts', id: trustedRecord.id, op: 'upsert' },
+        ]);
         return true;
       };
 
@@ -3623,12 +3751,178 @@ export const useMobileAppStore = create<MobileAppState>()(
               authType: getMobileCredentialPromptAuthType(host),
               message,
               initialValue,
+              initialUsername: host.username,
             },
           });
         });
 
+      /**
+       * 프롬프트로 받은 자격증명을 **연결 성공 때까지 들고만 있는다.**
+       *
+       * 예전에는 프롬프트 직후 바로 저장했다. 틀린 비밀번호도 저장되고, `secretRef` 가 없는
+       * 호스트(주소만 적어 만든 것 등)는 아예 저장되지 않아 붙을 때마다 다시 물었다.
+       * 데스크톱은 코어가 "connected" 를 보낸 뒤에만 저장한다(persistHostSpecificSecret).
+       */
+      const rememberPromptedSecret = (
+        host: SshHostRecord,
+        prompted: HostSecretInput,
+      ) => {
+        if (
+          !prompted.password &&
+          !prompted.passphrase &&
+          !prompted.privateKeyPem &&
+          !prompted.certificateText
+        ) {
+          return;
+        }
+        promptedSecretsByHostId.set(host.id, prompted);
+      };
+
+      /**
+       * 연결에 성공했으니 방금 쓴 자격증명을 저장한다.
+       *
+       * `secretRef` 가 없으면 여기서 만든다 — 그래야 다음에 붙을 때 묻지 않는다. 호스트
+       * 레코드가 바뀌므로 아웃박스에 실어 보낸다(오프라인이면 큐에 남는다).
+       */
+      const commitPromptedSecret = async (hostId: string) => {
+        const prompted = promptedSecretsByHostId.get(hostId);
+        if (!prompted) {
+          return;
+        }
+        promptedSecretsByHostId.delete(hostId);
+
+        const host = get().hosts.find(item => item.id === hostId);
+        if (!host || !isSshHostRecord(host)) {
+          return;
+        }
+
+        const secretRef = host.secretRef ?? createLocalId('secret');
+        const merged = mergePromptedSecrets(
+          get().secretsByRef[secretRef],
+          { ...host, secretRef },
+          prompted,
+        );
+        if (!merged) {
+          return;
+        }
+
+        const entries: SyncOutboxEntry[] = [
+          { kind: 'secrets', id: secretRef, op: 'upsert' },
+        ];
+        let nextHosts = get().hosts;
+        if (!host.secretRef) {
+          const record: HostRecord = {
+            ...host,
+            secretRef,
+            updatedAt: new Date().toISOString(),
+          };
+          nextHosts = sortHosts([
+            ...nextHosts.filter(item => item.id !== hostId),
+            record,
+          ]);
+          set({ hosts: nextHosts });
+          entries.push({ kind: 'hosts', id: hostId, op: 'upsert' });
+        }
+
+        await updateSecretsState(
+          { ...get().secretsByRef, [secretRef]: merged },
+          nextHosts,
+        );
+        enqueueAndDrain(entries);
+      };
+
+      /**
+       * 자격증명 창에서 고친 SSH 사용자명을 호스트에 남긴다.
+       *
+       * 로컬 우선 + 아웃박스다 — 로그인·네트워크 없이도 고쳐지고, 이번 연결이 또 실패해도
+       * 고쳐 넣은 값은 남는다(아니면 매번 같은 오타를 다시 친다).
+       */
+      /**
+       * 연결에 성공했으니 **이 연결이 쓴** 자격증명을 저장한다.
+       *
+       * 대상 호스트만으로는 모자란다 — 점프 홉도 붙기 전에 물어보므로, 그 홉의 비밀도 같이
+       * 저장하지 않으면 갈 때마다 다시 묻는다.
+       */
+      const commitConnectionSecrets = (host: HostRecord) => {
+        void commitPromptedSecret(host.id);
+        if (!isSshHostRecord(host)) {
+          return;
+        }
+        for (const jumpHostId of normalizeJumpHostIds(
+          host.jumpHostIds,
+          host.jumpHostId,
+        )) {
+          void commitPromptedSecret(jumpHostId);
+        }
+      };
+
+      const applyHostUsername = (host: SshHostRecord, username: string) => {
+        if (username === host.username.trim()) {
+          return;
+        }
+        const record: HostRecord = {
+          ...host,
+          username,
+          updatedAt: new Date().toISOString(),
+        };
+        const nextHosts = sortHosts([
+          ...get().hosts.filter(item => item.id !== host.id),
+          record,
+        ]);
+        set({
+          hosts: nextHosts,
+          secretMetadata: deriveSecretMetadata(nextHosts, get().secretsByRef),
+        });
+        enqueueAndDrain([{ kind: 'hosts', id: host.id, op: 'upsert' }]);
+      };
+
+      /**
+       * 자격증명 창을 지나온 뒤 호스트를 다시 읽는다.
+       *
+       * 연결 경로는 창을 띄우기 **전에** 읽은 레코드를 들고 있다. 창에서 사용자명을 고쳤는데
+       * 그대로 두면 이번 시도가 옛 사용자명으로 나가고, 방금 고친 사람은 왜 또 실패하는지
+       * 알 수 없다.
+       */
+      const refreshSshHost = <T extends SshHostRecord>(host: T): T => {
+        const next = get().hosts.find(item => item.id === host.id);
+        return next && isSshHostRecord(next) ? (next as T) : host;
+      };
+
+      /**
+       * 이 호스트로 붙을 때 쓸 자격증명을 고른다.
+       *
+       * `override` 는 인증 실패 재시도 창이 방금 받아 온 값이다. **저장된 값보다 우선한다** —
+       * 안 그러면 저장된 비밀번호가 틀린 경우(서버에서 바꿨을 때)를 고칠 방법이 없다.
+       * 저장은 여기서 하지 않는다. 연결이 성공해야 저장하는 규칙은 그대로다.
+       */
+      /** 인증이 깨진 것이면 재시도 창을 세운다. 판정과 내용은 lib/credential-retry 가 만든다. */
+      const offerCredentialRetry = (
+        host: HostRecord,
+        error: unknown,
+        target: CredentialRetryTarget,
+        message: string,
+      ) => {
+        const request = buildCredentialRetryRequest(
+          host,
+          error,
+          target,
+          message,
+        );
+        if (request) {
+          set({ pendingCredentialRetry: request });
+        }
+      };
+
+      /**
+       * 이 호스트로 붙을 때 쓸 자격증명을 고른다.
+       *
+       * `override` 는 인증 실패 재시도 창이 방금 받아 온 값이다. **저장된 값보다 우선한다** —
+       * 안 그러면 저장된 비밀번호가 틀린 경우(서버에서 바꿨을 때)를 고칠 방법이 없다.
+       * 저장은 여기서 하지 않는다. 연결이 성공해야 저장하는 규칙은 그대로다.
+       */
       const resolveHostCredentials = async (
         host: SshHostRecord,
+        override?: HostSecretInput | null,
       ): Promise<HostSecretInput | null> => {
         const existing = host.secretRef
           ? get().secretsByRef[host.secretRef]
@@ -3639,6 +3933,18 @@ export const useMobileAppStore = create<MobileAppState>()(
           privateKeyPem: existing?.privateKeyPem,
           certificateText: existing?.certificateText,
         };
+
+        if (override) {
+          const merged: HostSecretInput = {
+            password: override.password ?? promptBase.password,
+            passphrase: override.passphrase ?? promptBase.passphrase,
+            privateKeyPem: override.privateKeyPem ?? promptBase.privateKeyPem,
+            certificateText:
+              override.certificateText ?? promptBase.certificateText,
+          };
+          rememberPromptedSecret(host, merged);
+          return merged;
+        }
 
         if (host.authType === 'password') {
           if (promptBase.password) {
@@ -3654,15 +3960,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             return null;
           }
 
-          if (host.secretRef) {
-            const merged = mergePromptedSecrets(existing, host, prompted);
-            if (merged) {
-              await updateSecretsState({
-                ...get().secretsByRef,
-                [merged.secretRef]: merged,
-              });
-            }
-          }
+          rememberPromptedSecret(host, prompted);
 
           return { ...promptBase, ...prompted };
         }
@@ -3681,15 +3979,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             return null;
           }
 
-          if (host.secretRef) {
-            const merged = mergePromptedSecrets(existing, host, prompted);
-            if (merged) {
-              await updateSecretsState({
-                ...get().secretsByRef,
-                [merged.secretRef]: merged,
-              });
-            }
-          }
+          rememberPromptedSecret(host, prompted);
 
           return { ...promptBase, ...prompted };
         }
@@ -3711,15 +4001,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             return null;
           }
 
-          if (host.secretRef) {
-            const merged = mergePromptedSecrets(existing, host, prompted);
-            if (merged) {
-              await updateSecretsState({
-                ...get().secretsByRef,
-                [merged.secretRef]: merged,
-              });
-            }
-          }
+          rememberPromptedSecret(host, prompted);
 
           return { ...promptBase, ...prompted };
         }
@@ -4226,6 +4508,10 @@ export const useMobileAppStore = create<MobileAppState>()(
       const connectSftpSessionRecord = async (
         sftpSessionRecord: MobileSftpSessionRecord,
         host: SshHostRecord | AwsEc2HostRecord,
+        options?: {
+          /** 인증 실패 재시도 창이 방금 받아 온 자격증명. 저장된 값보다 우선한다. */
+          credentialOverride?: HostSecretInput | null;
+        },
       ) => {
         if (
           runtimeSftpSessions.has(sftpSessionRecord.id) ||
@@ -4256,7 +4542,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
-          const credentials = await resolveHostCredentials(host);
+          const credentials = await resolveHostCredentials(
+            host,
+            options?.credentialOverride,
+          );
           if (!credentials) {
             markSftpSessionState(
               sftpSessionRecord.id,
@@ -4265,6 +4554,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             );
             return;
           }
+
+          // 창에서 사용자명을 고쳤을 수 있다 — 고친 값으로 붙어야 한다.
+          host = isSshHostRecord(host) ? refreshSshHost(host) : host;
 
           const security = buildEngineCredential(host, credentials);
 
@@ -4398,6 +4690,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           if (closedDuringConnect) {
             return;
           }
+          // 터미널과 같은 시점에 저장한다. 여기 없으면 SFTP 로만 쓰는 호스트는 붙을 때마다
+          // 비밀번호를 다시 묻는다 — 물어본 비밀을 성공 뒤에만 저장하도록 바꾸면서 빠졌었다.
+          commitConnectionSecrets(host);
           const now = new Date().toISOString();
           set(state => ({
             sftpSessions: patchSftpSessionRecord(
@@ -4439,6 +4734,12 @@ export const useMobileAppStore = create<MobileAppState>()(
                 )
               : t('store.sftpConnectFailed');
           markSftpSessionState(sftpSessionRecord.id, 'error', message);
+          offerCredentialRetry(
+            host,
+            error,
+            { kind: 'sftp', recordId: sftpSessionRecord.id },
+            message,
+          );
           // 터미널과 같은 규칙 — 실패한 단계를 남겨 어디서 막혔는지 보이게 한다.
           patchConnectionView(sftpSessionRecord.id, {
             failureLayer:
@@ -4764,31 +5065,10 @@ export const useMobileAppStore = create<MobileAppState>()(
           syncStatus: { ...state.syncStatus, pendingPush: true },
         }));
 
-        // Trust is already explicit at this point. Keep the local pin even if
-        // the network is down, and retry its encrypted sync through normal sync.
-        if (!get().auth.session) return;
-        try {
-          await callWithFreshAccessToken(async accessToken => {
-            const currentSession = get().auth.session;
-            if (!currentSession) return;
-            const pushedRevision = await postSyncSnapshot(
-              get().settings.serverUrl,
-              accessToken,
-              buildHostMutationSyncPayload(
-                { hosts: [record], secrets: [] },
-                resolveVaultKeyForPush(currentSession),
-              ),
-              resolveVaultEpochForPush(),
-              resolveMobileSyncDataFloor(get().hosts),
-            );
-            storePushedRevision(pushedRevision);
-          });
-        } catch (error) {
-          await handleVaultDekMismatchError(error).catch(() => undefined);
-          set(state => ({
-            syncStatus: { ...state.syncStatus, pendingPush: true },
-          }));
-        }
+        // Trust is already explicit at this point. Keep the local pin even if the network is
+        // down — 아웃박스가 다음 기회에 민다. 예전에는 pendingPush 만 세우고 재시도할 주체가
+        // 없어서, 오프라인에서 신뢰한 인증서가 그 기기에만 남았다.
+        enqueueAndDrain([{ kind: 'hosts', id: record.id, op: 'upsert' }]);
       };
 
       const handleRdpCertificateEvent = async (
@@ -4894,12 +5174,13 @@ export const useMobileAppStore = create<MobileAppState>()(
             protocol === 'vnc' ? host.sshTunnelHostId?.trim() : undefined;
 
           if (protocol === 'vnc' && sshTunnelHostId) {
-            const tunnelHost = get().hosts.find(
+            const tunnelHostRecord = get().hosts.find(
               item => item.id === sshTunnelHostId,
             );
-            if (!tunnelHost || !isSshHostRecord(tunnelHost)) {
+            if (!tunnelHostRecord || !isSshHostRecord(tunnelHostRecord)) {
               throw new Error(t('session.remoteDesktopTunnelHostMissing'));
             }
+            let tunnelHost = tunnelHostRecord;
             if (
               tunnelHost.authType !== 'password' &&
               tunnelHost.authType !== 'privateKey' &&
@@ -4920,6 +5201,8 @@ export const useMobileAppStore = create<MobileAppState>()(
             });
             const credentials = await resolveHostCredentials(tunnelHost);
             if (!credentials) throw new Error(t('store.connectCancelled'));
+            // 창에서 사용자명을 고쳤을 수 있다 — 고친 값으로 터널을 뚫어야 한다.
+            tunnelHost = refreshSshHost(tunnelHost);
             const credential = buildEngineCredential(tunnelHost, credentials);
             if (!credential) {
               throw new Error(getMissingCredentialMessage(tunnelHost));
@@ -5009,6 +5292,9 @@ export const useMobileAppStore = create<MobileAppState>()(
               tunnelAuthToken: opened.authToken,
             };
             runtime.tunnelId = opened.tunnelId;
+            // 터널이 섰다 = 이 홉의 자격증명이 맞았다. 여기서 저장하지 않으면 VNC 를 열 때마다
+            // 게이트웨이 비밀번호를 다시 묻는다.
+            commitConnectionSecrets(tunnelHost);
           } else {
             const route = resolveSyncedTailnetRoute(
               { tailnetId: host.tailnetId?.trim() || undefined },
@@ -5409,6 +5695,8 @@ export const useMobileAppStore = create<MobileAppState>()(
            * false 다 — 홈에서 돌아올 때마다 모달이 뜨면 쓸 수 없다.
            */
           promptForStartupVars?: boolean;
+          /** 인증 실패 재시도 창이 방금 받아 온 자격증명. 저장된 값보다 우선한다. */
+          credentialOverride?: HostSecretInput | null;
         },
       ) => {
         const promptForStartupVars = options?.promptForStartupVars ?? true;
@@ -5441,6 +5729,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             sessionRecord,
             host,
             promptForStartupVars,
+            options?.credentialOverride,
           );
           return;
         }
@@ -5471,6 +5760,8 @@ export const useMobileAppStore = create<MobileAppState>()(
         host: SshHostRecord,
         /** false 면 startup command 스니펫 변수를 묻지 않는다(자동 재연결). */
         promptForStartupVars = true,
+        /** 인증 실패 재시도 창이 방금 받아 온 자격증명. 저장된 값보다 우선한다. */
+        credentialOverride?: HostSecretInput | null,
       ) => {
         let pendingConnection: EngineConnection | null = null;
         let pendingShell: EngineShell | null = null;
@@ -5491,7 +5782,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
-          const credentials = await resolveHostCredentials(host);
+          const credentials = await resolveHostCredentials(
+            host,
+            credentialOverride,
+          );
           if (!credentials) {
             markSessionState(
               sessionRecord.id,
@@ -5500,6 +5794,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             );
             return;
           }
+
+          // 창에서 사용자명을 고쳤을 수 있다 — 고친 값으로 붙어야 한다. 이 줄이 없으면
+          // 방금 고친 사람이 왜 또 실패하는지 알 수 없다(옛 사용자명으로 나간다).
+          host = refreshSshHost(host);
 
           const security = buildEngineCredential(host, credentials);
 
@@ -5779,6 +6077,8 @@ export const useMobileAppStore = create<MobileAppState>()(
             shell,
             backgroundListenerId,
           });
+          // 연결에 성공했으니 방금 쓴 자격증명을 저장한다(데스크톱과 같은 시점).
+          commitConnectionSecrets(host);
           pendingConnection = null;
           pendingShell = null;
           pendingBackgroundListenerId = null;
@@ -5813,6 +6113,12 @@ export const useMobileAppStore = create<MobileAppState>()(
                   )
                 : t('store.sshConnectFailed');
             markSessionState(sessionRecord.id, 'error', message);
+            offerCredentialRetry(
+              host,
+              error,
+              { kind: 'terminal', recordId: sessionRecord.id },
+              message,
+            );
             // 뷰는 지우지 않는다. 실패한 단계가 남아 있어야 사용자가 어디서 막혔는지 읽는다 —
             // 지우면 "실패했습니다" 한 줄만 남고 tailnet 인지 SSH 인지 알 수 없다.
             patchConnectionView(sessionRecord.id, {
@@ -6270,16 +6576,29 @@ export const useMobileAppStore = create<MobileAppState>()(
           // (세대 증가) 이 sync 의 결과는 낡은 것이므로 상태를 덮지 않고 버린다.
           const startedGeneration = vaultSyncGeneration;
           const isStaleSync = () => vaultSyncGeneration !== startedGeneration;
-          set(state => ({
-            syncStatus: {
-              ...state.syncStatus,
-              status: 'syncing',
-              errorMessage: null,
-            },
-          }));
 
           let currentSession = activeSession;
           try {
+            // **당기기 전에 큐부터 민다.** 순서를 여기서 보장한다 — pull 을 부르는 곳이
+            // 여럿이라(30초 폴링·포그라운드 복귀·수동·로그인) 호출부마다 지키게 했더니
+            // 폴링이 빠졌고, 앱을 켜 둔 채 네트워크가 돌아오면 큐가 영영 안 밀렸다.
+            //
+            // 밀지 못해도 **막지 않는다.** 볼트가 잠겨 있으면 밀기는 잠금을 풀기 전까지
+            // 절대 성공하지 않는데, 그때 당기기까지 멈추면 동기화가 통째로 죽는다.
+            // 안 올라간 변경은 아래에서 다시 얹어 지켜 준다.
+            // 당기기 전에 큐부터 민다. 다만 **막지는 않는다** — 밀지 못하는 이유가 볼트가
+            // 아직 확정되지 않아서일 수 있고(그 확정을 pull 이 한다), 그때 pull 까지 멈추면
+            // 서로를 기다리다 동기화가 영영 죽는다. 못 민 변경은 아래에서 다시 얹어 지킨다.
+            await drainSyncOutbox();
+
+            set(state => ({
+              syncStatus: {
+                ...state.syncStatus,
+                status: 'syncing',
+                errorMessage: null,
+              },
+            }));
+
             const serverInfoPromise = fetchServerInfo(
               get().settings.serverUrl,
             ).catch(() => null);
@@ -6520,6 +6839,21 @@ export const useMobileAppStore = create<MobileAppState>()(
               return;
             }
 
+            // **비밀 복원이 끝나기 전에는 이 스냅샷을 손대지 않는다.**
+            //
+            // 아래 경로들은 전부 로컬 상태를 읽거나 쓴다 — 빈 서버 복구는 로컬을 통째로
+            // 재업로드하고, 적용은 로컬과 병합한다. 그 시점 secretsByRef 가 비어 있으면
+            // **호스트만 올라가고 비밀번호는 빠진 채** 리비전이 올라가고, 게다가 여기서
+            // `secureStateReady: true` 가 켜져 밀기 가드까지 무력화된다. 실제로 그렇게 잃었다.
+            if (!get().secureStateReady && secureStateRestorePromise) {
+              await secureStateRestorePromise.catch(() => undefined);
+            }
+            if (!get().secureStateReady) {
+              // 복원이 실패했다. 이 회차는 통째로 건너뛴다 — ensureSecureStateRestored 가
+              // 포그라운드 복귀에서 다시 시도하고, 그때 이 회차가 다시 돈다.
+              return;
+            }
+
             // 서버가 진짜 비어 있는데(tombstone 조차 0 = 초기화 직후/서버 유실) 로컬에
             // 데이터가 있으면, 빈 스냅샷을 적용해 로컬을 비우는 대신 로컬을 재업로드한다
             // — 데스크톱 runBootstrap 과 같은 자연 복구 규칙. 재설정 직후 복구 push 가
@@ -6576,7 +6910,76 @@ export const useMobileAppStore = create<MobileAppState>()(
             if (isStaleSync()) {
               return;
             }
-            await updateSecretsState(nextSecretsByRef, nextHosts);
+            // 원격 스냅샷은 **한 입구로만** 적용한다. 종류마다 따로 덮어쓰면 아직 못 올린
+            // 로컬 변경이 조용히 사라질 수 있고, 실제로 secrets 에서 그렇게 잃었다.
+            // 규칙은 레코드마다 더 최신인 쪽 — 못 올린 변경은 정의상 최신이라 살아남는다.
+            const localBeforeApply = get();
+            const mergedState = mergeSyncedState({
+              hosts: {
+                local: localBeforeApply.hosts,
+                remote: {
+                  live: nextHosts,
+                  tombstones: decodeSyncTombstones(payload.hosts),
+                },
+              },
+              groups: {
+                local: localBeforeApply.groups,
+                remote: {
+                  live: nextGroups,
+                  tombstones: decodeSyncTombstones(payload.groups),
+                },
+              },
+              knownHosts: {
+                local: localBeforeApply.knownHosts,
+                remote: {
+                  live: nextKnownHosts,
+                  tombstones: decodeSyncTombstones(payload.knownHosts),
+                },
+              },
+              secrets: {
+                local: Object.values(localBeforeApply.secretsByRef),
+                remote: {
+                  live: Object.values(nextSecretsByRef),
+                  tombstones: decodeSyncTombstones(payload.secrets),
+                },
+              },
+            });
+            const mergedHosts = sortHosts(mergedState.hosts);
+            const mergedGroups = sortGroups(mergedState.groups);
+            const mergedKnownHosts = mergedState.knownHosts;
+            const mergedSecretsByRef = Object.fromEntries(
+              mergedState.secrets.map(record => [record.secretRef, record]),
+            );
+            // 서버에 없고 삭제된 적도 없는 로컬 레코드는 아직 안 올라간 것이다. 큐에 다시
+            // 넣어 스스로 회복하게 한다 — 큐 항목이 어쩌다 사라져도(로컬 저장 직후 앱이
+            // 죽는 등) 올라가지도 지워지지도 않는 유령 레코드가 남지 않는다.
+            // 이미 큐에 있으면 enqueue 가 합치므로 중복되지 않는다.
+            if (mergedState.unpushed.length > 0) {
+              // **큐에 넣기만 한다.** 여기서 밀면 그 밀기가 아직 반영 전인 로컬을 읽는다 —
+              // 큐에 남아 있던 다른 항목까지 함께 나가면서, 서버에 더 최신 값이 있는
+              // 레코드를 옛 값으로 되돌린다(서버 upsert 는 타임스탬프를 비교하지 않는다).
+              // 다음 회차가 밀면 그때는 병합된 로컬을 읽는다.
+              set(state => {
+                const next = enqueueManySyncOutbox(
+                  state.syncOutbox,
+                  mergedState.unpushed.map(entry => ({
+                    kind: entry.kind,
+                    id: entry.id,
+                    op: 'upsert' as const,
+                  })),
+                );
+                return {
+                  syncOutbox: next,
+                  syncStatus: {
+                    ...state.syncStatus,
+                    pendingPush: next.length > 0,
+                  },
+                };
+              });
+            }
+
+            await updateSecretsState(mergedSecretsByRef, mergedHosts);
+
             if (isStaleSync()) {
               return;
             }
@@ -6611,12 +7014,12 @@ export const useMobileAppStore = create<MobileAppState>()(
             clearOfflineRecoveryLoop();
             set({
               vault: vaultState,
-              groups: nextGroups,
-              hosts: nextHosts,
+              groups: mergedGroups,
+              hosts: mergedHosts,
               awsProfiles: nextAwsProfiles,
               tailnets: nextTailnets,
               snippets: nextSnippets,
-              knownHosts: sortKnownHosts(nextKnownHosts),
+              knownHosts: sortKnownHosts(mergedKnownHosts),
               secureStateReady: true,
               auth: authenticatedAuth,
               syncStatus: readySyncStatus,
@@ -6874,11 +7277,16 @@ export const useMobileAppStore = create<MobileAppState>()(
           activeSessionTabId: null,
           activeConnectionTab: null,
           syncStatus: createDefaultSyncStatus(),
+          // 큐도 계정과 함께 비운다. 남겨 두면 다음에 **다른 계정**으로 로그인했을 때
+          // 그 계정으로 밀려 나간다 — 삭제 항목은 로컬 레코드 없이도 스스로 밀린다.
+          syncOutbox: [],
           pendingBrowserLoginState: null,
           pendingAwsSsoLogin: null,
           pendingServerKeyPrompt: null,
           pendingRdpCertificatePrompt: null,
           pendingCredentialPrompt: null,
+          pendingCredentialRetry: null,
+          syncOutboxFailure: null,
           pendingInteractiveAuthPrompt: null,
           pendingStartupCommandPrompt: null,
           connectionViews: {},
@@ -6919,6 +7327,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         settings: createDefaultMobileSettings(),
         syncStatus: createDefaultSyncStatus(),
         groups: [],
+        syncOutbox: [],
         hosts: [],
         awsProfiles: [],
         tailnets: [],
@@ -6951,6 +7360,8 @@ export const useMobileAppStore = create<MobileAppState>()(
         pendingServerKeyPrompt: null,
         pendingRdpCertificatePrompt: null,
         pendingCredentialPrompt: null,
+        pendingCredentialRetry: null,
+        syncOutboxFailure: null,
         pendingInteractiveAuthPrompt: null,
         pendingStartupCommandPrompt: null,
         connectionViews: {},
@@ -7005,10 +7416,11 @@ export const useMobileAppStore = create<MobileAppState>()(
                   secureStateReady: false,
                 },
               );
-              void restoreStoredSecureStateInBackground(
+              secureStateRestorePromise = restoreStoredSecureStateInBackground(
                 currentServerUrl,
                 currentRestoreVersion,
               );
+              void secureStateRestorePromise;
               void restoreStoredSessionInBackground(
                 storedSession,
                 currentServerUrl,
@@ -7809,6 +8221,22 @@ export const useMobileAppStore = create<MobileAppState>()(
           await persistSynthesizedVaultDescriptor();
           assertVaultOperationContext(operationContext);
         },
+        flushSyncOutbox: async () => {
+          await drainSyncOutbox();
+        },
+        ensureSecureStateRestored: () => {
+          const state = get();
+          if (state.secureStateReady || !state.auth.session) {
+            return;
+          }
+          const nextVersion = secureStateRestoreVersion + 1;
+          secureStateRestoreVersion = nextVersion;
+          secureStateRestorePromise = restoreStoredSecureStateInBackground(
+            state.settings.serverUrl,
+            nextVersion,
+          );
+          void secureStateRestorePromise;
+        },
         syncNow: async () => {
           await syncWithSession();
         },
@@ -7882,6 +8310,10 @@ export const useMobileAppStore = create<MobileAppState>()(
               activeSessionTabId: null,
               activeConnectionTab: null,
               syncStatus: createDefaultSyncStatus(),
+              // 큐도 서버와 함께 비운다. 남겨 두면 옛 서버의 변경이 **새 서버**로 밀려
+              // 나간다 — 삭제 항목은 로컬 레코드 없이도 스스로 밀린다.
+              syncOutbox: [],
+              syncOutboxFailure: null,
               pendingBrowserLoginState: null,
               pendingAwsSsoLogin: null,
             });
@@ -7946,6 +8378,16 @@ export const useMobileAppStore = create<MobileAppState>()(
           ) {
             throw new Error(t('store.replaceOrUnlink'));
           }
+          // 자격증명을 **적다 만 것**은 거절한다. 인증서 방식인데 개인키만 있으면 연결이
+          // 반드시 실패하는 호스트가 하나 생길 뿐이다. 아무것도 안 준 경우(접속할 때 묻는다)
+          // 와 구분해야 하므로 "뭔가는 줬는데 모자란" 때만 막는다.
+          if (
+            credentialMode === 'replace' &&
+            !hasReplacementCredential &&
+            (password || privateKeyPem || certificateText)
+          ) {
+            throw new Error(t('store.replaceOrUnlink'));
+          }
           const secretRef =
             credentialMode === 'preserve'
               ? existingSsh?.secretRef
@@ -7989,32 +8431,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 }
               : null;
 
-          try {
-            await callWithFreshAccessToken(async accessToken => {
-              const currentSession = get().auth.session;
-              if (!currentSession) {
-                throw new Error(t('store.onlineOnly'));
-              }
-              const pushedRevision = await postSyncSnapshot(
-                get().settings.serverUrl,
-                accessToken,
-                buildHostMutationSyncPayload(
-                  {
-                    hosts: [record],
-                    secrets: nextSecret ? [nextSecret] : [],
-                  },
-                  resolveVaultKeyForPush(currentSession),
-                ),
-                resolveVaultEpochForPush(),
-                resolveMobileSyncDataFloor(get().hosts),
-              );
-              storePushedRevision(pushedRevision);
-            });
-          } catch (error) {
-            await handleVaultDekMismatchError(error);
-            throw error;
-          }
-
+          // **로컬 먼저.** 오프라인이어도 호스트가 저장되고, 큐가 다음 기회에 서버로 나른다.
           const nextHosts = sortHosts([
             ...get().hosts.filter(host => host.id !== record.id),
             record,
@@ -8028,10 +8445,22 @@ export const useMobileAppStore = create<MobileAppState>()(
           } else {
             await updateSecretsState(get().secretsByRef, nextHosts);
           }
+
+          enqueueAndDrain([
+            { kind: 'hosts', id: record.id, op: 'upsert' },
+            ...(nextSecret
+              ? [
+                  {
+                    kind: 'secrets' as const,
+                    id: nextSecret.secretRef,
+                    op: 'upsert' as const,
+                  },
+                ]
+              : []),
+          ]);
         },
         // 즐겨찾기 토글 — 데스크톱과 같은 host.favorite 필드를 뒤집는다. saveHost 와 같은
-        // 경로(push 성공 뒤 로컬 반영)를 쓴다: 먼저 로컬만 바꿔 두면 push 가 실패했을 때
-        // 이 기기만 다른 상태로 남는다. 시크릿은 건드리지 않으므로 호스트만 실어 보낸다.
+        // 경로(로컬 먼저 → 아웃박스)를 쓴다. 시크릿은 건드리지 않으므로 호스트만 큐에 넣는다.
         toggleHostFavorite: async (hostId: string) => {
           const host = get().hosts.find(item => item.id === hostId);
           if (!host) {
@@ -8043,38 +8472,17 @@ export const useMobileAppStore = create<MobileAppState>()(
             updatedAt: new Date().toISOString(),
           };
 
-          try {
-            await callWithFreshAccessToken(async accessToken => {
-              const currentSession = get().auth.session;
-              if (!currentSession) {
-                throw new Error(t('store.onlineOnly'));
-              }
-              const pushedRevision = await postSyncSnapshot(
-                get().settings.serverUrl,
-                accessToken,
-                buildHostMutationSyncPayload(
-                  { hosts: [record], secrets: [] },
-                  resolveVaultKeyForPush(currentSession),
-                ),
-                resolveVaultEpochForPush(),
-                resolveMobileSyncDataFloor(get().hosts),
-              );
-              storePushedRevision(pushedRevision);
-            });
-          } catch (error) {
-            await handleVaultDekMismatchError(error);
-            throw error;
-          }
-
+          // 즐겨찾기는 목록에서 곧바로 반응해야 한다. 로컬을 먼저 바꾸고 큐에 넣는다.
+          const nextHosts = sortHosts([
+            ...get().hosts.filter(item => item.id !== hostId),
+            record,
+          ]);
           set({
-            hosts: sortHosts([
-              ...get().hosts.filter(item => item.id !== record.id),
-              record,
-            ]),
+            hosts: nextHosts,
+            secretMetadata: deriveSecretMetadata(nextHosts, get().secretsByRef),
           });
+          enqueueAndDrain([{ kind: 'hosts', id: hostId, op: 'upsert' }]);
         },
-        // EC2 서버 프록시 토글. 즐겨찾기와 같은 경로를 쓴다 — 먼저 로컬만 바꾸면 push 가
-        // 실패했을 때 이 기기만 다른 상태로 남고, 그러면 데스크톱과 접속 경로가 갈린다.
         setAwsSsmServerProxyEnabled: async (
           hostId: string,
           enabled: boolean,
@@ -8089,83 +8497,58 @@ export const useMobileAppStore = create<MobileAppState>()(
             updatedAt: new Date().toISOString(),
           };
 
-          try {
-            await callWithFreshAccessToken(async accessToken => {
-              const currentSession = get().auth.session;
-              if (!currentSession) {
-                throw new Error(t('store.onlineOnly'));
-              }
-              const pushedRevision = await postSyncSnapshot(
-                get().settings.serverUrl,
-                accessToken,
-                buildHostMutationSyncPayload(
-                  { hosts: [record], secrets: [] },
-                  resolveVaultKeyForPush(currentSession),
-                ),
-                resolveVaultEpochForPush(),
-                resolveMobileSyncDataFloor(get().hosts),
-              );
-              storePushedRevision(pushedRevision);
-            });
-          } catch (error) {
-            await handleVaultDekMismatchError(error);
-            throw error;
-          }
-
+          const nextHosts = sortHosts([
+            ...get().hosts.filter(item => item.id !== hostId),
+            record,
+          ]);
           set({
-            hosts: sortHosts([
-              ...get().hosts.filter(item => item.id !== record.id),
-              record,
-            ]),
+            hosts: nextHosts,
+            secretMetadata: deriveSecretMetadata(nextHosts, get().secretsByRef),
           });
+          enqueueAndDrain([{ kind: 'hosts', id: hostId, op: 'upsert' }]);
         },
-        // 호스트 삭제 — tombstone push 성공 후 로컬에서 제거. 연결된 시크릿은 다른
-        // 호스트와 공유될 수 있으므로 남긴다. 라이브 세션도 유지된다(목록에는
-        // "삭제된 호스트"로 표시).
         deleteHost: async (hostId: string) => {
           const host = get().hosts.find(item => item.id === hostId);
           if (!host) {
             return;
           }
 
+          // **로컬 먼저.** 오프라인이어도 지워지고, 큐가 다음 기회에 서버로 나른다.
           const deletedAt = new Date().toISOString();
-          try {
-            await callWithFreshAccessToken(async accessToken => {
-              const currentSession = get().auth.session;
-              if (!currentSession) {
-                throw new Error(t('store.onlineOnly'));
-              }
-              const pushedRevision = await postSyncSnapshot(
-                get().settings.serverUrl,
-                accessToken,
-                buildHostMutationSyncPayload(
-                  { deletedHosts: [{ id: hostId, deletedAt }] },
-                  resolveVaultKeyForPush(currentSession),
-                ),
-                resolveVaultEpochForPush(),
-                resolveMobileSyncDataFloor(get().hosts),
-              );
-              storePushedRevision(pushedRevision);
-            });
-          } catch (error) {
-            await handleVaultDekMismatchError(error);
-            throw error;
-          }
-
           const nextHosts = get().hosts.filter(item => item.id !== hostId);
           set({
             hosts: nextHosts,
             secretMetadata: deriveSecretMetadata(nextHosts, get().secretsByRef),
           });
+          enqueueAndDrain([
+            { kind: 'hosts', id: hostId, op: 'delete', deletedAt },
+          ]);
         },
         // ── 그룹 편집 ───────────────────────────────────────────────────────
         //
         // 규칙은 shared-core 의 순수 함수가 갖고 있다(데스크톱 메인도 같은 것을 쓴다).
-        // 여기서는 다음 상태를 만들어 **서버에 먼저 밀고, 성공한 뒤에 로컬을 바꾼다** —
-        // 순서가 반대면 푸시가 실패했을 때 폰만 바뀐 채로 남아 되돌릴 방법이 없다.
+        // 여기서는 **로컬을 먼저 바꾸고 아웃박스에 넣는다** — 오프라인이어도 편집이 되고,
+        // 큐가 다음 기회에 서버로 나른다.
         //
         // 그룹 이름을 바꾸면 그 아래 호스트의 groupName(경로 문자열)이 전부 다시 쓰이므로
-        // 한 번에 수십 개가 갈 수 있다. 그래서 바뀐 것만 골라 보낸다(updatedAt 대조).
+        // 바뀐 것만 골라 큐에 넣는다(updatedAt 대조).
+        quickConnectSsh: async (input: ParsedQuickSshCommand) => {
+          const existing = findExistingQuickSshHost(input, get().hosts);
+          if (existing) {
+            return get().connectToHost(existing.id);
+          }
+
+          await get().saveHost({
+            label: buildQuickSshHostLabel(input, get().hosts, null),
+            hostname: input.hostname,
+            port: input.port,
+            username: input.username,
+            authType: 'password',
+          });
+          // saveHost 는 id 를 돌려주지 않는다. 같은 주소가 둘일 수 없으므로 다시 찾는다.
+          const created = findExistingQuickSshHost(input, get().hosts);
+          return created ? get().connectToHost(created.id) : null;
+        },
         createGroup: async (name: string, parentPath: string | null) => {
           const timestamp = new Date().toISOString();
           const { groups, created } = createGroupIn(get().groups, {
@@ -8175,8 +8558,8 @@ export const useMobileAppStore = create<MobileAppState>()(
             timestamp,
           });
 
-          await pushGroupMutation({ groups: [created] });
           set({ groups: sortGroups(groups) });
+          enqueueAndDrain([{ kind: 'groups', id: created.id, op: 'upsert' }]);
         },
         renameGroup: async (path: string, name: string) => {
           const timestamp = new Date().toISOString();
@@ -8185,18 +8568,30 @@ export const useMobileAppStore = create<MobileAppState>()(
             timestamp,
           });
 
-          const removedGroupIds = collectRemovedGroupIds(before.groups, result.groups);
-          await pushGroupMutation({
-            groups: result.groups.filter(record => record.updatedAt === timestamp),
-            deletedGroups: removedGroupIds.map(id => ({ id, deletedAt: timestamp })),
-            hosts: result.hosts.filter(record => record.updatedAt === timestamp),
-          });
+          const survivingIds = new Set(result.groups.map(record => record.id));
+          const removedGroupIds = before.groups
+            .filter(record => !survivingIds.has(record.id))
+            .map(record => record.id);
 
           set({
             groups: sortGroups(result.groups),
             hosts: sortHosts(result.hosts),
             secretMetadata: deriveSecretMetadata(result.hosts, get().secretsByRef),
           });
+          enqueueAndDrain([
+            ...result.groups
+              .filter(record => record.updatedAt === timestamp)
+              .map(record => ({ kind: 'groups' as const, id: record.id, op: 'upsert' as const })),
+            ...removedGroupIds.map(id => ({
+              kind: 'groups' as const,
+              id,
+              op: 'delete' as const,
+              deletedAt: timestamp,
+            })),
+            ...result.hosts
+              .filter(record => record.updatedAt === timestamp)
+              .map(record => ({ kind: 'hosts' as const, id: record.id, op: 'upsert' as const })),
+          ]);
         },
         removeGroup: async (path: string, mode: GroupRemoveMode) => {
           const timestamp = new Date().toISOString();
@@ -8205,18 +8600,31 @@ export const useMobileAppStore = create<MobileAppState>()(
             timestamp,
           });
 
-          await pushGroupMutation({
-            groups: result.groups.filter(record => record.updatedAt === timestamp),
-            deletedGroups: result.removedGroupIds.map(id => ({ id, deletedAt: timestamp })),
-            hosts: result.hosts.filter(record => record.updatedAt === timestamp),
-            deletedHosts: result.removedHostIds.map(id => ({ id, deletedAt: timestamp })),
-          });
-
           set({
             groups: sortGroups(result.groups),
             hosts: sortHosts(result.hosts),
             secretMetadata: deriveSecretMetadata(result.hosts, get().secretsByRef),
           });
+          enqueueAndDrain([
+            ...result.groups
+              .filter(record => record.updatedAt === timestamp)
+              .map(record => ({ kind: 'groups' as const, id: record.id, op: 'upsert' as const })),
+            ...result.removedGroupIds.map(id => ({
+              kind: 'groups' as const,
+              id,
+              op: 'delete' as const,
+              deletedAt: timestamp,
+            })),
+            ...result.hosts
+              .filter(record => record.updatedAt === timestamp)
+              .map(record => ({ kind: 'hosts' as const, id: record.id, op: 'upsert' as const })),
+            ...result.removedHostIds.map(id => ({
+              kind: 'hosts' as const,
+              id,
+              op: 'delete' as const,
+              deletedAt: timestamp,
+            })),
+          ]);
         },
         disconnectRemoteDesktopSession: async (sessionId: string) => {
           // 기록을 **지우지 않는다.** closeRemoteDesktopSession 이 status 를 'closed' 로
@@ -8414,7 +8822,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         },
         resumeSession: async (
           sessionId: string,
-          options?: { auto?: boolean },
+          options?: { auto?: boolean; credentialOverride?: HostSecretInput },
         ) => {
           const session = get().sessions.find(item => item.id === sessionId);
           if (!session) {
@@ -8468,6 +8876,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           });
           void connectSessionRecord(session, host, {
             promptForStartupVars: !options?.auto,
+            credentialOverride: options?.credentialOverride,
           });
           return session.id;
         },
@@ -9551,7 +9960,20 @@ export const useMobileAppStore = create<MobileAppState>()(
             () => undefined,
           );
         },
-        submitCredentialPrompt: async (input: HostSecretInput) => {
+        submitCredentialPrompt: async (
+          input: HostSecretInput & { username?: string },
+        ) => {
+          const prompt = get().pendingCredentialPrompt;
+          const host = prompt
+            ? get().hosts.find(item => item.id === prompt.hostId)
+            : undefined;
+          const username = input.username?.trim();
+          if (!username) {
+            throw new Error(t('credentialRetry.usernameRequired'));
+          }
+          if (host && isSshHostRecord(host)) {
+            applyHostUsername(host, username);
+          }
           pendingCredentialResolver?.(input);
           pendingCredentialResolver = null;
           set({ pendingCredentialPrompt: null });
@@ -9560,6 +9982,66 @@ export const useMobileAppStore = create<MobileAppState>()(
           pendingCredentialResolver?.(null);
           pendingCredentialResolver = null;
           set({ pendingCredentialPrompt: null });
+        },
+        submitCredentialRetry: async input => {
+          const pending = get().pendingCredentialRetry;
+          if (!pending) {
+            return;
+          }
+          const host = get().hosts.find(item => item.id === pending.hostId);
+          if (!host || !isSshHostRecord(host)) {
+            set({ pendingCredentialRetry: null });
+            return;
+          }
+
+          const username = input.username.trim();
+          if (!username) {
+            throw new Error(t('credentialRetry.usernameRequired'));
+          }
+
+          // 사용자명은 **먼저 저장한다**(데스크톱과 같다). 다시 붙는 것이 또 실패해도 사용자가
+          // 고쳐 넣은 값은 남아야 한다 — 아니면 매번 같은 오타를 다시 쳐야 한다.
+          applyHostUsername(host, username);
+
+          // 비밀은 여기서 저장하지 않는다. 연결이 성공해야 저장하는 규칙을 그대로 탄다
+          // (resolveHostCredentials → rememberPromptedSecret → commitPromptedSecret).
+          // 틀린 비밀번호를 저장하면 이 창이 필요해진 원인(저장된 값이 틀렸는데 못 고침)을
+          // 다시 만드는 셈이다.
+          const credentialOverride: HostSecretInput = {
+            password: input.password || undefined,
+            passphrase: input.passphrase || undefined,
+            privateKeyPem: input.privateKeyPem || undefined,
+            certificateText: input.certificateText || undefined,
+          };
+
+          set({ pendingCredentialRetry: null });
+
+          if (pending.target.kind === 'terminal') {
+            await get().resumeSession(pending.target.recordId, {
+              credentialOverride,
+            });
+            return;
+          }
+
+          const sftpSession = get().sftpSessions.find(
+            item => item.id === pending.target.recordId,
+          );
+          const sftpHost = get().hosts.find(
+            item => item.id === pending.hostId,
+          );
+          if (
+            !sftpSession ||
+            !sftpHost ||
+            (!isSshHostRecord(sftpHost) && !isAwsEc2HostRecord(sftpHost))
+          ) {
+            return;
+          }
+          void connectSftpSessionRecord(sftpSession, sftpHost, {
+            credentialOverride,
+          });
+        },
+        cancelCredentialRetry: () => {
+          set({ pendingCredentialRetry: null });
         },
         submitInteractiveAuthPrompt: (answer: EngineInteractiveAnswer) => {
           pendingInteractiveAuthResolver?.(answer);
@@ -9592,6 +10074,9 @@ export const useMobileAppStore = create<MobileAppState>()(
         syncStatus: state.syncStatus,
         groups: state.groups,
         hosts: state.hosts,
+        // 못 민 변경은 앱을 껐다 켜도 남아야 한다. 안 그러면 비행기 모드에서 고친 것이
+        // 앱을 내리는 순간 사라진다.
+        syncOutbox: state.syncOutbox,
         // 콜드스타트 첫 접속에도 스니펫이 필요하다 — pull 이 끝나기 전에 붙으면 startup
         // command 가 미해결로 건너뛰어진다.
         //

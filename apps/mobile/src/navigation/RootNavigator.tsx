@@ -27,16 +27,25 @@ export type AuthStackParamList = {
   AuthSettings: undefined;
 };
 
+/** 설정 화면의 섹션. 검색에서 바로 그 자리로 스크롤할 때 쓴다. */
+export type SettingsSectionKey = 'account' | 'server' | 'security' | 'app';
+
 export type MainTabParamList = {
   Home: undefined;
   Sessions: undefined;
-  Settings: undefined;
+  Settings: { section?: SettingsSectionKey } | undefined;
 };
 
 // 메인 탭 위에 얹히는 루트 스택 — 호스트 폼(생성·수정)을 모달로 띄운다.
 export type RootStackParamList = {
   Main: undefined;
-  HostForm: { hostId?: string } | undefined;
+  HostForm:
+    | {
+        hostId?: string;
+        /** 새로 만들 때 미리 채울 그룹 경로. 보고 있던 그룹에 그대로 추가되게 한다. */
+        defaultGroupPath?: string;
+      }
+    | undefined;
 };
 
 interface RootNavigatorProps {

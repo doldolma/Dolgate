@@ -2,6 +2,7 @@ import React, { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
+  Alert,
   Linking,
   StatusBar,
   StyleSheet,
@@ -49,6 +50,15 @@ export function AppRoot(): React.JSX.Element {
   );
   const pendingAwsSsoLogin = useMobileAppStore(
     (state) => state.pendingAwsSsoLogin,
+  );
+  const pendingCredentialRetry = useMobileAppStore(
+    (state) => state.pendingCredentialRetry,
+  );
+  const submitCredentialRetry = useMobileAppStore(
+    (state) => state.submitCredentialRetry,
+  );
+  const cancelCredentialRetry = useMobileAppStore(
+    (state) => state.cancelCredentialRetry,
   );
   const pendingCredentialPrompt = useMobileAppStore(
     (state) => state.pendingCredentialPrompt,
@@ -200,7 +210,42 @@ export function AppRoot(): React.JSX.Element {
         <CredentialPromptModal
           prompt={pendingCredentialPrompt}
           onCancel={cancelCredentialPrompt}
-          onSubmit={(value) => void submitCredentialPrompt(value)}
+          onSubmit={(value) => {
+            void submitCredentialPrompt(value).catch((error: unknown) => {
+              Alert.alert(
+                translate("credentialPrompt.title", {
+                  label: pendingCredentialPrompt?.hostLabel ?? "",
+                }),
+                error instanceof Error && error.message.trim()
+                  ? error.message
+                  : translate("credentialPrompt.defaultMessage"),
+              );
+            });
+          }}
+        />
+        {/* 인증이 깨진 뒤의 재시도. 사전 프롬프트와 같은 창을 쓰되 사용자명 칸이 붙는다 —
+            둘이 동시에 뜨는 일은 없다(하나는 붙기 전, 하나는 실패 후). */}
+        <CredentialPromptModal
+          prompt={pendingCredentialRetry}
+          variant="retry"
+          onCancel={cancelCredentialRetry}
+          onSubmit={(value) => {
+            // 모달이 이미 사용자명을 검사하므로 여기서 던지는 것은 사실상 방어선이다.
+            // 그래도 삼키지는 않는다 — 조용히 아무 일도 안 일어나는 것이 제일 나쁘다.
+            void submitCredentialRetry({
+              ...value,
+              username: value.username ?? "",
+            }).catch((error: unknown) => {
+              Alert.alert(
+                translate("credentialRetry.title", {
+                  label: pendingCredentialRetry?.hostLabel ?? "",
+                }),
+                error instanceof Error && error.message.trim()
+                  ? error.message
+                  : translate("credentialRetry.defaultMessage"),
+              );
+            });
+          }}
         />
         <InteractiveAuthPromptModal
           challenge={pendingInteractiveAuthPrompt?.challenge ?? null}

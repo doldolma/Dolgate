@@ -345,7 +345,11 @@ export function HostFormScreen(): React.JSX.Element {
   const [portDraft, setPortDraft] = useState(String(existing?.port ?? 22));
   const [username, setUsername] = useState(existing?.username ?? "");
   const [authType, setAuthType] = useState<HostAuthType>(initialAuthType);
-  const [groupName, setGroupName] = useState(existing?.groupName ?? "");
+  // 채워 넣은 기본 그룹은 **사용자가 고친 것이 아니다.** 변경 판정 기준선도 이 값이어야
+  // 한다 — 아니면 아무것도 안 건드리고 나가려 할 때 "변경 사항을 버릴까요?" 가 뜬다.
+  const initialGroupName =
+    existing?.groupName ?? route.params?.defaultGroupPath ?? "";
+  const [groupName, setGroupName] = useState(initialGroupName);
   const [password, setPassword] = useState("");
   const [privateKeyPem, setPrivateKeyPem] = useState("");
   const [certificateText, setCertificateText] = useState("");
@@ -397,7 +401,7 @@ export function HostFormScreen(): React.JSX.Element {
     hostname !== (existing?.hostname ?? "") ||
     portDraft !== String(existing?.port ?? 22) ||
     username !== (existing?.username ?? "") ||
-    groupName !== (existing?.groupName ?? "") ||
+    groupName !== initialGroupName ||
     authType !== initialAuthType ||
     credentialMode !== initialCredentialMode ||
     // startup 항목을 빠뜨리면 그것만 고치고 나갈 때 확인 없이 입력이 사라진다.

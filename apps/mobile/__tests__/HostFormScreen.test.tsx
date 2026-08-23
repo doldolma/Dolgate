@@ -13,7 +13,9 @@ import { useMobileAppStore } from "../src/store/useMobileAppStore";
 
 const mockGoBack = jest.fn();
 const mockDispatch = jest.fn();
-let mockRouteParams: { hostId?: string } | undefined;
+let mockRouteParams:
+  | { hostId?: string; defaultGroupPath?: string }
+  | undefined;
 // 화면이 beforeRemove 로 나가기를 가로챈다 — 등록된 콜백을 잡아 두고 테스트에서 직접 부른다.
 let beforeRemoveListener: ((event: unknown) => void) | null = null;
 
@@ -163,6 +165,58 @@ describe("HostFormScreen", () => {
     await act(async () => {
       resetStore();
     });
+  });
+
+  it("does not treat the prefilled group as an unsaved change", async () => {
+    // 채워 넣은 기본 그룹은 사용자가 고친 것이 아니다. 기준선을 안 맞추면 아무것도
+    // 안 건드리고 나가려 할 때 "변경 사항을 버릴까요?" 가 뜬다.
+    mockRouteParams = { defaultGroupPath: "test" };
+    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+
+    await act(async () => {
+      renderForm();
+    });
+
+    const untouched = {
+      preventDefault: jest.fn(),
+      data: { action: { type: "POP" } },
+    };
+    await act(async () => {
+      beforeRemoveListener?.(untouched);
+    });
+
+    expect(untouched.preventDefault).not.toHaveBeenCalled();
+    expect(alertSpy).not.toHaveBeenCalled();
+    alertSpy.mockRestore();
+  });
+
+  it("starts in the group the list was showing", async () => {
+    // 그룹을 열어 둔 채 추가하면 그 그룹에 넣으려는 것이다. 폼에서 다시 고르게 하면
+    // 손이 한 번 더 가고, 안 고르면 뿌리에 떨어진다.
+    mockRouteParams = { defaultGroupPath: "work/aws" };
+    const saveHostMock = jest.fn(async () => undefined);
+    useMobileAppStore.setState({ saveHost: saveHostMock });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderForm();
+    });
+
+    expect(findInput(tree!.root, "그룹").props.value).toBe("work/aws");
+
+    await act(async () => {
+      findInput(tree!.root, "이름").props.onChangeText("New host");
+      findInput(tree!.root, "호스트").props.onChangeText("new.example.com");
+      findInput(tree!.root, "사용자").props.onChangeText("deploy");
+      findInput(tree!.root, "비밀번호").props.onChangeText("hunter2");
+    });
+    await act(async () => {
+      findSaveButton(tree!.root, "호스트 추가").props.onPress();
+    });
+
+    expect(saveHostMock).toHaveBeenCalledWith(
+      expect.objectContaining({ groupName: "work/aws" }),
+    );
   });
 
   it("collects the form into saveHost and goes back on success", async () => {

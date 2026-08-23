@@ -1,6 +1,6 @@
 import React from "react";
 import renderer, { act } from "react-test-renderer";
-import { Alert, BackHandler, FlatList, Platform, TextInput } from "react-native";
+import { Alert, BackHandler, FlatList, Platform, Text, TextInput } from "react-native";
 import type {
   AuthState,
   GroupRecord,
@@ -724,6 +724,35 @@ describe("HomeScreen group browsing", () => {
     });
   });
 
+  // 동기화는 **사용자가 신경 쓸 일이 아니다.** 대기 건수도, 실패 이유도 홈에 띄우지
+  // 않는다 — 알아서 올라가고, 안 되면 설정의 동기화 상태 한 줄이 말해 준다.
+  it("never shows a sync queue banner", async () => {
+    act(() => {
+      useMobileAppStore.setState({
+        syncOutbox: [{ kind: "hosts", id: "h1", op: "upsert" }],
+        syncOutboxFailure: { count: 5, message: "볼트 잠금을 풀어야 합니다." },
+      });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    const text = tree!.root
+      .findAllByType(Text)
+      .map((node) => node.props.children)
+      .filter((child) => typeof child === "string") as string[];
+    expect(text.some((line) => line.includes("동기화 대기"))).toBe(false);
+    expect(
+      text.some((line) => line.includes("볼트 잠금을 풀어야 합니다.")),
+    ).toBe(false);
+
+    act(() => {
+      useMobileAppStore.setState({ syncOutbox: [], syncOutboxFailure: null });
+    });
+  });
+
   // 그룹 꾹 누르기 → 이름 변경. **시트를 먼저 닫아야 한다** — React Native 는 Modal 두 개가
   // 겹치면 나중 것이 아래 깔려, 입력 모달을 띄워도 탭이 전부 시트로 가 "눌러도 아무 일이
   // 없는" 상태가 된다. iOS 는 닫히는 도중 띄우기도 무시하므로 onDismiss 를 기다린다.
@@ -841,6 +870,27 @@ describe("HomeScreen group browsing", () => {
     // 가장 흔한 동작이라 한 탭으로 간다 — 무엇을 추가할지 먼저 묻지 않는다.
     expect(mockNavigate).toHaveBeenCalledWith("HostForm", undefined);
 
+    // 그룹을 열어 둔 채 추가하면 그 그룹이 미리 채워진다 — 열어 둔 그룹에 넣으려는 것이
+    // 뻔한데 폼에서 다시 고르게 하면 손이 한 번 더 간다(데스크톱은 이미 그렇게 한다).
+    const serversButton = tree!.root.findByProps({
+      accessibilityLabel: "Servers 그룹 열기",
+    });
+    await act(async () => {
+      serversButton.props.onPress();
+    });
+    await act(async () => {
+      tree!.root
+        .findAll(
+          (node) =>
+            node.props.accessibilityLabel === "호스트 추가" &&
+            typeof node.props.onPress === "function",
+        )[0]
+        .props.onPress();
+    });
+    expect(mockNavigate).toHaveBeenLastCalledWith("HostForm", {
+      defaultGroupPath: "Servers",
+    });
+
     await act(async () => {
       jest.runOnlyPendingTimers();
       tree!.unmount();
@@ -924,6 +974,158 @@ describe("HomeScreen group browsing", () => {
     expect(deleteHostMock).toHaveBeenCalledTimes(1);
 
     alertSpy.mockRestore();
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+  // ── 검색 = 명령 팔레트 ────────────────────────────────────────────────────
+  // 데스크톱 팔레트를 그대로 옮긴 것이라, 데스크톱에서 되는 네 가지가 여기서도 돼야 한다.
+
+  it("keeps connect and the long-press menu on search results", async () => {
+    const connectMock = jest.fn(async (hostId: string) => `session:${hostId}`);
+    useMobileAppStore.setState({ connectToHost: connectMock });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    const searchInput = tree!.root.findByType(TextInput);
+    await act(async () => {
+      searchInput.props.onChangeText("nas");
+    });
+
+    const card = tree!.root.findByProps({
+      accessibilityLabel: "NAS Shell 접속",
+    });
+
+    // 탭 = 바로 접속.
+    await act(async () => {
+      card.props.onPress();
+    });
+    expect(connectMock).toHaveBeenCalledWith(expect.any(String));
+    expect(mockNavigate).toHaveBeenCalledWith("Sessions");
+
+    // 길게 = 수정·삭제까지 있는 시트. 검색 결과를 동작 줄로 바꿨더니 이 길이 통째로
+    // 사라져서 검색해서 호스트를 고칠 수 없었다 — 그래서 카드를 그대로 둔다.
+    await act(async () => {
+      card.props.onLongPress();
+    });
+    expect(
+      tree!.root.findAll(
+        (node) =>
+          node.props.accessibilityLabel === "수정" &&
+          typeof node.props.onPress === "function",
+      )[0],
+    ).toBeTruthy();
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+
+  it("offers an instant SSH connection when the query reads as an address", async () => {
+    const quickConnectMock = jest.fn(async () => "session:quick");
+    useMobileAppStore.setState({ quickConnectSsh: quickConnectMock });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    const searchInput = tree!.root.findByType(TextInput);
+    // 이름만 치면 검색이어야 한다 — 여기서 즉석 접속이 뜨면 검색할 때마다 이 줄을 지나친다.
+    await act(async () => {
+      searchInput.props.onChangeText("nas");
+    });
+    expect(collectText(tree!.toJSON()).join(" ")).not.toContain(" 에 접속");
+
+    await act(async () => {
+      searchInput.props.onChangeText("ops@10.0.0.9:2222");
+    });
+
+    const quickRow = tree!.root.findAll(
+      (node) =>
+        typeof node.props.accessibilityLabel === "string" &&
+        node.props.accessibilityLabel.includes("ops@10.0.0.9:2222"),
+    )[0];
+    expect(quickRow).toBeTruthy();
+    await act(async () => {
+      quickRow.props.onPress();
+    });
+
+    expect(quickConnectMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        username: "ops",
+        hostname: "10.0.0.9",
+        port: 2222,
+      }),
+    );
+    expect(mockNavigate).toHaveBeenCalledWith("Sessions");
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+
+  it("jumps to a settings section from the search field", async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    const searchInput = tree!.root.findByType(TextInput);
+    await act(async () => {
+      searchInput.props.onChangeText("보안");
+    });
+
+    const settingsRow = tree!.root.findAll(
+      (node) =>
+        typeof node.props.accessibilityLabel === "string" &&
+        node.props.accessibilityLabel.startsWith("설정 —"),
+    )[0];
+    expect(settingsRow).toBeTruthy();
+    await act(async () => {
+      settingsRow.props.onPress();
+    });
+
+    expect(mockNavigate).toHaveBeenCalledWith("Settings", {
+      section: "security",
+    });
+
+    // 호스트를 찾는 도중에 끼어들면 안 된다 — "nas" 의 첫 글자 "n" 은 예전에 account·
+    // server·app 을 한꺼번에 걸어 설정 줄 셋을 목록 맨 위로 올렸다가 다음 글자에서 지웠다.
+    await act(async () => {
+      searchInput.props.onChangeText("n");
+    });
+    expect(collectText(tree!.toJSON()).join(" ")).not.toContain("설정 —");
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+
+  it("does not add per-host action rows next to the cards", async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    const searchInput = tree!.root.findByType(TextInput);
+    await act(async () => {
+      searchInput.props.onChangeText("nas");
+    });
+
+    // 카드가 이미 탭=접속, 길게=SFTP 를 한다. 같은 일을 하는 줄을 더 내면 목록만 길어지고
+    // 카드가 밀려난다 — 팔레트에서 가져온 것은 카드가 못 하는 것뿐이다.
+    const text = collectText(tree!.toJSON());
+    expect(text.filter((part) => part.includes("NAS Shell"))).toHaveLength(1);
+    expect(text.join(" ")).not.toContain("SFTP 열기");
+
     await act(async () => {
       jest.runOnlyPendingTimers();
       tree!.unmount();

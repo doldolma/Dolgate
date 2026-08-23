@@ -7,6 +7,7 @@ import type {
   SshHostRecord,
   SyncPayloadV2,
 } from "@dolssh/shared-core";
+import { isSshHostRecord } from "@dolssh/shared-core";
 import { toByteArray } from "base64-js";
 import { Buffer } from "buffer";
 import {
@@ -153,6 +154,9 @@ function resetStore(overrides?: {
     pendingBrowserLoginState: null,
     pendingServerKeyPrompt: null,
     pendingCredentialPrompt: null,
+    pendingCredentialRetry: null,
+    syncOutbox: [],
+    syncOutboxFailure: null,
   });
 }
 
@@ -324,7 +328,10 @@ describe("useMobileAppStore host mutations", () => {
     expect(useMobileAppStore.getState().hosts).toHaveLength(0);
   });
 
-  it("keeps local state untouched when the push fails", async () => {
+  // 쓰기는 로컬 우선이다 — 서버가 죽어 있어도 호스트는 저장되고, 못 민 변경은 아웃박스에
+  // 남아 다음 기회에 나간다. 예전에는 push 가 실패하면 로컬도 안 바뀌어 오프라인에서
+  // 아무것도 할 수 없었다.
+  it("keeps the local change and queues it when the push fails", async () => {
     fetchMock.mockImplementation(async (input) => {
       const path = new URL(String(input)).pathname;
       if (path === "/sync") {
@@ -332,22 +339,23 @@ describe("useMobileAppStore host mutations", () => {
       }
       throw new Error(`unexpected fetch path: ${path}`);
     });
-
     await act(async () => {
       resetStore({ auth: createAuthenticatedState() });
     });
 
-    await expect(
-      useMobileAppStore.getState().saveHost({
+    await act(async () => {
+      await useMobileAppStore.getState().saveHost({
         label: "Broken push",
         hostname: "example.com",
         port: 22,
         username: "ubuntu",
         authType: "password",
-      }),
-    ).rejects.toThrow("서버 오류가 발생했습니다.");
+      });
+    });
 
-    expect(useMobileAppStore.getState().hosts).toHaveLength(0);
+    expect(useMobileAppStore.getState().hosts).toHaveLength(1);
+    expect(useMobileAppStore.getState().syncOutbox).toHaveLength(1);
+    expect(useMobileAppStore.getState().syncStatus.pendingPush).toBe(true);
   });
 
   it("preserves desktop-managed fields and identity when editing", async () => {
@@ -626,16 +634,21 @@ describe("useMobileAppStore host mutations", () => {
     ).toBe(0);
   });
 
-  it("refuses to save while unauthenticated", async () => {
-    await expect(
-      useMobileAppStore.getState().saveHost({
-        label: "Nope",
+  // 로그아웃 상태에서도 저장된다. 서버로 밀 수 없을 뿐이라 큐에 남고, 로그인하면 나간다.
+  it("saves locally while signed out and queues the push", async () => {
+    await act(async () => {
+      await useMobileAppStore.getState().saveHost({
+        label: "Offline",
         hostname: "example.com",
         port: 22,
         username: "ubuntu",
         authType: "password",
-      }),
-    ).rejects.toThrow("온라인 로그인 상태에서만 사용할 수 있습니다.");
+      });
+    });
+
+    expect(useMobileAppStore.getState().hosts).toHaveLength(1);
+    expect(useMobileAppStore.getState().syncOutbox).toHaveLength(1);
+    // 세션이 없으니 서버에 닿지도 않는다.
     expect(fetchMock).not.toHaveBeenCalled();
   });
   it("sets and clears the startup command", async () => {
@@ -707,5 +720,401 @@ describe("useMobileAppStore host mutations", () => {
         },
       }),
     ).rejects.toThrow();
+  });
+  // ── 인증 실패 재시도 ────────────────────────────────────────────────────────
+  // 데스크톱 CredentialRetryDialog 와 같은 자리다. 여기서 고친 사용자명은 호스트에 남고,
+  // 다시 넣은 비밀은 **저장된 값을 덮어** 다음 연결에 쓰인다.
+
+  it("saves the corrected username and retries with the new credentials", async () => {
+    const resumeSession = jest.fn(async () => "session-1");
+    resetStore({
+      auth: createAuthenticatedState(),
+      hosts: [createExistingHost()],
+      secretsByRef: {
+        "secret-1": {
+          secretRef: "secret-1",
+          label: "Existing host",
+          updatedAt: "2026-07-01T00:00:00.000Z",
+          password: "stale-password",
+        },
+      },
+    });
+    useMobileAppStore.setState({
+      resumeSession,
+      pendingCredentialRetry: {
+        hostId: "host-1",
+        hostLabel: "Existing host",
+        target: { kind: "terminal", recordId: "session-1" },
+        authType: "password",
+        message: "인증에 실패했습니다.",
+        initialUsername: "ubuntu",
+      },
+    });
+
+    await act(async () => {
+      await useMobileAppStore
+        .getState()
+        .submitCredentialRetry({ username: "  admin  ", password: "fresh" });
+    });
+
+    const host = useMobileAppStore
+      .getState()
+      .hosts.find((item) => item.id === "host-1");
+    expect(host).toMatchObject({ username: "admin" });
+    // 로컬 우선 + 아웃박스 — 로그인·네트워크 없이도 고쳐져야 한다.
+    expect(useMobileAppStore.getState().syncOutbox).toContainEqual(
+      expect.objectContaining({ kind: "hosts", id: "host-1", op: "upsert" }),
+    );
+
+    // 저장된(틀린) 비밀번호가 아니라 방금 넣은 것으로 다시 붙는다. 이 덮어쓰기가 없으면
+    // 서버에서 비번을 바꾼 호스트는 모바일에서 영영 못 고친다.
+    expect(resumeSession).toHaveBeenCalledWith("session-1", {
+      credentialOverride: expect.objectContaining({ password: "fresh" }),
+    });
+    expect(useMobileAppStore.getState().pendingCredentialRetry).toBeNull();
+
+    // 비밀은 아직 저장하지 않는다 — 연결이 성공해야 저장한다.
+    expect(
+      useMobileAppStore.getState().secretsByRef["secret-1"]?.password,
+    ).toBe("stale-password");
+  });
+
+  it("keeps the window open when the username is blank", async () => {
+    const resumeSession = jest.fn(async () => null);
+    resetStore({
+      auth: createAuthenticatedState(),
+      hosts: [createExistingHost()],
+    });
+    const pending = {
+      hostId: "host-1",
+      hostLabel: "Existing host",
+      target: { kind: "terminal" as const, recordId: "session-1" },
+      authType: "password" as const,
+      message: null,
+      initialUsername: "ubuntu",
+    };
+    useMobileAppStore.setState({ resumeSession, pendingCredentialRetry: pending });
+
+    await act(async () => {
+      await expect(
+        useMobileAppStore
+          .getState()
+          .submitCredentialRetry({ username: "   ", password: "fresh" }),
+      ).rejects.toThrow();
+    });
+
+    expect(resumeSession).not.toHaveBeenCalled();
+    expect(useMobileAppStore.getState().pendingCredentialRetry).toEqual(pending);
+  });
+
+  it("leaves the username alone when it did not change", async () => {
+    const resumeSession = jest.fn(async () => "session-1");
+    resetStore({
+      auth: createAuthenticatedState(),
+      hosts: [createExistingHost()],
+    });
+    useMobileAppStore.setState({
+      resumeSession,
+      syncOutbox: [],
+      pendingCredentialRetry: {
+        hostId: "host-1",
+        hostLabel: "Existing host",
+        target: { kind: "terminal", recordId: "session-1" },
+        authType: "password",
+        message: null,
+        initialUsername: "ubuntu",
+      },
+    });
+
+    await act(async () => {
+      await useMobileAppStore
+        .getState()
+        .submitCredentialRetry({ username: "ubuntu", password: "fresh" });
+    });
+
+    // 비밀번호만 고친 경우다. 호스트를 건드리지 않아야 updatedAt 이 튀지 않고, 아웃박스에도
+    // 올릴 것이 없다.
+    expect(useMobileAppStore.getState().syncOutbox).toEqual([]);
+    expect(
+      useMobileAppStore.getState().hosts.find((item) => item.id === "host-1")
+        ?.updatedAt,
+    ).toBe("2026-07-01T00:00:00.000Z");
+    expect(resumeSession).toHaveBeenCalled();
+  });
+  it("saves a username corrected in the pre-connect window", async () => {
+    resetStore({
+      auth: createAuthenticatedState(),
+      hosts: [createExistingHost()],
+    });
+    useMobileAppStore.setState({
+      syncOutbox: [],
+      pendingCredentialPrompt: {
+        hostId: "host-1",
+        hostLabel: "Existing host",
+        authType: "password",
+        message: null,
+        initialValue: {},
+        initialUsername: "ubuntu",
+      },
+    });
+
+    await act(async () => {
+      await useMobileAppStore
+        .getState()
+        .submitCredentialPrompt({ username: "admin", password: "fresh" });
+    });
+
+    // 이 창에서 고친 사용자명도 호스트에 남아야 한다 — 안 그러면 붙어 보고 실패할 때까지
+    // 기다렸다 재시도 창에서 다시 고쳐야 한다.
+    expect(
+      useMobileAppStore.getState().hosts.find((item) => item.id === "host-1"),
+    ).toMatchObject({ username: "admin" });
+    expect(useMobileAppStore.getState().syncOutbox).toContainEqual(
+      expect.objectContaining({ kind: "hosts", id: "host-1", op: "upsert" }),
+    );
+    expect(useMobileAppStore.getState().pendingCredentialPrompt).toBeNull();
+  });
+
+  it("rejects a blank username in the pre-connect window", async () => {
+    resetStore({
+      auth: createAuthenticatedState(),
+      hosts: [createExistingHost()],
+    });
+    const prompt = {
+      hostId: "host-1",
+      hostLabel: "Existing host",
+      authType: "password" as const,
+      message: null,
+      initialValue: {},
+      initialUsername: "ubuntu",
+    };
+    useMobileAppStore.setState({ pendingCredentialPrompt: prompt });
+
+    await act(async () => {
+      await expect(
+        useMobileAppStore
+          .getState()
+          .submitCredentialPrompt({ username: "  ", password: "fresh" }),
+      ).rejects.toThrow();
+    });
+
+    expect(useMobileAppStore.getState().pendingCredentialPrompt).toEqual(prompt);
+  });
+  it("does not push before the keychain secrets are restored", async () => {
+    // 비밀은 앱 시작 후 뒤늦게 복원된다. 그 전에 밀면 secrets 항목이 보낼 것을 못 찾아
+    // 큐에서 조용히 빠지고, 호스트만 올라가고 **비밀번호는 영영 안 올라간다.**
+    const pushed: SyncPayloadV2[] = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/sync" && init?.method === "POST") {
+        pushed.push(JSON.parse(String(init.body)) as SyncPayloadV2);
+        return createJsonResponse("", 202);
+      }
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+
+    resetStore({
+      auth: createAuthenticatedState(),
+      hosts: [createExistingHost()],
+    });
+    useMobileAppStore.setState({
+      secureStateReady: false,
+      secretsByRef: {},
+      syncOutbox: [
+        { kind: "hosts", id: "host-1", op: "upsert" },
+        { kind: "secrets", id: "secret-1", op: "upsert" },
+      ],
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().flushSyncOutbox();
+    });
+
+    // 아무것도 밀지 않고, 큐를 그대로 둔다.
+    expect(pushed).toHaveLength(0);
+    expect(useMobileAppStore.getState().syncOutbox).toHaveLength(2);
+
+    // 복원이 끝나면 그때 함께 올라간다.
+    useMobileAppStore.setState({
+      secureStateReady: true,
+      secretsByRef: {
+        "secret-1": {
+          secretRef: "secret-1",
+          label: "Existing host",
+          updatedAt: "2026-07-01T00:00:00.000Z",
+          password: "hunter2",
+        },
+      },
+    });
+    await act(async () => {
+      await useMobileAppStore.getState().flushSyncOutbox();
+    });
+
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]!.secrets).toHaveLength(1);
+    expect(useMobileAppStore.getState().syncOutbox).toEqual([]);
+  });
+  it("retries the keychain restore instead of stalling sync forever", async () => {
+    // 비밀 복원이 실패하면 secureStateReady 가 false 로 남고, 그동안은 큐를 밀지 않는다
+    // (비밀 값 없이 밀면 secrets 항목이 버려져 비밀번호가 사라진다). 그대로 두면 앱을 껐다
+    // 켜기 전까지 동기화가 멈춘 채이므로, 포그라운드 복귀 때 다시 시도해 스스로 풀린다.
+    const pushed: SyncPayloadV2[] = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/sync" && init?.method === "POST") {
+        pushed.push(JSON.parse(String(init.body)) as SyncPayloadV2);
+        return createJsonResponse("", 202);
+      }
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+
+    resetStore({
+      auth: createAuthenticatedState(),
+      hosts: [createExistingHost()],
+    });
+    useMobileAppStore.setState({
+      secureStateReady: false,
+      syncOutbox: [{ kind: "hosts", id: "host-1", op: "upsert" }],
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().flushSyncOutbox();
+    });
+    expect(pushed).toHaveLength(0);
+
+    // 복원 재시도가 성공하면 secureStateReady 가 켜지고, 그때부터 큐가 나간다.
+    await act(async () => {
+      useMobileAppStore.getState().ensureSecureStateRestored();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(useMobileAppStore.getState().secureStateReady).toBe(true);
+
+    await act(async () => {
+      await useMobileAppStore.getState().flushSyncOutbox();
+    });
+    expect(pushed).toHaveLength(1);
+  });
+  it("uploads the password created while offline once the network returns", async () => {
+    // 오프라인에서 만든 자격증명이 나중에 실제로 서버로 나가는지 — 호스트만 올라가고
+    // 비밀 본문이 빠지면 다른 기기에서 연결이 안 된다.
+    const pushed: SyncPayloadV2[] = [];
+    let online = false;
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/sync" && init?.method === "POST") {
+        if (!online) {
+          throw new Error("offline");
+        }
+        pushed.push(JSON.parse(String(init.body)) as SyncPayloadV2);
+        return createJsonResponse("", 202);
+      }
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+
+    resetStore({ auth: createAuthenticatedState() });
+
+    await act(async () => {
+      await useMobileAppStore.getState().saveHost({
+        label: "Offline host",
+        hostname: "offline.example.com",
+        port: 22,
+        username: "ubuntu",
+        authType: "password",
+        groupName: null,
+        credentials: { password: "hunter2" },
+      });
+    });
+
+    // 로컬에는 비밀이 들어갔고, 큐에는 호스트와 비밀이 함께 대기한다.
+    const created = useMobileAppStore
+      .getState()
+      .hosts.filter(isSshHostRecord)
+      .find((host) => host.hostname === "offline.example.com");
+    expect(created?.secretRef).toBeTruthy();
+    expect(
+      useMobileAppStore.getState().secretsByRef[created!.secretRef!]?.password,
+    ).toBe("hunter2");
+    expect(
+      useMobileAppStore
+        .getState()
+        .syncOutbox.map((entry) => entry.kind)
+        .sort(),
+    ).toEqual(["hosts", "secrets"]);
+
+    online = true;
+    await act(async () => {
+      await useMobileAppStore.getState().flushSyncOutbox();
+    });
+
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]!.hosts).toHaveLength(1);
+    // 비밀 본문이 함께 올라가야 한다.
+    expect(pushed[0]!.secrets).toHaveLength(1);
+    expect(
+      decryptRecord<{ password?: string }>(
+        pushed[0]!.secrets[0]!.encrypted_payload,
+      ).password,
+    ).toBe("hunter2");
+    expect(useMobileAppStore.getState().syncOutbox).toEqual([]);
+  });
+  it("uploads a credential added to an existing host while offline", async () => {
+    // 이미 있던 호스트에 오프라인에서 자격증명을 붙인 경우. 호스트만 올라가고 비밀 본문이
+    // 빠지면, 다른 기기에는 "자격증명이 달린 호스트" 만 생기고 실제 비밀번호는 없다.
+    const pushed: SyncPayloadV2[] = [];
+    let online = false;
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/sync" && init?.method === "POST") {
+        if (!online) {
+          throw new Error("offline");
+        }
+        pushed.push(JSON.parse(String(init.body)) as SyncPayloadV2);
+        return createJsonResponse("", 202);
+      }
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+
+    const bare: SshHostRecord = {
+      ...createExistingHost(),
+      secretRef: null,
+      jumpHostIds: undefined,
+      env: undefined,
+      startupCommand: undefined,
+    };
+    resetStore({ auth: createAuthenticatedState(), hosts: [bare] });
+
+    await act(async () => {
+      await useMobileAppStore.getState().saveHost({
+        hostId: bare.id,
+        label: bare.label,
+        hostname: bare.hostname,
+        port: bare.port,
+        username: bare.username,
+        authType: "password",
+        groupName: bare.groupName,
+        credentials: { password: "hunter2" },
+      });
+    });
+
+    const updated = useMobileAppStore
+      .getState()
+      .hosts.filter(isSshHostRecord)
+      .find((host) => host.id === bare.id);
+    expect(updated?.secretRef).toBeTruthy();
+
+    online = true;
+    await act(async () => {
+      await useMobileAppStore.getState().flushSyncOutbox();
+    });
+
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]!.secrets).toHaveLength(1);
+    expect(
+      decryptRecord<{ password?: string }>(
+        pushed[0]!.secrets[0]!.encrypted_payload,
+      ).password,
+    ).toBe("hunter2");
   });
 });

@@ -426,7 +426,14 @@
     "groupHostCount": "{{count}} hosts",
     "groupHostCountOne": "{{count}} host",
     "groupMeta": "Groups {{meta}}",
-    "connectHost": "Connect to {{name}}"
+    "connectHost": "Connect to {{name}}",
+    "action": {
+      "quickConnect": "Connect to {{target}}",
+      "quickConnectMeta": "SSH · saved as a new host if it is not in your list",
+      "settings": "Settings — {{section}}",
+      "quickConnectFailedTitle": "Could not connect",
+      "quickConnectFailed": "Please try again in a moment."
+    }
   },
   "session": {
     "noSessionsTitle": "No open sessions.",
@@ -512,6 +519,13 @@
     "importCertFromFile": "Import a certificate file",
     "passphraseHint": "If the private key has a passphrase, enter it too.",
     "saveAndConnect": "Save and connect"
+  },
+  "credentialRetry": {
+    "title": "{{label}} authentication failed",
+    "defaultMessage": "Check the username and password, then try again.",
+    "usernameLabel": "Username",
+    "usernameRequired": "Enter a username.",
+    "submit": "Reconnect"
   },
   "mobileLib": {
     "vaultRequestTimeout": "The sync passphrase request timed out. Check your network and try again.",

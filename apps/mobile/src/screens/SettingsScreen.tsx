@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 } from "@dolssh/shared-core";
-import { useNavigation } from "@react-navigation/native";
-import type { NavigationProp } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
+import type { NavigationProp, RouteProp } from "@react-navigation/native";
+import type { LayoutChangeEvent } from "react-native";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -24,7 +25,10 @@ import {
   PRIVACY_POLICY_URL,
   getSettingsValidationMessage,
 } from "../lib/mobile";
-import type { MainTabParamList } from "../navigation/RootNavigator";
+import type {
+  MainTabParamList,
+  SettingsSectionKey,
+} from "../navigation/RootNavigator";
 import { useScreenPadding } from "../lib/screen-layout";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
@@ -44,6 +48,9 @@ import {
 interface SettingsContentProps {
   mode: "auth" | "full";
   onServerUrlSaved?: () => void;
+  // 홈 검색에서 "설정 — 보안" 같은 항목을 고르면 그 그룹까지 스크롤해서 보여 준다.
+  focusSection?: SettingsSectionKey;
+  onSectionFocused?: () => void;
 }
 
 // 언어 이름은 그 언어로 적는다(자기 언어를 못 읽는 사용자가 없게).
@@ -59,6 +66,8 @@ const THEME_OPTIONS: readonly AppTheme[] = ["system", "light", "dark"];
 function SettingsContent({
   mode,
   onServerUrlSaved,
+  focusSection,
+  onSectionFocused,
 }: SettingsContentProps): React.JSX.Element {
   const { t: translate } = useTranslation();
   const palette = useMobilePalette();
@@ -144,6 +153,40 @@ function SettingsContent({
       auth.status === "offline-authenticated") &&
     Boolean(auth.session);
   const showFullSettings = mode === "full" && hasAuthenticatedSession;
+
+  // 섹션 직행 — 그룹이 실제로 배치된 뒤라야 위치를 알 수 있어서, onLayout 으로 받아 둔 y 를
+  // 쓴다. 요청이 먼저 오고 배치가 나중일 수도 있으므로 요청을 들고 있다가 y 가 채워지면 간다.
+  const scrollRef = useRef<ScrollView | null>(null);
+  const sectionOffsets = useRef<Partial<Record<SettingsSectionKey, number>>>({});
+  const [layoutTick, setLayoutTick] = useState(0);
+
+  const handleSectionLayout = useCallback(
+    (section: SettingsSectionKey) => (event: LayoutChangeEvent) => {
+      const next = event.nativeEvent.layout.y;
+      if (sectionOffsets.current[section] === next) {
+        return;
+      }
+      sectionOffsets.current[section] = next;
+      setLayoutTick((tick) => tick + 1);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!focusSection) {
+      return;
+    }
+    const offset = sectionOffsets.current[focusSection];
+    if (offset === undefined) {
+      return;
+    }
+    // 그룹 머리글이 화면 맨 위에 딱 붙으면 잘린 것처럼 보인다 — 조금 위를 남긴다.
+    scrollRef.current?.scrollTo({
+      y: Math.max(offset - 12, 0),
+      animated: true,
+    });
+    onSectionFocused?.();
+  }, [focusSection, layoutTick, onSectionFocused]);
   const canSaveServerUrl = !validationMessage && !savingServerUrl;
 
   // 정책 문서는 앱 안의 브라우저 시트에서 띄운다 — 시스템 브라우저로 나가도 규정상 문제는
@@ -370,6 +413,7 @@ function SettingsContent({
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={[
         styles.screen,
         {
@@ -387,6 +431,7 @@ function SettingsContent({
     >
       {showFullSettings ? (
         <SettingsGroup
+          onLayout={handleSectionLayout("account")}
           header={translate("settings.sections.account")}
           footer={
             auth.errorMessage ??
@@ -479,6 +524,7 @@ function SettingsContent({
       ) : null}
 
       <SettingsGroup
+        onLayout={handleSectionLayout("server")}
         header={translate("settings.sections.server")}
         footer={
           showFullSettings
@@ -558,7 +604,10 @@ function SettingsContent({
       {/* known host 지문과 자격증명 이름을 늘어놓으면 화면 대부분이 디버그 목록이 된다 —
           개수만 보여준다. */}
       {showFullSettings ? (
-        <SettingsGroup header={translate("settings.sections.security")}>
+        <SettingsGroup
+          onLayout={handleSectionLayout("security")}
+          header={translate("settings.sections.security")}
+        >
           <SettingsRow
             icon="finger-print-outline"
             label={translate("settings.knownHosts")}
@@ -572,7 +621,10 @@ function SettingsContent({
         </SettingsGroup>
       ) : null}
 
-      <SettingsGroup header={translate("settings.sections.app")}>
+      <SettingsGroup
+        onLayout={handleSectionLayout("app")}
+        header={translate("settings.sections.app")}
+      >
         {/* 세션을 보고 있는 동안 화면이 꺼지지 않게 잡아 둔다. 기기의 자동 꺼짐 설정을 앱이
             덮는 동작이라 끌 수 있어야 한다. */}
         <SettingsRow
@@ -1023,6 +1075,14 @@ function SettingsContent({
 
 export function SettingsScreen(): React.JSX.Element {
   const navigation = useNavigation<NavigationProp<MainTabParamList>>();
+  const route = useRoute<RouteProp<MainTabParamList, "Settings">>();
+  const focusSection = route.params?.section;
+
+  // 한 번 스크롤하고 나면 파라미터를 비운다. 남겨 두면 다음에 탭으로 들어와도 그 섹션으로
+  // 끌려가고, 같은 섹션을 다시 고를 때 파라미터가 안 바뀌어 아무 일도 안 일어난다.
+  const handleSectionFocused = useCallback(() => {
+    navigation.setParams({ section: undefined });
+  }, [navigation]);
 
   const goBackToPreviousMainTab = useCallback(() => {
     if (navigation.canGoBack()) {
@@ -1035,7 +1095,11 @@ export function SettingsScreen(): React.JSX.Element {
 
   return (
     <IosEdgeSwipeBack onBack={goBackToPreviousMainTab}>
-      <SettingsContent mode="full" />
+      <SettingsContent
+        mode="full"
+        focusSection={focusSection}
+        onSectionFocused={handleSectionFocused}
+      />
     </IosEdgeSwipeBack>
   );
 }

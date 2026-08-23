@@ -2,7 +2,9 @@ import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,7 +15,20 @@ import {
 import type {
   HostSecretInput,
 } from "@dolssh/shared-core";
-import type { PendingCredentialPromptState } from "../store/useMobileAppStore";
+/**
+ * 이 창이 띄우는 요청. 두 가지가 들어온다.
+ *
+ *  - `prompt` — 붙기 전에 저장된 비밀이 없어서 묻는 것. 사용자명은 호스트에 있으니 안 묻는다.
+ *  - `retry`  — 인증이 깨진 뒤 다시 묻는 것. 틀린 것이 비밀인지 사용자명인지 알 수 없어서
+ *               **사용자명까지** 받는다(데스크톱 CredentialRetryDialog 와 같은 자리).
+ */
+export interface CredentialModalRequest {
+  hostLabel: string;
+  authType: "password" | "privateKey" | "certificate";
+  message?: string | null;
+  initialValue?: HostSecretInput;
+  initialUsername?: string;
+}
 import { useMobilePalette } from "../theme";
 import { t } from "../i18n";
 import {
@@ -22,8 +37,10 @@ import {
 } from "../lib/document-picker";
 
 interface CredentialPromptModalProps {
-  prompt: PendingCredentialPromptState | null;
-  onSubmit: (value: HostSecretInput) => void;
+  prompt: CredentialModalRequest | null;
+  /** 창의 생김새는 같다. 제목·버튼 문구와, 비밀 칸을 채워 줄지 말지만 다르다. */
+  variant?: "prompt" | "retry";
+  onSubmit: (value: HostSecretInput & { username?: string }) => void;
   onCancel: () => void;
 }
 
@@ -37,11 +54,14 @@ async function readPickedFileText(uri: string): Promise<string> {
 
 export function CredentialPromptModal({
   prompt,
+  variant = "prompt",
   onSubmit,
   onCancel,
 }: CredentialPromptModalProps): React.JSX.Element {
   const palette = useMobilePalette();
   const { t: translate } = useTranslation();
+  const isRetry = variant === "retry";
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [privateKeyPem, setPrivateKeyPem] = useState("");
   const [certificateText, setCertificateText] = useState("");
@@ -49,12 +69,17 @@ export function CredentialPromptModal({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    setPassword(prompt?.initialValue.password ?? "");
-    setPrivateKeyPem(prompt?.initialValue.privateKeyPem ?? "");
-    setCertificateText(prompt?.initialValue.certificateText ?? "");
-    setPassphrase(prompt?.initialValue.passphrase ?? "");
+    setUsername(prompt?.initialUsername ?? "");
+    // 재시도에서는 비밀 칸을 **비운 채로** 연다. 저장된 값을 채워 두면 방금 실패한 그 값을
+    // 그대로 다시 보내기 쉽고, 무엇을 고쳐야 하는지도 가려진다.
+    setPassword(isRetry ? "" : (prompt?.initialValue?.password ?? ""));
+    setPrivateKeyPem(isRetry ? "" : (prompt?.initialValue?.privateKeyPem ?? ""));
+    setCertificateText(
+      isRetry ? "" : (prompt?.initialValue?.certificateText ?? ""),
+    );
+    setPassphrase(isRetry ? "" : (prompt?.initialValue?.passphrase ?? ""));
     setErrorMessage(null);
-  }, [prompt]);
+  }, [isRetry, prompt]);
 
   const handleImportPrivateKey = async () => {
     try {
@@ -105,6 +130,11 @@ export function CredentialPromptModal({
       return;
     }
 
+    if (!username.trim()) {
+      setErrorMessage(translate("credentialRetry.usernameRequired"));
+      return;
+    }
+
     if (prompt.authType === "password" && !password.trim()) {
       setErrorMessage(translate("credentialPrompt.passwordRequired"));
       return;
@@ -124,6 +154,7 @@ export function CredentialPromptModal({
     }
 
     onSubmit({
+      username: username.trim(),
       password: password.trim() || undefined,
       privateKeyPem: privateKeyPem.trim() || undefined,
       certificateText: certificateText.trim() || undefined,
@@ -138,7 +169,11 @@ export function CredentialPromptModal({
       visible={Boolean(prompt)}
       onRequestClose={onCancel}
     >
-      <View
+      {/* 시트가 내용만큼만 높아지므로 키보드가 올라오면 가려진다 — 키보드만큼 밀어 올린다.
+          예전에는 시트에 minHeight 58% 를 박아 화면 절반을 차지하게 해서 가리는 것을 피했는데,
+          그래서 비밀번호 한 칸짜리 창에도 빈 공간이 화면 절반이었다. */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={[
           styles.overlay,
           {
@@ -157,11 +192,43 @@ export function CredentialPromptModal({
         >
           <ScrollView contentContainerStyle={styles.content}>
             <Text style={[styles.title, { color: palette.text }]}>
-              {translate("credentialPrompt.title", { label: prompt?.hostLabel ?? "" })}
+              {translate(
+                isRetry ? "credentialRetry.title" : "credentialPrompt.title",
+                { label: prompt?.hostLabel ?? "" },
+              )}
             </Text>
             <Text style={[styles.body, { color: palette.mutedText }]}>
-              {prompt?.message ?? translate("credentialPrompt.defaultMessage")}
+              {prompt?.message ??
+                translate(
+                  isRetry
+                    ? "credentialRetry.defaultMessage"
+                    : "credentialPrompt.defaultMessage",
+                )}
             </Text>
+
+            {/* 사용자명은 **두 경우 모두** 받는다. 붙기 전 창에서 못 고치면, 사용자명이
+                틀렸을 때 눈앞에 자격증명 창을 두고도 고칠 데가 없다. */}
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.fieldLabel, { color: palette.text }]}>
+                {translate("credentialRetry.usernameLabel")}
+              </Text>
+              <TextInput
+                value={username}
+                onChangeText={setUsername}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="root"
+                placeholderTextColor={palette.mutedText}
+                style={[
+                  styles.input,
+                  {
+                    color: palette.text,
+                    borderColor: palette.border,
+                    backgroundColor: palette.input,
+                  },
+                ]}
+              />
+            </View>
 
             {prompt?.authType === "password" ? (
               <View style={styles.fieldGroup}>
@@ -329,12 +396,18 @@ export function CredentialPromptModal({
                   },
                 ]}
               >
-                <Text style={styles.primaryButtonText}>{translate("credentialPrompt.saveAndConnect")}</Text>
+                <Text style={styles.primaryButtonText}>
+                  {translate(
+                    isRetry
+                      ? "credentialRetry.submit"
+                      : "credentialPrompt.saveAndConnect",
+                  )}
+                </Text>
               </Pressable>
             </View>
           </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -349,7 +422,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     borderWidth: 1,
     borderBottomWidth: 0,
-    minHeight: "58%",
     maxHeight: "88%",
   },
   content: {

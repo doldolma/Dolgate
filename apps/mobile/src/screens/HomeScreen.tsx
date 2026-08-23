@@ -19,8 +19,11 @@ import {
   type HostRecord,
   isDirectHostChild,
   normalizeGroupPath,
+  formatQuickSshHostLabel,
   type GroupCardView,
   type GroupRemoveMode,
+  parseQuickSshInput,
+  type ParsedQuickSshCommand,
 } from "@dolssh/shared-core";
 import {
   useFocusEffect,
@@ -29,6 +32,7 @@ import {
 } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
 import Ionicons from "react-native-vector-icons/Ionicons";
+import type { SettingsSectionKey } from "../navigation/RootNavigator";
 import { GroupActionSheet } from "../components/GroupActionSheet";
 import { GroupNamePromptModal } from "../components/GroupNamePromptModal";
 import { HostActionSheet } from "../components/HostActionSheet";
@@ -66,7 +70,52 @@ type HomeListItem =
   | {
       /** 그룹 목록을 닫는 "새 그룹" 줄. 지금 보고 있는 경로의 하위로 만든다. */
       kind: "new-group";
+    }
+  | {
+      /**
+       * 검색 중에만 나오는 동작 항목. 데스크톱 명령 팔레트에서 **카드가 못 하는 것**만
+       * 가져왔다 — 주소를 치면 즉석 접속, 섹션 이름을 치면 설정 직행.
+       */
+      kind: "action";
+      action: HomeAction;
     };
+
+type HomeAction =
+  | { type: "quick-connect"; target: ParsedQuickSshCommand }
+  | { type: "settings"; section: SettingsSectionKey };
+
+const SETTINGS_SECTION_ALIASES: Record<SettingsSectionKey, string[]> = {
+  account: ["account", "계정", "로그인"],
+  server: ["server", "서버", "동기화", "sync"],
+  security: ["security", "보안", "볼트", "vault"],
+  app: ["app", "앱", "설정", "settings", "테마", "theme"],
+};
+
+function matchSettingsSections(query: string): SettingsSectionKey[] {
+  const needle = query.trim().toLowerCase();
+  // **앞부분 일치**다. 부분 일치로 두면 "nas" 를 치는 첫 글자 "n" 에서 account·server·app
+  // 이 한꺼번에 걸려(각각 account·sync·settings 안의 n) 설정 줄 셋이 목록 맨 위로 튀었다가
+  // 두 번째 글자에서 사라진다. 데스크톱은 점수로 밀어내지만 여기는 순서가 고정이라 못 밀어낸다.
+  // 알파벳 한 글자도 같은 이유로 무시한다("s" → server·security·app). 한글 한 글자는
+  // 담는 정보가 달라서(예: "앱") 남긴다.
+  if (!needle || /^[a-z0-9]$/.test(needle)) {
+    return [];
+  }
+  return (
+    Object.keys(SETTINGS_SECTION_ALIASES) as SettingsSectionKey[]
+  ).filter((section) =>
+    SETTINGS_SECTION_ALIASES[section].some((alias) =>
+      alias.toLowerCase().startsWith(needle),
+    ),
+  );
+}
+
+function actionKey(action: HomeAction): string {
+  if (action.type === "settings") {
+    return `action:settings:${action.section}`;
+  }
+  return "action:quick-connect";
+}
 
 export function HomeScreen(): React.JSX.Element {
   const { t: translate } = useTranslation();
@@ -95,6 +144,7 @@ export function HomeScreen(): React.JSX.Element {
   const createGroup = useMobileAppStore((state) => state.createGroup);
   const renameGroup = useMobileAppStore((state) => state.renameGroup);
   const removeGroup = useMobileAppStore((state) => state.removeGroup);
+  const quickConnectSsh = useMobileAppStore((state) => state.quickConnectSsh);
   const toggleHostFavorite = useMobileAppStore(
     (state) => state.toggleHostFavorite,
   );
@@ -290,11 +340,30 @@ export function HomeScreen(): React.JSX.Element {
 
   const listData = useMemo<HomeListItem[]>(() => {
     if (isSearching) {
-      return filteredHosts.map((host) => ({
-        kind: "host",
-        host,
-        showGroupMeta: true,
-      }));
+      const items: HomeListItem[] = [];
+
+      // 주소로 읽히면 맨 위. 이름만 쳐도 뜨면 검색할 때마다 이 줄을 지나쳐야 한다.
+      const quickTarget = parseQuickSshInput(query);
+      if (quickTarget) {
+        items.push({
+          kind: "action",
+          action: { type: "quick-connect", target: quickTarget },
+        });
+      }
+
+      for (const section of matchSettingsSections(query)) {
+        items.push({ kind: "action", action: { type: "settings", section } });
+      }
+
+      // 호스트는 **카드 그대로** 둔다. 카드를 동작 줄로 바꿔 봤더니 탭 하나(접속)를 얻고
+      // 길게 누르기(수정·SFTP·즐겨찾기·삭제)를 통째로 잃었다 — 검색해서 호스트를 고치는
+      // 길이 사라졌다. 카드는 이미 탭이 접속이라 "바로 접속" 도 원래 되고 있었다.
+      // 그래서 동작 줄은 **카드가 못 하는 것**(즉석 SSH·설정 섹션)만 맡는다.
+      for (const host of filteredHosts) {
+        items.push({ kind: "host", host, showGroupMeta: true });
+      }
+
+      return items;
     }
 
     return [
@@ -335,6 +404,7 @@ export function HomeScreen(): React.JSX.Element {
     filteredHosts,
     isFavoritesView,
     isSearching,
+    query,
     visibleGroups,
   ]);
 
@@ -506,6 +576,30 @@ export function HomeScreen(): React.JSX.Element {
     [leaveGroupPath, removeGroup, runGroupMutation, translate, visibleGroups],
   );
 
+  /** 검색 결과의 동작을 실행한다. 데스크톱 팔레트의 run 콜백에 해당한다. */
+  const runHomeAction = useCallback(
+    async (action: HomeAction) => {
+      if (action.type === "settings") {
+        navigation.navigate("Settings", { section: action.section });
+        return;
+      }
+      try {
+        const sessionId = await quickConnectSsh(action.target);
+        if (sessionId) {
+          navigation.navigate("Sessions");
+        }
+      } catch (error) {
+        Alert.alert(
+          translate("home.action.quickConnectFailedTitle"),
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : translate("home.action.quickConnectFailed"),
+        );
+      }
+    },
+    [navigation, quickConnectSsh, translate],
+  );
+
   const handleDeleteHost = useCallback(
     (host: HostRecord) => {
       Alert.alert(
@@ -554,7 +648,13 @@ export function HomeScreen(): React.JSX.Element {
     }
 
     return null;
-  }, [auth.status, palette.danger, palette.warning, syncStatus]);
+  }, [
+    auth.status,
+    palette.danger,
+    palette.warning,
+    syncStatus,
+    translate,
+  ]);
 
   const getSearchGroupMeta = (host: HostRecord): string | null => {
     const groupPath = normalizeGroupPath(host.groupName);
@@ -628,7 +728,16 @@ export function HomeScreen(): React.JSX.Element {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={translate("home.addHost")}
-            onPress={() => navigation.navigate("HostForm", undefined)}
+            onPress={() =>
+              // 그룹을 열어 둔 채 추가하면 그 그룹에 넣으려는 것이다. 즐겨찾기는 진짜
+              // 그룹이 아니라 호스트의 플래그라 넘기지 않는다.
+              navigation.navigate(
+                "HostForm",
+                !isFavoritesView && currentGroupPath
+                  ? { defaultGroupPath: currentGroupPath }
+                  : undefined,
+              )
+            }
             style={[
               styles.addHostButton,
               {
@@ -702,7 +811,9 @@ export function HomeScreen(): React.JSX.Element {
                 ? `group:${item.group.path}`
                 : item.kind === "new-group"
                   ? "new-group"
-                  : `host:${item.host.id}`
+                  : item.kind === "action"
+                    ? actionKey(item.action)
+                    : `host:${item.host.id}`
           }
           initialNumToRender={12}
           maxToRenderPerBatch={12}
@@ -859,6 +970,71 @@ export function HomeScreen(): React.JSX.Element {
                 </Pressable>
               );
             }
+
+            if (item.kind === "action") {
+              const action = item.action;
+              const label =
+                action.type === "quick-connect"
+                  ? translate("home.action.quickConnect", {
+                      target: formatQuickSshHostLabel(action.target),
+                    })
+                  : translate("home.action.settings", {
+                      section: translate(`settings.sections.${action.section}`),
+                    });
+              const icon =
+                action.type === "quick-connect"
+                  ? "flash-outline"
+                  : "settings-outline";
+              // 즉석 접속은 무엇을 만들며 붙는지 아래 줄에 남긴다 — 오타 난 주소로 호스트가
+              // 생기는 것을 누르기 전에 알아야 한다.
+              const actionMeta =
+                action.type === "quick-connect"
+                  ? translate("home.action.quickConnectMeta")
+                  : null;
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={label}
+                  onPress={() => void runHomeAction(action)}
+                  style={[
+                    styles.actionRow,
+                    {
+                      backgroundColor: palette.surface,
+                      borderColor: palette.border,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.groupIcon,
+                      { backgroundColor: palette.accentSoft },
+                    ]}
+                  >
+                    <Ionicons name={icon} size={18} color={palette.accent} />
+                  </View>
+                  <View style={styles.actionText}>
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.actionLabel, { color: palette.text }]}
+                    >
+                      {label}
+                    </Text>
+                    {actionMeta ? (
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.actionMeta,
+                          { color: palette.mutedText },
+                        ]}
+                      >
+                        {actionMeta}
+                      </Text>
+                    ) : null}
+                  </View>
+                </Pressable>
+              );
+            }
+
 
             const searchGroupMeta = item.showGroupMeta
               ? getSearchGroupMeta(item.host)
@@ -1082,6 +1258,27 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
+  },
+  // 검색 결과의 동작 줄. 호스트 카드와 같은 크기라 목록의 리듬이 유지된다.
+  actionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+  },
+  actionText: {
+    flex: 1,
+    gap: 2,
+  },
+  actionLabel: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  actionMeta: {
+    fontSize: 12,
   },
   // 그룹 카드와 같은 알약 모양이되 **높이를 낮추고 점선**으로 둔다 — 채워진 카드가 아니라
   // "여기에 하나 만들 수 있다" 는 자리로 읽혀야 한다. 아이콘 타일도 40 이 아니라 28 이다.

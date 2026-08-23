@@ -426,7 +426,14 @@
     "groupHostCount": "{{count}}개 호스트",
     "groupHostCountOne": "{{count}}개 호스트",
     "groupMeta": "그룹 {{meta}}",
-    "connectHost": "{{name}} 접속"
+    "connectHost": "{{name}} 접속",
+    "action": {
+      "quickConnect": "{{target}} 에 접속",
+      "quickConnectMeta": "SSH · 목록에 없으면 새로 저장합니다",
+      "settings": "설정 — {{section}}",
+      "quickConnectFailedTitle": "접속하지 못했습니다",
+      "quickConnectFailed": "잠시 후 다시 시도해 주세요."
+    }
   },
   "session": {
     "noSessionsTitle": "열린 세션이 없습니다.",
@@ -512,6 +519,13 @@
     "importCertFromFile": "인증서 파일에서 가져오기",
     "passphraseHint": "Passphrase가 있는 개인키라면 함께 입력해 주세요.",
     "saveAndConnect": "저장 후 연결"
+  },
+  "credentialRetry": {
+    "title": "{{label}} 인증 실패",
+    "defaultMessage": "계정 또는 비밀번호를 다시 확인해 주세요.",
+    "usernameLabel": "사용자명",
+    "usernameRequired": "사용자명을 입력해 주세요.",
+    "submit": "다시 연결"
   },
   "mobileLib": {
     "vaultRequestTimeout": "동기화 암호 요청 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.",
