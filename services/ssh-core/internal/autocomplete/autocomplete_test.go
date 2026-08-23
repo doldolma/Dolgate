@@ -111,6 +111,12 @@ func TestShellIntegrationInitCommandParses(t *testing.T) {
 			if err != nil {
 				t.Skipf("%s not available", shell)
 			}
+			// LookPath 는 이름만 본다 — Windows 의 WSL 런처 스텁처럼 실행되지 않는 것도
+			// 잡아온다(WSL 기능을 제거하면 HCS_E_SERVICE_NOT_AVAILABLE 로 exit 1 한다).
+			// 돌지 않는 셸은 없는 것과 같으니 여기서 갈라낸다.
+			if err := exec.Command(path, "-c", "exit 0").Run(); err != nil {
+				t.Skipf("%s found at %s but is not runnable: %v", shell, path, err)
+			}
 			if output, err := exec.Command(path, "-n", "-c", command).CombinedOutput(); err != nil {
 				t.Fatalf("%s failed to parse init command: %v\n%s", shell, err, output)
 			}
