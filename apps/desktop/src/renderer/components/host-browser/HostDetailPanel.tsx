@@ -1132,7 +1132,7 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
           {/* 상세는 조금 크게. 마크가 없으면 예전 액센트 뱃지로 돌아간다. */}
           <HostBadge
             host={host}
-            className="h-[2rem] min-w-[2rem] rounded-[10px] px-[0.4rem]"
+            className="h-[2rem] w-[2rem] rounded-[10px]"
           />
           <h2 className="min-w-0 truncate text-[1rem] font-bold text-[var(--text)]">
             {host.label}

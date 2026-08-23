@@ -53,11 +53,37 @@ describe('HostBadge', () => {
     expect(screen.getByRole('img', { name: 'FreeBSD' })).toBeTruthy();
   });
 
-  it('NAS 도 자기 마크로 그린다', () => {
-    render(
+  it('워드마크 로고는 그림 대신 짧은 글자로 그린다', () => {
+    // Synology 로고는 'Synology' 라는 글자를 그린 그림이라 30px 뱃지에서 얼룩이 된다.
+    const { container } = render(
       <HostBadge host={host({ detectedOs: { id: 'dsm', prettyName: 'Synology DSM 7.2.2' } })} />,
     );
     expect(screen.getByRole('img', { name: 'Synology DSM 7.2.2' })).toBeTruthy();
+    expect(container.textContent).toBe('DSM');
+    expect(container.querySelector('svg')).toBeNull();
+  });
+
+  it('NAS 도 자기 마크로 그린다', () => {
+    render(<HostBadge host={host({ detectedOs: { id: 'truenas' } })} />);
+    const badge = screen.getByRole('img', { name: 'TrueNAS' });
+    expect(badge.querySelector('svg')).toBeTruthy();
+  });
+
+  it('브랜드색은 대비가 되는 테마에만 넘긴다', () => {
+    // 노란 Tux(#FCC624)는 라이트에서 안 보이므로 라이트 잉크를 넘기지 않는다 — 그러면
+    // 스타일시트가 글자색으로 떨어뜨린다.
+    render(<HostBadge host={host({ detectedOs: { id: 'amzn' } })} />);
+    const tux = screen.getByRole('img', { name: 'Linux' });
+    expect(tux.style.getPropertyValue('--host-os-ink-light')).toBe('');
+    expect(tux.style.getPropertyValue('--host-os-ink-dark')).toBe('#FCC624');
+    expect(tux.style.getPropertyValue('--host-os-brand')).toBe('#FCC624');
+  });
+
+  it('양쪽에서 보이는 브랜드색은 두 테마 모두에 넘긴다', () => {
+    render(<HostBadge host={host({ detectedOs: { id: 'ubuntu' } })} />);
+    const badge = screen.getByRole('img', { name: 'Ubuntu' });
+    expect(badge.style.getPropertyValue('--host-os-ink-light')).toBe('#E95420');
+    expect(badge.style.getPropertyValue('--host-os-ink-dark')).toBe('#E95420');
   });
 
   it('마크가 없는 OS 는 글자 뱃지로 남는다', () => {

@@ -216,7 +216,7 @@ function HostListTableRow({
                 {/* 표는 행이 얕아 뱃지도 한 단계 작게 그린다. */}
                 <HostBadge
                   host={host}
-                  className="h-[1.7rem] min-w-[2.1rem] rounded-[7px] text-[0.65rem]"
+                  className="h-[1.7rem] w-[1.7rem] rounded-[7px]"
                 />
                 <span className="min-w-0 truncate font-medium text-[var(--text)]">
                   {host.label}

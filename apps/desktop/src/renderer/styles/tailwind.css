@@ -44,6 +44,20 @@
     -webkit-user-select: text;
   }
 
+  /* 호스트 OS 마크 뱃지. 브랜드색을 잉크로 그대로 쓰면 라이트에서 노란 Tux 가, 다크에서
+     검은 Apple 이 사라진다. 그래서 배경은 늘 브랜드색 틴트로 깔고, 잉크는 그 배경 대비
+     3:1 을 넘는 테마에서만 브랜드색을 쓴다 — 어느 테마에서 쓸 수 있는지는 host-os-marks.ts
+     가 미리 계산해 인라인 변수로 넘기고, 안 넘긴 테마는 글자색으로 떨어진다. */
+  [data-host-os-mark="true"] {
+    background: color-mix(in srgb, var(--host-os-brand) 15%, transparent);
+    color: var(--host-os-ink-light, var(--text));
+  }
+
+  :root[data-theme="dark"] [data-host-os-mark="true"] {
+    background: color-mix(in srgb, var(--host-os-brand) 24%, transparent);
+    color: var(--host-os-ink-dark, var(--text));
+  }
+
   * {
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);

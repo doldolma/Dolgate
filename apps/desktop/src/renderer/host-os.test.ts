@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeHostOsId, resolveHostOsMark } from '@shared';
-import { HOST_OS_MARK_ART } from './lib/host-os-marks';
+import { HOST_OS_MARK_ART, isLetteredMark } from './lib/host-os-marks';
 
 describe('resolveHostOsMark', () => {
   it('os-release 의 ID 를 그대로 대조한다', () => {
@@ -83,14 +83,36 @@ describe('resolveHostOsMark', () => {
 // 마크와 그림은 1:1 이어야 한다. 타입(Record<HostOsMark, …>)이 빠진 것을 잡아 주지만, 경로가
 // 깨진 채 생성된 것은 못 잡는다 — 그림 파일은 스크립트로 다시 뽑으므로 그 사고가 가능하다.
 describe('마크 그림', () => {
-  it('모든 마크에 쓸 수 있는 그림이 있다', () => {
+  it('모든 마크가 그림이나 글자 중 하나로 그려진다', () => {
     for (const [mark, art] of Object.entries(HOST_OS_MARK_ART)) {
       expect(art.title, mark).toBeTruthy();
       expect(art.hex, mark).toMatch(/^#[0-9a-fA-F]{6}$/);
+      if (isLetteredMark(art)) {
+        // 정사각 뱃지에 들어가는 길이만 허용한다 — 네 글자가 한계다.
+        expect(art.letters.length, mark).toBeGreaterThan(1);
+        expect(art.letters.length, mark).toBeLessThanOrEqual(4);
+        continue;
+      }
       // simple-icons 경로는 24x24 단일 path 라 항상 이 정도 길이가 넘는다.
       expect(art.path.length, mark).toBeGreaterThan(50);
       expect(art.path, mark).toMatch(/^[Mm]/);
+      // 브랜드색을 잉크로 쓸 수 있는 테마. 어느 테마에서도 못 쓰면 글자색으로만 그려진다.
+      expect(['both', 'light', 'dark', 'none'], mark).toContain(art.ink);
     }
+  });
+
+  it('브랜드색 잉크는 대비가 되는 테마에만 허용된다', () => {
+    // 눈으로 확인한 판정을 못 박는다 — 다시 뽑을 때 이 값이 뒤집히면 뱃지가 사라진다.
+    const inkOf = (mark: string) => {
+      const art = HOST_OS_MARK_ART[mark as keyof typeof HOST_OS_MARK_ART];
+      return isLetteredMark(art) ? 'letters' : art.ink;
+    };
+    // 노란 Tux 는 라이트에서, 검은 Apple 은 다크에서 브랜드색을 쓸 수 없다.
+    expect(inkOf('linux')).toBe('dark');
+    expect(inkOf('macos')).toBe('light');
+    expect(inkOf('ubuntu')).toBe('both');
+    // 워드마크는 색과 무관하게 글자로 그린다.
+    expect(inkOf('synology')).toBe('letters');
   });
 
   it('감지되는 id 는 모두 그림까지 닿는다', () => {
