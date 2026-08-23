@@ -1,4 +1,4 @@
-import { getHostBadgeLabel, normalizeGroupPath } from '@shared';
+import { normalizeGroupPath } from '@shared';
 import type { HostRecord } from '@shared';
 import { cn } from '../../lib/cn';
 import { HostRowBoundary } from './HostRowBoundary';
@@ -6,7 +6,6 @@ import { ChevronDown, ChevronUp, MoreVertical, Star } from '../../ui/icons';
 import {
   formatLastUsed,
   getHostAddress,
-  getHostBadgeTone,
   getHostShortType,
 } from './hostDisplay';
 import {
@@ -15,6 +14,7 @@ import {
   type HostBrowserModel,
 } from './useHostBrowser';
 import { useTranslation } from 'react-i18next';
+import { HostBadge } from './HostBadge';
 
 interface HostListTableProps {
   hb: HostBrowserModel;
@@ -213,15 +213,11 @@ function HostListTableRow({
             >
               {/* 이름 + 배지 */}
               <span className="flex min-w-0 items-center gap-[0.55rem]">
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    'inline-grid h-[1.7rem] min-w-[2.1rem] shrink-0 place-items-center rounded-[7px] px-[0.25rem] text-[0.65rem] font-bold tracking-[-0.01em]',
-                    getHostBadgeTone(host),
-                  )}
-                >
-                  {getHostBadgeLabel(host)}
-                </span>
+                {/* 표는 행이 얕아 뱃지도 한 단계 작게 그린다. */}
+                <HostBadge
+                  host={host}
+                  className="h-[1.7rem] min-w-[2.1rem] rounded-[7px] text-[0.65rem]"
+                />
                 <span className="min-w-0 truncate font-medium text-[var(--text)]">
                   {host.label}
                 </span>

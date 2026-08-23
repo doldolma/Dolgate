@@ -63,6 +63,7 @@ import type {
   AuthType,
   AwsEc2HostDraft,
   AwsEc2HostRecord,
+  HostDetectedOs,
   AwsEcsHostDraft,
   AwsEcsHostRecord,
   AwsProfileMetadataRecord,
@@ -522,6 +523,21 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
   throw new Error('Unsupported host record');
 }
 
+/** 같은 값인지. 연결마다 들어오는 값이라 같으면 쓰지 않는다(동기화 잡음 방지). */
+function isSameDetectedOs(
+  left: HostDetectedOs | null,
+  right: HostDetectedOs | null,
+): boolean {
+  if (left === null || right === null) {
+    return left === right;
+  }
+  return (
+    left.id === right.id &&
+    (left.like ?? null) === (right.like ?? null) &&
+    (left.prettyName ?? null) === (right.prettyName ?? null)
+  );
+}
+
 function toSshHostRecord(id: string, draft: SshHostDraft, secretRef: string | null, timestamp: string, current?: SshHostRecord): SshHostRecord {
   const jumpHostIds = normalizeJumpHostIds(draft.jumpHostIds, draft.jumpHostId);
   return {
@@ -549,6 +565,8 @@ function toSshHostRecord(id: string, draft: SshHostDraft, secretRef: string | nu
     // env는 시크릿이 아니라 호스트 속성 — 드래프트 값을 그대로 정규화해 저장(공유 시크릿으로 번지지 않음).
     env: draft.env !== undefined ? normalizeHostEnvVars(draft.env) : (current?.env ?? null),
     favorite: current?.favorite ?? null,
+    // 폼을 거치지 않는 값 — 드래프트에 없으니 현재 레코드에서 이어받는다(favorite 과 같은 이유).
+    detectedOs: current?.detectedOs ?? null,
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp
   };
@@ -581,6 +599,8 @@ function toAwsHostRecord(id: string, draft: AwsEc2HostDraft, timestamp: string, 
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
     startupCommand: normalizeHostStartupCommand(draft.startupCommand),
     favorite: current?.favorite ?? null,
+    // 폼을 거치지 않는 값 — 드래프트에 없으니 현재 레코드에서 이어받는다(favorite 과 같은 이유).
+    detectedOs: current?.detectedOs ?? null,
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp
   };
@@ -605,6 +625,8 @@ function toAwsEcsHostRecord(
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
     favorite: current?.favorite ?? null,
+    // 폼을 거치지 않는 값 — 드래프트에 없으니 현재 레코드에서 이어받는다(favorite 과 같은 이유).
+    detectedOs: current?.detectedOs ?? null,
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp,
   };
@@ -631,6 +653,8 @@ function toWarpgateHostRecord(
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
     startupCommand: normalizeHostStartupCommand(draft.startupCommand),
     favorite: current?.favorite ?? null,
+    // 폼을 거치지 않는 값 — 드래프트에 없으니 현재 레코드에서 이어받는다(favorite 과 같은 이유).
+    detectedOs: current?.detectedOs ?? null,
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp
   };
@@ -702,6 +726,8 @@ function toSerialHostRecord(
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
     favorite: current?.favorite ?? null,
+    // 폼을 거치지 않는 값 — 드래프트에 없으니 현재 레코드에서 이어받는다(favorite 과 같은 이유).
+    detectedOs: current?.detectedOs ?? null,
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp,
   };
@@ -756,6 +782,8 @@ function toRdpHostRecord(
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
     favorite: current?.favorite ?? null,
+    // 폼을 거치지 않는 값 — 드래프트에 없으니 현재 레코드에서 이어받는다(favorite 과 같은 이유).
+    detectedOs: current?.detectedOs ?? null,
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp,
   };
@@ -797,6 +825,8 @@ function toVncHostRecord(
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
     favorite: current?.favorite ?? null,
+    // 폼을 거치지 않는 값 — 드래프트에 없으니 현재 레코드에서 이어받는다(favorite 과 같은 이유).
+    detectedOs: current?.detectedOs ?? null,
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp,
   };
@@ -1023,6 +1053,30 @@ export class HostRepository {
       state.data.hosts = state.data.hosts.map((entry) => (entry.id === id ? record : entry));
     });
     return record;
+  }
+
+  /**
+   * 연결할 때 감지한 OS 를 기록한다.
+   *
+   * 값이 같으면 아무것도 하지 않는다 — updatedAt 이 바뀌면 동기화가 따라 움직이고, 이건 연결마다
+   * 들어오는 값이다.
+   */
+  setDetectedOs(id: string, detectedOs: HostDetectedOs | null): HostRecord | null {
+    let nextRecord: HostRecord | null = null;
+    stateStorage.updateState((state) => {
+      state.data.hosts = state.data.hosts.map((entry) => {
+        if (entry.id !== id) {
+          return entry;
+        }
+        if (isSameDetectedOs(entry.detectedOs ?? null, detectedOs)) {
+          nextRecord = entry;
+          return entry;
+        }
+        nextRecord = { ...entry, detectedOs, updatedAt: nowIso() };
+        return nextRecord;
+      });
+    });
+    return nextRecord;
   }
 
   setTerminalTheme(id: string, terminalThemeId: TerminalThemeId | null): HostRecord | null {

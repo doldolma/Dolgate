@@ -592,6 +592,19 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
             }));
             await syncOperationalData(set);
           },
+    setHostDetectedOs: async (hostId, detectedOs) => {
+            const next = await api.hosts.setDetectedOs(hostId, detectedOs);
+            if (!next) {
+              return;
+            }
+            set((state) => ({
+              hosts: sortHosts([
+                ...state.hosts.filter((host) => host.id !== next.id),
+                next,
+              ]),
+            }));
+            await syncOperationalData(set);
+          },
     setHostTerminalTheme: async (hostId, terminalThemeId) => {
             const next = await api.hosts.setTerminalTheme(hostId, terminalThemeId);
             if (!next) {

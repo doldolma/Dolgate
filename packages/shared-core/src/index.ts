@@ -5,6 +5,7 @@ export * from "./client-api";
 export * from "./connection-failure";
 export * from "./aws-ssm-attempt";
 export * from "./connection-stages";
+export * from "./host-os";
 export * from "./group-paths";
 export * from "./group-mutations";
 export * from "./interactive-hop";

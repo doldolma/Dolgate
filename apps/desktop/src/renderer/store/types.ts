@@ -1,7 +1,7 @@
 import type { StoreApi } from "zustand/vanilla";
 import type { CommandFinishedInfo } from "../lib/command-notification";
 import type { SessionPanelSectionId } from "../lib/session-panel";
-import type { TerminalThemeId } from "@shared";
+import type { HostDetectedOs, TerminalThemeId } from "@shared";
 import type {
   ActivityLogRecord,
   AuthType,
@@ -857,6 +857,15 @@ interface AppStateParts {
     hostId: string,
     terminalThemeId: TerminalThemeId | null,
   ) => Promise<void>;
+  /**
+   * 연결할 때 감지한 운영체제를 기록한다(호스트 아이콘용).
+   *
+   * 같은 값이면 메인이 아무것도 쓰지 않으므로 여기서 비교하지 않는다.
+   */
+  setHostDetectedOs: (
+    hostId: string,
+    detectedOs: HostDetectedOs | null,
+  ) => Promise<void>;
   removeHost: (hostId: string) => Promise<void>;
   openLocalTerminal: (cols: number, rows: number) => Promise<void>;
   connectHost: (
@@ -1346,6 +1355,7 @@ export type CatalogSlice = Pick<
   | "moveHostToGroup"
   | "setHostFavorite"
   | "setHostTerminalTheme"
+  | "setHostDetectedOs"
   | "removeHost"
 >;
 

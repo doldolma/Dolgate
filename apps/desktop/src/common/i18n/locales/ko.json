@@ -711,7 +711,8 @@
       "qualityBalanced": "균형 (JPEG)",
       "qualityFast": "속도 우선 (JPEG)",
       "viewOnly": "보기 전용",
-      "screenShare": "화면 공유"
+      "screenShare": "화면 공유",
+      "os": "운영체제"
     },
     "update": {
       "checking": "GitHub Releases에서 새 버전을 확인하고 있습니다.",

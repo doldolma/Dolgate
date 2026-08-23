@@ -6,7 +6,11 @@ import {
   useState,
 } from 'react';
 import type React from 'react';
-import type { SessionShareSnapshotInput, TerminalTab } from '@shared';
+import type {
+  HostDetectedOs,
+  SessionShareSnapshotInput,
+  TerminalTab,
+} from '@shared';
 import type { Terminal } from '@xterm/xterm';
 import {
   createTerminalRuntime,
@@ -468,6 +472,23 @@ export function useTerminalSessionViewController({
     liveHandleTmuxPrefixInputRef.current = handleTmuxPrefixInput;
   }, [handleTmuxPrefixInput]);
 
+  /**
+   * 감지한 OS 를 호스트 레코드에 남긴다(아이콘용).
+   *
+   * 호스트가 없는 세션(로컬 터미널)에서는 쓸 데가 없고, 컨테이너 세션에서는 잡히는 것이 그
+   * 이미지의 OS 라 호스트를 잘못 표시하게 된다 — 둘 다 건너뛴다.
+   */
+  const recordHostOs = useCallback(
+    (detectedOs: HostDetectedOs) => {
+      const hostId = host?.id;
+      if (!hostId || tab?.shellKind === 'container-exec') {
+        return;
+      }
+      void appStore.getState().setHostDetectedOs(hostId, detectedOs);
+    },
+    [host?.id, tab?.shellKind],
+  );
+
   const autocomplete = useTerminalAutocomplete({
     sessionId,
     enabled:
@@ -481,6 +502,7 @@ export function useTerminalSessionViewController({
     sendInput: sendAutocompleteInput,
     snippets,
     onCommandFinished,
+    onHostOsDetected: recordHostOs,
   });
   const liveAutocompleteInputRef = useRef(autocomplete.handleInput);
   const liveAutocompleteVisibleRef = useRef(false);

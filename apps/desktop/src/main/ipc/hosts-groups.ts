@@ -1,4 +1,10 @@
-import type { GroupRemoveMode, HostDraft, HostSecretInput, TerminalThemeId } from "@shared";
+import type {
+  GroupRemoveMode,
+  HostDetectedOs,
+  HostDraft,
+  HostSecretInput,
+  TerminalThemeId,
+} from "@shared";
 import {
   isRdpHostDraft,
   isRdpHostRecord,
@@ -233,6 +239,16 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.hosts.setTerminalTheme,
     async (event, id: string, terminalThemeId: TerminalThemeId | null) => {
       const record = ctx.hosts.setTerminalTheme(id, terminalThemeId);
+      ctx.queueSync();
+      ctx.emitWorkspaceChanged?.(event?.sender);
+      return record;
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.hosts.setDetectedOs,
+    async (event, id: string, detectedOs: HostDetectedOs | null) => {
+      const record = ctx.hosts.setDetectedOs(id, detectedOs);
       ctx.queueSync();
       ctx.emitWorkspaceChanged?.(event?.sender);
       return record;

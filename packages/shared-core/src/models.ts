@@ -1,4 +1,5 @@
 import type { AuthSession } from './api';
+import type { HostDetectedOs } from './host-os';
 
 export type AuthType =
   | 'password'
@@ -188,6 +189,13 @@ interface HostBaseRecord {
   tags?: string[];
   terminalThemeId?: TerminalThemeId | null;
   favorite?: boolean | null;
+  /**
+   * 연결할 때 셸에서 읽은 운영체제. 아이콘을 그리는 데 쓴다.
+   *
+   * 폼에서 입력하는 값이 아니라 좁은 setter 로만 쓴다(favorite 과 같은 결) — 드래프트에 넣으면
+   * 호스트를 편집할 때마다 날아간다.
+   */
+  detectedOs?: HostDetectedOs | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   CoreEvent,
+  HostDetectedOs,
   TerminalAutocompleteCapability,
   TerminalAutocompleteSnapshot,
 } from '@shared';
+import { normalizeHostOsId } from '@shared';
 import {
   prepareTerminalAutocomplete,
   queryTerminalCompletion,
@@ -128,6 +130,13 @@ interface UseTerminalAutocompleteOptions {
   snippets?: readonly { label: string; command: string; keyword?: string | null }[];
   /** 명령이 끝났을 때(OSC 133;D) 호출 — 명령 완료 알림 등 후처리에 사용. */
   onCommandFinished?: (info: CommandFinishedInfo) => void;
+  /**
+   * 연결할 때 감지한 OS 를 받는다(호스트 아이콘용).
+   *
+   * 이 훅이 직접 호스트를 쓰지 않는 이유: 어느 호스트에 쓸지는 호출부가 안다(로컬 터미널·
+   * 컨테이너 세션처럼 기록할 호스트가 없는 경우도 있다).
+   */
+  onHostOsDetected?: (detectedOs: HostDetectedOs) => void;
 }
 
 const EMPTY_SNIPPETS: readonly { label: string; command: string; keyword?: string | null }[] = [];
@@ -186,6 +195,29 @@ function isShellIntegrationArtifact(entry: string): boolean {
   );
 }
 
+/**
+ * 코어가 보낸 OS 값을 레코드에 넣을 모양으로 다듬는다. id 가 없으면 없는 것으로 본다 —
+ * 아이콘을 고르는 유일한 기준이라 빈 값을 저장할 이유가 없다.
+ */
+function normalizeDetectedOs(value: unknown): HostDetectedOs | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const id = normalizeHostOsId(typeof record.id === 'string' ? record.id : null);
+  if (!id) {
+    return null;
+  }
+  const like = typeof record.like === 'string' ? record.like.trim() : '';
+  const prettyName =
+    typeof record.prettyName === 'string' ? record.prettyName.trim() : '';
+  return {
+    id,
+    like: like.length > 0 ? like : null,
+    prettyName: prettyName.length > 0 ? prettyName : null,
+  };
+}
+
 function normalizeSnapshot(
   sessionId: string,
   payload: Record<string, unknown>,
@@ -230,6 +262,7 @@ export function useTerminalAutocomplete({
   sendInput,
   snippets = EMPTY_SNIPPETS,
   onCommandFinished,
+  onHostOsDetected,
 }: UseTerminalAutocompleteOptions) {
   const [capability, setCapability] =
     useState<TerminalAutocompleteCapability | null>(null);
@@ -284,6 +317,7 @@ export function useTerminalAutocomplete({
   const dynamicGenerationRef = useRef(0);
   const snippetsRef = useRef(snippets);
   const onCommandFinishedRef = useRef(onCommandFinished);
+  const onHostOsDetectedRef = useRef(onHostOsDetected);
   const pendingSnippetRef = useRef(pendingSnippet);
   const autocompleteUnsupported = capability?.status === 'unsupported';
 
@@ -298,7 +332,8 @@ export function useTerminalAutocomplete({
   }, [snippets]);
   useEffect(() => {
     onCommandFinishedRef.current = onCommandFinished;
-  }, [onCommandFinished]);
+    onHostOsDetectedRef.current = onHostOsDetected;
+  }, [onCommandFinished, onHostOsDetected]);
   useEffect(() => {
     pendingSnippetRef.current = pendingSnippet;
   }, [pendingSnippet]);
@@ -686,6 +721,14 @@ export function useTerminalAutocomplete({
         if (event.type === 'terminalAutocompleteCapability') {
           setCapability(normalizeCapability(sessionId, event.payload));
         } else if (event.type === 'terminalAutocompleteSnapshot') {
+          // OS 는 스냅샷 정규화 **밖에서** 읽는다. 아래 normalizeSnapshot 은 bash·zsh 가 아니면
+          // 전체를 버리는데, 아이콘은 셸과 상관이 없다 — ash 를 쓰는 NAS 도 잡혀야 한다.
+          const detectedOs = normalizeDetectedOs(
+            (event.payload as Record<string, unknown>).os,
+          );
+          if (detectedOs) {
+            onHostOsDetectedRef.current?.(detectedOs);
+          }
           const next = normalizeSnapshot(sessionId, event.payload);
           snapshotRef.current = next;
           setSnapshot(next);

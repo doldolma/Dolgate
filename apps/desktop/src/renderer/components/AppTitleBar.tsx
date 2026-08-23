@@ -684,6 +684,14 @@ export function buildTabHoverInfo(
       ? hosts.find((candidate) => candidate.id === tab.hostId) ?? null
       : null;
     const kind = deriveSessionConnectionKind(tab, host);
+    // 연결할 때 감지한 운영체제. 뱃지는 마크가 있을 때만 바뀌므로(Windows·NAS 는 글자로 남는다)
+    // 실제로 무엇을 잡았는지는 여기서만 볼 수 있다.
+    if (host?.detectedOs) {
+      rows.push({
+        label: t('titleBar.hover.os'),
+        value: host.detectedOs.prettyName || host.detectedOs.id,
+      });
+    }
     if (host?.kind === 'ssh' && host.jumpHostId) {
       const jump = hosts.find((candidate) => candidate.id === host.jumpHostId);
       rows.push({ label: t('titleBar.hover.jump'), value: jump?.label ?? host.jumpHostId });

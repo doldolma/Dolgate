@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   describeRdpDrives,
-  getHostBadgeLabel,
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
   isRdpHostRecord,
@@ -58,6 +57,7 @@ import type { HostBrowserModel } from './useHostBrowser';
 import { useTranslation } from 'react-i18next';
 import { getFormatLocale, t } from '../../i18n';
 import { resolveLogMessage } from '../../lib/activity-log-message';
+import { HostBadge } from './HostBadge';
 
 interface HostDetailPanelProps {
   hb: HostBrowserModel;
@@ -1129,12 +1129,11 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
       {/* Header */}
       <div className="flex items-start justify-between gap-3 px-[0.9rem] pb-[0.55rem] pt-[0.9rem]">
         <div className="flex min-w-0 items-center gap-[0.55rem]">
-          <span
-            className="inline-grid h-[2rem] min-w-[2rem] place-items-center rounded-[10px] bg-[color-mix(in_srgb,var(--accent-strong)_68%,var(--chrome-bg)_32%)] px-[0.4rem] text-[0.7rem] font-bold text-white"
-            aria-hidden="true"
-          >
-            {getHostBadgeLabel(host)}
-          </span>
+          {/* 상세는 조금 크게. 마크가 없으면 예전 액센트 뱃지로 돌아간다. */}
+          <HostBadge
+            host={host}
+            className="h-[2rem] min-w-[2rem] rounded-[10px] px-[0.4rem]"
+          />
           <h2 className="min-w-0 truncate text-[1rem] font-bold text-[var(--text)]">
             {host.label}
           </h2>

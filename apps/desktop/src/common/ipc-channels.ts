@@ -36,7 +36,8 @@ export const ipcChannels = {
     update: 'hosts:update',
     remove: 'hosts:remove',
     setFavorite: 'hosts:set-favorite',
-    setTerminalTheme: 'hosts:set-terminal-theme'
+    setTerminalTheme: 'hosts:set-terminal-theme',
+    setDetectedOs: 'hosts:set-detected-os'
   },
   groups: {
     list: 'groups:list',

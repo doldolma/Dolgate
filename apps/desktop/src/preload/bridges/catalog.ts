@@ -2,6 +2,7 @@ import type { IpcRenderer } from "electron";
 import type {
   DesktopApi,
   GroupRemoveMode,
+  HostDetectedOs,
   HostDraft,
   HostSecretInput,
   TerminalThemeId,
@@ -23,6 +24,8 @@ export function buildHostsBridge(
       ipcRenderer.invoke(ipcChannels.hosts.setFavorite, id, favorite),
     setTerminalTheme: (id: string, terminalThemeId: TerminalThemeId | null) =>
       ipcRenderer.invoke(ipcChannels.hosts.setTerminalTheme, id, terminalThemeId),
+    setDetectedOs: (id: string, detectedOs: HostDetectedOs | null) =>
+      ipcRenderer.invoke(ipcChannels.hosts.setDetectedOs, id, detectedOs),
   };
 }
 

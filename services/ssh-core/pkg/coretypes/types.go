@@ -414,6 +414,19 @@ type TerminalAutocompleteSnapshotPayload struct {
 	History     []string                         `json:"history"`
 	Executables []TerminalAutocompleteExecutable `json:"executables"`
 	Truncated   bool                             `json:"truncated"`
+	// Os 는 이 호스트의 운영체제다. 연결마다 한 번 오는 이 스냅샷에 실어 보낸다 — 앱이 호스트
+	// 아이콘을 그리는 데 쓴다. 읽지 못하면 비어 있다(그때는 앱이 예전처럼 그린다).
+	Os *TerminalHostOs `json:"os,omitempty"`
+}
+
+// TerminalHostOs 는 /etc/os-release(리눅스) 또는 uname/sw_vers(macOS)에서 읽은 값이다.
+type TerminalHostOs struct {
+	// Id 는 os-release 의 ID (`ubuntu`, `debian`, …) 또는 `darwin`.
+	Id string `json:"id"`
+	// Like 는 os-release 의 ID_LIKE. 모르는 파생 배포판을 부모로 되돌릴 때 쓴다.
+	Like string `json:"like,omitempty"`
+	// PrettyName 은 사람이 읽는 이름(`Ubuntu 20.04.6 LTS`).
+	PrettyName string `json:"prettyName,omitempty"`
 }
 
 type TerminalAutocompleteShellStatePayload struct {

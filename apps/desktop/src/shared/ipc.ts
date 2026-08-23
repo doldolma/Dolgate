@@ -72,6 +72,7 @@ import type {
   HostContainerLogsSnapshot,
   HostContainerLogSearchResult,
   HostContainerStatsSample,
+  HostDetectedOs,
   HostRecord,
   TerminalThemeId,
   ContainerConnectionProgressEvent,
@@ -1321,6 +1322,16 @@ export interface DesktopApi {
     setTerminalTheme: (
       id: string,
       terminalThemeId: TerminalThemeId | null,
+    ) => Promise<HostRecord | null>;
+    /**
+     * 연결할 때 감지한 운영체제를 기록한다(호스트 아이콘용).
+     *
+     * 폼을 거치지 않는 값이라 좁은 setter 로 둔다. 달라졌을 때만 부르는 것은 부르는 쪽의
+     * 몫이다 — 매 연결마다 쓰면 동기화가 시끄러워진다.
+     */
+    setDetectedOs: (
+      id: string,
+      detectedOs: HostDetectedOs | null,
     ) => Promise<HostRecord | null>;
   };
   groups: {

@@ -1,15 +1,15 @@
 import type { HTMLAttributes } from 'react';
-import { getHostBadgeLabel, normalizeGroupPath, type HostRecord } from '@shared';
+import { normalizeGroupPath, type HostRecord } from '@shared';
 import { cn } from '../../lib/cn';
 import { MoreVertical, Star } from '../../ui/icons';
 import {
   formatLastUsed,
   getHostAddress,
-  getHostBadgeTone,
   getHostRegion,
   getHostShortType,
 } from './hostDisplay';
 import { useTranslation } from 'react-i18next';
+import { HostBadge } from './HostBadge';
 
 const MAX_VISIBLE_TAGS = 3;
 
@@ -79,15 +79,7 @@ export function HostListCard({
     >
       {/* Top row: badge + name + star + menu */}
       <div className="flex items-center gap-[0.55rem]">
-        <span
-          aria-hidden="true"
-          className={cn(
-            'inline-grid h-[1.9rem] min-w-[2.3rem] shrink-0 place-items-center rounded-[8px] px-[0.25rem] text-[0.7rem] font-bold tracking-[-0.01em]',
-            getHostBadgeTone(host),
-          )}
-        >
-          {getHostBadgeLabel(host)}
-        </span>
+        <HostBadge host={host} />
         <strong className="min-w-0 flex-1 truncate text-[0.9rem] text-[var(--text)]">
           {host.label}
         </strong>

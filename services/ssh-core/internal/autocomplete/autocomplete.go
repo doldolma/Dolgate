@@ -103,6 +103,7 @@ func ParseSnapshot(data []byte, revision int) Result {
 	}
 	fields := bytes.Split(data, []byte{0})
 	var shell string
+	var hostOs *coretypes.TerminalHostOs
 	history := make([]string, 0, 256)
 	executables := make([]coretypes.TerminalAutocompleteExecutable, 0, 512)
 	truncated := false
@@ -116,6 +117,19 @@ func ParseSnapshot(data []byte, revision int) Result {
 			if index < len(fields) {
 				shell = NormalizeShell(string(fields[index]))
 				index++
+			}
+		case "O":
+			// id, like, prettyName 세 칸. id 가 없으면 무의미하므로 버린다.
+			if index+2 >= len(fields) {
+				index = len(fields)
+				continue
+			}
+			id := strings.ToLower(strings.TrimSpace(string(fields[index])))
+			like := strings.ToLower(strings.TrimSpace(string(fields[index+1])))
+			pretty := strings.TrimSpace(string(fields[index+2]))
+			index += 3
+			if id != "" && !hasUnsafeControl(id) && !hasUnsafeControl(pretty) {
+				hostOs = &coretypes.TerminalHostOs{Id: id, Like: like, PrettyName: pretty}
 			}
 		case "H":
 			if index >= len(fields) {
@@ -157,7 +171,18 @@ func ParseSnapshot(data []byte, revision int) Result {
 	}
 
 	if shell == "" {
-		return Unsupported()
+		// 자동완성은 못 하지만(bash·zsh 가 아니다) OS 는 읽었을 수 있다. NAS·컨테이너처럼
+		// ash 를 쓰는 호스트가 그렇다 — 아이콘은 셸과 상관이 없으니 그것만 실어 보낸다.
+		result := Unsupported()
+		if hostOs != nil {
+			result.Snapshot = &coretypes.TerminalAutocompleteSnapshotPayload{
+				Revision:    revision,
+				History:     []string{},
+				Executables: []coretypes.TerminalAutocompleteExecutable{},
+				Os:          hostOs,
+			}
+		}
+		return result
 	}
 	sort.Slice(executables, func(left, right int) bool {
 		return executables[left].Name < executables[right].Name
@@ -168,6 +193,7 @@ func ParseSnapshot(data []byte, revision int) Result {
 		},
 		Snapshot: &coretypes.TerminalAutocompleteSnapshotPayload{
 			Shell: shell, Revision: revision, History: history, Executables: executables, Truncated: truncated,
+			Os: hostOs,
 		},
 	}
 }
@@ -206,7 +232,7 @@ func CollectLocal(shellHint string, revision int) Result {
 }
 
 func RemoteSnapshotCommand() string {
-	return `( if [ -n "${BASH_VERSION:-}" ]; then shell_name=bash; elif [ -n "${ZSH_VERSION:-}" ]; then shell_name=zsh; else shell_path="${SHELL:-}"; if command -v getent >/dev/null 2>&1; then shell_path="$(getent passwd "$(id -un)" | cut -d: -f7)"; fi; shell_name="${shell_path##*/}"; fi; case "$shell_name" in bash|zsh) ;; *) printf 'S\0%s\0' "$shell_name"; exit 0 ;; esac; printf 'S\0%s\0' "$shell_name"; hist="$HOME/.${shell_name}_history"; if [ -r "$hist" ]; then tail -n 2000 "$hist" | while IFS= read -r line; do printf 'H\0%s\0' "$line"; done; fi; old_ifs="$IFS"; IFS=:; count=0; for dir in $PATH; do [ -d "$dir" ] || continue; for file in "$dir"/*; do [ "$count" -lt 5000 ] || break 2; [ -f "$file" ] && [ -x "$file" ] || continue; name="${file##*/}"; printf 'E\0%s\0%s\0' "$name" "$file"; count=$((count + 1)); done; done; IFS="$old_ifs" ) | head -c 1048576`
+	return `( if [ -n "${BASH_VERSION:-}" ]; then shell_name=bash; elif [ -n "${ZSH_VERSION:-}" ]; then shell_name=zsh; else shell_path="${SHELL:-}"; if command -v getent >/dev/null 2>&1; then shell_path="$(getent passwd "$(id -un)" | cut -d: -f7)"; fi; shell_name="${shell_path##*/}"; fi; ` + osProbeCommand + `case "$shell_name" in bash|zsh) ;; *) printf 'S\0%s\0' "$shell_name"; exit 0 ;; esac; printf 'S\0%s\0' "$shell_name"; hist="$HOME/.${shell_name}_history"; if [ -r "$hist" ]; then tail -n 2000 "$hist" | while IFS= read -r line; do printf 'H\0%s\0' "$line"; done; fi; old_ifs="$IFS"; IFS=:; count=0; for dir in $PATH; do [ -d "$dir" ] || continue; for file in "$dir"/*; do [ "$count" -lt 5000 ] || break 2; [ -f "$file" ] && [ -x "$file" ] || continue; name="${file##*/}"; printf 'E\0%s\0%s\0' "$name" "$file"; count=$((count + 1)); done; done; IFS="$old_ifs" ) | head -c 1048576`
 }
 
 func InBandProbeCommand(nonce string) string {
@@ -227,6 +253,50 @@ func DecodeInBandSnapshot(value []byte, revision int) (Result, error) {
 	}
 	return ParseSnapshot(decoded[:n], revision), nil
 }
+
+/**
+ * 호스트 OS 를 읽는 조각. 스냅샷 명령 안에서 한 번만 돈다 — 연결마다 1회라 왕복이 늘지 않는다.
+ *
+ * **셸 게이트보다 앞에 둔다.** 그 아래에서 bash·zsh 가 아니면 명령이 곧바로 끝나는데, NAS·컨테이너
+ * 처럼 ash(busybox)를 쓰는 호스트도 OS 는 알려줄 수 있어야 한다. 이 조각은 test·sed·uname·printf
+ * 뿐이라 POSIX 셸이면 어디서든 돈다.
+ *
+ * 순서가 중요하다. **표시 파일이 os-release 를 이긴다** — Proxmox·TrueNAS SCALE·openmediavault·
+ * Raspberry Pi OS 는 os-release 가 `ID=debian` 이라, 그대로 두면 전부 데비안으로 보인다. 그래서
+ * os-release 를 먼저 읽어 두고 그 위에 표시 파일로 덮는다(이름은 더 정확한 쪽을 쓴다).
+ *
+ * os-release 를 소스(`.`)하지 않고 sed 로 뽑는다. 소스하면 그 파일이 정의한 변수(NAME·VERSION
+ * 등)가 스냅샷 명령의 변수를 덮을 수 있다.
+ *
+ * 아무것도 못 읽으면 출력하지 않는다 — 앱은 그때 예전처럼 글자 뱃지를 그린다.
+ */
+const osProbeCommand = `os_id=""; os_like=""; os_name=""; ` +
+	`if [ -r /etc/os-release ]; then ` +
+	`os_id="$(sed -n 's/^ID=//p' /etc/os-release | head -n1 | tr -d '\"')"; ` +
+	`os_like="$(sed -n 's/^ID_LIKE=//p' /etc/os-release | head -n1 | tr -d '\"')"; ` +
+	`os_name="$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release | head -n1 | tr -d '\"')"; fi; ` +
+	// 표시 파일. 위에서 읽은 값을 덮는다(가장 구체적인 것이 이긴다).
+	`if [ -d /etc/pve ]; then os_id=pve; os_like=""; os_name="Proxmox VE"; ` +
+	`elif [ -r /etc/unraid-version ]; then os_id=unraid; os_like=""; ` +
+	`os_name="Unraid $(sed -n 's/^version=//p' /etc/unraid-version | head -n1 | tr -d '\"')"; ` +
+	`elif [ -r /etc/config/uLinux.conf ]; then os_id=qts; os_like=""; os_name="QNAP QTS"; ` +
+	`elif [ -r /etc/VERSION ] && [ -r /etc/synoinfo.conf ]; then os_id=dsm; os_like=""; ` +
+	`os_name="Synology DSM $(sed -n 's/^productversion=//p' /etc/VERSION | head -n1 | tr -d '\"')"; ` +
+	`elif [ -d /usr/local/opnsense ]; then os_id=opnsense; os_like=""; os_name="OPNsense"; ` +
+	`elif [ -r /etc/platform ] && [ "$(head -n1 /etc/platform)" = pfSense ]; then os_id=pfsense; os_like=""; ` +
+	`os_name="pfSense $(head -n1 /etc/version 2>/dev/null)"; ` +
+	`elif [ -r /etc/version ] && [ "$(cut -c1-7 /etc/version)" = TrueNAS ]; then os_id=truenas; os_like=""; ` +
+	`os_name="$(head -n1 /etc/version)"; ` +
+	`elif [ -d /etc/openmediavault ]; then os_id=omv; os_like=""; os_name="openmediavault"; ` +
+	// Raspberry Pi OS 는 64비트에서 os-release 가 `ID=debian` 이다 — 이름은 그쪽이 더 정확해 남긴다.
+	`elif [ -r /etc/rpi-issue ]; then os_id=raspbian; os_like=debian; ` +
+	`elif [ -r /system/build.prop ]; then os_id=android; os_like=""; os_name="Android"; fi; ` +
+	// os-release 도 표시 파일도 없는 호스트: 커널 이름·버전만이라도 남긴다. macOS 는 sw_vers,
+	// ESXi 는 uname 이 VMkernel 을 준다.
+	`if [ -z "$os_id" ]; then os_kernel="$(uname -s 2>/dev/null)"; os_rel="$(uname -r 2>/dev/null)"; ` +
+	`if [ "$os_kernel" = Darwin ]; then os_id=darwin; os_name="macOS $(sw_vers -productVersion 2>/dev/null)"; ` +
+	`elif [ -n "$os_kernel" ]; then os_id="$os_kernel"; os_name="$os_kernel $os_rel"; fi; fi; ` +
+	`[ -n "$os_id" ] && printf 'O\0%s\0%s\0%s\0' "$os_id" "$os_like" "$os_name"; `
 
 func normalizeHistoryLine(shell string, value string) string {
 	value = strings.TrimSpace(value)
