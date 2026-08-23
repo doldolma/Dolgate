@@ -71,6 +71,11 @@ export {
   ClipboardList,
   ListOrdered,
   Palette,
+  Waypoints,
+  Network,
+  Boxes,
+  Plug,
+  LogOut,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';

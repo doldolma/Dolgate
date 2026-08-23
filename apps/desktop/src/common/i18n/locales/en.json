@@ -2688,6 +2688,26 @@
     "noGroups": "No groups created yet.",
     "sortManual": "Custom"
   },
+  "sessionStatusBar": {
+    "latencyValue": "{{ms}}ms",
+    "rttMin": "min",
+    "rttAvg": "avg",
+    "rttMax": "max",
+    "openResources": "Open resources",
+    "openTmux": "Manage tmux sessions",
+    "tmuxDetected": "tmux · {{version}}",
+    "tmuxAttached": "tmux · {{name}}",
+    "destination": "destination",
+    "kind": {
+      "jumpVia": "Jump · {{name}}",
+      "jumpHops": "{{count}} jump hops",
+      "ssm": "SSM",
+      "ecs": "ECS",
+      "warpgate": "Warpgate",
+      "serial": "Serial",
+      "container": "Container"
+    }
+  },
   "sessionStore": {
     "ecsShellReopening": "Reopening the ECS shell for {{label}}.",
     "localRestarting": "Restarting the local terminal.",
@@ -3623,6 +3643,22 @@
       "manage": "Add or edit rules",
       "start": "Start",
       "stop": "Stop"
+    },
+    "tmux": {
+      "title": "tmux",
+      "emptyTitle": "tmux is not available",
+      "noHost": "This session has no host, so there is no tmux to manage.",
+      "notDetected": "No tmux was found on this host.",
+      "attachedTo": "Attached to {{name}}",
+      "detectedVersion": "tmux {{version}} detected",
+      "noSessions": "There are no tmux sessions on the remote. Create one below.",
+      "windows": "{{count}} windows",
+      "attach": "Attach",
+      "kill": "Kill session",
+      "attachedElsewhere": "Attached elsewhere",
+      "namePlaceholder": "New session name",
+      "create": "Create",
+      "refresh": "Refresh list"
     },
     "theme": {
       "title": "Terminal theme",

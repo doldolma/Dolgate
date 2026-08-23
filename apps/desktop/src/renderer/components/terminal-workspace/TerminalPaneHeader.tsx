@@ -13,7 +13,6 @@ import {
   SquareArrowOutUpRight,
   SquareTerminal,
 } from '../../ui/icons';
-import { rttColor } from '../../lib/rtt';
 import { useTranslation } from 'react-i18next';
 
 interface TerminalPaneHeaderProps {
@@ -30,8 +29,6 @@ interface TerminalPaneHeaderProps {
   kind?: HostKind;
   /** `user@host:port` 같은 대상 표기. 좁아지면 가장 먼저 접힌다. */
   subtitle?: string;
-  /** keepalive 왕복 지연. 연결 직후·재연결 중에는 null 이라 점만 남는다. */
-  rttMs?: number | null;
   /** 이 pane 이 브로드캐스트에 참여 중인가. */
   broadcastActive?: boolean;
   /** 참여 pane 이 부족해 지금은 켤 수 없음(눌러도 아무 일이 없다는 것을 보여준다). */
@@ -127,7 +124,6 @@ export function TerminalPaneHeader({
   onEndDrag,
   kind,
   subtitle,
-  rttMs,
   broadcastActive = false,
   broadcastDisabled = false,
   onToggleBroadcast,
@@ -137,7 +133,6 @@ export function TerminalPaneHeader({
   actions,
 }: TerminalPaneHeaderProps) {
   const { t: translate } = useTranslation();
-  const showLatency = typeof rttMs === 'number';
 
   return (
     <div
@@ -183,27 +178,6 @@ export function TerminalPaneHeader({
         ) : null}
       </button>
       <div className="flex shrink-0 items-center gap-[0.15rem]">
-        {showLatency ? (
-          <>
-            <span
-              className="mr-[0.1rem] inline-flex shrink-0 cursor-default items-center gap-[0.2rem] font-mono text-[0.65rem] leading-none"
-              title={translate('paneHeader.latency', { ms: rttMs })}
-            >
-              <span
-                className="h-[5px] w-[5px] shrink-0 rounded-full"
-                style={{ backgroundColor: rttColor(rttMs) }}
-              />
-              {/* 더 좁아지면 수치를 접고 점만 남긴다 — 색만으로도 빠름/느림은 읽힌다. */}
-              <span className="text-[var(--text-muted)] @max-[15rem]:hidden">
-                <span className="font-semibold" style={{ color: rttColor(rttMs) }}>
-                  {rttMs}
-                </span>
-                ms
-              </span>
-            </span>
-            <span className="mx-[0.15rem] my-[0.15rem] w-px self-stretch bg-[var(--border)]" />
-          </>
-        ) : null}
         {onToggleBroadcast ? (
           <HeaderIconButton
             label={translate(

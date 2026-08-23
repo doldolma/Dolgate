@@ -1,5 +1,6 @@
 import type { SliceDeps } from "../services/context";
 import { clearSessionCwd } from "../../lib/terminal-cwd-registry";
+import { recordRtt } from "../../lib/rtt-history";
 import { writeTerminalNotice } from "../../lib/terminal-write-registry";
 import type {
   AppState,
@@ -1044,7 +1045,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
         return;
       }
 
-      // keepalive RTT 이벤트 — 탭 인디게이터용. SSH 세션은 탭의 sessionId 가,
+      // keepalive RTT 이벤트 — 하단바 표시용. SSH 세션은 탭의 sessionId 가,
       // tmux 는 그룹의 controlSessionId 가 매칭된다(둘 중 하나만 갱신됨).
       if (event.type === "latency" && sessionId) {
         const payload = event.payload as { roundTripMs?: number };
@@ -1052,6 +1053,16 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
           typeof payload?.roundTripMs === "number" ? payload.roundTripMs : null;
         if (rtt == null) {
           return;
+        }
+        // 이력은 스토어가 아니라 레지스트리에 쌓는다 — 10초마다 오는 값을 여기 배열에 넣으면
+        // 그때마다 tabs 가 새로 만들어져 리렌더가 앱 전체로 번진다. 키는 재연결에도 불변인
+        // stableId(그룹은 group.id)다.
+        const historyKey =
+          get().tabs.find((tab) => tab.sessionId === sessionId)?.stableId ??
+          get().tmuxGroups.find((group) => group.controlSessionId === sessionId)?.id ??
+          null;
+        if (historyKey) {
+          recordRtt(historyKey, rtt);
         }
         set((state) => ({
           tabs: state.tabs.map((tab) =>

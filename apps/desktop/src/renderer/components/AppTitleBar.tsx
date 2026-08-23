@@ -1960,22 +1960,18 @@ export function AppTitleBar({
                     'min-w-[8.5rem]',
                     getTitlebarDynamicTabButtonClass(item.active),
                   )}
-                  // 제목은 잘려서 보이고(truncate) 상태 점·지연 시간이 같은 버튼 안에 섞여 있다.
-                  // 이름을 따로 주지 않으면 화면 낭독이 "● Prod 42ms" 처럼 읽고, 자동화도 이 탭을
-                  // 특정할 수 없다(닫기 버튼에만 이름이 있었다).
+                  // 제목은 잘려서 보이고(truncate) 상태 점이 같은 버튼 안에 섞여 있다. 이름을
+                  // 따로 주지 않으면 화면 낭독이 "● Prod" 처럼 읽고, 자동화도 이 탭을 특정할 수
+                  // 없다(닫기 버튼에만 이름이 있었다).
+                  //
+                  // 지연 숫자는 여기 없다 — 세션 하단바로 내렸다. 탭 안에 두면 자릿수가 바뀔 때
+                  // (9ms → 142ms) 활성 탭 폭이 흔들려 제목 잘리는 위치가 같이 움직였고, 분할에서는
+                  // 활성 pane 것만 보여 나머지 pane 의 지연은 볼 수 없었다. hover 행에는 남아 있다.
                   aria-label={translate('titleBar.tab.selectSession', { title: item.title })}
                   onClick={() => onSelectSession(item.sessionId)}
                 >
                   <TabStatusDot state={item.dotState} />
                   <span className="truncate">{item.title}</span>
-                  {item.active && item.rttMs != null ? (
-                    <span
-                      className="ml-1 flex-none text-[10px] tabular-nums"
-                      style={{ color: rttColor(item.rttMs) }}
-                    >
-                      {item.rttMs}ms
-                    </span>
-                  ) : null}
                 </TabButton>
                 <IconButton
                   size="sm"
@@ -2065,14 +2061,6 @@ export function AppTitleBar({
                     )}
                   </span>
                   <span className="truncate">{item.title}</span>
-                  {item.active && item.rttMs != null ? (
-                    <span
-                      className="ml-1 flex-none text-[10px] tabular-nums"
-                      style={{ color: rttColor(item.rttMs) }}
-                    >
-                      {item.rttMs}ms
-                    </span>
-                  ) : null}
                 </TabButton>
                 <IconButton
                   size="sm"

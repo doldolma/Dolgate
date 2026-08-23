@@ -2688,6 +2688,26 @@
     "noGroups": "아직 만든 그룹이 없습니다.",
     "sortManual": "사용자 지정"
   },
+  "sessionStatusBar": {
+    "latencyValue": "{{ms}}ms",
+    "rttMin": "min",
+    "rttAvg": "avg",
+    "rttMax": "max",
+    "openResources": "자원 자세히 보기",
+    "openTmux": "tmux 세션 관리",
+    "tmuxDetected": "tmux · {{version}}",
+    "tmuxAttached": "tmux · {{name}}",
+    "destination": "목적지",
+    "kind": {
+      "jumpVia": "점프 · {{name}}",
+      "jumpHops": "점프 {{count}}홉",
+      "ssm": "SSM",
+      "ecs": "ECS",
+      "warpgate": "Warpgate",
+      "serial": "시리얼",
+      "container": "컨테이너"
+    }
+  },
   "sessionStore": {
     "ecsShellReopening": "{{label}} ECS 셸을 다시 여는 중입니다.",
     "localRestarting": "로컬 터미널을 다시 시작하는 중입니다.",
@@ -3623,6 +3643,22 @@
       "manage": "규칙 추가·편집",
       "start": "시작",
       "stop": "정지"
+    },
+    "tmux": {
+      "title": "tmux",
+      "emptyTitle": "tmux 를 쓸 수 없습니다",
+      "noHost": "이 세션에는 호스트가 없어 tmux 를 다룰 수 없습니다.",
+      "notDetected": "이 호스트에서 tmux 를 찾지 못했습니다.",
+      "attachedTo": "{{name}} 에 붙어 있습니다",
+      "detectedVersion": "tmux {{version}} 감지",
+      "noSessions": "원격에 tmux 세션이 없습니다. 아래에서 새로 만들 수 있습니다.",
+      "windows": "창 {{count}}개",
+      "attach": "붙기",
+      "kill": "세션 종료",
+      "attachedElsewhere": "다른 곳에서 붙어 있음",
+      "namePlaceholder": "새 세션 이름",
+      "create": "만들기",
+      "refresh": "목록 새로고침"
     },
     "theme": {
       "title": "터미널 테마",

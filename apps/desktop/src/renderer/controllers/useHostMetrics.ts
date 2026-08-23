@@ -140,7 +140,11 @@ export function useHostMetrics({
     let previous: HostMetricsSample | null = previousSampleRef.current;
     // 탭을 한참 가려 뒀다 돌아오면 직전 샘플이 너무 오래됐다. 그대로 차분을 내면 그 사이의
     // *평균*이 현재값인 척 표시된다 — 버리고 다시 두 번 찍는다.
-    if (previous && Date.now() - previous.atMs > intervalMs * 2) {
+    //
+    // 기준은 **상시 주기**의 두 배로 고정한다. 새 주기(부스트 3초)로 재면 10초 주기에 찍힌
+    // 직전 샘플이 거의 항상 낡은 것이 되어, 패널을 열어 주기가 좁혀지는 순간 기준 샘플이
+    // 버려지고 값이 `-` 로 돌아갔다(자원 섹션을 열 때마다 다시 읽기 시작하던 것).
+    if (previous && Date.now() - previous.atMs > POLL_INTERVAL_MS * 2) {
       previous = null;
       previousSampleRef.current = null;
     }

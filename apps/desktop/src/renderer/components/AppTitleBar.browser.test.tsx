@@ -74,6 +74,21 @@ function renderTitleBar(overrides: Partial<AppTitleBarPropsForTest> = {}) {
   return render(<AppTitleBar {...props} />);
 }
 
+describe('AppTitleBar 탭 얼굴', () => {
+  it('지연 숫자를 탭에 그리지 않는다 — 세션 하단바로 옮겼다', () => {
+    // 예전에는 활성 탭에 `42ms` 가 붙어 있었다. 자릿수가 바뀔 때마다 탭 폭이 흔들려 제목
+    // 잘리는 위치가 같이 움직였고, 분할에서는 활성 pane 것만 보였다. hover 행에는 남아 있다.
+    const tab = { ...createSessionTab(), lastRttMs: 142 };
+    renderTitleBar({
+      tabs: [tab],
+      tabStrip: [{ kind: 'session', sessionId: tab.sessionId } as never],
+      activeWorkspaceTab: `session:${tab.sessionId}` as never,
+    });
+
+    expect(screen.queryByText('142ms')).not.toBeInTheDocument();
+  });
+});
+
 describe('AppTitleBar 세션 패널 토글', () => {
   it('셸 세션을 보고 있을 때만 뜬다', () => {
     const { unmount } = renderTitleBar({ activeWorkspaceTab: 'home' });

@@ -20,6 +20,7 @@ export type SessionPanelSectionId =
   | 'resources'
   | 'processes'
   | 'ports'
+  | 'tmux'
   | 'theme';
 
 export interface SessionPanelHistoryItem {

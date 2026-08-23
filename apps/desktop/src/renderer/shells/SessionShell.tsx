@@ -3,13 +3,13 @@ import { isSplittablePaneKind, type AuthState } from '@shared';
 import { TerminalWorkspace } from '../components/TerminalWorkspace';
 import { cn } from '../lib/cn';
 import { TmuxWindowBar } from '../components/terminal-workspace/TmuxWindowBar';
-import { TerminalHostStatusBar } from '../components/terminal-workspace/TerminalHostStatusBar';
+import { TerminalSessionStatusBar } from '../components/terminal-workspace/TerminalSessionStatusBar';
 import { listWorkspaceSessionIds } from '../components/terminal-workspace/terminalWorkspaceLayout';
 import { useHostMetrics } from '../controllers/useHostMetrics';
 import { useAppStore } from '../store/appStore';
-import { TmuxSessionFooter } from '../components/terminal-workspace/TmuxSessionFooter';
+import { resolveSessionKindChip } from '../lib/session-status-bar';
+import { t } from '../i18n';
 import {
-  statusBarDivider,
   statusBarStack,
 } from '../components/terminal-workspace/terminalStatusBarChrome';
 import { TmuxCommandPrompt } from '../components/terminal-workspace/TmuxCommandPrompt';
@@ -18,7 +18,6 @@ import { SessionPanel } from '../components/terminal-workspace/session-panel/Ses
 import { useSessionPanelTargetSessionId } from '../components/terminal-workspace/session-panel/useSessionPanelTarget';
 import type { useLoginController } from '../controllers/useLoginController';
 import { openOwnerChatWindow } from '../services/desktop/session-shares';
-import { refreshTmuxSessions } from '../services/desktop/terminal';
 import type {
   useAppModalViewModel,
   useAppSettingsViewModel,
@@ -312,80 +311,26 @@ export function SessionShell({
             따라 다른 간격으로 놓여 "tmux 와 ssh 의 UI 가 다르다"로 보인다. */}
         {activeTmuxGroup ? (
           <div className={statusBarStack}>
-            {/* 자원과 tmux 를 한 줄에 나눠 놓는다(TerminalSessionPane 과 같은 배치).
-                세로로 쌓으면 터미널이 두 줄만큼 좁아진다. */}
-            <div className="flex items-stretch">
-              <div className="min-w-0 flex-1">
-                <TerminalHostStatusBar
-                  status={tmuxHostMetrics.status}
-                  metrics={tmuxHostMetrics.metrics}
-                  onRetry={tmuxHostMetrics.retry}
-                />
-              </div>
-              <div className={`shrink-0 ${statusBarDivider}`}>
-                <TmuxSessionFooter
-                  sessionName={activeTmuxGroup.sessionName}
-                  sessions={activeTmuxGroup.sessions ?? []}
-                  onCreateSession={(name) => {
-                    const hostId = activeTmuxGroup.hostId;
-                    if (!hostId) {
-                      return;
-                    }
-                    // 새 세션 = 새 그룹 탭(replaceSessionId 없음 — 현재 tmux 유지). strict new.
-                    const quoted = `'${name.replace(/'/g, "'\\''")}'`;
-                    void sessionViewModel.connectHost(
-                      hostId,
-                      120,
-                      32,
-                      undefined,
-                      true,
-                      `tmux -CC new-session -s ${quoted}`,
-                      undefined,
-                      undefined,
-                      activeTmuxGroup.tmuxVersion ?? undefined,
-                    );
-                  }}
-                  onSelectSession={(name) => {
-                    const hostId = activeTmuxGroup.hostId;
-                    if (!hostId) {
-                      return;
-                    }
-                    // 다른 세션 전환 = 새 그룹 탭으로 attach(현재 세션 유지).
-                    const quoted = `'${name.replace(/'/g, "'\\''")}'`;
-                    void sessionViewModel.connectHost(
-                      hostId,
-                      120,
-                      32,
-                      undefined,
-                      true,
-                      `tmux -CC attach -t ${quoted}`,
-                      undefined,
-                      undefined,
-                      activeTmuxGroup.tmuxVersion ?? undefined,
-                    );
-                  }}
-                  onKillSession={(name) => {
-                    if (activeWorkspace) {
-                      sessionViewModel.killTmuxSession(
-                        activeWorkspace.activeSessionId,
-                        name,
-                      );
-                    }
-                  }}
-                  onDetach={() => {
-                    if (activeWorkspace) {
-                      void sessionViewModel.detachTmuxWorkspace(activeWorkspace.id);
-                    }
-                  }}
-                  onRefresh={() => {
-                    if (activeWorkspace) {
-                      // 드롭다운 열 때 세션 목록 즉시 재조회(다른 SSH 연결의 새 세션 반영).
-                      void refreshTmuxSessions(activeWorkspace.activeSessionId);
-                    }
-                  }}
-                />
-              </div>
-            </div>
+            {/* pane 쪽과 같은 한 줄 바를 쓴다. tmux 칩만 세션명을 들고, 누르면 패널의 tmux
+                섹션이 열린다(세션 전환·생성·kill·detach 가 거기 있다). */}
+            <TerminalSessionStatusBar
+              sessionId={activeWorkspace?.activeSessionId ?? tmuxMetricsSessionId ?? ''}
+              status={tmuxHostMetrics.status}
+              metrics={tmuxHostMetrics.metrics}
+              onRetry={tmuxHostMetrics.retry}
+              rttMs={activeTmuxGroup.lastRttMs ?? null}
+              // 그룹 id 는 재연결로 controlSessionId 가 바뀌어도 불변이다(탭의 stableId 와 같은 역할).
+              historyKey={activeTmuxGroup.id}
+              kindChip={resolveSessionKindChip({
+                host: homeViewModel.hosts.find(
+                  (host) => host.id === activeTmuxGroup.hostId,
+                ),
+              })}
+              hopRows={[]}
+              tmuxLabel={t('sessionStatusBar.tmuxAttached', {
+                name: activeTmuxGroup.sessionName,
+              })}
+            />
           </div>
         ) : null}
       </div>

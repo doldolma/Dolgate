@@ -26,6 +26,23 @@ describe('TerminalPaneHeader', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('지연은 그리지 않는다 — 세션 하단바로 옮겼다', () => {
+    // 예전에는 여기에 점 + 숫자가 있었다. 하단바로 내린 뒤 같은 값이 두 곳에 뜨지 않게
+    // prop 째 없앴으므로, 헤더에는 ms 표기가 남아 있어서는 안 된다.
+    const { container } = render(
+      <TerminalPaneHeader
+        sessionId="session-1"
+        title="Prod Shell"
+        subtitle="ubuntu@prod:22"
+        active
+        draggingDisabled={false}
+        closingDisabled={false}
+      />,
+    );
+
+    expect(container.textContent).not.toMatch(/\d+\s*ms/);
+  });
+
   it('writes the session id into the drag payload when dragging starts', () => {
     const setData = vi.fn();
     const onStartDrag = vi.fn();

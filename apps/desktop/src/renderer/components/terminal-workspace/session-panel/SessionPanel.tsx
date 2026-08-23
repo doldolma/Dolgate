@@ -19,6 +19,7 @@ import type { SessionPanelSectionId } from '../../../lib/session-panel';
 import {
   Activity,
   Cable,
+  Columns2,
   History,
   ListOrdered,
   Palette,
@@ -34,6 +35,7 @@ import { SessionPanelProcesses } from './SessionPanelProcesses';
 import { SessionPanelResources } from './SessionPanelResources';
 import { SessionPanelSnippets } from './SessionPanelSnippets';
 import { SessionPanelTheme } from './SessionPanelTheme';
+import { SessionPanelTmux } from './SessionPanelTmux';
 import {
   useSessionCommandBlocks,
   useSessionPanelSender,
@@ -64,6 +66,8 @@ const SECTIONS: Array<{
   { id: 'resources', Icon: Activity, labelKey: 'sessionPanel.resources.title' },
   { id: 'processes', Icon: ListOrdered, labelKey: 'sessionPanel.processes.title' },
   { id: 'ports', Icon: Cable, labelKey: 'sessionPanel.ports.title' },
+  // tmux. 하단바에는 상태 칩만 두고 세션 목록·생성·kill·detach 는 여기로 모았다.
+  { id: 'tmux', Icon: Columns2, labelKey: 'sessionPanel.tmux.title' },
   // 테마는 맨 아래. 세션마다 여는 것이 아니라 한 번 정하고 마는 것이다.
   { id: 'theme', Icon: Palette, labelKey: 'sessionPanel.theme.title' },
 ];
@@ -75,6 +79,7 @@ const SECTION_TITLE_KEY: Record<SessionPanelSectionId, string> = {
   resources: 'sessionPanel.resources.title',
   processes: 'sessionPanel.processes.title',
   ports: 'sessionPanel.ports.title',
+  tmux: 'sessionPanel.tmux.title',
   theme: 'sessionPanel.theme.title',
 };
 
@@ -215,6 +220,8 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
           <SessionPanelProcesses sessionId={sessionId} />
         ) : section === 'ports' ? (
           <SessionPanelPorts hostId={targetTab?.hostId ?? null} />
+        ) : section === 'tmux' ? (
+          <SessionPanelTmux sessionId={sessionId} />
         ) : section === 'theme' ? (
           <SessionPanelTheme hostId={targetTab?.hostId ?? null} />
         ) : (

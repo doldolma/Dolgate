@@ -28,6 +28,7 @@ import {
   createInactiveSessionShareState,
 } from "./session-share";
 import { t } from '../../i18n';
+import { clearRttHistory } from "../../lib/rtt-history";
 
 export function asSessionTabId(sessionId: string): SessionWorkspaceTabId {
   return `session:${sessionId}`;
@@ -612,6 +613,14 @@ export function removeSessionFromState(
   state: AppState,
   sessionId: string,
 ): Partial<AppState> {
+  // 지연 이력은 stableId 로 들고 있다 — 탭이 사라질 때 함께 버린다(재연결로 sessionId 만
+  // 바뀔 때는 이 함수를 지나지 않으므로 이력이 이어진다).
+  const closingStableId = state.tabs.find(
+    (tab) => tab.sessionId === sessionId,
+  )?.stableId;
+  if (closingStableId) {
+    clearRttHistory(closingStableId);
+  }
   const tabs = state.tabs.filter((tab) => tab.sessionId !== sessionId);
   const standaloneIndex = state.tabStrip.findIndex(
     (item) => item.kind === "session" && item.sessionId === sessionId,

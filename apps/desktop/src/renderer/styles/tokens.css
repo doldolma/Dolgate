@@ -27,6 +27,9 @@
   --surface-raised: rgba(254, 255, 255, 0.97);
   --surface-strong: rgba(250, 252, 255, 0.98);
   --surface-muted: rgba(245, 248, 252, 0.94);
+  /* 상태바에서 누를 수 있는 영역의 hover 배경. 어두운 배경 위에서는 같은 비율이 훨씬 약하게
+     읽혀 다크에서 값을 더 올린다(4% → 10%). */
+  --status-hover-bg: color-mix(in srgb, var(--surface) 96%, var(--text) 4%);
   --dialog-surface: #fbfdff;
   --dialog-surface-muted: #f2f6fb;
   --border: rgba(84, 104, 132, 0.12);
@@ -110,6 +113,7 @@
   --surface-raised: rgba(17, 30, 46, 0.97);
   --surface-strong: rgba(18, 32, 48, 0.98);
   --surface-muted: rgba(19, 30, 45, 0.92);
+  --status-hover-bg: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
   --dialog-surface: #13253b;
   --dialog-surface-muted: #182c43;
   --border: rgba(133, 154, 179, 0.12);

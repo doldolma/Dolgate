@@ -19,10 +19,13 @@ import { getPathForDroppedFile } from '../../services/desktop/files';
 import { useTerminalSessionViewController } from '../../controllers/useTerminalSessionViewController';
 import { TerminalChatToastRegion } from './TerminalChatToastRegion';
 import { TerminalConnectionOverlay } from './TerminalConnectionOverlay';
-import { TerminalHostStatusBar } from './TerminalHostStatusBar';
+import { TerminalSessionStatusBar } from './TerminalSessionStatusBar';
 import { TerminalMoshStatusBar } from './TerminalMoshStatusBar';
-import { TerminalTmuxStatusBar } from './TerminalTmuxStatusBar';
-import { statusBarDivider, statusBarStack } from './terminalStatusBarChrome';
+import { statusBarStack } from './terminalStatusBarChrome';
+import {
+  buildHopRows,
+  resolveSessionKindChip,
+} from '../../lib/session-status-bar';
 import { useHostMetrics } from '../../controllers/useHostMetrics';
 import { TerminalHostKeyTrustCard } from './TerminalHostKeyTrustCard';
 import { TerminalInteractiveAuthOverlay } from './TerminalInteractiveAuthOverlay';
@@ -45,16 +48,10 @@ import { TerminalBlockStickyHeader } from './TerminalBlockStickyHeader';
 import { TerminalCommandPalette } from './TerminalCommandPalette';
 import { SnippetVariablesDialog } from './SnippetVariablesDialog';
 import type { CommandFinishedInfo } from '../../lib/command-notification';
-import { supportsTmuxControlMode } from '../../lib/tmux-version';
 import { getHostSubtitle } from '@shared';
 import { hostSubtitleLabels } from '../../../common/shared-messages';
 import { useTranslation } from 'react-i18next';
 
-// PASSTHROUGH_TMUX_COMMAND: control mode floor(2.6) 미만 tmux 를 일반 SSH 세션으로 띄울
-// 때 접속 직후 셸에 자동 입력하는 호환 attach-or-create 명령. 모든 tmux 버전에서 동작
-// (attach 실패 시 new 로 폴백). 1.8+ 면 'tmux new -A' 한 줄도 되지만, floor 미만(=구버전)
-// 환경의 폭넓은 호환을 위해 가장 보수적인 폴백 형태를 쓴다.
-const PASSTHROUGH_TMUX_COMMAND = 'tmux attach 2>/dev/null || tmux new';
 
 export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   const { t: translate } = useTranslation();
@@ -93,97 +90,6 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   const hosts = useAppStore((state) => state.hosts);
 
 
-  const connectHost = useAppStore((state) => state.connectHost);
-  const killTmuxSession = useAppStore((state) => state.killTmuxSession);
-  // tmux 하단바 "열기" — 같은 호스트로 control mode(tmux -CC) 연결을 시작한다(기본 dolgate 세션).
-  // 이 세션(tab.sessionId)의 탭 자리를 재사용해 "현재 화면에서" tmux 가 열리게 한다.
-  const handleOpenTmux = useCallback(() => {
-    if (!tab?.hostId) {
-      return;
-    }
-    const version = tab.tmuxAvailable?.version;
-    // control mode floor(2.6) 미만 tmux 는 control client 사이즈 모델(refresh-client -C)
-    // 이 없어 -CC 가 제대로 동작하지 않는다. 이 경우 control mode 대신 일반 SSH 세션을
-    // 열고 접속 직후 호환 attach-or-create 명령을 자동 입력해 passthrough 로 tmux 를 띄운다.
-    if (!supportsTmuxControlMode(version)) {
-      void connectHost(
-        tab.hostId,
-        120,
-        32,
-        undefined,
-        false, // tmux=false → 일반 SSH 세션(control mode 아님)
-        undefined,
-        tab.sessionId,
-        undefined,
-        undefined,
-        PASSTHROUGH_TMUX_COMMAND, // startupCommandOverride
-      );
-      return;
-    }
-    void connectHost(
-      tab.hostId,
-      120,
-      32,
-      undefined,
-      true,
-      undefined,
-      tab.sessionId,
-      undefined,
-      version,
-    );
-  }, [connectHost, tab?.hostId, tab?.sessionId, tab?.tmuxAvailable?.version]);
-  // 하단바 드롭다운에서 감지된 특정 tmux 세션 [attach] — 그 세션 이름으로 control mode 진입.
-  const handleAttachTmuxSession = useCallback(
-    (name: string) => {
-      if (!tab?.hostId) {
-        return;
-      }
-      // tmux 세션 이름은 작은따옴표로 감싸 셸 인젝션을 막는다(이름 내 ' 는 escape).
-      const quoted = `'${name.replace(/'/g, "'\\''")}'`;
-      void connectHost(
-        tab.hostId,
-        120,
-        32,
-        undefined,
-        true,
-        `tmux -CC attach -t ${quoted}`,
-        tab.sessionId,
-        undefined,
-        tab.tmuxAvailable?.version,
-      );
-    },
-    [connectHost, tab?.hostId, tab?.sessionId, tab?.tmuxAvailable?.version],
-  );
-  // 하단바 드롭다운에서 이름 지정 신규 tmux 세션 생성 — new-session -s <name>(strict new;
-  // 이름 충돌 시 tmux 에러 → 연결 실패 오버레이). attach 와 동일 escape, 현재 탭 재사용.
-  const handleCreateTmuxSession = useCallback(
-    (name: string) => {
-      if (!tab?.hostId) {
-        return;
-      }
-      const quoted = `'${name.replace(/'/g, "'\\''")}'`;
-      void connectHost(
-        tab.hostId,
-        120,
-        32,
-        undefined,
-        true,
-        `tmux -CC new-session -s ${quoted}`,
-        tab.sessionId,
-        undefined,
-        tab.tmuxAvailable?.version,
-      );
-    },
-    [connectHost, tab?.hostId, tab?.sessionId, tab?.tmuxAvailable?.version],
-  );
-  // 감지 하단바에서 원격 tmux 세션 종료 — attach 없이. sessionId(이 SSH 세션)를 넘기면
-  // Go runtime 이 control 세션이 아님을 보고 보조 exec 채널로 kill-session 후 목록을 재감지한다.
-  const handleKillTmuxSession = useCallback(
-    (name: string) => {
-      killTmuxSession(sessionId, name);
-    },
-    [killTmuxSession, sessionId],
-  );
   // tmux pane 분할은 상단 윈도우 바의 "분할" 버튼(또는 Ctrl-b % / ")이 담당한다.
   // pane 헤더/floating 의 │·─ 버튼은 헷갈려서 제거했다.
   // tmux pane 은 헤더/여백 없이 슬롯을 꽉 채운다 — 그래야 컨테이너 픽셀과 tmux 셀 그리드가
@@ -700,7 +606,6 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           // 대상 표기는 앱의 다른 목록과 같은 헬퍼를 쓴다 — pane 헤더만 따로 만들면 같은
           // 호스트가 화면마다 다르게 적힌다(AWS·Warpgate·시리얼은 형식이 제각각이다).
           subtitle={props.host ? getHostSubtitle(props.host, hostSubtitleLabels()) : undefined}
-          rttMs={tab?.lastRttMs ?? null}
           zoomed={props.zoomed}
           onToggleZoom={props.onToggleZoom}
           onDetachToTab={props.onDetachToTab}
@@ -952,31 +857,38 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
             lastResponseAt={tab.lastMoshResponseAt ?? null}
           />
         ) : null}
-        {/* 자원과 tmux 는 한 줄에 나눠 놓는다 — 세로로 쌓으면 터미널이 두 줄만큼 좁아지는데,
-            둘 다 짧아서 한 줄에 들어간다. 자원이 왼쪽을 채우고 tmux 는 오른쪽 끝에 붙는다.
-            자원 바는 지표를 못 읽는 연결에서 null 을 반환하며, 그때 tmux 만 남아도 위치는
-            같다(빈 flex-1 이 왼쪽을 차지한다). */}
-        <div className="flex items-stretch">
-          <div className="min-w-0 flex-1">
-            <TerminalHostStatusBar
-              status={hostMetrics.status}
-              metrics={hostMetrics.metrics}
-              onRetry={hostMetrics.retry}
-            />
-          </div>
-          {tab?.tmuxAvailable && !tab.tmux ? (
-            <div className={cn('shrink-0', statusBarDivider)}>
-              <TerminalTmuxStatusBar
-                version={tab.tmuxAvailable.version}
-                sessions={tab.tmuxAvailable.sessions}
-                onOpen={handleOpenTmux}
-                onAttachSession={handleAttachTmuxSession}
-                onCreateSession={handleCreateTmuxSession}
-                onKillSession={handleKillTmuxSession}
-              />
-            </div>
-          ) : null}
-        </div>
+        {/* 세션 상태바. tmux pane 은 그리지 않는다 — 그쪽은 그룹 하단에 한 줄이 따로 있고,
+            여기까지 그리면 같은 값이 두 줄로 뜬다. */}
+        {isTmuxPane ? null : (
+          <TerminalSessionStatusBar
+            sessionId={sessionId}
+            status={hostMetrics.status}
+            metrics={hostMetrics.metrics}
+            onRetry={hostMetrics.retry}
+            rttMs={tab?.lastRttMs ?? null}
+            // 이력은 재연결을 건너 이어져야 한다 — sessionId 는 재연결마다 새로 발급된다.
+            historyKey={tab?.stableId ?? null}
+            // 분할이면 종류·대상은 pane 헤더가 이미 들고 있다 — 같은 것을 두 번 두지 않는다.
+            kindChip={
+              showHeader
+                ? null
+                : resolveSessionKindChip({
+                    host: props.host,
+                    shellKind: tab?.shellKind,
+                    hops: tab?.connectionHops,
+                  })
+            }
+            hopRows={showHeader ? [] : buildHopRows(tab?.connectionHops)}
+            // 감지만 된 상태에서는 버전을, 붙어 있으면 그룹 하단바가 세션명을 보여 준다.
+            tmuxLabel={
+              tab?.tmuxAvailable && !tab.tmux
+                ? translate('sessionStatusBar.tmuxDetected', {
+                    version: tab.tmuxAvailable.version,
+                  })
+                : null
+            }
+          />
+        )}
       </div>
     </div>
   );
