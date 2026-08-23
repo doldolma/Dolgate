@@ -4,7 +4,7 @@ import {
   buildQuickSshHostLabel,
   findExistingQuickSshHost,
   parseQuickSshCommand,
-} from './quick-connect';
+} from '@shared';
 
 const sshHost = (overrides: Partial<Extract<HostRecord, { kind: 'ssh' }>> = {}) =>
   ({

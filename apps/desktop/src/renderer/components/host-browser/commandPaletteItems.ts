@@ -9,7 +9,7 @@ import { matchesKeyboardLayoutQuery } from '../../lib/keyboard-layout-search';
 import {
   formatQuickSshHostLabel,
   parseQuickSshCommand,
-} from '../../lib/quick-connect';
+} from '@shared';
 import type { CommandPaletteItem } from '../CommandPalette';
 import {
   ArrowLeftRight,
