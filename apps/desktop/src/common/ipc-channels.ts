@@ -35,14 +35,16 @@ export const ipcChannels = {
     create: 'hosts:create',
     update: 'hosts:update',
     remove: 'hosts:remove',
-    setFavorite: 'hosts:set-favorite'
+    setFavorite: 'hosts:set-favorite',
+    setTerminalTheme: 'hosts:set-terminal-theme'
   },
   groups: {
     list: 'groups:list',
     create: 'groups:create',
     remove: 'groups:remove',
     move: 'groups:move',
-    rename: 'groups:rename'
+    rename: 'groups:rename',
+    setOrder: 'groups:set-order'
   },
   aws: {
     listProfiles: 'aws:list-profiles',

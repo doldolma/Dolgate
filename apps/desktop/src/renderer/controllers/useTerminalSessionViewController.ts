@@ -36,7 +36,9 @@ import {
   finishCommandBlock,
   getCommandBlocks,
   jumpToAdjacentCommandBlock,
+  noteContinuationPrompt,
   notePromptCommandStart,
+  noteReportedCommand,
   readBlockOutput,
 } from '../lib/terminal-command-blocks';
 import { useTerminalBlockOverlay } from './useTerminalBlockOverlay';
@@ -982,6 +984,14 @@ export function useTerminalSessionViewController({
             if (blockTerminal) {
               notePromptCommandStart(liveSessionIdRef.current, blockTerminal);
             }
+          } else if (marker === 'B;2') {
+            // 이어지는 줄(PS2)의 프롬프트 폭. bash 에서 `> ` 가 명령에 섞이지 않게 한다.
+            if (blockTerminal) {
+              noteContinuationPrompt(liveSessionIdRef.current, blockTerminal);
+            }
+          } else if (marker.startsWith('E;')) {
+            // 셸이 알려 준 명령 원문(zsh). C 보다 먼저 오고, 있으면 화면에서 읽지 않는다.
+            noteReportedCommand(liveSessionIdRef.current, marker.slice(2));
           } else if (marker === 'C') {
             if (blockTerminal) {
               beginCommandBlock(
@@ -1068,6 +1078,16 @@ export function useTerminalSessionViewController({
       getSelection: () => runtime.getSelection(),
       captureRecentText: (maxLines: number) => runtime.captureRecentText(maxLines),
       captureTextSnapshot: () => runtime.captureTextSnapshot(),
+      // 세션 패널(워크스페이스 레벨)이 이 pane 의 셸에 입력을 보내는 경로. 연결이 죽어 있으면
+      // sendInputIfConnected 가 조용히 버린다.
+      sendInput: (data: string) => {
+        sendInputIfConnected(data);
+      },
+      // 여러 줄을 "실행하지 않고 넣기" 가 되는지는 셸이 켜 준 모드로만 알 수 있다.
+      isBracketedPasteEnabled: () => runtime.terminal.modes.bracketedPasteMode,
+      scrollToLine: (line: number) => {
+        runtime.terminal.scrollToLine(line);
+      },
     };
     registerTerminalHooks(stableId, terminalHooks);
     // 안전망: 이전 터미널이 남긴 스크롤백이 있으면 복원한다.
@@ -1378,9 +1398,8 @@ export function useTerminalSessionViewController({
         ? t('termView.askFailed')
         : t('termView.askExplain');
     const store = appStore.getState();
-    if (!store.aiConversations?.[liveSessionIdRef.current]?.open) {
-      store.toggleAiPanel(liveSessionIdRef.current);
-    }
+    // AI 는 세션 패널의 섹션이다 — 물어보려면 그 섹션을 띄운다(패널이 닫혀 있으면 함께 열린다).
+    store.selectSessionPanelSection(liveSessionIdRef.current, 'ai');
     void store.sendAiMessage(
       liveSessionIdRef.current,
       question,

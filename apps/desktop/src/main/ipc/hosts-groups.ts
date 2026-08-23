@@ -1,4 +1,4 @@
-import type { GroupRemoveMode, HostDraft, HostSecretInput } from "@shared";
+import type { GroupRemoveMode, HostDraft, HostSecretInput, TerminalThemeId } from "@shared";
 import {
   isRdpHostDraft,
   isRdpHostRecord,
@@ -229,6 +229,16 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
     },
   );
 
+  ipcMain.handle(
+    ipcChannels.hosts.setTerminalTheme,
+    async (event, id: string, terminalThemeId: TerminalThemeId | null) => {
+      const record = ctx.hosts.setTerminalTheme(id, terminalThemeId);
+      ctx.queueSync();
+      ctx.emitWorkspaceChanged?.(event?.sender);
+      return record;
+    },
+  );
+
   ipcMain.handle(ipcChannels.groups.list, async () => ctx.groups.list());
 
   ipcMain.handle(
@@ -284,6 +294,18 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
       ctx.queueSync();
       ctx.emitWorkspaceChanged?.(event?.sender);
       return result;
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.groups.setOrder,
+    async (event, assignments: Array<{ id: string; sortRank: number }>) => {
+      // 삭제가 아니므로 outbox 툼스톤은 없다 — create/move/rename 과 같이 queueSync 가
+      // 다음 push 에서 바뀐 레코드를 실어 간다.
+      const groups = ctx.groups.setSortRanks(assignments);
+      ctx.queueSync();
+      ctx.emitWorkspaceChanged?.(event?.sender);
+      return groups;
     },
   );
 

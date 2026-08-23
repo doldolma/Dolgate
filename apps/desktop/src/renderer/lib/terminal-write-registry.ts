@@ -24,6 +24,17 @@ export interface TerminalHooks {
   captureRecentText: (maxLines: number) => string;
   /** 질문 시점에 고정할 전체 scrollback 텍스트 snapshot(AI anchored scrollback 조회용). */
   captureTextSnapshot: () => string[];
+  /** 셸로 입력을 보낸다(세션 패널의 "넣기/실행"). 연결이 없으면 아무 일도 하지 않는다. */
+  sendInput: (data: string) => void;
+  /**
+   * 셸이 괄호 붙여넣기(`ESC[?2004h`)를 켰는가.
+   *
+   * 여러 줄 텍스트를 "실행하지 않고 넣기" 가 가능한지가 여기서 갈린다. 추측하지 않고 셸이
+   * 켜 준 모드를 읽는다.
+   */
+  isBracketedPasteEnabled: () => boolean;
+  /** 스크롤백의 해당 행으로 이동한다(히스토리 항목 클릭). */
+  scrollToLine: (line: number) => void;
 }
 
 const hooksByStableId = new Map<string, TerminalHooks>();
@@ -69,6 +80,55 @@ export function captureTerminalRecentText(stableId: string, maxLines: number): s
 /** 살아 있는 터미널(stableId)의 전체 텍스트 snapshot. 없으면 null. AI anchored scrollback 조회용. */
 export function captureTerminalTextSnapshot(stableId: string): string[] | null {
   return hooksByStableId.get(stableId)?.captureTextSnapshot() ?? null;
+}
+
+/**
+ * sessionId 로 훅을 찾는다.
+ *
+ * 레지스트리 키는 stableId(pane 수명) 인데 세션 패널은 sessionId(연결 수명)로 대상을 정한다
+ * — 패널은 pane 밖(워크스페이스 레벨)에 있어 pane 의 ref 에 닿을 수 없다. 살아 있는 터미널
+ * 수는 탭 수만큼이라 선형 탐색으로 충분하다.
+ */
+function findHooksBySessionId(sessionId: string): TerminalHooks | null {
+  if (!sessionId) {
+    return null;
+  }
+  for (const hooks of hooksByStableId.values()) {
+    if (hooks.getSessionId() === sessionId) {
+      return hooks;
+    }
+  }
+  return null;
+}
+
+/**
+ * 이 세션에 살아 있는 터미널이 있는가.
+ *
+ * 끊긴 세션의 탭은 그대로 남으므로(최근 세션 복원이 그것에 기댄다) 패널이 보낼 수 있는지는
+ * 이것으로 갈린다. 없는데 버튼이 살아 있으면 눌러도 아무 일이 없는 UI 가 된다.
+ */
+export function hasLiveTerminal(sessionId: string): boolean {
+  return findHooksBySessionId(sessionId) !== null;
+}
+
+/** 살아 있는 터미널이 있으면 입력을 보내고 true. 없으면 false. */
+export function sendTerminalInput(sessionId: string, data: string): boolean {
+  const hooks = findHooksBySessionId(sessionId);
+  if (!hooks) {
+    return false;
+  }
+  hooks.sendInput(data);
+  return true;
+}
+
+/** 셸이 괄호 붙여넣기를 켰는가. 터미널을 못 찾으면 false(=여러 줄 넣기를 막는 쪽). */
+export function isTerminalBracketedPasteEnabled(sessionId: string): boolean {
+  return findHooksBySessionId(sessionId)?.isBracketedPasteEnabled() ?? false;
+}
+
+/** 스크롤백의 해당 행으로 이동한다. */
+export function scrollTerminalToLine(sessionId: string, line: number): void {
+  findHooksBySessionId(sessionId)?.scrollToLine(line);
 }
 
 /** 절전/잠금 복귀 시 모든 살아 있는 터미널을 강제 재렌더한다. */

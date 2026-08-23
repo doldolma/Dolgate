@@ -40,6 +40,8 @@ function renderTitleBar(overrides: Partial<AppTitleBarPropsForTest> = {}) {
     workspaces: [],
     tabStrip: [],
     activeWorkspaceTab: 'home',
+    sessionPanelOpen: false,
+    onToggleSessionPanel: vi.fn(),
     draggedSession: null,
     updateState: createUpdateState(),
     windowState: { isMaximized: false, isFullScreen: false },
@@ -71,6 +73,52 @@ function renderTitleBar(overrides: Partial<AppTitleBarPropsForTest> = {}) {
 
   return render(<AppTitleBar {...props} />);
 }
+
+describe('AppTitleBar 세션 패널 토글', () => {
+  it('셸 세션을 보고 있을 때만 뜬다', () => {
+    const { unmount } = renderTitleBar({ activeWorkspaceTab: 'home' });
+    expect(screen.queryByRole('button', { name: '세션 패널' })).not.toBeInTheDocument();
+    unmount();
+
+    const onToggleSessionPanel = vi.fn();
+    renderTitleBar({
+      tabs: [createSessionTab('session-1')],
+      tabStrip: [{ kind: 'session', sessionId: 'session-1' }],
+      activeWorkspaceTab: 'session:session-1',
+      onToggleSessionPanel,
+    });
+    fireEvent.click(screen.getByRole('button', { name: '세션 패널' }));
+    expect(onToggleSessionPanel).toHaveBeenCalledTimes(1);
+  });
+
+  it('RDP 탭에서는 뜨지 않는다', () => {
+    // 셸이 없으니 히스토리도 스니펫도 성립하지 않는다.
+    renderTitleBar({
+      tabs: [{ ...createSessionTab('session-1'), paneKind: 'rdp' as const }],
+      tabStrip: [{ kind: 'session', sessionId: 'session-1' }],
+      activeWorkspaceTab: 'session:session-1',
+    });
+    expect(screen.queryByRole('button', { name: '세션 패널' })).not.toBeInTheDocument();
+  });
+
+  it('분할 화면에서는 포커스된 pane 을 대상으로 삼는다', () => {
+    // 상단 바와 패널 본체가 같은 계산(resolveFocusedPaneSessionId)을 써야 대상이 갈리지 않는다.
+    renderTitleBar({
+      tabs: [createSessionTab('session-1'), createSessionTab('session-2')],
+      workspaces: [
+        {
+          id: 'ws-1',
+          activeSessionId: 'session-2',
+          layout: { kind: 'leaf', sessionId: 'session-2' },
+          zoomedSessionId: null,
+        } as never,
+      ],
+      tabStrip: [{ kind: 'workspace', workspaceId: 'ws-1' }],
+      activeWorkspaceTab: 'workspace:ws-1',
+    });
+    expect(screen.getByRole('button', { name: '세션 패널' })).toBeInTheDocument();
+  });
+});
 
 describe('AppTitleBar update popover', () => {
   it('keeps update details while downloading and shows a direct install button when ready', () => {
@@ -220,6 +268,8 @@ describe('AppTitleBar update popover', () => {
         onSetRdpMonitors={vi.fn()}
         resolveRdpMonitors={() => null}
         onCloseWindow={vi.fn().mockResolvedValue(undefined)}
+        sessionPanelOpen={false}
+        onToggleSessionPanel={vi.fn()}
       />
     );
 
@@ -362,6 +412,8 @@ describe('AppTitleBar update popover', () => {
         onSetRdpMonitors={vi.fn()}
         resolveRdpMonitors={() => null}
         onCloseWindow={vi.fn().mockResolvedValue(undefined)}
+        sessionPanelOpen={false}
+        onToggleSessionPanel={vi.fn()}
       />,
     );
 
@@ -466,6 +518,8 @@ describe('AppTitleBar update popover', () => {
         onSetRdpMonitors={vi.fn()}
         resolveRdpMonitors={() => null}
         onCloseWindow={vi.fn().mockResolvedValue(undefined)}
+        sessionPanelOpen={false}
+        onToggleSessionPanel={vi.fn()}
       />,
     );
 
@@ -526,6 +580,8 @@ describe('AppTitleBar update popover', () => {
         onSetRdpMonitors={vi.fn()}
         resolveRdpMonitors={() => null}
         onCloseWindow={vi.fn().mockResolvedValue(undefined)}
+        sessionPanelOpen={false}
+        onToggleSessionPanel={vi.fn()}
       />,
     );
 

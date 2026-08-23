@@ -44,6 +44,7 @@ import {
   type FigExecuteCommand,
 } from '../lib/command-spec/fig-runtime';
 import type { CommandSpec } from '../lib/command-spec/types';
+import { setShellHistory } from '../lib/shell-history-registry';
 
 // The overlay shows ~5 rows at once but keeps a deeper list so arrow keys can
 // scroll through more candidates (TerminalAutocompleteOverlay windows the view).
@@ -627,6 +628,7 @@ export function useTerminalAutocomplete({
     setCommand(createEmptyCommandBuffer());
     setCapability(null);
     setSnapshot(null);
+    setShellHistory(sessionId, null);
     setDismissedValue(null);
     setIntegrationReady(false);
     setCommandSpec(null);
@@ -662,6 +664,7 @@ export function useTerminalAutocomplete({
       setCommand(createEmptyCommandBuffer());
       setCapability(null);
       setSnapshot(null);
+    setShellHistory(sessionId, null);
       setIntegrationReady(false);
       setCommandSpec(null);
       setDynamicSuggestions(EMPTY_DYNAMIC);
@@ -686,6 +689,8 @@ export function useTerminalAutocomplete({
           const next = normalizeSnapshot(sessionId, event.payload);
           snapshotRef.current = next;
           setSnapshot(next);
+          // 세션 패널의 히스토리 섹션도 같은 값을 본다 — 원격에 다시 묻지 않기 위해서다.
+          setShellHistory(sessionId, next?.history ?? null);
         }
       });
   }, [enabled, sessionId]);

@@ -1025,6 +1025,20 @@ export class HostRepository {
     return record;
   }
 
+  setTerminalTheme(id: string, terminalThemeId: TerminalThemeId | null): HostRecord | null {
+    let nextRecord: HostRecord | null = null;
+    stateStorage.updateState((state) => {
+      state.data.hosts = state.data.hosts.map((entry) => {
+        if (entry.id !== id) {
+          return entry;
+        }
+        nextRecord = { ...entry, terminalThemeId, updatedAt: nowIso() };
+        return nextRecord;
+      });
+    });
+    return nextRecord;
+  }
+
   setFavorite(id: string, favorite: boolean): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
@@ -1374,6 +1388,30 @@ export class GroupRepository {
       removedGroupIds,
       removedHostIds
     };
+  }
+
+  /**
+   * 직접 정렬 순서를 저장한다.
+   *
+   * 이름·경로·부모는 건드리지 않는다 — 순서만 바뀌는 조작이라 경로 변형(mutatePath)을
+   * 거칠 이유가 없고, 거치면 하위 호스트까지 다시 쓰게 된다.
+   */
+  setSortRanks(assignments: Array<{ id: string; sortRank: number }>): GroupRecord[] {
+    if (assignments.length === 0) {
+      return stateStorage.getState().data.groups;
+    }
+    const rankById = new Map(assignments.map((entry) => [entry.id, entry.sortRank]));
+    const timestamp = nowIso();
+    const nextState = stateStorage.updateState((state) => {
+      state.data.groups = state.data.groups.map((record) => {
+        const nextRank = rankById.get(record.id);
+        if (nextRank === undefined || record.sortRank === nextRank) {
+          return record;
+        }
+        return { ...record, sortRank: nextRank, updatedAt: timestamp };
+      });
+    });
+    return nextState.data.groups;
   }
 
   replaceAll(records: GroupRecord[]): void {

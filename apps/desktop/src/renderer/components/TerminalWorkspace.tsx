@@ -66,6 +66,8 @@ interface TerminalWorkspaceProps {
   settings: AppSettings;
   prefersDark: boolean;
   activeSessionId: string | null;
+  /** 세션 패널과 한 카드를 나눠 쓰는가. 그러면 자기 테두리·그림자를 그리지 않는다. */
+  sharesCardWithPanel?: boolean;
   activeWorkspace: WorkspaceTab | null;
   viewActivationKey: string | null;
   draggedSession: DraggedSessionPayload | null;
@@ -174,6 +176,7 @@ export function TerminalWorkspace({
   settings,
   prefersDark,
   activeSessionId,
+  sharesCardWithPanel = false,
   activeWorkspace,
   viewActivationKey,
   draggedSession,
@@ -571,8 +574,17 @@ export function TerminalWorkspace({
     });
 
   const workspaceClassName = cn(
-    'relative h-full min-h-0 overflow-hidden shadow-[var(--shadow)]',
-    !remoteScreenOnly && 'rounded-[10px] border border-[var(--border)]',
+    // pane 슬롯은 퍼센트로 절대 배치되므로 이 컨테이너는 내용으로 폭을 못 정한다. 세션 패널이
+    // 붙으면서 부모가 flex 행이 되었으니 flex-1 을 명시해야 폭이 0 으로 접히지 않는다.
+    'relative h-full min-h-0 min-w-0 flex-1 overflow-hidden',
+    // 세션 패널이 열리면 테두리·그림자·오른쪽 라운드를 내려놓는다 — 바깥 윤곽은 셸의 래퍼가
+    // 한 번만 그리고, 터미널과 패널은 그 한 판을 좌우로 나눠 쓴다. 라운드 카드 옆에 평평한
+    // 띠가 붙는 모양을 피하기 위한 것이다.
+    !sharesCardWithPanel && 'shadow-[var(--shadow)]',
+    !remoteScreenOnly &&
+      (sharesCardWithPanel
+        ? 'rounded-l-[10px]'
+        : 'rounded-[10px] border border-[var(--border)]'),
     activeWorkspace ? '' : '',
     ((draggedSession?.source === 'standalone-tab' && canDropDraggedSession) ||
       canRearrangeActiveWorkspace) &&
@@ -751,12 +763,6 @@ export function TerminalWorkspace({
           // pane 식별/조작은 상단 윈도우 바 + tmux 자체 경계선/단축키가 담당.
           showHeader={Boolean(activeWorkspace && placement) && !tab.tmux}
           zoomed={activeWorkspace?.zoomedSessionId === tab.sessionId}
-          // 분할 중이고 확대도 아니면 pane 이 좁다. 이때는 AI 토글을 감춘다 — AI 패널이
-          // 열리면 터미널을 좌우로 또 나눠 쓰는데 좁은 pane 에서는 둘 다 못 쓴다.
-          // 확대하면 다시 나타나므로 접근이 막히지는 않는다.
-          compactActions={
-            canZoom && activeWorkspace?.zoomedSessionId !== tab.sessionId
-          }
           onToggleZoom={
             canZoom && activeWorkspace && placement && !tab.tmux
               ? () => {

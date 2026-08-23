@@ -28,7 +28,6 @@ interface AiChatPanelProps {
   sessionId: string;
   // 터미널 최근 출력 캡처는 stableId 로 살아있는 런타임 레지스트리에서 읽는다.
   stableId: string;
-  width: number;
 }
 
 // 입력창 자동 높이 상한(px). 이보다 길어지면 창은 안 커지고 내부 스크롤.
@@ -147,18 +146,15 @@ function ThinkingIndicator() {
   );
 }
 
-export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
+export function AiChatPanel({ sessionId, stableId }: AiChatPanelProps) {
   const { t: translate } = useTranslation();
   const conversation = useAppStore((state) => state.aiConversations[sessionId]);
   const aiEnabled = useAppStore((state) => state.settings.ai?.enabled ?? false);
   const sendAiMessage = useAppStore((state) => state.sendAiMessage);
   const cancelAiMessage = useAppStore((state) => state.cancelAiMessage);
-  const clearAiConversation = useAppStore((state) => state.clearAiConversation);
   const respondAiApproval = useAppStore((state) => state.respondAiApproval);
-  const toggleAiPanel = useAppStore((state) => state.toggleAiPanel);
   const openSettingsSection = useAppStore((state) => state.openSettingsSection);
   const openExternalUrl = useAppStore((state) => state.openExternalUrl);
-  const setAiPanelWidth = useAppStore((state) => state.setAiPanelWidth);
   const currentTab = useAppStore(
     (state) => state.tabs.find((tab) => tab.sessionId === sessionId) ?? null,
   );
@@ -175,7 +171,6 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const messages = conversation?.messages ?? [];
   const streaming = conversation?.streaming ?? false;
@@ -262,31 +257,10 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
     );
   }
 
-  function handleResizeMouseDown(event: React.MouseEvent) {
-    dragRef.current = { startX: event.clientX, startWidth: width };
-    const onMove = (moveEvent: MouseEvent) => {
-      if (!dragRef.current) {
-        return;
-      }
-      // 왼쪽 가장자리를 왼쪽으로 끌수록 폭이 커진다.
-      const delta = dragRef.current.startX - moveEvent.clientX;
-      setAiPanelWidth(dragRef.current.startWidth + delta);
-    };
-    const onUp = () => {
-      dragRef.current = null;
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    event.preventDefault();
-  }
-
   return (
     <div
-      className="relative flex min-h-0 select-text flex-col border-l border-[var(--border)] bg-[var(--surface)]"
-      style={{ width, flex: `0 0 ${width}px` }}
-      // OS 파일 드래그만 가로챈다. stopPropagation 은 쓰지 않는다 — 부모(TerminalSessionPane)가
+      className="relative flex min-h-0 min-w-0 flex-1 select-text flex-col"
+      // OS 파일 드래그만 가로챈다. stopPropagation 은 쓰지 않는다 — 세션 패널을 감싼 쪽이
       // defaultPrevented 를 보고 SFTP 업로드 오버레이를 끄는 데 의존한다.
       onDragOver={(event) => {
         if (!aiEnabled || !hasExternalFileDrop(event.dataTransfer)) {
@@ -311,38 +285,11 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
         void addAttachmentFiles(Array.from(event.dataTransfer.files));
       }}
     >
-      <div
-        className="absolute left-0 top-0 z-[2] h-full w-[6px] -translate-x-1/2 cursor-col-resize"
-        onMouseDown={handleResizeMouseDown}
-      />
       {isDropActive ? (
         <div className="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center rounded-[4px] border-2 border-dashed border-[var(--accent-strong)] bg-[color-mix(in_srgb,var(--accent-strong)_8%,transparent)] text-[0.85rem] font-medium text-[var(--accent-strong)]">
           {translate('aiChat.dropToAttach')}
         </div>
       ) : null}
-
-      <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
-        <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
-          AI Assistant
-        </span>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            className="rounded-[6px] px-2 py-1 text-[0.8rem] text-[var(--text-soft)] hover:bg-[var(--surface-strong)]"
-            onClick={() => clearAiConversation(sessionId)}
-          >
-            {translate('aiChat.clear')}
-          </button>
-          <button
-            type="button"
-            className="rounded-[6px] px-2 py-1 text-[0.8rem] text-[var(--text-soft)] hover:bg-[var(--surface-strong)]"
-            onClick={() => toggleAiPanel(sessionId)}
-            aria-label={translate('aiChat.closePanel')}
-          >
-            ✕
-          </button>
-        </div>
-      </div>
 
       <div
         ref={transcriptRef}

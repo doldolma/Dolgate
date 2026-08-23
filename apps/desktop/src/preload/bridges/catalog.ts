@@ -1,5 +1,11 @@
 import type { IpcRenderer } from "electron";
-import type { DesktopApi, GroupRemoveMode, HostDraft, HostSecretInput } from "@shared";
+import type {
+  DesktopApi,
+  GroupRemoveMode,
+  HostDraft,
+  HostSecretInput,
+  TerminalThemeId,
+} from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
 import { subscribeWarpgateImportEvent } from "../events/state";
 
@@ -15,6 +21,8 @@ export function buildHostsBridge(
     remove: (id: string) => ipcRenderer.invoke(ipcChannels.hosts.remove, id),
     setFavorite: (id: string, favorite: boolean) =>
       ipcRenderer.invoke(ipcChannels.hosts.setFavorite, id, favorite),
+    setTerminalTheme: (id: string, terminalThemeId: TerminalThemeId | null) =>
+      ipcRenderer.invoke(ipcChannels.hosts.setTerminalTheme, id, terminalThemeId),
   };
 }
 
@@ -31,6 +39,8 @@ export function buildGroupsBridge(
       ipcRenderer.invoke(ipcChannels.groups.move, path, targetParentPath),
     rename: (path: string, name: string) =>
       ipcRenderer.invoke(ipcChannels.groups.rename, path, name),
+    setOrder: (assignments) =>
+      ipcRenderer.invoke(ipcChannels.groups.setOrder, assignments),
   };
 }
 

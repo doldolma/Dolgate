@@ -8,6 +8,8 @@ import {
   hasAnyHostMetric,
   isHostMetricAlarming,
   parseHostMetricsSample,
+  parseHostProcesses,
+  parseHostProcessesFromOutput,
 } from './host-metrics';
 
 /** 실제 /proc 출력 형태 그대로. 필드 위치에 의존하는 파서라 형식을 흉내 내면 의미가 없다. */
@@ -245,5 +247,57 @@ describe('buildHostMetricsCommand', () => {
     expect(command).toContain('/proc/net/dev');
     // 쓰기·삭제로 읽힐 만한 것이 섞이면 안 된다.
     expect(command).not.toMatch(/\b(rm|mv|kill|shutdown|>)\b/);
+  });
+});
+
+describe('프로세스 목록', () => {
+  it('요청하지 않으면 명령에 ps 가 들어가지 않는다', () => {
+    // 출력이 커서(수백 줄) 상태바만 쓰는 평소에는 실어 보내지 않는다.
+    expect(buildHostMetricsCommand()).not.toContain('ps -eo');
+    expect(buildHostMetricsCommand({ processLimit: 0 })).not.toContain('ps -eo');
+  });
+
+  it('요청하면 상위 N개만 CPU 내림차순으로 가져온다', () => {
+    const command = buildHostMetricsCommand({ processLimit: 40 });
+    expect(command).toContain('--sort=-pcpu');
+    expect(command).toContain('head -n 40');
+    expect(command).toContain('|| true');
+  });
+
+  it('args 의 공백을 명령으로 붙여 읽는다', () => {
+    const rows = parseHostProcesses(
+      [
+        ' 1234 ubuntu 12.5  3.1 204800 /usr/bin/node --max-old-space-size=4096 server.js',
+        ' 5678 root    0.0  0.2   4096 sshd: ubuntu [priv]',
+      ].join('\n'),
+    );
+    expect(rows).toEqual([
+      {
+        pid: 1234,
+        user: 'ubuntu',
+        cpuPercent: 12.5,
+        memPercent: 3.1,
+        rssKb: 204800,
+        command: '/usr/bin/node --max-old-space-size=4096 server.js',
+      },
+      {
+        pid: 5678,
+        user: 'root',
+        cpuPercent: 0,
+        memPercent: 0.2,
+        rssKb: 4096,
+        command: 'sshd: ubuntu [priv]',
+      },
+    ]);
+  });
+
+  it('칸이 모자라거나 pid 가 없는 줄은 버린다', () => {
+    expect(parseHostProcesses('garbage\n\n  x y z\n')).toEqual([]);
+  });
+
+  it('섹션이 아예 없으면 null — 못 읽은 것과 빈 것을 구분한다', () => {
+    // busybox ps 처럼 옵션을 모르는 호스트에서는 빈 섹션이 되고, 그때 UI 가 안내를 바꾼다.
+    expect(parseHostProcessesFromOutput('@@dolgate:mem\nMemTotal: 1 kB\n')).toBeNull();
+    expect(parseHostProcessesFromOutput('@@dolgate:ps\n')).toEqual([]);
   });
 });

@@ -40,6 +40,11 @@ import type {
 } from '../store/createAppStore';
 import { formatInteractiveHop, normalizeErrorMessage } from '../store/utils';
 import { cn } from '../lib/cn';
+import {
+  portForwardFailureMessage,
+  portForwardStatusLabel,
+  portForwardStatusTone,
+} from '../lib/port-forward-status';
 import { usePortForwardingPanelController } from '../controllers/usePortForwardingPanelController';
 import {
   Badge,
@@ -413,19 +418,6 @@ function toDraft(rule: PortForwardRuleRecord): PortForwardDraft {
   };
 }
 
-function statusLabel(runtime?: PortForwardRuntimeRecord) {
-  switch (runtime?.status) {
-    case 'starting':
-      return 'Starting';
-    case 'running':
-      return 'Running';
-    case 'error':
-      return 'Error';
-    default:
-      return 'Stopped';
-  }
-}
-
 function runtimeMethodLabel(runtime?: PortForwardRuntimeRecord) {
   if (!runtime?.method) {
     return null;
@@ -439,22 +431,6 @@ function runtimeMethodLabel(runtime?: PortForwardRuntimeRecord) {
   return 'SSH Native';
 }
 
-function getRuntimeStatusTone(
-  status?: string | null,
-): ComponentProps<typeof StatusBadge>['tone'] {
-  switch (status) {
-    case 'running':
-      return 'running';
-    case 'starting':
-      return 'starting';
-    case 'paused':
-      return 'paused';
-    case 'error':
-      return 'error';
-    default:
-      return 'stopped';
-  }
-}
 
 function tabTitle(tab: ForwardTab) {
   if (tab === 'ssh') {
@@ -1095,8 +1071,8 @@ export function PortForwardingPanel({
           <CardMain>
             <CardTitleRow>
               <strong>{rule.label}</strong>
-              <StatusBadge tone={getRuntimeStatusTone(runtime?.status)}>
-                {statusLabel(runtime)}
+              <StatusBadge tone={portForwardStatusTone(runtime?.status)}>
+                {portForwardStatusLabel(runtime)}
               </StatusBadge>
             </CardTitleRow>
             <CardMeta>
@@ -1108,7 +1084,11 @@ export function PortForwardingPanel({
               <span>{(runtime?.bindAddress ?? rule.bindAddress) || '127.0.0.1'}:{runtime?.bindPort ?? rule.bindPort}</span>
               <span>{rule.targetKind === 'remote-host' ? `${rule.remoteHost}:${rule.targetPort}` : `instance:${rule.targetPort}`}</span>
             </CardMeta>
-            {runtime?.message ? <CardMessage>{runtime.message}</CardMessage> : null}
+            {runtime?.message ? (
+              <CardMessage title={runtime.message}>
+                {portForwardFailureMessage(runtime)}
+              </CardMessage>
+            ) : null}
           </CardMain>
           <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
             <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
@@ -1135,8 +1115,8 @@ export function PortForwardingPanel({
           <CardMain>
             <CardTitleRow>
               <strong>{rule.label}</strong>
-              <StatusBadge tone={getRuntimeStatusTone(runtime?.status)}>
-                {statusLabel(runtime)}
+              <StatusBadge tone={portForwardStatusTone(runtime?.status)}>
+                {portForwardStatusLabel(runtime)}
               </StatusBadge>
             </CardTitleRow>
             <CardMeta>
@@ -1151,7 +1131,11 @@ export function PortForwardingPanel({
               <span>{runtime?.bindAddress ?? '127.0.0.1'}:{(runtime?.bindPort ?? rule.bindPort) || 'auto'}</span>
               <span>127.0.0.1:{rule.targetPort}</span>
             </CardMeta>
-            {runtime?.message ? <CardMessage>{runtime.message}</CardMessage> : null}
+            {runtime?.message ? (
+              <CardMessage title={runtime.message}>
+                {portForwardFailureMessage(runtime)}
+              </CardMessage>
+            ) : null}
           </CardMain>
           <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
             <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
@@ -1178,8 +1162,8 @@ export function PortForwardingPanel({
           <CardMain>
             <CardTitleRow>
               <strong>{rule.label}</strong>
-              <StatusBadge tone={getRuntimeStatusTone(runtime?.status)}>
-                {statusLabel(runtime)}
+              <StatusBadge tone={portForwardStatusTone(runtime?.status)}>
+                {portForwardStatusLabel(runtime)}
               </StatusBadge>
             </CardTitleRow>
             <CardMeta>
@@ -1190,7 +1174,11 @@ export function PortForwardingPanel({
               <span>{runtime?.bindAddress ?? '127.0.0.1'}:{(runtime?.bindPort ?? rule.bindPort) || 'auto'}</span>
               <span>{rule.networkName}:{rule.targetPort}</span>
             </CardMeta>
-            {runtime?.message ? <CardMessage>{runtime.message}</CardMessage> : null}
+            {runtime?.message ? (
+              <CardMessage title={runtime.message}>
+                {portForwardFailureMessage(runtime)}
+              </CardMessage>
+            ) : null}
           </CardMain>
           <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
             <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
@@ -1216,8 +1204,8 @@ export function PortForwardingPanel({
         <CardMain>
           <CardTitleRow>
             <strong>{rule.label}</strong>
-            <StatusBadge tone={getRuntimeStatusTone(runtime?.status)}>
-              {statusLabel(runtime)}
+            <StatusBadge tone={portForwardStatusTone(runtime?.status)}>
+              {portForwardStatusLabel(runtime)}
             </StatusBadge>
           </CardTitleRow>
           <CardMeta>
@@ -1227,7 +1215,11 @@ export function PortForwardingPanel({
             <span>{rule.bindAddress}:{runtime?.bindPort ?? rule.bindPort}</span>
             <span>{rule.mode === 'dynamic' ? 'SOCKS5' : `${rule.targetHost}:${rule.targetPort}`}</span>
           </CardMeta>
-          {runtime?.message ? <CardMessage>{runtime.message}</CardMessage> : null}
+          {runtime?.message ? (
+              <CardMessage title={runtime.message}>
+                {portForwardFailureMessage(runtime)}
+              </CardMessage>
+            ) : null}
         </CardMain>
         <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
           <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
@@ -1260,8 +1252,8 @@ export function PortForwardingPanel({
           <CardTitleRow>
             <strong>{serviceName}</strong>
             <Badge>Ephemeral</Badge>
-            <StatusBadge tone={getRuntimeStatusTone(runtime.status)}>
-              {statusLabel(runtime)}
+            <StatusBadge tone={portForwardStatusTone(runtime.status)}>
+              {portForwardStatusLabel(runtime)}
             </StatusBadge>
           </CardTitleRow>
           <CardMeta>
@@ -1276,7 +1268,11 @@ export function PortForwardingPanel({
             <span>{runtime.bindAddress}:{runtime.bindPort}</span>
             <span>127.0.0.1:{targetPort}</span>
           </CardMeta>
-          {runtime.message ? <CardMessage>{runtime.message}</CardMessage> : null}
+          {runtime.message ? (
+            <CardMessage title={runtime.message}>
+              {portForwardFailureMessage(runtime)}
+            </CardMessage>
+          ) : null}
         </CardMain>
         <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
           <Button type="button" variant="secondary" size="sm" onClick={() => void onStop(runtime.ruleId)}>
@@ -1303,8 +1299,8 @@ export function PortForwardingPanel({
           <CardTitleRow>
             <strong>{containerName}</strong>
             <Badge>Ephemeral</Badge>
-            <StatusBadge tone={getRuntimeStatusTone(runtime.status)}>
-              {statusLabel(runtime)}
+            <StatusBadge tone={portForwardStatusTone(runtime.status)}>
+              {portForwardStatusLabel(runtime)}
             </StatusBadge>
           </CardTitleRow>
           <CardMeta>
@@ -1315,7 +1311,11 @@ export function PortForwardingPanel({
             <span>{runtime.bindAddress}:{runtime.bindPort}</span>
             <span>{networkName}:{targetPort}</span>
           </CardMeta>
-          {runtime.message ? <CardMessage>{runtime.message}</CardMessage> : null}
+          {runtime.message ? (
+            <CardMessage title={runtime.message}>
+              {portForwardFailureMessage(runtime)}
+            </CardMessage>
+          ) : null}
         </CardMain>
         <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
           <Button type="button" variant="secondary" size="sm" onClick={() => void onStop(runtime.ruleId)}>
@@ -2028,8 +2028,8 @@ export function PortForwardingPanel({
                     <CardTitleRow>
                       <strong>{override.hostname}</strong>
                       <Badge>{isStatic ? 'Static' : 'Linked'}</Badge>
-                      <StatusBadge tone={getRuntimeStatusTone(isStatic ? (override.status === 'active' ? 'running' : 'stopped') : runtime?.status)}>
-                        {isStatic ? (override.status === 'active' ? 'On' : 'Off') : statusLabel(runtime)}
+                      <StatusBadge tone={portForwardStatusTone(isStatic ? (override.status === 'active' ? 'running' : 'stopped') : runtime?.status)}>
+                        {isStatic ? (override.status === 'active' ? 'On' : 'Off') : portForwardStatusLabel(runtime)}
                       </StatusBadge>
                     </CardTitleRow>
                     <CardMeta>

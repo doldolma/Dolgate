@@ -326,14 +326,14 @@ describe("aiChatSlice", () => {
     expect(api.ai.cancelChat).toHaveBeenCalledWith(requestId);
   });
 
-  it("clears a conversation but keeps the panel open state", async () => {
+  it("clears a conversation", async () => {
+    // 패널을 여닫는 상태는 세션 패널(sessionPanelSlice)이 들고 있다 — 대화는 내용만 갖는다.
     const { slice, get } = harness(ENABLED);
-    slice.toggleAiPanel("s1");
     await slice.sendAiMessage("s1", "hi");
     slice.clearAiConversation("s1");
     const conv = get().aiConversations["s1"];
     expect(conv.messages).toEqual([]);
-    expect(conv.open).toBe(true);
+    expect(conv.streaming).toBe(false);
   });
 
   it("sets pendingApproval on an approval-required event and clears it on done", async () => {
@@ -376,13 +376,4 @@ describe("aiChatSlice", () => {
     expect(get().aiConversations["s1"].pendingApproval).toBeNull();
   });
 
-  it("toggles the panel and clamps the width", () => {
-    const { slice, get } = harness(ENABLED);
-    slice.toggleAiPanel("s1");
-    expect(get().aiConversations["s1"].open).toBe(true);
-    slice.setAiPanelWidth(99999);
-    expect(get().aiPanelWidth).toBeLessThanOrEqual(760);
-    slice.setAiPanelWidth(10);
-    expect(get().aiPanelWidth).toBeGreaterThanOrEqual(280);
-  });
 });

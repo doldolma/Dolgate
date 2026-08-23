@@ -10,6 +10,7 @@
 // 그래서 각 분류가 두 표현을 모두 받아야 한다.
 
 export type ConnectionFailureCode =
+  | "address-in-use"
   | "agent-unreachable"
   | "aws-auth"
   | "cancelled"
@@ -110,6 +111,14 @@ const RULES: Array<{
   },
   // "connection aborted" 도 gvisor 쪽 표현이다.
   { pattern: /connection (reset|aborted)|\bEOF\b/i, code: "reset" },
+  // 포트 포워딩이 로컬 리스너를 열지 못한 경우(`open local listener: listen tcp …: bind: …`).
+  // 원격이 아니라 **이 컴퓨터**의 포트가 이미 쓰이고 있다는 뜻이라 사용자가 할 일이 다르다.
+  // 윈도우의 Go 는 같은 상황에 다른 문장을 준다("Only one usage of each socket address …").
+  {
+    pattern:
+      /address already in use|only one usage of each socket address|EADDRINUSE/i,
+    code: "address-in-use",
+  },
 ];
 
 export function getConnectionFailureReason(

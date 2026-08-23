@@ -21,6 +21,38 @@ import {
 } from "./createAppStore.test-support";
 
 describe("createAppStore catalog and settings", () => {
+  // 세션 패널의 터미널 테마 섹션이 쓰는 경로. saveHost 는 드래프트 전체를 요구해서 패널에서
+  // 재구성하면 드래프트에 없는 필드가 날아간다 — 그래서 좁은 setter 를 쓴다.
+  it("writes only the terminal theme and folds the returned host back in", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+
+    const before = store.getState().hosts[0];
+    expect(before).toBeDefined();
+    const updated = { ...before, terminalThemeId: "kanagawa-wave" as const };
+    (api.hosts.setTerminalTheme as ReturnType<typeof vi.fn>).mockResolvedValue(updated);
+
+    await store.getState().setHostTerminalTheme(before.id, "kanagawa-wave");
+
+    expect(api.hosts.setTerminalTheme).toHaveBeenCalledWith(before.id, "kanagawa-wave");
+    expect(api.hosts.update).not.toHaveBeenCalled();
+    expect(
+      store.getState().hosts.find((host) => host.id === before.id)?.terminalThemeId,
+    ).toBe("kanagawa-wave");
+  });
+
+  it("leaves hosts alone when the write finds no such host", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    const before = store.getState().hosts;
+
+    await store.getState().setHostTerminalTheme("missing", null);
+
+    expect(store.getState().hosts).toEqual(before);
+  });
+
   it("bootstraps home workspace and settings from desktop api", async () => {
     const api = createMockApi();
     const store = createAppStore(api);

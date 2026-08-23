@@ -63,6 +63,13 @@ export {
   Minimize2,
   SquareArrowOutUpRight,
   Radio,
+  History,
+  TextCursorInput,
+  PanelRight,
+  Sparkles,
+  Activity,
+  ListOrdered,
+  Palette,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';

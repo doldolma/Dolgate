@@ -1,6 +1,12 @@
 import type { SliceDeps } from "../services/context";
 import type { CatalogSlice } from "../types";
 import {
+  collectGroupPaths,
+  getGroupLabel,
+  isDirectGroupChild,
+  planGroupReorder,
+} from "@shared";
+import {
   AWS_SFTP_DEFAULT_PORT,
   DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
   getAwsEc2SftpDisabledMessage,
@@ -440,6 +446,58 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
                   : state.hostDrawer,
             }));
           },
+    reorderGroup: async (path, targetParentPath, targetIndex) => {
+            const nextParentPath = normalizeGroupPath(targetParentPath);
+            let groups = get().groups;
+            let hosts = get().hosts;
+            let movedPath = normalizeGroupPath(path);
+            if (!movedPath) {
+              return;
+            }
+
+            // 부모가 다르면 먼저 옮긴다 — 경로가 바뀌므로 형제 목록을 그 뒤에 만들어야 한다.
+            if (getParentGroupPath(movedPath) !== nextParentPath) {
+              const moved = await api.groups.move(movedPath, nextParentPath);
+              groups = moved.groups;
+              hosts = moved.hosts;
+              movedPath = moved.nextPath;
+            }
+
+            // 형제 목록을 **화면에 보이는 순서**로 만든다. planGroupReorder 가 그 순서를 전제한다.
+            const siblingPaths = collectGroupPaths(groups, hosts).filter((candidate: string) =>
+              isDirectGroupChild(candidate, nextParentPath),
+            );
+
+            // 레코드가 없는 형제(호스트의 groupName 만으로 존재)는 순서를 적을 곳이 없다.
+            // 그대로 두면 랭크 없는 것으로 취급돼 맨 뒤로 밀려 목록이 흐트러지므로, 여기서
+            // 레코드를 만들어 준다. 이름·경로는 이미 정해져 있어 물을 것이 없다.
+            const recordByPath = new Map(groups.map((record) => [record.path, record]));
+            for (const siblingPath of siblingPaths) {
+              if (recordByPath.has(siblingPath)) {
+                continue;
+              }
+              const created = await api.groups.create(
+                getGroupLabel(siblingPath),
+                nextParentPath,
+              );
+              recordByPath.set(created.path, created);
+              groups = [...groups, created];
+            }
+
+            const siblings = siblingPaths
+              .map((siblingPath) => recordByPath.get(siblingPath))
+              .filter((record): record is NonNullable<typeof record> => Boolean(record));
+            const moved = recordByPath.get(movedPath);
+            if (!moved) {
+              return;
+            }
+
+            const assignments = planGroupReorder(siblings, moved.id, targetIndex);
+            const nextGroups =
+              assignments.length > 0 ? await api.groups.setOrder(assignments) : groups;
+
+            set({ groups: sortGroups(nextGroups), hosts: sortHosts(hosts) });
+          },
     renameGroup: async (path, name) => {
             const result = await api.groups.rename(path, name);
             set((state) => ({
@@ -526,6 +584,19 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
               groupName: groupPath,
             });
     
+            set((state) => ({
+              hosts: sortHosts([
+                ...state.hosts.filter((host) => host.id !== next.id),
+                next,
+              ]),
+            }));
+            await syncOperationalData(set);
+          },
+    setHostTerminalTheme: async (hostId, terminalThemeId) => {
+            const next = await api.hosts.setTerminalTheme(hostId, terminalThemeId);
+            if (!next) {
+              return;
+            }
             set((state) => ({
               hosts: sortHosts([
                 ...state.hosts.filter((host) => host.id !== next.id),

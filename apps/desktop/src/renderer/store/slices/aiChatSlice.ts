@@ -51,9 +51,6 @@ function toWireMessage(message: AiChatMessage): AiChatMessage {
   };
 }
 
-const DEFAULT_AI_PANEL_WIDTH = 380;
-const MIN_AI_PANEL_WIDTH = 280;
-const MAX_AI_PANEL_WIDTH = 760;
 
 const SYSTEM_PROMPT = `You are an assistant embedded in the Dolgate SSH terminal client.
 Help with shell, SSH, Linux, containers, networking, and DevOps questions. Be concise and practical; use fenced code blocks for commands.
@@ -97,7 +94,6 @@ Identity:
 
 function emptyConversation(): AiConversation {
   return {
-    open: false,
     messages: [],
     requestId: null,
     terminalSnapshotId: null,
@@ -131,27 +127,13 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
 
   return {
     aiConversations: {},
-    aiPanelWidth: DEFAULT_AI_PANEL_WIDTH,
-
-    toggleAiPanel: (sessionId) => {
-      patch(sessionId, (conv) => ({ ...conv, open: !conv.open }));
-    },
-
-    setAiPanelWidth: (width) => {
-      const clamped = Math.min(
-        MAX_AI_PANEL_WIDTH,
-        Math.max(MIN_AI_PANEL_WIDTH, Math.round(width)),
-      );
-      set({ aiPanelWidth: clamped });
-    },
-
     clearAiConversation: (sessionId) => {
       const conv = get().aiConversations[sessionId];
       if (conv?.requestId) {
         void api.ai.cancelChat(conv.requestId);
       }
       releaseAiTerminalSnapshot(conv?.terminalSnapshotId);
-      patch(sessionId, (current) => ({ ...emptyConversation(), open: current.open }));
+      patch(sessionId, () => emptyConversation());
     },
 
     cancelAiMessage: (sessionId) => {

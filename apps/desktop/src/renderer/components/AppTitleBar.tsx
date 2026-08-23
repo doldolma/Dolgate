@@ -23,7 +23,8 @@ import {
 import { getVncCapabilities } from '../lib/vnc-capability-registry';
 import { listWorkspaceSessionIds } from './terminal-workspace/terminalWorkspaceLayout';
 import { Badge, Button, IconButton, TabButton, Tabs, Tooltip } from '../ui';
-import { ArrowUpRight, Bell, Columns2, Container, Download, Folder, Home, Plus, RefreshCw, Rows2, X } from '../ui/icons';
+import { ArrowUpRight, Bell, Columns2, Container, Download, Folder, Home, PanelRight, Plus, RefreshCw, Rows2, X } from '../ui/icons';
+import { resolveFocusedPaneSessionId } from './terminal-workspace/terminalWorkspaceLayout';
 import { useTranslation } from 'react-i18next';
 import { getFormatLocale, t } from '../i18n';
 
@@ -32,6 +33,18 @@ interface DraggedSessionPayload {
   source: 'standalone-tab' | 'workspace-pane';
   workspaceId?: string;
 }
+
+/**
+ * 상단 바(다크 크롬)의 토글 아이콘 버튼.
+ *
+ * 평소에는 배경 없이 아이콘만 둔다. 켜지면 옅은 칩 + 얇은 테두리로 바꾸고 아이콘만 완전한
+ * 흰색이 된다 — 흰 원으로 채우면 크롬에서 그것만 튀고, hover 배경만으로는 켜진 티가 나지
+ * 않는다. IconButton 의 active 색(selection-tint)은 밝은 배경을 가정한 값이라 여기선 못 쓴다.
+ */
+const CHROME_TOGGLE_CLASS =
+  'h-9 w-9 rounded-full border-transparent bg-transparent text-[1.15rem] text-[rgba(255,255,255,0.66)] shadow-none hover:bg-[rgba(255,255,255,0.1)] hover:text-white';
+const CHROME_TOGGLE_ON_CLASS =
+  'bg-[rgba(255,255,255,0.16)] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.24)] hover:bg-[rgba(255,255,255,0.2)]';
 
 interface AppTitleBarProps {
   desktopPlatform: DesktopPlatform;
@@ -49,6 +62,9 @@ interface AppTitleBarProps {
   /** 이 세션의 호스트에 저장된 모니터 선택. 배치도를 열 때 켜둘 화면을 정한다. */
   resolveRdpMonitors: (sessionId: string) => RdpMonitorSelection[] | null;
   activeWorkspaceTab: WorkspaceTabId;
+  /** 세션 패널(오른쪽)이 열려 있는가. 셸 세션을 보고 있을 때만 토글이 뜬다. */
+  sessionPanelOpen: boolean;
+  onToggleSessionPanel: () => void;
   draggedSession: DraggedSessionPayload | null;
   updateState: UpdateState;
   windowState: DesktopWindowState;
@@ -1063,6 +1079,8 @@ export function AppTitleBar({
   onSetRdpMonitors,
   resolveRdpMonitors,
   activeWorkspaceTab,
+  sessionPanelOpen,
+  onToggleSessionPanel,
   draggedSession,
   updateState,
   windowState,
@@ -1264,6 +1282,24 @@ export function AppTitleBar({
         .filter((item): item is TitlebarDynamicItem => item !== null),
     [activeWorkspaceTab, hosts, tabStrip, tabs, tmuxGroups, workspaces]
   );
+
+  // 세션 패널을 열 수 있는 대상. 세션 셸과 같은 계산을 써야 토글이 켜는 패널과 실제로 열리는
+  // 패널의 대상이 갈리지 않는다. RDP·VNC 에는 히스토리도 스니펫도 성립하지 않아 제외한다.
+  const sessionPanelSessionId = useMemo(() => {
+    const focused = resolveFocusedPaneSessionId(
+      activeWorkspaceTab,
+      workspaces,
+      tmuxGroups,
+    );
+    if (!focused) {
+      return null;
+    }
+    const tab = tabs.find((item) => item.sessionId === focused);
+    if (!tab || (tab.paneKind ?? 'terminal') !== 'terminal') {
+      return null;
+    }
+    return focused;
+  }, [activeWorkspaceTab, tabs, tmuxGroups, workspaces]);
 
   const showBadge = shouldShowBadge(updateState);
   const publishedAt = formatPublishedAt(updateState.release?.publishedAt);
@@ -2174,6 +2210,22 @@ export function AppTitleBar({
         className={cn('min-w-16 flex-none self-stretch', chromeDragRegion)}
       />
       <div className="relative flex items-center self-center mb-[0.42rem] gap-[0.55rem] [-webkit-app-region:no-drag]">
+        {/* 아래 두 버튼(패널 토글·알림)은 같은 규칙을 쓴다: 평소엔 아이콘만, 켜져 있으면 채운
+            칩. 예전에는 항상 옅은 배경이 깔려 있어 눌러도 달라진 티가 나지 않았다. */}
+        {/* 세션 패널 토글. 셸이 있는 세션을 보고 있을 때만 뜬다 — RDP·VNC 나 홈에서는 열 것이
+            없다. 패널은 이 버튼으로만 열린다(늘 붙어 있는 세로 줄을 두지 않는다). */}
+        {sessionPanelSessionId ? (
+          <IconButton
+            tone="default"
+            className={cn(CHROME_TOGGLE_CLASS, sessionPanelOpen && CHROME_TOGGLE_ON_CLASS)}
+            aria-pressed={sessionPanelOpen}
+            aria-label={translate('sessionPanel.toggle')}
+            title={translate('sessionPanel.toggle')}
+            onClick={onToggleSessionPanel}
+          >
+            <PanelRight className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
+          </IconButton>
+        ) : null}
         <div className="relative [-webkit-app-region:no-drag]" ref={updateMenuRef}>
           {showInstallAction ? (
             <Tooltip label={installTooltip}>
@@ -2199,8 +2251,12 @@ export function AppTitleBar({
           ) : (
             <IconButton
               tone="default"
-              active={isUpdateOpen}
-              className="relative h-9 w-9 rounded-full border-transparent bg-[rgba(255,255,255,0.06)] text-[1.15rem] text-white shadow-none hover:bg-[rgba(255,255,255,0.1)]"
+              className={cn(
+                'relative',
+                CHROME_TOGGLE_CLASS,
+                isUpdateOpen && CHROME_TOGGLE_ON_CLASS,
+              )}
+              aria-pressed={isUpdateOpen}
               aria-label={translate('titleBar.update.viewStatus')}
               onClick={() => setIsUpdateOpen((current) => !current)}
             >

@@ -107,6 +107,7 @@ export function getSyncStatusLabel(status: SyncBootstrapStatus): string {
 // 코어가 올려 보내는 연결 실패는 대부분 Go 원문("context deadline exceeded" 등)이다. 분류는
 // shared-core 가 하고(데스크톱과 같은 규칙) 문구만 여기서 붙인다.
 const CONNECT_FAILURE_KEYS = {
+  "address-in-use": "connectFailure.addressInUse",
   "agent-unreachable": "connectFailure.agentUnreachable",
   "aws-auth": "connectFailure.awsAuth",
   "host-key-untrusted": "connectFailure.hostKeyUntrusted",

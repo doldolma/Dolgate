@@ -73,6 +73,7 @@ import type {
   HostContainerLogSearchResult,
   HostContainerStatsSample,
   HostRecord,
+  TerminalThemeId,
   ContainerConnectionProgressEvent,
   SecretMetadataRecord,
   SerialControlAction,
@@ -1311,6 +1312,16 @@ export interface DesktopApi {
     ) => Promise<HostRecord>;
     remove: (id: string) => Promise<void>;
     setFavorite: (id: string, favorite: boolean) => Promise<HostRecord | null>;
+    /**
+     * 이 호스트의 터미널 테마만 바꾼다. null 은 앱 설정을 따른다는 뜻.
+     *
+     * 호스트 폼을 거치지 않고 바꾸는 값이라 좁은 setter 로 둔다 — update() 로 통째로 저장하면
+     * draft 에 없는 필드가 날아간다(setFavorite 과 같은 이유).
+     */
+    setTerminalTheme: (
+      id: string,
+      terminalThemeId: TerminalThemeId | null,
+    ) => Promise<HostRecord | null>;
   };
   groups: {
     list: () => Promise<GroupRecord[]>;
@@ -1321,6 +1332,13 @@ export interface DesktopApi {
       targetParentPath: string | null,
     ) => Promise<GroupPathMutationResult>;
     rename: (path: string, name: string) => Promise<GroupPathMutationResult>;
+    /**
+     * 직접 정렬 순서를 저장한다. 보통 한 건이지만, 형제 사이 간격이 닫히면 그 부모 아래를
+     * 통째로 다시 매기므로 배열로 받는다(group-ordering 의 planGroupReorder).
+     */
+    setOrder: (
+      assignments: Array<{ id: string; sortRank: number }>,
+    ) => Promise<GroupRecord[]>;
   };
   aws: {
     listProfiles: () => Promise<AwsProfileSummary[]>;

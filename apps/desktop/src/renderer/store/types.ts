@@ -1,5 +1,7 @@
 import type { StoreApi } from "zustand/vanilla";
 import type { CommandFinishedInfo } from "../lib/command-notification";
+import type { SessionPanelSectionId } from "../lib/session-panel";
+import type { TerminalThemeId } from "@shared";
 import type {
   ActivityLogRecord,
   AuthType,
@@ -832,6 +834,16 @@ interface AppStateParts {
   removeGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
   moveGroup: (path: string, targetParentPath: string | null) => Promise<void>;
   renameGroup: (path: string, name: string) => Promise<void>;
+  /**
+   * 직접 정렬에서 그룹을 옮긴다. 부모가 바뀌면 이동까지 함께 처리한다.
+   *
+   * `targetIndex` 는 **옮긴 뒤** 그 형제 목록에서 있어야 할 자리다(화면에 보이는 순서 기준).
+   */
+  reorderGroup: (
+    path: string,
+    targetParentPath: string | null,
+    targetIndex: number,
+  ) => Promise<void>;
   saveHost: (
     hostId: string | null,
     draft: HostDraft,
@@ -840,6 +852,11 @@ interface AppStateParts {
   duplicateHosts: (hostIds: string[]) => Promise<void>;
   moveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
   setHostFavorite: (hostId: string, favorite: boolean) => Promise<void>;
+  /** 이 호스트의 터미널 테마만 바꾼다. null 은 앱 설정을 따른다는 뜻. */
+  setHostTerminalTheme: (
+    hostId: string,
+    terminalThemeId: TerminalThemeId | null,
+  ) => Promise<void>;
   removeHost: (hostId: string) => Promise<void>;
   openLocalTerminal: (cols: number, rows: number) => Promise<void>;
   connectHost: (
@@ -1323,10 +1340,12 @@ export type CatalogSlice = Pick<
   | "removeGroup"
   | "moveGroup"
   | "renameGroup"
+  | "reorderGroup"
   | "saveHost"
   | "duplicateHosts"
   | "moveHostToGroup"
   | "setHostFavorite"
+  | "setHostTerminalTheme"
   | "removeHost"
 >;
 
@@ -1572,7 +1591,6 @@ export interface AiDisplayMessage extends AiChatMessage {
 }
 
 export interface AiConversation {
-  open: boolean;
   messages: AiDisplayMessage[];
   requestId: string | null;
   terminalSnapshotId: string | null;
@@ -1588,9 +1606,6 @@ export interface AiConversation {
 
 export interface AiChatSlice {
   aiConversations: Record<string, AiConversation>;
-  aiPanelWidth: number;
-  toggleAiPanel: (sessionId: string) => void;
-  setAiPanelWidth: (width: number) => void;
   // context = 전송 시점 세션 컨텍스트(호스트 요약 + 터미널 최근 출력, redaction됨).
   // 표시 메시지엔 안 들어가고 요청에만 실린다. attachments 는 표시 메시지와 요청 양쪽에 실린다.
   sendAiMessage: (
@@ -1612,6 +1627,25 @@ export interface AiChatSlice {
   clearAiConversation: (sessionId: string) => void;
 }
 
+export interface SessionPanelSlice {
+  /** 패널이 열려 있는가. 상단 바의 토글로만 바뀐다(창 단위). */
+  sessionPanelOpen: boolean;
+  /** 창 단위 패널 폭(px). 영속화하지 않는다. */
+  sessionPanelWidth: number;
+  /** 세션마다 마지막으로 본 섹션. */
+  sessionPanelSectionBySessionId: Record<string, SessionPanelSectionId | null>;
+  toggleSessionPanel: () => void;
+  setSessionPanelWidth: (width: number) => void;
+  selectSessionPanelSection: (
+    sessionId: string,
+    section: SessionPanelSectionId,
+  ) => void;
+  toggleSessionPanelSection: (
+    sessionId: string,
+    section: SessionPanelSectionId,
+  ) => void;
+}
+
 export type AppState = CatalogSlice &
   SessionSlice &
   ContainersSlice &
@@ -1620,7 +1654,8 @@ export type AppState = CatalogSlice &
   SettingsSlice &
   RuntimeEventSlice &
   ZmodemSlice &
-  AiChatSlice;
+  AiChatSlice &
+  SessionPanelSlice;
 
 export interface SliceDeps {
   api: DesktopApi;

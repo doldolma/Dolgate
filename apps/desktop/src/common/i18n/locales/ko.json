@@ -1893,7 +1893,8 @@
     "disabledHint": "AI 어시스턴트가 꺼져 있습니다. 설정 → AI에서 켜세요.",
     "modelMissing": "설정 → AI에서 모델을 지정하세요.",
     "sessionContext": "현재 세션 컨텍스트:",
-    "requestFailed": "요청에 실패했습니다."
+    "requestFailed": "요청에 실패했습니다.",
+    "title": "AI 어시스턴트"
   },
   "imports": {
     "exportRequestInvalid": "내보내기 요청이 올바르지 않습니다.",
@@ -2567,7 +2568,9 @@
     "tailscaleNeedsAuth": "Tailscale 인증이 끝나지 않았습니다. 브라우저에서 로그인을 마치면 연결이 이어집니다.",
     "tailscaleNeedsApproval": "이 기기가 관리자 승인을 기다리는 중입니다. 승인되면 연결할 수 있습니다.",
     "tailscaleMismatch": "설정에 지정된 Tailscale 네트워크가 아닌 곳에 연결돼 있습니다. 로그인한 계정을 확인해 주세요.",
-    "serverNotice": "서버가 보낸 안내:\n{{notice}}"
+    "serverNotice": "서버가 보낸 안내:\n{{notice}}",
+    "addressInUse": "해당 포트는 이미 사용 중입니다.",
+    "addressInUseAt": "해당 포트는 이미 사용 중입니다 ({{address}})."
   },
   "knownHostsIpc": {
     "noSecrets": "저장할 인증 정보가 없습니다.",
@@ -3547,5 +3550,84 @@
   },
   "portForwarding": {
     "startFailed": "포워딩을 시작하지 못했습니다."
+  },
+  "sessionPanel": {
+    "title": "세션 패널",
+    "toggle": "세션 패널",
+    "close": "패널 닫기",
+    "copy": "복사",
+    "insert": "입력줄에 넣기",
+    "run": "넣고 실행",
+    "blocked": {
+      "unreadable": "화면에서 이 명령을 읽지 못했습니다.",
+      "busy": "실행 중인 명령이 끝난 뒤에 보낼 수 있습니다.",
+      "needsBracketedPaste": "이 셸은 붙여넣기를 받지 않아, 여러 줄 명령을 실행하지 않고 넣을 수 없습니다. 복사해서 쓰세요.",
+      "unreliable": "화면에서 읽은 값이라 실제 입력과 다를 수 있습니다 — 입력줄에 넣어 확인한 뒤 실행하세요."
+    },
+    "history": {
+      "title": "히스토리",
+      "search": "명령 검색",
+      "failedOnly": "실패한 명령만",
+      "failedOnlyShort": "실패",
+      "jump": "이 명령 위치로 이동",
+      "empty": "실행한 명령이 여기에 쌓입니다.",
+      "noMatches": "일치하는 명령이 없습니다.",
+      "emptyTitle": "아직 없습니다",
+      "noMatchesTitle": "찾지 못했습니다",
+      "previous": "이전 명령"
+    },
+    "snippets": {
+      "title": "스니펫",
+      "search": "스니펫 검색",
+      "empty": "스니펫이 없습니다.",
+      "noMatches": "일치하는 스니펫이 없습니다.",
+      "manage": "스니펫 관리",
+      "emptyTitle": "스니펫이 없습니다",
+      "noMatchesTitle": "찾지 못했습니다"
+    },
+    "resources": {
+      "title": "자원",
+      "load": "부하 / 코어",
+      "uptime": "가동 시간",
+      "disks": "디스크",
+      "loading": "첫 값을 읽고 있습니다…",
+      "paused": "연속 실패로 폴링을 멈췄습니다.",
+      "disabledTitle": "호스트 지표가 꺼져 있습니다",
+      "disabled": "켜면 이 호스트의 CPU·메모리·디스크를 읽어 옵니다.",
+      "enable": "켜기",
+      "unsupportedTitle": "지표를 읽을 수 없습니다",
+      "unsupported": "이 연결에서는 값을 읽는 백그라운드 명령을 쓸 수 없습니다."
+    },
+    "processes": {
+      "title": "프로세스",
+      "search": "프로세스 검색",
+      "sortCpu": "CPU",
+      "sortMem": "MEM",
+      "meta": "pid {{pid}} · {{user}} · 메모리 {{mem}}%",
+      "loadingTitle": "프로세스를 읽고 있습니다…",
+      "loading": "다음 샘플에 목록이 함께 옵니다.",
+      "unreadableTitle": "프로세스를 읽을 수 없습니다",
+      "unreadable": "이 호스트의 ps 가 필요한 옵션을 지원하지 않습니다.",
+      "noMatches": "일치하는 프로세스가 없습니다.",
+      "disabled": "호스트 지표를 켜면 프로세스 목록을 읽어 옵니다."
+    },
+    "ports": {
+      "title": "포트 포워딩",
+      "emptyTitle": "포트 규칙이 없습니다",
+      "empty": "이 호스트에 규칙을 추가하면 여기에 보입니다.",
+      "noHost": "이 세션에는 호스트가 없어 전달할 것이 없습니다.",
+      "manage": "규칙 추가·편집",
+      "start": "시작",
+      "stop": "정지"
+    },
+    "theme": {
+      "title": "터미널 테마",
+      "followGlobal": "앱 설정 따르기",
+      "followSystem": "시스템 외형을 따릅니다",
+      "noHostTitle": "호스트가 없습니다",
+      "noHost": "테마는 호스트에 저장되므로 호스트 없는 세션에서는 정할 수 없습니다.",
+      "saveFailed": "테마를 저장하지 못했습니다: {{message}}"
+    },
+    "copied": "복사했습니다"
   }
 }

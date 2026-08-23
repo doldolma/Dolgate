@@ -189,6 +189,41 @@ describe('HostRepository', () => {
     expect(unfavored?.favorite ?? null).toBeNull();
   });
 
+  it('keeps the terminal theme through a form save and clears it on null', async () => {
+    // 세션 패널이 테마만 바꾸는 경로다. 폼을 거치지 않는 값이라 좁은 setter 로 둔다 —
+    // update() 로 통째로 저장하면 draft 에 없는 필드가 날아간다(favorite 과 같은 이유).
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+    const draft = {
+      kind: 'ssh' as const,
+      label: 'Theme host',
+      hostname: 'theme.example.com',
+      port: 22,
+      username: 'ubuntu',
+      authType: 'password' as const,
+    };
+
+    hosts.create('ssh-theme', draft);
+    expect(hosts.setTerminalTheme('ssh-theme', 'kanagawa-wave')).toMatchObject({
+      terminalThemeId: 'kanagawa-wave',
+    });
+
+    // favorite 과 달리 테마는 드래프트가 실어 보내는 값이다 — 폼이 그 필드를 담아 저장하면
+    // 유지되고, 빼고 저장하면 지워진다(폼은 항상 담는다).
+    expect(
+      hosts.update('ssh-theme', {
+        ...draft,
+        label: 'Theme host (renamed)',
+        terminalThemeId: 'kanagawa-wave',
+      }),
+    ).toMatchObject({ label: 'Theme host (renamed)', terminalThemeId: 'kanagawa-wave' });
+
+    // null 은 "앱 설정 따르기" 다.
+    expect(hosts.setTerminalTheme('ssh-theme', null)?.terminalThemeId ?? null).toBeNull();
+    // 없는 호스트에는 아무 일도 일어나지 않는다.
+    expect(hosts.setTerminalTheme('missing', 'night-owl')).toBeNull();
+  });
+
   it('stores env on the host record, not the shared credential, so it does not bleed across hosts', async () => {
     const { HostRepository } = await loadRepositories();
     const hosts = new HostRepository();

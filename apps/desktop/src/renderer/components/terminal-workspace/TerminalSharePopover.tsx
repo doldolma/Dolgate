@@ -18,7 +18,6 @@ interface TerminalSharePopoverProps {
   open: boolean;
   actions?: ReactNode;
   // Share 버튼 왼쪽에 함께 놓이는 토글(AI 패널 등).
-  aiToggle?: ReactNode;
   canStartShare: boolean;
   shareCopyStatus: string | null;
   shareState: TerminalTab['sessionShare'] | null;
@@ -42,7 +41,6 @@ export function TerminalSharePopover({
   variant = 'floating',
   open,
   actions,
-  aiToggle,
   canStartShare,
   shareCopyStatus,
   shareState,
@@ -67,7 +65,6 @@ export function TerminalSharePopover({
       )}
     >
       {actions}
-      {aiToggle}
       <Button
         variant="secondary"
         size="sm"

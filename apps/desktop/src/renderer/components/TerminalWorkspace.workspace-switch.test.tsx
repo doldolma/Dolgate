@@ -807,11 +807,6 @@ describe('TerminalWorkspace workspace switching', () => {
     );
   });
 
-  // 분할된 좁은 pane 에서는 AI 토글을 감춘다 — AI 패널이 열리면 터미널을 좌우로 또 나눠
-  // 쓰는데 좁은 pane 에서는 둘 다 못 쓴다. 확대하면 다시 나타나므로 접근이 막히지는 않는다.
-  // Share 는 감추지 않는다: 공유를 시작하는 경로가 그 팝오버뿐이라 감추면 분할 pane 에서
-  // 기능 자체가 사라진다.
-  //
   // 쿼리를 배치된 pane(`data-terminal-pane-slot`)으로 좁히는 이유: 배치되지 않은 pane 도
   // DOM 에는 남고(display:none), 헤더가 없어 플로팅 버튼을 그린다. 실제 화면에서는 안 보이지만
   // jsdom 은 Tailwind 를 적용하지 않아 그대로 잡힌다.
@@ -821,7 +816,9 @@ describe('TerminalWorkspace workspace switching', () => {
     );
   }
 
-  it('hides the AI toggle in split panes but keeps Share reachable', () => {
+  // AI 토글은 pane 헤더에서 세션 패널의 섹션으로 옮겼다(상단 바 토글 · ⌘I). 그래서 pane 위에
+  // 뜨는 버튼은 Share 뿐이다 — 공유를 시작하는 경로가 그 팝오버뿐이라 좁은 pane 에서도 남긴다.
+  it('keeps Share reachable in split panes and no longer draws an AI toggle', () => {
     const { container } = renderWorkspace({
       activeWorkspace: splitWorkspace,
       tabs: splitHostTabs,
@@ -837,21 +834,6 @@ describe('TerminalWorkspace workspace switching', () => {
       ).toBeNull();
       expect(within(pane).getByRole('button', { name: 'Share' })).toBeTruthy();
     }
-  });
-
-  it('brings the AI toggle back on the zoomed pane', () => {
-    const { container } = renderWorkspace({
-      activeWorkspace: { ...splitWorkspace, zoomedSessionId: 'session-1' },
-      tabs: splitHostTabs,
-      hosts: hostRecords,
-      viewActivationKey: 'workspace:workspace-split'
-    });
-
-    const panes = placedPanes(container);
-    expect(panes).toHaveLength(1);
-    expect(
-      within(panes[0]!).getByRole('button', { name: 'AI 어시스턴트 열기' }),
-    ).toBeTruthy();
   });
 
   it('shows a pane excluded from broadcast as not participating', () => {

@@ -104,8 +104,6 @@ export interface TerminalSessionPaneProps {
   host?: HostRecord;
   /** 이 pane 이 워크스페이스 전체로 확대돼 있는가. */
   zoomed?: boolean;
-  /** pane 이 좁은 상태(분할 중 + 확대 아님). 선택적 액션을 접는다. */
-  compactActions?: boolean;
   /** 확대 토글. 없으면 아이콘이 뜨지 않는다. */
   onToggleZoom?: () => void;
   /** 분할에서 빼내 독립 탭으로. 없으면 아이콘이 뜨지 않는다. */

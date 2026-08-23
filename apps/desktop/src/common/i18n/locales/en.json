@@ -1893,7 +1893,8 @@
     "disabledHint": "The AI assistant is off. Turn it on in Settings → AI.",
     "modelMissing": "Choose a model in Settings → AI.",
     "sessionContext": "Current session context:",
-    "requestFailed": "The request failed."
+    "requestFailed": "The request failed.",
+    "title": "AI assistant"
   },
   "imports": {
     "exportRequestInvalid": "The export request is not valid.",
@@ -2567,7 +2568,9 @@
     "tailscaleNeedsAuth": "Tailscale authentication has not finished. Finish the browser login and the connection will continue.",
     "tailscaleNeedsApproval": "This device is waiting for administrator approval. You can connect once it is approved.",
     "tailscaleMismatch": "You are connected to a different Tailscale network than the one configured. Check which account is logged in.",
-    "serverNotice": "The server sent this notice:\n{{notice}}"
+    "serverNotice": "The server sent this notice:\n{{notice}}",
+    "addressInUse": "That port is already in use.",
+    "addressInUseAt": "That port is already in use ({{address}})."
   },
   "knownHostsIpc": {
     "noSecrets": "There is no credential to save.",
@@ -3547,5 +3550,84 @@
   },
   "portForwarding": {
     "startFailed": "Could not start the forward."
+  },
+  "sessionPanel": {
+    "title": "Session panel",
+    "toggle": "Session panel",
+    "close": "Close panel",
+    "copy": "Copy",
+    "insert": "Insert into the prompt",
+    "run": "Insert and run",
+    "blocked": {
+      "unreadable": "This command could not be read from the screen.",
+      "busy": "Wait until the running command finishes.",
+      "needsBracketedPaste": "This shell does not accept pasted text, so a multi-line command cannot be inserted without running it. Copy it instead.",
+      "unreliable": "Read from the screen, so it may differ from what was typed — insert it and check before running."
+    },
+    "history": {
+      "title": "History",
+      "search": "Search commands",
+      "failedOnly": "Failed commands only",
+      "failedOnlyShort": "Failed",
+      "jump": "Go to this command",
+      "empty": "Commands you run appear here.",
+      "noMatches": "No matching commands.",
+      "emptyTitle": "No commands yet",
+      "noMatchesTitle": "Nothing found",
+      "previous": "Earlier commands"
+    },
+    "snippets": {
+      "title": "Snippets",
+      "search": "Search snippets",
+      "empty": "No snippets yet.",
+      "noMatches": "No matching snippets.",
+      "manage": "Manage snippets",
+      "emptyTitle": "No snippets",
+      "noMatchesTitle": "Nothing found"
+    },
+    "resources": {
+      "title": "Resources",
+      "load": "Load / cores",
+      "uptime": "Uptime",
+      "disks": "Disks",
+      "loading": "Reading the first sample…",
+      "paused": "Polling stopped after repeated failures.",
+      "disabledTitle": "Host metrics are off",
+      "disabled": "Turn them on to read CPU, memory, and disk from this host.",
+      "enable": "Turn on",
+      "unsupportedTitle": "Can't read metrics",
+      "unsupported": "This connection cannot run the background reads these numbers need."
+    },
+    "processes": {
+      "title": "Processes",
+      "search": "Search processes",
+      "sortCpu": "CPU",
+      "sortMem": "MEM",
+      "meta": "pid {{pid}} · {{user}} · mem {{mem}}%",
+      "loadingTitle": "Reading processes…",
+      "loading": "The list arrives with the next sample.",
+      "unreadableTitle": "Can't read processes",
+      "unreadable": "This host's ps does not support the options this needs.",
+      "noMatches": "No process matches.",
+      "disabled": "Turn on host metrics to read the process list."
+    },
+    "ports": {
+      "title": "Port forwarding",
+      "emptyTitle": "No port rules",
+      "empty": "Rules you add for this host appear here.",
+      "noHost": "This session has no host, so there is nothing to forward.",
+      "manage": "Add or edit rules",
+      "start": "Start",
+      "stop": "Stop"
+    },
+    "theme": {
+      "title": "Terminal theme",
+      "followGlobal": "Follow app setting",
+      "followSystem": "Follows the system appearance",
+      "noHostTitle": "No host",
+      "noHost": "A theme is saved on the host, so a session without one cannot set it.",
+      "saveFailed": "Could not save the theme: {{message}}"
+    },
+    "copied": "Copied"
   }
 }

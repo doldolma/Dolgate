@@ -96,6 +96,11 @@ export function resolveConnectionFailurePresentation(
           : ""
       }`
     : dialTarget;
+  // `listen tcp 127.0.0.1:5555: bind: …` 에서 막힌 주소를 뽑는다. 포트 포워딩 실패에서 사용자가
+  // 알아야 하는 것은 원격 대상이 아니라 이 주소다.
+  const listenAddress =
+    /listen (?:tcp|tcp4|tcp6|udp)6? (\[[^\]]+\]:\d+|[^\s:]+:\d+)/i.exec(normalized)?.[1] ??
+    null;
   const awsSsmExitCodeMatch =
     /^AWS SSM session exited with code\s+(-?\d+)/i.exec(normalized);
   if (awsSsmExitCodeMatch) {
@@ -151,6 +156,11 @@ export function resolveConnectionFailurePresentation(
     Exclude<ConnectionFailureCode, "unknown">,
     () => string
   > = {
+    // 원격이 아니라 이 컴퓨터의 포트가 막힌 것이다 — 주소를 읽어냈으면 어느 포트인지 말해 준다.
+    "address-in-use": () =>
+      listenAddress
+        ? t('connectFailure.addressInUseAt', { address: listenAddress })
+        : t('connectFailure.addressInUse'),
     "agent-unreachable": () => t('connectFailure.agentUnreachable'),
     "tailnet-expired": () => t('connectFailure.tailnetExpired'),
     "tailnet-needs-auth": () => t('connectFailure.tailscaleNeedsAuth'),

@@ -5,6 +5,7 @@ import { createCatalogSlice } from "./slices/catalogSlice";
 import { createContainersSlice } from "./slices/containersSlice";
 import { createNetworkSlice } from "./slices/networkSlice";
 import { createRuntimeEventSlice } from "./slices/runtimeEventSlice";
+import { createSessionPanelSlice } from "./slices/sessionPanelSlice";
 import { createSessionSlice } from "./slices/sessionSlice";
 import { createSettingsSlice } from "./slices/settingsSlice";
 import { createSftpSlice } from "./slices/sftpSlice";
@@ -28,6 +29,7 @@ export function createAppStore(api: DesktopApi) {
       ...createRuntimeEventSlice(deps),
       ...createZmodemSlice(deps),
       ...createAiChatSlice(deps),
+      ...createSessionPanelSlice(deps),
     };
   });
 }

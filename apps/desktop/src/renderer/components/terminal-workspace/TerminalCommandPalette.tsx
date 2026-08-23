@@ -5,9 +5,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../lib/cn';
 import type { TerminalCommandBlockState } from '../../lib/terminal-command-blocks';
-import { formatBlockDuration } from './blockFormat';
+import { formatBlockDuration, formatBlockRelativeTime } from './blockFormat';
 import { useTranslation } from 'react-i18next';
-import { t } from '../../i18n';
 
 export interface TerminalCommandPaletteItem {
   id: number;
@@ -26,21 +25,6 @@ interface TerminalCommandPaletteProps {
   onClose: () => void;
   onJump: (id: number) => void;
   onRerun: (id: number) => void;
-}
-
-function formatRelativeTime(startedAt: number, now: number): string {
-  const seconds = Math.max(0, Math.round((now - startedAt) / 1000));
-  if (seconds < 5) {
-    return t('cmdPalette.ago.justNow');
-  }
-  if (seconds < 60) {
-    return t('cmdPalette.ago.seconds', { count: seconds });
-  }
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {
-    return t('cmdPalette.ago.minutes', { count: minutes });
-  }
-  return t('cmdPalette.ago.hours', { count: Math.floor(minutes / 60) });
 }
 
 /** 공백으로 나눈 모든 토큰이 순서 상관없이 들어 있으면 통과(간단한 부분 일치 검색). */
@@ -215,7 +199,7 @@ export function TerminalCommandPalette({
                         item.cwd,
                         item.state === 'running'
                           ? translate('cmdPalette.running')
-                          : formatRelativeTime(item.startedAt, openedAt),
+                          : formatBlockRelativeTime(item.startedAt, openedAt),
                       ]
                         .filter(Boolean)
                         .join(' · ')}

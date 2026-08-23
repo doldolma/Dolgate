@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { isSplittablePaneKind, type AuthState } from '@shared';
 import { TerminalWorkspace } from '../components/TerminalWorkspace';
+import { cn } from '../lib/cn';
 import { TmuxWindowBar } from '../components/terminal-workspace/TmuxWindowBar';
 import { TerminalHostStatusBar } from '../components/terminal-workspace/TerminalHostStatusBar';
 import { listWorkspaceSessionIds } from '../components/terminal-workspace/terminalWorkspaceLayout';
@@ -13,6 +14,8 @@ import {
 } from '../components/terminal-workspace/terminalStatusBarChrome';
 import { TmuxCommandPrompt } from '../components/terminal-workspace/TmuxCommandPrompt';
 import { TerminalTransferToastRegion } from '../components/TerminalTransferToastRegion';
+import { SessionPanel } from '../components/terminal-workspace/session-panel/SessionPanel';
+import { useSessionPanelTargetSessionId } from '../components/terminal-workspace/session-panel/useSessionPanelTarget';
 import type { useLoginController } from '../controllers/useLoginController';
 import { openOwnerChatWindow } from '../services/desktop/session-shares';
 import { refreshTmuxSessions } from '../services/desktop/terminal';
@@ -166,6 +169,11 @@ export function SessionShell({
     sessionViewModel.workspaces,
   ]);
 
+  // 패널이 볼 세션. 레이아웃(카드를 좌우로 나눌지)과 패널 본체가 같은 답을 봐야 한다.
+  const panelSessionId = useSessionPanelTargetSessionId(
+    activeWorkspace?.activeSessionId ?? activeSessionId,
+  );
+
   const workspaceEl = (
     <TerminalWorkspace
       tabs={sessionViewModel.tabs}
@@ -173,6 +181,7 @@ export function SessionShell({
       settings={settingsViewModel.settings}
       prefersDark={prefersDark}
       activeSessionId={activeSessionId}
+      sharesCardWithPanel={panelSessionId !== null}
       activeWorkspace={activeWorkspace}
       viewActivationKey={sessionViewActivationKey}
       draggedSession={draggedSession}
@@ -281,8 +290,20 @@ export function SessionShell({
             }}
           />
         ) : null}
-        <div className="relative min-h-0 flex-1">
+        {/* 패널이 열리면 이 래퍼가 카드의 바깥 윤곽(테두리·그림자·라운드)을 그리고, 터미널과
+            패널이 그 안에서 좌우로 나뉜다 — 분할 화면(pane)과 같은 문법이다. 닫혀 있으면
+            터미널이 예전처럼 자기 카드를 그린다. */}
+        <div
+          className={cn(
+            'relative flex min-h-0 flex-1',
+            panelSessionId !== null &&
+              'overflow-hidden rounded-[10px] border border-[var(--border)] shadow-[var(--shadow)]',
+          )}
+        >
           {workspaceEl}
+          {/* 오른쪽 세션 패널. 터미널과 flex 형제라 패널이 넓어지면 터미널이 좁아지고,
+              리사이즈 스케줄러가 격자가 실제로 바뀔 때만 PTY 에 알린다. */}
+          <SessionPanel sessionId={panelSessionId} />
           <TerminalTransferToastRegion />
           <TmuxCommandPrompt />
         </div>

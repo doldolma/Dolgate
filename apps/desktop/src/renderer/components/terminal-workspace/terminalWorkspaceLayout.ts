@@ -6,6 +6,41 @@ import type {
 } from '../../store/createAppStore';
 import type { Rect, SessionPlacement, SplitHandlePlacement } from './types';
 
+/**
+ * 지금 포커스된 pane 의 sessionId.
+ *
+ * 상단 바(패널 토글)와 세션 셸(패널 본체)이 같은 답을 봐야 한다 — 따로 계산하면 토글이 켜는
+ * 패널과 실제로 열리는 패널의 대상이 갈린다.
+ */
+export function resolveFocusedPaneSessionId(
+  activeWorkspaceTab: string,
+  workspaces: readonly { id: string; activeSessionId: string }[],
+  tmuxGroups: readonly { id: string; activeWorkspaceId: string }[] = [],
+): string | null {
+  if (activeWorkspaceTab.startsWith('session:')) {
+    return activeWorkspaceTab.slice('session:'.length);
+  }
+  if (activeWorkspaceTab.startsWith('workspace:')) {
+    const workspaceId = activeWorkspaceTab.slice('workspace:'.length);
+    return (
+      workspaces.find((workspace) => workspace.id === workspaceId)?.activeSessionId ?? null
+    );
+  }
+  if (activeWorkspaceTab.startsWith('tmuxgrp:')) {
+    const group = tmuxGroups.find(
+      (item) => item.id === activeWorkspaceTab.slice('tmuxgrp:'.length),
+    );
+    if (!group) {
+      return null;
+    }
+    return (
+      workspaces.find((workspace) => workspace.id === group.activeWorkspaceId)
+        ?.activeSessionId ?? null
+    );
+  }
+  return null;
+}
+
 export function toPercentRectStyle(rect: Rect): React.CSSProperties {
   return {
     left: `${rect.x * 100}%`,

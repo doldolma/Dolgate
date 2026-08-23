@@ -19,7 +19,9 @@ const SECTION = '@@dolgate';
  * - df 는 `-P`(POSIX 형식)로 고정 — 긴 장치명이 줄바꿈되는 것을 막는다.
  * - 각 항목은 실패해도 나머지를 살리도록 `|| true` 로 감싼다(예: 컨테이너에 df 없음).
  */
-export function buildHostMetricsCommand(): string {
+export function buildHostMetricsCommand(
+  options: { processLimit?: number } = {},
+): string {
   const parts = [
     `echo ${SECTION}:stat`,
     'grep -m1 "^cpu " /proc/stat || true',
@@ -38,7 +40,65 @@ export function buildHostMetricsCommand(): string {
     `echo ${SECTION}:disk`,
     'df -Pk || true',
   ];
+  // 프로세스 목록은 세션 패널이 보고 있을 때만 태운다. 출력이 커서(수백 줄) 상태바만 쓰는
+  // 평소에도 실어 보내면 왕복마다 그만큼을 버리게 된다.
+  //
+  // `-o …=` 로 헤더를 없애고 CPU 내림차순 상위 N개만 가져온다. busybox ps 처럼 이 옵션을
+  // 모르는 호스트에서는 빈 섹션이 되고(`|| true`), 그때 UI 가 "읽을 수 없다" 를 말한다.
+  const processLimit = options.processLimit ?? 0;
+  if (processLimit > 0) {
+    parts.push(
+      `echo ${SECTION}:ps`,
+      `ps -eo pid=,user=,pcpu=,pmem=,rss=,args= --sort=-pcpu 2>/dev/null | head -n ${processLimit} || true`,
+    );
+  }
   return `LC_ALL=C sh -c '${parts.join('; ')}'`;
+}
+
+/** 프로세스 한 줄. 종료·우선순위 변경은 하지 않으므로 보여 줄 것만 담는다. */
+export interface HostProcess {
+  pid: number;
+  user: string;
+  cpuPercent: number;
+  memPercent: number;
+  /** 상주 메모리(KB). 못 읽으면 null. */
+  rssKb: number | null;
+  /** 전체 명령줄. 길면 UI 가 자른다 — 여기서 자르면 검색이 안 걸린다. */
+  command: string;
+}
+
+/**
+ * `ps -eo pid=,user=,pcpu=,pmem=,rss=,args=` 출력을 읽는다.
+ *
+ * args 에 공백이 들어 있으므로 앞의 다섯 칸만 나누고 나머지를 전부 명령으로 본다.
+ */
+export function parseHostProcesses(block: string): HostProcess[] {
+  const rows: HostProcess[] = [];
+  for (const line of block.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '') {
+      continue;
+    }
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 6) {
+      continue;
+    }
+    const pid = toNumber(parts[0]);
+    const cpuPercent = toNumber(parts[2]);
+    const memPercent = toNumber(parts[3]);
+    if (pid === null) {
+      continue;
+    }
+    rows.push({
+      pid,
+      user: parts[1],
+      cpuPercent: cpuPercent ?? 0,
+      memPercent: memPercent ?? 0,
+      rssKb: toNumber(parts[4]),
+      command: parts.slice(5).join(' '),
+    });
+  }
+  return rows;
 }
 
 export interface HostDiskUsage {
@@ -268,6 +328,17 @@ function parseDisks(block: string): HostDiskUsage[] {
 }
 
 /** 명령 출력 한 덩어리를 샘플로 만든다. 읽지 못한 항목은 null 로 남기고 나머지는 살린다. */
+/**
+ * 프로세스 섹션만 따로 읽는다. 지표 샘플과 수명이 달라(요청했을 때만 있다) 같은 구조체에
+ * 넣지 않는다 — 없는 것과 빈 것을 구분해야 UI 가 "읽을 수 없다" 를 말할 수 있다.
+ */
+export function parseHostProcessesFromOutput(output: string): HostProcess[] | null {
+  if (!output.includes(`${SECTION}:ps`)) {
+    return null;
+  }
+  return parseHostProcesses(section(output, 'ps'));
+}
+
 export function parseHostMetricsSample(output: string, atMs: number): HostMetricsSample {
   const mem = parseMem(section(output, 'mem'));
   const load = section(output, 'load').trim().split(/\s+/);

@@ -17,7 +17,6 @@ import {
 import { getSessionCwd } from '../../lib/terminal-cwd-registry';
 import { getPathForDroppedFile } from '../../services/desktop/files';
 import { useTerminalSessionViewController } from '../../controllers/useTerminalSessionViewController';
-import { AiChatPanel } from './AiChatPanel';
 import { TerminalChatToastRegion } from './TerminalChatToastRegion';
 import { TerminalConnectionOverlay } from './TerminalConnectionOverlay';
 import { TerminalHostStatusBar } from './TerminalHostStatusBar';
@@ -208,10 +207,6 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     snippets,
     onCommandFinished,
   });
-  const aiPanelOpen = useAppStore(
-    (state) => state.aiConversations?.[sessionId]?.open ?? false,
-  );
-  const aiPanelWidth = useAppStore((state) => state.aiPanelWidth);
   // 블록 툴바의 AI 버튼은 AI 기능이 켜져 있을 때만 노출한다.
   const aiAssistantEnabled = useAppStore(
     (state) => state.settings?.ai?.enabled ?? false,
@@ -246,19 +241,22 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
       ? stickyBottom - blockOverlay.top + 2
       : 0;
   })();
-  const toggleAiPanel = useAppStore((state) => state.toggleAiPanel);
+  // ⌘I 는 세션 패널의 AI 섹션을 여닫는다. AI 는 pane 헤더의 버튼에서 패널 섹션으로 옮겼다.
+  const toggleSessionPanelSection = useAppStore(
+    (state) => state.toggleSessionPanelSection,
+  );
   // 선택/출력 캡처는 stableId 로 살아있는 런타임에서 읽는다(재연결로 sessionId가 바뀌어도 안정).
   const stableId = tab?.stableId ?? sessionId;
   const handlePaneKeyDownCapture = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
-      // ⌘I / Ctrl+I: AI 패널 토글. 나머지 단축키(검색 등)는 컨트롤러로 위임.
+      // ⌘I / Ctrl+I: AI 여닫기. 나머지 단축키(검색 등)는 컨트롤러로 위임.
       if (
         (event.metaKey || event.ctrlKey) &&
         !event.altKey &&
         (event.key === 'i' || event.key === 'I')
       ) {
         event.preventDefault();
-        toggleAiPanel(sessionId);
+        toggleSessionPanelSection(sessionId, 'ai');
         return;
       }
       // ⌘/Ctrl+Shift+P: 명령 팔레트. 팔레트 표준 단축키라 다른 도구와 감각이 같고,
@@ -279,7 +277,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
       }
       controller.handlePaneKeyDownCapture(event);
     },
-    [controller, sessionId, toggleAiPanel],
+    [controller, sessionId, toggleSessionPanelSection],
   );
 
   const [serialNotice, setSerialNotice] = useState<string | null>(null);
@@ -634,32 +632,11 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   // Share 옆에 놓이는 AI 패널 토글(누르면 열림/닫힘). active=열림 상태 강조.
   //
   // 헤더 안(inline)과 터미널 위(floating) 두 자리에 놓이고 크기만 다르다. 헤더는 한 줄
-  // 크롬이라 36px 알약이 들어가면 헤더가 그만큼 두꺼워지므로 닫기 아이콘과 높이를 맞춘다.
-  const renderAiToggle = (inline: boolean) => (
-    <Button
-      variant="secondary"
-      size="sm"
-      active={aiPanelOpen}
-      className={
-        inline
-          ? 'h-[1.25rem] min-h-0 rounded-[5px] border-0 bg-transparent px-[0.3rem] text-[0.65rem] font-semibold text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] hover:text-[var(--text)]'
-          : 'min-h-9 rounded-full px-3.5'
-      }
-      onClick={() => toggleAiPanel(sessionId)}
-      title={translate('sessionPane.aiTitle')}
-      aria-label={translate(aiPanelOpen ? 'sessionPane.aiClose' : 'sessionPane.aiOpen')}
-    >
-      AI
-    </Button>
-  );
-
-  // 시리얼 액션 · AI · Share 묶음. 헤더가 있으면 헤더 안, 없으면 터미널 위에 뜬다.
-  // 어느 쪽이든 같은 컴포넌트를 쓴다 — 예전에는 위치 좌표가 두 곳에 복사돼 있었다.
-  // AI 토글을 감출지. 분할된 좁은 pane 에서는 감추되, **이미 열려 있으면 남긴다** —
-  // 버튼이 사라지면 열린 패널을 닫을 방법이 없어진다. Share 는 항상 남긴다: 공유를 시작하는
-  // 경로가 이 팝오버뿐이라 감추면 분할 pane 에서 기능 자체가 사라진다.
-  const hideAiToggle = Boolean(props.compactActions) && !aiPanelOpen;
-
+  // 시리얼 액션 · Share 묶음. 헤더가 있으면 헤더 안, 없으면 터미널 위에 뜬다. 어느 쪽이든
+  // 같은 컴포넌트를 쓴다 — 예전에는 위치 좌표가 두 곳에 복사돼 있었다.
+  //
+  // AI 토글은 여기 있었지만 세션 패널의 섹션으로 옮겼다(상단 바 토글 · ⌘I). 터미널 위에 뜨는
+  // 버튼이 하나 줄고, 세션에 딸린 것을 찾을 데가 한 곳이 된다.
   const renderPaneActions = (inline: boolean) =>
     controller.canShareSession ? (
       <TerminalSharePopover
@@ -668,7 +645,6 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         showHeader={showHeader}
         open={controller.sharePopoverOpen}
         actions={serialActions}
-        aiToggle={hideAiToggle ? undefined : renderAiToggle(inline)}
         canStartShare={controller.canStartShare}
         shareCopyStatus={controller.shareCopyStatus}
         shareState={controller.shareState}
@@ -684,19 +660,8 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         onStopShare={controller.handleStopShare}
         canOpenChatWindow={Boolean(onOpenSessionShareChatWindow)}
       />
-    ) : inline ? (
-      // 공유 불가 세션(로컬 터미널 등)엔 Share 팝오버가 없다. AI 토글만 남는다.
-      hideAiToggle ? null : renderAiToggle(true)
-    ) : (
-      <div
-        className={cn(
-          'absolute right-[0.85rem] top-[0.85rem] z-[4] flex items-center',
-          showHeader && 'right-[0.8rem] top-[0.8rem]',
-        )}
-      >
-        {renderAiToggle(false)}
-      </div>
-    );
+    ) : // 공유 불가 세션(로컬 터미널 등)엔 Share 팝오버가 없고, 이제 띄울 다른 버튼도 없다.
+    null;
 
   return (
     <div
@@ -973,9 +938,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
             />
           </div>
         </div>
-        {aiPanelOpen ? (
-          <AiChatPanel sessionId={sessionId} stableId={stableId} width={aiPanelWidth} />
-        ) : null}
+
       </div>
       {/* 하단 상태바들은 서로 바짝 붙이고, 아래 여백은 이 컨테이너에서 한 번만 준다.
           각 바가 아래 여백을 들고 있으면 여러 개가 쌓일 때 간격이 그만큼 배로 벌어진다.

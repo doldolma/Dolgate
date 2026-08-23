@@ -143,7 +143,8 @@
     "tailnetNeedsAuth": "This tailnet is not connected yet. Authenticate on your desktop.",
     "tailnetNeedsApproval": "Waiting for tailnet administrator approval.",
     "tailnetMismatch": "You are connected to a different tailnet than the one configured.",
-    "targetHost": "the host"
+    "targetHost": "the host",
+    "addressInUse": "That port is already in use."
   },
   "store": {
     "serverSlow": "The server is slow to respond. Try again.",

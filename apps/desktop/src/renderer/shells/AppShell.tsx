@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { AuthState, DesktopWindowState, UpdateState } from '@shared';
 import { AppTitleBar } from '../components/AppTitleBar';
 import { cn } from '../lib/cn';
+import { useAppStore } from '../store/appStore';
 import { titleBarMode } from '../components/useTitleBarAutoHide';
 import {
   resolveSpreadTarget,
@@ -87,6 +88,9 @@ export function AppShell({
     useState(false);
   const [secretEditRequest, setSecretEditRequest] =
     useState<SecretEditDialogRequest | null>(null);
+  // 세션 패널은 상단 바의 토글로만 열린다 — 상태는 창 단위(스토어)다.
+  const sessionPanelOpen = useAppStore((state) => state.sessionPanelOpen);
+  const toggleSessionPanel = useAppStore((state) => state.toggleSessionPanel);
 
   // 전체화면 + 멀티모니터 RDP 세션이면 원격 모니터를 물리 화면마다 펼친다. 창을 여는 일은
   // 메인 프로세스가 하고, 여기서는 언제 펼칠지만 정한다.
@@ -187,6 +191,8 @@ export function AppShell({
           hosts={homeViewModel.hosts}
           tabStrip={sessionViewModel.tabStrip}
           activeWorkspaceTab={homeViewModel.activeWorkspaceTab}
+          sessionPanelOpen={sessionPanelOpen}
+          onToggleSessionPanel={toggleSessionPanel}
           draggedSession={draggedSession}
           updateState={updateState}
           windowState={windowState}
