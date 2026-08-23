@@ -3041,7 +3041,9 @@
     "rerun": "Re-run",
     "commandRunning": "A command is running",
     "sessionDisconnected": "The session is not connected",
-    "rerunBlocked": "The command read from the screen may differ from what was typed, so it cannot be re-run (too long or multi-line)."
+    "rerunBlocked": "The command read from the screen may differ from what was typed, so it cannot be re-run (too long or multi-line).",
+    "askAi": "Ask AI",
+    "copied": "Copied"
   },
   "updateConfirm": {
     "title": "Applying the update requires a restart",

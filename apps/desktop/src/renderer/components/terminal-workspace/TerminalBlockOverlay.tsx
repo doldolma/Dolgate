@@ -4,10 +4,13 @@
 // 액션 툴바를 띄운다. 루트는 pointer-events:none 이어서 터미널 텍스트 선택/드래그를 막지
 // 않는다 — 툴바만 pointer-events 를 되살린다.
 
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { BLOCK_TOOLBAR_ATTRIBUTE } from '../../controllers/useTerminalBlockOverlay';
 import type { TerminalBlockOverlayState } from '../../controllers/useTerminalBlockOverlay';
 import { cn } from '../../lib/cn';
 import { formatBlockDuration } from './blockFormat';
+import { Check, ClipboardList, Copy, Play, Sparkles } from '../../ui/icons';
+import { Tooltip } from '../../ui';
 import { useTranslation } from 'react-i18next';
 
 interface TerminalBlockOverlayProps {
@@ -72,20 +75,19 @@ export function TerminalBlockOverlay({
         )}
       />
 
+      {/* 하나의 바로 묶는다. 버튼마다 테두리를 주면 동그란 조각이 흩어져 떠 있는 것으로 보이고,
+          앱의 라운드(8~12px)와도 어긋난다. 대비는 바 하나가 책임진다 — 터미널 배경은 테마마다
+          다르므로 불투명이어야 한다(반투명이면 라이트 테마에서 거의 안 보인다). */}
       <div
-        className="pointer-events-auto absolute right-2 flex items-center gap-1.5"
+        className="pointer-events-auto absolute right-2 flex items-center overflow-hidden rounded-[8px] border border-[rgba(255,255,255,0.14)] bg-[rgba(20,28,44,0.94)] shadow-[var(--shadow-soft)]"
         style={{ top: toolbarTop }}
         {...{ [BLOCK_TOOLBAR_ATTRIBUTE]: 'true' }}
       >
         {duration || failed ? (
           <span
             className={cn(
-              // 터미널 배경(테마마다 다름) 위에 얹히므로 불투명 배경으로 대비를 확보한다.
-              // 반투명이면 배경이 비쳐 라이트 테마에서 거의 안 보인다.
-              'rounded-full border px-2 py-0.5 text-[0.7rem] font-semibold tabular-nums shadow-[var(--shadow-soft)]',
-              failed
-                ? 'border-[rgba(239,111,108,0.45)] bg-[rgba(58,22,24,0.95)] text-[#ffb1b1]'
-                : 'border-[rgba(255,255,255,0.12)] bg-[rgba(20,28,44,0.92)] text-[rgba(232,239,255,0.95)]',
+              'border-r border-[rgba(255,255,255,0.1)] px-2 text-[0.7rem] font-semibold tabular-nums leading-[22px]',
+              failed ? 'text-[#ffb1b1]' : 'text-[rgba(232,239,255,0.95)]',
             )}
           >
             {failed && overlay.exitCode !== null
@@ -94,11 +96,17 @@ export function TerminalBlockOverlay({
           </span>
         ) : null}
 
-        <BlockAction label={translate('blockOverlay.copyOutput')} onClick={onCopyOutput} />
-        <BlockAction
+        {/* 글자 대신 아이콘. 툴바가 짧아져 터미널을 덜 가린다 — 무엇인지는 툴팁이 말한다. */}
+        <BlockCopyAction
+          label={translate('blockOverlay.copyOutput')}
+          onClick={onCopyOutput}
+          icon={<ClipboardList className="h-3.5 w-3.5" aria-hidden />}
+        />
+        <BlockCopyAction
           label={translate('blockOverlay.copyCommand')}
           onClick={onCopyCommand}
           disabled={!overlay.command}
+          icon={<Copy className="h-3.5 w-3.5" aria-hidden />}
         />
         <BlockAction
           label={translate('blockOverlay.rerun')}
@@ -115,8 +123,15 @@ export function TerminalBlockOverlay({
                   ? translate('blockOverlay.rerunBlocked')
                   : undefined
           }
+          icon={<Play className="h-3.5 w-3.5" aria-hidden />}
         />
-        {aiEnabled ? <BlockAction label="AI" onClick={onAskAi} /> : null}
+        {aiEnabled ? (
+          <BlockAction
+            label={translate('blockOverlay.askAi')}
+            onClick={onAskAi}
+            icon={<Sparkles className="h-3.5 w-3.5" aria-hidden />}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -127,23 +142,78 @@ function BlockAction({
   onClick,
   disabled,
   title,
+  icon,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
   title?: string;
+  icon: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      className="rounded-full border border-[rgba(255,255,255,0.12)] bg-[rgba(20,28,44,0.9)] px-2 py-0.5 text-[0.7rem] font-semibold text-[rgba(226,234,255,0.9)] shadow-[var(--shadow-soft)] transition-colors duration-150 hover:bg-[rgba(40,52,78,0.95)] disabled:cursor-not-allowed disabled:opacity-40"
-      onClick={onClick}
+    // 글자를 뺐으니 이름은 툴팁이 말한다. 브라우저 기본 title 은 지연이 있어 아이콘 두 개를
+    // 가르기엔 늦다 — 앱의 Tooltip 은 즉시 뜨고, 잠긴 버튼에서도 이유를 보여 준다.
+    <Tooltip label={title ?? label}>
+      <button
+        type="button"
+        // 터미널 배경(테마마다 다름) 위에 얹히므로 불투명 배경으로 대비를 확보한다.
+        // 버튼 자체는 테두리·배경 없이 바 안의 칸으로만 존재한다.
+        className="grid h-[22px] w-[24px] place-items-center text-[rgba(226,234,255,0.85)] transition-colors duration-150 hover:bg-[rgba(255,255,255,0.1)] hover:text-white disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={label}
+        // 터미널이 포커스를 잃지 않도록 mousedown 기본동작(포커스 이동)을 막는다.
+        onMouseDown={(event) => event.preventDefault()}
+      >
+        {icon}
+      </button>
+    </Tooltip>
+  );
+}
+
+/**
+ * 복사 버튼. 누르면 잠깐 체크로 바뀐다 — 클립보드는 눈에 보이는 변화가 없어서, 반응이 없으면
+ * 복사가 됐는지 알 수 없다(세션 패널·AI 패널의 복사와 같은 방식).
+ */
+function BlockCopyAction({
+  label,
+  onClick,
+  disabled,
+  icon,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  icon: ReactNode;
+}) {
+  const { t: translate } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    },
+    [],
+  );
+
+  return (
+    <BlockAction
+      label={copied ? translate('blockOverlay.copied') : label}
       disabled={disabled}
-      title={title ?? label}
-      // 터미널이 포커스를 잃지 않도록 mousedown 기본동작(포커스 이동)을 막는다.
-      onMouseDown={(event) => event.preventDefault()}
-    >
-      {label}
-    </button>
+      onClick={() => {
+        onClick();
+        setCopied(true);
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+        }
+        timerRef.current = setTimeout(() => setCopied(false), 1200);
+      }}
+      icon={
+        copied ? <Check className="h-3.5 w-3.5 text-[#7ac8a0]" aria-hidden /> : icon
+      }
+    />
   );
 }

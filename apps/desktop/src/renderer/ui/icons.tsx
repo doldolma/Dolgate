@@ -68,6 +68,7 @@ export {
   PanelRight,
   Sparkles,
   Activity,
+  ClipboardList,
   ListOrdered,
   Palette,
 } from 'lucide-react';
