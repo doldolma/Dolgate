@@ -480,6 +480,8 @@
     "rdToolbarKeyboard": "Toggle keyboard",
     "rdToolbarToggleScale": "Toggle scale mode",
     "rdToolbarEnterFullscreen": "Full screen",
+    "rdToolbarLockLandscape": "Lock to landscape",
+    "rdToolbarUnlockRotation": "Unlock rotation",
     "rdToolbarCollapse": "Hide toolbar",
     "rdToolbarExpand": "Show toolbar",
     "rdToolbarExitFullscreen": "Exit full screen",

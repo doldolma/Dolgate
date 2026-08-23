@@ -20,6 +20,12 @@ export interface RemoteDesktopToolbarProps {
   onToggleScale: () => void;
   immersive: boolean;
   onToggleImmersive: () => void;
+  /**
+   * 가로 고정 토글. **지원하는 플랫폼에서만 넘어온다**(지금은 안드로이드) — 없으면 버튼도
+   * 그리지 않는다. iOS 는 폰의 자동 회전을 그대로 따른다.
+   */
+  landscapeLocked?: boolean;
+  onToggleLandscape?: () => void;
   /** 툴바를 접어 손잡이만 남긴다. */
   onCollapse: () => void;
   onSendClipboard: () => void;
@@ -35,6 +41,8 @@ export function RemoteDesktopToolbar({
   onToggleScale,
   immersive,
   onToggleImmersive,
+  landscapeLocked = false,
+  onToggleLandscape,
   onCollapse,
   onSendClipboard,
   onDisconnect,
@@ -150,6 +158,33 @@ export function RemoteDesktopToolbar({
           color={immersive ? '#8ab4ff' : '#e0e0f0'}
         />
       </Pressable>
+
+      {/* 가로 고정. 원격 데스크톱은 가로가 기본인데 폰의 자동 회전을 꺼 둔 사람은 세로로만
+          보게 된다 — 시스템 설정을 건드리지 않고 여기서 뒤집는다. 세션을 벗어나면 자동으로
+          풀린다(RemoteDesktopSurface). */}
+      {onToggleLandscape ? (
+        <Pressable
+          style={[styles.button, landscapeLocked && styles.buttonActive]}
+          onPress={onToggleLandscape}
+          accessibilityRole="button"
+          accessibilityState={{ selected: landscapeLocked }}
+          accessibilityLabel={
+            landscapeLocked
+              ? t('session.rdToolbarUnlockRotation', {
+                  defaultValue: '회전 잠금 풀기',
+                })
+              : t('session.rdToolbarLockLandscape', {
+                  defaultValue: '가로로 고정',
+                })
+          }
+        >
+          <Ionicons
+            name={landscapeLocked ? 'phone-portrait-outline' : 'phone-landscape-outline'}
+            size={18}
+            color={landscapeLocked ? '#8ab4ff' : '#e0e0f0'}
+          />
+        </Pressable>
+      ) : null}
 
       {/* 화면 다시 받기 버튼은 두지 않는다. 화면이 정상일 때 누르면 서버가 같은 픽셀을 다시
           보내므로 눈에 보이는 변화가 없어 "고장난 버튼" 으로 읽히고, 아이콘도 회전으로

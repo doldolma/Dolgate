@@ -449,3 +449,23 @@ export function getInitialZoomState(mode: ScaleMode): ZoomState {
       return { scale: 1.0, mode: 'custom', panX: 0, panY: 0 };
   }
 }
+
+// ---------------------------------------------------------------------------
+// 두 손가락: 스크롤인가 핀치인가
+// ---------------------------------------------------------------------------
+
+/**
+ * RDP 는 휠 한 칸을 **120 단위**로 표현한다(rotation units). VNC 는 칸 수를 그대로 받는다.
+ *
+ * 두 코어의 단위가 실제로 다르다 — vnc-core 는 `delta: -1`, rdp-core 는 `delta: -120` 을
+ * 한 칸으로 읽는다. 칸 수를 그대로 RDP 에 넘기면 한 칸의 1/120 만 굴러 **아무 일도 일어나지
+ * 않는다.** 두 손가락 스크롤이 안 되던 마지막 원인이 이것이었다.
+ */
+export const RDP_WHEEL_UNITS_PER_NOTCH = 120;
+
+export function toWheelDelta(
+  protocol: 'rdp' | 'vnc',
+  notches: number,
+): number {
+  return protocol === 'rdp' ? notches * RDP_WHEEL_UNITS_PER_NOTCH : notches;
+}

@@ -480,6 +480,8 @@
     "rdToolbarKeyboard": "키보드 전환",
     "rdToolbarToggleScale": "화면 크기 전환",
     "rdToolbarEnterFullscreen": "전체화면",
+    "rdToolbarLockLandscape": "가로로 고정",
+    "rdToolbarUnlockRotation": "회전 잠금 풀기",
     "rdToolbarCollapse": "툴바 접기",
     "rdToolbarExpand": "툴바 펼치기",
     "rdToolbarExitFullscreen": "전체화면 끝내기",

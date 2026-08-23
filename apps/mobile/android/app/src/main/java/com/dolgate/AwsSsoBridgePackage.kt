@@ -11,6 +11,7 @@ class AwsSsoBridgePackage : ReactPackage {
       AwsSsoBridgeModule(reactContext),
       DolsshFileTransferModule(reactContext),
       GoSshEngineModule(reactContext),
+      ScreenOrientationModule(reactContext),
     )
 
   override fun createViewManagers(

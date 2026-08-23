@@ -16,13 +16,11 @@ import {
   ActivityIndicator,
   Animated,
   Image,
-  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
-  type GestureResponderEvent,
   type LayoutChangeEvent,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
@@ -52,6 +50,7 @@ import {
   nativeSetActive,
   nativeUnicodeEvent,
 } from '@dolssh/react-native-remote-desktop';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useTranslation } from 'react-i18next';
 import { keyToKeysym, MODIFIER_KEYSYMS } from '../lib/vnc-keysym';
 import { keyToRdpScancode, RDP_MODIFIER_SCANCODES } from '../lib/rdp-keyboard';
@@ -62,13 +61,19 @@ import {
   isRepeatTap,
   panToRevealCursor,
   clampPan,
-  classifyTap,
   directTouchToRemote,
   remoteToViewport,
-  TAP_SLOP,
+  toWheelDelta,
+  LONG_PRESS_MS,
+  TAP_TIMEOUT_MS,
   type Point,
   type ZoomState,
 } from '../lib/remote-desktop-gestures';
+import {
+  isScreenOrientationLockSupported,
+  lockLandscape,
+  unlockOrientation,
+} from '../lib/screen-orientation';
 import { RemoteDesktopKeyboardInput } from './RemoteDesktopKeyboardInput';
 import { RemoteDesktopToolbar } from './RemoteDesktopToolbar';
 import { ConnectionStagesPanel } from './ConnectionStagesPanel';
@@ -87,54 +92,6 @@ const CLIPBOARD_NOTICE_MS = 3200;
  * 둔다.
  */
 const CLIPBOARD_PASTE_DELAY_MS = 350;
-
-interface ActiveGesture {
-  startedAt: number;
-  maxTouches: number;
-  totalMovement: number;
-  lastPoint: Point | null;
-  lastCenter: Point | null;
-  initialDistance: number;
-  initialZoom: ZoomState;
-  twoFingerMode: 'pending' | 'pinch' | 'scroll';
-  scrollX: number;
-  scrollY: number;
-  directPressed: boolean;
-}
-
-function createGesture(zoom: ZoomState): ActiveGesture {
-  return {
-    startedAt: 0,
-    maxTouches: 0,
-    totalMovement: 0,
-    lastPoint: null,
-    lastCenter: null,
-    initialDistance: 0,
-    initialZoom: zoom,
-    twoFingerMode: 'pending',
-    scrollX: 0,
-    scrollY: 0,
-    directPressed: false,
-  };
-}
-
-function touchPoints(event: GestureResponderEvent): Point[] {
-  return event.nativeEvent.touches.map(touch => ({
-    x: touch.locationX,
-    y: touch.locationY,
-  }));
-}
-
-function midpoint(first: Point, second: Point): Point {
-  return {
-    x: (first.x + second.x) / 2,
-    y: (first.y + second.y) / 2,
-  };
-}
-
-function pointDistance(first: Point, second: Point): number {
-  return Math.hypot(second.x - first.x, second.y - first.y);
-}
 
 function clampNativeCoordinate(value: number, size: number): number {
   return Math.max(
@@ -210,6 +167,18 @@ export function RemoteDesktopSurface({
   const prevActiveRef = useRef(isActiveTab);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  // 가로 고정. 지원하는 플랫폼(안드로이드)에서만 버튼이 뜬다.
+  const [landscapeLocked, setLandscapeLocked] = useState(false);
+  const orientationLockSupported = isScreenOrientationLockSupported();
+
+  // **화면을 벗어나면 반드시 푼다.** 안 풀면 홈 화면까지 가로로 남는다. 세션이 끊겨
+  // 언마운트되는 경우까지 여기서 덮는다.
+  useEffect(
+    () => () => {
+      unlockOrientation();
+    },
+    [],
+  );
   const [zoom, setZoom] = useState<ZoomState>({
     scale: 1,
     mode: 'fit',
@@ -310,7 +279,6 @@ export function RemoteDesktopSurface({
     x: remoteWidth / 2,
     y: remoteHeight / 2,
   });
-  const gestureRef = useRef<ActiveGesture>(createGesture(zoom));
   const effectiveInputMode: RemoteDesktopInputMode = viewOnly
     ? 'none'
     : inputMode;
@@ -522,266 +490,214 @@ export function RemoteDesktopSurface({
     [nativePoint, sessionId],
   );
 
-  const finishGesture = useCallback(
-    (cancelled: boolean) => {
-      const gesture = gestureRef.current;
-      if (gesture.directPressed) {
-        sendButton(0, false);
-        gesture.directPressed = false;
-      }
-      if (cancelled || viewOnly || effectiveInputMode === 'none') return;
 
-      const tap = classifyTap(
-        gesture.maxTouches,
-        Date.now() - gesture.startedAt,
-        gesture.totalMovement,
-      );
-      if (tap.type === 'none') {
-        // 드래그였다. 포인터가 딸려 갔으므로 다음 탭을 앞 클릭 자리로 볼 근거가 없다.
-        lastTapRef.current = null;
+  // 제스처 중재는 **라이브러리에 맡긴다.**
+  //
+  // 예전에는 PanResponder 하나로 스크롤·핀치·드래그·탭을 직접 갈랐다 — 임계값, 유예 타이머,
+  // "간격 변화 vs 중심 이동" 우세 판정을 손으로 짰고, 그 판정이 실제 손짓(두 손가락의 이동량이
+  // 크게 다르다)과 어긋나 스크롤이 핀치로, 스크롤이 클릭으로 새어 나갔다. 손가락 개수로
+  // 갈라야 하는 일을 크기·시간으로 흉내 내고 있었던 셈이다.
+  //
+  // react-native-gesture-handler 는 그 중재가 본업이다. 손가락 수를 선언하면 두 번째 손가락이
+  // 닿는 순간 한 손가락 제스처가 **자동으로 취소**된다 — 우리가 버튼을 눌렀다 떼며 수습하던
+  // 그 일이 애초에 일어나지 않는다.
+  const pressedButtonRef = useRef<number | null>(null);
+  const scrollRemainderRef = useRef({ x: 0, y: 0 });
+  const pinchStartRef = useRef(zoomRef.current);
+
+  const releasePressedButton = useCallback(() => {
+    const button = pressedButtonRef.current;
+    if (button === null) {
+      return;
+    }
+    pressedButtonRef.current = null;
+    sendButton(button, false);
+  }, [sendButton]);
+
+  const clickAt = useCallback(
+    (button: number, point: Point) => {
+      if (viewOnly || effectiveInputMode === 'none') {
         return;
       }
-      if (tap.type === 'left-click' && effectiveInputMode === 'touch') {
-        const point = gesture.lastPoint;
-        if (point) {
-          const now = Date.now();
-          const previous = lastTapRef.current;
-          if (previous && isRepeatTap(previous, point.x, point.y, now)) {
-            // 앞 클릭과 **정확히 같은** 원격 좌표로 보낸다. 이동 이벤트가 그 사이 포인터를
-            // 몇 px 옮겼어도 클릭 좌표가 같으면 원격은 더블클릭으로 센다.
-            //
-            // 기준은 첫 탭의 자리로 유지한다 — 세 번 이상 이어질 때도 한 점에 모인다.
-            cursorRef.current = previous.remote;
-            lastTapRef.current = { ...previous, at: now };
-          } else {
-            lastTapRef.current = {
-              x: point.x,
-              y: point.y,
-              at: now,
-              remote: moveDirectPointer(point),
-            };
-          }
+      if (effectiveInputMode === 'touch') {
+        const now = Date.now();
+        const previous = lastTapRef.current;
+        if (button === 0 && previous && isRepeatTap(previous, point.x, point.y, now)) {
+          // 앞 클릭과 **정확히 같은** 원격 좌표로 보낸다 — 그래야 원격이 더블클릭으로 센다.
+          cursorRef.current = previous.remote;
+          lastTapRef.current = { ...previous, at: now };
+        } else {
+          const remote = moveDirectPointer(point);
+          lastTapRef.current =
+            button === 0 ? { x: point.x, y: point.y, at: now, remote } : null;
         }
-      } else {
-        // 우클릭 뒤에는 컨텍스트 메뉴가 떠 있다. 다음 탭은 메뉴를 고르는 것이므로 앞 클릭
-        // 자리로 끌어다 놓으면 안 된다.
+      } else if (button !== 0) {
         lastTapRef.current = null;
-        if (tap.type === 'right-click' && gesture.lastCenter) {
-          if (effectiveInputMode === 'touch') {
-            moveDirectPointer(gesture.lastCenter);
-          }
-        }
       }
-      const button = tap.type === 'right-click' ? 2 : 0;
       sendButton(button, true);
       sendButton(button, false);
     },
     [effectiveInputMode, moveDirectPointer, sendButton, viewOnly],
   );
 
-  const panResponder = useMemo(
+  /** 두 손가락 끌기 → 원격 스크롤. 한 손가락으로는 아예 시작되지 않는다. */
+  const twoFingerScroll = useMemo(
     () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => gestureEnabled,
-        onMoveShouldSetPanResponder: () => gestureEnabled,
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: event => {
-          const points = touchPoints(event);
-          const first = points[0] ?? {
-            x: event.nativeEvent.locationX,
-            y: event.nativeEvent.locationY,
-          };
-          const center =
-            points.length >= 2 ? midpoint(points[0], points[1]) : first;
-          const next = createGesture(zoomRef.current);
-          next.startedAt = Date.now();
-          next.maxTouches = Math.max(1, points.length);
-          next.lastPoint = first;
-          next.lastCenter = center;
-          next.initialDistance =
-            points.length >= 2 ? pointDistance(points[0], points[1]) : 0;
-          next.initialZoom = zoomRef.current;
-          gestureRef.current = next;
-          if (
-            !viewOnly &&
-            effectiveInputMode === 'touch' &&
-            points.length < 2
-          ) {
-            moveDirectPointer(first);
-          }
-        },
-        onPanResponderMove: event => {
-          const points = touchPoints(event);
-          if (points.length === 0) return;
-          const gesture = gestureRef.current;
-          const previousMaxTouches = gesture.maxTouches;
-          gesture.maxTouches = Math.max(gesture.maxTouches, points.length);
-
-          if (points.length >= 2) {
-            const center = midpoint(points[0], points[1]);
-            const distance = pointDistance(points[0], points[1]);
-            // Most gestures begin with one finger and receive the second in a
-            // later event. Establish the pinch/scroll baseline at that moment.
-            if (previousMaxTouches < 2 || gesture.initialDistance <= 0) {
-              gesture.initialDistance = distance;
-              gesture.initialZoom = zoomRef.current;
-              gesture.lastCenter = center;
-              gesture.lastPoint = center;
-              gesture.twoFingerMode = 'pending';
-              return;
-            }
-            const centerDeltaX = gesture.lastCenter
-              ? center.x - gesture.lastCenter.x
-              : 0;
-            const centerDeltaY = gesture.lastCenter
-              ? center.y - gesture.lastCenter.y
-              : 0;
-            gesture.totalMovement += Math.hypot(centerDeltaX, centerDeltaY);
-            gesture.lastCenter = center;
-            gesture.lastPoint = center;
-
-            if (
-              gesture.twoFingerMode === 'pending' &&
-              Math.abs(distance - gesture.initialDistance) > 5
-            ) {
-              gesture.twoFingerMode = 'pinch';
-              // A stationary pinch changes distance but not its center. Mark it
-              // non-tappable so release cannot become a right click.
-              gesture.totalMovement = Math.max(
-                gesture.totalMovement,
-                TAP_SLOP + 1,
-              );
-            } else if (
-              gesture.twoFingerMode === 'pending' &&
-              gesture.totalMovement > TAP_SLOP
-            ) {
-              gesture.twoFingerMode = 'scroll';
-            }
-
-            if (
-              gesture.twoFingerMode === 'pinch' &&
-              gesture.initialDistance > 0
-            ) {
-              const next = clampPan(
-                applyPinchZoom(
-                  gesture.initialZoom,
-                  center.x,
-                  center.y,
-                  distance / gesture.initialDistance,
-                  1,
-                  MAX_LOCAL_ZOOM,
-                ),
-                viewport.width,
-                viewport.height,
-              );
-              updateZoom(next);
-              if (next.scale === 1) {
-                onScaleModeChange?.('fit');
-              } else {
-                onScaleModeChange?.('fill');
-              }
-              return;
-            }
-
-            if (
-              gesture.twoFingerMode === 'scroll' &&
-              !viewOnly &&
-              effectiveInputMode !== 'none'
-            ) {
-              gesture.scrollX += centerDeltaX;
-              gesture.scrollY += centerDeltaY;
-              const native = nativePoint();
-              if (Math.abs(gesture.scrollY) >= SCROLL_STEP_PX) {
-                const steps = Math.trunc(gesture.scrollY / SCROLL_STEP_PX);
-                nativeScroll(sessionId, true, -steps, native.x, native.y);
-                gesture.scrollY -= steps * SCROLL_STEP_PX;
-              }
-              if (Math.abs(gesture.scrollX) >= SCROLL_STEP_PX) {
-                const steps = Math.trunc(gesture.scrollX / SCROLL_STEP_PX);
-                nativeScroll(sessionId, false, steps, native.x, native.y);
-                gesture.scrollX -= steps * SCROLL_STEP_PX;
-              }
-            }
+      Gesture.Pan()
+        .withTestId('rd-two-finger-scroll')
+        .minPointers(2)
+        .maxPointers(2)
+        .averageTouches(true)
+        .onStart(() => {
+          scrollRemainderRef.current = { x: 0, y: 0 };
+        })
+        // changeX/Y(직전 이벤트 대비 변화량)는 onChange 가 준다.
+        .onChange(event => {
+          if (viewOnly || effectiveInputMode === 'none') {
             return;
           }
-
-          const point = points[0];
-          // Do not reinterpret the final remaining finger from a two-finger
-          // gesture as a one-finger pointer drag.
-          if (gesture.maxTouches >= 2) {
-            gesture.lastPoint = point;
-            return;
-          }
-          const deltaX = gesture.lastPoint ? point.x - gesture.lastPoint.x : 0;
-          const deltaY = gesture.lastPoint ? point.y - gesture.lastPoint.y : 0;
-          gesture.totalMovement += Math.hypot(deltaX, deltaY);
-          gesture.lastPoint = point;
-          gesture.lastCenter = point;
-          if (viewOnly || effectiveInputMode === 'none') return;
-
-          if (effectiveInputMode === 'touch') {
-            moveDirectPointer(point);
-            if (gesture.totalMovement > TAP_SLOP && !gesture.directPressed) {
-              sendButton(0, true);
-              gesture.directPressed = true;
-            }
-          } else {
-            const moved = applyTrackpadMove(
-              {
-                cursorX: cursorRef.current.x,
-                cursorY: cursorRef.current.y,
-                zoomScale: zoomRef.current.scale,
-                panX: zoomRef.current.panX,
-                panY: zoomRef.current.panY,
-                remoteWidth,
-                remoteHeight,
-                viewportWidth: Math.max(1, viewport.width),
-                viewportHeight: Math.max(1, viewport.height),
-              },
-              deltaX,
-              deltaY,
-            );
-            cursorRef.current = { x: moved.cursorX, y: moved.cursorY };
-            const native = nativePoint(cursorRef.current);
-            nativePointerMove(sessionId, native.x, native.y);
-
-            // **화면은 커서를 따라간다.** 예전에는 손가락이 화면 가장자리에 닿아야 움직였는데,
-            // 트랙패드 모드에서 손가락은 화면 아무 데나 있어도 되므로 확대 상태에서는 커서만
-            // 원격 끝까지 가고 화면은 끝내 안 움직였다.
-            const cursorOnScreen = remoteToViewport(
+          const remainder = scrollRemainderRef.current;
+          remainder.x += event.changeX;
+          remainder.y += event.changeY;
+          const native = nativePoint();
+          // **손가락을 따라 종이가 밀린다**(폰 관습) — 위로 밀면 문서의 아래쪽이 보인다.
+          // MS·Chrome 원격 데스크톱 모바일도 같다. 만지는 기기가 폰이므로 폰의 관습을
+          // 따른다. 두 축의 부호가 서로 다른 것은 휠 규약이 축마다 반대이기 때문이다.
+          if (Math.abs(remainder.y) >= SCROLL_STEP_PX) {
+            const steps = Math.trunc(remainder.y / SCROLL_STEP_PX);
+            nativeScroll(
+              sessionId,
+              true,
+              toWheelDelta(protocol, steps),
               native.x,
               native.y,
-              zoomRef.current,
-              viewport.width,
-              viewport.height,
+            );
+            remainder.y -= steps * SCROLL_STEP_PX;
+          }
+          if (Math.abs(remainder.x) >= SCROLL_STEP_PX) {
+            const steps = Math.trunc(remainder.x / SCROLL_STEP_PX);
+            nativeScroll(
+              sessionId,
+              false,
+              toWheelDelta(protocol, -steps),
+              native.x,
+              native.y,
+            );
+            remainder.x -= steps * SCROLL_STEP_PX;
+          }
+        }),
+    [effectiveInputMode, nativePoint, protocol, sessionId, viewOnly],
+  );
+
+  /** 두 손가락 확대. 원격에는 아무것도 보내지 않는다 — 화면만 키운다. */
+  const pinchZoom = useMemo(
+    () =>
+      Gesture.Pinch()
+        .withTestId('rd-pinch')
+        .onStart(() => {
+          pinchStartRef.current = zoomRef.current;
+        })
+        .onUpdate(event => {
+          const next = clampPan(
+            applyPinchZoom(
+              pinchStartRef.current,
+              event.focalX,
+              event.focalY,
+              event.scale,
+              1,
+              MAX_LOCAL_ZOOM,
+            ),
+            viewport.width,
+            viewport.height,
+          );
+          updateZoom(next);
+          onScaleModeChange?.(next.scale === 1 ? 'fit' : 'fill');
+        }),
+    [onScaleModeChange, updateZoom, viewport.height, viewport.width],
+  );
+
+  /**
+   * 한 손가락 끌기.
+   *
+   * `maxPointers(1)` 이라 **둘째 손가락이 닿는 순간 이 제스처가 취소된다.** 예전에 스크롤이
+   * 클릭으로 새던 원인(두 번째 손가락이 오기 전에 좌버튼을 눌러 버림)이 여기서 사라진다.
+   */
+  const oneFingerDrag = useMemo(
+    () =>
+      Gesture.Pan()
+        .withTestId('rd-one-finger-drag')
+        .minPointers(1)
+        .maxPointers(1)
+        .onStart(event => {
+          if (viewOnly || effectiveInputMode === 'none') {
+            return;
+          }
+          if (effectiveInputMode === 'touch') {
+            moveDirectPointer({ x: event.x, y: event.y });
+            sendButton(0, true);
+            pressedButtonRef.current = 0;
+          }
+        })
+        .onChange(event => {
+          if (viewOnly || effectiveInputMode === 'none') {
+            return;
+          }
+          if (effectiveInputMode === 'touch') {
+            moveDirectPointer({ x: event.x, y: event.y });
+            return;
+          }
+          const moved = applyTrackpadMove(
+            {
+              cursorX: cursorRef.current.x,
+              cursorY: cursorRef.current.y,
+              zoomScale: zoomRef.current.scale,
+              panX: zoomRef.current.panX,
+              panY: zoomRef.current.panY,
               remoteWidth,
               remoteHeight,
-            );
-            const followed = panToRevealCursor(
-              zoomRef.current,
-              cursorOnScreen.x,
-              cursorOnScreen.y,
-              viewport.width,
-              viewport.height,
-            );
-            if (
-              followed.panX !== zoomRef.current.panX ||
-              followed.panY !== zoomRef.current.panY
-            ) {
-              updateZoom(followed);
-            }
+              viewportWidth: Math.max(1, viewport.width),
+              viewportHeight: Math.max(1, viewport.height),
+            },
+            event.changeX,
+            event.changeY,
+          );
+          cursorRef.current = { x: moved.cursorX, y: moved.cursorY };
+          const native = nativePoint(cursorRef.current);
+          nativePointerMove(sessionId, native.x, native.y);
+
+          // **화면은 커서를 따라간다.** 트랙패드 모드에서 손가락은 화면 아무 데나 있어도
+          // 되므로, 확대 상태에서 커서만 원격 끝까지 가고 화면이 안 따라가면 안 된다.
+          const cursorOnScreen = remoteToViewport(
+            native.x,
+            native.y,
+            zoomRef.current,
+            viewport.width,
+            viewport.height,
+            remoteWidth,
+            remoteHeight,
+          );
+          const followed = panToRevealCursor(
+            zoomRef.current,
+            cursorOnScreen.x,
+            cursorOnScreen.y,
+            viewport.width,
+            viewport.height,
+          );
+          if (
+            followed.panX !== zoomRef.current.panX ||
+            followed.panY !== zoomRef.current.panY
+          ) {
+            updateZoom(followed);
           }
-        },
-        onPanResponderRelease: () => finishGesture(false),
-        onPanResponderTerminate: () => finishGesture(true),
-      }),
+        })
+        .onFinalize(() => {
+          releasePressedButton();
+        }),
     [
       effectiveInputMode,
-      finishGesture,
-      gestureEnabled,
       moveDirectPointer,
       nativePoint,
-      onScaleModeChange,
+      releasePressedButton,
       remoteHeight,
       remoteWidth,
       sendButton,
@@ -790,6 +706,66 @@ export function RemoteDesktopSurface({
       viewOnly,
       viewport.height,
       viewport.width,
+    ],
+  );
+
+  const singleTap = useMemo(
+    () =>
+      Gesture.Tap()
+        .withTestId('rd-tap')
+        .maxDuration(TAP_TIMEOUT_MS)
+        .onEnd((event, success) => {
+          if (success) {
+            clickAt(0, { x: event.x, y: event.y });
+          }
+        }),
+    [clickAt],
+  );
+
+  /** 제자리에서 길게 누르면 우클릭. 폰에서 컨텍스트 메뉴가 그 손짓이다. */
+  const longPressRightClick = useMemo(
+    () =>
+      Gesture.LongPress()
+        .withTestId('rd-long-press')
+        .minDuration(LONG_PRESS_MS)
+        .onStart(event => {
+          clickAt(2, { x: event.x, y: event.y });
+        }),
+    [clickAt],
+  );
+
+  /** 두 손가락 탭도 우클릭(트랙패드 관습). 스크롤로 번지지 않게 손가락 수로 갈린다. */
+  const twoFingerTap = useMemo(
+    () =>
+      Gesture.Tap()
+        .withTestId('rd-two-finger-tap')
+        .minPointers(2)
+        .maxDuration(TAP_TIMEOUT_MS)
+        .onEnd((event, success) => {
+          if (success) {
+            clickAt(2, { x: event.x, y: event.y });
+          }
+        }),
+    [clickAt],
+  );
+
+  const composedGesture = useMemo(
+    () =>
+      Gesture.Race(
+        twoFingerScroll,
+        pinchZoom,
+        twoFingerTap,
+        longPressRightClick,
+        oneFingerDrag,
+        singleTap,
+      ),
+    [
+      longPressRightClick,
+      oneFingerDrag,
+      pinchZoom,
+      singleTap,
+      twoFingerScroll,
+      twoFingerTap,
     ],
   );
 
@@ -920,16 +896,17 @@ export function RemoteDesktopSurface({
         ) : null}
 
         {gestureEnabled ? (
-          <View
-            testID={`remote-desktop-gesture-layer-${sessionId}`}
-            style={styles.gestureLayer}
-            accessible
-            accessibilityRole="imagebutton"
-            accessibilityLabel={t('session.remoteDesktopGestureArea', {
-              defaultValue: 'Remote desktop input area',
-            })}
-            {...panResponder.panHandlers}
-          />
+          <GestureDetector gesture={composedGesture}>
+            <View
+              testID={`remote-desktop-gesture-layer-${sessionId}`}
+              style={styles.gestureLayer}
+              accessible
+              accessibilityRole="imagebutton"
+              accessibilityLabel={t('session.remoteDesktopGestureArea', {
+                defaultValue: 'Remote desktop input area',
+              })}
+            />
+          </GestureDetector>
         ) : null}
 
         {status !== 'connected' ? (
@@ -996,6 +973,22 @@ export function RemoteDesktopSurface({
             onInputModeChange?.(inputMode === 'trackpad' ? 'touch' : 'trackpad')
           }
           onToggleKeyboard={() => setKeyboardVisible(value => !value)}
+          landscapeLocked={landscapeLocked}
+          onToggleLandscape={
+            orientationLockSupported
+              ? () => {
+                  setLandscapeLocked(value => {
+                    const next = !value;
+                    if (next) {
+                      lockLandscape();
+                    } else {
+                      unlockOrientation();
+                    }
+                    return next;
+                  });
+                }
+              : undefined
+          }
           onToggleScale={toggleScaleMode}
           immersive={immersive === true}
           onToggleImmersive={() => onToggleImmersive?.()}

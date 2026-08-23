@@ -62,7 +62,10 @@ import {
   type NativeTerminalInputEvent,
   type TerminalShortcutItem,
 } from '../lib/terminal-input';
-import { getKeyboardDockInset } from '../lib/keyboard-layout';
+import {
+  getConnectionBodyPaddingBottom,
+  getKeyboardDockInset,
+} from '../lib/keyboard-layout';
 import {
   TERMINAL_GRID_REPORT_SCRIPT,
   parseReportedTerminalGrid,
@@ -1631,10 +1634,12 @@ export function SessionScreen(): React.JSX.Element {
           style={[
             styles.screenBody,
             {
-              paddingBottom:
-                activeTab.kind === 'terminal'
-                  ? toolbarHeight + toolbarKeyboardInset
-                  : screenPadding.paddingBottom,
+              paddingBottom: getConnectionBodyPaddingBottom({
+                tabKind: activeTab.kind,
+                toolbarHeight,
+                keyboardDockInset: toolbarKeyboardInset,
+                safeAreaPaddingBottom: screenPadding.paddingBottom,
+              }),
             },
           ]}
         >
