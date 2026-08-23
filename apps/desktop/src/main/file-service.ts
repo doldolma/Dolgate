@@ -169,16 +169,21 @@ export class LocalFileService {
   }
 
   async delete(paths: string[]): Promise<void> {
+    // Windows 는 삭제가 EPERM 으로 실패하는 일이 잦다 — 백신이나 인덱서가 갓 쓰여진 파일에
+    // 잠깐 핸들을 잡으면 그렇게 된다. fs.rm 의 maxRetries 가 바로 그 상황을 위한 것이라
+    // (EPERM·EBUSY 등에 선형 백오프로 재시도) unlink 대신 이것을 쓴다. maxRetries 는
+    // recursive 가 true 일 때만 적용되고, 파일에도 그대로 동작한다.
+    //
+    // force 는 false 로 둔다 — 없는 경로는 계속 ENOENT 로 드러나야 한다.
     await Promise.all(
-      paths.map(async (targetPath) => {
-        const absolutePath = path.resolve(targetPath);
-        const stats = await fs.lstat(absolutePath);
-        if (stats.isDirectory()) {
-          await fs.rm(absolutePath, { recursive: true, force: false });
-          return;
-        }
-        await fs.unlink(absolutePath);
-      })
+      paths.map((targetPath) =>
+        fs.rm(path.resolve(targetPath), {
+          recursive: true,
+          force: false,
+          maxRetries: 3,
+          retryDelay: 100
+        })
+      )
     );
   }
 }

@@ -82,7 +82,19 @@ describe('LocalFileService', () => {
       expect(stats.mode & 0o777).toBe(0o640);
     }
 
-    await service.delete([path.join(tempDir, 'created', 'after.txt'), path.join(tempDir, 'created')]);
+    // UI 는 한 디렉터리 목록 안에서만 선택하므로 delete 에는 형제 항목들이 넘어온다. 부모와
+    // 자식을 같이 넘기면 delete 가 자식을 걸러내므로(병렬 삭제 경합 방지) 파일 unlink 경로가
+    // 검증되지 않는다 — 실제 선택 형태 그대로 형제로 지운다.
+    await service.mkdir(path.join(tempDir, 'created'), 'sibling');
+    await service.delete([
+      path.join(tempDir, 'created', 'after.txt'),
+      path.join(tempDir, 'created', 'sibling')
+    ]);
+
+    await expect(fs.access(path.join(tempDir, 'created', 'after.txt'))).rejects.toThrow();
+    await expect(fs.access(path.join(tempDir, 'created', 'sibling'))).rejects.toThrow();
+
+    await service.delete([path.join(tempDir, 'created')]);
 
     await expect(fs.access(path.join(tempDir, 'created'))).rejects.toThrow();
   });
