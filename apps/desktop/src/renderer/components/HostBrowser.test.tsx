@@ -245,6 +245,7 @@ interface RenderBrowserOptions {
   onDuplicateHosts?: ReturnType<typeof vi.fn>;
   onRemoveGroup?: ReturnType<typeof vi.fn>;
   onMoveGroup?: ReturnType<typeof vi.fn>;
+  onReorderGroup?: ReturnType<typeof vi.fn>;
   onRenameGroup?: ReturnType<typeof vi.fn>;
   onMoveHostToGroup?: ReturnType<typeof vi.fn>;
   onRemoveHost?: ReturnType<typeof vi.fn>;
@@ -289,6 +290,7 @@ function renderBrowser({
   onDuplicateHosts = vi.fn().mockResolvedValue(undefined),
   onRemoveGroup = vi.fn().mockResolvedValue(undefined),
   onMoveGroup = vi.fn().mockResolvedValue(undefined),
+  onReorderGroup = vi.fn().mockResolvedValue(undefined),
   onRenameGroup = vi.fn().mockResolvedValue(undefined),
   onMoveHostToGroup = vi.fn().mockResolvedValue(undefined),
   onRemoveHost = vi.fn().mockResolvedValue(undefined),
@@ -341,6 +343,7 @@ function renderBrowser({
       onCreateGroup={vi.fn().mockResolvedValue(undefined)}
       onRemoveGroup={onRemoveGroup}
       onMoveGroup={onMoveGroup}
+      onReorderGroup={onReorderGroup}
       onRenameGroup={onRenameGroup}
       onNavigateGroup={onNavigateGroup}
       onClearHostSelection={onClearHostSelection}

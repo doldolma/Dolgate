@@ -9,6 +9,7 @@ export * from "./connection-stages";
 export * from "./host-os";
 export * from "./group-paths";
 export * from "./group-mutations";
+export * from "./group-ordering";
 export * from "./quick-connect";
 export * from "./interactive-hop";
 export * from "./locale";

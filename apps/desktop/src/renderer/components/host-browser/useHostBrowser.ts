@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Fuse from 'fuse.js';
 import { resolveContextMenuPosition } from './contextMenuPosition';
 import {
@@ -29,7 +29,7 @@ import type { HomeSection, SettingsSection } from '../../store/types';
 import { getUnusedSavedCredentialsAfterHostDeletion } from '../../lib/host-secret-cleanup';
 import { getKeyboardLayoutSearchQueries } from '../../lib/keyboard-layout-search';
 import { useResponsiveCardGrid } from '../../lib/useResponsiveCardGrid';
-import type { ParsedQuickSshCommand } from '../../lib/quick-connect';
+import type { ParsedQuickSshCommand } from '@shared';
 import type { DesktopPlatform } from '../DesktopWindowControls';
 import { t } from '../../i18n';
 
@@ -73,7 +73,14 @@ export function getHostBrowserEmptyCalloutMessage(
 export type HostSortKey = 'name' | 'recent' | 'group' | 'lastConnected';
 
 // 그룹 사이드바 정렬: 이름순 / 최근 사용순 / 호스트 많은 순.
-export type GroupSortKey = 'name' | 'recent' | 'count';
+/**
+ * `manual` 은 사용자가 끌어서 정한 순서다(GroupRecord.sortRank).
+ *
+ * 기본값이다. 아무도 순서를 바꾼 적이 없으면 랭크가 전부 비어 있고, 그때 비교 규칙은
+ * 이름순으로 떨어지므로 **예전과 같은 화면**이 나온다. 기본을 'name' 으로 두면 끌었을 때
+ * 아무 일도 일어나지 않아, 사용자가 정렬 메뉴를 먼저 찾아야 한다.
+ */
+export type GroupSortKey = 'manual' | 'name' | 'recent' | 'count';
 export type HostViewMode = HomeHostViewMode;
 
 export interface GroupDeleteTarget {
@@ -159,6 +166,12 @@ export function sortGroupTreeRows(
       byParent.set(row.parentPath, [row]);
     }
   }
+  // 직접 순서는 들어온 배열이 이미 갖고 있다 — collectGroupPaths 가 랭크로 정렬하고
+  // buildGroupTreeRows 가 그 순서를 유지한다. 여기서 다시 손대면 그 순서를 덮는다.
+  if (sortKey === 'manual') {
+    return rows;
+  }
+
   const compare = (a: GroupTreeRow, b: GroupTreeRow): number => {
     if (sortKey === 'count') {
       return b.hostCount - a.hostCount || a.label.localeCompare(b.label);
@@ -388,6 +401,12 @@ export interface UseHostBrowserParams {
   onCreateGroup: (name: string, parentPath?: string | null) => Promise<void>;
   onRemoveGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
   onMoveGroup: (path: string, targetParentPath: string | null) => Promise<void>;
+  /** 직접 정렬에서 자리를 옮긴다(부모가 바뀌면 이동까지 함께). */
+  onReorderGroup: (
+    path: string,
+    targetParentPath: string | null,
+    targetIndex: number,
+  ) => Promise<void>;
   onRenameGroup: (path: string, name: string) => Promise<void>;
   onNavigateGroup: (path: string | null) => void;
   onClearHostSelection: () => void;
@@ -434,6 +453,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     onSelectHost,
     onNavigateGroup,
     onMoveGroup,
+    onReorderGroup,
     onMoveHostToGroup,
   } = params;
 
@@ -469,6 +489,14 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   const [draggedHostIds, setDraggedHostIds] = useState<string[]>([]);
   const [draggedGroupPath, setDraggedGroupPath] = useState<string | null>(null);
   const [isRootDragTarget, setIsRootDragTarget] = useState(false);
+  /**
+   * 형제 사이에 놓을 자리 표시. `직접` 정렬일 때만 쓴다 — 다른 정렬에서는 놓아도 그 기준대로
+   * 다시 배치되므로 있지도 않은 자리를 그리게 된다.
+   */
+  const [groupDropEdge, setGroupDropEdge] = useState<{
+    path: string;
+    edge: 'before' | 'after';
+  } | null>(null);
   const [expandedHostTags, setExpandedHostTags] = useState<string[]>([]);
   const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
   const [collapsedTreeGroupPaths, setCollapsedTreeGroupPaths] = useState<string[]>([]);
@@ -489,7 +517,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       setSort(key);
     }
   }
-  const [groupSortKey, setGroupSortKey] = useState<GroupSortKey>('name');
+  const [groupSortKey, setGroupSortKey] = useState<GroupSortKey>('manual');
   const [hideEmptyGroups, setHideEmptyGroups] = useState(false);
   const viewMode = params.hostViewMode ?? 'grid';
   const setViewMode: (mode: HostViewMode) => void | Promise<void> =
@@ -650,6 +678,37 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   const sortedGroupTreeRows = useMemo(
     () => sortGroupTreeRows(groupTreeRows, groupSortKey, groupRecentByPath),
     [groupTreeRows, groupSortKey, groupRecentByPath],
+  );
+
+  /** 끌어서 순서를 바꿀 수 있는 상태인가. 다른 정렬에서는 놓자마자 제자리로 튄다. */
+  const canReorderGroups = groupSortKey === 'manual';
+
+  /**
+   * "이 행 위/아래" 를 부모와 index 로 옮긴다.
+   *
+   * index 는 **끌고 있는 그룹을 뺀 뒤**의 형제 목록 기준이다 — 스토어의 planGroupReorder 가
+   * 먼저 빼고 끼워 넣으므로, 그대로 세면 아래로 옮길 때 한 칸 어긋난다.
+   */
+  const resolveGroupDropTarget = useCallback(
+    (rowPath: string, edge: 'before' | 'after', draggedPath: string) => {
+      const row = sortedGroupTreeRows.find((candidate) => candidate.path === rowPath);
+      if (!row) {
+        return null;
+      }
+      const siblings = sortedGroupTreeRows.filter(
+        (candidate) =>
+          candidate.parentPath === row.parentPath && candidate.path !== draggedPath,
+      );
+      const anchor = siblings.findIndex((candidate) => candidate.path === rowPath);
+      if (anchor < 0) {
+        return null;
+      }
+      return {
+        parentPath: row.parentPath,
+        index: edge === 'before' ? anchor : anchor + 1,
+      };
+    },
+    [sortedGroupTreeRows],
   );
   const expandAllGroups = () => setCollapsedTreeGroupPaths([]);
   const collapseAllGroups = () =>
@@ -1326,6 +1385,11 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     setDraggedHostIds,
     dragTargetGroupPath,
     setDragTargetGroupPath,
+    groupDropEdge,
+    setGroupDropEdge,
+    onReorderGroup,
+    canReorderGroups,
+    resolveGroupDropTarget,
     isRootDragTarget,
     setIsRootDragTarget,
     getActiveDraggedHostIds,

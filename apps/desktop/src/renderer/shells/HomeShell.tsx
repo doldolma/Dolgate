@@ -35,7 +35,7 @@ import {
   buildQuickSshHostLabel,
   findExistingQuickSshHost,
   type ParsedQuickSshCommand,
-} from '../lib/quick-connect';
+} from '@shared';
 import { ArrowLeft } from '../ui/icons';
 import type { useLoginController } from '../controllers/useLoginController';
 import { useSettingsViewModel } from '../view-models/appViewModels';
@@ -602,6 +602,18 @@ export function HomeShell({
             }}
             onCreateGroup={homeViewModel.createGroup}
             onRemoveGroup={homeViewModel.removeGroup}
+            onReorderGroup={async (path, targetParentPath, targetIndex) => {
+              resetHostBrowserMessages();
+              try {
+                await homeViewModel.reorderGroup(path, targetParentPath, targetIndex);
+              } catch (error) {
+                setHostBrowserError(
+                  error instanceof Error
+                    ? error.message
+                    : translate('home.group.moveFailed'),
+                );
+              }
+            }}
             onMoveGroup={async (path, targetParentPath) => {
               resetHostBrowserMessages();
               try {

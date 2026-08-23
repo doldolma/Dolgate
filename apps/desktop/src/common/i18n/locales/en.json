@@ -1866,6 +1866,7 @@
     "noResults": "No search results."
   },
   "aiChat": {
+    "title": "AI assistant",
     "copy": "Copy",
     "copied": "Copied",
     "thinking": "Thinking",
@@ -1894,8 +1895,7 @@
     "disabledHint": "The AI assistant is off. Turn it on in Settings → AI.",
     "modelMissing": "Choose a model in Settings → AI.",
     "sessionContext": "Current session context:",
-    "requestFailed": "The request failed.",
-    "title": "AI assistant"
+    "requestFailed": "The request failed."
   },
   "imports": {
     "exportRequestInvalid": "The export request is not valid.",
@@ -2685,7 +2685,8 @@
     "collapseAll": "Collapse all",
     "hideEmpty": "Hide empty groups",
     "favorites": "Favorites",
-    "noGroups": "No groups created yet."
+    "noGroups": "No groups created yet.",
+    "sortManual": "Custom"
   },
   "sessionStore": {
     "ecsShellReopening": "Reopening the ECS shell for {{label}}.",

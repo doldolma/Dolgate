@@ -1,3 +1,4 @@
+import { compareGroupSiblings } from "@shared";
 import type {
   ActivityLogRecord,
   DnsOverrideResolvedRecord,
@@ -19,7 +20,15 @@ export function sortHosts(hosts: HostRecord[]): HostRecord[] {
 }
 
 export function sortGroups(groups: GroupRecord[]): GroupRecord[] {
-  return [...groups].sort((a, b) => a.path.localeCompare(b.path));
+  // 형제끼리는 직접 순서(없으면 이름), 부모가 다르면 경로로 가른다 — 이 배열은 트리가 아니라
+  // 저장용 평면 목록이라 부모별로 묶어 두기만 하면 된다. 화면 순서는 collectGroupPaths 가 정한다.
+  return [...groups].sort((a, b) => {
+    const parentCompare = (a.parentPath ?? "").localeCompare(b.parentPath ?? "");
+    if (parentCompare !== 0) {
+      return parentCompare;
+    }
+    return compareGroupSiblings(a, b);
+  });
 }
 
 export function sortPortForwards(

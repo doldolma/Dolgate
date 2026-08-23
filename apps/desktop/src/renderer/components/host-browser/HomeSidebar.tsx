@@ -86,6 +86,7 @@ export function HomeSidebar({ hb }: HomeSidebarProps) {
   const groupMenuItemClass =
     'flex w-full items-center gap-[0.6rem] rounded-[8px] px-[0.7rem] py-[0.5rem] text-left text-[0.85rem] text-[var(--text)] transition-colors duration-140 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)]';
   const groupSortOptions: Array<{ key: GroupSortKey; label: string }> = [
+    { key: 'manual', label: translate('sidebar.sortManual') },
     { key: 'name', label: translate('sidebar.sortName') },
     { key: 'recent', label: translate('sidebar.sortRecent') },
     { key: 'count', label: translate('sidebar.sortCount') },
@@ -341,6 +342,14 @@ export function HomeSidebar({ hb }: HomeSidebarProps) {
                       'bg-[color-mix(in_srgb,var(--surface-elevated)_66%,transparent_34%)]',
                     dragTargetGroupPath === group.path &&
                       'border-[var(--selection-border)] bg-[var(--selection-tint-strong)]',
+                    // 놓일 자리 표시. 행 위/아래에 2px 액센트 선을 의사요소로 얹는다 — 실제
+                    // 항목을 끼워 넣으면 목록 높이가 흔들려 커서 아래 행이 밀린다.
+                    hb.groupDropEdge?.path === group.path &&
+                      'relative before:absolute before:left-0 before:right-0 before:h-[2px] before:rounded-full before:bg-[var(--accent-strong)] before:content-[""]',
+                    hb.groupDropEdge?.path === group.path &&
+                      (hb.groupDropEdge.edge === 'before'
+                        ? 'before:-top-[1px]'
+                        : 'before:-bottom-[1px]'),
                   )}
                   data-group-tree-state={selectedGroupPathSet.has(group.path) ? 'selected' : 'idle'}
                   draggable
@@ -393,6 +402,27 @@ export function HomeSidebar({ hb }: HomeSidebarProps) {
                     event.preventDefault();
                     event.dataTransfer.dropEffect = 'move';
                     hb.setIsRootDragTarget(false);
+
+                    // 행의 위/아래 25% 는 "이 자리로", 가운데 50% 는 "이 그룹 안으로".
+                    // 노션과 같은 규칙이고, 얇은 밴드를 잘못 노리는 사고를 줄인다.
+                    // 순서를 바꿀 수 없는 정렬에서는 판정하지 않는다 — 놓아도 제자리로 튄다.
+                    const edge = (() => {
+                      if (!hb.canReorderGroups || !activeDraggedGroupPath) {
+                        return null;
+                      }
+                      const bounds = event.currentTarget.getBoundingClientRect();
+                      const ratio = (event.clientY - bounds.top) / bounds.height;
+                      if (ratio < 0.25) return 'before' as const;
+                      if (ratio > 0.75) return 'after' as const;
+                      return null;
+                    })();
+
+                    if (edge) {
+                      hb.setDragTargetGroupPath(null);
+                      hb.setGroupDropEdge({ path: group.path, edge });
+                      return;
+                    }
+                    hb.setGroupDropEdge(null);
                     hb.setDragTargetGroupPath(group.path);
                   }}
                   onDragLeave={(event) => {
@@ -403,14 +433,19 @@ export function HomeSidebar({ hb }: HomeSidebarProps) {
                     hb.setDragTargetGroupPath((current) =>
                       current === group.path ? null : current,
                     );
+                    hb.setGroupDropEdge((current) =>
+                      current?.path === group.path ? null : current,
+                    );
                   }}
                   onDrop={async (event) => {
                     const activeDraggedHostIds = hb.getActiveDraggedHostIds(event.dataTransfer);
                     const activeDraggedGroupPath =
                       draggedGroupPath ??
                       normalizeGroupPath(event.dataTransfer.getData(GROUP_DRAG_MIME_TYPE));
+                    const dropEdge = hb.groupDropEdge;
                     hb.setDragTargetGroupPath(null);
                     hb.setIsRootDragTarget(false);
+                    hb.setGroupDropEdge(null);
                     if (activeDraggedHostIds.length > 0) {
                       event.preventDefault();
                       try {
@@ -428,6 +463,30 @@ export function HomeSidebar({ hb }: HomeSidebarProps) {
                     ) {
                       return;
                     }
+                    // 표시선이 떠 있었으면 "안으로" 가 아니라 "이 자리로" 다.
+                    if (dropEdge?.path === group.path) {
+                      const target = hb.resolveGroupDropTarget(
+                        group.path,
+                        dropEdge.edge,
+                        activeDraggedGroupPath,
+                      );
+                      if (target) {
+                        event.preventDefault();
+                        try {
+                          await hb.onReorderGroup(
+                            activeDraggedGroupPath,
+                            target.parentPath,
+                            target.index,
+                          );
+                        } catch {
+                          // HomeShell surfaces the error through the shared notice area.
+                        } finally {
+                          hb.clearDragState();
+                        }
+                      }
+                      return;
+                    }
+
                     event.preventDefault();
                     const nextGroupPath = hb.buildNextGroupPath(activeDraggedGroupPath, group.path);
                     if (!nextGroupPath) {

@@ -1138,6 +1138,14 @@ export interface GroupRecord {
   name: string;
   path: string;
   parentPath?: string | null;
+  /**
+   * 형제 사이의 직접 정렬 위치(성긴 정수). 사이드바 정렬 방식이 `직접` 일 때만 쓰인다.
+   *
+   * 없으면 **맨 뒤로 몰고 이름순**이다(group-ordering.ts 의 compareGroupSiblings). 그래서
+   * 아무도 순서를 바꾼 적이 없으면 결과가 이름순과 같고, 옛 클라이언트에서 만든 그룹이
+   * 섞여 들어와도 목록이 흐트러지지 않는다.
+   */
+  sortRank?: number | null;
   createdAt: string;
   updatedAt: string;
 }

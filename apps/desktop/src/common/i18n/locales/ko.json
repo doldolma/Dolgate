@@ -1866,6 +1866,7 @@
     "noResults": "검색 결과가 없습니다."
   },
   "aiChat": {
+    "title": "AI 어시스턴트",
     "copy": "복사",
     "copied": "복사됨",
     "thinking": "생각중",
@@ -1894,8 +1895,7 @@
     "disabledHint": "AI 어시스턴트가 꺼져 있습니다. 설정 → AI에서 켜세요.",
     "modelMissing": "설정 → AI에서 모델을 지정하세요.",
     "sessionContext": "현재 세션 컨텍스트:",
-    "requestFailed": "요청에 실패했습니다.",
-    "title": "AI 어시스턴트"
+    "requestFailed": "요청에 실패했습니다."
   },
   "imports": {
     "exportRequestInvalid": "내보내기 요청이 올바르지 않습니다.",
@@ -2685,7 +2685,8 @@
     "collapseAll": "모두 접기",
     "hideEmpty": "빈 그룹 숨기기",
     "favorites": "즐겨찾기",
-    "noGroups": "아직 만든 그룹이 없습니다."
+    "noGroups": "아직 만든 그룹이 없습니다.",
+    "sortManual": "사용자 지정"
   },
   "sessionStore": {
     "ecsShellReopening": "{{label}} ECS 셸을 다시 여는 중입니다.",

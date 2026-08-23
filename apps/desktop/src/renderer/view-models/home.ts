@@ -34,6 +34,7 @@ export function useHomeViewModel() {
   const createGroup = useAppStore((state) => state.createGroup);
   const removeGroup = useAppStore((state) => state.removeGroup);
   const moveGroup = useAppStore((state) => state.moveGroup);
+  const reorderGroup = useAppStore((state) => state.reorderGroup);
   const renameGroup = useAppStore((state) => state.renameGroup);
   const saveHost = useAppStore((state) => state.saveHost);
   const duplicateHosts = useAppStore((state) => state.duplicateHosts);
@@ -91,6 +92,7 @@ export function useHomeViewModel() {
     createGroup,
     removeGroup,
     moveGroup,
+    reorderGroup,
     renameGroup,
     saveHost,
     duplicateHosts,

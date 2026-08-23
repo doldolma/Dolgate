@@ -1,4 +1,5 @@
 import type { GroupRecord, HostRecord } from './models';
+import { compareGroupSiblings } from './group-ordering';
 
 export interface GroupCardView {
   path: string;
@@ -72,7 +73,49 @@ export function collectGroupPaths(groups: GroupRecord[], hosts: HostRecord[]): s
     appendPathWithAncestors(host.groupName);
   }
 
-  return [...paths].sort((a, b) => a.localeCompare(b));
+  return orderGroupPaths([...paths], groups);
+}
+
+/**
+ * 경로 목록을 **트리 순서**로 편다 — 부모 바로 뒤에 그 자식들이 오고, 형제끼리는
+ * `compareGroupSiblings`(직접 순서 → 없으면 이름) 로 정렬한다.
+ *
+ * 예전에는 경로 문자열을 통째로 정렬했다. 직접 순서는 레코드에 있으므로 문자열만 봐서는
+ * 반영할 수 없다. 순서가 하나도 없으면 결과는 예전과 같다 — 형제끼리는 부모 접두사가 같아
+ * 전체 경로 비교와 마지막 마디 비교가 같은 답을 내기 때문이다.
+ */
+function orderGroupPaths(allPaths: string[], groups: GroupRecord[]): string[] {
+  const recordByPath = new Map(groups.map((group) => [group.path, group]));
+  const childrenByParent = new Map<string, string[]>();
+  for (const path of allPaths) {
+    const parent = getParentGroupPath(path) ?? '';
+    const bucket = childrenByParent.get(parent);
+    if (bucket) {
+      bucket.push(path);
+    } else {
+      childrenByParent.set(parent, [path]);
+    }
+  }
+
+  const ordered: string[] = [];
+  const emit = (parent: string) => {
+    const children = childrenByParent.get(parent);
+    if (!children) {
+      return;
+    }
+    const sorted = [...children].sort((left, right) =>
+      compareGroupSiblings(
+        recordByPath.get(left) ?? { path: left },
+        recordByPath.get(right) ?? { path: right }
+      )
+    );
+    for (const path of sorted) {
+      ordered.push(path);
+      emit(path);
+    }
+  };
+  emit('');
+  return ordered;
 }
 
 export function countHostsInGroupTree(hosts: HostRecord[], groupPath: string): number {
