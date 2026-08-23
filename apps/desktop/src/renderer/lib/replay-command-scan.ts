@@ -5,8 +5,8 @@
 // 스트림을 그대로 먹여 라이브와 동일한 방식으로 경계를 잡고, 각 경계에 녹화 시각(atMs)을
 // 붙인다.
 //
-// 명령 텍스트를 버퍼에서 읽는 이유는 라이브와 같다 — 셸 통합은 명령 텍스트를 보고하지 않아
-// (133;E 없음) 원시 바이트만으로는 알 수 없고, 화면에 그려진 결과가 가장 정확하다.
+// 명령 텍스트는 라이브와 같은 순서로 정한다 — 셸이 알려 준 원문(133;E, zsh)이 있으면 그것을,
+// 없으면(bash 등) 화면에 그려진 결과를 읽는다.
 //
 // atMs 귀속: xterm 의 write 콜백은 "그 청크를 파싱한 직후, 다음 청크 파싱 전" 에 불린다.
 // 그래서 각 청크의 콜백에서 *다음* 청크의 atMs 를 넣어 두면, OSC 핸들러가 불릴 때 항상 그
@@ -16,7 +16,10 @@
 import { Terminal } from '@xterm/headless';
 import type { IMarker } from '@xterm/headless';
 import type { SessionReplayRecording } from '@shared';
-import { readCommandTextFromBuffer } from './terminal-command-blocks';
+import {
+  readCommandTextFromBuffer,
+  unescapeReportedCommand,
+} from './terminal-command-blocks';
 
 export type ReplayCommandState = 'ok' | 'failed' | 'running';
 
@@ -93,8 +96,15 @@ export async function scanReplayCommands(
   let shellIntegrationDetected = false;
   // 프롬프트 위치는 raw 행 번호가 아니라 마커로 잡는다 — 스크롤백이 절삭되면 절대 행 번호가
   // 어긋나 명령 텍스트를 못 읽는다(라이브가 registerMarker 를 쓰는 이유와 같다).
-  let pendingPrompt: { marker: IMarker; promptEndX: number } | null = null;
+  let pendingPrompt: {
+    marker: IMarker;
+    promptEndX: number;
+    // 이어지는 줄(PS2)의 텍스트 시작 열 — 라이브와 같은 규칙.
+    continuationEndX: Map<number, number>;
+  } | null = null;
   let currentCwd: string | null = null;
+  // 셸이 알려 준 명령 원문. C 보다 먼저 오고, 한 번 쓰면 버린다(라이브와 같은 규칙).
+  let reportedCommand: string | null = null;
 
   try {
     terminal = new Terminal({
@@ -120,12 +130,28 @@ export async function scanReplayCommands(
         return true;
       }
 
+      if (kind === 'E') {
+        reportedCommand = unescapeReportedCommand(data.slice(2));
+        return true;
+      }
+
+      if (data.startsWith('B;2')) {
+        // 이어지는 줄(PS2)의 프롬프트 폭. 첫 프롬프트가 없으면 기준이 없어 버린다.
+        pendingPrompt?.continuationEndX.set(
+          buffer.baseY + buffer.cursorY,
+          buffer.cursorX,
+        );
+        return true;
+      }
+
       if (kind === 'B') {
         // 실제 명령이 실행될지는 아직 모르므로 위치만 기억하고 C 에서 승격한다.
+        // 새 프롬프트가 떴으면 직전 명령의 E 는 쓸 데가 없다.
+        reportedCommand = null;
         pendingPrompt?.marker.dispose();
         const marker = activeTerminal.registerMarker(0);
         pendingPrompt = marker
-          ? { marker, promptEndX: buffer.cursorX }
+          ? { marker, promptEndX: buffer.cursorX, continuationEndX: new Map() }
           : null;
         return true;
       }
@@ -139,19 +165,23 @@ export async function scanReplayCommands(
           endAtMs: null,
           durationMs: null,
           command:
-            (pendingPrompt && pendingPrompt.marker.line >= 0
+            reportedCommand ??
+            ((pendingPrompt && pendingPrompt.marker.line >= 0
               ? readCommandTextFromBuffer(
                   buffer,
                   pendingPrompt.marker.line,
                   pendingPrompt.promptEndX,
                   outputStartLine,
+                  pendingPrompt.continuationEndX,
                 )
               : null
-            )?.text ?? null,
+            )?.text ??
+              null),
           exitCode: null,
           cwd: currentCwd,
           state: 'running',
         });
+        reportedCommand = null;
         pendingPrompt?.marker.dispose();
         pendingPrompt = null;
         return true;

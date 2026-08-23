@@ -181,4 +181,58 @@ describe('scanReplayCommands', () => {
 
     expect(result.blocks[0]?.command).toBe('uname -a');
   });
+
+  it('셸이 알려 준 명령 원문이 있으면 화면 대신 그것을 쓴다', async () => {
+    // zsh 녹화. 화면에는 PS2(`heredoc> `)가 찍혀 있지만 E 가 원문을 준다.
+    const result = await scanReplayCommands(
+      recordingOf([
+        output(0, 'user@host ~ % \x1b]133;B\x07'),
+        output(100, 'cat <<EOF\r\nheredoc> line1\r\nheredoc> EOF\r\n'),
+        output(150, '\x1b]133;E;cat <<EOF\\nline1\\nEOF\x07\x1b]133;C\x07'),
+        output(400, 'line1\r\n\x1b]133;D;0\x07'),
+      ]),
+    );
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].command).toBe('cat <<EOF\nline1\nEOF');
+  });
+
+  it('이어지는 줄의 프롬프트 폭을 알려주면 PS2 가 섞이지 않는다', async () => {
+    // bash 녹화. `> ` 는 화면에 찍힌 PS2 이고, B;2 가 그 폭을 알려준다.
+    const result = await scanReplayCommands(
+      recordingOf([
+        output(0, 'user@host:~$ \x1b]133;B\x07'),
+        output(100, 'cat \\\r\n'),
+        output(150, '> \x1b]133;B;2\x07test.txt\r\n\x1b]133;C\x07'),
+        output(400, '\x1b]133;D;0\x07'),
+      ]),
+    );
+    expect(result.blocks[0].command).toBe('cat \\\ntest.txt');
+  });
+
+  it('E 가 없으면 예전처럼 화면을 읽는다', async () => {
+    // bash 는 명령 원문을 주지 못한다.
+    const result = await scanReplayCommands(
+      recordingOf([
+        output(0, 'user@host:~$ \x1b]133;B\x07'),
+        output(100, 'ls -la\r\n\x1b]133;C\x07'),
+        output(400, '\x1b]133;D;0\x07'),
+      ]),
+    );
+    expect(result.blocks[0].command).toBe('ls -la');
+  });
+
+  it('명령이 실행되지 않으면 남은 원문을 버린다', async () => {
+    // E 뒤에 C 없이 프롬프트가 다시 뜨는 경우(Ctrl-C).
+    const result = await scanReplayCommands(
+      recordingOf([
+        output(0, 'user@host ~ % \x1b]133;B\x07'),
+        output(100, '\x1b]133;E;stale\x07'),
+        output(150, '^C\r\nuser@host ~ % \x1b]133;B\x07'),
+        output(200, 'ls\r\n\x1b]133;C\x07'),
+        output(400, '\x1b]133;D;0\x07'),
+      ]),
+    );
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].command).toBe('ls');
+  });
 });

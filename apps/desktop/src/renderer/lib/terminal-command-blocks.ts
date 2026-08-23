@@ -35,12 +35,39 @@ interface PendingPrompt {
   marker: IMarker;
   /** OSC 133;B 시점의 커서 X = 프롬프트가 끝나고 명령 텍스트가 시작되는 열. */
   promptEndX: number;
+  /**
+   * 이어지는 줄(PS2)의 텍스트 시작 열. 절대 버퍼 행 → 열.
+   *
+   * bash 는 명령 원문을 알려줄 수 없어(133;E 불가) 화면을 읽어야 하는데, 그러면 화면에 찍힌
+   * PS2("> ")가 명령에 섞인다 — `cat \` 다음 줄을 `> test.txt` 로 읽어 이어 붙이면
+   * `cat > test.txt`(리다이렉트)가 된다. 그래서 PS2 에도 마커를 붙여(`B;2`) 셸이 매 줄마다
+   * 프롬프트 폭을 알려주게 했다. 추측하지 않는다.
+   */
+  continuationEndX: Map<number, number>;
 }
 
 interface SessionBlocks {
   seq: number;
   pendingPrompt: PendingPrompt | null;
+  /**
+   * 셸이 알려 준 명령 원문(OSC 133;E). 있으면 화면에서 읽지 않고 이것을 쓴다.
+   *
+   * zsh 의 `preexec` 이 받는 `$1` 이라 **셸이 받아들인 그대로**다 — 화면에 찍힌 보조
+   * 프롬프트(PS2: `heredoc> `)가 섞이지 않고, 행 예산에 잘리지도 않는다. bash 는 이것을
+   * 주지 못해(전체 입력을 알 방법이 없다) 그쪽은 여전히 화면을 읽는다.
+   */
+  reportedCommand: string | null;
   blocks: TerminalCommandBlock[];
+  /**
+   * 블록 목록이 바뀔 때마다 오르는 카운터. 목록을 보는 UI(세션 패널 히스토리)가 구독으로
+   * 갱신을 받기 위한 것이다.
+   *
+   * 왜 배열 대신 숫자인가: blocks 는 제자리에서 바뀌는(push·splice·필드 수정) 배열이라
+   * 참조가 그대로다. useSyncExternalStore 는 스냅샷이 달라져야 다시 그리므로 배열을 주면
+   * 아무 일도 일어나지 않는다. 그렇다고 매번 복사해 새 배열을 만들면 이 모듈이 refs 기반인
+   * 이유(명령마다 전역 리렌더를 만들지 않기)를 스스로 깨뜨린다.
+   */
+  version: number;
 }
 
 /** 세션당 보관할 최대 블록 수. 초과하면 오래된 것부터 버린다(메모리 상한). */
@@ -91,10 +118,68 @@ function safely<T>(sessionId: string, fallback: T, run: () => T): T {
 function getSession(sessionId: string): SessionBlocks {
   let session = sessions.get(sessionId);
   if (!session) {
-    session = { seq: 0, pendingPrompt: null, blocks: [] };
+    session = {
+      seq: 0,
+      pendingPrompt: null,
+      reportedCommand: null,
+      blocks: [],
+      version: 0,
+    };
     sessions.set(sessionId, session);
   }
   return session;
+}
+
+type CommandBlocksListener = () => void;
+
+const listeners = new Map<string, Set<CommandBlocksListener>>();
+
+/**
+ * 이 세션의 블록 목록이 바뀔 때 알림을 받는다. 반환값을 호출하면 구독을 끊는다.
+ *
+ * 알림은 블록이 생기고(C) 닫히고(D) 스크롤백에서 밀려날 때 나간다 — 출력 한 줄마다가 아니다.
+ */
+export function subscribeToCommandBlocks(
+  sessionId: string,
+  listener: CommandBlocksListener,
+): () => void {
+  let set = listeners.get(sessionId);
+  if (!set) {
+    set = new Set();
+    listeners.set(sessionId, set);
+  }
+  set.add(listener);
+  return () => {
+    const current = listeners.get(sessionId);
+    if (!current) {
+      return;
+    }
+    current.delete(listener);
+    if (current.size === 0) {
+      listeners.delete(sessionId);
+    }
+  };
+}
+
+/** 목록이 바뀐 횟수. 구독자의 스냅샷 값으로 쓴다. */
+export function getCommandBlocksVersion(sessionId: string): number {
+  return sessions.get(sessionId)?.version ?? 0;
+}
+
+function notifyCommandBlocksChanged(session: SessionBlocks, sessionId: string): void {
+  session.version += 1;
+  const set = listeners.get(sessionId);
+  if (!set) {
+    return;
+  }
+  for (const listener of [...set]) {
+    // 구독자 하나가 던져도 나머지 구독자와 호출한 OSC 핸들러를 멈추지 않는다.
+    try {
+      listener();
+    } catch (error) {
+      console.error('[command-blocks] listener threw', error);
+    }
+  }
 }
 
 /**
@@ -164,13 +249,6 @@ function disposeBlock(block: TerminalCommandBlock): void {
   block.marker.dispose();
 }
 
-function removeBlock(session: SessionBlocks, block: TerminalCommandBlock): void {
-  const index = session.blocks.indexOf(block);
-  if (index >= 0) {
-    session.blocks.splice(index, 1);
-  }
-}
-
 /**
  * 버퍼의 최소 표면만 요구한다 — 라이브(xterm)와 리플레이 사전 스캔(xterm-headless)이
  * 서로 다른 Terminal 타입을 쓰지만 명령 텍스트를 읽는 방식은 같아야 하기 때문이다.
@@ -237,6 +315,8 @@ export function readCommandTextFromBuffer(
   promptLine: number,
   promptEndX: number,
   endLineExclusive: number,
+  /** 이어지는 줄의 텍스트 시작 열(셸이 알려 준 PS2 폭). 없으면 그 줄은 믿을 수 없다고 본다. */
+  continuationEndX?: ReadonlyMap<number, number>,
 ): CommandText | null {
   const budgetLine = promptLine + MAX_COMMAND_ROWS;
   const lastLine = Math.min(endLineExclusive, budgetLine);
@@ -262,11 +342,56 @@ export function readCommandTextFromBuffer(
     if (raw.trim().length === 0) {
       continue;
     }
+    // 셸이 이 줄의 프롬프트 폭을 알려줬으면 그만큼 잘라낸다 — 오염이 없으니 믿을 수 있다.
+    const continuationStart = continuationEndX?.get(line);
+    if (continuationStart !== undefined) {
+      text += `\n${raw.slice(continuationStart)}`;
+      continue;
+    }
     text += `\n${raw}`;
     unreliable = true;
   }
   const trimmed = text.trim();
   return trimmed.length > 0 ? { text: trimmed, unreliable } : null;
+}
+
+/**
+ * OSC 133;E — 셸이 알려 준 명령 원문. C 보다 먼저 온다.
+ *
+ * 이스케이프를 되돌린다: 셸이 역슬래시를 두 배로 만든 뒤 개행을 `\n` 으로 바꿔 보낸다(OSC
+ * 페이로드에 raw 개행이 들어가면 파서가 시퀀스를 중단한다). 왼쪽에서 오른쪽으로 한 번만
+ * 훑어야 `echo back\\nline` 같은 입력이 개행으로 오해되지 않는다.
+ */
+export function noteReportedCommand(sessionId: string, escaped: string): void {
+  safely(sessionId, undefined, () => {
+    if (!sessionId) {
+      return;
+    }
+    getSession(sessionId).reportedCommand = unescapeReportedCommand(escaped);
+  });
+}
+
+export function unescapeReportedCommand(escaped: string): string {
+  let out = '';
+  for (let index = 0; index < escaped.length; index += 1) {
+    const char = escaped[index];
+    if (char !== '\\') {
+      out += char;
+      continue;
+    }
+    const next = escaped[index + 1];
+    if (next === 'n') {
+      out += '\n';
+      index += 1;
+    } else if (next === '\\') {
+      out += '\\';
+      index += 1;
+    } else {
+      // 우리가 만들지 않은 조합은 그대로 둔다 — 해석하려 들면 원문이 바뀐다.
+      out += char;
+    }
+  }
+  return out;
 }
 
 /**
@@ -280,10 +405,37 @@ export function notePromptCommandStart(sessionId: string, terminal: Terminal): v
     }
     const session = getSession(sessionId);
     session.pendingPrompt?.marker.dispose();
+    // 새 프롬프트가 떴으면 직전 명령의 E 는 쓸 데가 없다 — 남겨 두면 다음 블록에 붙는다.
+    session.reportedCommand = null;
     const marker = terminal.registerMarker(0);
     session.pendingPrompt = marker
-      ? { marker, promptEndX: terminal.buffer.active.cursorX }
+      ? {
+          marker,
+          promptEndX: terminal.buffer.active.cursorX,
+          continuationEndX: new Map(),
+        }
       : null;
+  });
+}
+
+/**
+ * OSC 133;B;2 — 이어지는 줄의 프롬프트(PS2)가 끝난 지점.
+ *
+ * PS1 의 B 와 구분해서 받는다. 빈 엔터로 프롬프트가 다시 뜨는 것과 한 명령이 여러 줄로 이어지는
+ * 것은 다른 일인데, 같은 마커면 구분할 수 없다.
+ */
+export function noteContinuationPrompt(sessionId: string, terminal: Terminal): void {
+  safely(sessionId, undefined, () => {
+    if (!sessionId || !isNormalBuffer(terminal)) {
+      return;
+    }
+    const pending = sessions.get(sessionId)?.pendingPrompt;
+    if (!pending) {
+      // 첫 프롬프트를 못 받은 상태의 이어지는 줄은 기준이 없어 쓸 수 없다.
+      return;
+    }
+    const buffer = terminal.buffer.active;
+    pending.continuationEndX.set(buffer.baseY + buffer.cursorY, buffer.cursorX);
   });
 }
 
@@ -320,14 +472,20 @@ function beginCommandBlockUnsafe(
 
   const buffer = terminal.buffer.active;
   const outputStartLine = buffer.baseY + buffer.cursorY;
-  const commandText = pending
-    ? readCommandTextFromBuffer(
-        buffer,
-        marker.line,
-        pending.promptEndX,
-        outputStartLine,
-      )
-    : null;
+  // 셸이 알려 준 원문이 있으면 화면을 읽지 않는다 — 보조 프롬프트도, 행 예산도 없다.
+  const reported = session.reportedCommand;
+  session.reportedCommand = null;
+  const commandText: CommandText | null = reported
+    ? { text: reported, unreliable: false }
+    : pending
+      ? readCommandTextFromBuffer(
+          buffer,
+          marker.line,
+          pending.promptEndX,
+          outputStartLine,
+          pending.continuationEndX,
+        )
+      : null;
   session.seq += 1;
   const block: TerminalCommandBlock = {
     id: session.seq,
@@ -343,21 +501,34 @@ function beginCommandBlockUnsafe(
     endLine: null,
     decoration: null,
   };
-  // 스크롤백에서 밀려나 마커가 사라지면 블록도 같이 정리한다.
+  /**
+   * 마커가 사라져도 **기록은 남긴다.**
+   *
+   * 마커는 스크롤백이 절삭될 때, 그리고 `clear` 로 화면·스크롤백을 지울 때 사라진다. 예전에는
+   * 그때 블록을 목록에서 지웠는데, 그러면 `clear` 한 번에 히스토리가 통째로 날아간다 —
+   * 셸의 `history` 도 `clear` 로 지워지지 않는다.
+   *
+   * 그래서 잃는 것은 **위치뿐**이다: 거터의 점과 "이 명령 위치로 이동" 이 사라지고(그 행이
+   * 실제로 없어졌으므로 맞다), 명령·종료 코드·소요 시간·작업 디렉터리는 남는다. 위치를 쓰는
+   * 쪽은 모두 `marker.line < 0` 을 건너뛴다.
+   */
   marker.onDispose(() => {
     block.decoration?.dispose();
     block.decoration = null;
-    removeBlock(session, block);
+    notifyCommandBlocksChanged(session, sessionId);
   });
   attachDecoration(terminal, block);
 
   session.blocks.push(block);
+  // 상한을 넘으면 오래된 것부터 실제로 버린다 — 마커가 사라지는 것(위치만 잃음)과 달리
+  // 이쪽은 기록 자체를 놓는 유일한 경로다(메모리 상한).
   while (session.blocks.length > MAX_BLOCKS_PER_SESSION) {
     const oldest = session.blocks.shift();
     if (oldest) {
       disposeBlock(oldest);
     }
   }
+  notifyCommandBlocksChanged(session, sessionId);
 }
 
 /**
@@ -399,6 +570,7 @@ function finishCommandBlockUnsafe(
     if (block.decoration?.element) {
       applyDecorationStyle(block, block.decoration.element);
     }
+    notifyCommandBlocksChanged(session, sessionId);
     return;
   }
 }
@@ -549,10 +721,13 @@ export function clearCommandBlocks(sessionId: string): void {
     return;
   }
   session.pendingPrompt?.marker.dispose();
+  session.reportedCommand = null;
   // 복사본을 돈다 — disposeBlock 이 marker.onDispose 를 동기로 발화시켜 원본 배열에서
   // 자신을 splice 하므로, 원본을 그대로 순회하면 한 칸씩 건너뛰어 절반이 안 지워진다.
   for (const block of [...session.blocks]) {
     disposeBlock(block);
   }
   sessions.delete(sessionId);
+  // 세션이 사라졌으니 목록은 빈 것이 된다 — 보고 있던 UI 가 그대로 남지 않게 알린다.
+  notifyCommandBlocksChanged(session, sessionId);
 }

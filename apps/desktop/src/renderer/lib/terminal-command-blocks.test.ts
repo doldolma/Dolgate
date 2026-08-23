@@ -5,10 +5,16 @@ import {
   clearCommandBlocks,
   finishCommandBlock,
   getCommandBlockAtLine,
+  getCommandBlockRange,
   getCommandBlocks,
+  getCommandBlocksVersion,
   jumpToAdjacentCommandBlock,
+  noteContinuationPrompt,
   notePromptCommandStart,
+  noteReportedCommand,
   readBlockOutput,
+  unescapeReportedCommand,
+  subscribeToCommandBlocks,
 } from './terminal-command-blocks';
 
 interface FakeMarker {
@@ -259,19 +265,28 @@ describe('terminal-command-blocks', () => {
     expect(blocks[0].command).toBe('real');
   });
 
-  it('스크롤백에서 밀려나 마커가 사라지면 블록도 제거된다', () => {
+  // `clear` 는 화면과 스크롤백을 함께 지운다 = 마커가 전부 사라진다. 그때 기록까지 지우면
+  // 히스토리가 통째로 날아간다 — 셸의 history 도 clear 로 지워지지 않는다.
+  it('마커가 사라져도 기록은 남고 위치만 잃는다', () => {
     const fake = createFakeTerminal(['$ old']);
     fake.buffer.cursorX = 2;
     notePromptCommandStart(SESSION, fake.terminal);
     fake.buffer.cursorY = 1;
     beginCommandBlock(SESSION, fake.terminal, null);
-    expect(getCommandBlocks(SESSION)).toHaveLength(1);
+    finishCommandBlock(SESSION, fake.terminal, 0);
 
-    // xterm 이 스크롤백 상한을 넘겨 마커를 폐기하는 상황.
+    // xterm 이 스크롤백을 절삭하거나 clear 로 마커를 폐기하는 상황.
     fake.markers[0].dispose();
 
-    expect(getCommandBlocks(SESSION)).toHaveLength(0);
+    const [block] = getCommandBlocks(SESSION);
+    expect(block.command).toBe('old');
+    expect(block.exitCode).toBe(0);
+    // 거터 점은 사라진다 — 그 행이 실제로 없어졌다.
     expect(fake.decorations[0].disposed).toBe(true);
+    expect(block.marker.line).toBe(-1);
+    // 위치를 쓰는 쪽은 그 블록을 건너뛴다.
+    expect(getCommandBlockRange(block)).toBeNull();
+    expect(getCommandBlockAtLine(SESSION, 0)).toBeNull();
   });
 
   it('D 와 A 가 한 청크로 와도 실행 중이던 블록을 닫는다', () => {
@@ -526,5 +541,209 @@ describe('terminal-command-blocks (셸 훅 잡음)', () => {
     expect(block.command).toBe('ls -la');
     expect(block.commandUnreliable).toBe(false);
     clearCommandBlocks(HOOK_SESSION);
+  });
+});
+
+// 세션 패널 히스토리가 이 구독으로 갱신을 받는다. 목록 배열은 제자리에서 바뀌므로(참조 불변)
+// 버전 숫자가 스냅샷 역할을 한다 — 이게 안 오르면 패널이 영원히 첫 화면을 보여 준다.
+describe('블록 목록 구독', () => {
+  function runCommand(fake: ReturnType<typeof createFakeTerminal>, row: number) {
+    fake.buffer.cursorY = row;
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    fake.buffer.cursorY = row + 1;
+    beginCommandBlock(SESSION, fake.terminal, null);
+    finishCommandBlock(SESSION, fake.terminal, 0);
+  }
+
+  it('명령이 시작·종료될 때마다 버전이 오르고 구독자가 불린다', () => {
+    const fake = createFakeTerminal(['$ ls', 'out', '$ pwd', 'out']);
+    let calls = 0;
+    const unsubscribe = subscribeToCommandBlocks(SESSION, () => {
+      calls += 1;
+    });
+
+    expect(getCommandBlocksVersion(SESSION)).toBe(0);
+    runCommand(fake, 0);
+    // 시작(C)과 종료(D) 각각 한 번.
+    expect(calls).toBe(2);
+    expect(getCommandBlocksVersion(SESSION)).toBe(2);
+
+    unsubscribe();
+    runCommand(fake, 2);
+    // 구독을 끊었으면 더 이상 불리지 않지만 버전은 계속 오른다.
+    expect(calls).toBe(2);
+    expect(getCommandBlocksVersion(SESSION)).toBe(4);
+  });
+
+  it('마커가 사라지면 알린다 — 목록은 그대로다(위치만 잃는다)', () => {
+    const fake = createFakeTerminal(['$ ls', 'out']);
+    runCommand(fake, 0);
+    let calls = 0;
+    const unsubscribe = subscribeToCommandBlocks(SESSION, () => {
+      calls += 1;
+    });
+
+    fake.markers[0].dispose();
+    expect(calls).toBe(1);
+    expect(getCommandBlocks(SESSION)).toHaveLength(1);
+    unsubscribe();
+  });
+
+  it('세션이 정리되면 알리고 버전이 0 으로 돌아간다', () => {
+    const fake = createFakeTerminal(['$ ls', 'out']);
+    runCommand(fake, 0);
+    let calls = 0;
+    const unsubscribe = subscribeToCommandBlocks(SESSION, () => {
+      calls += 1;
+    });
+
+    clearCommandBlocks(SESSION);
+    expect(calls).toBeGreaterThan(0);
+    // 세션 객체가 사라지므로 버전 조회는 0 — 구독자의 스냅샷이 달라져 다시 그린다.
+    expect(getCommandBlocksVersion(SESSION)).toBe(0);
+    unsubscribe();
+  });
+
+  it('구독자가 던져도 명령 추적은 계속된다', () => {
+    // 이 알림은 xterm 의 OSC 핸들러 안에서 나간다 — 여기서 예외가 새면 파싱 루프가 끊긴다.
+    const fake = createFakeTerminal(['$ ls', 'out']);
+    const unsubscribe = subscribeToCommandBlocks(SESSION, () => {
+      throw new Error('boom');
+    });
+    expect(() => runCommand(fake, 0)).not.toThrow();
+    expect(getCommandBlocks(SESSION)).toHaveLength(1);
+    unsubscribe();
+  });
+});
+
+// 셸이 명령 원문을 알려주면(OSC 133;E) 화면을 읽지 않는다. 화면 읽기의 두 한계(보조 프롬프트
+// 혼입·행 예산 잘림)가 그대로 사라지는 경로다.
+describe('셸이 알려 준 명령 원문', () => {
+  it('화면 대신 그 값을 쓰고 재실행을 막지 않는다', () => {
+    // 화면에는 PS2 가 섞여 있지만(`heredoc> `) E 가 있으면 그것을 무시한다.
+    const fake = createFakeTerminal(['% cat <<EOF', 'heredoc> line1', 'heredoc> EOF']);
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    noteReportedCommand(SESSION, 'cat <<EOF\\nline1\\nEOF');
+    fake.buffer.cursorY = 3;
+    beginCommandBlock(SESSION, fake.terminal, null);
+
+    const [block] = getCommandBlocks(SESSION);
+    expect(block.command).toBe('cat <<EOF\nline1\nEOF');
+    expect(block.commandUnreliable).toBe(false);
+  });
+
+  it('한 번 쓰면 버린다 — 다음 명령에 붙지 않는다', () => {
+    const fake = createFakeTerminal(['$ first', 'out', '$ second', 'out']);
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    noteReportedCommand(SESSION, 'reported');
+    fake.buffer.cursorY = 1;
+    beginCommandBlock(SESSION, fake.terminal, null);
+    finishCommandBlock(SESSION, fake.terminal, 0);
+
+    fake.buffer.cursorY = 2;
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    fake.buffer.cursorY = 3;
+    beginCommandBlock(SESSION, fake.terminal, null);
+
+    const blocks = getCommandBlocks(SESSION);
+    expect(blocks[0].command).toBe('reported');
+    // 두 번째는 화면에서 읽는다.
+    expect(blocks[1].command).toBe('second');
+  });
+
+  it('새 프롬프트가 뜨면 쓰이지 않은 값을 버린다', () => {
+    // 명령이 실행되지 않고 프롬프트만 다시 뜨는 경우(빈 엔터·Ctrl-C).
+    const fake = createFakeTerminal(['$ typed', 'out']);
+    noteReportedCommand(SESSION, 'stale');
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    fake.buffer.cursorY = 1;
+    beginCommandBlock(SESSION, fake.terminal, null);
+    expect(getCommandBlocks(SESSION)[0].command).toBe('typed');
+  });
+});
+
+describe('unescapeReportedCommand', () => {
+  it('개행과 역슬래시를 되돌린다', () => {
+    expect(unescapeReportedCommand('a\\nb')).toBe('a\nb');
+    expect(unescapeReportedCommand('back\\\\slash')).toBe('back\\slash');
+  });
+
+  it('사용자가 친 \\n 을 개행으로 오해하지 않는다', () => {
+    // 셸이 역슬래시를 먼저 두 배로 만들어 보내므로 이 조합이 구분된다.
+    expect(unescapeReportedCommand('echo back\\\\nline')).toBe('echo back\\nline');
+  });
+
+  it('우리가 만들지 않은 조합은 그대로 둔다', () => {
+    expect(unescapeReportedCommand('grep \\d')).toBe('grep \\d');
+  });
+});
+
+// bash 는 명령 원문을 알려줄 수 없어(133;E 불가) 화면을 읽는다. 그러면 화면에 찍힌 PS2 가
+// 섞이는데(`cat \\` 다음 줄이 `> test.txt`), 이어 붙이면 `cat > test.txt` — 리다이렉트가 되어
+// 파일이 비고 셸이 stdin 을 기다린다. 그래서 PS2 에도 마커를 붙여 셸이 프롬프트 폭을 알려준다.
+describe('이어지는 줄의 프롬프트(OSC 133;B;2)', () => {
+  it('알려 준 폭만큼 잘라내 PS2 가 섞이지 않는다', () => {
+    const fake = createFakeTerminal(['$ cat \\', '> test.txt']);
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+
+    // 이어지는 줄: PS2("> ")가 그려진 뒤 마커가 온다 → 커서는 2열.
+    fake.buffer.cursorY = 1;
+    fake.buffer.cursorX = 2;
+    noteContinuationPrompt(SESSION, fake.terminal);
+
+    fake.buffer.cursorY = 2;
+    beginCommandBlock(SESSION, fake.terminal, null);
+
+    const [block] = getCommandBlocks(SESSION);
+    expect(block.command).toBe('cat \\\ntest.txt');
+    // 오염이 없으니 재실행을 막지 않는다.
+    expect(block.commandUnreliable).toBe(false);
+  });
+
+  it('heredoc 본문도 같은 방식으로 복원된다', () => {
+    const fake = createFakeTerminal(['$ cat <<EOF', '> line1', '> EOF']);
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    for (const row of [1, 2]) {
+      fake.buffer.cursorY = row;
+      fake.buffer.cursorX = 2;
+      noteContinuationPrompt(SESSION, fake.terminal);
+    }
+    fake.buffer.cursorY = 3;
+    beginCommandBlock(SESSION, fake.terminal, null);
+
+    const [block] = getCommandBlocks(SESSION);
+    expect(block.command).toBe('cat <<EOF\nline1\nEOF');
+    expect(block.commandUnreliable).toBe(false);
+  });
+
+  it('마커가 없는 줄은 예전처럼 믿을 수 없다고 본다', () => {
+    // 예전 세션·통합이 없는 셸. 한 줄만 알려 주고 다음 줄은 안 알려 주는 경우도 포함.
+    const fake = createFakeTerminal(['$ cat <<EOF', '> line1', '> EOF']);
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    fake.buffer.cursorY = 1;
+    fake.buffer.cursorX = 2;
+    noteContinuationPrompt(SESSION, fake.terminal);
+    fake.buffer.cursorY = 3;
+    beginCommandBlock(SESSION, fake.terminal, null);
+
+    const [block] = getCommandBlocks(SESSION);
+    expect(block.command).toBe('cat <<EOF\nline1\n> EOF');
+    expect(block.commandUnreliable).toBe(true);
+  });
+
+  it('첫 프롬프트를 못 받았으면 무시한다', () => {
+    // 기준이 없는 이어지는 줄은 쓸 수 없다.
+    const fake = createFakeTerminal(['> orphan']);
+    fake.buffer.cursorX = 2;
+    expect(() => noteContinuationPrompt(SESSION, fake.terminal)).not.toThrow();
+    expect(getCommandBlocks(SESSION)).toHaveLength(0);
   });
 });

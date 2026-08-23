@@ -293,15 +293,40 @@ func readFileTail(path string, limit int64) ([]byte, error) {
 // interactive bash or zsh shell. It is shell-agnostic (branches on
 // BASH_VERSION/ZSH_VERSION), idempotent, and appends to any existing
 // PROMPT_COMMAND / precmd / preexec hooks instead of replacing them. Markers:
-// A=prompt start, B=command input start, C=command output start, D;<exit>=done.
+// A=prompt start, B=command input start, C=command output start, D;<exit>=done,
+// E;<command>=the command text as the shell accepted it (zsh only — see below).
+//
+// 길이 제한은 없다. 예전에는 마커 뒤 재출력 echo 를 청크별 전체 일치로 지워서 1024바이트
+// (로컬 PTY 한 번 읽기 상한)를 넘기면 스크립트가 화면에 찍혔다. 지금은 꼬리를 물고 잇는
+// 스트리밍 치환이라(stripInjectedEchoStreaming) 길이와 무관하다.
 const shellIntegrationScript = `__ds_o(){ printf '\033]133;%s\007' "$1"; }; __ds_cwd(){ printf '\033]7;file://%s\007' "$PWD"; }; ` +
 	`if [ -n "${BASH_VERSION:-}" ]; then ` +
 	`__ds_pc(){ local __e=$?; __ds_o "D;$__e"; __ds_o A; __ds_cwd; }; ` +
+	// 여러 줄을 "실행하지 않고 입력줄에 넣기" 는 셸이 괄호 붙여넣기를 받아야 성립한다. bash 는
+	// 5.1 부터 기본으로 켜지므로 그 아래 버전(우분투 20.04 = 5.0)에서는 우리가 켠다. 없는
+	// 옵션이면 bind 가 조용히 실패한다.
+	`bind 'set enable-bracketed-paste on' 2>/dev/null; ` +
 	`case ";${PROMPT_COMMAND:-};" in *__ds_pc*) ;; *) PROMPT_COMMAND="__ds_pc${PROMPT_COMMAND:+;$PROMPT_COMMAND}";; esac; ` +
 	`case "${PS1:-}" in *'133;B'*) ;; *) PS1="${PS1:-}"'\[\033]133;B\007\]';; esac; ` +
 	`case "${PS0:-}" in *'133;C'*) ;; *) PS0="${PS0:-}"'\033]133;C\007';; esac; ` +
+	// 이어지는 줄(PS2)에도 마커를 붙인다. bash 는 명령 원문을 알려줄 방법이 없어(133;E 불가)
+	// 화면을 읽어야 하는데, 그러면 화면에 찍힌 PS2("> ")가 명령에 섞인다 — `cat \` 다음 줄이
+	// `> test.txt` 로 읽혀 이어 붙이면 `cat > test.txt`(리다이렉트)가 된다.
+	//
+	// 마커를 붙이면 셸이 매 줄마다 "여기까지가 프롬프트다" 를 알려주므로 추측하지 않아도 된다.
+	// PS1 과 구분해야 하므로(빈 엔터로 새 프롬프트가 뜨는 것과 이어지는 줄은 다르다) 파라미터를
+	// 하나 붙여 `B;2` 로 보낸다.
+	`case "${PS2:-}" in *'133;B'*) ;; *) PS2="${PS2:-}"'\[\033]133;B;2\007\]';; esac; ` +
 	`elif [ -n "${ZSH_VERSION:-}" ]; then ` +
-	`__ds_precmd(){ local __e=$?; __ds_o "D;$__e"; __ds_o A; __ds_cwd; }; __ds_preexec(){ __ds_o C; }; ` +
+	// zsh 의 preexec 은 **셸이 받아들인 명령 원문**을 $1 로 준다(여러 줄까지). 그것을 E 로
+	// 올려 보내면 화면에서 읽지 않아도 되고, 화면에 찍힌 보조 프롬프트(PS2: `heredoc> `)가
+	// 섞이는 문제가 사라진다. C 보다 먼저 보내 블록이 만들어질 때 쓸 수 있게 한다.
+	//
+	// 이스케이프: OSC 페이로드에 raw 개행이 들어가면 파서가 시퀀스를 중단한다. 역슬래시를 먼저
+	// 두 배로 만든 뒤 개행을 `\n` 으로 바꾼다 — 그래야 `echo back\slash` 와 여러 줄이 구분된다.
+	`__ds_precmd(){ local __e=$?; __ds_o "D;$__e"; __ds_o A; __ds_cwd; }; ` +
+	`__ds_e(){ local t=${1//\\/\\\\}; __ds_o "E;${t//$'\n'/\\n}"; }; ` +
+	`__ds_preexec(){ __ds_e "$1"; __ds_o C; }; ` +
 	`typeset -ga precmd_functions preexec_functions; ` +
 	// Membership test via case on the space-joined array, mirroring the bash
 	// PROMPT_COMMAND guard above. Avoids zsh-only arithmetic subscripts like
@@ -425,14 +450,99 @@ func (f *HandshakeFilter) stripInjectedEcho(data []byte) []byte {
 	return bytes.ReplaceAll(data, echo, nil)
 }
 
+/**
+ * 청크 경계를 넘어서도 echo 를 지운다.
+ *
+ * 왜 필요한가: 마커 뒤에 오는 프롬프트 재출력의 echo 는 청크 단위로 지워 왔다. 그런데 로컬 PTY 는
+ * 한 번에 1024바이트까지만 주므로(4096 버퍼로 읽어도) 주입 스크립트가 그보다 길면 어떤 청크에도
+ * 통째로 들어가지 않아 **하나도 지워지지 않는다** — 스크립트가 화면에 그대로 찍힌다. 그래서
+ * 스크립트 길이에 1024바이트 천장이 생겨 있었다.
+ *
+ * 방법: 아직 내보내지 않은 꼬리를 들고 있다가 다음 청크와 이어 붙여 찾는다. 다만 꼬리를 무조건
+ * 붙들면 화면이 그만큼 늦게 그려지므로, **echo 의 접두사가 될 수 있는 만큼만** 붙든다. 평소
+ * 출력은 `__ds_o(){ printf` 로 시작하지 않으니 붙드는 양은 0 이다.
+ */
+func (f *HandshakeFilter) stripInjectedEchoStreaming(chunk []byte) []byte {
+	echo := f.echoText()
+	if len(echo) == 0 {
+		return chunk
+	}
+	// 지울 일이 끝났으면(한 번 지웠거나 예산을 다 썼으면) 붙들지 않고 그대로 흘려보낸다.
+	//
+	// 세션이 끝날 때까지 계속 찾으면, 사용자가 우연히 같은 글자를 출력했을 때 그것도 지워진다.
+	// 재출력은 마커 직후에 오므로 짧은 예산으로 충분하다.
+	if f.echoScrubDone {
+		return chunk
+	}
+	pending := append(f.pendingEcho, chunk...)
+	f.pendingEcho = nil
+	f.echoScrubBudget += len(chunk)
+
+	cleaned := bytes.ReplaceAll(pending, echo, nil)
+	if len(cleaned) != len(pending) {
+		// 한 번 지웠으면 끝이다 — 재출력은 한 번뿐이다.
+		f.echoScrubDone = true
+		return cleaned
+	}
+	if f.echoScrubBudget >= maxEchoScrubBytes {
+		f.echoScrubDone = true
+		return cleaned
+	}
+	// 뒤쪽이 echo 의 시작일 수 있으면 그만큼만 붙들어 둔다.
+	hold := prefixOverlap(cleaned, echo)
+	if hold == 0 {
+		return cleaned
+	}
+	f.pendingEcho = append([]byte(nil), cleaned[len(cleaned)-hold:]...)
+	return cleaned[:len(cleaned)-hold]
+}
+
+/** 붙들어 둔 꼬리를 내보낸다(필터를 끝낼 때). */
+func (f *HandshakeFilter) drainPendingEcho() []byte {
+	if len(f.pendingEcho) == 0 {
+		return nil
+	}
+	out := f.pendingEcho
+	f.pendingEcho = nil
+	return out
+}
+
+/** data 의 접미사이면서 동시에 prefix 의 접두사인 가장 긴 길이(prefix 전체와 같은 경우는 뺀다). */
+func prefixOverlap(data []byte, prefix []byte) int {
+	max := len(prefix) - 1
+	if len(data) < max {
+		max = len(data)
+	}
+	for size := max; size > 0; size-- {
+		if bytes.Equal(data[len(data)-size:], prefix[:size]) {
+			return size
+		}
+	}
+	return 0
+}
+
 // HandshakeFilter hides the injected shell-integration command's echo: it
 // suppresses interactive output from injection until the first OSC 133;A prompt
 // marker, then forwards everything from that marker onward and becomes a no-op.
 // If the marker never arrives within the byte budget (or on Flush after a
 // timeout), the buffered bytes are released so no real output is lost.
+/**
+ * 마커 뒤 재출력을 찾는 동안 볼 최대 바이트.
+ *
+ * 재출력은 마커 바로 다음 청크에 온다. 이 예산을 넘기면 찾기를 접고 그대로 흘려보낸다 — 두 가지
+ * 이유다. 세션이 끝날 때까지 찾으면 (1) 사용자가 우연히 같은 글자를 출력했을 때 그것도 지워지고,
+ * (2) echo 의 접두사로 끝나는 출력을 계속 붙들게 된다.
+ */
+const maxEchoScrubBytes = 8 * 1024
+
 type HandshakeFilter struct {
 	// echo 는 이 세션에 실제로 주입한 명령의 보이는 텍스트다. 비어 있으면 bash/zsh 기본값을 쓴다.
 	echo []byte
+	// pendingEcho 는 아직 내보내지 않은 꼬리다 — echo 의 접두사가 될 수 있는 만큼만 붙든다.
+	pendingEcho []byte
+	// 재출력을 한 번 지웠거나 예산을 다 쓰면 true. 그 뒤로는 그대로 흘려보낸다.
+	echoScrubDone   bool
+	echoScrubBudget int
 	// preserveMotd가 true면 주입 echo가 찍힌 프롬프트 줄 "이전" 출력(로그인 motd 등)은
 	// 흘려보내고, echo 줄 시작 ~ 첫 133;A 마커만 버린다. false면 Arm~133;A 전부 버린다(기존
 	// 동작). SSH 로그인 셸에서 motd를 보존하면서 통합 프롬프트만 1개로 보이게 하는 용도다.
@@ -448,8 +558,9 @@ type HandshakeFilter struct {
 func (f *HandshakeFilter) Filter(chunk []byte) (forward []byte, handshakeDone bool) {
 	if f.done {
 		// After the handshake, still scrub a late injected-command echo (prompt
-		// redraw) so it never reaches the screen.
-		return f.stripInjectedEcho(chunk), false
+		// redraw) so it never reaches the screen. 청크 경계를 넘겨도 잡아야 한다 —
+		// 로컬 PTY 는 한 번에 1024바이트까지만 준다.
+		return f.stripInjectedEchoStreaming(chunk), false
 	}
 	f.buffer = append(f.buffer, chunk...)
 
