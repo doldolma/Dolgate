@@ -2571,7 +2571,9 @@
     "tailscaleMismatch": "설정에 지정된 Tailscale 네트워크가 아닌 곳에 연결돼 있습니다. 로그인한 계정을 확인해 주세요.",
     "serverNotice": "서버가 보낸 안내:\n{{notice}}",
     "addressInUse": "해당 포트는 이미 사용 중입니다.",
-    "addressInUseAt": "해당 포트는 이미 사용 중입니다 ({{address}})."
+    "addressInUseAt": "해당 포트는 이미 사용 중입니다 ({{address}}).",
+    "certificateDeclined": "서버 인증서를 승인하지 않아 연결을 멈췄습니다.",
+    "certificateUndecided": "인증서 확인을 기다리다 시간이 지났습니다. 다시 연결해 승인해 주세요."
   },
   "knownHostsIpc": {
     "noSecrets": "저장할 인증 정보가 없습니다.",

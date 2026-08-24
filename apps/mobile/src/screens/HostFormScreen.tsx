@@ -14,7 +14,9 @@ import {
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NavigationProp, RouteProp } from "@react-navigation/native";
 import {
+  MAX_HOST_ENV_VARS,
   collectGroupPaths,
+  normalizeHostEnvVars,
   isRdpHostRecord,
   isSshHostRecord,
   isVncHostRecord,
@@ -44,7 +46,10 @@ import { RemoteDesktopHostFormScreen } from "./RemoteDesktopHostFormScreen";
 import { StartupSnippetPickerModal } from "../components/StartupSnippetPickerModal";
 import { hasSnippetVariables } from "../lib/snippet-variables";
 import { useScreenPadding } from "../lib/screen-layout";
-import { useMobileAppStore } from "../store/useMobileAppStore";
+import {
+  MOBILE_MAX_JUMP_CHAIN,
+  useMobileAppStore,
+} from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
 import { useTranslation } from "react-i18next";
 
@@ -117,9 +122,6 @@ const LOCKED_AUTH_LABEL_KEYS = {
   keyboardInteractive: "hostForm.auth.keyboardInteractive",
 } as const satisfies Record<Exclude<AuthType, HostAuthType>, string>;
 
-// 스토어(MOBILE_MAX_JUMP_CHAIN)와 같은 값이어야 한다 — 폼에서 더 넣게 두면 저장은 되고
-// 접속만 거부된다.
-const MAX_JUMP_HOSTS = 8;
 
 interface PasteFieldProps {
   label: string;
@@ -362,6 +364,7 @@ export function HostFormScreen(): React.JSX.Element {
   // 보인다 — 보존하고 있다는 사실이 눈에 보여야 한다.
   const [envNameDraft, setEnvNameDraft] = useState("");
   const [envValueDraft, setEnvValueDraft] = useState("");
+  const [envError, setEnvError] = useState<string | null>(null);
   const initialJumpHostIds = normalizeJumpHostIds(
     existing?.jumpHostIds,
     existing?.jumpHostId,
@@ -424,6 +427,13 @@ export function HostFormScreen(): React.JSX.Element {
   // 받으면 어느 쪽으로 나갔는지에 따라 입력이 조용히 사라진다.
   useEffect(() => {
     const unsubscribe = navigation.addListener("beforeRemove", (event) => {
+      // **RDP·VNC 화면을 그리는 중이면 그쪽 가드에 맡긴다.** 이 화면은 같은 라우트 안에서
+      // 자식으로 그려지므로 이 리스너가 그대로 살아 있는데, savedRef 는 아래 SSH 저장만
+      // 세운다 — 자식이 저장한 뒤의 goBack 을 여기서 막으면 이미 저장된 것을 두고 "버릴까요?"
+      // 가 뜨고, 계속 편집을 누른 뒤 다시 저장하면 호스트와 시크릿이 하나 더 만들어졌다.
+      if (editingRemoteDesktop || creatingRemoteDesktop) {
+        return;
+      }
       if (savedRef.current || !isDirty) {
         return;
       }
@@ -442,7 +452,13 @@ export function HostFormScreen(): React.JSX.Element {
       );
     });
     return unsubscribe;
-  }, [isDirty, navigation, translate]);
+  }, [
+    creatingRemoteDesktop,
+    editingRemoteDesktop,
+    isDirty,
+    navigation,
+    translate,
+  ]);
 
   // 저장된 자격 증명이 있고 방식도 그대로일 때만 "기존 유지/교체/연결 해제"를 고를 수 있다.
   const canChooseCredentialMode = Boolean(
@@ -866,17 +882,45 @@ export function HostFormScreen(): React.JSX.Element {
                     if (!key) {
                       return;
                     }
+                    // **저장 경로가 쓰는 것과 같은 규칙으로 여기서 거른다.** 데스크톱은 읽고
+                    // 쓸 때마다 normalizeHostEnvVars 를 통과시키므로, 규칙에 안 맞는 이름은
+                    // 여기서 받아 주면 동기화된 뒤 그 경계에서 조용히 사라진다 — 폰에서는
+                    // 넣었는데 없어진 것으로만 보인다.
+                    const [normalized] = normalizeHostEnvVars([
+                      { key, value: envValueDraft.trim() },
+                    ]);
+                    if (!normalized) {
+                      setEnvError(translate("hostForm.env.invalidName"));
+                      return;
+                    }
+                    if (
+                      envVars.length >= MAX_HOST_ENV_VARS &&
+                      !envVars.some(item => item.key === normalized.key)
+                    ) {
+                      setEnvError(
+                        translate("hostForm.env.tooMany", {
+                          max: MAX_HOST_ENV_VARS,
+                        }),
+                      );
+                      return;
+                    }
                     // 같은 이름을 다시 넣으면 덮어쓴다 — 같은 변수가 두 줄 있으면 어느 쪽이
                     // 적용되는지 알 수 없다.
                     setEnvVars(current => [
-                      ...current.filter(item => item.key !== key),
-                      { key, value: envValueDraft.trim() },
+                      ...current.filter(item => item.key !== normalized.key),
+                      normalized,
                     ]);
+                    setEnvError(null);
                     setEnvNameDraft("");
                     setEnvValueDraft("");
                   },
                 }}
               />
+              {envError ? (
+                <Text style={[styles.errorText, { color: palette.warning }]}>
+                  {envError}
+                </Text>
+              ) : null}
               <ChipField
                 label={translate("hostForm.jump.header")}
                 chips={jumpHostIds.map((id, index) => ({
@@ -1059,6 +1103,11 @@ export function HostFormScreen(): React.JSX.Element {
         selectedIds={jumpHostIds}
         searchPlaceholder={translate("hostForm.jump.search")}
         emptyText={translate("hostForm.jump.empty")}
+        limitNotice={
+          jumpHostIds.length >= MOBILE_MAX_JUMP_CHAIN
+            ? translate("hostForm.jump.tooMany", { max: MOBILE_MAX_JUMP_CHAIN })
+            : undefined
+        }
         onSelect={id => {
           if (!id) {
             return;
@@ -1067,7 +1116,7 @@ export function HostFormScreen(): React.JSX.Element {
           setJumpHostIds(current =>
             current.includes(id)
               ? current.filter(item => item !== id)
-              : current.length >= MAX_JUMP_HOSTS
+              : current.length >= MOBILE_MAX_JUMP_CHAIN
                 ? current
                 : [...current, id],
           );

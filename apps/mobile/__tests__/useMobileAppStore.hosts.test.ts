@@ -7,7 +7,7 @@ import type {
   SshHostRecord,
   SyncPayloadV2,
 } from "@dolssh/shared-core";
-import { isSshHostRecord } from "@dolssh/shared-core";
+import { isSshHostRecord, normalizeJumpHostIds } from "@dolssh/shared-core";
 import { toByteArray } from "base64-js";
 import { Buffer } from "buffer";
 import {
@@ -412,6 +412,131 @@ describe("useMobileAppStore host mutations", () => {
     expect(pushedPayloads[0].secrets).toHaveLength(0);
 
     expect(useMobileAppStore.getState().hosts[0].label).toBe("Renamed host");
+  });
+
+  // 읽는 쪽(normalizeJumpHostIds)은 배열이 비면 레거시 jumpHostId 로 폴백한다. 배열만 비우면
+  // 방금 지운 홉을 계속 경유하고, 데스크톱이 그것을 배열로 되살려 모든 기기에 되밀었다.
+  it("clears the legacy jumpHostId mirror when the chain is emptied", async () => {
+    const existing: SshHostRecord = {
+      ...createExistingHost(),
+      jumpHostIds: ["jump-1"],
+      jumpHostId: "jump-1",
+    } as SshHostRecord;
+    await act(async () => {
+      resetStore({ hosts: [existing] });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().saveHost({
+        hostId: existing.id,
+        label: existing.label,
+        hostname: existing.hostname,
+        port: existing.port,
+        username: existing.username,
+        authType: "password",
+        groupName: existing.groupName,
+        jumpHostIds: null,
+      });
+    });
+
+    const saved = useMobileAppStore.getState().hosts[0] as SshHostRecord & {
+      jumpHostId?: string | null;
+    };
+    expect(saved.jumpHostIds).toBeNull();
+    expect(saved.jumpHostId).toBeNull();
+    expect(
+      normalizeJumpHostIds(saved.jumpHostIds, saved.jumpHostId),
+    ).toEqual([]);
+  });
+
+  // 반대 방향도 맞아야 한다 — 첫 홉이 미러에 들어가야 옛 클라이언트가 같은 경로를 쓴다.
+  it("mirrors the first hop into the legacy jumpHostId field", async () => {
+    const existing = createExistingHost();
+    await act(async () => {
+      resetStore({ hosts: [existing] });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().saveHost({
+        hostId: existing.id,
+        label: existing.label,
+        hostname: existing.hostname,
+        port: existing.port,
+        username: existing.username,
+        authType: "password",
+        groupName: existing.groupName,
+        jumpHostIds: ["jump-2", "jump-3"],
+      });
+    });
+
+    const saved = useMobileAppStore.getState().hosts[0] as SshHostRecord & {
+      jumpHostId?: string | null;
+    };
+    expect(saved.jumpHostIds).toEqual(["jump-2", "jump-3"]);
+    expect(saved.jumpHostId).toBe("jump-2");
+  });
+
+  // 화면이 종류 칸을 막는 것은 UI 뿐이다 — 폼을 열어 둔 사이 서버 판정이 떨어지거나 라우트로
+  // 종류가 들어오면 그대로 저장됐다. 이 레코드는 같은 계정의 옛 클라이언트가 받아 조용히
+  // 망가지므로 저장 자리에서 한 번 더 본다.
+  it("rejects creating an RDP host when the server cannot judge the data floor", async () => {
+    await act(async () => {
+      resetStore();
+    });
+    useMobileAppStore.setState(state => ({
+      syncStatus: {
+        ...state.syncStatus,
+        dataFloorServerSupport: "unsupported",
+      },
+    }));
+
+    await expect(
+      useMobileAppStore.getState().saveRemoteDesktopHost({
+        kind: "rdp",
+        label: "Office PC",
+        hostname: "pc.example.com",
+        port: 3389,
+        credentialMode: "replace",
+        credentials: { username: "Administrator", password: "hunter2" },
+      }),
+    ).rejects.toThrow();
+    expect(useMobileAppStore.getState().hosts).toHaveLength(0);
+  });
+
+  // 고치는 것은 막지 않는다 — 다른 기기에서 만들어 동기화된 호스트를 손볼 길이 없어진다.
+  it("still edits an existing RDP host on a server without the data floor", async () => {
+    const existing = {
+      id: "rdp-1",
+      kind: "rdp",
+      label: "Office PC",
+      hostname: "10.0.0.5",
+      port: 3389,
+      secretRef: null,
+      groupName: null,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    } as unknown as SshHostRecord;
+    await act(async () => {
+      resetStore({ hosts: [existing] });
+    });
+    useMobileAppStore.setState(state => ({
+      syncStatus: {
+        ...state.syncStatus,
+        dataFloorServerSupport: "unsupported",
+      },
+    }));
+
+    await act(async () => {
+      await useMobileAppStore.getState().saveRemoteDesktopHost({
+        hostId: existing.id,
+        kind: "rdp",
+        label: "Renamed",
+        hostname: existing.hostname,
+        port: existing.port,
+      });
+    });
+
+    expect(useMobileAppStore.getState().hosts[0].label).toBe("Renamed");
   });
 
   it("replaces an existing host credential only when explicitly requested", async () => {

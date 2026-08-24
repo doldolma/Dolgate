@@ -168,6 +168,9 @@ export function resolveConnectionFailurePresentation(
     "tailnet-mismatch": () => t('connectFailure.tailscaleMismatch'),
     "host-key-untrusted": () => t('connectFailure.hostKeyUntrusted'),
     "host-key-declined": () => t('connectFailure.hostKeyDeclined'),
+    // RDP 인증서. 호스트 키와 같은 성격이라(신원 승인) 같은 자리에 둔다.
+    "certificate-declined": () => t('connectFailure.certificateDeclined'),
+    "certificate-undecided": () => t('connectFailure.certificateUndecided'),
     cancelled: () => t('connectFailure.cancelled'),
     "aws-auth": () => t('connectFailure.awsAuthFailed'),
     "no-route": () => t('connectFailure.noRoute', { target }),
@@ -179,6 +182,8 @@ export function resolveConnectionFailurePresentation(
   const TITLES: Partial<Record<ConnectionFailureCode, string>> = {
     "host-key-untrusted": "Host Key Not Trusted",
     "host-key-declined": "Host Key Declined",
+    "certificate-declined": "Certificate Declined",
+    "certificate-undecided": "Certificate Not Confirmed",
     "aws-auth": "AWS Authentication Required",
   };
   if (reason.code !== "unknown") {

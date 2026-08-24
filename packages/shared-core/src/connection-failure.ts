@@ -14,6 +14,8 @@ export type ConnectionFailureCode =
   | "agent-unreachable"
   | "aws-auth"
   | "cancelled"
+  | "certificate-declined"
+  | "certificate-undecided"
   | "host-key-declined"
   | "host-key-untrusted"
   | "no-route"
@@ -101,6 +103,21 @@ const RULES: Array<{
   },
   // gvisor 는 "connection was refused" 다 — "was" 때문에 예전 패턴이 통째로 새어 나갔다.
   { pattern: /connection (was )?refused/i, code: "refused" },
+  // --- RDP·VNC 코어(rdp-core)의 인증서 판정 ---
+  //
+  // **아래 timeout 규칙보다 앞이어야 한다.** rdp-core 의 문장이 "timed out waiting for the
+  // certificate decision" 이어서 timeout 에 먼저 걸리면 "호스트가 응답하지 않는다" 로 뒤바뀐다
+  // — 실제로는 사용자가 인증서 승인을 안 눌러서 한도를 넘긴 것이고, 할 일이 정반대다.
+  {
+    pattern: /waiting for the certificate decision/i,
+    code: "certificate-undecided",
+    layer: "hostKey",
+  },
+  {
+    pattern: /(server )?certificate was not trusted/i,
+    code: "certificate-declined",
+    layer: "hostKey",
+  },
   // context deadline exceeded 는 Go 의 ctx 만료가 그대로 올라온 것이다(tailnet 경유 dial 이
   // 예산을 다 쓴 경우 등). 분류하지 않으면 원문이 화면에 뜬다.
   {

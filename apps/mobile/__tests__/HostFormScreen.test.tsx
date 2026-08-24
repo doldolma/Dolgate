@@ -856,6 +856,74 @@ describe("HostFormScreen", () => {
     });
   });
 
+
+  // 데스크톱은 읽고 쓸 때마다 normalizeHostEnvVars 를 통과시킨다. 폰이 규칙에 안 맞는 이름을
+  // 받아 주면 동기화된 뒤 그 경계에서 조용히 사라져, 넣었는데 없어진 것으로만 보인다.
+  it("규칙에 안 맞는 환경 변수 이름을 거부하고 이유를 말한다", async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderForm();
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "고급").props.onPress();
+    });
+
+    await act(async () => {
+      findInput(tree!.root, "변수 이름").props.onChangeText("MY VAR");
+      findInput(tree!.root, "변수 값").props.onChangeText("1");
+    });
+    await act(async () => {
+      findInput(tree!.root, "변수 값").props.onSubmitEditing?.();
+    });
+
+    expect(
+      hasText(
+        tree!.root,
+        "변수 이름은 영문·숫자·밑줄만 쓸 수 있고 숫자로 시작할 수 없습니다.",
+      ),
+    ).toBe(true);
+    // 칩은 만들어지지 않는다 — 받아 준 것처럼 보이면 안 된다.
+    expect(hasText(tree!.root, "MY VAR=1")).toBe(false);
+
+    // 이름을 고치면 들어간다.
+    await act(async () => {
+      findInput(tree!.root, "변수 이름").props.onChangeText("MY_VAR");
+    });
+    await act(async () => {
+      findInput(tree!.root, "변수 값").props.onSubmitEditing?.();
+    });
+    expect(hasText(tree!.root, "MY_VAR=1")).toBe(true);
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  // 관례가 대문자라고 강제하면 no_proxy 처럼 소문자인 변수를 넣을 방법이 없어진다.
+  it("환경 변수 이름을 대문자로 바꾸지 않는다", async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderForm();
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "고급").props.onPress();
+    });
+
+    expect(findInput(tree!.root, "변수 이름").props.autoCapitalize).toBe("none");
+
+    await act(async () => {
+      findInput(tree!.root, "변수 이름").props.onChangeText("no_proxy");
+      findInput(tree!.root, "변수 값").props.onChangeText("localhost");
+    });
+    await act(async () => {
+      findInput(tree!.root, "변수 값").props.onSubmitEditing?.();
+    });
+    expect(hasText(tree!.root, "no_proxy=localhost")).toBe(true);
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
   it("고급은 값이 있어도 접힌 채로 열고, 무엇이 들었는지 머리글에 적는다", async () => {
     // 값이 있으면 펼쳐 두게 했더니 태그 하나만 넣어도 그 뒤로는 영영 열려 있었다. 보존하고
     // 있다는 사실은 요약이 알려 주면 된다.
@@ -944,6 +1012,104 @@ describe("HostFormScreen", () => {
       tree!.unmount();
     });
   });
+  // 눌러도 아무 일이 없는 목록은 고장으로 읽힌다 — 상한에 걸리면 그 자리에서 이유를 말한다.
+  it("점프 호스트 상한에 걸리면 이유를 보여주고 더 고르지 못하게 한다", async () => {
+    const candidates: SshHostRecord[] = Array.from({ length: 10 }, (_, index) => ({
+      ...createExistingHost(),
+      id: `jump-${index}`,
+      label: `Hop ${index}`,
+      hostname: `h${index}.example.com`,
+      secretRef: null,
+      jumpHostIds: undefined,
+      env: undefined,
+      startupCommand: undefined,
+    }));
+    resetStore(candidates);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderForm();
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "고급").props.onPress();
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "점프 호스트 추가").props.onPress();
+    });
+
+    for (let index = 0; index < 8; index += 1) {
+      await act(async () => {
+        findPressableByText(tree!.root, `Hop ${index}`).props.onPress();
+      });
+    }
+    expect(
+      hasText(tree!.root, "점프 호스트는 최대 8개까지 넣을 수 있습니다."),
+    ).toBe(true);
+
+    // 아직 안 고른 항목은 눌릴 수 없고, 이미 고른 것은 빼야 하므로 눌릴 수 있어야 한다.
+    const disabledOf = (label: string): boolean[] =>
+      tree!.root
+        .findAll(
+          node =>
+            node.props?.label === label &&
+            typeof node.props?.disabled === "boolean",
+        )
+        .map(node => node.props.disabled as boolean);
+    expect(disabledOf("Hop 8")).toContain(true);
+    expect(disabledOf("Hop 0")).toContain(false);
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  // 검색어를 남겨 두면 다시 열었을 때 걸러진 목록이 나오고, 그 사이 항목이 8개 미만으로
+  // 줄면 검색칸이 사라져 지울 수단도 없어진다.
+  it("고르는 시트를 닫으면 검색어를 버린다", async () => {
+    const candidates: SshHostRecord[] = Array.from({ length: 9 }, (_, index) => ({
+      ...createExistingHost(),
+      id: `jump-${index}`,
+      label: `Hop ${index}`,
+      hostname: `h${index}.example.com`,
+      secretRef: null,
+      jumpHostIds: undefined,
+      env: undefined,
+      startupCommand: undefined,
+    }));
+    resetStore(candidates);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderForm();
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "고급").props.onPress();
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "점프 호스트 추가").props.onPress();
+    });
+
+    const search = (): renderer.ReactTestInstance =>
+      tree!.root.findByProps({ testID: "list-picker-search" });
+    await act(async () => {
+      search().props.onChangeText("Hop 3");
+    });
+    expect(search().props.value).toBe("Hop 3");
+
+    // 닫고 다시 연다.
+    await act(async () => {
+      findPressableByText(tree!.root, "완료").props.onPress();
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "점프 호스트 추가").props.onPress();
+    });
+    expect(search().props.value).toBe("");
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
 it("점프 호스트를 목록에서 고르고 순서대로 저장한다", async () => {
     // 연결 경로는 이미 모바일에서 돈다 — 지정만 못 했다.
     const first: SshHostRecord = { ...createExistingHost(), id: "jump-1", label: "Bastion", hostname: "b1.example.com", secretRef: null, jumpHostIds: undefined, env: undefined, startupCommand: undefined };

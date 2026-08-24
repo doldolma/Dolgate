@@ -199,7 +199,9 @@ export function ChipField({
             onChangeText={pairInput.name.onChangeText}
             placeholder={pairInput.name.placeholder}
             placeholderTextColor={palette.tabInactive}
-            autoCapitalize="characters"
+            // 관례가 대문자라고 강제하면 no_proxy·http_proxy 처럼 소문자인 변수를 넣을
+            // 방법이 없어진다(많은 도구가 대·소문자를 다른 변수로 본다).
+            autoCapitalize="none"
             autoCorrect={false}
             returnKeyType="next"
             style={[

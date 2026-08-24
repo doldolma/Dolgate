@@ -2571,7 +2571,9 @@
     "tailscaleMismatch": "You are connected to a different Tailscale network than the one configured. Check which account is logged in.",
     "serverNotice": "The server sent this notice:\n{{notice}}",
     "addressInUse": "That port is already in use.",
-    "addressInUseAt": "That port is already in use ({{address}})."
+    "addressInUseAt": "That port is already in use ({{address}}).",
+    "certificateDeclined": "The server certificate was not approved, so the connection stopped.",
+    "certificateUndecided": "Timed out waiting for the certificate to be confirmed. Reconnect and approve it."
   },
   "knownHostsIpc": {
     "noSecrets": "There is no credential to save.",

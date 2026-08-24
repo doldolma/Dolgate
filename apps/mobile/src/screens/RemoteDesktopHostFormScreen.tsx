@@ -4,7 +4,7 @@
 // 전용·공유가 온다. 한 화면에 넣으면 대부분 숨어 있는 칸이 되어, 어느 종류를 고치는 중인지
 // 읽기 어려워진다.
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Alert,
@@ -59,6 +59,8 @@ export function RemoteDesktopHostFormScreen({
   const hosts = useMobileAppStore(state => state.hosts);
   const groups = useMobileAppStore(state => state.groups);
   const tailnets = useMobileAppStore(state => state.tailnets);
+  const secretsByRef = useMobileAppStore(state => state.secretsByRef);
+  const awsProfiles = useMobileAppStore(state => state.awsProfiles);
   const saveRemoteDesktopHost = useMobileAppStore(
     state => state.saveRemoteDesktopHost,
   );
@@ -79,17 +81,53 @@ export function RemoteDesktopHostFormScreen({
 
   const [label, setLabel] = useState(existing?.label ?? "");
   const [hostname, setHostname] = useState(existing?.hostname ?? "");
-  const [portDraft, setPortDraft] = useState(
-    String(existing?.port ?? DEFAULT_PORTS[kind]),
+  /**
+   * 포트는 **손대기 전에는 종류를 따라간다.**
+   *
+   * state 초기값으로 굳히면 RDP 를 골랐다가 VNC 로 바꿀 때 3389 가 그대로 남는다 — 화면을
+   * 다시 마운트하지 않으므로(같은 컴포넌트다) 초기값 계산이 다시 돌지 않는다. 그렇게 저장된
+   * VNC 호스트는 연결이 거부된다.
+   */
+  const [portOverride, setPortOverride] = useState<string | null>(null);
+  const portDraft = portOverride ?? String(existing?.port ?? DEFAULT_PORTS[kind]);
+  const setPortDraft = (next: string): void => setPortOverride(next);
+  // 그룹을 보다가 들어왔으면 그 그룹에 만든다(SSH 폼과 같다) — 무시하면 최상위에 생기고,
+  // 사용자는 폼에서 "그룹 없음" 을 보고 직접 다시 골라야 한다.
+  const [groupName, setGroupName] = useState(
+    existing?.groupName ?? route.params?.defaultGroupPath ?? "",
   );
-  const [groupName, setGroupName] = useState(existing?.groupName ?? "");
-  const [username, setUsername] = useState("");
-  const [domain, setDomain] = useState("");
+  /**
+   * 계정·도메인은 **시크릿에서 읽어 채운다.**
+   *
+   * RDP 는 계정이 호스트 레코드가 아니라 자격증명에 있다. 빈 칸으로 열어 두면 계정만 고치는
+   * 길이 없고(비워 두면 저장이 무시한다), 비밀번호만 바꾸려던 사람이 저장된 계정을 지운다.
+   *
+   * 사용자가 손대기 전에는 저장된 값을 그대로 비춘다 — state 초기값으로 굳히면 시크릿이
+   * 하이드레이트보다 먼저 열린 화면에서 영영 빈 칸으로 남는다.
+   */
+  const [accountDraft, setAccountDraft] = useState<{
+    username: string;
+    domain: string;
+  } | null>(null);
+  const storedSecret = existing?.secretRef
+    ? secretsByRef[existing.secretRef]
+    : undefined;
+  const storedUsername = storedSecret?.username ?? "";
+  const storedDomain = storedSecret?.domain ?? "";
+  const username = accountDraft?.username ?? storedUsername;
+  const domain = accountDraft?.domain ?? storedDomain;
+  const setUsername = (next: string): void =>
+    setAccountDraft({ username: next, domain });
+  const setDomain = (next: string): void =>
+    setAccountDraft({ username, domain: next });
   const [password, setPassword] = useState("");
-  const [shared, setShared] = useState(vnc?.shared === true);
+  // 없거나 null 이면 공유(true), 화질은 무손실이다 — VncHostRecord 가 그렇게 규정한다.
+  // `=== true` / `?? "balanced"` 로 읽으면 데스크톱에서 만든 호스트를 열자마자 값이 뒤집힌
+  // 것으로 보이고, 저장하면 그 뒤집힌 값이 모든 기기로 퍼진다.
+  const [shared, setShared] = useState(vnc?.shared !== false);
   const [viewOnly, setViewOnly] = useState(vnc?.viewOnly === true);
   const [imageQuality, setImageQuality] = useState<VncImageQuality>(
-    vnc?.imageQuality ?? "balanced",
+    vnc?.imageQuality ?? "lossless",
   );
   const [tailnetId, setTailnetId] = useState<string | null>(
     existing?.tailnetId ?? null,
@@ -108,10 +146,78 @@ export function RemoteDesktopHostFormScreen({
     if (!Number.isInteger(port) || port <= 0 || port > 65535) {
       return translate("hostForm.validation.port");
     }
+    // RDP 는 계정과 비밀번호가 **둘 다 시크릿에 있어야** 연결이 시작된다 — 연결 경로가
+    // 그렇게 판정한다. 비운 채 저장하면 저장은 되는데 접속만 안 되는 호스트가 생기고(만들 때),
+    // 고칠 때는 조용히 예전 값을 쓰거나 자격증명을 떼는 두 갈래뿐이다. 여기서 막는다.
+    if (kind === "rdp" && !username.trim()) {
+      return translate("hostForm.validation.username");
+    }
+    if (kind === "rdp" && !existing?.secretRef && !password) {
+      return translate("hostForm.validation.password");
+    }
     return null;
   })();
   const canSave = !saving && !validationMessage;
   const selectedTailnet = tailnets.find(item => item.id === tailnetId) ?? null;
+  // 프로파일 이름은 id 로 지금 이름을 찾는다 — 이름은 사용자가 바꿀 수 있어서, 저장된 이름만
+  // 믿으면 바꾼 뒤에는 없는 프로파일처럼 보인다. 못 찾으면 저장된 이름을 쓴다(접속 경로도 같은
+  // 순서로 판단한다).
+  const awsSsmSummary = useMemo(() => {
+    const target = existing && isRdpHostRecord(existing) ? existing.awsSsm : null;
+    if (!target) {
+      return null;
+    }
+    const profileName =
+      awsProfiles.find(
+        profile => target.profileId && profile.id === target.profileId,
+      )?.name ?? target.profileName;
+    return [target.instanceId, target.region, profileName]
+      .filter(Boolean)
+      .join(" · ");
+  }, [awsProfiles, existing]);
+
+  const credentialsChanged =
+    Boolean(password) ||
+    (kind === "rdp" &&
+      (username.trim() !== storedUsername || domain.trim() !== storedDomain));
+
+  // 저장에 성공해 스스로 닫는 경우와 도중에 나가는 경우를 구분한다(SSH 폼과 같은 장치다).
+  // 이 화면은 SSH 폼의 자식으로 그려지는데, 부모의 가드는 부모의 SSH 필드만 보므로 여기서
+  // 고친 값은 확인 없이 사라졌다.
+  const savedRef = useRef(false);
+  const isDirty =
+    label !== (existing?.label ?? "") ||
+    hostname !== (existing?.hostname ?? "") ||
+    portDraft !== String(existing?.port ?? DEFAULT_PORTS[kind]) ||
+    groupName !== (existing?.groupName ?? "") ||
+    tailnetId !== (existing?.tailnetId ?? null) ||
+    credentialsChanged ||
+    (kind === "vnc" &&
+      (shared !== (vnc?.shared !== false) ||
+        viewOnly !== (vnc?.viewOnly === true) ||
+        imageQuality !== (vnc?.imageQuality ?? "lossless")));
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("beforeRemove", event => {
+      if (savedRef.current || !isDirty) {
+        return;
+      }
+      event.preventDefault();
+      Alert.alert(
+        translate("hostForm.discardTitle"),
+        translate("hostForm.discardBody"),
+        [
+          { text: translate("hostForm.keepEditing"), style: "cancel" },
+          {
+            text: translate("hostForm.discardConfirm"),
+            style: "destructive",
+            onPress: () => navigation.dispatch(event.data.action),
+          },
+        ],
+      );
+    });
+    return unsubscribe;
+  }, [isDirty, navigation, translate]);
 
   const handleSave = async (): Promise<void> => {
     if (!canSave) {
@@ -128,15 +234,24 @@ export function RemoteDesktopHostFormScreen({
         groupName: groupName.trim() ? groupName : null,
         tailnetId,
         // 비밀번호를 비워 두면 저장된 자격증명을 그대로 둔다 — 이름만 고치려고 들어왔다가
-        // 비밀번호가 지워지면 다음 접속이 막힌다.
-        credentialMode: password ? "replace" : "preserve",
-        credentials: password
-          ? { username, domain: kind === "rdp" ? domain : undefined, password }
+        // 비밀번호가 지워지면 다음 접속이 막힌다. 다만 **계정을 고친 것도 교체다** —
+        // 그러지 않으면 계정만 바꿔 저장했을 때 아무 말 없이 버려진다(비밀번호는 스토어가
+        // 저장된 값을 이어 준다).
+        credentialMode: credentialsChanged ? "replace" : "preserve",
+        credentials: credentialsChanged
+          ? {
+              // VNC 에는 계정 칸이 없다. RDP 에서 치던 값을 그대로 실어 보내면 vnc-core 가
+              // 인증 방식을 달리 고른다(계정이 있으면 ARD·TlsPlain).
+              username: kind === "rdp" ? username.trim() : undefined,
+              domain: kind === "rdp" ? domain.trim() : undefined,
+              password: password || undefined,
+            }
           : null,
         ...(kind === "vnc"
           ? { shared, viewOnly, imageQuality }
           : {}),
       });
+      savedRef.current = true;
       navigation.goBack();
     } catch (error) {
       Alert.alert(
@@ -207,6 +322,16 @@ export function RemoteDesktopHostFormScreen({
             chevron
             onPress={() => setPicker("group")}
           />
+          {/* SSM 을 거치는지는 주소만 봐서는 알 수 없다 — 사설 IP 가 그대로 적혀 있어서 직접
+              붙는 것처럼 보이는데 실제로는 포트 포워딩을 거친다(데스크톱 상세 패널과 같은 행).
+              AWS 가져오기가 만든 값이라 기기에서 고칠 것이 아니므로 읽기 전용으로 둔다. */}
+          {awsSsmSummary ? (
+            <SettingsRow
+              icon="cloud-outline"
+              label={translate("hostForm.rd.awsSsm")}
+              value={awsSsmSummary}
+            />
+          ) : null}
         </SettingsGroup>
 
         <SettingsGroup

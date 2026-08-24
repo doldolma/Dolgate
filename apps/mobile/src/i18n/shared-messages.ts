@@ -121,6 +121,8 @@ const CONNECT_FAILURE_KEYS = {
   "tailnet-needs-auth": "connectFailure.tailnetNeedsAuth",
   "tailnet-needs-approval": "connectFailure.tailnetNeedsApproval",
   "tailnet-mismatch": "connectFailure.tailnetMismatch",
+  "certificate-declined": "connectFailure.certificateDeclined",
+  "certificate-undecided": "connectFailure.certificateUndecided",
 } as const;
 
 export const CONNECT_FAILURE_MESSAGE_KEYS: readonly string[] = [

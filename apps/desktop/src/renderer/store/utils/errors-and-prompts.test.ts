@@ -67,6 +67,27 @@ describe("resolveConnectionFailurePresentation", () => {
     ).not.toContain("host is down");
   });
 
+  // rdp-core 의 문장이 "timed out waiting for the certificate decision" 이라, timeout 규칙에
+  // 먼저 걸리면 "호스트가 응답하지 않는다" 로 뒤바뀐다 — 사용자가 할 일은 인증서 승인이라
+  // 안내가 정반대가 된다. 그래서 인증서 규칙이 timeout 보다 앞이어야 한다.
+  it("keeps an unanswered certificate prompt out of the timeout bucket", () => {
+    const presented = resolveConnectionFailurePresentation(
+      "begin connection: timed out waiting for the certificate decision",
+    );
+    expect(presented.message).not.toContain("시간이 초과");
+    expect(presented.message).toContain("인증서");
+    expect(presented.layer).toBe("hostKey");
+  });
+
+  it("presents a declined server certificate without the core wording", () => {
+    const presented = resolveConnectionFailurePresentation(
+      "begin connection: server certificate was not trusted",
+    );
+    expect(presented.message).not.toContain("certificate was not trusted");
+    expect(presented.message).toContain("인증서");
+    expect(presented.layer).toBe("hostKey");
+  });
+
   it("presents timeout errors without raw Go wording", () => {
     expect(
       resolveConnectionFailurePresentation(

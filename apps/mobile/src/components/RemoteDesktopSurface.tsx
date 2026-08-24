@@ -109,6 +109,11 @@ export interface RemoteDesktopSurfaceProps {
   /** Whether this tab is the active (visible) tab. */
   isActiveTab?: boolean;
   errorMessage?: string | null;
+  /**
+   * 실패한 세션을 다시 붙인다. 넘기지 않으면 버튼이 나오지 않는다(테스트 패턴처럼 붙을 곳이
+   * 없는 화면도 이 컴포넌트를 쓴다).
+   */
+  onReconnect?: () => void;
   title?: string;
   hostAddress?: string;
   connectionStatusMessage?: string | null;
@@ -133,6 +138,7 @@ export function RemoteDesktopSurface({
   testPattern = false,
   isActiveTab = true,
   errorMessage,
+  onReconnect,
   title,
   hostAddress,
   connectionStatusMessage,
@@ -936,6 +942,23 @@ export function RemoteDesktopSurface({
               >
                 {loadingStatusLabel}
               </Text>
+              {/* 실패·종료 상태에서 다시 붙는 길. SSH 는 오류 배너에 이 버튼이 있는데
+                  원격 데스크톱에는 없어서, 탭을 닫고 홈에서 다시 들어와야 했다. */}
+              {onReconnect && (status === 'error' || status === 'closed') ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('session.reconnectAria', {
+                    title: title ?? protocol.toUpperCase(),
+                  })}
+                  onPress={onReconnect}
+                  style={styles.reconnectButton}
+                >
+                  <Ionicons name="refresh" size={15} color="#c8c8e0" />
+                  <Text style={styles.reconnectLabel}>
+                    {t('session.reconnect')}
+                  </Text>
+                </Pressable>
+              ) : null}
               {connectionStages.length > 0 ? (
                 <View style={styles.connectionStages}>
                   <ConnectionStagesPanel
@@ -1148,6 +1171,19 @@ const styles = StyleSheet.create({
   overlayScroll: {
     width: '100%',
   },
+  reconnectButton: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#3a3a52',
+    backgroundColor: '#22222f',
+  },
+  reconnectLabel: { color: '#c8c8e0', fontSize: 14, fontWeight: '600' },
   overlayContent: {
     // ScrollView 의 내용 컨테이너다. 남는 공간에서는 가운데(justifyContent), 모자라면 스크롤.
     flexGrow: 1,

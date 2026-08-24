@@ -3,7 +3,7 @@
 // 겉모습은 앱의 설정 목록(SettingsGroup/SettingsRow)을 그대로 쓴다 — 고르는 화면만 테두리
 // 친 카드를 줄줄이 세우면 같은 앱 안에서 목록이 두 가지 모양이 된다. 고른 항목은 체크
 // 표시로만 알린다(iOS 규격).
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Modal,
@@ -41,6 +41,11 @@ interface ListPickerModalProps {
   emptyText: string;
   /** "없음" 을 고를 수 있게 한다 — Tailnet 처럼 해제가 뜻이 있는 경우. */
   noneLabel?: string;
+  /**
+   * 더 고를 수 없을 때의 이유. 상한에 걸리면 누를 수 없게 하고 이 문구를 위에 띄운다 —
+   * 눌러도 아무 일이 없는 목록은 고장으로 읽힌다.
+   */
+  limitNotice?: string;
   /** 목록 아래에 붙는 만들기 행 — 그룹처럼 여기서 새로 만들 수 있는 경우. */
   actionLabel?: string;
   actionIcon?: string;
@@ -76,6 +81,7 @@ export function ListPickerModal({
   searchPlaceholder,
   emptyText,
   noneLabel,
+  limitNotice,
   actionLabel,
   actionIcon = 'add-outline',
   onAction,
@@ -86,6 +92,14 @@ export function ListPickerModal({
   const palette = useMobilePalette();
   const { t: translate } = useTranslation();
   const [query, setQuery] = useState('');
+
+  // 닫히면 검색어를 버린다. 남겨 두면 다시 열었을 때 걸러진 목록이 나오고, 그 사이 항목이
+  // 줄어 검색칸이 사라지면(8개 미만) 지울 수단 없이 항목이 없어진 것처럼 보인다.
+  useEffect(() => {
+    if (!visible) {
+      setQuery('');
+    }
+  }, [visible]);
 
   const visibleItems = useMemo(
     () => items.filter(item => matches(item, query)),
@@ -144,6 +158,12 @@ export function ListPickerModal({
             />
           ) : null}
 
+          {limitNotice ? (
+            <Text style={[styles.notice, { color: palette.warning }]}>
+              {limitNotice}
+            </Text>
+          ) : null}
+
           {visibleItems.length === 0 && !noneLabel ? (
             <Text style={[styles.empty, { color: palette.mutedText }]}>
               {emptyText}
@@ -159,17 +179,22 @@ export function ListPickerModal({
                   onPress={() => onSelect(null)}
                 />
               ) : null}
-              {visibleItems.map(item => (
-                <SettingsRow
-                  key={item.id}
-                  icon={item.icon}
-                  label={item.label}
-                  subtitle={item.detail}
-                  check={selectedIds.includes(item.id)}
-                  accessibilityLabel={item.label}
-                  onPress={() => onSelect(item.id)}
-                />
-              ))}
+              {visibleItems.map(item => {
+                const selected = selectedIds.includes(item.id);
+                return (
+                  <SettingsRow
+                    key={item.id}
+                    icon={item.icon}
+                    label={item.label}
+                    subtitle={item.detail}
+                    check={selected}
+                    // 이미 고른 것은 상한에 걸려도 눌러야 한다 — 빼는 길이 막히면 안 된다.
+                    disabled={Boolean(limitNotice) && !selected}
+                    accessibilityLabel={item.label}
+                    onPress={() => onSelect(item.id)}
+                  />
+                );
+              })}
             </SettingsGroup>
           )}
 
@@ -213,4 +238,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   empty: { fontSize: 14, paddingVertical: 20, textAlign: 'center' },
+  notice: { fontSize: 13, lineHeight: 18 },
 });

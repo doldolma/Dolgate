@@ -146,7 +146,9 @@
     "tailnetNeedsApproval": "Waiting for tailnet administrator approval.",
     "tailnetMismatch": "You are connected to a different tailnet than the one configured.",
     "targetHost": "the host",
-    "addressInUse": "That port is already in use."
+    "addressInUse": "That port is already in use.",
+    "certificateDeclined": "The server certificate was not approved, so the connection stopped.",
+    "certificateUndecided": "Timed out waiting for the certificate to be confirmed. Reconnect and approve it."
   },
   "store": {
     "serverSlow": "The server is slow to respond. Try again.",
@@ -254,7 +256,8 @@
     "ssmPathDirectSsh": "SSH over SSM · direct from this device",
     "ssmPathDirectShell": "SSM shell · direct from this device",
     "ssmPathServerProxy": "SSM shell · through the server",
-    "ssmBothFailed": "SSH: {{ssh}} · SSM shell: {{shell}}"
+    "ssmBothFailed": "SSH: {{ssh}} · SSM shell: {{shell}}",
+    "hostKindNeedsDataFloor": "This server cannot record the account data floor, so RDP and VNC hosts cannot be created. Update the server to enable them."
   },
   "vaultGate": {
     "switchAccount": "Sign in with a different account (sign out)",
@@ -331,7 +334,8 @@
       "port": "The port must be a number between 1 and 65535.",
       "username": "Enter a username.",
       "certificatePair": "Certificate auth needs both the private key and the certificate.",
-      "startupCommandTooLong": "The startup command is too long."
+      "startupCommandTooLong": "The startup command is too long.",
+      "password": "Enter a password."
     },
     "editFailedTitle": "Could not update the host",
     "addFailedTitle": "Could not add the host",
@@ -415,7 +419,9 @@
       "nameLabel": "Variable name",
       "valueLabel": "Variable value",
       "namePlaceholder": "LANG",
-      "valuePlaceholder": "en_US.UTF-8"
+      "valuePlaceholder": "en_US.UTF-8",
+      "invalidName": "Names can use letters, digits and underscores, and cannot start with a digit.",
+      "tooMany": "Up to {{max}} environment variables."
     },
     "toggles": {
       "agentForwarding": "Agent forwarding",
@@ -441,7 +447,8 @@
       "search": "Search hosts",
       "empty": "No SSH hosts to jump through.",
       "remove": "Remove {{label}}",
-      "count": "{{count}} jumps"
+      "count": "{{count}} jumps",
+      "tooMany": "Up to {{max}} jump hosts."
     },
     "rd": {
       "rdpSection": "RDP host",
@@ -458,7 +465,8 @@
         "fast": "Fastest",
         "balanced": "Balanced",
         "lossless": "Lossless"
-      }
+      },
+      "awsSsm": "Via SSM"
     },
     "kindSection": "Kind",
     "kindUnsupported": "This server cannot host RDP or VNC entries. Update the server to enable them."

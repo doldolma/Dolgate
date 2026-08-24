@@ -253,6 +253,9 @@ export function SessionScreen(): React.JSX.Element {
   const disconnectRemoteDesktopSession = useMobileAppStore(
     state => state.disconnectRemoteDesktopSession,
   );
+  const reconnectRemoteDesktopSession = useMobileAppStore(
+    state => state.reconnectRemoteDesktopSession,
+  );
   const activeSessionTabId = useMobileAppStore(
     state => state.activeSessionTabId,
   );
@@ -1830,6 +1833,9 @@ export function SessionScreen(): React.JSX.Element {
                   testPattern={false}
                   isActiveTab={true}
                   errorMessage={activeRdSession.errorMessage}
+                  onReconnect={() => {
+                    void reconnectRemoteDesktopSession(activeRdSession.id);
+                  }}
                   title={activeRdSession.title}
                   hostAddress={
                     activeRdHost &&

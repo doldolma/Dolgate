@@ -399,6 +399,227 @@ describe('mobile remote desktop connection paths', () => {
     ).toBeUndefined();
   });
 
+  // 실패한 세션은 탭에 남는다(탭은 status !== 'closed' 를 살아 있는 것으로 본다). SSH 처럼
+  // 그 자리에서 다시 붙을 수 있어야 하고, 이때 **세션 id 를 재사용**해야 탭이 안 늘어난다.
+  it('reconnects a failed session in the same tab', async () => {
+    const host = createVncHost();
+    const secret = createVncSecret();
+    resetStore({
+      hosts: [host],
+      secretsByRef: { [secret.secretRef]: secret },
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+    const rdId = requireSessionId(sessionId);
+
+    // 네이티브가 오류를 알린다 — 세션은 error 로 남고 탭에서 사라지지 않는다.
+    await act(async () => {
+      emitSessionEvent({
+        sessionId: rdId,
+        type: 'error',
+        message: '연결이 거부되었습니다.',
+      });
+      await flushAsyncWork();
+    });
+    expect(
+      useMobileAppStore
+        .getState()
+        .remoteDesktopSessions.find(record => record.id === rdId)?.status,
+    ).toBe('error');
+
+    nativeConnectMock.mockClear();
+    await act(async () => {
+      await useMobileAppStore.getState().reconnectRemoteDesktopSession(rdId);
+      await flushAsyncWork();
+    });
+
+    // 같은 id 로 다시 붙고, 세션이 늘지 않는다.
+    expect(nativeConnectMock).toHaveBeenCalledWith(
+      rdId,
+      expect.objectContaining({ protocol: 'vnc', host: host.hostname }),
+    );
+    expect(useMobileAppStore.getState().remoteDesktopSessions).toHaveLength(1);
+    const session = useMobileAppStore
+      .getState()
+      .remoteDesktopSessions.find(record => record.id === rdId);
+    // 지난 오류 문구는 지워져야 한다 — 남으면 새 시도 중에 옛 실패가 보인다.
+    expect(session?.errorMessage).toBeNull();
+    expect(session?.status).not.toBe('error');
+  });
+
+  // 붙어 있는 세션에 눌러도 새 연결을 만들면 안 된다 — 런타임 핸들이 그 사실이다.
+  it('leaves a live session alone when reconnect is requested', async () => {
+    const host = createVncHost();
+    const secret = createVncSecret();
+    resetStore({
+      hosts: [host],
+      secretsByRef: { [secret.secretRef]: secret },
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+    const rdId = requireSessionId(sessionId);
+    await act(async () => {
+      emitSessionEvent({ sessionId: rdId, type: 'status', status: 'connected' });
+    });
+
+    nativeConnectMock.mockClear();
+    await act(async () => {
+      await useMobileAppStore.getState().reconnectRemoteDesktopSession(rdId);
+      await flushAsyncWork();
+    });
+    expect(nativeConnectMock).not.toHaveBeenCalled();
+  });
+
+  // 호스트를 지운 뒤 눌렀을 때. 조용히 아무 일도 없으면 고장으로 읽힌다.
+  it('reports a missing host instead of silently doing nothing', async () => {
+    const host = createVncHost();
+    const secret = createVncSecret();
+    resetStore({
+      hosts: [host],
+      secretsByRef: { [secret.secretRef]: secret },
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+    const rdId = requireSessionId(sessionId);
+    await act(async () => {
+      emitSessionEvent({ sessionId: rdId, type: 'error', message: '끊겼습니다.' });
+      await flushAsyncWork();
+    });
+
+    useMobileAppStore.setState({ hosts: [] });
+    nativeConnectMock.mockClear();
+    await act(async () => {
+      await useMobileAppStore.getState().reconnectRemoteDesktopSession(rdId);
+      await flushAsyncWork();
+    });
+
+    expect(nativeConnectMock).not.toHaveBeenCalled();
+    const session = useMobileAppStore
+      .getState()
+      .remoteDesktopSessions.find(record => record.id === rdId);
+    expect(session?.status).toBe('error');
+    expect(session?.errorMessage).toBeTruthy();
+  });
+
+  // 코어가 올려 보내는 문장은 Go 원문이다. RD 경로만 그 분류를 안 거쳐서 화면에
+  // "rdtunnel: connect target: connect tcp ...: connection was refused" 가 그대로 떴다.
+  it('classifies a native error event instead of showing the core wording', async () => {
+    const host = createVncHost();
+    const secret = createVncSecret();
+    resetStore({
+      hosts: [host],
+      secretsByRef: { [secret.secretRef]: secret },
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+    const rdId = requireSessionId(sessionId);
+
+    await act(async () => {
+      emitSessionEvent({
+        sessionId: rdId,
+        type: 'error',
+        // tailnet 을 지나면 같은 원인이 "connection was refused" 로 온다(netstack 문구).
+        message:
+          'rdtunnel: connect target: connect tcp 192.168.200.27:3389: connection was refused',
+      });
+      await flushAsyncWork();
+    });
+
+    const session = useMobileAppStore
+      .getState()
+      .remoteDesktopSessions.find(record => record.id === rdId);
+    expect(session?.errorMessage).toBe(
+      `${host.hostname}:${host.port} 이 연결을 거부했습니다. 포트와 서버 상태를 확인해 주세요.`,
+    );
+    expect(session?.errorMessage).not.toContain('connect tcp');
+  });
+
+  // 분류되지 않은 오류는 원문을 남긴다 — 뭉뚱그린 문구로 덮으면 유일한 단서가 사라진다.
+  it('keeps an unclassified core message as-is', async () => {
+    const host = createVncHost();
+    const secret = createVncSecret();
+    resetStore({
+      hosts: [host],
+      secretsByRef: { [secret.secretRef]: secret },
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+    const rdId = requireSessionId(sessionId);
+
+    await act(async () => {
+      emitSessionEvent({
+        sessionId: rdId,
+        type: 'error',
+        message: 'rfb: unsupported security type 42',
+      });
+      await flushAsyncWork();
+    });
+
+    expect(
+      useMobileAppStore
+        .getState()
+        .remoteDesktopSessions.find(record => record.id === rdId)?.errorMessage,
+    ).toBe('rfb: unsupported security type 42');
+  });
+
+  // rdp-core 의 "timed out waiting for the certificate decision" 은 timeout 규칙에 먼저
+  // 걸리면 "호스트가 응답하지 않는다" 로 뒤바뀐다 — 할 일이 정반대라(인증서 승인) 그 분류가
+  // timeout 보다 앞이어야 한다.
+  it('does not turn an unanswered certificate prompt into a network timeout', async () => {
+    const host = createVncHost();
+    const secret = createVncSecret();
+    resetStore({
+      hosts: [host],
+      secretsByRef: { [secret.secretRef]: secret },
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+    const rdId = requireSessionId(sessionId);
+
+    await act(async () => {
+      emitSessionEvent({
+        sessionId: rdId,
+        type: 'error',
+        message: 'begin connection: timed out waiting for the certificate decision',
+      });
+      await flushAsyncWork();
+    });
+
+    const message =
+      useMobileAppStore
+        .getState()
+        .remoteDesktopSessions.find(record => record.id === rdId)?.errorMessage ??
+      '';
+    expect(message).toContain('인증서');
+    expect(message).not.toContain('응답하지 않습니다');
+    // 원문도 남지 않아야 한다.
+    expect(message).not.toContain('certificate decision');
+  });
+
   it('copies remote clipboard text only for the active session', async () => {
     const host = createVncHost();
     const secret = createVncSecret();
@@ -630,19 +851,23 @@ describe('mobile remote desktop connection paths', () => {
     });
 
     expect(nativeConnectMock).not.toHaveBeenCalled();
-    expect(
-      useMobileAppStore
-        .getState()
-        .remoteDesktopSessions.find(record => record.id === sessionId),
-    ).toEqual(
-      expect.objectContaining({ status: 'error', errorMessage: actualError }),
+    // 코어 원문("...: connect: connection refused")은 화면에 그대로 가지 않는다 — SSH 경로와
+    // 같은 분류를 거쳐 사람이 읽는 문구가 되고, 대상은 붙으려던 주소로 적힌다.
+    const failureMessage = `${host.hostname}:${host.port} 이 연결을 거부했습니다. 포트와 서버 상태를 확인해 주세요.`;
+    const session = useMobileAppStore
+      .getState()
+      .remoteDesktopSessions.find(record => record.id === sessionId);
+    expect(session).toEqual(
+      expect.objectContaining({ status: 'error', errorMessage: failureMessage }),
     );
+    expect(session?.errorMessage).not.toContain('rdtunnel');
+    // 막힌 곳은 그대로 SSH 터널 단계여야 한다 — 문구를 바꾼다고 단계가 옮겨가면 안 된다.
     expect(
       useMobileAppStore.getState().connectionViews[requireSessionId(sessionId)],
     ).toEqual(
       expect.objectContaining({
         stage: 'ssh-tunnel-gateway',
-        failureMessage: actualError,
+        failureMessage,
       }),
     );
   });

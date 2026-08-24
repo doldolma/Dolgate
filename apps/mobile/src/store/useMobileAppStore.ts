@@ -45,6 +45,7 @@ import type {
 // 그룹 트리 변형 규칙. 데스크톱 메인도 같은 함수를 쓴다 — 두 벌이 되면 같은 그룹을 폰에서
 // 지운 것과 PC 에서 지운 것이 다른 결과를 낳는다.
 import {
+  LEGACY_TOLERATED_HOST_KINDS,
   buildQuickSshHostLabel,
   createGroupIn,
   findExistingQuickSshHost,
@@ -294,7 +295,7 @@ function canonicalizeRdpFingerprint(value: string | null | undefined): string {
 }
 
 /** ProxyJump 다단 깊이 상한. 데스크톱과 같은 값이다(안전장치). */
-const MOBILE_MAX_JUMP_CHAIN = 8;
+export const MOBILE_MAX_JUMP_CHAIN = 8;
 // 모듈 로드 시점에는 i18n 초기화 전이고 언어를 바꿔도 갱신되지 않으므로 호출 시점에 번역한다.
 function getStartupRefreshTimeoutMessage(): string {
   return t('store.serverSlow');
@@ -1043,6 +1044,14 @@ interface MobileAppState {
   activateRemoteDesktopSession: RemoteDesktopSlice['activateRemoteDesktopSession'];
   setRemoteDesktopImmersive: RemoteDesktopSlice['setRemoteDesktopImmersive'];
   disconnectRemoteDesktopSession: (sessionId: string) => Promise<void>;
+  /**
+   * 실패한 RDP·VNC 세션을 **같은 탭에서** 다시 붙인다.
+   *
+   * SSH 의 resumeSession 과 다른 것은 이어 붙일 상태가 없다는 점이다 — 화면은 서버가 다시
+   * 그리므로 처음부터 붙는 것이 맞다. 대신 세션 id 를 재사용해서, 탭을 닫고 홈에서 다시
+   * 들어오는 일 없이 그 자리에서 이어지게 한다.
+   */
+  reconnectRemoteDesktopSession: (sessionId: string) => Promise<void>;
 }
 
 /** 프롬프트로 받았지만 아직 연결 성공을 못 본 자격증명. 성공하면 저장하고 지운다. */
@@ -5174,6 +5183,15 @@ export const useMobileAppStore = create<MobileAppState>()(
         });
       };
 
+      /**
+       * 실패 문구의 `{{target}}` 에 넣을 이름.
+       *
+       * 주소를 쓰는 이유는 그것이 사용자가 확인할 것이기 때문이다(포트가 열렸는지, 주소가
+       * 맞는지). 라벨은 화면 다른 곳에 이미 있다.
+       */
+      const rdFailureTarget = (host: RdpHostRecord | VncHostRecord): string =>
+        `${host.hostname}:${host.port}`;
+
       const connectRemoteDesktopSession = async (
         rdId: string,
         host: RdpHostRecord | VncHostRecord,
@@ -5596,8 +5614,10 @@ export const useMobileAppStore = create<MobileAppState>()(
               return;
             }
             if (event.type === 'error') {
-              const errorMessage =
-                event.message ?? t('session.remoteDesktopError');
+              // 네이티브가 올려 보내는 문장도 같은 처지다 — 위 catch 와 같은 분류를 쓴다.
+              const errorMessage = event.message?.trim()
+                ? getConnectFailureMessage(event.message, rdFailureTarget(host))
+                : t('session.remoteDesktopError');
               get().updateRemoteDesktopSession(rdId, {
                 status: 'error',
                 errorMessage,
@@ -5605,7 +5625,11 @@ export const useMobileAppStore = create<MobileAppState>()(
                 lastDisconnectedAt: new Date().toISOString(),
               });
               patchConnectionView(rdId, {
-                failureLayer: null,
+                // 어느 단계에 붙일지도 분류가 정한다 — null 로 고정하면 tailnet 계층에서 난
+                // 실패까지 호스트 단계에 붙는다(SSH·SFTP 는 같은 분류를 쓴다).
+                failureLayer: event.message
+                  ? getConnectFailureLayer(event.message)
+                  : null,
                 failureMessage: errorMessage,
               });
               void (async () => {
@@ -5696,9 +5720,13 @@ export const useMobileAppStore = create<MobileAppState>()(
           await releaseRemoteDesktopRuntime(rdId, runtime);
           if (wasCancelled) return;
 
+          // **원문을 그대로 보여주지 않는다.** 코어가 올려 보내는 문장은 Go 원문이라
+          // "rdtunnel: connect target: connect tcp 10.0.0.5:3389: connection was refused"
+          // 처럼 나온다. SSH 경로와 같은 분류를 거쳐 사람이 읽는 문구로 바꾼다 — 분류되지
+          // 않은 것만 원문으로 남는다(단서를 잃지 않으려고).
           const errorMessage =
-            error instanceof Error
-              ? error.message
+            error instanceof Error && error.message.trim()
+              ? getConnectFailureMessage(error.message, rdFailureTarget(host))
               : t('session.remoteDesktopError');
           get().updateRemoteDesktopSession(rdId, {
             status: 'error',
@@ -5708,7 +5736,13 @@ export const useMobileAppStore = create<MobileAppState>()(
           });
           const currentView = get().connectionViews[rdId];
           patchConnectionView(rdId, {
-            failureLayer: currentView?.stage === 'tailnet' ? 'tailscale' : null,
+            // 분류가 계층을 알면 그것을 쓰고(문구가 tailnet 실패라고 말하는 경우),
+            // 모르면 그 순간 어느 단계였는지로 떨어뜨린다.
+            failureLayer:
+              (error instanceof Error
+                ? getConnectFailureLayer(error.message)
+                : null) ??
+              (currentView?.stage === 'tailnet' ? 'tailscale' : null),
             failureMessage: errorMessage,
             hostKeyPrompted: false,
             interactiveAuthPending: false,
@@ -8479,7 +8513,14 @@ export const useMobileAppStore = create<MobileAppState>()(
               : {}),
             ...(input.useMosh !== undefined ? { useMosh: input.useMosh } : {}),
             ...(input.jumpHostIds !== undefined
-              ? { jumpHostIds: input.jumpHostIds }
+              ? {
+                  jumpHostIds: input.jumpHostIds,
+                  // **레거시 미러도 함께 쓴다.** 읽는 쪽(normalizeJumpHostIds)은 배열이 비면
+                  // 이 값으로 폴백하므로, 배열만 비우면 방금 지운 홉을 계속 경유하고 폼을
+                  // 다시 열면 칩이 되살아난다. 데스크톱 쓰기 경로와 같은 규칙이다
+                  // (state-storage.ts / database.ts 의 `jumpHostId: jumpHostIds[0] ?? null`).
+                  jumpHostId: input.jumpHostIds?.[0] ?? null,
+                }
               : {}),
             ...(input.tailnetId !== undefined
               ? { tailnetId: input.tailnetId }
@@ -8548,6 +8589,18 @@ export const useMobileAppStore = create<MobileAppState>()(
           if (existing && existing.kind !== input.kind) {
             throw new Error(t('store.hostToEditNotFound'));
           }
+          // **만드는 것은 서버가 데이터 수준을 판정할 때만 허용한다.** 화면도 같은 규칙으로
+          // 칸을 막지만(resolveCreatableHostFormKinds) 그것은 UI 뿐이라, 라우트 파라미터로
+          // 들어오거나 폼을 열어 둔 사이 서버 판정이 떨어지면 그대로 저장된다. 이 레코드는
+          // 같은 계정의 옛 클라이언트가 받아 조용히 망가지므로 저장 자리에서 한 번 더 본다.
+          // 고치는 것은 막지 않는다 — 다른 기기에서 만들어 동기화된 호스트를 손볼 길이 없어진다.
+          if (
+            !existing &&
+            !LEGACY_TOLERATED_HOST_KINDS.has(input.kind) &&
+            get().syncStatus.dataFloorServerSupport !== 'supported'
+          ) {
+            throw new Error(t('store.hostKindNeedsDataFloor'));
+          }
           const previous =
             existing && (isRdpHostRecord(existing) || isVncHostRecord(existing))
               ? existing
@@ -8557,16 +8610,26 @@ export const useMobileAppStore = create<MobileAppState>()(
             ? input.credentials.password
             : undefined;
           const username = input.credentials?.username?.trim() || undefined;
+          const domain = input.credentials?.domain?.trim() || undefined;
           const credentialMode =
             input.credentialMode ?? (previous?.secretRef ? 'preserve' : 'replace');
-          // RDP 는 계정이 자격증명에 딸린다 — 비밀번호가 없으면 만들 것이 없다.
-          const hasReplacement = Boolean(password);
+          const previousSecret = previous?.secretRef
+            ? get().secretsByRef[previous.secretRef]
+            : undefined;
+          // RDP 는 계정이 자격증명에 딸린다 — 저장된 것이 없으면 비밀번호 없이는 만들 것이
+          // 없다. 반대로 이미 있으면 계정만 바꾸는 것도 교체다(비밀번호는 아래에서 잇는다).
+          const hasReplacement = Boolean(
+            password || (previousSecret && (username || domain)),
+          );
+          // **연결을 끊는 것은 'remove' 뿐이다.** 계정만 바꾸는 것도 교체로 받게 되면서
+          // 값이 하나도 안 실린 replace 가 들어올 수 있게 됐는데(계정을 비우고 저장), 그때
+          // undefined 로 떨어뜨리면 자격증명이 통째로 떼어진다 — 지우려던 것은 계정이었다.
           const secretRef =
-            credentialMode === 'preserve'
-              ? previous?.secretRef
+            credentialMode === 'remove'
+              ? undefined
               : credentialMode === 'replace' && hasReplacement
                 ? (previous?.secretRef ?? createLocalId('secret'))
-                : undefined;
+                : previous?.secretRef;
 
           const now = new Date().toISOString();
           const base = {
@@ -8590,12 +8653,24 @@ export const useMobileAppStore = create<MobileAppState>()(
               ? ({
                   ...base,
                   kind: 'vnc',
-                  ...(input.shared !== undefined ? { shared: input.shared } : {}),
+                  // **기본값인 쪽은 null 로 쓴다.** shared 는 없으면 공유, viewOnly 는 없으면
+                  // 꺼짐, imageQuality 는 없으면 무손실이다(VncHostRecord 주석). 기본값을
+                  // 명시값으로 굳혀 두면 나중에 기본을 바꿀 여지가 사라지고, 데스크톱이
+                  // 디스크에 쓰는 정규형과도 달라진다(state-storage.ts:1021-1035).
+                  ...(input.shared !== undefined
+                    ? { shared: input.shared === false ? false : null }
+                    : {}),
                   ...(input.viewOnly !== undefined
-                    ? { viewOnly: input.viewOnly }
+                    ? { viewOnly: input.viewOnly === true ? true : null }
                     : {}),
                   ...(input.imageQuality !== undefined
-                    ? { imageQuality: input.imageQuality }
+                    ? {
+                        imageQuality:
+                          input.imageQuality === 'balanced' ||
+                          input.imageQuality === 'fast'
+                            ? input.imageQuality
+                            : null,
+                      }
                     : {}),
                   ...(input.sshTunnelHostId !== undefined
                     ? { sshTunnelHostId: input.sshTunnelHostId }
@@ -8603,6 +8678,12 @@ export const useMobileAppStore = create<MobileAppState>()(
                 } as HostRecord)
               : ({ ...base, kind: 'rdp' } as HostRecord);
 
+          // **저장된 시크릿을 잇는다.** 처음부터 다시 만들면 이번에 넘어오지 않은 항목이
+          // 지워진다 — 비밀번호만 바꿨는데 계정이 사라지면 RDP 는 계정이 시크릿에만 있어
+          // 다음 접속이 막힌다(연결 경로가 username 을 필수로 본다).
+          const mergedUsername = username ?? previousSecret?.username;
+          const mergedDomain = domain ?? previousSecret?.domain;
+          const mergedPassword = password ?? previousSecret?.password;
           const nextSecret: LoadedManagedSecretPayload | null =
             credentialMode === 'replace' && secretRef && hasReplacement
               ? {
@@ -8611,11 +8692,9 @@ export const useMobileAppStore = create<MobileAppState>()(
                     get().secretsByRef[secretRef]?.label ??
                     `${record.label} credentials`,
                   kind: input.kind,
-                  ...(username ? { username } : {}),
-                  ...(input.credentials?.domain?.trim()
-                    ? { domain: input.credentials.domain.trim() }
-                    : {}),
-                  ...(password ? { password } : {}),
+                  ...(mergedUsername ? { username: mergedUsername } : {}),
+                  ...(mergedDomain ? { domain: mergedDomain } : {}),
+                  ...(mergedPassword ? { password: mergedPassword } : {}),
                   updatedAt: now,
                 }
               : null;
@@ -8820,6 +8899,48 @@ export const useMobileAppStore = create<MobileAppState>()(
           // 내려 탭에서는 사라지고(탭은 live 만 본다), 최근 세션 목록에는 남는다. 지우면
           // RDP/VNC 는 재연결 목록에 아예 나타나지 않는다.
           await closeRemoteDesktopSession(sessionId);
+        },
+        reconnectRemoteDesktopSession: async (sessionId: string) => {
+          if (!get().secureStateReady) {
+            throw new Error(getSecureStateLoadingMessage());
+          }
+          const session = get().remoteDesktopSessions.find(
+            item => item.id === sessionId,
+          );
+          if (!session) {
+            return;
+          }
+          // 이미 붙어 있거나 붙는 중이면 아무 일도 하지 않는다 — 런타임 핸들이 그 사실이다.
+          if (getRemoteDesktopHandle(sessionId)) {
+            return;
+          }
+          const host = get().hosts.find(item => item.id === session.hostId);
+          if (!host || !(isRdpHostRecord(host) || isVncHostRecord(host))) {
+            // 호스트를 지웠거나 종류가 바뀐 경우. 붙을 곳이 없으니 이유를 남긴다.
+            get().updateRemoteDesktopSession(sessionId, {
+              status: 'error',
+              errorMessage: t('store.sessionHostNotFound'),
+              connectionStatusMessage: null,
+            });
+            return;
+          }
+          const engineError = guardRemoteDesktopEngine(host.kind);
+          if (engineError) {
+            get().updateRemoteDesktopSession(sessionId, {
+              status: 'error',
+              errorMessage: engineError.message,
+              connectionStatusMessage: null,
+            });
+            return;
+          }
+          // 지난 오류를 먼저 지운다 — 남겨 두면 새 시도가 도는 동안 옛 실패 문구가 보인다.
+          get().updateRemoteDesktopSession(sessionId, {
+            status: 'connecting',
+            errorMessage: null,
+            connectionStatusMessage: t('session.remoteDesktopConnecting'),
+          });
+          // 만들 때와 같은 경로다(void). 실패는 그 안의 catch 가 상태로 남긴다.
+          void connectRemoteDesktopSession(sessionId, host);
         },
         connectToHost: async (hostId: string) => {
           if (!get().secureStateReady) {

@@ -146,7 +146,9 @@
     "tailnetNeedsApproval": "tailnet 관리자 승인을 기다리고 있습니다.",
     "tailnetMismatch": "설정과 다른 tailnet 에 연결되어 있습니다.",
     "targetHost": "호스트",
-    "addressInUse": "해당 포트는 이미 사용 중입니다."
+    "addressInUse": "해당 포트는 이미 사용 중입니다.",
+    "certificateDeclined": "서버 인증서를 승인하지 않아 연결을 멈췄습니다.",
+    "certificateUndecided": "인증서 확인을 기다리다 시간이 지났습니다. 다시 연결해 승인해 주세요."
   },
   "store": {
     "serverSlow": "서버 응답이 지연되고 있습니다. 다시 시도해 주세요.",
@@ -254,7 +256,8 @@
     "ssmPathDirectSsh": "SSH over SSM · 기기에서 직접",
     "ssmPathDirectShell": "SSM 셸 · 기기에서 직접",
     "ssmPathServerProxy": "SSM 셸 · 서버 경유",
-    "ssmBothFailed": "SSH: {{ssh}} · SSM 셸: {{shell}}"
+    "ssmBothFailed": "SSH: {{ssh}} · SSM 셸: {{shell}}",
+    "hostKindNeedsDataFloor": "이 서버는 계정 데이터 수준을 판정하지 못해 RDP·VNC 호스트를 만들 수 없습니다. 서버를 업데이트하면 열립니다."
   },
   "vaultGate": {
     "switchAccount": "다른 계정으로 로그인 (로그아웃)",
@@ -331,7 +334,8 @@
       "port": "포트는 1~65535 사이의 숫자여야 합니다.",
       "username": "사용자 이름을 입력해 주세요.",
       "certificatePair": "인증서 인증은 개인 키와 인증서를 함께 입력해야 합니다.",
-      "startupCommandTooLong": "Startup command가 너무 깁니다."
+      "startupCommandTooLong": "Startup command가 너무 깁니다.",
+      "password": "비밀번호를 입력해 주세요."
     },
     "editFailedTitle": "호스트 수정 실패",
     "addFailedTitle": "호스트 추가 실패",
@@ -415,7 +419,9 @@
       "nameLabel": "변수 이름",
       "valueLabel": "변수 값",
       "namePlaceholder": "LANG",
-      "valuePlaceholder": "ko_KR.UTF-8"
+      "valuePlaceholder": "ko_KR.UTF-8",
+      "invalidName": "변수 이름은 영문·숫자·밑줄만 쓸 수 있고 숫자로 시작할 수 없습니다.",
+      "tooMany": "환경 변수는 최대 {{max}}개까지 넣을 수 있습니다."
     },
     "toggles": {
       "agentForwarding": "에이전트 포워딩",
@@ -441,7 +447,8 @@
       "search": "호스트 검색",
       "empty": "점프로 쓸 SSH 호스트가 없습니다.",
       "remove": "{{label}} 빼기",
-      "count": "점프 {{count}}"
+      "count": "점프 {{count}}",
+      "tooMany": "점프 호스트는 최대 {{max}}개까지 넣을 수 있습니다."
     },
     "rd": {
       "rdpSection": "RDP 호스트",
@@ -458,7 +465,8 @@
         "fast": "속도 우선",
         "balanced": "균형",
         "lossless": "무손실"
-      }
+      },
+      "awsSsm": "SSM 경유"
     },
     "kindSection": "종류",
     "kindUnsupported": "RDP·VNC 는 이 서버에서 만들 수 없습니다. 서버를 업데이트하면 열립니다."
