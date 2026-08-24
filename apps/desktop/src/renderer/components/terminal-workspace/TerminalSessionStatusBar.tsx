@@ -13,7 +13,15 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/cn';
-import { Boxes, Columns2, Container, Network, Plug, RefreshCw, Waypoints } from '../../ui/icons';
+import {
+  Boxes,
+  Columns2,
+  Container,
+  Network,
+  Plug,
+  RefreshCw,
+  Waypoints,
+} from '../../ui/icons';
 import { Tooltip } from '../../ui';
 import { useAppStore } from '../../store/appStore';
 import { rttBandColor, rttColor } from '../../lib/rtt';
@@ -80,8 +88,10 @@ interface TerminalSessionStatusBarProps {
 // 배경) 그 조각만 떠 보여 조잡하다. `self-stretch` 로 높이를 채우고 세로 여백을 상쇄해 바와
 // 같은 높이가 되게 한다. 색은 테마마다 세기가 달라야 해서(어두운 배경에서는 같은 비율이 훨씬
 // 약하게 읽힌다) tokens.css 의 `--status-hover-bg` 가 정한다.
+// hover 띠는 자기 높이로만 그린다. `self-stretch` + 음수 세로 마진으로 줄 높이를 채우려 하면
+// 부모(내용 기반 높이) 계산에 끼어들어 pane 높이가 미세하게 흔들릴 수 있다.
 const PRESSABLE_CLASS =
-  'group flex items-center gap-1.5 self-stretch -my-[0.25rem] rounded-[4px] py-[0.25rem] transition-colors hover:bg-[var(--status-hover-bg)]';
+  'group flex items-center gap-1.5 rounded-[4px] px-[0.3rem] py-[0.1rem] transition-colors hover:bg-[var(--status-hover-bg)]';
 
 /** hover 시 라벨이 한 단계 진해진다(자식에 직접 건다). */
 const HOVER_LABEL_CLASS =
@@ -95,8 +105,7 @@ const HOVER_ICON_CLASS =
  * 자원 영역은 구분선에서 tmux 칩까지를 통째로 차지한다 — 좌우 여백(바의 gap)을 음수 마진으로
  * 상쇄하고 같은 값을 패딩으로 돌려주므로, 글자 위치는 그대로인데 띠만 이웃까지 닿는다.
  */
-const ZONE_CLASS =
-  `${PRESSABLE_CLASS} min-w-0 flex-1 gap-[0.9rem] -mx-[0.9rem] px-[0.9rem]`;
+const ZONE_CLASS = `${PRESSABLE_CLASS} min-w-0 flex-1 gap-[0.9rem]`;
 
 /** 스파크라인 크기. 10분 창은 10초 간격이라 60점이고, 60px 이면 1점이 1px 이다. */
 const SPARKLINE_WIDTH = 132;
@@ -163,29 +172,48 @@ function useRttSummary(key: string | null | undefined): RttSummary | null {
   return summary;
 }
 
-/** 스스로 폭을 재서 접힘 단계를 고른다. 못 재는 환경에서는 접지 않는다(넘쳐도 잘리기만 한다). */
-function useMeasuredWidth(
-  ref: React.RefObject<HTMLDivElement | null>,
-  override: number | undefined,
-): number | null {
+/**
+ * 스스로 폭을 재서 접힘 단계를 고른다. 못 재는 환경에서는 접지 않는다(넘쳐도 잘리기만 한다).
+ *
+ * 방어 장치 셋:
+ * - 관측자를 **콜백 ref** 로 붙인다. `useEffect` + `useRef` 로 붙이면 노드가 바뀌어도(조건부
+ *   렌더로 다시 그려질 때) effect 가 다시 돌지 않아, 낡은 노드를 붙잡은 관측자가 남고 새
+ *   노드에는 아무도 붙지 않는다.
+ * - 폭을 **정수로 반올림**하고 이전 값과 같으면 setState 를 건너뛴다. 소수점 값을 그대로
+ *   넣으면 0.x px 흔들림이 관측 → 렌더 → 레이아웃 → 관측 으로 되돌아온다.
+ * - 폭 0 은 무시한다(접혀 있는 동안) — 마지막으로 잰 값을 지켜 펼칠 때 다시 재지 않게 한다.
+ */
+function useMeasuredWidth(override: number | undefined): {
+  width: number | null;
+  attach: (node: HTMLDivElement | null) => void;
+} {
   const [width, setWidth] = useState<number | null>(null);
+  const observerRef = useRef<ResizeObserver | null>(null);
 
-  useEffect(() => {
-    const element = ref.current;
-    if (override !== undefined || !element || typeof ResizeObserver === 'undefined') {
-      return;
-    }
-    const observer = new ResizeObserver((entries) => {
-      const next = entries[0]?.contentRect.width;
-      if (typeof next === 'number') {
-        setWidth(next);
+  const attach = useCallback(
+    (node: HTMLDivElement | null) => {
+      observerRef.current?.disconnect();
+      observerRef.current = null;
+      if (override !== undefined || !node || typeof ResizeObserver === 'undefined') {
+        return;
       }
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [override, ref]);
+      const observer = new ResizeObserver((entries) => {
+        const next = entries[0]?.contentRect.width;
+        if (typeof next !== 'number' || next <= 0) {
+          return;
+        }
+        const rounded = Math.round(next);
+        setWidth((current) => (current === rounded ? current : rounded));
+      });
+      observer.observe(node);
+      observerRef.current = observer;
+    },
+    [override],
+  );
 
-  return override ?? width;
+  useEffect(() => () => observerRef.current?.disconnect(), []);
+
+  return { width: override ?? width, attach };
 }
 
 export function TerminalSessionStatusBar({
@@ -202,8 +230,7 @@ export function TerminalSessionStatusBar({
 }: TerminalSessionStatusBarProps) {
   const { t: translate } = useTranslation();
   const selectSection = useAppStore((state) => state.selectSessionPanelSection);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const measured = useMeasuredWidth(rootRef, width);
+  const { width: measured, attach } = useMeasuredWidth(width);
   const [hopsOpen, setHopsOpen] = useState(false);
   const [rttOpen, setRttOpen] = useState(false);
   const rttSummary = useRttSummary(historyKey);
@@ -236,7 +263,7 @@ export function TerminalSessionStatusBar({
     : null;
 
   return (
-    <div ref={rootRef} className={cn('relative', statusBarSpacing)}>
+    <div ref={attach} className={cn('relative', statusBarSpacing)}>
       <div
         className={cn(statusBarChrome, 'gap-[0.9rem]', stale && 'opacity-60')}
         role="status"

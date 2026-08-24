@@ -849,7 +849,16 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           각 바가 아래 여백을 들고 있으면 여러 개가 쌓일 때 간격이 그만큼 배로 벌어진다.
           tmux 경로(SessionShell)도 같은 statusBarStack 을 쓴다 — 컨테이너가 갈리면 같은
           바가 연결 방식에 따라 다른 간격으로 놓인다. */}
-      <div className={cn(statusBarStack, showHeader && 'px-0 pb-0 pt-[0.25rem]')}>
+      <div
+        className={cn(
+          statusBarStack,
+          // 아래 여백만 없애 바가 카드 바닥에 닿게 한다. 위쪽 gap 을 음수 마진으로 지우려
+          // 했다가 pane 이 화면 밖으로 11px 흘러나갔다 — flex 에서 마지막 자식의 음수 top
+          // 마진은 남는 공간 계산을 키워 flex-1 인 터미널이 컨테이너보다 커진다.
+          'pb-0',
+          showHeader && 'px-0 pt-[0.25rem]',
+        )}
+      >
         {/* mosh 는 자기 줄에 둔다. tmux·자원 바와 같이 뜨는 조합이 아니라 어차피 한 줄이다. */}
         {tab?.moshState ? (
           <TerminalMoshStatusBar

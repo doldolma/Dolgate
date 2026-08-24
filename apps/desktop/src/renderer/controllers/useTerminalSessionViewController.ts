@@ -1627,7 +1627,10 @@ export function useTerminalSessionViewController({
   }, []);
 
   const shareState = tab?.sessionShare ?? null;
-  const canShareSession = tab?.source === 'host';
+  // tmux pane 에는 공유 버튼을 두지 않는다. control mode 는 pane 이 여럿이라 화면마다 떠 있는
+  // 알약이 그만큼 늘고, 공유는 pane 하나가 아니라 그 세션을 여는 일이라 pane 단위 버튼이
+  // 가리키는 대상이 흐리다. (일반 SSH 세션에서는 그대로 있다.)
+  const canShareSession = tab?.source === 'host' && !tab?.tmux;
   const canStartShare =
     canShareSession && tab?.status === 'connected' && shareState?.status !== 'starting';
   const visibleSessionShareChatNotifications = useMemo(

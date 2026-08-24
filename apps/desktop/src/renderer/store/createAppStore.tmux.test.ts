@@ -62,6 +62,36 @@ describe("createAppStore tmux session grouping", () => {
     );
   });
 
+  it("pane 탭이 control 세션의 호스트를 물려받는다", () => {
+    // hostId 가 비어 있으면 호스트에 딸린 화면(세션 패널의 포트·테마 섹션)이 "이 세션에는
+    // 호스트가 없다" 로 뜬다 — pane 은 control 세션이 붙은 그 호스트에 있다.
+    const store = createAppStore(createMockApi());
+    store.setState({
+      tabs: [
+        {
+          id: CTL,
+          stableId: CTL,
+          sessionId: CTL,
+          source: "host",
+          hostId: "h1",
+          title: "Prod",
+          status: "connected",
+        },
+      ],
+    } as never);
+
+    store.getState().handleTmuxLayoutChange(CTL, "@0", layoutFor(0), {
+      index: 0,
+      name: "zsh",
+      active: true,
+    });
+
+    const pane = store
+      .getState()
+      .tabs.find((tab) => tab.sessionId === `tmux:${CTL}:0`);
+    expect(pane?.hostId).toBe("h1");
+  });
+
   it("adds a second window to the SAME group without a second top tab", () => {
     const store = createAppStore(createMockApi());
     const api = store.getState();

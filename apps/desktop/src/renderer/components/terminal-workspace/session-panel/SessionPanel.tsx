@@ -38,6 +38,7 @@ import { SessionPanelTheme } from './SessionPanelTheme';
 import { SessionPanelTmux } from './SessionPanelTmux';
 import {
   useSessionCommandBlocks,
+  useSessionPanelMetricsSessionId,
   useSessionPanelSender,
   useSessionShellHistory,
 } from './useSessionPanelTarget';
@@ -102,6 +103,8 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
   const blocks = useSessionCommandBlocks(sessionId ?? '');
   const shellHistory = useSessionShellHistory(sessionId ?? '');
   const sender = useSessionPanelSender(sessionId ?? '', blocks);
+  // 지표는 발행 쪽 키로 읽는다 — tmux 는 창당 한 번만 폴링하며 첫 pane 키로 담는다.
+  const metricsSessionId = useSessionPanelMetricsSessionId(sessionId ?? '');
   // 열었을 때 빈 레일만 보이면 "이게 뭐지" 가 된다. 처음 열면 히스토리를 보여 준다.
   const section = sessionId
     ? (sectionBySessionId[sessionId] ?? DEFAULT_SECTION)
@@ -215,9 +218,9 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
         ) : section === 'snippets' ? (
           <SessionPanelSnippets sender={sender} />
         ) : section === 'resources' ? (
-          <SessionPanelResources sessionId={sessionId} />
+          <SessionPanelResources sessionId={metricsSessionId} />
         ) : section === 'processes' ? (
-          <SessionPanelProcesses sessionId={sessionId} />
+          <SessionPanelProcesses sessionId={metricsSessionId} />
         ) : section === 'ports' ? (
           <SessionPanelPorts hostId={targetTab?.hostId ?? null} />
         ) : section === 'tmux' ? (

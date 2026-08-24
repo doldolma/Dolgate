@@ -56,16 +56,16 @@ beforeEach(() => {
 });
 
 describe('감지만 된 상태', () => {
-  it('버전과 세션 목록을 펼친다', () => {
+  it('버전은 목록 머리에 붙고 세션이 목록으로 펼쳐진다', () => {
     render(<SessionPanelTmux sessionId="session-1" />);
-    expect(screen.getByText('tmux 3.4 감지')).toBeTruthy();
+    expect(screen.getByText('tmux 3.4')).toBeTruthy();
     expect(screen.getByText('work')).toBeTruthy();
     expect(screen.getByText('창 3개')).toBeTruthy();
   });
 
-  it('붙기는 이 탭 자리에서 control mode 로 attach 한다', () => {
+  it('세션을 고르면 새 탭에서 control mode 로 attach 한다', () => {
     render(<SessionPanelTmux sessionId="session-1" />);
-    fireEvent.click(screen.getAllByRole('button', { name: '붙기' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'work 세션으로' }));
     expect(connectHost).toHaveBeenCalledWith(
       'host-1',
       120,
@@ -73,8 +73,8 @@ describe('감지만 된 상태', () => {
       undefined,
       true,
       "tmux -CC attach -t 'work'",
-      // 감지 상태에서는 이 세션의 탭 자리를 재사용한다 — 같은 화면에서 tmux 가 열려야 한다.
-      'session-1',
+      // 탭 자리를 재사용하지 않는다 — 보고 있던 셸을 닫지 않고 새 탭에서 연다.
+      undefined,
       undefined,
       '3.4',
     );
@@ -93,7 +93,7 @@ describe('감지만 된 상태', () => {
       undefined,
       true,
       "tmux -CC new-session -s 'deploy'",
-      'session-1',
+      undefined,
       undefined,
       '3.4',
     );
@@ -114,9 +114,11 @@ describe('감지만 된 상태', () => {
     expect(killTmuxSession).toHaveBeenCalledWith('session-1', 'work');
   });
 
-  it('다른 데서 붙어 있는 세션을 표시한다', () => {
+  it('다른 클라이언트가 쓰고 있는 세션을 표시한다', () => {
+    // tmux 는 한 세션에 클라이언트 여럿이 붙을 수 있고 그때 창 크기가 가장 작은 쪽에 맞춰진다
+    // — 들어가기 전에 알려 준다.
     render(<SessionPanelTmux sessionId="session-1" />);
-    expect(screen.getByText('다른 곳에서 붙어 있음')).toBeTruthy();
+    expect(screen.getByText('다른 곳에서 사용 중')).toBeTruthy();
   });
 
   it('control mode 를 못 쓰는 버전에서만 열기를 남긴다', () => {
@@ -176,16 +178,18 @@ describe('붙어 있는 상태', () => {
     });
   });
 
-  it('붙어 있는 세션을 알려 주고 그 세션에는 붙기를 두지 않는다', () => {
+  it('지금 보고 있는 세션을 표시하고 그 행은 누를 수 없다', () => {
     render(<SessionPanelTmux sessionId="session-1" />);
-    expect(screen.getByText('work 에 붙어 있습니다')).toBeTruthy();
-    // 목록의 붙기 버튼은 다른 세션(logs)에만 있다.
-    expect(screen.getAllByRole('button', { name: '붙기' })).toHaveLength(1);
+    // 붙어 있는 세션에는 "현재 화면" 딱지가 붙는다.
+    expect(screen.getByText('현재 화면')).toBeTruthy();
+    // 전환할 수 있는 행은 다른 세션(logs)뿐이다.
+    expect(screen.getByRole('button', { name: 'logs 세션으로' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'work 세션으로' })).toBeNull();
   });
 
   it('다른 세션으로 전환하면 현재 tmux 를 살린 채 새 탭으로 붙는다', () => {
     render(<SessionPanelTmux sessionId="session-1" />);
-    fireEvent.click(screen.getByRole('button', { name: '붙기' }));
+    fireEvent.click(screen.getByRole('button', { name: 'logs 세션으로' }));
     expect(connectHost).toHaveBeenCalledWith(
       'host-1',
       120,

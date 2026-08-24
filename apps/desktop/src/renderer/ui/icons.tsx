@@ -65,6 +65,7 @@ export {
   Radio,
   History,
   TextCursorInput,
+  PanelBottom,
   PanelRight,
   Sparkles,
   Activity,

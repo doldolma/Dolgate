@@ -6,6 +6,7 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { useAppStore } from '../../../store/appStore';
+import { listWorkspaceSessionIds } from '../terminalWorkspaceLayout';
 import {
   getCommandBlocks,
   getCommandBlocksVersion,
@@ -93,6 +94,32 @@ export function useSessionPanelTargetSessionId(
     }
     return activeSessionId;
   }, [activeSessionId, open, tabs]);
+}
+
+/**
+ * 지표를 읽을 세션. **tmux pane 이면 그 창의 첫 pane** 이다.
+ *
+ * 지표 폴링은 세션(pane) 단위 레지스트리에 담기는데, tmux 는 pane 여럿이 control 세션 하나를
+ * 공유하므로 pane 마다 돌리면 같은 호스트를 여러 번 찌른다. 그래서 창당 한 번만 돌리고 그
+ * 값을 **첫 pane 키**로 발행한다(SessionShell 의 tmuxMetricsSessionId). 패널이 포커스된 pane
+ * 키로 읽으면 첫 pane 이 아닐 때 빈 서랍을 열게 되어 `읽는 중` 으로 남았다 — 발행 쪽 키에
+ * 맞춘다. 관찰 요청(주기 좁히기·프로세스 얹기)도 같은 키로 걸려야 듣는다.
+ */
+export function useSessionPanelMetricsSessionId(sessionId: string): string {
+  const workspaces = useAppStore((state) => state.workspaces);
+
+  return useMemo(() => {
+    if (!sessionId) {
+      return sessionId;
+    }
+    const workspace = workspaces.find((entry) =>
+      listWorkspaceSessionIds(entry.layout).includes(sessionId),
+    );
+    if (!workspace?.tmux) {
+      return sessionId;
+    }
+    return listWorkspaceSessionIds(workspace.layout)[0] ?? sessionId;
+  }, [sessionId, workspaces]);
 }
 
 /**

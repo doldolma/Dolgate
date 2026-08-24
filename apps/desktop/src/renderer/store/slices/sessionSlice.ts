@@ -323,6 +323,15 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               const existing = new Set(state.tabs.map((t) => t.sessionId));
               const live = new Set(paneSessionIds);
               const now = new Date().toISOString();
+              // pane 은 control 세션이 붙은 그 호스트에 있다. hostId 를 비워 두면 호스트에
+              // 딸린 화면들(세션 패널의 포트·테마 섹션 등)이 "이 세션에는 호스트가 없다" 로
+              // 보인다. control 세션 탭 → 그룹 순서로 찾는다(재연결 중에는 그룹만 남는다).
+              const paneHostId =
+                state.tabs.find((tab) => tab.sessionId === controlSessionId)?.hostId ??
+                state.tmuxGroups.find(
+                  (group) => group.controlSessionId === controlSessionId,
+                )?.hostId ??
+                null;
               const newPaneTabs: TerminalTab[] = paneSessionIds
                 .filter((sid) => !existing.has(sid))
                 .map((sid) => {
@@ -337,7 +346,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                     stableId: `tmux-pane:${windowId}:${paneNum}`,
                     sessionId: sid,
                     source: "host",
-                    hostId: null,
+                    hostId: paneHostId,
                     title: `pane ${paneNum}`,
                     status: "connected",
                     hasReceivedOutput: true,

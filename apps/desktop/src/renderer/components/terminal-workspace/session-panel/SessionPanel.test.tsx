@@ -92,6 +92,7 @@ function setState(overrides: Record<string, unknown> = {}): void {
     respondAiApproval: vi.fn(),
     openSettingsSection: vi.fn(),
     openExternalUrl: vi.fn(),
+    workspaces: [],
     tabs: [
       { sessionId: 'session-1', title: 'Prod', paneKind: 'terminal' },
       { sessionId: 'session-2', title: 'Staging', paneKind: 'terminal' },
@@ -126,6 +127,59 @@ afterEach(() => {
   unregisterTerminalHooks('pane-1', hooks);
   clearHostMetrics('session-1');
   setShellHistory('session-1', null);
+});
+
+describe('tmux 창의 지표', () => {
+  it('첫 pane 이 아닌 pane 에서도 자원 값을 찾는다', () => {
+    // 폴링은 창당 한 번만 돌며 **첫 pane 키**로 발행한다(SessionShell). 패널이 포커스된 pane
+    // 키로 읽으면 빈 서랍을 열게 되어 `읽는 중` 으로 남았다.
+    setState({
+      sessionPanelSectionBySessionId: { 'tmux:ctl:1': 'resources' },
+      workspaces: [
+        {
+          id: 'ws-1',
+          activeSessionId: 'tmux:ctl:1',
+          tmux: { controlSessionId: 'ctl', windowId: '@0' },
+          layout: {
+            kind: 'split',
+            direction: 'row',
+            ratio: 0.5,
+            first: { kind: 'leaf', sessionId: 'tmux:ctl:0' },
+            second: { kind: 'leaf', sessionId: 'tmux:ctl:1' },
+          },
+        },
+      ],
+      tabs: [
+        { sessionId: 'tmux:ctl:0', title: 'pane 0', paneKind: 'terminal' },
+        { sessionId: 'tmux:ctl:1', title: 'pane 1', paneKind: 'terminal' },
+      ],
+    });
+    publishHostMetrics('tmux:ctl:0', {
+      status: 'ready',
+      metrics: {
+        cpuPercent: 42,
+        memUsedKb: 1048576,
+        memTotalKb: 2097152,
+        rxBytesPerSec: 0,
+        txBytesPerSec: 0,
+        diskReadBytesPerSec: 0,
+        diskWriteBytesPerSec: 0,
+        loadAvg1: 0.1,
+        cpuCount: 2,
+        uptimeSeconds: 60,
+        disks: [],
+      },
+      processes: null,
+      updatedAtMs: Date.now(),
+    });
+
+    render(<SessionPanel sessionId="tmux:ctl:1" />);
+    expect(screen.getByText('42%')).toBeTruthy();
+
+    // 관찰 요청도 발행 키에 걸려야 주기가 좁혀진다.
+    expect(getHostMetricsWatch('tmux:ctl:0').boosted).toBe(true);
+    clearHostMetrics('tmux:ctl:0');
+  });
 });
 
 describe('SessionPanel', () => {

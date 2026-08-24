@@ -12,8 +12,9 @@ import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../../../store/appStore';
 import { supportsTmuxControlMode } from '../../../lib/tmux-version';
 import { refreshTmuxSessions } from '../../../services/desktop/terminal';
+import { cn } from '../../../lib/cn';
 import { Button, Input, Tooltip } from '../../../ui';
-import { LogOut, Play, RefreshCw, X } from '../../../ui/icons';
+import { LogOut, RefreshCw, X } from '../../../ui/icons';
 import { listWorkspaceSessionIds } from '../terminalWorkspaceLayout';
 import { SessionPanelEmpty } from './SessionPanelEmpty';
 
@@ -77,8 +78,8 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
   const attachedName = group?.sessionName ?? null;
 
   /**
-   * 세션에 붙는다. 붙어 있을 때는 **새 그룹 탭**으로 열고(현재 tmux 를 살린다), 감지 상태에서는
-   * 이 세션의 탭 자리를 재사용한다(같은 화면에서 tmux 가 열리는 것으로 보이게).
+   * 세션에 붙는다. **늘 새 탭**으로 연다 — 지금 보고 있는 세션(SSH 든 다른 tmux 든)을 닫지
+   * 않는다. 탭 자리를 재사용하면 tmux 를 열어 보려다 원래 셸을 잃는다.
    */
   function attach(name: string): void {
     if (!hostId) {
@@ -91,7 +92,7 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
       undefined,
       true,
       `tmux -CC attach -t ${quote(name)}`,
-      group ? undefined : tab?.sessionId,
+      undefined,
       undefined,
       version ?? undefined,
     );
@@ -103,6 +104,7 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
       return;
     }
     // strict new — 이름이 겹치면 tmux 가 에러를 내고 연결 실패로 보인다(조용히 붙지 않는다).
+    // attach 와 같이 새 탭으로 연다.
     void connectHost(
       hostId,
       120,
@@ -110,7 +112,7 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
       undefined,
       true,
       `tmux -CC new-session -s ${quote(name)}`,
-      group ? undefined : tab?.sessionId,
+      undefined,
       undefined,
       version ?? undefined,
     );
@@ -165,13 +167,11 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 px-2.5 pb-1 pt-2">
-        <span className="min-w-0 flex-1 truncate text-[0.72rem] text-[var(--text-soft)]">
-          {attachedName
-            ? translate('sessionPanel.tmux.attachedTo', { name: attachedName })
-            : translate('sessionPanel.tmux.detectedVersion', {
-                version: version ?? '—',
-              })}
+      {/* 버전은 회색 문장 한 줄을 차지하지 않고 목록 머리에 붙인다 — 이 섹션에서 자주 할 일은
+          세션을 고르는 것이고, 버전은 한 번 보면 되는 값이다. */}
+      <div className="flex items-center gap-1 px-2.5 pb-1 pt-1.5">
+        <span className="min-w-0 flex-1 truncate text-[0.68rem] text-[var(--text-soft)]">
+          {version ? `tmux ${version}` : null}
         </span>
         <Tooltip label={translate('sessionPanel.tmux.refresh')}>
           <button
@@ -197,6 +197,38 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
         ) : null}
       </div>
 
+      {/* 새 세션 입력은 목록 위, 헤더 바로 아래다 — 목록이 짧을 때 아래에 두면 빈 공간
+          건너 멀리 떨어져 보인다. 입력은 늘 열려 있다(버튼을 눌러 여는 단계를 두면 가장
+          단순한 동작에 뎁스가 하나 생긴다).
+          크기는 **이 패널의 검색창과 같은 값**을 쓴다(SessionPanelSearch: min-h-9 · rounded-9 ·
+          text-0.78rem). 기본 Input 은 폼용 44px 이라 좁은 패널에서 혼자 커 보이고, 손으로 다른
+          값을 고르면 같은 패널 안에서 입력마다 크기가 달라진다. */}
+      <div className="flex min-w-0 items-center gap-1.5 px-2.5 py-2">
+        <Input
+          value={newName}
+          onChange={(event) => setNewName(event.target.value)}
+          placeholder={translate('sessionPanel.tmux.namePlaceholder')}
+          aria-label={translate('sessionPanel.tmux.namePlaceholder')}
+          className="min-h-9 min-w-0 flex-1 rounded-[9px] px-2.5 py-1.5 text-[0.78rem]"
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              create();
+            }
+          }}
+        />
+        {/* Button sm 도 같은 높이(min-h-9)라 그대로 쓰면 입력과 나란히 맞는다. */}
+        <Button
+          variant="secondary"
+          size="sm"
+          className="shrink-0 rounded-[9px] px-3 text-[0.78rem]"
+          disabled={!newName.trim()}
+          onClick={create}
+        >
+          {translate('sessionPanel.tmux.create')}
+        </Button>
+      </div>
+
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5">
         {sessions.length === 0 ? (
           <p className="px-2.5 py-2 text-[0.75rem] leading-[1.5] text-[var(--text-soft)]">
@@ -205,69 +237,77 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
         ) : (
           sessions.map((session) => {
             const active = session.name === attachedName;
+            const label = active
+              ? translate('sessionPanel.tmux.currentScreen')
+              : translate('sessionPanel.tmux.attachTo', { name: session.name });
             return (
-              <div key={session.name} className="group rounded-[9px] px-2.5 py-1.5">
-                <div className="flex items-baseline gap-2">
+              // 행 전체가 "이 세션으로" 다 — 이 섹션에서 하는 일이 거의 그것뿐이라 버튼을 따로
+              // 두지 않는다. 종료(×)만 안쪽 버튼으로 남고, 그 클릭은 행까지 번지지 않는다.
+              <div
+                key={session.name}
+                role="button"
+                tabIndex={0}
+                aria-label={label}
+                aria-current={active ? 'true' : undefined}
+                onClick={active ? undefined : () => attach(session.name)}
+                onKeyDown={(event) => {
+                  if (!active && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault();
+                    attach(session.name);
+                  }
+                }}
+                className={cn(
+                  'relative flex items-center gap-2 rounded-[9px] py-2 pl-3 pr-1.5',
+                  active
+                    ? 'bg-[var(--selection-tint)]'
+                    : 'cursor-pointer hover:bg-[var(--surface-muted)]',
+                )}
+              >
+                {/* 지금 보고 있는 화면이라는 표시 — 왼쪽 액센트 바 + 글자색 + 딱지. */}
+                {active ? (
                   <span
-                    className={cnLabel(active)}
-                    title={session.name}
-                  >
-                    {session.name}
-                  </span>
-                  <span className="shrink-0 text-[0.7rem] text-[var(--text-soft)]">
-                    {translate('sessionPanel.tmux.windows', { count: session.windows })}
-                  </span>
-                  {/* 붙어 있는 세션에는 attach 를 두지 않는다 — 눌러도 같은 곳이다. */}
-                  {active ? null : (
-                    <Tooltip label={translate('sessionPanel.tmux.attach')}>
-                      <button
-                        type="button"
-                        aria-label={translate('sessionPanel.tmux.attach')}
-                        className={ACTION_CLASS}
-                        onClick={() => attach(session.name)}
-                      >
-                        <Play className="h-3 w-3" aria-hidden />
-                      </button>
-                    </Tooltip>
-                  )}
-                  <Tooltip label={translate('sessionPanel.tmux.kill')}>
-                    <button
-                      type="button"
-                      aria-label={translate('sessionPanel.tmux.kill')}
-                      className={ACTION_CLASS}
-                      onClick={() => killTmuxSession(sessionId, session.name)}
-                    >
-                      <X className="h-3 w-3" aria-hidden />
-                    </button>
-                  </Tooltip>
-                </div>
-                {session.attached && !active ? (
-                  <p className="text-[0.7rem] text-[var(--text-soft)]">
-                    {translate('sessionPanel.tmux.attachedElsewhere')}
-                  </p>
+                    className="absolute left-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-r bg-[var(--accent-strong)]"
+                    aria-hidden
+                  />
                 ) : null}
+                <span
+                  className={cn(
+                    'min-w-0 flex-1 truncate font-mono text-[0.82rem]',
+                    active ? 'text-[var(--accent-strong)]' : 'text-[var(--text)]',
+                  )}
+                  title={session.name}
+                >
+                  {session.name}
+                </span>
+                {active ? (
+                  <span className="shrink-0 rounded-[5px] bg-[var(--surface)] px-[0.35rem] text-[0.66rem] font-medium text-[var(--accent-strong)]">
+                    {translate('sessionPanel.tmux.currentScreen')}
+                  </span>
+                ) : session.attached ? (
+                  <span className="shrink-0 text-[0.66rem] text-[var(--text-soft)]">
+                    {translate('sessionPanel.tmux.attachedElsewhere')}
+                  </span>
+                ) : null}
+                <span className="shrink-0 text-[0.7rem] text-[var(--text-soft)]">
+                  {translate('sessionPanel.tmux.windows', { count: session.windows })}
+                </span>
+                <Tooltip label={translate('sessionPanel.tmux.kill')}>
+                  <button
+                    type="button"
+                    aria-label={translate('sessionPanel.tmux.kill')}
+                    className={ACTION_CLASS}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      killTmuxSession(sessionId, session.name);
+                    }}
+                  >
+                    <X className="h-3 w-3" aria-hidden />
+                  </button>
+                </Tooltip>
               </div>
             );
           })
         )}
-      </div>
-
-      <div className="flex items-center gap-1.5 px-2.5 py-2">
-        <Input
-          value={newName}
-          onChange={(event) => setNewName(event.target.value)}
-          placeholder={translate('sessionPanel.tmux.namePlaceholder')}
-          className="min-w-0 flex-1"
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              create();
-            }
-          }}
-        />
-        <Button variant="secondary" size="sm" disabled={!newName.trim()} onClick={create}>
-          {translate('sessionPanel.tmux.create')}
-        </Button>
       </div>
 
       {/* control mode 를 못 쓰는 버전에서만 남기는 진입점. 그 외에는 위 목록·생성으로 전부 된다. */}
@@ -280,10 +320,4 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
       ) : null}
     </div>
   );
-}
-
-function cnLabel(active: boolean): string {
-  return active
-    ? 'min-w-0 flex-1 truncate text-[0.78rem] font-semibold text-[var(--accent-strong)]'
-    : 'min-w-0 flex-1 truncate text-[0.78rem] text-[var(--text)]';
 }
