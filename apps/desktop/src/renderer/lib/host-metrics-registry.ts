@@ -11,7 +11,7 @@
 // 스토어에 두지 않는 이유는 terminal-command-blocks 와 같다 — 폴링마다 전역 리렌더를 만들 이유가
 // 없고, 보는 쪽은 구독으로 충분하다.
 
-import type { HostMetrics, HostProcess } from './host-metrics';
+import type { HostMetrics, HostProcess, HostSystemInfo } from './host-metrics';
 
 /** 패널이 보고 있을 때의 폴링 주기. 상태바용 10초로는 프로세스 목록이 굼떠 보인다. */
 export const HOST_METRICS_BOOST_INTERVAL_MS = 3_000;
@@ -30,6 +30,12 @@ export interface HostMetricsSnapshot {
   metrics: HostMetrics | null;
   /** 프로세스를 요청하지 않았거나 못 읽었으면 null(빈 배열과 구분한다). */
   processes: HostProcess[] | null;
+  /**
+   * 세션 동안 바뀌지 않는 값들(호스트명·커널·아키텍처·CPU 종류).
+   *
+   * 자원 섹션이 열릴 때 한 번 받아 여기 남긴다 — 이후 왕복에는 실어 보내지 않는다.
+   */
+  system: HostSystemInfo | null;
   updatedAtMs: number | null;
 }
 
@@ -37,6 +43,7 @@ const EMPTY: HostMetricsSnapshot = {
   status: 'off',
   metrics: null,
   processes: null,
+  system: null,
   updatedAtMs: null,
 };
 
@@ -45,7 +52,7 @@ interface Entry {
   version: number;
   listeners: Set<() => void>;
   /** 관찰 요청 토큰들. 살아 있는 동안 주기를 좁히고, 프로세스를 원하면 그것도 함께 켠다. */
-  watchers: Set<{ processes: boolean }>;
+  watchers: Set<{ processes: boolean; system: boolean }>;
   watchVersion: number;
   watchListeners: Set<() => void>;
 }
@@ -132,6 +139,8 @@ export interface HostMetricsWatch {
   boosted: boolean;
   /** 프로세스 목록까지 수집할지. */
   processes: boolean;
+  /** 정적 시스템 정보를 이번 왕복에 태울지(아직 캐시가 없을 때만 true). */
+  system: boolean;
 }
 
 /**
@@ -141,13 +150,16 @@ export interface HostMetricsWatch {
  */
 export function watchHostMetrics(
   sessionId: string,
-  options: { processes?: boolean } = {},
+  options: { processes?: boolean; system?: boolean } = {},
 ): () => void {
   if (!sessionId) {
     return () => undefined;
   }
   const entry = entryFor(sessionId);
-  const token = { processes: options.processes === true };
+  const token = {
+    processes: options.processes === true,
+    system: options.system === true,
+  };
   entry.watchers.add(token);
   entry.watchVersion += 1;
   notify(entry.watchListeners);
@@ -163,16 +175,19 @@ export function watchHostMetrics(
 export function getHostMetricsWatch(sessionId: string): HostMetricsWatch {
   const entry = entries.get(sessionId);
   if (!entry || entry.watchers.size === 0) {
-    return { boosted: false, processes: false };
+    return { boosted: false, processes: false, system: false };
   }
   let processes = false;
+  let system = false;
   for (const watcher of entry.watchers) {
-    if (watcher.processes) {
-      processes = true;
+    processes = processes || watcher.processes;
+    system = system || watcher.system;
+    if (processes && system) {
       break;
     }
   }
-  return { boosted: true, processes };
+  // 이미 받아 둔 값이 있으면 다시 묻지 않는다 — 세션 동안 바뀌지 않는 값이다.
+  return { boosted: true, processes, system: system && entry.snapshot.system === null };
 }
 
 /** 관찰 요청이 바뀐 횟수. 발행자가 주기·명령을 다시 정하는 신호로 쓴다. */

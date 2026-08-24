@@ -6,11 +6,13 @@ import {
   buildRunPayload,
   filterByQuery,
   isAtPrompt,
+  resolveDefaultSessionPanelSection,
   resolveHistoryActions,
   resolveSnippetActions,
   type SessionPanelHistoryItem,
   limitListItems,
   SESSION_PANEL_LIST_LIMIT,
+  splitProcessCommand,
 } from './session-panel';
 
 const AT_PROMPT = { atPrompt: true, bracketedPaste: true };
@@ -218,17 +220,32 @@ describe('buildShellHistoryItems', () => {
     ).toEqual(['docker ps', 'pwd', 'ls']);
   });
 
-  it('연달아 같은 줄은 접는다', () => {
-    // `ls` 를 스무 번 친 기록이 목록의 스무 줄을 먹지 않게.
+  // 실제 파일은 `ls`·`pwd`·`clear` 가 사이사이 섞여 수십 번 나온다 — 연달아 있는 것만 접으면
+  // 목록이 그대로 그 반복으로 채워진다.
+  it('떨어져 있어도 같은 명령은 최신 하나로 접는다', () => {
     expect(
-      buildShellHistoryItems(['ls', 'ls', 'ls', 'pwd', 'ls']).map((item) => item.command),
-    ).toEqual(['ls', 'pwd', 'ls']);
+      buildShellHistoryItems([
+        'ls',
+        'clear',
+        'ls',
+        'pwd',
+        'clear',
+        'docker ps',
+      ]).map((item) => item.command),
+    ).toEqual(['docker ps', 'clear', 'pwd', 'ls']);
   });
 
-  it('같은 명령이 떨어져 있으면 각각 남긴다 — 키가 겹치지 않는다', () => {
-    const items = buildShellHistoryItems(['ls', 'pwd', 'ls']);
-    expect(items).toHaveLength(3);
-    expect(new Set(items.map((item) => item.key)).size).toBe(3);
+  it('몇 번 쳤는지 센다', () => {
+    const items = buildShellHistoryItems(['ls', 'pwd', 'ls', 'ls']);
+    expect(items.map((item) => [item.command, item.count])).toEqual([
+      ['ls', 3],
+      ['pwd', 1],
+    ]);
+  });
+
+  it('키는 겹치지 않는다', () => {
+    const items = buildShellHistoryItems(['ls', 'pwd', 'htop']);
+    expect(new Set(items.map((item) => item.key)).size).toBe(items.length);
   });
 });
 
@@ -244,5 +261,44 @@ describe('목록 상한', () => {
     expect(shown).toHaveLength(SESSION_PANEL_LIST_LIMIT);
     expect(shown[0]).toBe(0);
     expect(hidden).toBe(2000 - SESSION_PANEL_LIST_LIMIT);
+  });
+});
+
+describe('splitProcessCommand', () => {
+  it('절대 경로면 프로그램 이름만 남기고 인자를 뗀다', () => {
+    expect(splitProcessCommand('/usr/bin/node server.js --port 3000')).toEqual({
+      program: 'node',
+      args: 'server.js --port 3000',
+    });
+  });
+
+  it('경로가 아니면 그대로 둔다 — 커널 스레드 이름이 잘리지 않게', () => {
+    expect(splitProcessCommand('[kworker/0:1]')).toEqual({
+      program: '[kworker/0:1]',
+      args: '',
+    });
+    expect(splitProcessCommand('nginx: worker process')).toEqual({
+      program: 'nginx:',
+      args: 'worker process',
+    });
+  });
+
+  it('빈 문자열도 던지지 않는다', () => {
+    expect(splitProcessCommand('   ')).toEqual({ program: '', args: '' });
+  });
+});
+
+describe('resolveDefaultSessionPanelSection', () => {
+  // 패널을 여는 이유가 대개 "이 서버 지금 어때" 다.
+  it('붙은 호스트 세션은 자원으로 시작한다', () => {
+    expect(resolveDefaultSessionPanelSection('host')).toBe('resources');
+  });
+
+  // 원격 부하라는 개념이 없는 세션이다 — 자원을 열면 읽을 수 없다는 화면만 남는다.
+  it('지표가 없는 세션은 이력으로 시작한다', () => {
+    expect(resolveDefaultSessionPanelSection('local')).toBe('history');
+    expect(resolveDefaultSessionPanelSection('serial')).toBe('history');
+    expect(resolveDefaultSessionPanelSection(null)).toBe('history');
+    expect(resolveDefaultSessionPanelSection(undefined)).toBe('history');
   });
 });

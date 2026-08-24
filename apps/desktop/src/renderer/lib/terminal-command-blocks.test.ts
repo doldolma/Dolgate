@@ -10,6 +10,7 @@ import {
   getCommandBlocksVersion,
   jumpToAdjacentCommandBlock,
   noteContinuationPrompt,
+  noteInsertedCommand,
   notePromptCommandStart,
   noteReportedCommand,
   readBlockOutput,
@@ -183,6 +184,55 @@ describe('terminal-command-blocks', () => {
     const [block] = getCommandBlocks(SESSION);
     expect(block.command).toBe('cat <<EOF\nline1\nEOF');
     expect(block.commandUnreliable).toBe(true);
+  });
+
+  it('앱이 넣은 원문과 화면이 같으면 여러 줄도 재실행할 수 있다', () => {
+    // 우리가 괄호 붙여넣기로 넣으면 bash 는 PS2 를 찍지 않는다(readline 버퍼 안의 개행).
+    // 화면에는 오염 없는 값이 그대로 있는데도 "증명할 수 없다" 로 막혀 있었다 — 방금 우리가
+    // 넣은 그 문자열이면 대조가 증명이 된다.
+    const fake = createFakeTerminal(['$ cat \\', 'test.txt']);
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    noteInsertedCommand(SESSION, 'cat \\\ntest.txt');
+    fake.buffer.cursorY = 2;
+    beginCommandBlock(SESSION, fake.terminal, null);
+
+    const [block] = getCommandBlocks(SESSION);
+    expect(block.command).toBe('cat \\\ntest.txt');
+    expect(block.commandUnreliable).toBe(false);
+  });
+
+  it('넣은 뒤 줄을 고쳤으면 대조가 어긋나 그대로 막힌다', () => {
+    // 추측으로 재실행을 열어 주지 않는다.
+    const fake = createFakeTerminal(['$ cat \\', 'other.txt']);
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    noteInsertedCommand(SESSION, 'cat \\\ntest.txt');
+    fake.buffer.cursorY = 2;
+    beginCommandBlock(SESSION, fake.terminal, null);
+
+    const [block] = getCommandBlocks(SESSION);
+    expect(block.command).toBe('cat \\\nother.txt');
+    expect(block.commandUnreliable).toBe(true);
+  });
+
+  it('넣은 원문은 한 블록에만 쓰인다 — 다음 명령에 붙지 않는다', () => {
+    const first = createFakeTerminal(['$ cat \\', 'test.txt']);
+    first.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, first.terminal);
+    noteInsertedCommand(SESSION, 'cat \\\ntest.txt');
+    first.buffer.cursorY = 2;
+    beginCommandBlock(SESSION, first.terminal, null);
+
+    // 사용자가 이번에는 직접 여러 줄을 쳤다(PS2 보고 없음) → 다시 막혀야 한다.
+    const second = createFakeTerminal(['$ cat \\', 'test.txt']);
+    second.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, second.terminal);
+    second.buffer.cursorY = 2;
+    beginCommandBlock(SESSION, second.terminal, null);
+
+    const blocks = getCommandBlocks(SESSION);
+    expect(blocks[blocks.length - 1].commandUnreliable).toBe(true);
   });
 
   it('접힘 경계에서 명령에 속한 공백을 잘라먹지 않는다', () => {

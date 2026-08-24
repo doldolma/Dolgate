@@ -134,6 +134,8 @@
   "connectFailure": {
     "agentUnreachable": "Could not reach ssh-agent. Check the agent on your desktop.",
     "awsAuth": "The AWS sign-in expired. Sign in again on your desktop and retry.",
+    "awsPermission": "AWS denied the request for lack of permission. Check this profile IAM user/role policy.",
+    "awsPermissionAction": "AWS denied the {{action}} request. Check that this profile IAM user/role is allowed that action.",
     "hostKeyUntrusted": "This host's key is not trusted yet.",
     "hostKeyDeclined": "You declined this host key, so the connection ended.",
     "cancelled": "The connection was cancelled.",
@@ -201,6 +203,7 @@
     "awsSftpAzRequired": "Availability zone information is required for AWS SFTP.",
     "awsSftpHostKeyFailed": "Could not verify the AWS SFTP host key.",
     "hostKindUnsupported": "This host kind is not supported on mobile yet.",
+    "hostKindNeedsDataFloor": "This server cannot record the account data floor, so RDP and VNC hosts cannot be created. Update the server to enable them.",
     "authKindUnsupported": "This authentication method is not supported on mobile.",
     "connectCancelled": "The connection was cancelled.",
     "sshConnectFailed": "The SSH connection failed.",
@@ -252,12 +255,13 @@
     "jumpHostMustBeSsh": "A jump host has to be an SSH host.",
     "jumpHostCredentialMissing": "No credentials for {{label}}, so it cannot be used as a jump host.",
     "ssmDirectFailed": "Could not start the SSM session.",
+    "ssmNotManaged": "This instance is not recognized as an SSM managed instance. Check the SSM Agent, the instance IAM role, and whether it is online.",
+    "ssmAgentOffline": "The instance SSM Agent is not connected (PingStatus: {{status}}). Check the agent, then try again.",
     "ssmSshFellBack": "Could not connect over SSH, so the SSM shell was used instead.",
     "ssmPathDirectSsh": "SSH over SSM · direct from this device",
     "ssmPathDirectShell": "SSM shell · direct from this device",
     "ssmPathServerProxy": "SSM shell · through the server",
-    "ssmBothFailed": "SSH: {{ssh}} · SSM shell: {{shell}}",
-    "hostKindNeedsDataFloor": "This server cannot record the account data floor, so RDP and VNC hosts cannot be created. Update the server to enable them."
+    "ssmBothFailed": "SSH: {{ssh}} · SSM shell: {{shell}}"
   },
   "vaultGate": {
     "switchAccount": "Sign in with a different account (sign out)",
@@ -455,6 +459,7 @@
       "vncSection": "VNC host",
       "domain": "Domain",
       "domainPlaceholder": "e.g. CORP",
+      "awsSsm": "Via SSM",
       "credentialKeepHint": "Leave blank to keep the saved credential.",
       "passwordKeepPlaceholder": "Leave blank to keep",
       "vncOptions": "Display",
@@ -465,8 +470,7 @@
         "fast": "Fastest",
         "balanced": "Balanced",
         "lossless": "Lossless"
-      },
-      "awsSsm": "Via SSM"
+      }
     },
     "kindSection": "Kind",
     "kindUnsupported": "This server cannot host RDP or VNC entries. Update the server to enable them."

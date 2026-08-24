@@ -37,6 +37,7 @@ import type { TerminalSessionPaneProps } from './types';
 import { Button, NoticeCard } from '../../ui';
 import { findHostKeyPromptForSession, resolveConnectionFailurePresentation } from '../../store/utils';
 import {
+  resolveAwsFailureNotice,
   resolveTailnetFailureGuidance,
   resolveTailnetLoginRejectedGuidance,
   resolveTailnetPhaseMessage,
@@ -224,6 +225,14 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         ? resolveConnectionFailurePresentation(tab.errorMessage)
         : null,
     [tab?.errorMessage],
+  );
+  const awsFailureNotice = useMemo(
+    () =>
+      resolveAwsFailureNotice({
+        reasonCode: tab?.awsDiagnosticReasonCode,
+        errorMessage: tab?.errorMessage,
+      }),
+    [tab?.awsDiagnosticReasonCode, tab?.errorMessage],
   );
   /**
    * 이 호스트의 tailnet 이 지금 어떤 상태인지. 설정 화면과 같은 값을 본다.
@@ -641,7 +650,27 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
 
       {tab?.errorMessage ? (
         <NoticeCard tone="danger" className="mx-[0.55rem] mt-[0.55rem]" role="alert">
-          {tailnetFailureMessage ?? connectionFailurePresentation?.message ?? tab.errorMessage}
+          {awsFailureNotice ? (
+            <span className="grid gap-[0.2rem]">
+              <strong className="text-[var(--text)]">
+                {awsFailureNotice.title}
+              </strong>
+              <span>
+                {tailnetFailureMessage ??
+                  connectionFailurePresentation?.message ??
+                  tab.errorMessage}
+              </span>
+              {awsFailureNotice.action ? (
+                <span className="text-[var(--text-soft)]">
+                  {awsFailureNotice.action}
+                </span>
+              ) : null}
+            </span>
+          ) : (
+            (tailnetFailureMessage ??
+              connectionFailurePresentation?.message ??
+              tab.errorMessage)
+          )}
         </NoticeCard>
       ) : null}
       {serialNotice ? (

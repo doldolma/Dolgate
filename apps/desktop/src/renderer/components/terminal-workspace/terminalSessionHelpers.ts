@@ -1,10 +1,45 @@
-import type {
-  SessionShareChatMessage,
-  SessionShareSnapshotInput,
-  TerminalTab,
+import {
+  extractAwsIamAction,
+  type AwsSftpDiagnosticReasonCode,
+  type SessionShareChatMessage,
+  type SessionShareSnapshotInput,
+  type TerminalTab,
 } from '@shared';
+import {
+  getAwsSftpDiagnosticAction,
+  getAwsSftpDiagnosticTitle,
+} from '../../../common/aws-diagnostics';
 import { resolveConnectionFailurePresentation } from '../../store/utils';
 import { getFormatLocale, t } from '../../i18n';
+
+/**
+ * AWS preflight 가 판정한 실패에 얹을 제목과 "할 일" 한 줄.
+ *
+ * 판정은 이미 메인에서 끝났다 — 화면은 오류 문장을 다시 뜯지 않고 그 코드로 문구를 고른다.
+ * SFTP 실패 화면이 쓰는 것과 같은 카탈로그라 두 화면이 같은 말을 한다.
+ *
+ * 조치 줄은 **실패 문구가 아직 말하지 않은 경우에만** 얹는다. 권한 거부는 문구 쪽이 이미
+ * 거부된 액션 이름까지 말하므로 대개 제목만 남고, 관리 대상 아님·사용자명 없음처럼 "무엇을
+ * 하라" 는 말이 없던 실패에는 조치 줄이 새로 붙는다 — 같은 말을 두 번 하면 둘 다 안 읽힌다.
+ */
+export function resolveAwsFailureNotice(input: {
+  reasonCode?: AwsSftpDiagnosticReasonCode | null;
+  errorMessage?: string | null;
+}): { title: string; action: string | null } | null {
+  const reasonCode = input.reasonCode;
+  const errorMessage = input.errorMessage?.trim();
+  if (!reasonCode || !errorMessage) {
+    return null;
+  }
+  const action = getAwsSftpDiagnosticAction(reasonCode);
+  const spokenAction = extractAwsIamAction(
+    resolveConnectionFailurePresentation(errorMessage).message,
+  );
+  return {
+    title: getAwsSftpDiagnosticTitle(reasonCode),
+    action: spokenAction && action.includes(spokenAction) ? null : action,
+  };
+}
 
 export const SESSION_SHARE_CHAT_TOAST_LIMIT = 3;
 export const SESSION_SHARE_CHAT_TOAST_TTL_MS = 8000;

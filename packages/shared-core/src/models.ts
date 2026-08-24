@@ -116,6 +116,9 @@ export type AwsSftpDiagnosticReasonCode =
   | 'missing-availability-zone'
   | 'host-key-missing'
   | 'not-managed-instance'
+  | 'access-denied'
+  | 'ssm-access-denied'
+  | 'describe-access-denied'
   | 'eic-access-denied'
   | 'eic-invalid-os-user'
   | 'eic-az-mismatch'
@@ -1023,6 +1026,9 @@ export const AWS_SFTP_DIAGNOSTIC_REASON_CODES: readonly AwsSftpDiagnosticReasonC
   'missing-availability-zone',
   'host-key-missing',
   'not-managed-instance',
+  'access-denied',
+  'ssm-access-denied',
+  'describe-access-denied',
   'eic-access-denied',
   'eic-invalid-os-user',
   'eic-az-mismatch',
@@ -1072,12 +1078,36 @@ export function inferAwsSftpDiagnosticReasonCode(
       ? 'eic-invalid-os-user'
       : 'missing-username';
   }
+  // 권한 거부. 어느 **액션**이 거부됐는지까지 갈라 준다 — "권한이 없습니다" 만으로는 고칠
+  // 정책을 찾을 수 없고, 예전에는 EIC 단계가 아니면 전부 'unknown' 으로 떨어져서 "확인되지
+  // 않은 오류" 로 뭉개졌다(정작 원인은 확실한데).
+  //
+  // 단계보다 문장에 적힌 액션 이름을 먼저 믿는다 — 한 단계에서 여러 액션을 부르므로(관리 대상
+  // 확인과 터널 열기가 같은 단계에 겹치는 경로가 있다) 단계만으로 고르면 엉뚱한 액션을 짚는다.
+  //
+  // 한국어는 "권한" 만으로 잡지 않는다 — 제한 시간 초과 안내에도 "권한을 확인한 뒤" 가 들어
+  // 있어서, 그것까지 권한 문제로 단정하면 되지도 않을 정책 수정을 시키게 된다.
   if (
-    /accessdenied|unauthorizedoperation|not authorized|is not authorized|권한|거부/.test(
+    /accessdenied|unauthorizedoperation|not authorized|is not authorized|권한이 없|권한 부족|권한 문제|거부/.test(
       normalized,
     )
   ) {
-    return stage === 'sending-public-key' ? 'eic-access-denied' : 'unknown';
+    if (
+      /ec2-instance-connect:sendsshpublickey/.test(normalized) ||
+      stage === 'sending-public-key'
+    ) {
+      return 'eic-access-denied';
+    }
+    if (/ssm:startsession/.test(normalized) || stage === 'opening-tunnel') {
+      return 'ssm-access-denied';
+    }
+    if (
+      /ssm:describeinstanceinformation/.test(normalized) ||
+      stage === 'checking-ssm'
+    ) {
+      return 'describe-access-denied';
+    }
+    return 'access-denied';
   }
   if (/availability zone.+match|az.+match|zone.+mismatch/.test(normalized)) {
     return 'eic-az-mismatch';
@@ -3083,6 +3113,13 @@ export interface ContainerConnectionProgressEvent {
   hostId: string;
   stage: ConnectionProgressStage;
   message: string;
+  /**
+   * 실패 진단의 원인 코드. AWS preflight 가 실패를 알릴 때만 실린다(진행 중에는 없다).
+   *
+   * 이 통로로 터미널 탭까지 온다 — AWS EC2 터미널 연결은 SFTP 와 **같은** preflight 를 지나고,
+   * 그 실패 사건이 aws-ec2-ssh 엔드포인트로 흘러 이 탭에 매핑된다.
+   */
+  reasonCode?: AwsSftpDiagnosticReasonCode;
 }
 
 export interface HostContainerSummary {
@@ -3513,6 +3550,14 @@ export interface TerminalTab {
   status: 'pending' | 'connecting' | 'connected' | 'disconnecting' | 'closed' | 'error';
   errorMessage?: string;
   connectionProgress?: TerminalConnectionProgress | null;
+  /**
+   * AWS preflight 가 판정한 실패 원인 코드. 그 실패로 끝난 연결에만 남는다.
+   *
+   * 오류 문장을 다시 뜯어 원인을 추측하지 않기 위해 들고 있는다 — 판정은 이미 메인에서 끝났고,
+   * 화면은 그 코드로 "무엇을 해야 하는지" 한 줄을 고른다(문구 카탈로그는 앱이 가진다).
+   * 'unknown' 은 담지 않는다 — 고를 안내가 없고, 그 문구는 SFTP 를 가리켜 터미널에선 틀린다.
+   */
+  awsDiagnosticReasonCode?: AwsSftpDiagnosticReasonCode | null;
   /** 다단 ProxyJump 연결 중 각 홉의 상태(연결 화면 표시용). 새 연결 시도 시 리셋, 비었으면 미표시. */
   connectionHops?: TerminalConnectionHop[] | null;
   /** 자동 재연결 진행 중일 때만 채워지는 표시용 상태. 평시엔 null/undefined. */

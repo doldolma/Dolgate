@@ -3,6 +3,7 @@ import type { TerminalTab } from "@shared";
 import { t } from "../../i18n";
 import { resolveConnectionFailurePresentation } from "../../store/utils";
 import {
+  resolveAwsFailureNotice,
   resolveConnectionOverlayMessage,
   resolveConnectionOverlayTitle,
   resolveTailnetFailureGuidance,
@@ -204,5 +205,49 @@ describe("resolveTailnetPhaseMessage", () => {
     expect(resolveTailnetPhaseMessage("회사망", { state: "running" })).toBeNull();
     expect(resolveTailnetPhaseMessage("회사망", { state: "stopped" })).toBeNull();
     expect(resolveTailnetPhaseMessage("회사망", undefined)).toBeNull();
+  });
+});
+
+describe("resolveAwsFailureNotice", () => {
+  it("판정된 실패가 없으면 아무것도 얹지 않는다", () => {
+    expect(
+      resolveAwsFailureNotice({ reasonCode: null, errorMessage: "boom" }),
+    ).toBeNull();
+    expect(
+      resolveAwsFailureNotice({
+        reasonCode: "not-managed-instance",
+        errorMessage: "",
+      }),
+    ).toBeNull();
+  });
+
+  // 문구가 "무엇을 하라" 를 말하지 않던 실패다 — 조치 줄이 새로 붙는다.
+  it("조치가 없던 실패에는 할 일을 붙인다", () => {
+    const notice = resolveAwsFailureNotice({
+      reasonCode: "not-managed-instance",
+      errorMessage: "[SSM 상태 확인] 인스턴스가 SSM 관리 대상으로 확인되지 않습니다.",
+    });
+    expect(notice?.title).toBe(t("awsDiagnostic.title.notManagedInstance"));
+    expect(notice?.action).toBe(t("awsDiagnostic.action.notManagedInstance"));
+  });
+
+  // 권한 거부는 실패 문구가 이미 액션 이름까지 말한다 — 같은 말을 두 번 하면 둘 다 안 읽힌다.
+  it("실패 문구가 이미 같은 액션을 말했으면 조치 줄을 접는다", () => {
+    const notice = resolveAwsFailureNotice({
+      reasonCode: "ssm-access-denied",
+      errorMessage:
+        "[SSM 터널 열기] User: arn:aws:sts::123456789012:assumed-role/DevRole/dolma is not authorized to perform: ssm:StartSession on resource: arn:aws:ec2:ap-northeast-2:123456789012:instance/i-0abc",
+    });
+    expect(notice?.title).toBe(t("awsDiagnostic.title.ssmAccessDenied"));
+    expect(notice?.action).toBeNull();
+  });
+
+  // 같은 코드라도 문구가 액션 이름을 말하지 않았으면(단계로 판정된 경우) 조치 줄이 그것을 말한다.
+  it("문구가 액션을 말하지 않았으면 조치 줄로 알려 준다", () => {
+    const notice = resolveAwsFailureNotice({
+      reasonCode: "ssm-access-denied",
+      errorMessage: "[SSM 터널 열기] AccessDeniedException",
+    });
+    expect(notice?.action).toContain("ssm:StartSession");
   });
 });

@@ -2801,6 +2801,15 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                     event.stage === "browser-login" ? "browser" : "none",
                 },
               ),
+              // preflight 가 실패를 판정하면 그 원인 코드를 탭에 남긴다 — 곧 도착할 실패 화면이
+              // 원문을 다시 뜯지 않고 "무엇을 해야 하는지" 를 여기서 고른다.
+              //
+              // 진행 중 사건(코드가 없는 사건)마다 지운다. 탭은 재연결에도 그대로 쓰이므로,
+              // 지우지 않으면 지난 실패의 안내가 다음 실패에 그대로 붙는다.
+              awsDiagnosticReasonCode:
+                event.reasonCode && event.reasonCode !== "unknown"
+                  ? event.reasonCode
+                  : null,
               lastEventAt: new Date().toISOString(),
             };
           });

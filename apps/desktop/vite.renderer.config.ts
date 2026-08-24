@@ -38,6 +38,17 @@ export default mergeConfig(baseConfig, {
   test: {
     environment: 'jsdom',
     setupFiles: '../../vitest.setup.ts',
+    // **한 테스트에 주는 총 시간.** vitest 기본값은 5초인데, 이 스위트의 비동기 단언
+    // (waitFor·findBy)은 하나당 3초까지 기다릴 수 있다(vitest.setup.ts 의 asyncUtilTimeout).
+    // 순차로 세 번 기다리는 테스트가 흔해서, 워커가 잠깐 굶으면 단언은 아직 여유가 있는데
+    // **테스트 상한이 먼저 닫혀** 산발적으로 실패했다(단독 실행은 늘 통과 — 실기기에서
+    // 시뮬레이터·번들러를 함께 돌릴 때 겪었다).
+    //
+    // 상한을 늘려도 진짜 실패는 그대로 3초에 "요소를 찾을 수 없다"로 잡힌다 — 바뀌는 것은
+    // 멈춘 테스트가 죽기까지 걸리는 시간뿐이다.
+    testTimeout: 20_000,
+    // 훅도 같은 이유다. beforeEach 가 무거운 트리를 그리는 파일이 있다.
+    hookTimeout: 20_000,
     server: {
       // react-i18next 를 인라인해 Vite 파이프라인(=위의 alias)을 타게 한다. 외부화되면
       // Node 해석으로 로드되어 alias 를 우회하기 때문이다.

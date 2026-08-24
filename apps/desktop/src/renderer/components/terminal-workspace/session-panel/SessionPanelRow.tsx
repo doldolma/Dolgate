@@ -16,8 +16,29 @@ import { useTranslation } from 'react-i18next';
 interface SessionPanelRowProps {
   /** 명령 또는 스니펫 텍스트. 여러 줄이면 여러 줄로 보인다. */
   text: string;
-  /** 두 번째 줄(작업 디렉터리·시각·종료 코드·키워드). */
+  /**
+   * 명령 오른쪽, 버튼 앞에 놓이는 작은 표시(반복 횟수 등).
+   *
+   * hover 로 나타나는 버튼과 자리를 다투지 않는다 — 버튼은 늘 자리를 잡고 있으므로 이 값이
+   * 있어도 줄이 밀리지 않는다.
+   */
+  trailing?: ReactNode;
+  /**
+   * 한 줄짜리 목록을 촘촘하게. 위아래 여백과 버튼을 한 단계 줄인다.
+   *
+   * 이전 명령처럼 딸린 정보가 없는(작업 디렉터리도, 종료 코드도 없는) 목록에 쓴다 — 짧은 명령
+   * 한 줄에 40px 을 쓰면 화면에 스무 줄밖에 안 들어가 목록을 훑는 데 계속 스크롤해야 한다.
+   */
+  dense?: boolean;
+  /** 두 번째 줄 왼쪽(작업 디렉터리·키워드). */
   meta?: ReactNode;
+  /**
+   * 두 번째 줄 오른쪽(시각·소요·종료 코드).
+   *
+   * 왼쪽 문구와 한 문자열로 이으면 줄마다 길이가 달라 숫자가 세로로 맞지 않는다. 오른쪽에
+   * 붙여 두면 목록 전체에서 같은 자리에 온다.
+   */
+  metaTrailing?: ReactNode;
   actions: SessionPanelActions;
   /** 잠긴 버튼에 붙이는 이유(툴팁). 줄 안에 딱지로 늘어놓지 않는다. */
   blockedHint?: string | null;
@@ -33,12 +54,14 @@ function RowAction({
   label,
   hint,
   disabled,
+  dense,
   onClick,
   children,
 }: {
   label: string;
   hint?: string | null;
   disabled: boolean;
+  dense?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -53,7 +76,12 @@ function RowAction({
           event.stopPropagation();
           onClick();
         }}
-        className="grid h-6 w-6 place-items-center rounded-[7px] text-[var(--text-soft)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--text)] disabled:pointer-events-none disabled:opacity-30"
+        className={cn(
+          'grid place-items-center rounded-[7px] text-[var(--text-soft)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--text)] disabled:pointer-events-none disabled:opacity-30',
+          // 줄 높이를 정하는 것은 글자가 아니라 이 버튼이다 — 촘촘한 목록에서는 이것도 줄여야
+          // 여백만 줄인 것보다 실제로 짧아진다.
+          dense ? 'h-5 w-5' : 'h-6 w-6',
+        )}
       >
         {children}
       </button>
@@ -61,11 +89,24 @@ function RowAction({
   );
 }
 
+/** 버튼 안 아이콘 크기. 촘촘한 줄에서는 버튼과 함께 한 단계 줄인다. */
+function iconClass(dense?: boolean): string {
+  return dense ? 'h-3 w-3' : 'h-3.5 w-3.5';
+}
+
 /**
  * 복사 버튼. 누르면 잠깐 체크로 바뀐다 — 클립보드는 눈에 보이는 변화가 없어서, 반응이 없으면
  * 복사가 됐는지 알 수 없다(AI 패널의 코드블록 복사와 같은 방식).
  */
-function CopyRowAction({ disabled, onCopy }: { disabled: boolean; onCopy: () => void }) {
+function CopyRowAction({
+  disabled,
+  dense,
+  onCopy,
+}: {
+  disabled: boolean;
+  dense?: boolean;
+  onCopy: () => void;
+}) {
   const { t: translate } = useTranslation();
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -84,6 +125,7 @@ function CopyRowAction({ disabled, onCopy }: { disabled: boolean; onCopy: () => 
     <RowAction
       label={copied ? translate('sessionPanel.copied') : translate('sessionPanel.copy')}
       disabled={disabled}
+      dense={dense}
       onClick={() => {
         onCopy();
         setCopied(true);
@@ -94,9 +136,12 @@ function CopyRowAction({ disabled, onCopy }: { disabled: boolean; onCopy: () => 
       }}
     >
       {copied ? (
-        <Check className="h-3.5 w-3.5 text-[var(--success-text)]" aria-hidden />
+        <Check
+          className={cn(iconClass(dense), 'text-[var(--success-text)]')}
+          aria-hidden
+        />
       ) : (
-        <Copy className="h-3.5 w-3.5" aria-hidden />
+        <Copy className={iconClass(dense)} aria-hidden />
       )}
     </RowAction>
   );
@@ -104,7 +149,10 @@ function CopyRowAction({ disabled, onCopy }: { disabled: boolean; onCopy: () => 
 
 export function SessionPanelRow({
   text,
+  trailing,
+  dense,
   meta,
+  metaTrailing,
   actions,
   blockedHint,
   onCopy,
@@ -133,7 +181,8 @@ export function SessionPanelRow({
           : undefined
       }
       className={cn(
-        'group rounded-[9px] px-2.5 py-2 transition-colors',
+        'group rounded-[9px] px-2.5 transition-colors',
+        dense ? 'py-1' : 'py-2',
         onActivate && 'cursor-pointer',
         'hover:bg-[var(--surface-muted)] focus-visible:bg-[var(--surface-muted)] focus-visible:outline-none',
       )}
@@ -154,30 +203,45 @@ export function SessionPanelRow({
             </p>
           ))}
         </div>
+        {trailing ? (
+          <span
+            className={cn(
+              'shrink-0 tabular-nums text-[0.68rem] text-[var(--text-muted)]',
+              dense ? 'mt-[0.1rem]' : 'mt-[0.2rem]',
+            )}
+          >
+            {trailing}
+          </span>
+        ) : null}
         <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-focus-visible:opacity-100 group-hover:opacity-100">
-          <CopyRowAction disabled={!actions.canCopy} onCopy={onCopy} />
+          <CopyRowAction disabled={!actions.canCopy} dense={dense} onCopy={onCopy} />
           <RowAction
             label={translate('sessionPanel.insert')}
             hint={blockedHint}
             disabled={!actions.canInsert}
+            dense={dense}
             onClick={onInsert}
           >
-            <TextCursorInput className="h-3.5 w-3.5" aria-hidden />
+            <TextCursorInput className={iconClass(dense)} aria-hidden />
           </RowAction>
           <RowAction
             label={translate('sessionPanel.run')}
             hint={blockedHint}
             disabled={!actions.canRun}
+            dense={dense}
             onClick={onRun}
           >
-            <Play className="h-3.5 w-3.5" aria-hidden />
+            <Play className={iconClass(dense)} aria-hidden />
           </RowAction>
         </div>
       </div>
-      {meta ? (
-        <p className="mt-0.5 truncate text-[0.7rem] leading-[1.4] text-[var(--text-soft)]">
-          {meta}
-        </p>
+      {meta || metaTrailing ? (
+        <div className="mt-0.5 flex items-baseline gap-2 text-[0.7rem] leading-[1.4] text-[var(--text-soft)]">
+          <span className="min-w-0 flex-1 truncate">{meta}</span>
+          {metaTrailing ? (
+            <span className="shrink-0 tabular-nums">{metaTrailing}</span>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

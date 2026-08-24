@@ -16,6 +16,7 @@ import { cn } from '../../../lib/cn';
 import { Button, Input, Tooltip } from '../../../ui';
 import { LogOut, RefreshCw, X } from '../../../ui/icons';
 import { listWorkspaceSessionIds } from '../terminalWorkspaceLayout';
+import { BOOTSTRAP_TERMINAL_SIZE } from '../../terminal-resize';
 import { SessionPanelEmpty } from './SessionPanelEmpty';
 
 interface SessionPanelTmuxProps {
@@ -78,24 +79,44 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
   const attachedName = group?.sessionName ?? null;
 
   /**
+   * connectHost 를 이 섹션에서 부르는 **단 한 곳**.
+   *
+   * connectHost 는 위치 인자가 열 개고 그중 여럿이 tmux 전용이라, 호출부마다 `undefined` 를
+   * 세어 채우면 한 칸만 밀려도 뜻이 조용히 바뀐다(예: replaceSessionId 자리에 값이 들어가면
+   * 지금 보고 있는 탭을 닫아 버린다). 이름 있는 필드로 받아 여기서 한 번만 자리를 맞춘다.
+   */
+  function openTmuxTab(options: {
+    /** control mode 로 붙을 때 실행할 tmux 명령. passthrough 경로는 넘기지 않는다. */
+    controlModeCommand?: string;
+    /** 이 세션이 있던 탭 자리를 물려받는다(그 탭은 사라진다). */
+    replaceSessionId?: string;
+    /** control mode 를 못 쓰는 버전에서 접속 직후 셸에 타이핑할 명령. */
+    startupCommandOverride?: string;
+  }): void {
+    if (!hostId) {
+      return;
+    }
+    const controlMode = options.controlModeCommand !== undefined;
+    void connectHost(
+      hostId,
+      BOOTSTRAP_TERMINAL_SIZE.cols,
+      BOOTSTRAP_TERMINAL_SIZE.rows,
+      undefined,
+      controlMode,
+      options.controlModeCommand,
+      options.replaceSessionId,
+      undefined,
+      controlMode ? (version ?? undefined) : undefined,
+      options.startupCommandOverride,
+    );
+  }
+
+  /**
    * 세션에 붙는다. **늘 새 탭**으로 연다 — 지금 보고 있는 세션(SSH 든 다른 tmux 든)을 닫지
    * 않는다. 탭 자리를 재사용하면 tmux 를 열어 보려다 원래 셸을 잃는다.
    */
   function attach(name: string): void {
-    if (!hostId) {
-      return;
-    }
-    void connectHost(
-      hostId,
-      120,
-      32,
-      undefined,
-      true,
-      `tmux -CC attach -t ${quote(name)}`,
-      undefined,
-      undefined,
-      version ?? undefined,
-    );
+    openTmuxTab({ controlModeCommand: `tmux -CC attach -t ${quote(name)}` });
   }
 
   function create(): void {
@@ -105,40 +126,23 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
     }
     // strict new — 이름이 겹치면 tmux 가 에러를 내고 연결 실패로 보인다(조용히 붙지 않는다).
     // attach 와 같이 새 탭으로 연다.
-    void connectHost(
-      hostId,
-      120,
-      32,
-      undefined,
-      true,
-      `tmux -CC new-session -s ${quote(name)}`,
-      undefined,
-      undefined,
-      version ?? undefined,
-    );
+    openTmuxTab({ controlModeCommand: `tmux -CC new-session -s ${quote(name)}` });
     setNewName('');
   }
 
   /**
    * control mode 를 못 쓰는 tmux(2.6 미만)의 유일한 진입점. 일반 SSH 세션으로 열고 접속 직후
-   * 호환 attach-or-create 명령을 자동 입력한다(passthrough).
+   * 호환 attach-or-create 명령을 자동 입력한다(passthrough). 원래 탭 자리를 물려받아 "이 화면에서
+   * 계속" 이 된다.
    */
   function openLegacy(): void {
-    if (!hostId || !tab) {
+    if (!tab) {
       return;
     }
-    void connectHost(
-      hostId,
-      120,
-      32,
-      undefined,
-      false,
-      undefined,
-      tab.sessionId,
-      undefined,
-      undefined,
-      PASSTHROUGH_TMUX_COMMAND,
-    );
+    openTmuxTab({
+      replaceSessionId: tab.sessionId,
+      startupCommandOverride: PASSTHROUGH_TMUX_COMMAND,
+    });
   }
 
   if (!tab || !hostId) {
@@ -243,19 +247,12 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
             return (
               // 행 전체가 "이 세션으로" 다 — 이 섹션에서 하는 일이 거의 그것뿐이라 버튼을 따로
               // 두지 않는다. 종료(×)만 안쪽 버튼으로 남고, 그 클릭은 행까지 번지지 않는다.
+              // 행 전체가 하나의 버튼이 아니라, **누르는 영역이 버튼**이고 종료(×)는 그 옆에
+              // 나란히 둔다. 예전에는 행에 role="button" 을 주고 그 안에 종료 버튼을 품었는데,
+              // 버튼 안의 버튼은 보조기술에서 어느 것을 누르는지 알려 줄 방법이 없다.
               <div
                 key={session.name}
-                role="button"
-                tabIndex={0}
-                aria-label={label}
                 aria-current={active ? 'true' : undefined}
-                onClick={active ? undefined : () => attach(session.name)}
-                onKeyDown={(event) => {
-                  if (!active && (event.key === 'Enter' || event.key === ' ')) {
-                    event.preventDefault();
-                    attach(session.name);
-                  }
-                }}
                 className={cn(
                   'relative flex items-center gap-2 rounded-[9px] py-2 pl-3 pr-1.5',
                   active
@@ -270,36 +267,41 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
                     aria-hidden
                   />
                 ) : null}
-                <span
-                  className={cn(
-                    'min-w-0 flex-1 truncate font-mono text-[0.82rem]',
-                    active ? 'text-[var(--accent-strong)]' : 'text-[var(--text)]',
-                  )}
-                  title={session.name}
+                <button
+                  type="button"
+                  aria-label={label}
+                  disabled={active}
+                  onClick={() => attach(session.name)}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
                 >
-                  {session.name}
-                </span>
-                {active ? (
-                  <span className="shrink-0 rounded-[5px] bg-[var(--surface)] px-[0.35rem] text-[0.66rem] font-medium text-[var(--accent-strong)]">
-                    {translate('sessionPanel.tmux.currentScreen')}
+                  <span
+                    className={cn(
+                      'min-w-0 flex-1 truncate font-mono text-[0.82rem]',
+                      active ? 'text-[var(--accent-strong)]' : 'text-[var(--text)]',
+                    )}
+                    title={session.name}
+                  >
+                    {session.name}
                   </span>
-                ) : session.attached ? (
-                  <span className="shrink-0 text-[0.66rem] text-[var(--text-soft)]">
-                    {translate('sessionPanel.tmux.attachedElsewhere')}
+                  {active ? (
+                    <span className="shrink-0 rounded-[5px] bg-[var(--surface)] px-[0.35rem] text-[0.66rem] font-medium text-[var(--accent-strong)]">
+                      {translate('sessionPanel.tmux.currentScreen')}
+                    </span>
+                  ) : session.attached ? (
+                    <span className="shrink-0 text-[0.66rem] text-[var(--text-soft)]">
+                      {translate('sessionPanel.tmux.attachedElsewhere')}
+                    </span>
+                  ) : null}
+                  <span className="shrink-0 text-[0.7rem] text-[var(--text-soft)]">
+                    {translate('sessionPanel.tmux.windows', { count: session.windows })}
                   </span>
-                ) : null}
-                <span className="shrink-0 text-[0.7rem] text-[var(--text-soft)]">
-                  {translate('sessionPanel.tmux.windows', { count: session.windows })}
-                </span>
+                </button>
                 <Tooltip label={translate('sessionPanel.tmux.kill')}>
                   <button
                     type="button"
                     aria-label={translate('sessionPanel.tmux.kill')}
                     className={ACTION_CLASS}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      killTmuxSession(sessionId, session.name);
-                    }}
+                    onClick={() => killTmuxSession(sessionId, session.name)}
                   >
                     <X className="h-3 w-3" aria-hidden />
                   </button>

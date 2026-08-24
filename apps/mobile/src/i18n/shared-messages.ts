@@ -110,6 +110,7 @@ const CONNECT_FAILURE_KEYS = {
   "address-in-use": "connectFailure.addressInUse",
   "agent-unreachable": "connectFailure.agentUnreachable",
   "aws-auth": "connectFailure.awsAuth",
+  "aws-permission": "connectFailure.awsPermission",
   "host-key-untrusted": "connectFailure.hostKeyUntrusted",
   "host-key-declined": "connectFailure.hostKeyDeclined",
   cancelled: "connectFailure.cancelled",
@@ -127,6 +128,9 @@ const CONNECT_FAILURE_KEYS = {
 
 export const CONNECT_FAILURE_MESSAGE_KEYS: readonly string[] = [
   ...Object.values(CONNECT_FAILURE_KEYS),
+  // 액션 이름을 아는 경우에만 쓰는 변형. 위 맵에는 코드 하나당 키 하나만 들어가므로 여기서
+  // 더한다 — 이 목록은 문구가 사전에 실제로 있는지 검사하는 데 쓰인다.
+  "connectFailure.awsPermissionAction",
 ];
 
 /**
@@ -151,6 +155,15 @@ export function getConnectFailureMessage(
   const reason = getConnectionFailureReason(normalized);
   if (reason.code === "unknown") {
     return normalized;
+  }
+  // 권한 부족은 어느 액션이 거부됐는지가 곧 할 일이다 — 분류기가 문장에서 액션 이름을 뽑아
+  // 주면 그것을 그대로 말해 준다(재로그인으로 풀리는 aws-auth 와 구분해야 한다).
+  if (reason.code === "aws-permission") {
+    return reason.awsAction
+      ? i18next.t("connectFailure.awsPermissionAction", {
+          action: reason.awsAction,
+        })
+      : i18next.t("connectFailure.awsPermission");
   }
   return i18next.t(CONNECT_FAILURE_KEYS[reason.code], {
     target: target?.trim() || i18next.t("connectFailure.targetHost"),

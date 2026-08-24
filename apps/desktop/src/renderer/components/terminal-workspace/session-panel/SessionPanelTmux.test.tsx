@@ -77,6 +77,8 @@ describe('감지만 된 상태', () => {
       undefined,
       undefined,
       '3.4',
+      // control mode 경로에는 startup 명령 덮어쓰기가 없다(passthrough 전용).
+      undefined,
     );
   });
 
@@ -96,6 +98,8 @@ describe('감지만 된 상태', () => {
       undefined,
       undefined,
       '3.4',
+      // control mode 경로에는 startup 명령 덮어쓰기가 없다(passthrough 전용).
+      undefined,
     );
   });
 
@@ -201,6 +205,8 @@ describe('붙어 있는 상태', () => {
       undefined,
       undefined,
       '3.4',
+      // control mode 경로에는 startup 명령 덮어쓰기가 없다(passthrough 전용).
+      undefined,
     );
   });
 

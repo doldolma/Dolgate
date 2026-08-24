@@ -876,9 +876,13 @@ interface AppStateParts {
     tmux?: boolean,
     tmuxCommand?: string,
     /**
-     * tmux 를 기존 세션의 탭 자리에서 열 때, 닫고 대체할 그 세션 id. tmux=true 일 때만
-     * 의미가 있다. 지정하면 그 세션을 끊고 tmux 세션 그룹 탭이 그 자리에 들어선다
+     * 새 세션이 물려받을 탭 자리 — 지정한 세션의 탭을 없애고 그 자리에 새 탭이 들어선다
      * ("현재 화면에서 진행"). 호스트 레벨 연결처럼 원 세션이 없으면 생략한다.
+     *
+     * `tmux=true`(control mode) **또는 `startupCommandOverride` 를 준 passthrough** 에서만
+     * 듣는다 — 평범한 연결에 실수로 넘어와 남의 탭을 닫지 않게 구현에서 그 두 경우만
+     * 통과시킨다(sessionSlice 의 connectHost 참고). 옛 tmux(2.6 미만)를 일반 SSH 로 띄우는
+     * 경로가 두 번째 경우다.
      */
     replaceSessionId?: string,
     /**

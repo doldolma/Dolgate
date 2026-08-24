@@ -173,6 +173,12 @@ export function resolveConnectionFailurePresentation(
     "certificate-undecided": () => t('connectFailure.certificateUndecided'),
     cancelled: () => t('connectFailure.cancelled'),
     "aws-auth": () => t('connectFailure.awsAuthFailed'),
+    // 권한 부족은 다시 로그인해도 풀리지 않는다 — 고칠 곳은 정책이다. 어느 액션이 거부됐는지
+    // 분류기가 문장에서 뽑아 주므로, 있으면 그 이름을 그대로 말해 준다.
+    "aws-permission": () =>
+      reason.awsAction
+        ? t('connectFailure.awsPermissionAction', { action: reason.awsAction })
+        : t('connectFailure.awsPermission'),
     "no-route": () => t('connectFailure.noRoute', { target }),
     refused: () => t('connectFailure.refused', { target }),
     timeout: () => t('connectFailure.timeout', { target }),
@@ -185,6 +191,7 @@ export function resolveConnectionFailurePresentation(
     "certificate-declined": "Certificate Declined",
     "certificate-undecided": "Certificate Not Confirmed",
     "aws-auth": "AWS Authentication Required",
+    "aws-permission": "AWS Permission Required",
   };
   if (reason.code !== "unknown") {
     return {

@@ -1,5 +1,6 @@
 import {
   buildAwsEc2SshOverSsmSignature,
+  getConnectionFailureReason,
   isAwsEc2HostRecord,
   isAwsHostKeySecurityError,
   recordSshOverSsmFallback,
@@ -73,10 +74,27 @@ function combineAwsSshFallbackFailure(
   sshError: unknown,
   fallbackError: unknown,
 ): Error {
+  const primary = errorMessageOf(sshError);
+  const fallback = errorMessageOf(fallbackError);
+  // 두 경로가 **같은 권한** 때문에 막혔으면 문장을 하나로 접는다.
+  //
+  // 둘 다 결국 같은 액션을 부른다(ssm:StartSession) — 그 권한이 없으면 SSH-over-SSM 도 SSM 셸도
+  // 같은 이유로 실패하는데, 원문을 이어 붙이면 원인은 하나인데 화면에는 같은 말이 두 번 나온다.
+  // 거부된 액션이 서로 다르면(예: EIC 키 전송과 세션 시작) 각각이 알려 주는 사실이 달라 둘 다 남긴다.
+  const primaryReason = getConnectionFailureReason(primary);
+  const fallbackReason = getConnectionFailureReason(fallback);
+  if (
+    primaryReason.code === "aws-permission" &&
+    fallbackReason.code === "aws-permission" &&
+    primaryReason.awsAction === fallbackReason.awsAction
+  ) {
+    // 앞쪽을 남긴다 — preflight 가 붙인 단계 표시가 들어 있어 어디서 막혔는지가 함께 온다.
+    return new Error(primary);
+  }
   return new Error(
     t('sshIpc.fallbackFailed', {
-      primary: errorMessageOf(sshError),
-      fallback: errorMessageOf(fallbackError),
+      primary,
+      fallback,
     }),
   );
 }
@@ -474,8 +492,8 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.ssh.reinjectShellIntegration,
-    async (_event, sessionId: string) => {
-      await ctx.coreManager.reinjectShellIntegration(sessionId);
+    async (_event, sessionId: string, shell?: string) => {
+      await ctx.coreManager.reinjectShellIntegration(sessionId, shell);
     },
   );
 

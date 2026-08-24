@@ -189,6 +189,53 @@ describe("resolveConnectionFailurePresentation", () => {
     });
   });
 
+  // 권한 부족은 다시 로그인해도 풀리지 않는다 — 고칠 곳은 정책이다. 예전에는 이 실패가
+  // 분류되지 않아 AWS 영어 원문(ARN 한 줄)이 그대로 화면에 떴다.
+  it("presents AWS permission denials with the denied IAM action", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "User: arn:aws:sts::123456789012:assumed-role/DevRole/dolma is not authorized to perform: ssm:StartSession on resource: arn:aws:ec2:ap-northeast-2:123456789012:instance/i-0abc",
+      ),
+    ).toEqual({
+      title: "AWS Permission Required",
+      message:
+        "AWS가 ssm:StartSession 요청을 거부했습니다. 이 프로필의 IAM 사용자/역할에 그 권한이 있는지 확인해 주세요.",
+    });
+  });
+
+  it("presents AWS permission denials without an action name as policy guidance", () => {
+    expect(
+      resolveConnectionFailurePresentation("UnauthorizedOperation"),
+    ).toEqual({
+      title: "AWS Permission Required",
+      message:
+        "AWS 권한이 없어 요청이 거부되었습니다. 이 프로필의 IAM 사용자/역할 정책을 확인해 주세요.",
+    });
+  });
+
+  // 만료는 다시 로그인이 답이라 권한 문제와 섞으면 안 된다 — 만료된 토큰을 AccessDenied 로
+  // 돌려주는 응답이 있어서 순서가 중요하다.
+  it("keeps expired-credential failures on the sign-in path", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "AccessDeniedException: The security token included in the request is invalid",
+      ),
+    ).toEqual({
+      title: "AWS Authentication Required",
+      message: "AWS 인증을 확인하지 못했습니다. 다시 로그인해 주세요.",
+    });
+  });
+
+  // SSH 의 "permission denied" 는 IAM 이 아니라 계정 인증 실패다 — 정책을 고치라고 말하면
+  // 엉뚱한 곳을 뒤지게 된다.
+  it("does not treat SSH permission denied as an IAM problem", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "ssh handshake failed: permission denied (publickey)",
+      ).title,
+    ).toBe("Connection Failed");
+  });
+
   it("falls back to the normalized raw message for unknown errors", () => {
     expect(
       resolveConnectionFailurePresentation(

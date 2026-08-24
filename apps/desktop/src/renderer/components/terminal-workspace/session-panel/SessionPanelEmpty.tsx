@@ -6,7 +6,8 @@ import { EmptyState } from '../../../ui';
 
 interface SessionPanelEmptyProps {
   title: string;
-  description: string;
+  /** 없으면 제목만 그린다 — 제목이 이미 다 말하는 상태에 설명을 덧붙이면 군더더기가 된다. */
+  description?: string;
   children?: ReactNode;
 }
 

@@ -57,6 +57,17 @@ interface SessionBlocks {
    * 주지 못해(전체 입력을 알 방법이 없다) 그쪽은 여전히 화면을 읽는다.
    */
   reportedCommand: string | null;
+  /**
+   * 앱이 이 세션의 입력줄에 방금 넣은 원문(패널의 넣기·실행).
+   *
+   * 화면에서 읽은 값이 이것과 같으면 **믿을 수 있다.** 왜 필요한가: 우리가 여러 줄을 괄호
+   * 붙여넣기로 넣으면 bash 는 PS2 를 찍지 않는다(readline 버퍼 안의 개행이라 한 줄 편집이다).
+   * 그러면 화면에는 오염 없는 값이 그대로 있는데도 "접힘이 아닌 새 줄 + 프롬프트 폭 미보고"
+   * 라서 재실행이 막혔다 — 방금 우리가 넣은 그 문자열인데도.
+   *
+   * 사용자가 넣은 뒤 줄을 고쳐서 실행하면 값이 달라지므로 그때는 그대로 막힌다.
+   */
+  insertedCommand: string | null;
   blocks: TerminalCommandBlock[];
   /**
    * 블록 목록이 바뀔 때마다 오르는 카운터. 목록을 보는 UI(세션 패널 히스토리)가 구독으로
@@ -122,6 +133,7 @@ function getSession(sessionId: string): SessionBlocks {
       seq: 0,
       pendingPrompt: null,
       reportedCommand: null,
+      insertedCommand: null,
       blocks: [],
       version: 0,
     };
@@ -371,6 +383,30 @@ export function noteReportedCommand(sessionId: string, escaped: string): void {
   });
 }
 
+/**
+ * 앱이 입력줄에 넣은(또는 넣고 실행한) 원문을 기억한다.
+ *
+ * 다음 블록이 만들어질 때 화면에서 읽은 값과 대조해 "우리가 넣은 그것" 임을 확인하는 데만
+ * 쓴다 — 대조에 실패하면 아무 일도 하지 않는다(추측으로 재실행을 열어 주지 않는다).
+ */
+export function noteInsertedCommand(sessionId: string, command: string): void {
+  safely(sessionId, undefined, () => {
+    if (!sessionId) {
+      return;
+    }
+    getSession(sessionId).insertedCommand = command;
+  });
+}
+
+/** 화면에서 읽은 값과 앱이 넣은 원문을 견주기 위한 정규화(줄 끝 공백·양끝 공백만 없앤다). */
+function normalizeForCompare(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .trim();
+}
+
 export function unescapeReportedCommand(escaped: string): string {
   let out = '';
   for (let index = 0; index < escaped.length; index += 1) {
@@ -475,7 +511,9 @@ function beginCommandBlockUnsafe(
   // 셸이 알려 준 원문이 있으면 화면을 읽지 않는다 — 보조 프롬프트도, 행 예산도 없다.
   const reported = session.reportedCommand;
   session.reportedCommand = null;
-  const commandText: CommandText | null = reported
+  const inserted = session.insertedCommand;
+  session.insertedCommand = null;
+  let commandText: CommandText | null = reported
     ? { text: reported, unreliable: false }
     : pending
       ? readCommandTextFromBuffer(
@@ -486,6 +524,15 @@ function beginCommandBlockUnsafe(
           pending.continuationEndX,
         )
       : null;
+  // 화면에서 읽은 값이 앱이 방금 넣은 원문과 같으면 믿을 수 있다 — 증명할 방법이 없어서
+  // 막았던 것이고(위 insertedCommand 주석), 이 대조가 그 증명이다.
+  if (
+    commandText?.unreliable &&
+    inserted !== null &&
+    normalizeForCompare(commandText.text) === normalizeForCompare(inserted)
+  ) {
+    commandText = { text: commandText.text, unreliable: false };
+  }
   session.seq += 1;
   const block: TerminalCommandBlock = {
     id: session.seq,
@@ -722,6 +769,7 @@ export function clearCommandBlocks(sessionId: string): void {
   }
   session.pendingPrompt?.marker.dispose();
   session.reportedCommand = null;
+  session.insertedCommand = null;
   // 복사본을 돈다 — disposeBlock 이 marker.onDispose 를 동기로 발화시켜 원본 배열에서
   // 자신을 splice 하므로, 원본을 그대로 순회하면 한 칸씩 건너뛰어 절반이 안 지워진다.
   for (const block of [...session.blocks]) {

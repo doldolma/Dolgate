@@ -134,6 +134,8 @@
   "connectFailure": {
     "agentUnreachable": "ssh-agent 에 연결할 수 없습니다. 데스크톱에서 agent 를 확인해 주세요.",
     "awsAuth": "AWS 인증이 만료되었습니다. 데스크톱에서 다시 로그인한 뒤 시도해 주세요.",
+    "awsPermission": "AWS 권한이 없어 요청이 거부되었습니다. 이 프로필의 IAM 사용자/역할 정책을 확인해 주세요.",
+    "awsPermissionAction": "AWS가 {{action}} 요청을 거부했습니다. 이 프로필의 IAM 사용자/역할에 그 권한이 있는지 확인해 주세요.",
     "hostKeyUntrusted": "이 호스트의 키를 아직 신뢰하지 않았습니다.",
     "hostKeyDeclined": "호스트 키를 신뢰하지 않아 연결을 끝냈습니다.",
     "cancelled": "연결을 그만뒀습니다.",
@@ -201,6 +203,7 @@
     "awsSftpAzRequired": "AWS SFTP에 사용할 Availability Zone 정보가 필요합니다.",
     "awsSftpHostKeyFailed": "AWS SFTP 호스트 키를 확인하지 못했습니다.",
     "hostKindUnsupported": "이 호스트 종류는 모바일에서 아직 지원하지 않습니다.",
+    "hostKindNeedsDataFloor": "이 서버는 계정 데이터 수준을 판정하지 못해 RDP·VNC 호스트를 만들 수 없습니다. 서버를 업데이트하면 열립니다.",
     "authKindUnsupported": "모바일에서 지원하지 않는 인증 방식입니다.",
     "connectCancelled": "연결이 취소되었습니다.",
     "sshConnectFailed": "SSH 연결에 실패했습니다.",
@@ -252,12 +255,13 @@
     "jumpHostMustBeSsh": "점프 호스트는 SSH 호스트여야 합니다.",
     "jumpHostCredentialMissing": "{{label}} 의 자격증명이 없어 경유할 수 없습니다.",
     "ssmDirectFailed": "SSM 세션을 시작하지 못했습니다.",
+    "ssmNotManaged": "이 인스턴스가 SSM 관리 대상으로 확인되지 않습니다. SSM Agent 와 인스턴스 IAM role, 온라인 상태를 확인해 주세요.",
+    "ssmAgentOffline": "인스턴스의 SSM Agent 가 연결되어 있지 않습니다 (PingStatus: {{status}}). 에이전트 상태를 확인한 뒤 다시 시도해 주세요.",
     "ssmSshFellBack": "SSH 로 붙지 못해 SSM 셸로 연결했습니다.",
     "ssmPathDirectSsh": "SSH over SSM · 기기에서 직접",
     "ssmPathDirectShell": "SSM 셸 · 기기에서 직접",
     "ssmPathServerProxy": "SSM 셸 · 서버 경유",
-    "ssmBothFailed": "SSH: {{ssh}} · SSM 셸: {{shell}}",
-    "hostKindNeedsDataFloor": "이 서버는 계정 데이터 수준을 판정하지 못해 RDP·VNC 호스트를 만들 수 없습니다. 서버를 업데이트하면 열립니다."
+    "ssmBothFailed": "SSH: {{ssh}} · SSM 셸: {{shell}}"
   },
   "vaultGate": {
     "switchAccount": "다른 계정으로 로그인 (로그아웃)",
@@ -455,6 +459,7 @@
       "vncSection": "VNC 호스트",
       "domain": "도메인",
       "domainPlaceholder": "예: CORP",
+      "awsSsm": "SSM 경유",
       "credentialKeepHint": "비워 두면 저장된 자격증명을 그대로 씁니다.",
       "passwordKeepPlaceholder": "그대로 두려면 비워 둡니다",
       "vncOptions": "화면",
@@ -465,8 +470,7 @@
         "fast": "속도 우선",
         "balanced": "균형",
         "lossless": "무손실"
-      },
-      "awsSsm": "SSM 경유"
+      }
     },
     "kindSection": "종류",
     "kindUnsupported": "RDP·VNC 는 이 서버에서 만들 수 없습니다. 서버를 업데이트하면 열립니다."

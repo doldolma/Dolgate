@@ -2,6 +2,7 @@ import { Buffer } from 'buffer';
 
 import { GenerateDataKeyCommand, KMSClient } from '@aws-sdk/client-kms';
 import {
+  DescribeInstanceInformationCommand,
   GetDocumentCommand,
   SSMClient,
   StartSessionCommand,
@@ -13,6 +14,7 @@ import {
 } from '@aws-sdk/client-ec2-instance-connect';
 
 import type { ResolvedAwsCredentials } from './aws-session';
+import { t } from '../i18n';
 
 /**
  * SSM 세션을 **기기에서 직접** 시작한다.
@@ -67,6 +69,51 @@ function callTimeout(limitMs: number): {
 
 function ssmClient(input: ClientInput): SSMClient {
   return new SSMClient({ region: input.region, credentials: input.credentials });
+}
+
+/** PingStatus 는 계정마다 대소문자가 다르게 온다. */
+function isSsmAgentOnline(status?: string | null): boolean {
+  return status?.trim().toLowerCase() === 'online';
+}
+
+/**
+ * 이 인스턴스에 지금 SSM 으로 붙을 수 있는지 **세션을 시작하기 전에** 확인한다.
+ *
+ * 데스크톱은 연결 전에 이 확인을 한다 — 하지 않으면 SSM Agent 가 죽은 인스턴스에 붙어 보다가
+ * 실패하고, 그 실패 문구는 "세션을 시작하지 못했습니다" 라서 무엇을 고쳐야 하는지 알 수 없다.
+ * 왕복 한 번을 더 쓰는 대신 원인을 먼저 말해 준다(에이전트인지, 아예 관리 대상이 아닌지).
+ *
+ * 조회 자체가 실패하면(권한·네트워크) 그 오류를 그대로 올린다 — 데스크톱과 같은 판단이다.
+ * `ssm:DescribeInstanceInformation` 이 거부된 경우 그 문장에 액션 이름이 들어 있어서, 화면이
+ * 정책에 무엇을 추가해야 하는지까지 말해 준다.
+ */
+export async function assertSsmManagedInstance(input: {
+  credentials: ResolvedAwsCredentials;
+  region: string;
+  instanceId: string;
+}): Promise<void> {
+  const limit = callTimeout(SUPPORT_CALL_TIMEOUT_MS);
+  const output = await ssmClient(input)
+    .send(
+      new DescribeInstanceInformationCommand({
+        Filters: [{ Key: 'InstanceIds', Values: [input.instanceId] }],
+      }),
+      { abortSignal: limit.signal },
+    )
+    .finally(limit.release);
+  const entry = (output.InstanceInformationList ?? []).find(
+    item => item.InstanceId?.trim() === input.instanceId,
+  );
+  if (!entry) {
+    throw new Error(t('store.ssmNotManaged'));
+  }
+  if (!isSsmAgentOnline(entry.PingStatus)) {
+    throw new Error(
+      t('store.ssmAgentOffline', {
+        status: entry.PingStatus?.trim() || 'unknown',
+      }),
+    );
+  }
 }
 
 /**

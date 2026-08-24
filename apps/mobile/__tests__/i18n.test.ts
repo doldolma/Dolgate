@@ -153,6 +153,32 @@ describe('연결 실패 문구', () => {
     }
   });
 
+  // 권한 부족은 다시 로그인해도 풀리지 않는다 — 고칠 곳은 정책이라 어느 액션이 거부됐는지가
+  // 곧 할 일이다. 예전에는 AWS 영어 원문(ARN 한 줄)이 그대로 화면에 떴다.
+  it('AWS 권한 거부는 거부된 액션 이름을 말해 준다', () => {
+    const message = getConnectFailureMessage(
+      'User: arn:aws:sts::123456789012:assumed-role/DevRole/dolma is not authorized to perform: ssm:StartSession on resource: arn:aws:ec2:ap-northeast-2:123456789012:instance/i-0abc',
+      'i-0abc',
+    );
+    expect(message).toContain('ssm:StartSession');
+    expect(message).not.toContain('arn:aws:sts');
+  });
+
+  it('액션을 알 수 없는 거부도 정책을 확인하라고 말한다', () => {
+    const message = getConnectFailureMessage('UnauthorizedOperation', 'i-0abc');
+    expect(message).toBe(t('connectFailure.awsPermission'));
+  });
+
+  // 만료는 다시 로그인이 답이라 권한 문제와 섞으면 안 된다.
+  it('만료된 자격증명은 다시 로그인 안내로 남는다', () => {
+    expect(
+      getConnectFailureMessage(
+        'AccessDeniedException: The security token included in the request is invalid',
+        'i-0abc',
+      ),
+    ).toBe(t('connectFailure.awsAuth'));
+  });
+
   // 분류되지 않은 실패를 뭉뚱그린 문구로 덮으면 유일한 단서가 사라진다.
   it('분류되지 않은 오류는 원문을 그대로 남긴다', () => {
     expect(getConnectFailureMessage('some brand new failure', 'host')).toBe(

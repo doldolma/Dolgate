@@ -174,6 +174,7 @@ import {
   type ResolvedAwsSessionResult,
 } from '../lib/aws-session';
 import {
+  assertSsmManagedInstance,
   pushEc2InstanceConnectKey,
   startSsmPortForwardSession,
   startSsmShellSession,
@@ -3506,6 +3507,14 @@ export const useMobileAppStore = create<MobileAppState>()(
         markDropped: () => void;
       }): Promise<void> => {
         const { host, sessionRecordId, resolved, terminalSize } = input;
+        // **붙기 전에 이 인스턴스가 SSM 으로 붙을 수 있는 상태인지 확인한다.** 데스크톱과 같은
+        // 순서다 — 없으면 에이전트가 죽은 인스턴스에 두 경로(SSH·셸)를 다 시도해 보고 나서
+        // "세션을 시작하지 못했습니다" 로 끝나, 무엇을 고쳐야 하는지 알 수 없다.
+        await assertSsmManagedInstance({
+          credentials: resolved.credentials,
+          region: resolved.region,
+          instanceId: host.awsInstanceId,
+        });
         const engine = getEngine();
         const sshPort = getAwsEc2HostSshPort(host);
         const isWindowsInstance = isAwsEc2WindowsPlatform(host.awsPlatform);

@@ -23,6 +23,23 @@ export type SessionPanelSectionId =
   | 'tmux'
   | 'theme';
 
+/**
+ * 아직 아무것도 고르지 않은 세션에서 처음 보이는 섹션.
+ *
+ * 붙은 호스트라면 **자원**이다 — 패널을 여는 이유가 대개 "이 서버 지금 어때" 이고, 그 값은
+ * 세션을 열어 둔 동안 계속 바뀌어서 볼 이유가 매번 있다. 이력은 내가 뭘 했는지 되짚는 것이라
+ * 필요할 때 찾아가는 성격이다.
+ *
+ * 지표가 없는 세션(로컬 터미널·시리얼)은 이력으로 둔다. 그쪽에서 자원을 열면 "지표를 읽을 수
+ * 없습니다" 만 있는 화면이 기본이 되는데, 원격 부하라는 개념이 없는 세션이라 켤 방법도 없다.
+ * (tmux pane 은 호스트 세션이다 — 폴링은 창당 하나지만 패널이 발행 키로 읽어 값이 있다.)
+ */
+export function resolveDefaultSessionPanelSection(
+  source?: string | null,
+): SessionPanelSectionId {
+  return source === 'host' ? 'resources' : 'history';
+}
+
 export interface SessionPanelHistoryItem {
   id: number;
   /** 화면에서 읽어 낸 명령. 읽지 못했으면 null. */
@@ -218,31 +235,46 @@ export function limitListItems<T>(
  * 스스로 밝힌다.
  */
 export interface ShellHistoryItem {
-  /** 목록 안에서만 쓰는 키. 같은 명령이 여러 번 있을 수 있어 위치를 함께 넣는다. */
+  /** 목록 안에서만 쓰는 키. 가장 최근에 나온 위치를 함께 넣는다. */
   key: string;
   command: string;
+  /** 파일에 몇 번 있었는지. 1이면 화면에 적지 않는다. */
+  count: number;
 }
 
 /**
  * 이번 세션 목록과 겹치지 않는 이전 명령들. 최신이 위로 온다.
  *
- * **중복 걱정이 없다** — 이 히스토리는 연결 시점에 뜬 스냅샷이라 이번 세션에 친 명령이 들어
- * 있을 수 없다. 다만 같은 명령을 예전에 여러 번 쳤으면 파일에도 여러 번 있으므로, 연달아
- * 같은 줄만 접는다(`ls` 를 스무 번 친 기록이 목록의 스무 줄을 먹지 않게).
+ * **이번 세션 목록과 겹치지 않는다** — 이 히스토리는 연결 시점에 뜬 스냅샷이라 이번 세션에 친
+ * 명령이 들어 있을 수 없다.
  */
 export function buildShellHistoryItems(
   history: readonly string[],
 ): ShellHistoryItem[] {
   const items: ShellHistoryItem[] = [];
+  const byCommand = new Map<string, ShellHistoryItem>();
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const command = history[index].trim();
     if (command.length === 0) {
       continue;
     }
-    if (items.length > 0 && items[items.length - 1].command === command) {
+    // 같은 명령은 **가장 최근 것 하나로** 접는다(연달아 있을 때만이 아니다).
+    //
+    // 실제 파일은 `ls`·`pwd`·`clear` 가 사이사이 섞여 수십 번 나온다 — 그대로 늘어놓으면 234
+    // 줄 중 서로 다른 명령은 마흔 개뿐인데 목록을 다 먹는다. 이 목록을 보는 이유는 "그때 뭘
+    // 했나" 를 되짚는 것이 아니라 **다시 쓸 명령을 찾는 것**이라, 순서만 최신으로 지키면 된다.
+    const existing = byCommand.get(command);
+    if (existing) {
+      existing.count += 1;
       continue;
     }
-    items.push({ key: `${index}:${command}`, command });
+    const item: ShellHistoryItem = {
+      key: `${index}:${command}`,
+      command,
+      count: 1,
+    };
+    byCommand.set(command, item);
+    items.push(item);
   }
   return items;
 }
@@ -250,4 +282,29 @@ export function buildShellHistoryItems(
 /** 실행 중인 명령이 하나라도 있으면 프롬프트가 아니다. */
 export function isAtPrompt(blocks: readonly Pick<SessionPanelHistoryItem, 'state'>[]): boolean {
   return !blocks.some((block) => block.state === 'running');
+}
+
+/**
+ * `ps` 의 명령 문자열을 **프로그램**과 **인자**로 나눈다 — 목록에서 훑을 때 이름이 먼저 보이게.
+ *
+ * 절대 경로일 때만 마지막 조각을 취한다. 무조건 `/` 뒤를 취하면 커널 스레드(`[kworker/0:1]`)나
+ * 인자에 경로가 섞인 이름이 엉뚱하게 잘린다.
+ */
+export function splitProcessCommand(command: string): {
+  program: string;
+  args: string;
+} {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    return { program: '', args: '' };
+  }
+  const boundary = trimmed.search(/\s/);
+  const head = boundary === -1 ? trimmed : trimmed.slice(0, boundary);
+  const args = boundary === -1 ? '' : trimmed.slice(boundary + 1).trim();
+  if (!head.startsWith('/')) {
+    return { program: head, args };
+  }
+  const lastSlash = head.lastIndexOf('/');
+  const base = head.slice(lastSlash + 1);
+  return { program: base || head, args };
 }

@@ -20,7 +20,7 @@ const SECTION = '@@dolgate';
  * - 각 항목은 실패해도 나머지를 살리도록 `|| true` 로 감싼다(예: 컨테이너에 df 없음).
  */
 export function buildHostMetricsCommand(
-  options: { processLimit?: number } = {},
+  options: { processLimit?: number; system?: boolean } = {},
 ): string {
   const parts = [
     `echo ${SECTION}:stat`,
@@ -52,7 +52,71 @@ export function buildHostMetricsCommand(
       `ps -eo pid=,user=,pcpu=,pmem=,rss=,args= --sort=-pcpu 2>/dev/null | head -n ${processLimit} || true`,
     );
   }
+  // 정적인 값(호스트명·커널·아키텍처·CPU 종류)은 **한 번만** 태운다. 세션이 사는 동안 바뀌지
+  // 않으므로(커널 교체는 재부팅이고 그건 새 세션이다) 자원 섹션이 열릴 때 한 번 받아 캐시한다.
+  //
+  // 명령 전체가 sh -c '...' 안이라 작은따옴표를 쓸 수 없다 — 큰따옴표만 쓴다.
+  if (options.system) {
+    parts.push(
+      `echo ${SECTION}:sys`,
+      'uname -srm || true',
+      'hostname 2>/dev/null || cat /proc/sys/kernel/hostname 2>/dev/null || true',
+      // x86 은 "model name", ARM(라즈베리파이 등)은 "Model"·"Hardware" 로 적는다. 맥은
+      // /proc 이 없어 sysctl 로 간다.
+      'grep -m1 -E "^(model name|Model|Hardware)" /proc/cpuinfo 2>/dev/null | cut -d: -f2- || sysctl -n machdep.cpu.brand_string 2>/dev/null || true',
+    );
+  }
   return `LC_ALL=C sh -c '${parts.join('; ')}'`;
+}
+
+/**
+ * 이 호스트가 무엇인지 — 세션 동안 바뀌지 않는 값들.
+ *
+ * 못 읽은 항목은 null 이다(빈 문자열로 두면 화면이 빈 줄을 그린다).
+ */
+export interface HostSystemInfo {
+  hostname: string | null;
+  /** `uname -sr` — 커널 이름과 릴리스(`Linux 5.15.0-91-generic`). */
+  kernel: string | null;
+  /** `uname -m` — 아키텍처(`x86_64`, `aarch64`). */
+  arch: string | null;
+  cpuModel: string | null;
+}
+
+/**
+ * `sys` 섹션을 읽는다 — 첫 줄이 `uname -srm`, 둘째 줄이 호스트명, 셋째 줄이 CPU 종류다.
+ *
+ * 항목이 하나도 없으면 null 을 돌려준다(요청하지 않은 것과 못 읽은 것을 구분하지 않는다 —
+ * 어느 쪽이든 보여 줄 것이 없다).
+ */
+export function parseHostSystemInfo(block: string): HostSystemInfo | null {
+  const lines = block
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) {
+    return null;
+  }
+  const [unameLine, hostnameLine, cpuLine] = lines;
+  // `uname -srm` 은 "Linux 5.15.0-91-generic x86_64" — 마지막 조각이 아키텍처다.
+  let kernel: string | null = null;
+  let arch: string | null = null;
+  if (unameLine) {
+    const pieces = unameLine.split(/\s+/);
+    if (pieces.length >= 3) {
+      arch = pieces[pieces.length - 1] ?? null;
+      kernel = pieces.slice(0, -1).join(' ');
+    } else {
+      kernel = unameLine;
+    }
+  }
+  const info: HostSystemInfo = {
+    hostname: hostnameLine ?? null,
+    kernel,
+    arch,
+    cpuModel: cpuLine ? cpuLine.replace(/\s+/g, ' ').trim() : null,
+  };
+  return info.hostname || info.kernel || info.arch || info.cpuModel ? info : null;
 }
 
 /** 프로세스 한 줄. 종료·우선순위 변경은 하지 않으므로 보여 줄 것만 담는다. */
@@ -337,6 +401,14 @@ export function parseHostProcessesFromOutput(output: string): HostProcess[] | nu
     return null;
   }
   return parseHostProcesses(section(output, 'ps'));
+}
+
+/** 출력에 sys 섹션이 있으면 읽는다. 요청하지 않은 왕복이면 null. */
+export function parseHostSystemInfoFromOutput(output: string): HostSystemInfo | null {
+  if (!output.includes(`${SECTION}:sys`)) {
+    return null;
+  }
+  return parseHostSystemInfo(section(output, 'sys'));
 }
 
 export function parseHostMetricsSample(output: string, atMs: number): HostMetricsSample {

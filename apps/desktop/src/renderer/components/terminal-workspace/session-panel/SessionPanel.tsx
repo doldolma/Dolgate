@@ -15,7 +15,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../../lib/cn';
 import { useAppStore } from '../../../store/appStore';
-import type { SessionPanelSectionId } from '../../../lib/session-panel';
+import {
+  resolveDefaultSessionPanelSection,
+  type SessionPanelSectionId,
+} from '../../../lib/session-panel';
 import {
   Activity,
   Cable,
@@ -57,8 +60,6 @@ const MOTION_SETTLE_MS = 40;
 
 /** 레일 폭(px). 저장하는 폭은 본문 폭이라 여기 값을 더해 전체 폭을 만든다. */
 const RAIL_WIDTH_PX = 38;
-
-const DEFAULT_SECTION: SessionPanelSectionId = 'history';
 
 const SECTIONS: Array<{
   id: SessionPanelSectionId;
@@ -163,9 +164,21 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
   // 지표는 발행 쪽 키로 읽는다 — tmux 는 창당 한 번만 폴링하며 첫 pane 키로 담는다.
   const metricsSessionId = useSessionPanelMetricsSessionId(sessionId ?? '');
   // 열었을 때 빈 레일만 보이면 "이게 뭐지" 가 된다. 처음 열면 히스토리를 보여 준다.
+  // 고른 것이 없으면 세션 종류가 기본을 정한다(붙은 호스트는 자원, 로컬은 이력).
+  const defaultSection = resolveDefaultSessionPanelSection(
+    sessionId
+      ? tabs.find((tab) => tab.sessionId === sessionId)?.source
+      : null,
+  );
   const section = sessionId
-    ? (sectionBySessionId[sessionId] ?? DEFAULT_SECTION)
-    : DEFAULT_SECTION;
+    ? (sectionBySessionId[sessionId] ?? defaultSection)
+    : defaultSection;
+
+  // 드래그를 끝내는 정리 함수. 언마운트에서도 불러야 한다 — 드래그 중에 세션이 끊겨 패널이
+  // 사라지면(대상 세션이 null 이 되면 이 컴포넌트는 그냥 없어진다) mouseup 이 오기 전까지
+  // 리스너가 남아 폭을 계속 바꾼다.
+  const endResizeRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => endResizeRef.current?.(), []);
 
   function handleResizeMouseDown(event: React.MouseEvent): void {
     dragRef.current = { startX: event.clientX, startWidth: width };
@@ -179,9 +192,11 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
     };
     const onUp = () => {
       dragRef.current = null;
+      endResizeRef.current = null;
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
+    endResizeRef.current = onUp;
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     event.preventDefault();
@@ -284,7 +299,12 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
           ) : section === 'snippets' ? (
             <SessionPanelSnippets sender={sender} />
           ) : section === 'resources' ? (
-            <SessionPanelResources sessionId={metricsSessionId} />
+            <SessionPanelResources
+              sessionId={metricsSessionId}
+              hostId={targetTab?.hostId ?? null}
+              shellKind={targetTab?.shellKind ?? null}
+              rttMs={targetTab?.lastRttMs ?? null}
+            />
           ) : section === 'processes' ? (
             <SessionPanelProcesses sessionId={metricsSessionId} />
           ) : section === 'ports' ? (

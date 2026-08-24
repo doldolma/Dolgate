@@ -908,6 +908,57 @@ describe("registerSshIpcHandlers", () => {
     expect(ctx.activityLogs.append).toHaveBeenCalledTimes(1);
   });
 
+  // 두 경로가 결국 같은 액션을 부른다 — 그 권한이 없으면 둘 다 같은 이유로 실패한다. 원문을
+  // 이어 붙이면 원인은 하나인데 화면에는 같은 말이 두 번 나온다.
+  it("folds the fallback failure into one message when both paths hit the same permission", async () => {
+    const ctx = createAwsEc2Context();
+    const denied =
+      "User: arn:aws:sts::123456789012:assumed-role/DevRole/dolma is not authorized to perform: ssm:StartSession on resource: arn:aws:ec2:ap-northeast-2:123456789012:instance/i-0abc";
+    connectAwsEc2OverSsmMock.mockRejectedValue(new Error(`[SSM 터널 열기] ${denied}`));
+    ctx.coreManager.connectAwsSession.mockRejectedValue(new Error(denied));
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    const failure = await connectHandler?.(null, {
+      hostId: "aws-host-1",
+      cols: 120,
+      rows: 32,
+    }).then(
+      () => null,
+      (error: unknown) => error as Error,
+    );
+
+    expect(failure?.message).toBe(`[SSM 터널 열기] ${denied}`);
+    expect(failure?.message).not.toContain("폴백도 실패");
+  });
+
+  // 거부된 액션이 서로 다르면 각각이 알려 주는 사실이 달라 둘 다 남겨야 한다.
+  it("keeps both failures when the two paths are denied different actions", async () => {
+    const ctx = createAwsEc2Context();
+    connectAwsEc2OverSsmMock.mockRejectedValue(
+      new Error("is not authorized to perform: ec2-instance-connect:SendSSHPublicKey"),
+    );
+    ctx.coreManager.connectAwsSession.mockRejectedValue(
+      new Error("is not authorized to perform: ssm:StartSession"),
+    );
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    const failure = await connectHandler?.(null, {
+      hostId: "aws-host-1",
+      cols: 120,
+      rows: 32,
+    }).then(
+      () => null,
+      (error: unknown) => error as Error,
+    );
+
+    expect(failure?.message).toContain("ec2-instance-connect:SendSSHPublicKey");
+    expect(failure?.message).toContain("ssm:StartSession");
+  });
+
   it("does not fall back for tmux connections when SSH-over-SSM fails", async () => {
     const ctx = createAwsEc2Context();
     connectAwsEc2OverSsmMock.mockRejectedValue(new Error("sshd unreachable"));

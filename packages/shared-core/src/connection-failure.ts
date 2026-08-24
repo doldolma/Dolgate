@@ -13,6 +13,7 @@ export type ConnectionFailureCode =
   | "address-in-use"
   | "agent-unreachable"
   | "aws-auth"
+  | "aws-permission"
   | "cancelled"
   | "certificate-declined"
   | "certificate-undecided"
@@ -34,6 +35,40 @@ export type ConnectionFailureLayer = "hostKey" | "ssh" | "tailscale";
 export interface ConnectionFailureReason {
   code: ConnectionFailureCode;
   layer?: ConnectionFailureLayer;
+  /**
+   * 거부된 IAM 액션 이름(`ssm:StartSession` 등). aws-permission 일 때만 채워진다.
+   *
+   * 문구에 이 값을 끼워 넣어야 사용자가 할 일이 정해진다 — "권한이 없습니다"만으로는
+   * 어느 정책을 고쳐야 하는지 알 수 없고, 원문(영어 ARN 한 줄)을 그대로 보여주면 읽지 않는다.
+   */
+  awsAction?: string;
+}
+
+/**
+ * AWS 오류 문장에서 거부된 IAM 액션 이름을 뽑는다.
+ *
+ * AWS 는 세 가지 표현을 쓴다:
+ *   - `User: arn:… is not authorized to perform: ssm:StartSession on resource: …`
+ *   - `… because no identity-based policy allows the ssm:StartSession action`
+ *   - 액션만 문장에 들어 있는 짧은 변형(SDK·서비스마다 다르다)
+ *
+ * 마지막 폴백은 서비스 접두사를 알고 있는 것만 받는다. `service:Action` 모양을 아무거나
+ * 받으면 문장 안의 ARN(`arn:aws:sts::…`)까지 액션으로 읽는다 — 액션의 첫 글자가 대문자라는
+ * 규칙만으로도 대부분 걸러지지만, 접두사를 못 박아 두는 편이 확실하다.
+ */
+export function extractAwsIamAction(message: string): string | null {
+  const patterns: RegExp[] = [
+    /not authorized to (?:perform|access):?\s*([a-z][a-z0-9-]*:[A-Za-z][A-Za-z0-9_*]*)/i,
+    /policy allows the ([a-z][a-z0-9-]*:[A-Za-z][A-Za-z0-9_*]*) action/i,
+    /\b((?:ssm|ssmmessages|ec2|ec2messages|ec2-instance-connect|kms|ecs|sts|iam|cloudshell):[A-Z][A-Za-z0-9_*]*)/,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(message);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+  return null;
 }
 
 // 판정 순서가 의미를 갖는다 — 위쪽이 원인이 더 확실한 분류다. 예를 들어 tailnet 계층이
@@ -95,6 +130,18 @@ const RULES: Array<{
       /error when retrieving token from sso|token has expired|refresh failed|sso session.*expired|unable to locate credentials|expiredtoken|security token included in the request is invalid/i,
     code: "aws-auth",
   },
+  // IAM 권한 부족. **aws-auth 뒤**에 둔다 — 두 실패의 할 일이 정반대다(저쪽은 다시 로그인,
+  // 이쪽은 정책 수정). 만료된 토큰을 AccessDenied 로 돌려주는 응답도 있어서, 만료를 먼저
+  // 판정해야 "다시 로그인" 안내를 잃지 않는다.
+  //
+  // 우리가 직접 만든 한국어 안내("… 권한을 확인해 주세요")는 일부러 잡지 않는다 — 이미 그
+  // 상황에 맞게 쓴 문장이라, 여기서 잡으면 더 구체적인 안내를 일반 문구로 덮는다. SSH 의
+  // "permission denied" 도 넣지 않는다 — 그것은 IAM 이 아니라 계정 인증 실패다.
+  {
+    pattern:
+      /not authorized to (?:perform|access)|no identity-based policy allows|\baccessdenied\b|accessdeniedexception|\bunauthorizedoperation\b/i,
+    code: "aws-permission",
+  },
   {
     // "host is down", "machine is not on the network" 는 gvisor netstack 쪽 표현이다.
     pattern:
@@ -146,11 +193,20 @@ export function getConnectionFailureReason(
     return { code: "unknown" };
   }
   for (const rule of RULES) {
-    if (rule.pattern.test(normalized)) {
-      return rule.layer
-        ? { code: rule.code, layer: rule.layer }
-        : { code: rule.code };
+    if (!rule.pattern.test(normalized)) {
+      continue;
     }
+    const reason: ConnectionFailureReason = { code: rule.code };
+    if (rule.layer) {
+      reason.layer = rule.layer;
+    }
+    if (rule.code === "aws-permission") {
+      const awsAction = extractAwsIamAction(normalized);
+      if (awsAction) {
+        reason.awsAction = awsAction;
+      }
+    }
+    return reason;
   }
   return { code: "unknown" };
 }

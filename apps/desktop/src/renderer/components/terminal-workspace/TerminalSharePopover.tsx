@@ -1,7 +1,7 @@
 import type { MutableRefObject, ReactNode } from 'react';
 import type { TerminalTab } from '@shared';
 import { cn } from '../../lib/cn';
-import { Button, IconButton, SectionLabel } from '../../ui';
+import { Button, IconButton } from '../../ui';
 import { Share2 } from '../../ui/icons';
 import {
   CHROME_TOGGLE_CLASS,
@@ -96,7 +96,8 @@ export function TerminalSharePopover({
         <div className="absolute right-0 top-[calc(100%+0.6rem)] z-30 grid min-w-0 w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] gap-3 overflow-hidden rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-4 text-[var(--text)] shadow-[var(--shadow-soft)]">
           {shareState?.status === 'inactive' || !shareState ? (
             <>
-              <SectionLabel className="mb-2">Session Share</SectionLabel>
+              {/* 판 이름("Session Share")은 두지 않는다 — 바로 아래 줄이 같은 말을 하고,
+                  이 판은 Share 버튼을 눌러서 열린다. 이름표는 자리만 먹었다. */}
               <strong>{translate('sharePopover.title')}</strong>
               <p className="mt-2 text-sm leading-[1.55] text-[var(--text-soft)]">{translate('sharePopover.hint')}</p>
               <Button
@@ -110,7 +111,6 @@ export function TerminalSharePopover({
             </>
           ) : (
             <>
-              <SectionLabel className="mb-2">Session Share</SectionLabel>
               <strong>
                 {shareState.status === 'error'
                   ? translate('sharePopover.failed')

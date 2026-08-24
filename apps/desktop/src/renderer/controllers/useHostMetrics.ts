@@ -15,6 +15,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { queryTerminalCompletion } from '../services/desktop/terminal';
 import {
   buildHostMetricsCommand,
+  parseHostSystemInfoFromOutput,
+  type HostSystemInfo,
   computeHostMetrics,
   hasAnyHostMetric,
   parseHostMetricsSample,
@@ -101,6 +103,8 @@ export function useHostMetrics({
     ? HOST_METRICS_BOOST_INTERVAL_MS
     : POLL_INTERVAL_MS;
   const processLimit = watch.processes ? HOST_PROCESS_LIMIT : 0;
+  // 정적 정보는 아직 캐시가 없을 때만 요청한다(레지스트리가 그 판단을 한다).
+  const wantsSystem = watch.system;
   /** 재시도 버튼이 누른 횟수. 값이 바뀌면 아래 effect 가 처음부터 다시 돈다. */
   const [retryToken, setRetryToken] = useState(0);
 
@@ -113,6 +117,11 @@ export function useHostMetrics({
 
   /** 이번 폴링에서 읽은 프로세스 목록. 요청하지 않았으면 null 로 남는다. */
   const processesRef = useRef<HostProcess[] | null>(null);
+  /**
+   * 한 번 받아 둔 정적 정보. 세션이 사는 동안 다시 묻지 않는다 — 발행할 때마다 이 값을
+   * 그대로 실어 보내야 캐시가 유지된다(스냅샷은 매번 새로 만든다).
+   */
+  const systemRef = useRef<HostSystemInfo | null>(null);
 
   useEffect(() => {
     if (!enabled || !sessionId) {
@@ -121,6 +130,7 @@ export function useHostMetrics({
       setUpdatedAtMs(null);
       previousSampleRef.current = null;
       processesRef.current = null;
+      systemRef.current = null;
       if (sessionId) {
         clearHostMetrics(sessionId);
       }
@@ -159,6 +169,7 @@ export function useHostMetrics({
         status: next.status,
         metrics: next.metrics ?? null,
         processes: processesRef.current,
+        system: systemRef.current,
         updatedAtMs: next.updatedAtMs ?? null,
       });
     };
@@ -183,7 +194,7 @@ export function useHostMetrics({
       try {
         stdout = await queryTerminalCompletion(
           sessionId,
-          buildHostMetricsCommand({ processLimit }),
+          buildHostMetricsCommand({ processLimit, system: wantsSystem }),
         );
       } catch {
         if (cancelled) {
@@ -221,6 +232,12 @@ export function useHostMetrics({
       failures = 0;
       // 요청하지 않았으면 null 이 되어 UI 가 "요청 안 함" 과 "못 읽음" 을 구분할 수 있다.
       processesRef.current = processLimit > 0 ? parseHostProcessesFromOutput(stdout) : null;
+      // 정적 정보는 받은 것만 덮어쓴다 — 요청하지 않은 왕복에서 null 로 지우면 캐시가 날아가
+      // 매번 다시 묻게 된다.
+      const system = wantsSystem ? parseHostSystemInfoFromOutput(stdout) : null;
+      if (system) {
+        systemRef.current = system;
+      }
       const computed = computeHostMetrics(sample, previous);
       setMetrics(computed);
       setUpdatedAtMs(sample.atMs);

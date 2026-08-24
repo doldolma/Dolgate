@@ -10,6 +10,7 @@ import { listWorkspaceSessionIds } from '../terminalWorkspaceLayout';
 import {
   getCommandBlocks,
   getCommandBlocksVersion,
+  noteInsertedCommand,
   subscribeToCommandBlocks,
 } from '../../../lib/terminal-command-blocks';
 import {
@@ -188,16 +189,42 @@ export interface SessionPanelSender {
   jumpToLine: (line: number) => void;
 }
 
+/**
+ * 보낼 수 있는지 판정을 다시 확인하는 주기(ms).
+ *
+ * 두 값(셸이 살아 있는가 · 괄호 붙여넣기가 켜져 있는가)은 가변 레지스트리에서 오는데 변경
+ * 알림이 없다 — 특히 괄호 붙여넣기는 원격이 보낸 이스케이프로 xterm 안에서 바뀌고, xterm 은
+ * 모드 변경 이벤트를 내주지 않는다. 렌더 시점에 한 번만 읽으면 vim 처럼 전체화면 프로그램에
+ * 들어가 모드가 꺼진 뒤에도 버튼이 열린 것처럼 보였다(눌러도 아무 일이 없어 고장으로 읽힌다).
+ *
+ * 하는 일은 Map 조회 두 번이고, 값이 그대로면 setState 가 리렌더를 만들지 않는다.
+ */
+const SEND_CONTEXT_POLL_MS = 500;
+
 export function useSessionPanelSender(
   sessionId: string,
   blocks: readonly SessionPanelHistoryItem[],
 ): SessionPanelSender {
-  // 괄호 붙여넣기 모드는 전체화면 프로그램이 드나들 때 바뀌므로 렌더마다 읽는다. 클릭 시점에
-  // 다시 확인하는 것은 buildInsertPayload 가 맡는다(그때 꺼져 있으면 null → 안 보낸다).
-  const bracketedPaste = isTerminalBracketedPasteEnabled(sessionId);
+  const [live, setLive] = useState(() => hasLiveTerminal(sessionId));
+  const [bracketedPaste, setBracketedPaste] = useState(() =>
+    isTerminalBracketedPasteEnabled(sessionId),
+  );
+
+  useEffect(() => {
+    const read = () => {
+      setLive(hasLiveTerminal(sessionId));
+      setBracketedPaste(isTerminalBracketedPasteEnabled(sessionId));
+    };
+    read();
+    const timer = window.setInterval(read, SEND_CONTEXT_POLL_MS);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [sessionId]);
+
   // 끊긴 세션에서도 히스토리는 남아 있고 볼 수 있다 — 다만 보낼 곳이 없으므로 프롬프트에
   // 있는 것으로 취급하지 않는다(복사는 그대로 된다).
-  const atPrompt = hasLiveTerminal(sessionId) && isAtPrompt(blocks);
+  const atPrompt = live && isAtPrompt(blocks);
   const context = useMemo(
     () => ({ atPrompt, bracketedPaste }),
     [atPrompt, bracketedPaste],
@@ -211,13 +238,25 @@ export function useSessionPanelSender(
       if (payload === null) {
         return false;
       }
-      return sendTerminalInput(sessionId, payload);
+      const sent = sendTerminalInput(sessionId, payload);
+      if (sent) {
+        // 우리가 넣은 원문을 남긴다 — 사용자가 직접 엔터를 쳐서 만들어지는 이력이 "화면에서
+        // 읽었으니 믿을 수 없다" 로 남지 않게(우리가 넣은 그 문자열이면 대조로 증명된다).
+        noteInsertedCommand(sessionId, command);
+      }
+      return sent;
     },
     [sessionId],
   );
 
   const run = useCallback(
-    (command: string) => sendTerminalInput(sessionId, buildRunPayload(command)),
+    (command: string) => {
+      const sent = sendTerminalInput(sessionId, buildRunPayload(command));
+      if (sent) {
+        noteInsertedCommand(sessionId, command);
+      }
+      return sent;
+    },
     [sessionId],
   );
 

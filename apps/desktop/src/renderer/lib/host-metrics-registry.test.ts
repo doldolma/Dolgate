@@ -20,6 +20,7 @@ function snapshot(cpuPercent: number) {
     status: 'ready' as const,
     metrics: { cpuPercent } as never,
     processes: null,
+    system: null,
     updatedAtMs: 1,
   };
 }
@@ -50,11 +51,11 @@ describe('host-metrics-registry', () => {
   });
 
   it('관찰 요청이 하나라도 있으면 주기를 좁힌다', () => {
-    expect(getHostMetricsWatch(SESSION)).toEqual({ boosted: false, processes: false });
+    expect(getHostMetricsWatch(SESSION)).toEqual({ boosted: false, processes: false, system: false });
     const release = watchHostMetrics(SESSION);
-    expect(getHostMetricsWatch(SESSION)).toEqual({ boosted: true, processes: false });
+    expect(getHostMetricsWatch(SESSION)).toEqual({ boosted: true, processes: false, system: false });
     release();
-    expect(getHostMetricsWatch(SESSION)).toEqual({ boosted: false, processes: false });
+    expect(getHostMetricsWatch(SESSION)).toEqual({ boosted: false, processes: false, system: false });
   });
 
   it('요청이 겹치면 하나라도 프로세스를 원할 때 켠다', () => {
@@ -64,7 +65,7 @@ describe('host-metrics-registry', () => {
     expect(getHostMetricsWatch(SESSION).processes).toBe(true);
 
     releaseProcesses();
-    expect(getHostMetricsWatch(SESSION)).toEqual({ boosted: true, processes: false });
+    expect(getHostMetricsWatch(SESSION)).toEqual({ boosted: true, processes: false, system: false });
     releaseMetrics();
     expect(getHostMetricsWatch(SESSION).boosted).toBe(false);
   });

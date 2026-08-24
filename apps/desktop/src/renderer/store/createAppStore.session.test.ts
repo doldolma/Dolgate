@@ -965,6 +965,73 @@ describe("createAppStore sessions and auth recovery", () => {
     await connectPromise;
   });
 
+  // 실패 원인 코드를 탭에 남겨 둬야 실패 화면이 "무엇을 해야 하는지" 를 고를 수 있다 —
+  // 안 남기면 화면이 오류 원문을 다시 뜯어 원인을 추측하게 된다.
+  it("keeps the AWS preflight failure reason on the pending tab and clears it on the next attempt", async () => {
+    const api = createMockApi();
+    api.aws.getProfileStatusById = vi.fn().mockResolvedValue({
+      profileName: "default",
+      available: true,
+      isSsoProfile: false,
+      isAuthenticated: true,
+      accountId: null,
+      arn: null,
+      errorMessage: null,
+    });
+    const connect = createDeferred<{ sessionId: string }>();
+    api.ssh.connect = vi.fn().mockImplementation(() => connect.promise);
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createAwsEc2Host()],
+    }));
+
+    const connectPromise = store.getState().connectHost("aws-host-1", 120, 32);
+    await flushMicrotasks();
+
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "aws-ec2-ssh:aws-host-1",
+      hostId: "aws-host-1",
+      stage: "checking-ssm",
+      message: "SSM 관리 상태를 확인하는 중입니다.",
+    });
+    expect(store.getState().tabs[0]?.awsDiagnosticReasonCode).toBeNull();
+
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "aws-ec2-ssh:aws-host-1",
+      hostId: "aws-host-1",
+      stage: "checking-ssm",
+      message: "SSM 상태 조회 권한이 없습니다.",
+      reasonCode: "describe-access-denied",
+    });
+    expect(store.getState().tabs[0]?.awsDiagnosticReasonCode).toBe(
+      "describe-access-denied",
+    );
+
+    // 탭은 재연결에도 그대로 쓰인다 — 지우지 않으면 지난 실패의 안내가 다음 실패에 붙는다.
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "aws-ec2-ssh:aws-host-1",
+      hostId: "aws-host-1",
+      stage: "checking-profile",
+      message: "AWS 프로필을 확인하는 중입니다.",
+    });
+    expect(store.getState().tabs[0]?.awsDiagnosticReasonCode).toBeNull();
+
+    // 'unknown' 은 담지 않는다 — 고를 안내가 없고, 그 문구는 SFTP 를 가리켜 터미널에선 틀린다.
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "aws-ec2-ssh:aws-host-1",
+      hostId: "aws-host-1",
+      stage: "checking-profile",
+      message: "확인되지 않은 오류가 발생했습니다.",
+      reasonCode: "unknown",
+    });
+    expect(store.getState().tabs[0]?.awsDiagnosticReasonCode).toBeNull();
+
+    connect.resolve({ sessionId: "aws-session-1" });
+    await connectPromise;
+  });
+
   it("opens a local terminal tab immediately and replaces the pending id when connected", async () => {
     const api = createMockApi();
     const connectLocal = createDeferred<{ sessionId: string }>();

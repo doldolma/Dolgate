@@ -40,6 +40,11 @@ vi.mock('../../../lib/terminal-command-blocks', () => ({
   getCommandBlocks: () => blocks,
   getCommandBlocksVersion: () => blocks.length,
   subscribeToCommandBlocks: () => () => undefined,
+  // 넣기·실행이 우리가 보낸 원문을 남긴다 — 그 이력이 "화면에서 읽었으니 믿을 수 없다" 로
+  // 남지 않게 하는 경로다.
+  noteInsertedCommand: (...args: unknown[]) => {
+    notedInsertions.push(args as [string, string]);
+  },
 }));
 
 const storeState: Record<string, unknown> = {};
@@ -64,6 +69,7 @@ function block(overrides: Partial<FakeBlock> = {}): FakeBlock {
 }
 
 const sent: string[] = [];
+const notedInsertions: Array<[string, string]> = [];
 const scrolled: number[] = [];
 let bracketedPaste = true;
 let hooks: TerminalHooks;
@@ -107,6 +113,7 @@ function setState(overrides: Record<string, unknown> = {}): void {
 beforeEach(() => {
   blocks.length = 0;
   sent.length = 0;
+  notedInsertions.length = 0;
   scrolled.length = 0;
   bracketedPaste = true;
   setState();
@@ -174,6 +181,7 @@ describe('tmux 창의 지표', () => {
         disks: [],
       },
       processes: null,
+      system: null,
       updatedAtMs: Date.now(),
     });
 
@@ -192,6 +200,25 @@ describe('SessionPanel', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  // 드래그 중에 세션이 끊겨 패널이 사라지면(대상이 null 이 되면 이 컴포넌트는 그냥 없어진다)
+  // mouseup 이 오기 전까지 window 리스너가 남아 폭을 계속 바꿨다.
+  it('드래그 중 언마운트되면 폭 리스너가 남지 않는다', () => {
+    const setWidth = vi.fn();
+    setState({ setSessionPanelWidth: setWidth });
+    const { unmount } = render(<SessionPanel sessionId="session-1" />);
+    const handle = document.querySelector('[class*="cursor-col-resize"]');
+    expect(handle).toBeTruthy();
+
+    fireEvent.mouseDown(handle as Element, { clientX: 500 });
+    fireEvent.mouseMove(window, { clientX: 400 });
+    expect(setWidth).toHaveBeenCalledTimes(1);
+
+    unmount();
+    // 언마운트 뒤의 움직임은 폭을 건드리지 못한다.
+    fireEvent.mouseMove(window, { clientX: 100 });
+    expect(setWidth).toHaveBeenCalledTimes(1);
+  });
+
   it('고른 섹션은 aria-pressed 로 드러난다', () => {
     setState({ sessionPanelSectionBySessionId: { 'session-1': 'snippets' } });
     render(<SessionPanel sessionId="session-1" />);
@@ -203,11 +230,76 @@ describe('SessionPanel', () => {
     ).toBe('false');
   });
 
-  it('섹션을 처음 열면 히스토리를 보여 준다', () => {
-    // 빈 레일만 보이면 "이게 뭐지" 가 된다.
-    setState({ sessionPanelSectionBySessionId: {} });
+  // 패널을 여는 이유가 대개 "이 서버 지금 어때" 다 — 붙은 호스트면 자원부터 보여 준다.
+  it('붙은 호스트 세션을 처음 열면 자원을 보여 준다', () => {
+    setState({
+      sessionPanelSectionBySessionId: {},
+      tabs: [
+        {
+          sessionId: 'session-1',
+          title: 'Prod',
+          paneKind: 'terminal',
+          source: 'host',
+        },
+      ],
+    });
+    publishHostMetrics('session-1', {
+      status: 'ready',
+      metrics: {
+        cpuPercent: 42,
+        memUsedKb: 1048576,
+        memTotalKb: 2097152,
+        rxBytesPerSec: 0,
+        txBytesPerSec: 0,
+        diskReadBytesPerSec: 0,
+        diskWriteBytesPerSec: 0,
+        loadAvg1: 0.1,
+        cpuCount: 2,
+        uptimeSeconds: 60,
+        disks: [],
+      },
+      processes: null,
+      system: null,
+      updatedAtMs: Date.now(),
+    });
+
+    render(<SessionPanel sessionId="session-1" />);
+    expect(screen.getByText('42%')).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: '자원' }).getAttribute('aria-pressed'),
+    ).toBe('true');
+    clearHostMetrics('session-1');
+  });
+
+  // 로컬 터미널·시리얼은 원격 부하라는 개념이 없다 — 자원을 기본으로 두면 "읽을 수 없습니다"
+  // 만 있는 화면으로 시작하고, 켤 방법도 없다. 빈 레일만 보이면 "이게 뭐지" 가 된다.
+  it('지표가 없는 세션을 처음 열면 히스토리를 보여 준다', () => {
+    setState({
+      sessionPanelSectionBySessionId: {},
+      tabs: [
+        {
+          sessionId: 'session-1',
+          title: 'Terminal',
+          paneKind: 'terminal',
+          source: 'local',
+        },
+      ],
+    });
     render(<SessionPanel sessionId="session-1" />);
     expect(screen.getByPlaceholderText('명령 검색')).toBeTruthy();
+  });
+
+  // 사용자가 넣은 뒤 직접 엔터를 쳐서 만들어지는 이력이 재실행 가능하려면, 넣는 시점에 원문을
+  // 남겨야 한다(대조로 증명한다 — terminal-command-blocks 참고).
+  it('넣기·실행은 보낸 원문을 블록 쪽에 남긴다', () => {
+    blocks.push(block({ command: 'ls -la' }));
+    render(<SessionPanel sessionId="session-1" />);
+
+    fireEvent.click(screen.getByRole('button', { name: '입력줄에 넣기' }));
+    expect(notedInsertions).toEqual([['session-1', 'ls -la']]);
+
+    fireEvent.click(screen.getByRole('button', { name: '넣고 실행' }));
+    expect(notedInsertions).toHaveLength(2);
   });
 
   it('한 줄 명령은 넣기·실행이 그 세션의 셸로 나간다', () => {
@@ -259,6 +351,35 @@ describe('SessionPanel', () => {
     expect((screen.getByRole('button', { name: '복사' }) as HTMLButtonElement).disabled).toBe(
       false,
     );
+  });
+
+  // 괄호 붙여넣기는 원격이 보낸 이스케이프로 꺼진다(vim 등). xterm 은 모드 변경을 알려 주지
+  // 않으므로 패널이 주기적으로 다시 확인한다 — 확인하지 않으면 버튼은 열린 채로 남고, 눌러도
+  // 아무 일이 없어 고장으로 읽힌다.
+  it('보는 중에 괄호 붙여넣기가 꺼지면 여러 줄 넣기가 잠긴다', () => {
+    vi.useFakeTimers();
+    try {
+      // 오염 없는 여러 줄이라 괄호 붙여넣기가 켜져 있는 동안에는 넣기가 열린다.
+      blocks.push(block({ command: 'cat <<EOF\nline1\nEOF', commandUnreliable: false }));
+      render(<SessionPanel sessionId="session-1" />);
+      expect(
+        (screen.getByRole('button', { name: '입력줄에 넣기' }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+
+      // 전체화면 프로그램이 모드를 끈다.
+      bracketedPaste = false;
+      act(() => {
+        vi.advanceTimersByTime(600);
+      });
+
+      expect(
+        (screen.getByRole('button', { name: '입력줄에 넣기' }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('실행 중인 명령이 있으면 아무것도 보내지 않는다', () => {
@@ -313,6 +434,19 @@ describe('SessionPanel', () => {
     // 보내는 동작은 그대로 된다 — 텍스트는 남아 있다.
     fireEvent.click(screen.getByRole('button', { name: '넣고 실행' }));
     expect(sent).toEqual(['\x15before clear\r']);
+  });
+
+  // 실패는 색으로 훑어야 한다 — 종료 코드를 딱지로 두고 상태 점을 함께 준다.
+  it('실패한 명령은 종료 코드 딱지와 상태 점을 함께 보여 준다', () => {
+    blocks.push(
+      block({ id: 1, command: 'ls', state: 'ok', exitCode: 0 }),
+      block({ id: 2, command: 'make', state: 'failed', exitCode: 2 }),
+    );
+    render(<SessionPanel sessionId="session-1" />);
+
+    expect(screen.getByText('exit 2')).toBeTruthy();
+    // 성공한 줄에는 종료 코드를 적지 않는다(거의 모든 줄이 그렇다).
+    expect(screen.queryByText('exit 0')).toBeNull();
   });
 
   it('검색은 목록만 줄인다', () => {
@@ -439,6 +573,7 @@ describe('SessionPanel 관측 섹션', () => {
         disks: [{ mount: '/', usedKb: 512, totalKb: 1024 }],
       },
       processes: null,
+      system: null,
       updatedAtMs: 1,
     });
     setState({ sessionPanelSectionBySessionId: { 'session-1': 'resources' } });
@@ -452,16 +587,29 @@ describe('SessionPanel 관측 섹션', () => {
     // 프로세스 출력은 크다 — 필요할 때만 왕복에 태운다.
     setState({ sessionPanelSectionBySessionId: { 'session-1': 'resources' } });
     render(<SessionPanel sessionId="session-1" />);
-    expect(getHostMetricsWatch('session-1')).toEqual({ boosted: true, processes: false });
+    // 자원 섹션은 프로세스를 요청하지 않고, 정적 정보만 한 번 요청한다(받으면 그다음부터 꺼진다).
+    expect(getHostMetricsWatch('session-1')).toEqual({
+      boosted: true,
+      processes: false,
+      system: true,
+    });
   });
 
   it('프로세스 섹션을 열면 그때 프로세스를 요청한다', () => {
     setState({ sessionPanelSectionBySessionId: { 'session-1': 'processes' } });
     const { unmount } = render(<SessionPanel sessionId="session-1" />);
-    expect(getHostMetricsWatch('session-1')).toEqual({ boosted: true, processes: true });
+    expect(getHostMetricsWatch('session-1')).toEqual({
+      boosted: true,
+      processes: true,
+      system: false,
+    });
     // 닫으면 요청이 풀려 주기가 원래대로 돌아간다.
     unmount();
-    expect(getHostMetricsWatch('session-1')).toEqual({ boosted: false, processes: false });
+    expect(getHostMetricsWatch('session-1')).toEqual({
+      boosted: false,
+      processes: false,
+      system: false,
+    });
   });
 
   it('프로세스는 CPU 내림차순이고 검색으로 걸러진다', () => {
@@ -472,19 +620,50 @@ describe('SessionPanel 관측 섹션', () => {
         { pid: 2, user: 'root', cpuPercent: 1, memPercent: 9, rssKb: null, command: 'nginx' },
         { pid: 1, user: 'ubuntu', cpuPercent: 80, memPercent: 1, rssKb: null, command: 'node server.js' },
       ],
+    system: null,
       updatedAtMs: 1,
     });
     setState({ sessionPanelSectionBySessionId: { 'session-1': 'processes' } });
     render(<SessionPanel sessionId="session-1" />);
 
-    const commands = screen.getAllByText(/nginx|node server\.js/);
-    expect(commands[0].textContent).toBe('node server.js');
+    // 명령은 프로그램 이름과 인자로 나뉘어 그려지므로 행 단위로 본다(헤더 행은 뺀다).
+    const rows = () => screen.getAllByRole('row').slice(1);
+    expect(rows()[0].textContent).toContain('node server.js');
+    expect(rows()[1].textContent).toContain('nginx');
 
     fireEvent.change(screen.getByPlaceholderText('프로세스 검색'), {
       target: { value: 'nginx' },
     });
-    expect(screen.queryByText('node server.js')).toBeNull();
-    expect(screen.getByText('nginx')).toBeTruthy();
+    const filtered = rows();
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].textContent).toContain('nginx');
+  });
+
+  // 무엇으로 정렬할지 고르게 하지 않는다 — CPU 내림차순 하나로 두고 두 값을 함께 보여 준다.
+  it('프로세스는 표로 CPU·RAM 을 함께 보여 주고 정렬 토글이 없다', () => {
+    publishHostMetrics('session-1', {
+      status: 'ready',
+      metrics: null,
+      processes: [
+        { pid: 7, user: 'ubuntu', cpuPercent: 12.34, memPercent: 4.56, rssKb: null, command: 'node' },
+      ],
+    system: null,
+      updatedAtMs: 1,
+    });
+    setState({ sessionPanelSectionBySessionId: { 'session-1': 'processes' } });
+    render(<SessionPanel sessionId="session-1" />);
+
+    // 값이 여러 열이라 표로 그린다 — 열 이름이 있어야 어느 숫자가 무엇인지 알 수 있다.
+    expect(screen.getByRole('columnheader', { name: 'CPU' })).toBeTruthy();
+    expect(screen.getByRole('columnheader', { name: 'RAM' })).toBeTruthy();
+    expect(screen.getByRole('columnheader', { name: 'PID' })).toBeTruthy();
+    const row = screen.getByRole('row', { name: /node/ });
+    expect(row.textContent).toContain('12.3%');
+    expect(row.textContent).toContain('4.6%');
+    expect(row.textContent).toContain('7');
+    // 정렬을 고르게 하지 않는다.
+    expect(screen.queryByRole('button', { name: 'CPU' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'MEM' })).toBeNull();
   });
 
   it('프로세스 섹션에는 종료 버튼이 없다', () => {
@@ -495,6 +674,7 @@ describe('SessionPanel 관측 섹션', () => {
       processes: [
         { pid: 1, user: 'root', cpuPercent: 1, memPercent: 1, rssKb: null, command: 'nginx' },
       ],
+    system: null,
       updatedAtMs: 1,
     });
     setState({ sessionPanelSectionBySessionId: { 'session-1': 'processes' } });
@@ -680,6 +860,18 @@ describe('SessionPanel 히스토리 — 이전 명령', () => {
     expect(screen.getByText('이전 명령')).toBeTruthy();
     expect(screen.getByText('pwd')).toBeTruthy();
     expect(screen.getByText('docker ps')).toBeTruthy();
+  });
+
+  // 파일에는 같은 명령이 사이사이 섞여 수십 번 나온다 — 그대로 늘어놓으면 목록이 그 반복으로
+  // 채워진다. 한 줄로 접고 몇 번인지만 적는다.
+  it('같은 명령은 한 줄로 접고 몇 번인지 적는다', () => {
+    setShellHistory('session-1', ['ls', 'pwd', 'ls', 'clear', 'ls']);
+    render(<SessionPanel sessionId="session-1" />);
+
+    expect(screen.getAllByText('ls')).toHaveLength(1);
+    expect(screen.getByText('×3')).toBeTruthy();
+    // 한 번만 친 명령에는 숫자를 붙이지 않는다.
+    expect(screen.queryByText('×1')).toBeNull();
   });
 
   it('이전 명령도 실행까지 된다 — 셸이 기록한 원문이다', () => {

@@ -10,6 +10,8 @@ import {
   parseHostMetricsSample,
   parseHostProcesses,
   parseHostProcessesFromOutput,
+  parseHostSystemInfo,
+  parseHostSystemInfoFromOutput,
 } from './host-metrics';
 
 /** 실제 /proc 출력 형태 그대로. 필드 위치에 의존하는 파서라 형식을 흉내 내면 의미가 없다. */
@@ -301,3 +303,33 @@ describe('프로세스 목록', () => {
     expect(parseHostProcessesFromOutput('@@dolgate:ps\n')).toEqual([]);
   });
 });
+
+describe('시스템 정보', () => {
+  it('요청하면 명령에 sys 섹션이 붙고, 아니면 붙지 않는다', () => {
+    expect(buildHostMetricsCommand({ system: true })).toContain('uname -srm');
+    expect(buildHostMetricsCommand()).not.toContain('uname');
+  });
+
+  it('uname·호스트명·CPU 종류를 읽는다', () => {
+    const info = parseHostSystemInfo(
+      ['Linux 5.15.0-91-generic x86_64', 'web-01', ' Intel(R) Xeon(R)  E5-2686 v4 @ 2.30GHz'].join(
+        '\n',
+      ),
+    );
+    expect(info).toEqual({
+      hostname: 'web-01',
+      kernel: 'Linux 5.15.0-91-generic',
+      arch: 'x86_64',
+      cpuModel: 'Intel(R) Xeon(R) E5-2686 v4 @ 2.30GHz',
+    });
+  });
+
+  it('읽을 것이 없으면 null 이다 — 빈 줄을 그리지 않게', () => {
+    expect(parseHostSystemInfo('')).toBeNull();
+    expect(parseHostSystemInfo('\n  \n')).toBeNull();
+  });
+
+  it('sys 섹션이 없는 왕복에서는 null 이다(캐시를 지우지 않게)', () => {
+    expect(parseHostSystemInfoFromOutput('@@dolgate:mem\nMemTotal: 1 kB\n')).toBeNull();
+  });
+})

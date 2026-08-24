@@ -16,16 +16,22 @@ import {
 
 export function useSessionHostMetrics(
   sessionId: string,
-  options: { processes?: boolean } = {},
+  options: { processes?: boolean; system?: boolean } = {},
 ): HostMetricsSnapshot {
   const wantsProcesses = options.processes === true;
+  // 정적 정보(호스트명·커널·아키텍처·CPU 종류)는 자원 섹션이 열릴 때 한 번만 받아 캐시한다 —
+  // 이미 받아 둔 세션에서는 레지스트리가 요청을 걸러 낸다.
+  const wantsSystem = options.system === true;
 
   useEffect(() => {
     if (!sessionId) {
       return;
     }
-    return watchHostMetrics(sessionId, { processes: wantsProcesses });
-  }, [sessionId, wantsProcesses]);
+    return watchHostMetrics(sessionId, {
+      processes: wantsProcesses,
+      system: wantsSystem,
+    });
+  }, [sessionId, wantsProcesses, wantsSystem]);
 
   const subscribe = useCallback(
     (onChange: () => void) => subscribeHostMetrics(sessionId, onChange),

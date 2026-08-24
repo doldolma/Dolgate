@@ -33,6 +33,10 @@ interface SessionPanelHistoryProps {
   sender: SessionPanelSender;
 }
 
+// 상태 점은 두지 않는다. 목록의 거의 모든 줄이 성공이라 줄마다 흐린 점이 하나씩 붙는 것이
+// 전부였고, 정작 알아야 하는 실패는 오른쪽 `exit N` 딱지가 이미 색으로 말해 준다. 이전 명령의
+// 빈 원은 "종료 코드가 없다" 는 뜻이었지만, 그 목록에는 애초에 종료 코드가 나온 적이 없다.
+
 export function SessionPanelHistory({
   blocks,
   shellHistory,
@@ -107,25 +111,35 @@ export function SessionPanelHistory({
             const actions = resolveHistoryActions(item, sender.context);
             const command = item.command ?? '';
             const failed = item.state === 'failed' && item.exitCode !== null;
-            const parts = [
-              item.cwd,
-              item.state === 'running'
-                ? translate('cmdPalette.running')
-                : formatBlockRelativeTime(item.startedAt, now),
+            // 시각·소요는 오른쪽에 모아 줄마다 같은 자리에 오게 한다. 작업 디렉터리는 길이가
+            // 제각각이라 왼쪽에서 잘리는 쪽이 낫다.
+            const running = item.state === 'running';
+            const timing = [
+              running ? null : formatBlockRelativeTime(item.startedAt, now),
               formatBlockDuration(item.durationMs),
-            ].filter(Boolean);
+            ]
+              .filter(Boolean)
+              .join(' · ');
             return (
               <SessionPanelRow
                 key={item.id}
                 text={command}
-                meta={
+                meta={item.cwd}
+                metaTrailing={
                   <>
-                    {/* 실패한 명령은 종료 코드를 먼저, 색으로 구분해 보여 준다. */}
+                    {/* 실패는 종료 코드를 딱지로 — 글자로만 적으면 훑을 때 눈에 걸리지 않는다. */}
                     {failed ? (
-                      <span className="text-[var(--danger-text)]">exit {item.exitCode}</span>
+                      <span className="mr-1.5 rounded-[4px] bg-[var(--danger-bg)] px-1 py-px text-[0.64rem] font-medium text-[var(--danger-text)]">
+                        exit {item.exitCode}
+                      </span>
                     ) : null}
-                    {failed && parts.length > 0 ? ' · ' : null}
-                    {parts.join(' · ')}
+                    {/* 실행 중은 색으로 말한다 — 시각·소요와 같은 회색이면 훑을 때 안 걸린다. */}
+                    {running ? (
+                      <span className="mr-1.5 text-[var(--warning-text)]">
+                        {translate('cmdPalette.running')}
+                      </span>
+                    ) : null}
+                    {timing}
                   </>
                 }
                 actions={actions}
@@ -152,14 +166,22 @@ export function SessionPanelHistory({
         ) : null}
         {previous.length > 0 ? (
           <>
-            {/* 경계를 한 줄로 알려 준다 — 아래부터는 종료 코드도, 위치 이동도 없다. */}
-            <p className="px-2.5 pb-1 pt-2.5 text-[0.68rem] uppercase tracking-[0.1em] text-[var(--text-soft)]">
-              {translate('sessionPanel.history.previous')}
-            </p>
+            {/* 경계를 실선으로 알려 준다 — 아래부터는 종료 코드도, 위치 이동도 없다. */}
+            <div className="mt-2 flex items-baseline gap-2 border-t border-[var(--border)] px-2.5 pb-1 pt-2">
+              <span className="text-[0.64rem] uppercase tracking-[0.1em] text-[var(--text-muted)]">
+                {translate('sessionPanel.history.previous')}
+              </span>
+              <span className="tabular-nums text-[0.64rem] text-[var(--text-muted)]">
+                {previous.length}
+              </span>
+            </div>
             {shownPrevious.shown.map((item) => (
               <SessionPanelRow
                 key={item.key}
                 text={item.command}
+                dense
+                // 몇 번 쳤는지. 접힌 줄이 몇 개였는지를 이 숫자가 대신한다.
+                trailing={item.count > 1 ? `×${item.count}` : null}
                 // 셸이 기록한 원문이라 화면에서 읽어 낸 것과 달리 보조 프롬프트가 섞이지
                 // 않는다 — 스니펫과 같은 판정을 쓴다(여러 줄 줄은 애초에 Go 가 버린다).
                 actions={resolveSnippetActions(item.command, sender.context)}

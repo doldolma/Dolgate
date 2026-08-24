@@ -157,11 +157,14 @@ jest.mock("@aws-sdk/client-sts", () => ({
 }));
 // 직접 경로가 실제로 도는지 보려면 AWS 호출을 대역으로 둬야 한다. 값은 테스트마다 바꾼다.
 const mockSsmDirect = {
+  assertSsmManagedInstance: jest.fn(),
   startSsmShellSession: jest.fn(),
   startSsmPortForwardSession: jest.fn(),
   pushEc2InstanceConnectKey: jest.fn(),
 };
 jest.mock("../src/lib/aws-ssm-direct", () => ({
+  assertSsmManagedInstance: (...args: unknown[]) =>
+    mockSsmDirect.assertSsmManagedInstance(...args),
   startSsmShellSession: (...args: unknown[]) =>
     mockSsmDirect.startSsmShellSession(...args),
   startSsmPortForwardSession: (...args: unknown[]) =>
@@ -2130,6 +2133,68 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(session?.errorMessage).toContain("ssm:StartSession");
     // 자격증명이 서버로 나가지 않는다 — 직접 경로는 우리 서버에 아무것도 보내지 않는다.
     expect(mockSsmDirect.startSsmShellSession).toHaveBeenCalledTimes(1);
+    // 붙기 전에 관리 대상인지 확인한다(데스크톱과 같은 순서).
+    expect(mockSsmDirect.assertSsmManagedInstance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        region: "ap-northeast-2",
+        instanceId: "i-direct",
+      }),
+    );
+  });
+
+  // 에이전트가 죽은 인스턴스에 두 경로를 다 시도해 보고 나서 "세션을 시작하지 못했습니다" 로
+  // 끝나면 무엇을 고쳐야 하는지 알 수 없다. 먼저 확인해서 원인을 말하고 멈춘다.
+  it("stops before connecting when the instance is not SSM managed", async () => {
+    const awsHost: AwsEc2HostRecord = {
+      id: "host-aws-unmanaged",
+      kind: "aws-ec2",
+      label: "Unmanaged EC2",
+      awsProfileId: "profile-prod",
+      awsProfileName: "prod",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-unmanaged",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const awsProfile: ManagedAwsProfilePayload = {
+      id: "profile-prod",
+      name: "prod",
+      kind: "static",
+      region: "ap-northeast-2",
+      accessKeyId: "AKIAPROD",
+      secretAccessKey: "prod-secret",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    mockSsmDirect.assertSsmManagedInstance.mockRejectedValueOnce(
+      new Error("이 인스턴스가 SSM 관리 대상으로 확인되지 않습니다."),
+    );
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [awsHost],
+        awsProfiles: [awsProfile],
+        syncStatus: {
+          ...createDefaultSyncStatus(),
+          awsProfilesServerSupport: "supported",
+          awsSsmServerSupport: "unsupported",
+        },
+      });
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(awsHost.id);
+      await flushAsyncWork();
+    });
+
+    const session = useMobileAppStore
+      .getState()
+      .sessions.find(item => item.id === sessionId);
+    expect(session?.status).toBe("error");
+    expect(session?.errorMessage).toContain("SSM 관리 대상");
+    expect(mockSsmDirect.startSsmShellSession).not.toHaveBeenCalled();
+    expect(mockSsmDirect.pushEc2InstanceConnectKey).not.toHaveBeenCalled();
   });
 
   // **SSM 셸 세션에도 타이핑이 들어가야 한다.** 이 경로에는 SSH 연결이 없어서(셸만 있다)
