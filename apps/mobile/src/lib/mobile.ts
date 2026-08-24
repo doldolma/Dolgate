@@ -151,6 +151,7 @@ export function createDefaultSyncStatus(): SyncStatus {
     awsSsmServerSupport: 'unknown',
     awsSftpServerSupport: 'unknown',
     vaultE2eeServerSupport: 'unknown',
+    dataFloorServerSupport: 'unknown',
   };
 }
 

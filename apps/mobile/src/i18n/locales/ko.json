@@ -122,12 +122,14 @@
   },
   "common": {
     "cancel": "취소",
+    "done": "완료",
     "close": "닫기",
     "delete": "삭제",
     "edit": "수정",
     "privacyPolicy": "개인정보 처리방침",
     "on": "켬",
-    "off": "끔"
+    "off": "끔",
+    "add": "추가"
   },
   "connectFailure": {
     "agentUnreachable": "ssh-agent 에 연결할 수 없습니다. 데스크톱에서 agent 를 확인해 주세요.",
@@ -340,7 +342,6 @@
     "hostPlaceholder": "10.0.0.1",
     "portPlaceholder": "22",
     "usernamePlaceholder": "ubuntu",
-    "groupPlaceholder": "work/aws",
     "credential": {
       "preserve": "기존 유지",
       "replace": "교체",
@@ -367,7 +368,7 @@
       "certificate": "인증서",
       "passphrase": "키 암호"
     },
-    "groupHint": "선택 사항입니다. work/aws 처럼 / 로 하위 그룹을 만듭니다.",
+    "groupHint": "선택 사항입니다. 없는 그룹은 고르는 화면에서 만듭니다.",
     "credentialSection": "저장된 자격 증명",
     "discardTitle": "변경 사항을 버릴까요?",
     "discardBody": "저장하지 않은 내용이 있습니다.",
@@ -385,7 +386,8 @@
       "emptyText": "사용 가능한 스니펫이 없습니다.",
       "missing": "선택한 스니펫을 찾을 수 없습니다. 연결 시 startup command를 건너뜁니다.",
       "varsHint": "연결할 때 변수 값을 묻습니다.",
-      "snippetOnlyOnDesktop": "스니펫은 데스크톱에서 만들고 편집합니다."
+      "snippetOnlyOnDesktop": "스니펫은 데스크톱에서 만들고 편집합니다.",
+      "count": "시작 명령"
     },
     "ec2": {
       "instanceSection": "인스턴스",
@@ -396,7 +398,70 @@
       "serverProxy": "서버 프록시",
       "serverProxyHint": "켜면 SSH 전송이 서버(sync-api)를 거칩니다. 직접 붙을 수 없는 망이거나, 앱이 백그라운드로 가도 세션을 유지해야 할 때 씁니다. 끄면 이 기기에서 AWS SSM 으로 직접 붙습니다.",
       "proxySaveFailed": "서버 프록시 설정을 저장하지 못했습니다."
-    }
+    },
+    "advancedSection": "고급",
+    "tags": {
+      "header": "태그",
+      "add": "태그 추가",
+      "placeholder": "예: 운영",
+      "remove": "태그 {{tag}} 지우기",
+      "count": "태그 {{count}}"
+    },
+    "env": {
+      "header": "환경 변수",
+      "add": "변수 추가",
+      "remove": "{{key}} 지우기",
+      "count": "변수 {{count}}",
+      "nameLabel": "변수 이름",
+      "valueLabel": "변수 값",
+      "namePlaceholder": "LANG",
+      "valuePlaceholder": "ko_KR.UTF-8"
+    },
+    "toggles": {
+      "agentForwarding": "에이전트 포워딩",
+      "mosh": "Mosh 사용",
+      "hint": "에이전트 포워딩은 이 기기의 키를 원격에 빌려주지 않고 서명만 대신합니다."
+    },
+    "group": {
+      "none": "그룹 없음",
+      "search": "그룹 검색",
+      "empty": "만들어 둔 그룹이 없습니다.",
+      "createHintRoot": "최상위에 만들어집니다."
+    },
+    "tailnet": {
+      "label": "Tailnet",
+      "none": "사용 안 함",
+      "search": "Tailnet 검색",
+      "empty": "등록된 tailnet 이 없습니다.",
+      "hint": "tailnet 을 지정하면 그 네트워크를 거쳐 접속합니다."
+    },
+    "jump": {
+      "header": "점프 호스트",
+      "add": "점프 호스트 추가",
+      "search": "호스트 검색",
+      "empty": "점프로 쓸 SSH 호스트가 없습니다.",
+      "remove": "{{label}} 빼기",
+      "count": "점프 {{count}}"
+    },
+    "rd": {
+      "rdpSection": "RDP 호스트",
+      "vncSection": "VNC 호스트",
+      "domain": "도메인",
+      "domainPlaceholder": "예: CORP",
+      "credentialKeepHint": "비워 두면 저장된 자격증명을 그대로 씁니다.",
+      "passwordKeepPlaceholder": "그대로 두려면 비워 둡니다",
+      "vncOptions": "화면",
+      "vncOptionsHint": "보기 전용이면 입력을 보내지 않습니다. 공유는 다른 사람의 세션을 끊지 않습니다.",
+      "viewOnly": "보기 전용",
+      "shared": "공유 모드",
+      "quality": {
+        "fast": "속도 우선",
+        "balanced": "균형",
+        "lossless": "무손실"
+      }
+    },
+    "kindSection": "종류",
+    "kindUnsupported": "RDP·VNC 는 이 서버에서 만들 수 없습니다. 서버를 업데이트하면 열립니다."
   },
   "home": {
     "favorites": "즐겨찾기",

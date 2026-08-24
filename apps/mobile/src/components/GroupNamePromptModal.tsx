@@ -86,6 +86,7 @@ export function GroupNamePromptModal({
                 onSubmit(trimmed);
               }
             }}
+            accessibilityLabel={translate("groupActions.namePlaceholder")}
             placeholder={translate("groupActions.namePlaceholder")}
             placeholderTextColor={palette.mutedText}
             style={[

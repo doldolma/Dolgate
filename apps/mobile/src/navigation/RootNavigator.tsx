@@ -44,6 +44,13 @@ export type RootStackParamList = {
         hostId?: string;
         /** 새로 만들 때 미리 채울 그룹 경로. 보고 있던 그룹에 그대로 추가되게 한다. */
         defaultGroupPath?: string;
+        /**
+         * 새로 만들 종류. 생략하면 SSH 다.
+         *
+         * 고치는 경우에는 넘기지 않는다 — 종류는 호스트 레코드가 이미 알고 있고, 여기서
+         * 다시 받으면 서로 어긋났을 때 종류가 바뀐 것처럼 보인다.
+         */
+        kind?: 'ssh' | 'rdp' | 'vnc';
       }
     | undefined;
 };

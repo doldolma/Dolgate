@@ -1814,6 +1814,14 @@ export interface SyncStatus {
   awsSftpServerSupport?: AwsProfilesServerSupport;
   // 서버가 E2EE 볼트(v2)를 지원하는지 — 기존(v1) 유저에게 전환 프롬프트를 띄울지 판단.
   vaultE2eeServerSupport?: AwsProfilesServerSupport;
+  /**
+   * 서버가 계정 데이터 수준(sync_data_floor)을 저장·판정하는지.
+   *
+   * 못 하는 서버에서 RDP·VNC 호스트를 만들면 그 계정의 옛 클라이언트가 그 레코드를 받고
+   * 조용히 망가진다 — 막아 줄 장치가 아무 데도 없다. 그래서 화면은 이 값이 supported 일
+   * 때만 그 종류를 만들게 연다(데스크톱 HostDrawer 와 같은 규칙).
+   */
+  dataFloorServerSupport?: AwsProfilesServerSupport;
 }
 
 // UpdateReleaseInfo는 GitHub Releases에서 읽어온 배포 메타데이터를 정규화한 형태다.

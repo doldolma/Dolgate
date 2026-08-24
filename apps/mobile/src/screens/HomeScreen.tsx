@@ -728,6 +728,8 @@ export function HomeScreen(): React.JSX.Element {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={translate("home.addHost")}
+            // 한 탭으로 폼까지 간다. 종류(SSH·RDP·VNC)는 폼 맨 위에서 고르고 SSH 가 기본이라,
+            // 흔한 길에는 손이 더 들지 않으면서 나머지도 눈에 보인다.
             onPress={() =>
               // 그룹을 열어 둔 채 추가하면 그 그룹에 넣으려는 것이다. 즐겨찾기는 진짜
               // 그룹이 아니라 호스트의 플래그라 넘기지 않는다.

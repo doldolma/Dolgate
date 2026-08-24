@@ -122,12 +122,14 @@
   },
   "common": {
     "cancel": "Cancel",
+    "done": "Done",
     "close": "Close",
     "delete": "Delete",
     "edit": "Edit",
     "privacyPolicy": "Privacy Policy",
     "on": "On",
-    "off": "Off"
+    "off": "Off",
+    "add": "Add"
   },
   "connectFailure": {
     "agentUnreachable": "Could not reach ssh-agent. Check the agent on your desktop.",
@@ -340,7 +342,6 @@
     "hostPlaceholder": "10.0.0.1",
     "portPlaceholder": "22",
     "usernamePlaceholder": "ubuntu",
-    "groupPlaceholder": "work/aws",
     "credential": {
       "preserve": "Keep existing",
       "replace": "Replace",
@@ -367,7 +368,7 @@
       "certificate": "Certificate",
       "passphrase": "Passphrase"
     },
-    "groupHint": "Optional. Use / to nest, like work/aws.",
+    "groupHint": "Optional. Create a missing group from the picker.",
     "credentialSection": "Saved credential",
     "discardTitle": "Discard changes?",
     "discardBody": "You have unsaved changes.",
@@ -385,7 +386,8 @@
       "emptyText": "No snippet available.",
       "missing": "The selected snippet could not be found. The startup command is skipped on connect.",
       "varsHint": "You will be asked for variable values when connecting.",
-      "snippetOnlyOnDesktop": "Snippets are created and edited on desktop."
+      "snippetOnlyOnDesktop": "Snippets are created and edited on desktop.",
+      "count": "Startup command"
     },
     "ec2": {
       "instanceSection": "Instance",
@@ -396,7 +398,70 @@
       "serverProxy": "Server proxy",
       "serverProxyHint": "When on, the SSH transport rides through the server (sync-api). Use it for networks you cannot reach directly, or when the session must survive the app going to the background. When off, this device connects to AWS SSM directly.",
       "proxySaveFailed": "Could not save the server proxy setting."
-    }
+    },
+    "advancedSection": "Advanced",
+    "tags": {
+      "header": "Tags",
+      "add": "Add tag",
+      "placeholder": "e.g. prod",
+      "remove": "Remove tag {{tag}}",
+      "count": "{{count}} tags"
+    },
+    "env": {
+      "header": "Environment variables",
+      "add": "Add variable",
+      "remove": "Remove {{key}}",
+      "count": "{{count}} variables",
+      "nameLabel": "Variable name",
+      "valueLabel": "Variable value",
+      "namePlaceholder": "LANG",
+      "valuePlaceholder": "en_US.UTF-8"
+    },
+    "toggles": {
+      "agentForwarding": "Agent forwarding",
+      "mosh": "Use Mosh",
+      "hint": "Agent forwarding signs on the remote side without copying your key there."
+    },
+    "group": {
+      "none": "No group",
+      "search": "Search groups",
+      "empty": "No groups yet.",
+      "createHintRoot": "Created at the top level."
+    },
+    "tailnet": {
+      "label": "Tailnet",
+      "none": "Not used",
+      "search": "Search tailnets",
+      "empty": "No tailnets registered.",
+      "hint": "Connections go through the tailnet you pick."
+    },
+    "jump": {
+      "header": "Jump hosts",
+      "add": "Add jump host",
+      "search": "Search hosts",
+      "empty": "No SSH hosts to jump through.",
+      "remove": "Remove {{label}}",
+      "count": "{{count}} jumps"
+    },
+    "rd": {
+      "rdpSection": "RDP host",
+      "vncSection": "VNC host",
+      "domain": "Domain",
+      "domainPlaceholder": "e.g. CORP",
+      "credentialKeepHint": "Leave blank to keep the saved credential.",
+      "passwordKeepPlaceholder": "Leave blank to keep",
+      "vncOptions": "Display",
+      "vncOptionsHint": "View only sends no input. Shared mode does not disconnect others.",
+      "viewOnly": "View only",
+      "shared": "Shared mode",
+      "quality": {
+        "fast": "Fastest",
+        "balanced": "Balanced",
+        "lossless": "Lossless"
+      }
+    },
+    "kindSection": "Kind",
+    "kindUnsupported": "This server cannot host RDP or VNC entries. Update the server to enable them."
   },
   "home": {
     "favorites": "Favorites",

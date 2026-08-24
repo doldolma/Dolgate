@@ -16,6 +16,7 @@ import type {
   FileEntry,
   GroupRecord,
   GroupRemoveMode,
+  HostEnvVar,
   HostRecord,
   ParsedQuickSshCommand,
   HostSecretInput,
@@ -37,6 +38,7 @@ import type {
   SyncPayloadV2,
   SyncStatus,
   TailnetPayload,
+  VncImageQuality,
   VaultCacheOwner,
   VaultKdfDescriptor,
 } from '@dolssh/shared-core';
@@ -784,6 +786,46 @@ export interface MobileHostDraftInput {
    * 값이 사라지면 안 된다.
    */
   startupCommand?: HostStartupCommand | null;
+  /**
+   * 아래 필드들도 같은 규약이다 — 값이면 설정, `null`(목록은 `[]`)이면 해제, 생략이면 보존.
+   *
+   * 목록형은 **빈 배열과 생략이 다른 뜻**이다. 빈 배열은 "전부 지워라", 생략은 "건드리지
+   * 마라" — 둘을 섞으면 이 필드를 모르는 화면이 저장할 때 데스크톱에서 넣은 값이 사라진다.
+   */
+  tags?: string[];
+  env?: HostEnvVar[] | null;
+  agentForwarding?: boolean | null;
+  useMosh?: boolean | null;
+  jumpHostIds?: string[] | null;
+  tailnetId?: string | null;
+}
+
+/**
+ * RDP·VNC 호스트 편집 입력.
+ *
+ * SSH 와 같은 보존 규약이다 — 값이면 설정, `null` 이면 해제, 생략이면 보존. RDP 는 계정이
+ * 자격증명에 딸리므로(도메인도) 사용자명이 여기 있다.
+ */
+export interface MobileRemoteDesktopDraftInput {
+  hostId?: string;
+  kind: 'rdp' | 'vnc';
+  label: string;
+  hostname: string;
+  port: number;
+  groupName?: string | null;
+  tags?: string[];
+  tailnetId?: string | null;
+  credentialMode?: 'preserve' | 'replace' | 'remove';
+  credentials?: {
+    username?: string;
+    domain?: string;
+    password?: string;
+  } | null;
+  /** VNC 전용. */
+  shared?: boolean | null;
+  viewOnly?: boolean | null;
+  imageQuality?: VncImageQuality | null;
+  sshTunnelHostId?: string | null;
 }
 
 interface MobileAppState {
@@ -886,6 +928,15 @@ interface MobileAppState {
   updateSettings: (input: Partial<MobileSettings>) => Promise<void>;
   connectToHost: (hostId: string) => Promise<string | null>;
   saveHost: (input: MobileHostDraftInput) => Promise<void>;
+  /**
+   * RDP·VNC 호스트를 만들거나 고친다.
+   *
+   * `saveHost` 와 섞지 않는다 — 그쪽은 SSH 전용이고(레코드를 `kind: 'ssh'` 로 만든다),
+   * 한 함수로 합치면 종류를 잘못 넘겼을 때 호스트의 종류가 조용히 바뀐다.
+   */
+  saveRemoteDesktopHost: (
+    input: MobileRemoteDesktopDraftInput,
+  ) => Promise<void>;
   /**
    * EC2 호스트의 서버 프록시 설정을 바꾼다.
    *
@@ -4793,6 +4844,9 @@ export const useMobileAppStore = create<MobileAppState>()(
                   serverInfo.capabilities.sessions.awsSsm,
                 ),
                 awsSftpServerSupport,
+                dataFloorServerSupport: toServerSupport(
+                  serverInfo.capabilities.sync.dataFloor,
+                ),
               },
             }));
           } catch {}
@@ -6176,6 +6230,9 @@ export const useMobileAppStore = create<MobileAppState>()(
                   awsSftpServerSupport: toServerSupport(
                     serverInfo.capabilities.sessions.awsSftp,
                   ),
+                  dataFloorServerSupport: toServerSupport(
+                    serverInfo.capabilities.sync.dataFloor,
+                  ),
                 },
               }));
             } catch {}
@@ -6657,6 +6714,9 @@ export const useMobileAppStore = create<MobileAppState>()(
                   : serverInfo
                     ? 'unsupported'
                     : 'unknown',
+              dataFloorServerSupport: serverInfo
+                ? toServerSupport(serverInfo.capabilities.sync.dataFloor)
+                : 'unknown',
             };
             const authenticatedAuth: AuthState = {
               status: 'authenticated',
@@ -8411,6 +8471,19 @@ export const useMobileAppStore = create<MobileAppState>()(
             ...(input.startupCommand !== undefined
               ? { startupCommand: input.startupCommand }
               : {}),
+            // 같은 이유로 전부 조건부 스프레드다 — 생략은 보존이어야 한다.
+            ...(input.tags !== undefined ? { tags: input.tags } : {}),
+            ...(input.env !== undefined ? { env: input.env } : {}),
+            ...(input.agentForwarding !== undefined
+              ? { agentForwarding: input.agentForwarding }
+              : {}),
+            ...(input.useMosh !== undefined ? { useMosh: input.useMosh } : {}),
+            ...(input.jumpHostIds !== undefined
+              ? { jumpHostIds: input.jumpHostIds }
+              : {}),
+            ...(input.tailnetId !== undefined
+              ? { tailnetId: input.tailnetId }
+              : {}),
             createdAt: existingSsh?.createdAt ?? now,
             updatedAt: now,
           };
@@ -8432,6 +8505,122 @@ export const useMobileAppStore = create<MobileAppState>()(
               : null;
 
           // **로컬 먼저.** 오프라인이어도 호스트가 저장되고, 큐가 다음 기회에 서버로 나른다.
+          const nextHosts = sortHosts([
+            ...get().hosts.filter(host => host.id !== record.id),
+            record,
+          ]);
+          set({ hosts: nextHosts });
+          if (nextSecret) {
+            await updateSecretsState(
+              { ...get().secretsByRef, [nextSecret.secretRef]: nextSecret },
+              nextHosts,
+            );
+          } else {
+            await updateSecretsState(get().secretsByRef, nextHosts);
+          }
+
+          enqueueAndDrain([
+            { kind: 'hosts', id: record.id, op: 'upsert' },
+            ...(nextSecret
+              ? [
+                  {
+                    kind: 'secrets' as const,
+                    id: nextSecret.secretRef,
+                    op: 'upsert' as const,
+                  },
+                ]
+              : []),
+          ]);
+        },
+        saveRemoteDesktopHost: async (
+          input: MobileRemoteDesktopDraftInput,
+        ) => {
+          if (!get().secureStateReady) {
+            throw new Error(getSecureStateLoadingMessage());
+          }
+          const existing = input.hostId
+            ? get().hosts.find(item => item.id === input.hostId)
+            : undefined;
+          if (input.hostId && !existing) {
+            throw new Error(t('store.hostToEditNotFound'));
+          }
+          // 종류를 바꾸는 편집은 없다. 섞이면 화면이 다루지 못하는 레코드가 생긴다.
+          if (existing && existing.kind !== input.kind) {
+            throw new Error(t('store.hostToEditNotFound'));
+          }
+          const previous =
+            existing && (isRdpHostRecord(existing) || isVncHostRecord(existing))
+              ? existing
+              : undefined;
+
+          const password = input.credentials?.password?.length
+            ? input.credentials.password
+            : undefined;
+          const username = input.credentials?.username?.trim() || undefined;
+          const credentialMode =
+            input.credentialMode ?? (previous?.secretRef ? 'preserve' : 'replace');
+          // RDP 는 계정이 자격증명에 딸린다 — 비밀번호가 없으면 만들 것이 없다.
+          const hasReplacement = Boolean(password);
+          const secretRef =
+            credentialMode === 'preserve'
+              ? previous?.secretRef
+              : credentialMode === 'replace' && hasReplacement
+                ? (previous?.secretRef ?? createLocalId('secret'))
+                : undefined;
+
+          const now = new Date().toISOString();
+          const base = {
+            ...(previous ?? {}),
+            id: previous?.id ?? createLocalId('host'),
+            label: input.label.trim(),
+            hostname: input.hostname.trim(),
+            port: input.port,
+            secretRef: secretRef ?? null,
+            groupName: input.groupName?.trim() ? input.groupName.trim() : null,
+            // 생략은 보존이다(SSH 와 같은 규약).
+            ...(input.tags !== undefined ? { tags: input.tags } : {}),
+            ...(input.tailnetId !== undefined
+              ? { tailnetId: input.tailnetId }
+              : {}),
+            createdAt: previous?.createdAt ?? now,
+            updatedAt: now,
+          };
+          const record: HostRecord =
+            input.kind === 'vnc'
+              ? ({
+                  ...base,
+                  kind: 'vnc',
+                  ...(input.shared !== undefined ? { shared: input.shared } : {}),
+                  ...(input.viewOnly !== undefined
+                    ? { viewOnly: input.viewOnly }
+                    : {}),
+                  ...(input.imageQuality !== undefined
+                    ? { imageQuality: input.imageQuality }
+                    : {}),
+                  ...(input.sshTunnelHostId !== undefined
+                    ? { sshTunnelHostId: input.sshTunnelHostId }
+                    : {}),
+                } as HostRecord)
+              : ({ ...base, kind: 'rdp' } as HostRecord);
+
+          const nextSecret: LoadedManagedSecretPayload | null =
+            credentialMode === 'replace' && secretRef && hasReplacement
+              ? {
+                  secretRef,
+                  label:
+                    get().secretsByRef[secretRef]?.label ??
+                    `${record.label} credentials`,
+                  kind: input.kind,
+                  ...(username ? { username } : {}),
+                  ...(input.credentials?.domain?.trim()
+                    ? { domain: input.credentials.domain.trim() }
+                    : {}),
+                  ...(password ? { password } : {}),
+                  updatedAt: now,
+                }
+              : null;
+
+          // **로컬 먼저.** 오프라인이어도 저장되고 큐가 다음 기회에 나른다(SSH 와 같다).
           const nextHosts = sortHosts([
             ...get().hosts.filter(host => host.id !== record.id),
             record,

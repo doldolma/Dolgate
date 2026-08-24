@@ -867,7 +867,7 @@ describe("HomeScreen group browsing", () => {
       addButton.props.onPress();
     });
 
-    // 가장 흔한 동작이라 한 탭으로 간다 — 무엇을 추가할지 먼저 묻지 않는다.
+    // 한 탭으로 폼까지 간다 — 종류(SSH·RDP·VNC)는 폼 맨 위에서 고르고 SSH 가 기본이다.
     expect(mockNavigate).toHaveBeenCalledWith("HostForm", undefined);
 
     // 그룹을 열어 둔 채 추가하면 그 그룹이 미리 채워진다 — 열어 둔 그룹에 넣으려는 것이

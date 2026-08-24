@@ -70,7 +70,8 @@ export function HostActionSheet({
       ),
       onPress: () => onToggleFavorite(host),
     });
-    if (isSshHostRecord(host) || isAwsEc2HostRecord(host)) {
+    // RDP·VNC 도 고칠 수 있다. 예전에는 접속만 되고 주소 하나 못 고쳤다.
+    if (isSshHostRecord(host) || isAwsEc2HostRecord(host) || isRdHost) {
       actions.push({
         key: "edit",
         icon: "create-outline",
@@ -78,7 +79,7 @@ export function HostActionSheet({
         onPress: () => onEdit(host),
       });
     }
-    if (isSshHostRecord(host)) {
+    if (isSshHostRecord(host) || isRdHost) {
       actions.push({
         key: "delete",
         icon: "trash-outline",

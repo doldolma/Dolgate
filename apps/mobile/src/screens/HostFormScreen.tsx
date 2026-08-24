@@ -13,14 +13,34 @@ import {
 } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NavigationProp, RouteProp } from "@react-navigation/native";
-import { isSshHostRecord } from "@dolssh/shared-core";
+import {
+  collectGroupPaths,
+  isRdpHostRecord,
+  isSshHostRecord,
+  isVncHostRecord,
+  normalizeGroupPath,
+  normalizeJumpHostIds,
+} from "@dolssh/shared-core";
 import type {
   AuthType,
   AwsEc2HostRecord,
+  HostEnvVar,
   HostStartupCommand,
 } from "@dolssh/shared-core";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { SettingsGroup, SettingsRow } from "../components/SettingsList";
+import Ionicons from "react-native-vector-icons/Ionicons";
+import {
+  ChipField,
+  FieldRow,
+  HostKindField,
+  Segmented,
+  type HostFormKind,
+} from "../components/HostFormFields";
+import { resolveCreatableHostFormKinds } from "../lib/host-form-kinds";
+import { GroupNamePromptModal } from "../components/GroupNamePromptModal";
+import { ListPickerModal } from "../components/ListPickerModal";
+import { RemoteDesktopHostFormScreen } from "./RemoteDesktopHostFormScreen";
 import { StartupSnippetPickerModal } from "../components/StartupSnippetPickerModal";
 import { hasSnippetVariables } from "../lib/snippet-variables";
 import { useScreenPadding } from "../lib/screen-layout";
@@ -97,46 +117,9 @@ const LOCKED_AUTH_LABEL_KEYS = {
   keyboardInteractive: "hostForm.auth.keyboardInteractive",
 } as const satisfies Record<Exclude<AuthType, HostAuthType>, string>;
 
-interface FieldRowProps {
-  label: string;
-  value: string;
-  placeholder: string;
-  onChangeText: (next: string) => void;
-  keyboardType?: "default" | "number-pad";
-  secureTextEntry?: boolean;
-  autoCapitalize?: "none" | "sentences";
-}
-
-// 한 줄 입력 행 — 라벨은 왼쪽에 남고 값은 그 오른쪽에 들어간다. placeholder 만으로 라벨을
-// 대신하면 값을 채운 순간 무슨 칸이었는지 사라진다(이 폼의 가장 큰 문제였다).
-function FieldRow({
-  label,
-  value,
-  placeholder,
-  onChangeText,
-  keyboardType = "default",
-  secureTextEntry = false,
-  autoCapitalize = "none",
-}: FieldRowProps): React.JSX.Element {
-  const palette = useMobilePalette();
-  return (
-    <View style={styles.fieldRow}>
-      <Text style={[styles.fieldLabel, { color: palette.text }]}>{label}</Text>
-      <TextInput
-        accessibilityLabel={label}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={palette.tabInactive}
-        keyboardType={keyboardType}
-        secureTextEntry={secureTextEntry}
-        autoCapitalize={autoCapitalize}
-        autoCorrect={false}
-        style={[styles.fieldInput, { color: palette.text }]}
-      />
-    </View>
-  );
-}
+// 스토어(MOBILE_MAX_JUMP_CHAIN)와 같은 값이어야 한다 — 폼에서 더 넣게 두면 저장은 되고
+// 접속만 거부된다.
+const MAX_JUMP_HOSTS = 8;
 
 interface PasteFieldProps {
   label: string;
@@ -174,52 +157,6 @@ function PasteField({
           },
         ]}
       />
-    </View>
-  );
-}
-
-interface SegmentedProps<T extends string> {
-  options: Array<{ value: T; label: string }>;
-  selected: T;
-  onSelect: (next: T) => void;
-}
-
-// 인증 방식은 셋 중 하나를 고르는 단일 선택이라 하나의 트랙에 담는다. 예전에는 자격 증명
-// 처리와 똑같이 생긴 알약 줄이 위아래로 붙어 있어, 성격이 다른 두 결정이 버튼 여섯 개짜리
-// 한 덩어리로 읽혔다.
-function Segmented<T extends string>({
-  options,
-  selected,
-  onSelect,
-}: SegmentedProps<T>): React.JSX.Element {
-  const palette = useMobilePalette();
-  return (
-    <View style={[styles.segmentTrack, { backgroundColor: palette.surface }]}>
-      {options.map((option) => {
-        const active = option.value === selected;
-        return (
-          <Pressable
-            key={option.value}
-            accessibilityRole="button"
-            accessibilityState={{ selected: active }}
-            onPress={() => onSelect(option.value)}
-            style={[
-              styles.segment,
-              active ? { backgroundColor: palette.accentSoft } : null,
-            ]}
-          >
-            <Text
-              numberOfLines={1}
-              style={[
-                styles.segmentText,
-                { color: active ? palette.accent : palette.mutedText },
-              ]}
-            >
-              {option.label}
-            </Text>
-          </Pressable>
-        );
-      })}
     </View>
   );
 }
@@ -313,6 +250,10 @@ export function HostFormScreen(): React.JSX.Element {
   const hostId = route.params?.hostId;
   const hosts = useMobileAppStore((state) => state.hosts);
   const saveHost = useMobileAppStore((state) => state.saveHost);
+  const createGroup = useMobileAppStore((state) => state.createGroup);
+  const dataFloorServerSupport = useMobileAppStore(
+    (state) => state.syncStatus.dataFloorServerSupport,
+  );
 
   const existing = useMemo(() => {
     if (!hostId) {
@@ -321,6 +262,31 @@ export function HostFormScreen(): React.JSX.Element {
     const found = hosts.find((host) => host.id === hostId);
     return found && isSshHostRecord(found) ? found : null;
   }, [hostId, hosts]);
+
+  // RDP·VNC 는 필드가 겹치지 않아 화면을 따로 쓴다. 종류는 고칠 때는 레코드가, 만들 때는
+  // 라우트 파라미터가 정한다.
+  const editingRemoteDesktop = useMemo(() => {
+    if (!hostId) {
+      return false;
+    }
+    const found = hosts.find((host) => host.id === hostId);
+    return Boolean(found && (isRdpHostRecord(found) || isVncHostRecord(found)));
+  }, [hostId, hosts]);
+  // 만들 때의 종류는 폼 안에서 고른다. 기본은 SSH — 폼을 열자마자 골라져 있어서 가장 흔한
+  // 길에는 손이 더 들지 않는다.
+  const [createKind, setCreateKind] = useState<HostFormKind>(
+    route.params?.kind ?? "ssh",
+  );
+  const creatingRemoteDesktop = !hostId && createKind !== "ssh";
+  // RDP·VNC 는 서버가 계정 데이터 수준을 판정할 때만 만들 수 있다 — 못 막는 서버에서 만들면
+  // 같은 계정의 옛 기기가 그 레코드를 받고 조용히 망가진다.
+  const creatableKinds = useMemo(
+    () =>
+      resolveCreatableHostFormKinds({
+        serverSupportsDataFloor: dataFloorServerSupport === "supported",
+      }),
+    [dataFloorServerSupport],
+  );
 
   // **EC2 호스트는 이 폼이 편집하지 않는다.** 인스턴스 정보는 AWS 가 정하고 동기화로 들어온다.
   // 다만 접속 경로를 정하는 서버 프록시는 기기에서 바꿀 수 있어야 해서 그 한 가지만 갈라 준다.
@@ -363,6 +329,8 @@ export function HostFormScreen(): React.JSX.Element {
   const [saving, setSaving] = useState(false);
 
   const snippets = useMobileAppStore((state) => state.snippets);
+  const tailnets = useMobileAppStore((state) => state.tailnets);
+  const groups = useMobileAppStore((state) => state.groups);
   const initialStartup = existing?.startupCommand ?? null;
   const initialStartupMode: StartupMode =
     initialStartup?.type === "command"
@@ -379,6 +347,39 @@ export function HostFormScreen(): React.JSX.Element {
     initialStartup?.type === "snippet" ? initialStartup.snippetId : null,
   );
   const [snippetPickerOpen, setSnippetPickerOpen] = useState(false);
+
+  // 고급 항목. 데스크톱에서 넣어 둔 값은 모바일이 **보존만** 하고 있었다 — 이제 여기서 고친다.
+  const initialTags = existing?.tags ?? [];
+  const initialEnv = existing?.env ?? [];
+  const [tags, setTags] = useState<string[]>(initialTags);
+  const [tagDraft, setTagDraft] = useState("");
+  const [envVars, setEnvVars] = useState<HostEnvVar[]>(initialEnv);
+  const [agentForwarding, setAgentForwarding] = useState(
+    existing?.agentForwarding === true,
+  );
+  const [useMosh, setUseMosh] = useState(existing?.useMosh === true);
+  // 값이 들어 있으면 펼친 채로 연다. 접힌 채로 두면 데스크톱에서 넣은 설정이 사라진 것처럼
+  // 보인다 — 보존하고 있다는 사실이 눈에 보여야 한다.
+  const [envNameDraft, setEnvNameDraft] = useState("");
+  const [envValueDraft, setEnvValueDraft] = useState("");
+  const initialJumpHostIds = normalizeJumpHostIds(
+    existing?.jumpHostIds,
+    existing?.jumpHostId,
+  );
+  const [jumpHostIds, setJumpHostIds] =
+    useState<string[]>(initialJumpHostIds);
+  const initialTailnetId = existing?.tailnetId ?? null;
+  const [tailnetId, setTailnetId] = useState<string | null>(initialTailnetId);
+  const [picker, setPicker] = useState<
+    'group' | 'tailnet' | 'jump' | null
+  >(null);
+  const [groupPromptOpen, setGroupPromptOpen] = useState(false);
+  const [groupBusy, setGroupBusy] = useState(false);
+  // 언제나 접힌 채로 연다.
+  //
+  // 값이 있으면 펼쳐 두게 했더니 태그 하나만 넣어도 그 뒤로는 영영 열려 있어서 접는 뜻이
+  // 없어졌다. 안에 무엇이 들었는지는 머리글의 요약이 알려 준다.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const selectedSnippet = useMemo(
     () =>
@@ -402,6 +403,13 @@ export function HostFormScreen(): React.JSX.Element {
     portDraft !== String(existing?.port ?? 22) ||
     username !== (existing?.username ?? "") ||
     groupName !== initialGroupName ||
+    tags.join('\u0000') !== initialTags.join('\u0000') ||
+    envVars.map(item => `${item.key}=${item.value}`).join('\u0000') !==
+      initialEnv.map(item => `${item.key}=${item.value}`).join('\u0000') ||
+    agentForwarding !== (existing?.agentForwarding === true) ||
+    useMosh !== (existing?.useMosh === true) ||
+    jumpHostIds.join('\u0000') !== initialJumpHostIds.join('\u0000') ||
+    tailnetId !== initialTailnetId ||
     authType !== initialAuthType ||
     credentialMode !== initialCredentialMode ||
     // startup 항목을 빠뜨리면 그것만 고치고 나갈 때 확인 없이 입력이 사라진다.
@@ -477,6 +485,57 @@ export function HostFormScreen(): React.JSX.Element {
     );
   };
 
+  const selectedTailnet = tailnets.find(item => item.id === tailnetId) ?? null;
+  // 점프 홉은 자기 자신을 넣을 수 없고(순환), SSH 호스트만 후보다.
+  const jumpCandidates = hosts
+    .filter(isSshHostRecord)
+    .filter(host => host.id !== hostId);
+  const groupPaths = collectGroupPaths(groups, hosts);
+
+  // 접힌 머리글에 개수를 적는다 — 안에 무엇이 들었는지 열어 보지 않아도 알 수 있게.
+  const advancedSummary = [
+    startupMode !== "none" ? translate("hostForm.startup.count") : null,
+    tags.length > 0 ? translate("hostForm.tags.count", { count: tags.length }) : null,
+    envVars.length > 0
+      ? translate("hostForm.env.count", { count: envVars.length })
+      : null,
+    jumpHostIds.length > 0
+      ? translate("hostForm.jump.count", { count: jumpHostIds.length })
+      : null,
+    selectedTailnet ? selectedTailnet.label : null,
+    agentForwarding ? translate("hostForm.toggles.agentForwarding") : null,
+    useMosh ? translate("hostForm.toggles.mosh") : null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
+
+  // 없는 그룹은 여기서 만든다 — 직접 타이핑하던 시절에는 오타가 그대로 새 그룹이 되었다.
+  // 지금 고른 그룹 아래에 만들고, 어디에 만들어지는지는 프롬프트가 먼저 알려 준다.
+  const handleCreateGroup = async (name: string): Promise<void> => {
+    const parentPath = groupName || null;
+    setGroupBusy(true);
+    try {
+      await createGroup(name, parentPath);
+      const created = normalizeGroupPath(
+        parentPath ? `${parentPath}/${name.trim()}` : name.trim(),
+      );
+      if (created) {
+        setGroupName(created);
+      }
+      setGroupPromptOpen(false);
+      setPicker(null);
+    } catch (error) {
+      Alert.alert(
+        translate("groupActions.failedTitle"),
+        error instanceof Error && error.message
+          ? error.message
+          : translate("groupActions.failed"),
+      );
+    } finally {
+      setGroupBusy(false);
+    }
+  };
+
   const handleSave = async (): Promise<void> => {
     if (!canSave) {
       return;
@@ -505,6 +564,14 @@ export function HostFormScreen(): React.JSX.Element {
               certificateText:
                 authType === "certificate" ? certificateText : undefined,
             },
+        tags,
+        // 빈 배열은 "전부 지워라" 다 — 값이 없으면 null 로 보내 해제한다.
+        env: envVars.length > 0 ? envVars : null,
+        agentForwarding,
+        useMosh,
+        // 목록은 빈 배열과 null 이 다른 뜻이다 — 비웠으면 해제로 보낸다.
+        jumpHostIds: jumpHostIds.length > 0 ? jumpHostIds : null,
+        tailnetId,
         startupCommand: buildStartupCommandPayload({
           mode: startupMode,
           command: startupCommand,
@@ -544,6 +611,16 @@ export function HostFormScreen(): React.JSX.Element {
     );
   }
 
+  if (editingRemoteDesktop || creatingRemoteDesktop) {
+    return (
+      <RemoteDesktopHostFormScreen
+        createKind={hostId ? null : createKind}
+        creatableKinds={creatableKinds}
+        onCreateKindChange={setCreateKind}
+      />
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       style={[styles.screen, { backgroundColor: palette.background }]}
@@ -560,6 +637,16 @@ export function HostFormScreen(): React.JSX.Element {
         ]}
         keyboardShouldPersistTaps="handled"
       >
+        {!hostId ? (
+          <HostKindField
+            kind={createKind}
+            kinds={creatableKinds}
+            onChange={setCreateKind}
+            label={translate("hostForm.kindSection")}
+            disabledHint={translate("hostForm.kindUnsupported")}
+          />
+        ) : null}
+
         <SettingsGroup
           header={translate("hostForm.basicSection")}
           footer={translate("hostForm.groupHint")}
@@ -590,11 +677,14 @@ export function HostFormScreen(): React.JSX.Element {
             placeholder={translate("hostForm.usernamePlaceholder")}
             onChangeText={setUsername}
           />
-          <FieldRow
+          {/* 그룹은 고르는 것이지 타이핑하는 것이 아니다 — 직접 입력을 남겨 두면 오타가 곧
+              새 그룹이 된다. 없는 그룹은 고르는 화면 안에서 만든다. */}
+          <SettingsRow
+            icon="folder-outline"
             label={translate("hostForm.fields.group")}
-            value={groupName}
-            placeholder={translate("hostForm.groupPlaceholder")}
-            onChangeText={setGroupName}
+            value={groupName || translate("hostForm.group.none")}
+            chevron
+            onPress={() => setPicker("group")}
           />
         </SettingsGroup>
 
@@ -680,61 +770,205 @@ export function HostFormScreen(): React.JSX.Element {
           </SettingsGroup>
         ) : null}
 
-        <View style={styles.authSection}>
-          <Text style={[styles.sectionHeader, { color: palette.text }]}>
-            {translate("hostForm.startupSection")}
-          </Text>
-          <Segmented
-            options={STARTUP_MODE_OPTIONS.map((option) => ({
-              value: option.value,
-              label: translate(option.labelKey),
-            }))}
-            selected={startupMode}
-            onSelect={setStartupMode}
-          />
-          <Text style={[styles.startupHint, { color: palette.tabInactive }]}>
-            {translate("hostForm.startup.description")}
-          </Text>
-        </View>
-
-        {startupMode === "command" ? (
-          <SettingsGroup>
-            <PasteField
-              label={translate("hostForm.startup.modeCommand")}
-              value={startupCommand}
-              placeholder={translate("hostForm.startup.commandPlaceholder")}
-              onChangeText={setStartupCommand}
-            />
-          </SettingsGroup>
-        ) : null}
-
-        {startupMode === "snippet" ? (
-          <SettingsGroup
-            footer={
-              startupSnippetMissing
-                ? translate("hostForm.startup.missing")
-                : startupHasVariables
-                  ? translate("hostForm.startup.varsHint")
-                  : translate("hostForm.startup.snippetOnlyOnDesktop")
-            }
-          >
-            <SettingsRow
-              icon="terminal-outline"
-              label={
-                selectedSnippet
-                  ? selectedSnippet.label
-                  : translate("hostForm.startup.selectPlaceholder")
-              }
-              tone={startupSnippetMissing ? "danger" : "default"}
-              onPress={() => setSnippetPickerOpen(true)}
-            />
-          </SettingsGroup>
-        ) : null}
-
         {validationMessage && (label || hostname || username) ? (
           <Text style={[styles.errorText, { color: palette.warning }]}>
             {validationMessage}
           </Text>
+        ) : null}
+
+        {/* 고급 — 평소에는 접어 둔다. 대부분의 사람이 쓰는 것(이름·주소·사용자·비밀번호)이
+            안 쓰는 항목들 사이에 묻히면 안 된다. 값이 있으면 펼친 채로 연다.
+
+            머리글은 카드가 아니라 구획 이름이다 — 카드에 넣으면 설정 항목 하나처럼 보여서
+            누르면 무엇이 열리는지 읽히지 않는다. */}
+        <Pressable
+          onPress={() => setAdvancedOpen(open => !open)}
+          accessibilityRole="button"
+          accessibilityLabel={translate("hostForm.advancedSection")}
+          accessibilityState={{ expanded: advancedOpen }}
+          style={styles.advancedHeader}
+        >
+          <Text style={[styles.advancedTitle, { color: palette.text }]}>
+            {translate("hostForm.advancedSection")}
+          </Text>
+          <Ionicons
+            name={advancedOpen ? "chevron-down" : "chevron-forward"}
+            size={15}
+            color={palette.tabInactive}
+          />
+          <View style={styles.advancedSpacer} />
+          {!advancedOpen && advancedSummary ? (
+            <Text
+              numberOfLines={1}
+              style={[styles.advancedSummary, { color: palette.mutedText }]}
+            >
+              {advancedSummary}
+            </Text>
+          ) : null}
+        </Pressable>
+
+        {advancedOpen ? (
+          <>
+            <SettingsGroup footer={translate("hostForm.toggles.hint")}>
+              <ChipField
+                label={translate("hostForm.tags.header")}
+                chips={tags.map(tag => ({ id: tag, text: tag }))}
+                removeLabel={chip =>
+                  translate("hostForm.tags.remove", { tag: chip.text })
+                }
+                onRemove={tag =>
+                  setTags(current => current.filter(item => item !== tag))
+                }
+                input={{
+                  value: tagDraft,
+                  label: translate("hostForm.tags.add"),
+                  placeholder: translate("hostForm.tags.placeholder"),
+                  onChangeText: setTagDraft,
+                  onSubmit: () => {
+                    const next = tagDraft.trim();
+                    if (!next || tags.includes(next)) {
+                      setTagDraft("");
+                      return;
+                    }
+                    setTags(current => [...current, next]);
+                    setTagDraft("");
+                  },
+                }}
+              />
+              <ChipField
+                label={translate("hostForm.env.header")}
+                chips={envVars.map(item => ({
+                  id: item.key,
+                  text: `${item.key}=${item.value}`,
+                }))}
+                removeLabel={chip =>
+                  translate("hostForm.env.remove", { key: chip.id })
+                }
+                onRemove={key =>
+                  setEnvVars(current => current.filter(item => item.key !== key))
+                }
+                pairInput={{
+                  name: {
+                    value: envNameDraft,
+                    label: translate("hostForm.env.nameLabel"),
+                    placeholder: translate("hostForm.env.namePlaceholder"),
+                    onChangeText: setEnvNameDraft,
+                  },
+                  value: {
+                    value: envValueDraft,
+                    label: translate("hostForm.env.valueLabel"),
+                    placeholder: translate("hostForm.env.valuePlaceholder"),
+                    onChangeText: setEnvValueDraft,
+                  },
+                  addLabel: translate("hostForm.env.add"),
+                  onSubmit: () => {
+                    const key = envNameDraft.trim();
+                    if (!key) {
+                      return;
+                    }
+                    // 같은 이름을 다시 넣으면 덮어쓴다 — 같은 변수가 두 줄 있으면 어느 쪽이
+                    // 적용되는지 알 수 없다.
+                    setEnvVars(current => [
+                      ...current.filter(item => item.key !== key),
+                      { key, value: envValueDraft.trim() },
+                    ]);
+                    setEnvNameDraft("");
+                    setEnvValueDraft("");
+                  },
+                }}
+              />
+              <ChipField
+                label={translate("hostForm.jump.header")}
+                chips={jumpHostIds.map((id, index) => ({
+                  id,
+                  text: `${index + 1}. ${
+                    hosts.find(item => item.id === id)?.label ?? id
+                  }`,
+                }))}
+                removeLabel={chip =>
+                  translate("hostForm.jump.remove", { label: chip.text })
+                }
+                onRemove={id =>
+                  setJumpHostIds(current => current.filter(item => item !== id))
+                }
+                action={{
+                  label: translate("common.add"),
+                  accessibilityLabel: translate("hostForm.jump.add"),
+                  onPress: () => setPicker("jump"),
+                }}
+              />
+              <SettingsRow
+                label={translate("hostForm.tailnet.label")}
+                value={
+                  selectedTailnet?.label ?? translate("hostForm.tailnet.none")
+                }
+                chevron
+                onPress={() => setPicker("tailnet")}
+              />
+              <SettingsRow
+                label={translate("hostForm.toggles.agentForwarding")}
+                toggle={{
+                  value: agentForwarding,
+                  onValueChange: setAgentForwarding,
+                }}
+              />
+              <SettingsRow
+                label={translate("hostForm.toggles.mosh")}
+                toggle={{ value: useMosh, onValueChange: setUseMosh }}
+              />
+            </SettingsGroup>
+
+            <View style={styles.authSection}>
+              <Text style={[styles.sectionHeader, { color: palette.text }]}>
+                {translate("hostForm.startupSection")}
+              </Text>
+              <Segmented
+                options={STARTUP_MODE_OPTIONS.map((option) => ({
+                  value: option.value,
+                  label: translate(option.labelKey),
+                }))}
+                selected={startupMode}
+                onSelect={setStartupMode}
+              />
+              <Text style={[styles.startupHint, { color: palette.tabInactive }]}>
+                {translate("hostForm.startup.description")}
+              </Text>
+            </View>
+
+            {startupMode === "command" ? (
+              <SettingsGroup>
+                <PasteField
+                  label={translate("hostForm.startup.modeCommand")}
+                  value={startupCommand}
+                  placeholder={translate("hostForm.startup.commandPlaceholder")}
+                  onChangeText={setStartupCommand}
+                />
+              </SettingsGroup>
+            ) : null}
+
+            {startupMode === "snippet" ? (
+              <SettingsGroup
+                footer={
+                  startupSnippetMissing
+                    ? translate("hostForm.startup.missing")
+                    : startupHasVariables
+                      ? translate("hostForm.startup.varsHint")
+                      : translate("hostForm.startup.snippetOnlyOnDesktop")
+                }
+              >
+                <SettingsRow
+                  icon="terminal-outline"
+                  label={
+                    selectedSnippet
+                      ? selectedSnippet.label
+                      : translate("hostForm.startup.selectPlaceholder")
+                  }
+                  tone={startupSnippetMissing ? "danger" : "default"}
+                  onPress={() => setSnippetPickerOpen(true)}
+                />
+              </SettingsGroup>
+            ) : null}
+          </>
         ) : null}
 
         <Pressable
@@ -757,6 +991,89 @@ export function HostFormScreen(): React.JSX.Element {
           </Text>
         </Pressable>
       </ScrollView>
+      <ListPickerModal
+        visible={picker === "group"}
+        title={translate("hostForm.fields.group")}
+        // 경로를 통째로 적으면 work/aws/seoul 이 한 줄에 뭉친다 — 이름은 앞에, 어디에
+        // 속하는지는 아랫줄에.
+        items={groupPaths.map(path => {
+          const cut = path.lastIndexOf("/");
+          return {
+            id: path,
+            icon: "folder-outline",
+            label: cut < 0 ? path : path.slice(cut + 1),
+            detail: cut < 0 ? undefined : path.slice(0, cut),
+          };
+        })}
+        selectedIds={groupName ? [groupName] : []}
+        searchPlaceholder={translate("hostForm.group.search")}
+        emptyText={translate("hostForm.group.empty")}
+        noneLabel={translate("hostForm.group.none")}
+        actionLabel={translate("groupActions.createTitle")}
+        onAction={() => setGroupPromptOpen(true)}
+        onSelect={id => {
+          setGroupName(id ?? "");
+          setPicker(null);
+        }}
+        onClose={() => setPicker(null)}
+      >
+        {/* 프롬프트는 이 시트 **안**에 있어야 한다 — 밖에 두면 iOS 가 두 번째 모달 띄우기를
+            무시해서, 새 그룹 만들기를 눌러도 아무 일도 일어나지 않는다. */}
+        <GroupNamePromptModal
+          visible={groupPromptOpen}
+          busy={groupBusy}
+          title={translate("groupActions.createTitle")}
+          hint={
+            groupName
+              ? translate("groupActions.createHint", { path: groupName })
+              : translate("hostForm.group.createHintRoot")
+          }
+          submitLabel={translate("groupActions.create")}
+          onClose={() => setGroupPromptOpen(false)}
+          onSubmit={name => void handleCreateGroup(name)}
+        />
+      </ListPickerModal>
+      <ListPickerModal
+        visible={picker === "tailnet"}
+        title={translate("hostForm.tailnet.label")}
+        items={tailnets.map(item => ({ id: item.id, label: item.label }))}
+        selectedIds={tailnetId ? [tailnetId] : []}
+        searchPlaceholder={translate("hostForm.tailnet.search")}
+        emptyText={translate("hostForm.tailnet.empty")}
+        noneLabel={translate("hostForm.tailnet.none")}
+        onSelect={id => {
+          setTailnetId(id);
+          setPicker(null);
+        }}
+        onClose={() => setPicker(null)}
+      />
+      <ListPickerModal
+        visible={picker === "jump"}
+        multiple
+        title={translate("hostForm.jump.header")}
+        items={jumpCandidates.map(host => ({
+          id: host.id,
+          label: host.label,
+          detail: `${host.username}@${host.hostname}:${host.port}`,
+        }))}
+        selectedIds={jumpHostIds}
+        searchPlaceholder={translate("hostForm.jump.search")}
+        emptyText={translate("hostForm.jump.empty")}
+        onSelect={id => {
+          if (!id) {
+            return;
+          }
+          // 누르면 넣고 다시 누르면 뺀다. 순서는 넣은 차례 그대로가 곧 홉 순서다.
+          setJumpHostIds(current =>
+            current.includes(id)
+              ? current.filter(item => item !== id)
+              : current.length >= MAX_JUMP_HOSTS
+                ? current
+                : [...current, id],
+          );
+        }}
+        onClose={() => setPicker(null)}
+      />
       <StartupSnippetPickerModal
         visible={snippetPickerOpen}
         snippets={snippets}
@@ -772,6 +1089,33 @@ export function HostFormScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
+  // 목록에 항목을 더하는 칸의 "+" — 키보드 완료로도 되지만, 눈에 보이는 버튼이 있어야
+  // 무엇을 하면 들어가는지 알 수 있다.
+  fieldAdd: {
+    fontSize: 22,
+    fontWeight: '600',
+    paddingHorizontal: 6,
+  },
+  // 구획 이름이라 행 라벨(17)보다 크고 굵다 — 접혔을 때 여기가 무엇을 여는 곳인지 한눈에
+  // 읽혀야 한다.
+  advancedHeader: {
+    minHeight: 34,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 4,
+  },
+  advancedTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    letterSpacing: -0.3,
+  },
+  advancedSpacer: { flex: 1 },
+  advancedSummary: {
+    fontSize: 13,
+    flexShrink: 1,
+    textAlign: "right",
+  },
   ec2ToggleRow: {
     flexDirection: "row",
     alignItems: "center",
