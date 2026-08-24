@@ -7,6 +7,7 @@ import { cn } from '../../../lib/cn';
 import {
   buildHistoryItems,
   buildShellHistoryItems,
+  limitListItems,
   filterByQuery,
   resolveHistoryActions,
   resolveSnippetActions,
@@ -50,6 +51,8 @@ export function SessionPanelHistory({
     // 검색은 여기서 끝난다 — 원격에 아무것도 보내지 않는다.
     return filterByQuery(ordered, query, (item) => `${item.command ?? ''} ${item.cwd ?? ''}`);
   }, [blocks, failedOnly, query]);
+  // 한 번에 그리는 줄 수를 묶는다 — 검색은 전체를 훑으므로 넘친 것도 검색으로 닿는다.
+  const shownItems = useMemo(() => limitListItems(items), [items]);
 
   // 이전 명령들. 실패만 보기에는 해당하지 않는다 — 파일에는 종료 코드가 없다.
   const previous = useMemo(() => {
@@ -58,6 +61,7 @@ export function SessionPanelHistory({
     }
     return filterByQuery(buildShellHistoryItems(shellHistory), query, (item) => item.command);
   }, [failedOnly, query, shellHistory]);
+  const shownPrevious = useMemo(() => limitListItems(previous), [previous]);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -99,7 +103,7 @@ export function SessionPanelHistory({
             }
           />
         ) : (
-          items.map((item) => {
+          shownItems.shown.map((item) => {
             const actions = resolveHistoryActions(item, sender.context);
             const command = item.command ?? '';
             const failed = item.state === 'failed' && item.exitCode !== null;
@@ -141,13 +145,18 @@ export function SessionPanelHistory({
             );
           })
         )}
+        {shownItems.hidden > 0 ? (
+          <p className="px-2.5 pt-1 text-[0.68rem] text-[var(--text-soft)]">
+            {translate('sessionPanel.history.moreHidden', { count: shownItems.hidden })}
+          </p>
+        ) : null}
         {previous.length > 0 ? (
           <>
             {/* 경계를 한 줄로 알려 준다 — 아래부터는 종료 코드도, 위치 이동도 없다. */}
             <p className="px-2.5 pb-1 pt-2.5 text-[0.68rem] uppercase tracking-[0.1em] text-[var(--text-soft)]">
               {translate('sessionPanel.history.previous')}
             </p>
-            {previous.map((item) => (
+            {shownPrevious.shown.map((item) => (
               <SessionPanelRow
                 key={item.key}
                 text={item.command}
@@ -160,6 +169,13 @@ export function SessionPanelHistory({
                 onRun={() => sender.run(item.command)}
               />
             ))}
+            {shownPrevious.hidden > 0 ? (
+              <p className="px-2.5 pt-1 text-[0.68rem] text-[var(--text-soft)]">
+                {translate('sessionPanel.history.moreHidden', {
+                  count: shownPrevious.hidden,
+                })}
+              </p>
+            ) : null}
           </>
         ) : null}
       </div>

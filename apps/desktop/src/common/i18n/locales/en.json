@@ -3589,6 +3589,7 @@
       "unreliable": "Read from the screen, so it may differ from what was typed — insert it and check before running."
     },
     "history": {
+      "moreHidden": "{{count}} more hidden — narrow it with search",
       "title": "History",
       "search": "Search commands",
       "failedOnly": "Failed commands only",

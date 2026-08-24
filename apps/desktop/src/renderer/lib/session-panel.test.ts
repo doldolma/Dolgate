@@ -9,6 +9,8 @@ import {
   resolveHistoryActions,
   resolveSnippetActions,
   type SessionPanelHistoryItem,
+  limitListItems,
+  SESSION_PANEL_LIST_LIMIT,
 } from './session-panel';
 
 const AT_PROMPT = { atPrompt: true, bracketedPaste: true };
@@ -227,5 +229,20 @@ describe('buildShellHistoryItems', () => {
     const items = buildShellHistoryItems(['ls', 'pwd', 'ls']);
     expect(items).toHaveLength(3);
     expect(new Set(items.map((item) => item.key)).size).toBe(3);
+  });
+});
+
+describe('목록 상한', () => {
+  it('상한 아래면 그대로 둔다', () => {
+    expect(limitListItems([1, 2, 3])).toEqual({ shown: [1, 2, 3], hidden: 0 });
+  });
+
+  it('넘치면 앞에서 상한만큼 자르고 남은 수를 알려 준다', () => {
+    // 셸 히스토리는 2000줄까지 온다 — 다 그리면 행마다 버튼 세 개가 붙어 앱이 버벅인다.
+    const items = Array.from({ length: 2000 }, (_, index) => index);
+    const { shown, hidden } = limitListItems(items);
+    expect(shown).toHaveLength(SESSION_PANEL_LIST_LIMIT);
+    expect(shown[0]).toBe(0);
+    expect(hidden).toBe(2000 - SESSION_PANEL_LIST_LIMIT);
   });
 });

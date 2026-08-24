@@ -194,6 +194,26 @@ export function buildHistoryItems(
 }
 
 /**
+ * 목록에 한 번에 그리는 최대 줄 수.
+ *
+ * 셸 히스토리 스냅샷은 마지막 2000줄까지 온다. 그걸 다 그리면 행마다 버튼 세 개가 붙어
+ * 요소가 수천 개가 되고, 히스토리가 많은 호스트에서 패널을 열면 앱 전체가 버벅인다
+ * (실측: 리스너가 5초에 6천 개 늘었다). 검색은 전체를 훑으므로 오래된 명령도 검색으로 닿는다.
+ */
+export const SESSION_PANEL_LIST_LIMIT = 200;
+
+/** 상한을 넘긴 만큼을 함께 돌려준다 — 목록 끝에 "몇 개 생략" 을 적기 위해. */
+export function limitListItems<T>(
+  items: readonly T[],
+  limit = SESSION_PANEL_LIST_LIMIT,
+): { shown: T[]; hidden: number } {
+  if (items.length <= limit) {
+    return { shown: [...items], hidden: 0 };
+  }
+  return { shown: items.slice(0, limit), hidden: items.length - limit };
+}
+
+/**
  * 셸 히스토리 파일에서 온 항목. 이번 세션 것과 한 목록에 섞이므로 같은 모양을 쓰되, 그 출처를
  * 스스로 밝힌다.
  */
