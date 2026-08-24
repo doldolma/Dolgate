@@ -18,6 +18,14 @@ import (
 // releasing buffered output (non-bash/zsh subshell).
 const shellIntegrationHandshakeTimeout = 8 * time.Second
 
+// 접속 직후 통합 주입을 미루는 창. 서브셸 재주입보다 짧다 — 로컬 PTY 출력은 즉시 오므로
+// 프롬프트 뒤 조용해지는 것을 오래 볼 필요가 없고, 이 기다림은 그대로 기능(cwd·마커·자동완성)이
+// 켜지는 지연이 된다.
+const (
+	installPromptSettleQuiet = 150 * time.Millisecond
+	installPromptMaxWait     = 3 * time.Second
+)
+
 type EventEmitter func(protocol.Event)
 type StreamEmitter func(protocol.StreamFrame, []byte)
 
@@ -33,6 +41,10 @@ type sessionHandle struct {
 	// (sudo su, docker exec, ssh from a local shell). Created in Connect; a no-op
 	// until Armed by ReinjectShellIntegration.
 	reinjectGate *autocomplete.PromptSettleGate
+	// installGate 는 접속 직후 통합 주입을 **첫 프롬프트가 뜬 뒤로** 미룬다. 재주입과 따로
+	// 두는 이유는 두 가지다: 둘이 겹칠 수 있고, 기다리는 시간이 다르다(로컬 출력은 즉시 오므로
+	// 조용해지는 창이 짧아도 된다).
+	installGate *autocomplete.PromptSettleGate
 }
 
 type Manager struct {
@@ -66,7 +78,14 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.LocalCon
 		return err
 	}
 
-	handle := &sessionHandle{runner: runner, reinjectGate: autocomplete.NewPromptSettleGate(0, 0)}
+	handle := &sessionHandle{
+		runner:       runner,
+		reinjectGate: autocomplete.NewPromptSettleGate(0, 0),
+		installGate: autocomplete.NewPromptSettleGate(
+			installPromptSettleQuiet,
+			installPromptMaxWait,
+		),
+	}
 	m.mu.Lock()
 	m.sessions[sessionID] = handle
 	m.mu.Unlock()
@@ -141,6 +160,16 @@ func (m *Manager) RunCompletionCommand(sessionID, command string) (string, bool,
 // InstallShellIntegration arms the OSC 133 handshake filter and writes the
 // integration init command into the interactive shell. The filter hides the
 // command's echo until the first prompt marker is seen.
+//
+// **첫 프롬프트가 뜬 뒤에 쓴다.** 접속 직후는 셸이 아직 준비되지 않았다 — rc 파일(oh-my-zsh
+// 등)이 도는 동안 tty 는 줄 편집기 없이 canonical 모드로 있고, 그 모드의 한 줄 입력 상한
+// (MAX_CANON, 1024바이트)이 우리 스크립트보다 작아서 뒷부분과 끝의 CR 이 **버려진다**. 그래서
+// 명령이 실행되지 않고(마커도 오지 않고) 원문이 두 번 화면에 남았다 — 한 번은 tty echo 로,
+// 한 번은 프롬프트가 뜬 뒤 줄 편집기의 재출력으로. 재출력은 tty 가 폭마다 CR 을 끼워 넣어
+// echo 걷어내기와도 글자가 맞지 않는다(실기기 로컬 터미널에서 그대로 재현된다).
+//
+// 프롬프트가 뜨면 줄 편집기가 raw 모드로 읽으므로 그 상한이 없다 — SSH 세션이 멀쩡했던 이유가
+// 그것이다(원격 셸은 이미 프롬프트에 있다).
 func (m *Manager) InstallShellIntegration(sessionID string) error {
 	session, err := m.getSession(sessionID)
 	if err != nil {
@@ -152,14 +181,52 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 		preinstalled.ShellIntegrationPreinstalled() {
 		return nil
 	}
-	command, ok := autocomplete.ShellIntegrationInitCommandForShell(session.runner.ShellKind())
-	if !ok {
+	// 로컬은 셸을 안다(실행 파일 이름) — 그 셸 것 하나만 보낸다.
+	commands := autocomplete.ShellIntegrationInitLines(session.runner.ShellKind())
+	if len(commands) == 0 {
 		return nil
 	}
-	// 걷어낼 echo 는 **지금 주입하는** 명령이다. Arm 은 bash/zsh 스크립트를 가정하므로, 로컬
-	// PowerShell 에서는 마커 뒤의 프롬프트 재출력이 그대로 남아 첫 줄에 프롬프트가 두 번 찍혔다.
-	session.handshake.ArmForCommand(false, command)
-	return session.runner.Write([]byte(command))
+	// 프롬프트를 못 알아본 경우에도 쓴다(테마에 따라 끝 글자가 목록에 없을 수 있다). 그때는
+	// 이미 rc 가 끝나 줄 편집기가 올라와 있을 시간이라, 예전처럼 잘려 나갈 위험이 낮다 — 반대로
+	// 쓰지 않으면 cwd·마커·자동완성이 조용히 전부 꺼진다.
+	session.installGate.Arm(
+		func() { m.writeShellIntegration(sessionID, commands, true) },
+		func() { m.writeShellIntegration(sessionID, commands, false) },
+	)
+	return nil
+}
+
+// writeShellIntegration 은 echo 억제를 무장하고 init 명령을 쓴다. 게이트 콜백에서 불린다.
+// atPrompt 는 프롬프트를 보고 쓰는 것인지다(그 경우에만 프롬프트 줄을 지운다).
+func (m *Manager) writeShellIntegration(sessionID string, commands []string, atPrompt bool) {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return
+	}
+	// 걷어낼 echo 는 **지금 주입하는** 명령들이다. 기본값(bash·zsh)에 맡기면 로컬 PowerShell
+	// 에서 마커 뒤 프롬프트 재출력이 그대로 남아 첫 줄에 프롬프트가 두 번 찍혔다.
+	session.handshake.ArmForCommand(false, commands...)
+	// 프롬프트를 보고 쓰는 대가로, 그 프롬프트가 이미 화면에 있다. 명령을 태우면 셸이 새
+	// 프롬프트를 그리는데 echo 를 걷어내면서 그 사이 줄바꿈까지 사라져 한 줄에 프롬프트가 두 번
+	// 남는다. 커서를 줄 앞으로 보내고 그 줄을 지워, 새 프롬프트가 같은 자리에 오게 한다.
+	//
+	// 프롬프트를 못 본 채로 쓰는 경우(기다림이 끝난 뒤)에는 지우지 않는다 — 그 줄에 무엇이 있는지
+	// 모르는데 지우면 셸이 방금 찍은 글을 우리가 없애는 셈이다.
+	if atPrompt {
+		m.emitStream(
+			protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID},
+			[]byte("\r\x1b[2K"),
+		)
+	}
+	for _, command := range commands {
+		if err := session.runner.Write([]byte(command)); err != nil {
+			// 쓰지 못했으면 붙잡고 있을 이유가 없다 — 그대로 두면 화면이 빈 채로 멈춘다.
+			if flushed := session.handshake.Flush(); len(flushed) > 0 {
+				m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+			}
+			return
+		}
+	}
 }
 
 // ReinjectShellIntegration re-installs the OSC 133/7 hooks into the foreground
@@ -168,7 +235,7 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 // subshell prompt to settle before writing so it never corrupts input, then
 // arms the echo-suppression handshake around the injected command. A non-bash/
 // zsh subshell emits no marker and the handshake flush restores its output.
-func (m *Manager) ReinjectShellIntegration(sessionID string) error {
+func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error {
 	session, err := m.getSession(sessionID)
 	if err != nil {
 		return err
@@ -179,22 +246,31 @@ func (m *Manager) ReinjectShellIntegration(sessionID string) error {
 		return nil
 	}
 	session.reinjectGate.Arm(
-		func() { m.performShellIntegrationReinject(sessionID, session) },
+		func() { m.performShellIntegrationReinject(sessionID, session, shell) },
 		func() {},
 	)
 	return nil
 }
 
-func (m *Manager) performShellIntegrationReinject(sessionID string, session *sessionHandle) {
+func (m *Manager) performShellIntegrationReinject(sessionID string, session *sessionHandle, shell string) {
 	if !m.HasSession(sessionID) {
 		return
 	}
-	session.handshake.Arm(true)
-	if err := session.runner.Write([]byte(autocomplete.ShellIntegrationInitCommand())); err != nil {
-		if flushed := session.handshake.Flush(); len(flushed) > 0 {
-			m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
-		}
+	// 렌더러가 실행된 명령에서 셸을 알아냈으면 그 셸 것 한 줄로 끝난다. 모르면 겸용을 여러 줄로
+	// 보낸다. 이름은 알지만 지원하지 않는 셸(dash·ksh 등)이면 아무것도 보내지 않는다 — 훅을 걸
+	// 방법이 없는 셸에 타이핑해 봐야 화면만 더럽힌다.
+	commands := autocomplete.ShellIntegrationInitLines(shell)
+	if len(commands) == 0 {
 		return
+	}
+	session.handshake.ArmForCommand(true, commands...)
+	for _, command := range commands {
+		if err := session.runner.Write([]byte(command)); err != nil {
+			if flushed := session.handshake.Flush(); len(flushed) > 0 {
+				m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+			}
+			return
+		}
 	}
 	time.AfterFunc(shellIntegrationHandshakeTimeout, func() {
 		m.FlushShellIntegration(sessionID)
@@ -270,7 +346,9 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 		if n > 0 {
 			chunk := make([]byte, n)
 			copy(chunk, buffer[:n])
-			// 서브셸 재주입 대기 중이면 raw 출력으로 프롬프트 안착을 감지한다(필터 전 관찰).
+			// 주입 대기 중이면 raw 출력으로 프롬프트 안착을 감지한다(필터 전 관찰). 접속 직후
+			// 설치와 서브셸 재주입이 각자의 문을 쓴다 — 무장하지 않은 쪽은 no-op 이다.
+			handle.installGate.Observe(chunk)
 			handle.reinjectGate.Observe(chunk)
 			chunk = handle.handshake.Filter(chunk)
 			if len(chunk) > 0 {
@@ -320,6 +398,11 @@ func (m *Manager) closeSession(sessionID string, message string) {
 	if !ok {
 		return
 	}
+
+	// 기다리던 주입은 여기서 접는다. 세션이 사라졌으니 쓸 곳이 없고, 남겨 두면 타이머가 최대
+	// 몇 초 더 살아 있다.
+	session.installGate.Disarm()
+	session.reinjectGate.Disarm()
 
 	m.emit(protocol.Event{
 		Type:      protocol.EventClosed,

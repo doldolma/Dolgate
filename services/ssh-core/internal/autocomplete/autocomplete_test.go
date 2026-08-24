@@ -103,8 +103,13 @@ func TestNormalizeShellIntegrationShell(t *testing.T) {
 	}
 }
 
+// 셸별 명령은 **모든 POSIX 셸에서 파싱은 되어야** 한다. 셸을 모를 때 둘을 연달아 보내므로,
+// zsh 용이 bash 에서(또는 그 반대로) 문법 오류를 내면 그 줄이 화면에 오류로 남는다.
 func TestShellIntegrationInitCommandParses(t *testing.T) {
-	command := strings.TrimRight(ShellIntegrationInitCommand(), "\r")
+	commands := map[string]string{
+		"bash": strings.TrimRight(BashShellIntegrationInitCommand(), "\r"),
+		"zsh":  strings.TrimRight(ZshShellIntegrationInitCommand(), "\r"),
+	}
 	for _, shell := range []string{"bash", "zsh"} {
 		t.Run(shell, func(t *testing.T) {
 			path, err := exec.LookPath(shell)
@@ -117,25 +122,33 @@ func TestShellIntegrationInitCommandParses(t *testing.T) {
 			if err := exec.Command(path, "-c", "exit 0").Run(); err != nil {
 				t.Skipf("%s found at %s but is not runnable: %v", shell, path, err)
 			}
-			if output, err := exec.Command(path, "-n", "-c", command).CombinedOutput(); err != nil {
-				t.Fatalf("%s failed to parse init command: %v\n%s", shell, err, output)
+			for target, command := range commands {
+				if output, err := exec.Command(path, "-n", "-c", command).CombinedOutput(); err != nil {
+					t.Fatalf("%s failed to parse the %s init command: %v\n%s", shell, target, err, output)
+				}
 			}
 		})
 	}
 }
 
 func TestShellIntegrationInitCommandStructure(t *testing.T) {
-	command := ShellIntegrationInitCommand()
-	for _, want := range []string{
-		"BASH_VERSION", "ZSH_VERSION", `133;%s`, "133;B", "133;C",
-		"PROMPT_COMMAND", "precmd_functions", "preexec_functions",
+	for command, wants := range map[string][]string{
+		BashShellIntegrationInitCommand(): {
+			"BASH_VERSION", `133;%s`, "133;B", "133;C", "PROMPT_COMMAND",
+		},
+		ZshShellIntegrationInitCommand(): {
+			// 명령 원문은 __ds_o 로 `E;<명령>` 을 보낸다 — 문자열에 "133;E" 로 박혀 있지 않다.
+			"ZSH_VERSION", `133;%s`, "133;B", `"E;`, "precmd_functions", "preexec_functions",
+		},
 	} {
-		if !strings.Contains(command, want) {
-			t.Errorf("init command missing %q", want)
+		for _, want := range wants {
+			if !strings.Contains(command, want) {
+				t.Errorf("init command missing %q: %q", want, command)
+			}
 		}
-	}
-	if !strings.HasPrefix(command, " ") {
-		t.Error("init command must start with a space for history hygiene")
+		if !strings.HasPrefix(command, " ") {
+			t.Errorf("init command must start with a space for history hygiene: %q", command)
+		}
 	}
 }
 
@@ -401,10 +414,11 @@ func TestHandshakeFilterWithoutPreserveMotdDropsEverythingBeforeMarker(t *testin
 // 찾아서, 마커 뒤에 오는 프롬프트 재출력이 그대로 화면에 남았다 — 첫 줄에 프롬프트가 두 번 찍히고
 // 첫 입력이 엉뚱한 열에서 시작했다.
 func TestHandshakeScrubsTheEchoOfTheCommandItArmedWith(t *testing.T) {
-	command, ok := ShellIntegrationInitCommandForShell("powershell")
-	if !ok {
-		t.Fatal("powershell 통합 명령이 없다")
+	commands := ShellIntegrationInitLines("powershell")
+	if len(commands) != 1 {
+		t.Fatalf("powershell 통합 명령이 %d개다", len(commands))
 	}
+	command := commands[0]
 	visible := string(visibleInjectedEcho(command))
 
 	var handshake Handshake
@@ -436,14 +450,16 @@ func TestHandshakeKeepsScrubbingTheDefaultEcho(t *testing.T) {
 
 // pwsh 로 무장한 필터가 bash echo 를 지우려 들면 안 된다(반대 방향 회귀).
 func TestHandshakeDoesNotScrubAnotherShellsEcho(t *testing.T) {
-	command, _ := ShellIntegrationInitCommandForShell("powershell")
+	command := ShellIntegrationInitLines("powershell")[0]
 
 	var handshake Handshake
 	handshake.ArmForCommand(false, command)
 	handshake.Filter([]byte(PromptStartMarker))
 
+	// 줄 끝의 개행까지 준다 — 안 주면 스트리머가 "다음 청크에서 pwsh echo 가 이어질 수도 있다" 며
+	// 마지막 한 글자를 붙들고 있어(정상 동작) 이 단정만 흔들린다.
 	bashEcho := string(injectedCommandEcho)
-	forwarded := string(handshake.Filter([]byte(bashEcho)))
+	forwarded := string(handshake.Filter([]byte(bashEcho + "\r\n")))
 	if !strings.Contains(forwarded, bashEcho) {
 		t.Error("pwsh 로 무장했는데 bash 텍스트를 지웠다")
 	}

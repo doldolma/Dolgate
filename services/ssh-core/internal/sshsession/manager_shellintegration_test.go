@@ -3,6 +3,7 @@ package sshsession
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -72,10 +73,11 @@ func TestInstallShellIntegrationInjectsOnce(t *testing.T) {
 		t.Fatalf("expected third install to be no-op, installed=%v err=%v", installed, err)
 	}
 
+	// 셸을 알고 부르므로(bash) 그 셸 것 하나만 나간다.
 	if got := w.writeCount(); got != 1 {
 		t.Fatalf("expected exactly one injection across repeated calls, got %d", got)
 	}
-	if got := w.written(); got != autocomplete.ShellIntegrationInitCommand() {
+	if got := w.written(); got != autocomplete.BashShellIntegrationInitCommand() {
 		t.Fatalf("unexpected injected command: %q", got)
 	}
 	// arm 되었으면 echo/마커가 없는 첫 청크는 흡수(버퍼링)되어 빈 forward를 반환한다.
@@ -149,7 +151,7 @@ func TestReinjectShellIntegrationInjectsAfterPromptSettles(t *testing.T) {
 	m.mu.Unlock()
 	defer close(h.closed)
 
-	if err := m.ReinjectShellIntegration("s1"); err != nil {
+	if err := m.ReinjectShellIntegration("s1", ""); err != nil {
 		t.Fatalf("arm reinject failed: %v", err)
 	}
 
@@ -160,16 +162,20 @@ func TestReinjectShellIntegrationInjectsAfterPromptSettles(t *testing.T) {
 		t.Fatalf("must not inject before a prompt settles, got %d writes", got)
 	}
 
-	// A settled subshell prompt then quiet triggers exactly one injection.
+	// A settled subshell prompt then quiet triggers the injection.
+	//
+	// 서브셸은 무엇으로 들어갔는지 모르므로 bash 용·zsh 용이 **한 명령의 여러 줄** 로 나간다 —
+	// 한 줄로 합치면 MAX_CANON(1024)을 넘어 줄 편집기가 없는 셸에서 잘린다.
 	h.reinjectGate.Observe([]byte("user@remote2:~$ "))
+	want := strings.Join(autocomplete.ShellIntegrationInitLines(""), "")
 	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) && w.writeCount() == 0 {
+	for time.Now().Before(deadline) && w.written() != want {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if got := w.writeCount(); got != 1 {
-		t.Fatalf("expected exactly one re-injection after prompt settle, got %d", got)
+	if got := w.writeCount(); got != len(autocomplete.ShellIntegrationInitLines("")) {
+		t.Fatalf("expected one write per injected line after prompt settle, got %d", got)
 	}
-	if got := w.written(); got != autocomplete.ShellIntegrationInitCommand() {
+	if got := w.written(); got != want {
 		t.Fatalf("unexpected injected command: %q", got)
 	}
 	// The handshake must be armed so the injected command echo is suppressed.

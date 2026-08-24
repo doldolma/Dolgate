@@ -10,6 +10,8 @@ import (
 )
 
 type stubCoreRuntime struct {
+	// 재주입 요청에 실려 온 셸 이름(렌더러가 알아낸 값). 힌트가 흘러오는지 확인한다.
+	reinjectShell       string
 	awsConnectSession   string
 	awsConnectPayload   protocol.AWSConnectPayload
 	inputSession        string
@@ -137,7 +139,10 @@ func (stub *stubCoreRuntime) PrepareAutocomplete(sessionID, requestID string) er
 func (stub *stubCoreRuntime) RefreshAutocomplete(sessionID, requestID string) error { return nil }
 func (stub *stubCoreRuntime) StopAutocomplete(sessionID string)                     {}
 func (stub *stubCoreRuntime) InstallShellIntegration(sessionID string) error        { return nil }
-func (stub *stubCoreRuntime) ReinjectShellIntegration(sessionID string) error       { return nil }
+func (stub *stubCoreRuntime) ReinjectShellIntegration(sessionID string, shell string) error {
+	stub.reinjectShell = shell
+	return nil
+}
 func (stub *stubCoreRuntime) RunCompletionQuery(sessionID, requestID, command string) error {
 	return nil
 }

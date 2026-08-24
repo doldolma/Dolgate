@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +41,9 @@ type sessionHandle struct {
 	shellIntegrationReadyOnce      sync.Once
 	// 원격 셸에 통합 스크립트를 타이핑할 수 있는지. 못 하는 종류면 arm 조차 하지 않는다.
 	shellIntegrationTypable bool
+	// 데스크톱이 알려 준 셸 종류(Windows 면 powershell). 알면 그 셸 것만 보낸다 — 빈 값이면
+	// Linux/POSIX 로 보고 bash·zsh 겸용을 보낸다(SSM 세션 문서가 정하는 셸이라 물어볼 데가 없다).
+	shellKind string
 }
 
 type autocompleteProbe struct {
@@ -116,6 +120,7 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.AWSConne
 		done:                    make(chan struct{}),
 		shellIntegrationReady:   make(chan struct{}),
 		shellIntegrationTypable: shellIntegrationTypable(payload.ShellKind),
+		shellKind:               strings.TrimSpace(payload.ShellKind),
 	}
 	m.mu.Lock()
 	m.sessions[sessionID] = handle
@@ -389,23 +394,17 @@ const (
 	shellIntegrationTailLimit        = 2048
 )
 
-// shellIntegrationTypable reports whether the init script can be typed into this
-// shell. The script is POSIX (bash/zsh); a Windows SSM session lands in
-// PowerShell, which parses it as a wall of errors and prints them over the first
-// screen. The PowerShell variant is no help here either -- typing it drifts the
-// cursor (that is why local pwsh sessions get it via -EncodedCommand instead),
-// and an SSM session takes no launch arguments. So for those shells we do not
-// attempt the install at all: shell integration is simply absent, which is what
-// a plain SSM session gives you.
+// shellIntegrationTypable 은 이 셸에 통합을 타이핑할 수 있는지다.
 //
-// An empty ShellKind means Linux/POSIX -- the pre-existing behaviour.
+// 예전에는 PowerShell 을 여기서 걸러 냈다. 이유는 두 가지였는데 하나만 맞았다: POSIX 스크립트를
+// PowerShell 에 타이핑하면 오류가 첫 화면을 덮는다(맞다). 그런데 pwsh 전용 스크립트를 보내면
+// "커서가 밀린다" 는 것은 원인이 달랐다 — 걷어낼 echo 를 bash 로 가정한 채 무장해서(Arm) 마커 뒤
+// 프롬프트 재출력이 화면에 남은 것이고, 지금은 실제로 보내는 명령으로 무장한다(ArmForCommand).
+// 그래서 셸에 맞는 스크립트만 보내면 된다.
+//
+// 이름을 알지만 지원하지 않는 셸(ksh·cmd)이면 보낼 것이 없다. 빈 값은 Linux/POSIX 로 본다.
 func shellIntegrationTypable(shellKind string) bool {
-	switch autocomplete.NormalizeShellIntegrationShell(shellKind) {
-	case "pwsh", "powershell":
-		return false
-	default:
-		return true
-	}
+	return len(autocomplete.ShellIntegrationInitLines(shellKind)) > 0
 }
 
 func (h *sessionHandle) beginShellIntegration() bool {
@@ -421,8 +420,25 @@ func (h *sessionHandle) beginShellIntegration() bool {
 		return false
 	}
 	h.shellIntegrationState = shellIntegrationArmed
-	h.handshake.Arm(false)
+	// 걷어낼 echo 는 실제로 보낼 명령이다 — 기본값(bash·zsh)에 맡기면 PowerShell 세션에서 마커 뒤
+	// 프롬프트 재출력이 화면에 남는다(그것이 "커서가 밀린다" 던 증상이다).
+	h.handshake.ArmForCommand(false, h.shellIntegrationCommands()...)
 	return true
+}
+
+// Windows 면 데스크톱이 셸 종류를 실어 보낸다 — 그 셸 것 한 줄이면 된다. Linux 는 세션 문서가
+// 정하는 셸(계정마다 sh·bash 가 다르다)이라 물어볼 채널이 없어 bash·zsh 겸용을 여러 줄로 보낸다.
+func (h *sessionHandle) shellIntegrationCommands() []string {
+	return autocomplete.ShellIntegrationInitLines(h.shellKind)
+}
+
+func (m *Manager) writeShellIntegrationCommands(session *sessionHandle) error {
+	for _, command := range session.shellIntegrationCommands() {
+		if err := session.runner.Write([]byte(command)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *Manager) writeShellIntegrationCommand(sessionID string, session *sessionHandle) (bool, error) {
@@ -433,14 +449,14 @@ func (m *Manager) writeShellIntegrationCommand(sessionID string, session *sessio
 		return false, nil
 	case shellIntegrationUnknown:
 		session.shellIntegrationState = shellIntegrationInstalling
-		session.handshake.Arm(false)
+		session.handshake.ArmForCommand(false, session.shellIntegrationCommands()...)
 	default:
 		session.shellIntegrationState = shellIntegrationInstalling
 	}
 	session.stopShellIntegrationInstallTimersLocked()
 	session.shellIntegrationMu.Unlock()
 
-	if err := session.runner.Write([]byte(autocomplete.ShellIntegrationInitCommand())); err != nil {
+	if err := m.writeShellIntegrationCommands(session); err != nil {
 		flushed := session.handshake.Flush()
 		session.shellIntegrationMu.Lock()
 		session.shellIntegrationState = shellIntegrationUnknown
@@ -490,12 +506,16 @@ func (m *Manager) observeShellIntegrationOutput(sessionID string, session *sessi
 		session.shellIntegrationTail = session.shellIntegrationTail[len(session.shellIntegrationTail)-shellIntegrationTailLimit:]
 	}
 
-	// PowerShell 이면 POSIX 스크립트를 넣을 수 없다. 붙잡고 있던 출력을 즉시 놓아준다 —
-	// 안 그러면 마커를 8초 기다리다 한꺼번에 쏟아진다(LooksLikePowerShellPrompt 주석).
+	// 화면으로 PowerShell 임을 알아냈는데 **우리가 그것을 몰랐다면** 넣을 것이 없다. 붙잡고 있던
+	// 출력을 즉시 놓아준다 — 안 그러면 마커를 8초 기다리다 한꺼번에 쏟아진다.
+	//
+	// 데스크톱이 셸 종류를 알려 준 경우(Windows 인스턴스)는 여기서 멈추지 않는다. 그 셸에 맞는
+	// pwsh 스크립트를 보낼 수 있으므로 아래 프롬프트 안착 경로로 그대로 간다.
 	//
 	// 아래 프롬프트 판정보다 **먼저** 봐야 한다. "PS C:\...>" 는 그쪽 검사도 통과한다(접미사가
 	// ">" 다).
-	if autocomplete.LooksLikePowerShellPrompt(session.shellIntegrationTail) {
+	if autocomplete.NormalizeShellIntegrationShell(session.shellKind) == "" &&
+		autocomplete.LooksLikePowerShellPrompt(session.shellIntegrationTail) {
 		session.stopShellIntegrationInstallTimersLocked()
 		session.shellIntegrationState = shellIntegrationUnsupported
 		session.shellIntegrationMu.Unlock()

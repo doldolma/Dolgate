@@ -1589,7 +1589,8 @@ export interface DesktopApi {
     refreshAutocomplete: (sessionId: string) => Promise<void>;
     stopAutocomplete: (sessionId: string) => Promise<void>;
     installShellIntegration: (sessionId: string) => Promise<void>;
-    reinjectShellIntegration: (sessionId: string) => Promise<void>;
+    /** shell 은 렌더러가 실행된 명령에서 알아낸 셸 이름(모르면 생략). */
+    reinjectShellIntegration: (sessionId: string, shell?: string) => Promise<void>;
     queryCompletion: (sessionId: string, command: string) => Promise<string>;
     respondKeyboardInteractive: (
       input: KeyboardInteractiveRespondInput,

@@ -171,6 +171,7 @@ type ConnectionHopProgressPayload = coretypes.ConnectionHopProgressPayload
 type EnvVar = coretypes.EnvVar
 type AWSConnectPayload = coretypes.AWSConnectPayload
 type LocalConnectPayload = coretypes.LocalConnectPayload
+type ShellIntegrationReinjectPayload = coretypes.ShellIntegrationReinjectPayload
 type TerminalAutocompleteCapabilityPayload = coretypes.TerminalAutocompleteCapabilityPayload
 type TerminalAutocompleteSnapshotPayload = coretypes.TerminalAutocompleteSnapshotPayload
 type TerminalAutocompleteShellStatePayload = coretypes.TerminalAutocompleteShellStatePayload

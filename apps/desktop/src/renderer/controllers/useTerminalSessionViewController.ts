@@ -66,7 +66,7 @@ import {
   applyTerminalInput,
   createEmptyCommandBuffer,
 } from '../lib/terminal-autocomplete';
-import { detectsSubshellEntry } from '../lib/subshell-detect';
+import { detectsSubshellEntry, resolveSubshellShell } from '../lib/subshell-detect';
 import {
   isLayoutTransitionActive,
   subscribeToLayoutTransitionEnd,
@@ -987,8 +987,11 @@ export function useTerminalSessionViewController({
                 currentSettings?.subshellReinjectPatterns ?? [],
               )
             ) {
+              // 어떤 셸로 들어가는지 명령에 적혀 있으면 함께 보낸다(`fish`, `docker exec … sh`).
+              // 코어가 그 셸 전용 스크립트 한 줄만 보내고, 모르면 겸용을 보낸다.
               void reinjectTerminalShellIntegration(
                 liveSessionIdRef.current,
+                resolveSubshellShell(trackedInput.executed),
               ).catch(() => undefined);
             }
           }

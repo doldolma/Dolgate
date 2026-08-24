@@ -48,7 +48,7 @@ type sshSessionManager interface {
 	HasSession(sessionID string) bool
 	CollectAutocomplete(sessionID string, revision int) (autocomplete.Result, error)
 	InstallShellIntegration(sessionID string) error
-	ReinjectShellIntegration(sessionID string) error
+	ReinjectShellIntegration(sessionID string, shell string) error
 	FlushShellIntegration(sessionID string)
 	RunCompletionCommand(sessionID, command string) (string, bool, error)
 	// RunHostCommand 은 보조 exec 채널에서 임의 명령을 실행하고 stdout/stderr/exit 를 돌려준다(AI run_command).
@@ -89,7 +89,7 @@ type localSessionManager interface {
 	Disconnect(sessionID string) error
 	CollectAutocomplete(sessionID string, revision int) (autocomplete.Result, error)
 	InstallShellIntegration(sessionID string) error
-	ReinjectShellIntegration(sessionID string) error
+	ReinjectShellIntegration(sessionID string, shell string) error
 	FlushShellIntegration(sessionID string)
 	RunCompletionCommand(sessionID, command string) (string, bool, error)
 }
@@ -717,12 +717,18 @@ func (runtime *Runtime) InstallShellIntegration(sessionID string) error {
 // once-per-session flag — re-injection is expected to run repeatedly as the
 // user moves in and out of subshells. The manager waits for the subshell prompt
 // to settle before writing, so this returns immediately after arming.
-func (runtime *Runtime) ReinjectShellIntegration(sessionID string) error {
+// shell 은 렌더러가 실행된 명령에서 알아낸 셸 이름이다(모르면 빈 문자열). 알면 그 셸 전용
+// 스크립트 한 줄로 끝나고, 모르면 bash·zsh 겸용을 여러 줄로 보낸다.
+func (runtime *Runtime) ReinjectShellIntegration(sessionID string, shell string) error {
 	switch {
+	case runtime.tmux.HasSession(sessionID):
+		// control mode pane 도 서브셸에 들어가면 훅을 잃는다. 예전에는 이 분기가 없어 조용히
+		// 아무 일도 하지 않았다 — tmux 로 작업하면 서브셸 통합이 아예 없었다.
+		return runtime.tmux.ReinjectShellIntegration(sessionID, shell)
 	case runtime.ssh.HasSession(sessionID):
-		return runtime.ssh.ReinjectShellIntegration(sessionID)
+		return runtime.ssh.ReinjectShellIntegration(sessionID, shell)
 	case runtime.local.HasSession(sessionID):
-		return runtime.local.ReinjectShellIntegration(sessionID)
+		return runtime.local.ReinjectShellIntegration(sessionID, shell)
 	default:
 		return nil
 	}

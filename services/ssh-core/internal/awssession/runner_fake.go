@@ -33,7 +33,17 @@ func (r *fakeRunner) Write(data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
-	if string(data) == autocomplete.ShellIntegrationInitCommand() {
+	// 주입은 조각이 여러 개일 수 있다(셸을 모를 때 bash 용·zsh 용). 실제 셸도 훅이 걸린 뒤
+	// 프롬프트에서 마커를 내므로, 마지막 조각 뒤에만 마커를 낸다.
+	commands := autocomplete.ShellIntegrationInitLines("")
+	for index, command := range commands {
+		if string(data) != command {
+			continue
+		}
+		if index < len(commands)-1 {
+			_, err := r.outputWriter.Write(data)
+			return err
+		}
 		r.mu.Lock()
 		initial := r.initial
 		r.initial = ""

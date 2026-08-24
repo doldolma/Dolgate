@@ -161,7 +161,8 @@ func waitForWriteCount(t *testing.T, runner *stubRunner, count int) [][]byte {
 func completeShellIntegration(t *testing.T, runner *stubRunner, streams <-chan []byte) {
 	t.Helper()
 	runner.emitOutput("ubuntu@ip-10-0-1-59:~$ ")
-	waitForWriteCount(t, runner, 1)
+	// SSM 셸의 종류를 알 수 없어 bash 용·zsh 용 두 조각이 나간다.
+	waitForWriteCount(t, runner, len(autocomplete.ShellIntegrationInitLines("")))
 	runner.emitOutput(autocomplete.PromptStartMarker + "ubuntu@ip-10-0-1-59:~$ ")
 	if got := waitForStream(t, streams); !bytes.Contains(got, []byte(autocomplete.PromptStartMarker)) {
 		t.Fatalf("shell integration marker was not forwarded: %q", got)
@@ -239,9 +240,12 @@ func TestManagerCollectAutocompleteFiltersProbeOutput(t *testing.T) {
 	}
 	waitForEvent(t, events, protocol.EventConnected)
 	completeShellIntegration(t, runner, streams)
-	writes := waitForWriteCount(t, runner, 1)
-	if string(writes[0]) != autocomplete.ShellIntegrationInitCommand() {
-		t.Fatalf("shell integration command was not written first: %q", writes[0])
+	commands := autocomplete.ShellIntegrationInitLines("")
+	writes := waitForWriteCount(t, runner, len(commands))
+	for index, command := range commands {
+		if string(writes[index]) != command {
+			t.Fatalf("shell integration command %d was not written first: %q", index, writes[index])
+		}
 	}
 
 	resultCh := make(chan autocomplete.Result, 1)
@@ -249,7 +253,8 @@ func TestManagerCollectAutocompleteFiltersProbeOutput(t *testing.T) {
 		result, _ := manager.CollectAutocomplete("session-1", 7)
 		resultCh <- result
 	}()
-	writes = waitForWriteCount(t, runner, 2)
+	// 통합 주입 조각들 뒤에 probe 가 온다(조각 수는 셸을 모르는 경로라 하나가 아니다).
+	writes = waitForWriteCount(t, runner, len(commands)+1)
 	probeWrite := writes[len(writes)-1]
 	match := regexp.MustCompile(`6973;([0-9a-f]+);snapshot`).FindSubmatch(probeWrite)
 	if len(match) != 2 {
@@ -297,7 +302,7 @@ func TestManagerWaitsForProbePromptRedrawBeforeCompletingAutocomplete(t *testing
 		result, _ := manager.CollectAutocomplete("session-split-probe", 8)
 		resultCh <- result
 	}()
-	writes := waitForWriteCount(t, runner, 2)
+	writes := waitForWriteCount(t, runner, len(autocomplete.ShellIntegrationInitLines(""))+1)
 	match := regexp.MustCompile(`6973;([0-9a-f]+);snapshot`).FindSubmatch(writes[len(writes)-1])
 	if len(match) != 2 {
 		t.Fatalf("probe nonce not found in %q", writes[len(writes)-1])
@@ -396,12 +401,12 @@ func TestManagerDoesNotInstallShellIntegrationBeforePromptOnMaxWait(t *testing.T
 	_ = manager.Disconnect("session-slow-profile")
 }
 
-// A Windows SSM session lands in PowerShell, which cannot run the POSIX
-// integration script -- typing it in prints a wall of parse errors over the
-// first screen. Shell integration is simply absent on those sessions, so the
-// install must not be attempted at all (not even armed, which would hold back
-// output waiting for an echo that never comes).
-func TestManagerSkipsShellIntegrationForPowerShellSessions(t *testing.T) {
+// 셸 종류를 모른 채 화면에서 PowerShell 프롬프트를 만나면 넣을 것이 없다 — POSIX 스크립트는
+// 오류가 첫 화면을 덮고, pwsh 스크립트는 이 세션이 그것인지 확신할 수 없다. 그때는 통합을 접고
+// 붙잡고 있던 출력을 바로 놓아준다(안 놓으면 오지 않을 echo 를 기다리며 화면이 멈춘다).
+//
+// 데스크톱이 Windows 라고 알려 준 경우는 다르다 — 그쪽은 pwsh 스크립트를 보낸다(아래 테스트).
+func TestManagerAbandonsShellIntegrationOnAnUnexpectedPowerShellPrompt(t *testing.T) {
 	events := make(chan protocol.Event, 16)
 	streams := make(chan []byte, 16)
 	runner := newStubRunner()
@@ -412,9 +417,8 @@ func TestManagerSkipsShellIntegrationForPowerShellSessions(t *testing.T) {
 	}, func(protocol.AWSConnectPayload) (sessionRunner, error) {
 		return runner, nil
 	})
-	if err := manager.Connect("session-windows", "request-windows", protocol.AWSConnectPayload{
-		ShellKind: "powershell",
-	}); err != nil {
+	// 셸 종류를 알려 주지 않은 세션이다(구버전 데스크톱·run-as 로 셸이 바뀐 경우).
+	if err := manager.Connect("session-windows", "request-windows", protocol.AWSConnectPayload{}); err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 	waitForEvent(t, events, protocol.EventConnected)
@@ -484,10 +488,14 @@ func TestManagerRoutesWriteResizeAndOutputThroughRunner(t *testing.T) {
 	}
 
 	writes := runner.writesSnapshot()
-	if len(writes) != 2 ||
-		string(writes[0]) != autocomplete.ShellIntegrationInitCommand() ||
-		!bytes.Equal(writes[1], []byte("ls -al\r")) {
+	commands := autocomplete.ShellIntegrationInitLines("")
+	if len(writes) != len(commands)+1 || !bytes.Equal(writes[len(commands)], []byte("ls -al\r")) {
 		t.Fatalf("writes = %#v", writes)
+	}
+	for index, command := range commands {
+		if string(writes[index]) != command {
+			t.Fatalf("writes[%d] = %q", index, writes[index])
+		}
 	}
 	controlSignals := runner.controlSignalsSnapshot()
 	if len(controlSignals) != 1 || controlSignals[0] != "interrupt" {
@@ -634,5 +642,45 @@ func TestManagerDoesNotHoldOutputOnPowerShellSession(t *testing.T) {
 	}
 	if result.Capability.Status != "unsupported" {
 		t.Fatalf("status = %q, want unsupported", result.Capability.Status)
+	}
+}
+
+// Windows SSM 세션(PowerShell)도 통합을 받는다.
+//
+// 예전에는 아예 걸렀다 — POSIX 스크립트를 타이핑하면 오류가 첫 화면을 덮기 때문인데, 정작
+// pwsh 전용 스크립트는 보내지 않았다. 그때 "커서가 밀린다" 던 것은 걷어낼 echo 를 bash 로
+// 가정한 채 무장해서 생긴 일이고(지금은 실제로 보내는 명령으로 무장한다), 셸에 맞는 스크립트를
+// 보내면 Windows EC2 에서도 cwd·명령 블록·마커가 산다.
+func TestManagerInstallsPowerShellIntegrationOnWindowsSessions(t *testing.T) {
+	events := make(chan protocol.Event, 16)
+	streams := make(chan []byte, 16)
+	runner := newStubRunner()
+	manager := NewManagerWithRunnerFactory(func(event protocol.Event) {
+		events <- event
+	}, func(_ protocol.StreamFrame, payload []byte) {
+		streams <- payload
+	}, func(protocol.AWSConnectPayload) (sessionRunner, error) {
+		return runner, nil
+	})
+	if err := manager.Connect("session-1", "request-1", protocol.AWSConnectPayload{
+		ShellKind: "powershell",
+	}); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	waitForEvent(t, events, protocol.EventConnected)
+
+	// 프롬프트가 안착하면 주입한다(SSM 은 셸 프로필·run-as 를 먼저 타이핑할 수 있어 기다린다).
+	runner.emitOutput("PS C:\\Users\\Administrator> ")
+	want := autocomplete.ShellIntegrationInitLines("powershell")
+	if len(want) != 1 {
+		t.Fatalf("pwsh 주입 줄이 %d개다", len(want))
+	}
+	writes := waitForWriteCount(t, runner, 1)
+	if string(writes[0]) != want[0] {
+		t.Fatalf("pwsh 스크립트가 아니다: %q", writes[0])
+	}
+	// POSIX 스크립트가 섞여 들어가면 PowerShell 이 오류로 첫 화면을 덮는다.
+	if strings.Contains(string(writes[0]), "BASH_VERSION") {
+		t.Fatalf("PowerShell 세션에 POSIX 스크립트를 보냈다: %q", writes[0])
 	}
 }

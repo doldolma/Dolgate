@@ -37,7 +37,7 @@ func TestStreamingScrubRemovesEchoLongerThanAPtyChunk(t *testing.T) {
 	if len(longEcho) <= ptyChunkLimit {
 		t.Fatalf("test fixture must exceed the PTY chunk limit, got %d", len(longEcho))
 	}
-	filter := &HandshakeFilter{echo: []byte(longEcho)}
+	filter := &HandshakeFilter{echoes: [][]byte{[]byte(longEcho)}}
 	filter.Filter([]byte(PromptStartMarker))
 
 	data := append([]byte("user@host:~$ "), longEcho...)

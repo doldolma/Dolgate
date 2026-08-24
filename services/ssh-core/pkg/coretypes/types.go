@@ -169,6 +169,15 @@ const (
 // tmux control mode 이벤트 payload들. control mode pane은 가상 sessionId
 // "tmux:<controlSessionId>:<paneId>" 로 노출되고, 구조 변화(window/layout)는
 // 아래 payload를 가진 control frame 이벤트로 상위 레이어에 전달된다.
+// ShellIntegrationReinjectPayload 는 서브셸 재주입 요청이다.
+//
+// Shell 은 렌더러가 사용자가 실행한 명령에서 알아낸 셸 이름이다(`fish`, `bash`, `docker exec …
+// sh` 의 `sh` 등). 알면 그 셸 전용 스크립트 한 줄로 끝나고, 비어 있으면 "모른다" 는 뜻이라
+// bash·zsh 겸용을 보낸다 — fish 에 겸용(POSIX)을 보내면 문법 오류가 화면에 뜬다.
+type ShellIntegrationReinjectPayload struct {
+	Shell string `json:"shell,omitempty"`
+}
+
 type TmuxLayoutChangePayload struct {
 	ControlSessionID string `json:"controlSessionId"`
 	WindowID         string `json:"windowId"`

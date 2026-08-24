@@ -3886,13 +3886,15 @@ export class CoreManager {
   // 서브셸(중첩 ssh·sudo su·docker exec) 진입 후 렌더러가 감지하면 호출된다. 코어가
   // 현재 포그라운드 셸의 프롬프트 안착을 기다렸다 OSC 133/7 훅을 다시 주입한다.
   // ssh/local 세션에만 효과가 있고 그 외 타입은 코어에서 no-op이다.
-  async reinjectShellIntegration(sessionId: string): Promise<void> {
+  // shell 은 렌더러가 실행된 명령에서 알아낸 셸 이름이다(모르면 undefined). 알면 코어가 그 셸
+  // 전용 스크립트 한 줄만 보낸다 — fish 에 POSIX 겸용을 보내면 문법 오류가 화면에 뜬다.
+  async reinjectShellIntegration(sessionId: string, shell?: string): Promise<void> {
     await this.start();
     this.sendControl({
       id: randomUUID(),
       type: "terminalShellIntegrationReinject",
       sessionId,
-      payload: {},
+      payload: { shell: shell?.trim() || undefined },
     });
   }
 

@@ -20,8 +20,17 @@ import (
 
 type unixPTYRunner struct {
 	shellKind string
-	command   *exec.Cmd
-	ptyFile   *os.File
+	// 기동 파일로 셸 통합을 이미 넣었는지. true 면 stdin 으로 타이핑하지 않는다.
+	shellIntegrationPreinstalled bool
+	command                      *exec.Cmd
+	ptyFile                      *os.File
+}
+
+// ShellIntegrationPreinstalled 는 기동 파일(bash --init-file · zsh ZDOTDIR · fish vendor_conf.d)로
+// 통합이 이미 들어갔는지다. 들어갔으면 타이핑하지 않는다 — 타이핑에 딸린 문제(한 줄 상한·echo
+// 걷어내기·프롬프트 대기)가 통째로 없어진다.
+func (r *unixPTYRunner) ShellIntegrationPreinstalled() bool {
+	return r.shellIntegrationPreinstalled
 }
 
 func startPlatformLocalRunner(payload protocol.LocalConnectPayload, runtime localCommandRuntime) (sessionRunner, error) {
@@ -41,9 +50,10 @@ func startPlatformLocalRunner(payload protocol.LocalConnectPayload, runtime loca
 	}
 
 	return &unixPTYRunner{
-		shellKind: runtime.shellKind,
-		command:   command,
-		ptyFile:   ptyFile,
+		shellKind:                    runtime.shellKind,
+		shellIntegrationPreinstalled: runtime.shellIntegrationPreinstalled,
+		command:                      command,
+		ptyFile:                      ptyFile,
 	}, nil
 }
 
@@ -58,12 +68,15 @@ func resolveLocalRuntime(payload protocol.LocalConnectPayload) (localCommandRunt
 		if shellKind == "" {
 			shellKind = strings.TrimPrefix(filepath.Base(executablePath), "-")
 		}
+		env := buildRuntimeEnv(os.Environ(), payload.UnsetEnv, payload.Env)
+		args, env, preinstalled := withShellStartupIntegration(shellKind, args, env)
 		return localCommandRuntime{
-			shellKind:        shellKind,
-			executablePath:   executablePath,
-			args:             args,
-			env:              buildRuntimeEnv(os.Environ(), payload.UnsetEnv, payload.Env),
-			workingDirectory: workingDirectory,
+			shellKind:                    shellKind,
+			shellIntegrationPreinstalled: preinstalled,
+			executablePath:               executablePath,
+			args:                         args,
+			env:                          env,
+			workingDirectory:             workingDirectory,
 		}, nil
 	}
 
@@ -73,12 +86,15 @@ func resolveLocalRuntime(payload protocol.LocalConnectPayload) (localCommandRunt
 	}
 
 	workingDirectory := resolveUserHomeDirectory()
+	shellKind := strings.TrimPrefix(filepath.Base(executablePath), "-")
+	args, env, preinstalled := withShellStartupIntegration(shellKind, nil, os.Environ())
 	return localCommandRuntime{
-		shellKind:        strings.TrimPrefix(filepath.Base(executablePath), "-"),
-		executablePath:   executablePath,
-		args:             nil,
-		env:              os.Environ(),
-		workingDirectory: workingDirectory,
+		shellKind:                    shellKind,
+		shellIntegrationPreinstalled: preinstalled,
+		executablePath:               executablePath,
+		args:                         args,
+		env:                          env,
+		workingDirectory:             workingDirectory,
 	}, nil
 }
 

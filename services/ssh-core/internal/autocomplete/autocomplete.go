@@ -369,9 +369,12 @@ func readFileTail(path string, limit int64) ([]byte, error) {
 // 길이 제한은 없다. 예전에는 마커 뒤 재출력 echo 를 청크별 전체 일치로 지워서 1024바이트
 // (로컬 PTY 한 번 읽기 상한)를 넘기면 스크립트가 화면에 찍혔다. 지금은 꼬리를 물고 잇는
 // 스트리밍 치환이라(stripInjectedEchoStreaming) 길이와 무관하다.
-const shellIntegrationScript = `__ds_o(){ printf '\033]133;%s\007' "$1"; }; __ds_cwd(){ printf '\033]7;file://%s\007' "$PWD"; }; ` +
-	`if [ -n "${BASH_VERSION:-}" ]; then ` +
-	`__ds_pc(){ local __e=$?; __ds_o "D;$__e"; __ds_o A; __ds_cwd; }; ` +
+const shellIntegrationCommonScript = `__ds_o(){ printf '\033]133;%s\007' "$1"; }; __ds_cwd(){ printf '\033]7;file://%s\007' "$PWD"; }; `
+
+// bash 전용 본문. 가드(`if [ -n "${BASH_VERSION:-}" ]`)를 붙여 보낸다 — 셸을 알고 보낼 때도
+// 붙인다. 판정이 틀렸을 때(래퍼 스크립트가 실제로는 다른 셸을 띄우는 등) 엉뚱한 셸에서 실행되는
+// 것보다 조용히 아무것도 안 하는 편이 낫고, 그 값이 38바이트다.
+const bashIntegrationBody = `__ds_pc(){ local __e=$?; __ds_o "D;$__e"; __ds_o A; __ds_cwd; }; ` +
 	// 여러 줄을 "실행하지 않고 입력줄에 넣기" 는 셸이 괄호 붙여넣기를 받아야 성립한다. bash 는
 	// 5.1 부터 기본으로 켜지므로 그 아래 버전(우분투 20.04 = 5.0)에서는 우리가 켠다. 없는
 	// 옵션이면 bind 가 조용히 실패한다.
@@ -386,8 +389,10 @@ const shellIntegrationScript = `__ds_o(){ printf '\033]133;%s\007' "$1"; }; __ds
 	// 마커를 붙이면 셸이 매 줄마다 "여기까지가 프롬프트다" 를 알려주므로 추측하지 않아도 된다.
 	// PS1 과 구분해야 하므로(빈 엔터로 새 프롬프트가 뜨는 것과 이어지는 줄은 다르다) 파라미터를
 	// 하나 붙여 `B;2` 로 보낸다.
-	`case "${PS2:-}" in *'133;B'*) ;; *) PS2="${PS2:-}"'\[\033]133;B;2\007\]';; esac; ` +
-	`elif [ -n "${ZSH_VERSION:-}" ]; then ` +
+	`case "${PS2:-}" in *'133;B'*) ;; *) PS2="${PS2:-}"'\[\033]133;B;2\007\]';; esac; `
+
+// zsh 전용 본문. bash·dash 가 **파싱은** 하게 두어야 한다 — 아래 eval 주석 참고.
+const zshIntegrationBody = `` +
 	// zsh 의 preexec 은 **셸이 받아들인 명령 원문**을 $1 로 준다(여러 줄까지). 그것을 E 로
 	// 올려 보내면 화면에서 읽지 않아도 되고, 화면에 찍힌 보조 프롬프트(PS2: `heredoc> `)가
 	// 섞이는 문제가 사라진다. C 보다 먼저 보내 블록이 만들어질 때 쓸 수 있게 한다.
@@ -411,8 +416,7 @@ const shellIntegrationScript = `__ds_o(){ printf '\033]133;%s\007' "$1"; }; __ds
 	// while bash/zsh still eval the append normally.
 	`case " ${precmd_functions[*]} " in *" __ds_precmd "*) ;; *) eval 'precmd_functions+=(__ds_precmd)';; esac; ` +
 	`case " ${preexec_functions[*]} " in *" __ds_preexec "*) ;; *) eval 'preexec_functions+=(__ds_preexec)';; esac; ` +
-	`case "${PS1:-}" in *'133;B'*) ;; *) PS1="${PS1:-}"$'%{\033]133;B\007%}';; esac; ` +
-	`fi`
+	`case "${PS1:-}" in *'133;B'*) ;; *) PS1="${PS1:-}"$'%{\033]133;B\007%}';; esac; `
 
 // fishIntegrationScript installs OSC 133 prompt/command lifecycle hooks without
 // replacing the user's fish_prompt. fish keeps its own completion UI; this only
@@ -438,13 +442,32 @@ const powerShellIntegrationScript = `if (-not (Get-Variable -Name __ds_shell_int
 	`try { $global:__ds_add_history = (Get-PSReadLineOption).AddToHistoryHandler; Set-PSReadLineOption -AddToHistoryHandler { param([string]$line) __ds_o 'C'; if ($global:__ds_add_history) { return & $global:__ds_add_history $line }; return $true } } catch {} ` +
 	`}`
 
-// ShellIntegrationInitCommand returns a one-line command, suitable for writing
-// straight into an interactive shell's stdin, that installs the OSC 133 hooks.
-// The leading space keeps it out of history when HISTCONTROL/HIST_IGNORE_SPACE
-// is set, and the trailing `history -d` is a best-effort cleanup (bash), both
-// mirroring InBandProbeCommand.
-func ShellIntegrationInitCommand() string {
-	return " " + shellIntegrationScript + "; history -d $((HISTCMD-1)) >/dev/null 2>&1 || true\r"
+// 주입 명령 하나의 크기 상한.
+//
+// tty 는 줄 편집기가 없는 동안(셸 기동 중, 또는 dash·busybox 처럼 줄 편집기가 아예 없는 셸)
+// canonical 모드로 한 줄을 모으는데, 그 한 줄의 상한이 POSIX MAX_CANON = 1024바이트다. 넘는
+// 만큼은 **버려진다** — 끝의 CR 까지 잘려 명령이 실행되지도 않고 원문만 화면에 남는다.
+//
+// 그래서 주입 명령은 셸별로 갈라 이 상한 아래로 유지한다. 예전에는 bash·zsh 를 한 줄에 담아
+// 1213바이트였고, 그 상태로 로컬 터미널과 dash 서브셸이 깨졌다.
+const MaxShellIntegrationCommandBytes = 1024
+
+// BashShellIntegrationInitCommand 는 bash 에 주입할 한 줄이다.
+//
+// 앞 공백은 HISTCONTROL/HIST_IGNORE_SPACE 가 켜진 셸에서 히스토리에 남지 않게 하고, 끝의
+// `history -d` 는 그렇지 않은 bash 를 위한 최선의 정리다(zsh 에서는 no-op 이라 붙이지 않는다).
+func BashShellIntegrationInitCommand() string {
+	return " " + shellIntegrationCommonScript + bashIntegrationGuarded() +
+		bashHistoryCleanupTail + "\r"
+}
+
+// bash 는 앞 공백만으로는 히스토리에서 빠지지 않는 설정도 있어 마지막 항목을 지운다. zsh 에서는
+// no-op 이라(그쪽은 우리 히스토리 필터가 걸러 낸다) 붙이지 않는다.
+const bashHistoryCleanupTail = "; history -d $((HISTCMD-1)) >/dev/null 2>&1 || true"
+
+// ZshShellIntegrationInitCommand 는 zsh 에 주입할 한 줄이다.
+func ZshShellIntegrationInitCommand() string {
+	return " " + shellIntegrationCommonScript + zshIntegrationGuarded() + "\r"
 }
 
 // FishShellIntegrationInitCommand returns a one-line command suitable for fish
@@ -471,17 +494,73 @@ func PowerShellIntegrationScript() string {
 	return powerShellIntegrationScript
 }
 
-func ShellIntegrationInitCommandForShell(shell string) (string, bool) {
-	switch NormalizeShellIntegrationShell(shell) {
-	case "bash", "zsh":
-		return ShellIntegrationInitCommand(), true
-	case "fish":
-		return FishShellIntegrationInitCommand(), true
-	case "pwsh", "powershell":
-		return PowerShellIntegrationInitCommand(), true
-	default:
-		return "", false
+// 아래 세 함수는 **파일로 읽힐** 스크립트다(로컬 셸의 기동 파일에 넣는 경로).
+//
+// 타이핑용 명령과 달리 앞 공백·끝 CR·히스토리 정리가 없다 — 타이핑하지 않으니 히스토리에 남지도,
+// echo 가 화면에 찍히지도 않는다. 그래서 크기 상한(MAX_CANON)과도 무관하다.
+func BashShellIntegrationScript() string {
+	return shellIntegrationCommonScript + bashIntegrationGuarded()
+}
+
+func ZshShellIntegrationScript() string {
+	return shellIntegrationCommonScript + zshIntegrationGuarded()
+}
+
+func FishShellIntegrationScript() string {
+	return fishIntegrationScript
+}
+
+// ShellIntegrationInitLines 는 이 셸에 써 넣을 **줄들**을 순서대로 돌려준다. 그대로 이어서 쓰면
+// 된다(각 줄이 CR 로 끝난다).
+//
+// 셸을 알면 한 줄이다. 모르면(서브셸 재주입처럼 사용자가 무엇으로 들어갔는지 알 수 없을 때)
+// bash 용·zsh 용을 **한 명령의 여러 줄로** 보낸다:
+//
+//	{ <공통><bash 가드+본문>fi
+//	<zsh 가드+본문>fi
+//	}; history -d …
+//
+// 왜 이 모양인가. 두 가지를 동시에 만족해야 한다.
+//
+//  1. **줄마다 MAX_CANON(1024) 아래.** 한 줄에 다 담으면 1213바이트가 되어, 줄 편집기가 없는
+//     동안(셸 기동 중·dash·busybox) tty 가 잘라 버린다.
+//  2. **명령은 하나.** 두 명령으로 나눠 보내면 bash 에서는 첫 명령이 훅을 깔면서 프롬프트 마커가
+//     중간에 와 버리고, 그 뒤에 오는 두 번째 명령의 echo 를 화면에서 걷어낼 수 없다(줄바꿈 폭마다
+//     tty 가 CR 을 끼워 넣어 글자 대조가 어긋난다). `{ … }` 로 묶으면 마커가 맨 끝에 한 번만 오고,
+//     핸드셰이크의 "마커 이전은 전부 버린다" 규칙이 모든 echo 를 덮는다.
+//
+// bash·zsh·dash·sh 모두 이 여러 줄 블록을 한 명령으로 파싱한다(실측).
+//
+// shell 이 빈 문자열이면 "모른다" 는 뜻이고, 이름은 알지만 지원하지 않는 셸(ksh·cmd 등)이면 빈
+// 목록이다 — 그 둘을 구분해야 한다(모른다고 주입을 포기하면 서브셸 통합이 사라진다).
+func ShellIntegrationInitLines(shell string) []string {
+	if strings.TrimSpace(shell) == "" {
+		return []string{
+			" { " + shellIntegrationCommonScript + bashIntegrationGuarded() + "\r",
+			zshIntegrationGuarded() + "\r",
+			"}" + bashHistoryCleanupTail + "\r",
+		}
 	}
+	switch NormalizeShellIntegrationShell(shell) {
+	case "bash":
+		return []string{BashShellIntegrationInitCommand()}
+	case "zsh":
+		return []string{ZshShellIntegrationInitCommand()}
+	case "fish":
+		return []string{FishShellIntegrationInitCommand()}
+	case "pwsh", "powershell":
+		return []string{PowerShellIntegrationInitCommand()}
+	default:
+		return nil
+	}
+}
+
+func bashIntegrationGuarded() string {
+	return `if [ -n "${BASH_VERSION:-}" ]; then ` + bashIntegrationBody + `fi`
+}
+
+func zshIntegrationGuarded() string {
+	return `if [ -n "${ZSH_VERSION:-}" ]; then ` + zshIntegrationBody + `fi`
 }
 
 // injectedCommandEcho is the visible text the shell echoes back for the injected
@@ -491,7 +570,17 @@ func ShellIntegrationInitCommandForShell(shell string) (string, bool) {
 // 133;A marker — so the handshake's "drop everything before the marker" rule
 // can't hide that second copy. We strip this text from every forwarded path
 // instead, so the injection never reaches the screen regardless of timing.
-var injectedCommandEcho = visibleInjectedEcho(ShellIntegrationInitCommand())
+// 셸을 모른 채 무장한 경우의 기본값이다 — 그때 실제로 보내는 것이 이 둘이다.
+var injectedCommandEchoes = func() [][]byte {
+	lines := ShellIntegrationInitLines("")
+	echoes := make([][]byte, 0, len(lines))
+	for _, line := range lines {
+		if echo := visibleInjectedEcho(line); len(echo) > 0 {
+			echoes = append(echoes, echo)
+		}
+	}
+	return echoes
+}()
 
 // visibleInjectedEcho 는 주입 명령에서 화면에 보이는 부분만 남긴다(앞 공백·끝 CR 제거).
 func visibleInjectedEcho(command string) []byte {
@@ -505,19 +594,77 @@ func visibleInjectedEcho(command string) []byte {
 // 로컬 PowerShell 에는 pwsh 스크립트를 주입하는데 걷어내는 쪽은 bash 문자열을 찾아서, 마커
 // 뒤에 오는 프롬프트 재출력이 그대로 화면에 남았다 — 첫 줄에 프롬프트가 두 번 찍히고 첫 입력이
 // 엉뚱한 열에서 시작했다.
-func (f *HandshakeFilter) echoText() []byte {
-	if len(f.echo) > 0 {
-		return f.echo
+func (f *HandshakeFilter) echoTexts() [][]byte {
+	if len(f.echoes) > 0 {
+		return f.echoes
 	}
-	return injectedCommandEcho
+	return injectedCommandEchoes
 }
 
 func (f *HandshakeFilter) stripInjectedEcho(data []byte) []byte {
-	echo := f.echoText()
-	if len(data) == 0 || len(echo) == 0 {
+	if len(data) == 0 {
 		return data
 	}
-	return bytes.ReplaceAll(data, echo, nil)
+	for _, echo := range f.echoTexts() {
+		if len(echo) == 0 {
+			continue
+		}
+		for {
+			start, end, ok := findWrappedEcho(data, echo)
+			if !ok {
+				break
+			}
+			data = append(data[:start:start], data[end:]...)
+		}
+	}
+	return data
+}
+
+/**
+ * 화면 폭에서 접힌 echo 를 찾는다.
+ *
+ * tty 는 한 줄이 화면 폭을 넘으면 그 자리에 **공백과 CR 을 끼워 넣는다**(readline·zle 의 재출력도
+ * 같다). 그래서 우리가 보낸 글자와 화면에 찍힌 글자가 바이트로 같지 않다 — 예전에는 그대로
+ * 대조해서, 폭보다 긴 주입 명령의 재출력을 하나도 지우지 못했다(실기기에서 스크립트가 화면에
+ * 그대로 남은 원인이 이것이다).
+ *
+ * 그래서 대조할 때 CR 과 "CR 바로 앞의 공백" 은 건너뛴다. 개행(LF)은 건너뛰지 않는다 — 그것까지
+ * 건너뛰면 서로 다른 줄에 흩어진 글자가 우연히 이어져 엉뚱한 곳을 지운다.
+ *
+ * 반환은 [시작, 끝) 이다. 지울 때 끼워 넣어진 CR 까지 함께 지워야 화면에 잔재가 남지 않는다.
+ */
+func findWrappedEcho(data []byte, echo []byte) (int, int, bool) {
+	if len(echo) == 0 || len(data) < len(echo) {
+		return 0, 0, false
+	}
+	for start := 0; start+len(echo) <= len(data); start++ {
+		if data[start] != echo[0] {
+			continue
+		}
+		cursor := start
+		matched := 0
+		for matched < len(echo) && cursor < len(data) {
+			if data[cursor] == echo[matched] {
+				cursor++
+				matched++
+				continue
+			}
+			// 접힘 표시는 건너뛴다: CR, 그리고 CR 바로 앞의 공백.
+			if data[cursor] == '\r' {
+				cursor++
+				continue
+			}
+			if data[cursor] == ' ' && cursor+1 < len(data) && data[cursor+1] == '\r' {
+				cursor += 2
+				continue
+			}
+			break
+		}
+		if matched == len(echo) {
+			return start, cursor, true
+		}
+	}
+	return 0, 0, false
 }
 
 /**
@@ -533,38 +680,63 @@ func (f *HandshakeFilter) stripInjectedEcho(data []byte) []byte {
  * 출력은 `__ds_o(){ printf` 로 시작하지 않으니 붙드는 양은 0 이다.
  */
 func (f *HandshakeFilter) stripInjectedEchoStreaming(chunk []byte) []byte {
-	echo := f.echoText()
-	if len(echo) == 0 {
-		return chunk
-	}
-	// 지울 일이 끝났으면(한 번 지웠거나 예산을 다 썼으면) 붙들지 않고 그대로 흘려보낸다.
+	// 지울 일이 끝났으면(보낸 명령 수만큼 지웠거나 예산을 다 썼으면) 붙들지 않고 그대로
+	// 흘려보낸다.
 	//
 	// 세션이 끝날 때까지 계속 찾으면, 사용자가 우연히 같은 글자를 출력했을 때 그것도 지워진다.
 	// 재출력은 마커 직후에 오므로 짧은 예산으로 충분하다.
 	if f.echoScrubDone {
 		return chunk
 	}
+	echoes := f.echoTexts()
+	if len(echoes) == 0 {
+		return chunk
+	}
 	pending := append(f.pendingEcho, chunk...)
 	f.pendingEcho = nil
 	f.echoScrubBudget += len(chunk)
 
-	cleaned := bytes.ReplaceAll(pending, echo, nil)
-	if len(cleaned) != len(pending) {
-		// 한 번 지웠으면 끝이다 — 재출력은 한 번뿐이다.
+	// 명령을 여러 개 보냈으면(셸을 모를 때 bash·zsh 둘) 재출력도 그만큼 온다. 지운 것은
+	// 목록에서 빼서, 남은 것만 계속 찾는다.
+	cleaned := pending
+	remaining := f.echoesLeft(echoes)
+	kept := remaining[:0]
+	for _, echo := range remaining {
+		if len(echo) == 0 {
+			continue
+		}
+		if start, end, ok := findWrappedEcho(cleaned, echo); ok {
+			cleaned = append(cleaned[:start:start], cleaned[end:]...)
+			continue
+		}
+		kept = append(kept, echo)
+	}
+	f.echoesScrubbed = true
+	f.echoesPending = kept
+	if len(kept) == 0 || f.echoScrubBudget >= maxEchoScrubBytes {
 		f.echoScrubDone = true
 		return cleaned
 	}
-	if f.echoScrubBudget >= maxEchoScrubBytes {
-		f.echoScrubDone = true
-		return cleaned
+	// 뒤쪽이 아직 안 지운 echo 의 시작일 수 있으면 그만큼만 붙들어 둔다.
+	hold := 0
+	for _, echo := range kept {
+		if overlap := prefixOverlap(cleaned, echo); overlap > hold {
+			hold = overlap
+		}
 	}
-	// 뒤쪽이 echo 의 시작일 수 있으면 그만큼만 붙들어 둔다.
-	hold := prefixOverlap(cleaned, echo)
 	if hold == 0 {
 		return cleaned
 	}
 	f.pendingEcho = append([]byte(nil), cleaned[len(cleaned)-hold:]...)
 	return cleaned[:len(cleaned)-hold]
+}
+
+/** 아직 지우지 못한 echo 들. 첫 호출에서는 무장할 때 받은 목록 전체다. */
+func (f *HandshakeFilter) echoesLeft(echoes [][]byte) [][]byte {
+	if !f.echoesScrubbed {
+		return append([][]byte(nil), echoes...)
+	}
+	return f.echoesPending
 }
 
 /** 붙들어 둔 꼬리를 내보낸다(필터를 끝낼 때). */
@@ -606,8 +778,12 @@ func prefixOverlap(data []byte, prefix []byte) int {
 const maxEchoScrubBytes = 8 * 1024
 
 type HandshakeFilter struct {
-	// echo 는 이 세션에 실제로 주입한 명령의 보이는 텍스트다. 비어 있으면 bash/zsh 기본값을 쓴다.
-	echo []byte
+	// echoes 는 이 세션에 실제로 주입한 명령들의 보이는 텍스트다. 비어 있으면 bash·zsh 기본값을
+	// 쓴다(셸을 모른 채 무장한 경우 실제로 보내는 것이 그 둘이다).
+	echoes [][]byte
+	// 아직 지우지 못한 echo 들. echoesScrubbed 가 false 면 아직 한 번도 훑지 않은 상태다.
+	echoesPending  [][]byte
+	echoesScrubbed bool
 	// pendingEcho 는 아직 내보내지 않은 꼬리다 — echo 의 접두사가 될 수 있는 만큼만 붙든다.
 	pendingEcho []byte
 	// 재출력을 한 번 지웠거나 예산을 다 쓰면 true. 그 뒤로는 그대로 흘려보낸다.
@@ -640,7 +816,15 @@ func (f *HandshakeFilter) Filter(chunk []byte) (forward []byte, handshakeDone bo
 	// motd가 이후 append에 덮이지 않도록 남은 버퍼는 새 백킹으로 복사한다.
 	var motd []byte
 	if f.preserveMotd && !f.motdSeen {
-		if echoIdx := bytes.Index(f.buffer, f.echoText()); echoIdx >= 0 {
+		// 경계는 **첫 줄** 의 echo 다. 뒤 줄로 잡으면 그 앞에 있던 앞 줄들의 echo 까지 motd 로
+		// 흘려보내게 된다(여러 줄로 보내면서 실제로 그렇게 새어 나갔다).
+		echoIdx := -1
+		if echoes := f.echoTexts(); len(echoes) > 0 && len(echoes[0]) > 0 {
+			if at, _, ok := findWrappedEcho(f.buffer, echoes[0]); ok {
+				echoIdx = at
+			}
+		}
+		if echoIdx >= 0 {
 			lineStart := bytes.LastIndexByte(f.buffer[:echoIdx], '\n') + 1
 			motd = f.buffer[:lineStart]
 			f.buffer = append([]byte(nil), f.buffer[lineStart:]...)
@@ -710,11 +894,17 @@ func (h *Handshake) Arm(preserveMotd bool) {
 // 셸마다 주입 스크립트가 다른 경로(ShellIntegrationInitCommandForShell)에서는 이것을 써야 한다.
 // Arm 은 bash/zsh 스크립트를 가정하므로, pwsh·fish 세션에서는 마커 뒤에 오는 프롬프트 재출력이
 // 걸러지지 않고 화면에 남는다.
-func (h *Handshake) ArmForCommand(preserveMotd bool, command string) {
+func (h *Handshake) ArmForCommand(preserveMotd bool, commands ...string) {
+	echoes := make([][]byte, 0, len(commands))
+	for _, command := range commands {
+		if echo := visibleInjectedEcho(command); len(echo) > 0 {
+			echoes = append(echoes, echo)
+		}
+	}
 	h.mu.Lock()
 	h.filter = &HandshakeFilter{
 		preserveMotd: preserveMotd,
-		echo:         visibleInjectedEcho(command),
+		echoes:       echoes,
 	}
 	h.mu.Unlock()
 }

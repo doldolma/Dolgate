@@ -53,7 +53,7 @@ type coreRuntime interface {
 	RunCompletionQuery(sessionID, requestID, command string) error
 	RunCommand(sessionID, requestID, command string, timeoutMs int) error
 	InstallShellIntegration(sessionID string) error
-	ReinjectShellIntegration(sessionID string) error
+	ReinjectShellIntegration(sessionID string, shell string) error
 	ProbeHostKey(requestID string, payload protocol.HostKeyProbePayload) error
 	InspectCertificate(requestID string, payload protocol.CertificateInspectPayload) error
 	GeneratePrivateKey(requestID string, payload protocol.PrivateKeyGeneratePayload) error
@@ -482,8 +482,14 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 		// current foreground shell after the renderer detects a subshell entry
 		// (nested ssh, sudo su, docker exec). Waits for the subshell prompt to
 		// settle internally, so returning immediately is fine.
+		//
+		// 페이로드가 없을 수도 있다(예전 렌더러) — 그때는 셸을 모르는 것으로 본다.
+		var reinject protocol.ShellIntegrationReinjectPayload
+		if len(request.Payload) > 0 {
+			_ = json.Unmarshal(request.Payload, &reinject)
+		}
 		go func() {
-			_ = core.ReinjectShellIntegration(request.SessionID)
+			_ = core.ReinjectShellIntegration(request.SessionID, reinject.Shell)
 		}()
 		return nil
 	case protocol.CommandKeyboardInteractiveRespond:

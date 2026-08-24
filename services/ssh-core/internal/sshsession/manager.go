@@ -608,13 +608,13 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 // Because it targets the current foreground shell, nested ssh/su/docker are
 // covered without a new channel; a non-bash/zsh subshell emits no OSC 133;A
 // marker and the handshake flush restores its output.
-func (m *Manager) ReinjectShellIntegration(sessionID string) error {
+func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error {
 	session, err := m.getSession(sessionID)
 	if err != nil {
 		return err
 	}
 	session.reinjectGate.Arm(
-		func() { m.performShellIntegrationReinject(sessionID, session) },
+		func() { m.performShellIntegrationReinject(sessionID, session, shell) },
 		// No prompt settled within the window (unusual prompt, non-shell
 		// foreground, or still authenticating): leave the session untouched.
 		func() {},
@@ -622,19 +622,28 @@ func (m *Manager) ReinjectShellIntegration(sessionID string) error {
 	return nil
 }
 
-func (m *Manager) performShellIntegrationReinject(sessionID string, session *sessionHandle) {
+func (m *Manager) performShellIntegrationReinject(sessionID string, session *sessionHandle, shell string) {
 	if !m.HasSession(sessionID) {
 		return
 	}
 	// Arm the handshake immediately before writing so only the injected command's
 	// echo (and its prompt redraw) is hidden — the subshell's own login/motd and
 	// prompt were already shown to the user while the gate was waiting.
-	session.handshake.Arm(true)
-	if _, err := session.writeStdin([]byte(autocomplete.ShellIntegrationInitCommand())); err != nil {
-		if flushed := session.handshake.Flush(); len(flushed) > 0 {
-			m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
-		}
+	// 렌더러가 실행된 명령에서 셸을 알아냈으면 그 셸 것 한 줄로 끝난다. 모르면 bash·zsh 겸용이
+	// **한 명령의 여러 줄** 로 나간다 — 한 줄로 합치면 MAX_CANON(1024)을 넘어 줄 편집기가 없는
+	// 셸(dash·busybox)에서 잘린다. 지원하지 않는 셸이면 아무것도 보내지 않는다.
+	commands := autocomplete.ShellIntegrationInitLines(shell)
+	if len(commands) == 0 {
 		return
+	}
+	session.handshake.ArmForCommand(true, commands...)
+	for _, command := range commands {
+		if _, err := session.writeStdin([]byte(command)); err != nil {
+			if flushed := session.handshake.Flush(); len(flushed) > 0 {
+				m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+			}
+			return
+		}
 	}
 	// If the foreground shell is not bash/zsh the OSC 133;A marker never arrives,
 	// so release the buffered output after the handshake window instead of hiding
@@ -706,8 +715,9 @@ func (h *sessionHandle) markShellIntegrationUnsupported() {
 // installShellIntegration는 핸드셰이크를 preserveMotd 모드로 arm하고 통합 init 명령을 셸
 // stdin에 1회만 쓴다. write 성공 후에만 installed 상태가 되므로 실패 시 재시도 가능하다.
 func (m *Manager) installShellIntegration(sessionID string, session *sessionHandle, shell string) (bool, error) {
-	command, ok := autocomplete.ShellIntegrationInitCommandForShell(shell)
-	if !ok {
+	// 접속 때 원격 셸을 이미 물어봤다 — 그 셸 것 하나만 보낸다.
+	commands := autocomplete.ShellIntegrationInitLines(shell)
+	if len(commands) == 0 {
 		session.markShellIntegrationUnsupported()
 		return false, nil
 	}
@@ -721,15 +731,17 @@ func (m *Manager) installShellIntegration(sessionID string, session *sessionHand
 
 	// 걷어낼 echo 는 지금 주입하는 명령이다 — 셸에 따라 스크립트가 다르므로(fish·pwsh) bash 를
 	// 가정하면 마커 뒤의 프롬프트 재출력이 화면에 남는다.
-	session.handshake.ArmForCommand(true, command)
-	if _, err := session.writeStdin([]byte(command)); err != nil {
-		flushed := session.handshake.Flush()
-		session.shellIntegrationState = shellIntegrationUnknown
-		session.shellIntegrationMu.Unlock()
-		if len(flushed) > 0 {
-			m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+	session.handshake.ArmForCommand(true, commands...)
+	for _, command := range commands {
+		if _, err := session.writeStdin([]byte(command)); err != nil {
+			flushed := session.handshake.Flush()
+			session.shellIntegrationState = shellIntegrationUnknown
+			session.shellIntegrationMu.Unlock()
+			if len(flushed) > 0 {
+				m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+			}
+			return false, err
 		}
-		return false, err
 	}
 
 	session.shellIntegrationState = shellIntegrationInstalled

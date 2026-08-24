@@ -76,7 +76,7 @@ func (stub *stubSSHManager) InstallShellIntegration(string) error {
 	stub.installCount++
 	return stub.installErr
 }
-func (stub *stubSSHManager) ReinjectShellIntegration(string) error {
+func (stub *stubSSHManager) ReinjectShellIntegration(string, string) error {
 	stub.reinjectCount++
 	return nil
 }
@@ -202,8 +202,8 @@ func (stub *stubLocalManager) InstallShellIntegration(string) error {
 	stub.installShellCount++
 	return nil
 }
-func (stub *stubLocalManager) ReinjectShellIntegration(string) error { return nil }
-func (stub *stubLocalManager) FlushShellIntegration(string)          {}
+func (stub *stubLocalManager) ReinjectShellIntegration(string, string) error { return nil }
+func (stub *stubLocalManager) FlushShellIntegration(string)                  {}
 func (stub *stubLocalManager) RunCompletionCommand(string, string) (string, bool, error) {
 	return "", false, nil
 }

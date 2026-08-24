@@ -77,13 +77,16 @@ func TestStdinWritesAreSerializedAcrossInjectionAndUserInput(t *testing.T) {
 	m.mu.Unlock()
 	defer close(h.closed)
 
-	if err := m.ReinjectShellIntegration("s1"); err != nil {
+	if err := m.ReinjectShellIntegration("s1", ""); err != nil {
 		t.Fatalf("arm reinject failed: %v", err)
 	}
 
 	// Keep user keystrokes in flight so the gate's injection lands in the middle
 	// of them rather than in a quiet moment.
-	injected := autocomplete.ShellIntegrationInitCommand()
+	// 재주입은 셸을 모르므로 조각이 둘이다. 마지막 조각이 통째로 한 번에 나가는지를 본다 —
+	// 사용자 입력과 섞여 찢어지면 그 조각이 그대로 화면에 남는다.
+	injectedCommands := autocomplete.ShellIntegrationInitLines("")
+	injected := injectedCommands[len(injectedCommands)-1]
 	stop := make(chan struct{})
 	var typists sync.WaitGroup
 	for i := 0; i < 4; i++ {
@@ -121,8 +124,13 @@ func TestStdinWritesAreSerializedAcrossInjectionAndUserInput(t *testing.T) {
 	// A torn injection would show up as a payload that is a strict fragment of
 	// the init command rather than the whole thing.
 	for _, payload := range probe.snapshot() {
-		if payload != injected && strings.Contains(injected, payload) && len(payload) > len("ls -al\r") {
-			t.Fatalf("injected command reached stdin torn into fragments: %q", payload)
+		if payload == injected {
+			continue
+		}
+		for _, command := range injectedCommands {
+			if payload != command && strings.Contains(command, payload) && len(payload) > len("ls -al\r") {
+				t.Fatalf("injected command reached stdin torn into fragments: %q", payload)
+			}
 		}
 	}
 }

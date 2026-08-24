@@ -21,6 +21,9 @@ import (
 
 // EventEmitter / StreamEmitter 는 sshsession 과 동일한 시그니처다.
 // coretypes.Event 는 protocol.Event 와 동일 타입(alias)이라 runtime 의 emit 콜백을 그대로 받는다.
+// 마커가 끝내 오지 않는 셸에서 붙잡고 있던 pane 출력을 놓아주기까지의 시간.
+const shellIntegrationFlushDelay = 1500 * time.Millisecond
+
 type EventEmitter func(coretypes.Event)
 type StreamEmitter func(coretypes.StreamFrame, []byte)
 
@@ -76,8 +79,11 @@ type controlHandle struct {
 	// InstallShellIntegration 을 다시 호출하므로, 이미 주입한 pane 은 건너뛰어 init
 	// 스크립트가 재주입되며 프롬프트가 중복 출력되는 것을 막는다. (reconnect 는 새
 	// controlHandle 이라 이 맵도 비어 있어 자동으로 재설치된다.)
-	integrated   map[string]bool
-	handshakesMu sync.Mutex
+	integrated map[string]bool
+	// pane(%N)별 서브셸 재주입 게이트. 사용자가 pane 안에서 서브셸(sudo su·docker exec …)로
+	// 들어가면 그 셸에는 훅이 없다 — 새 프롬프트가 안착하면 다시 심는다. nil/미armed 면 no-op.
+	reinjectGates map[string]*autocomplete.PromptSettleGate
+	handshakesMu  sync.Mutex
 
 	completionWorkerMu sync.Mutex
 	completionWorker   *sshcmd.CompletionWorker
@@ -100,7 +106,7 @@ func (h *controlHandle) markIntegrated(paneID string) bool {
 
 // armPaneHandshake 는 pane 의 핸드셰이크를 만들고 arm 한다(이후 출력은 OSC 133;A 마커
 // 전까지 숨겨진다). init 주입 직전에 호출한다.
-func (h *controlHandle) armPaneHandshake(paneID string) {
+func (h *controlHandle) armPaneHandshake(paneID string, commands []string) {
 	h.handshakesMu.Lock()
 	if h.handshakes == nil {
 		h.handshakes = make(map[string]*autocomplete.Handshake)
@@ -111,7 +117,8 @@ func (h *controlHandle) armPaneHandshake(paneID string) {
 		h.handshakes[paneID] = hs
 	}
 	h.handshakesMu.Unlock()
-	hs.Arm(false)
+	// 걷어낼 echo 는 지금 보내는 조각들이다(셸을 모르면 bash 용·zsh 용 둘).
+	hs.ArmForCommand(false, commands...)
 }
 
 // filterPaneOutput 는 pane 출력에 핸드셰이크 필터를 적용한다(없으면 그대로 통과).
@@ -123,6 +130,32 @@ func (h *controlHandle) filterPaneOutput(paneID string, data []byte) []byte {
 		return data
 	}
 	return hs.Filter(data)
+}
+
+// paneReinjectGate 는 pane 의 재주입 게이트를 돌려준다(없으면 만든다).
+func (h *controlHandle) paneReinjectGate(paneID string) *autocomplete.PromptSettleGate {
+	h.handshakesMu.Lock()
+	defer h.handshakesMu.Unlock()
+	if h.reinjectGates == nil {
+		h.reinjectGates = make(map[string]*autocomplete.PromptSettleGate)
+	}
+	gate := h.reinjectGates[paneID]
+	if gate == nil {
+		gate = autocomplete.NewPromptSettleGate(0, 0)
+		h.reinjectGates[paneID] = gate
+	}
+	return gate
+}
+
+// observePaneOutput 는 재주입 대기 중인 pane 에 원본 출력을 흘려 프롬프트 안착을 보게 한다.
+// 대기 중이 아니면 no-op 이다(필터 **전** 에 봐야 원본 프롬프트를 본다).
+func (h *controlHandle) observePaneOutput(paneID string, data []byte) {
+	h.handshakesMu.Lock()
+	gate := h.reinjectGates[paneID]
+	h.handshakesMu.Unlock()
+	if gate != nil {
+		gate.Observe(data)
+	}
 }
 
 // paneHandshake 는 pane 의 핸드셰이크를 반환한다(없으면 nil).
@@ -383,6 +416,8 @@ func (m *Manager) handleControlEvent(handle *controlHandle, ev ControlEvent) {
 			handle.collected = append(handle.collected, ev.Args[0])
 		}
 	case ControlOutput:
+		// 서브셸 재주입을 기다리는 pane 이면 원본 출력으로 프롬프트 안착을 본다(필터 전에).
+		handle.observePaneOutput(ev.PaneID, ev.Data)
 		// 셸 통합 주입 중이면 그 pane 의 에코를 마커 전까지 숨긴다(없으면 그대로 통과).
 		data := handle.filterPaneOutput(ev.PaneID, ev.Data)
 		if len(data) > 0 {
@@ -889,6 +924,71 @@ func (m *Manager) CollectAutocomplete(sessionID string, revision int) (autocompl
 	return autocomplete.ParseSnapshot(stdout, revision), nil
 }
 
+// ReinjectShellIntegration 는 pane 안에서 서브셸(sudo su·docker exec·중첩 ssh)로 들어간 뒤
+// 통합을 다시 심는다. pane 은 생성 시 1회만 주입했으므로 그 서브셸에는 훅이 없었다 — 명령 상태와
+// cwd 가 그대로 굳는다.
+//
+// 바로 쓰지 않는다. 아직 연결·인증 중인 셸에 쓰면 입력이 망가지므로, 새 프롬프트가 안착할 때까지
+// 기다렸다가(pane 별 게이트) 그때 echo 억제를 무장하고 send-keys 로 보낸다. 프롬프트가 끝내 오지
+// 않으면(비대화형 프로그램 등) 아무것도 하지 않는다 — 손대지 않는 편이 안전하다.
+//
+// shell 은 렌더러가 실행된 명령에서 알아낸 셸 이름이다(모르면 빈 문자열).
+func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error {
+	handle, paneID, err := m.controlOf(sessionID)
+	if err != nil {
+		return err
+	}
+	if paneID == "" {
+		return nil // pane 세션이 아니면 할 일 없음
+	}
+	commands := autocomplete.ShellIntegrationInitLines(shell)
+	if len(commands) == 0 {
+		// 훅을 걸 수 없는 셸이다(dash·ksh 등). 타이핑해 봐야 화면만 더럽힌다.
+		return nil
+	}
+	handle.paneReinjectGate(paneID).Arm(
+		func() { m.writePaneShellIntegration(sessionID, handle, paneID, commands) },
+		func() {},
+	)
+	return nil
+}
+
+// writePaneShellIntegration 는 echo 억제를 무장하고 pane 에 주입 줄들을 보낸다.
+func (m *Manager) writePaneShellIntegration(
+	sessionID string,
+	handle *controlHandle,
+	paneID string,
+	commands []string,
+) {
+	handle.armPaneHandshake(paneID, commands)
+	for _, command := range commands {
+		for _, cmd := range encodeInput(paneID, []byte(command), handle.version) {
+			if err := handle.writeStdin(cmd); err != nil {
+				m.flushPaneShellIntegration(sessionID, handle, paneID)
+				return
+			}
+		}
+	}
+	// 마커가 끝내 안 오면(느린/비호환 셸) 붙잡고 있던 출력을 놓아준다.
+	go func() {
+		time.Sleep(shellIntegrationFlushDelay)
+		m.flushPaneShellIntegration(sessionID, handle, paneID)
+	}()
+}
+
+func (m *Manager) flushPaneShellIntegration(sessionID string, handle *controlHandle, paneID string) {
+	hs := handle.paneHandshake(paneID)
+	if hs == nil {
+		return
+	}
+	if flushed := hs.Flush(); len(flushed) > 0 {
+		m.emitStream(coretypes.StreamFrame{
+			Type:      coretypes.StreamTypeData,
+			SessionID: sessionID,
+		}, flushed)
+	}
+}
+
 // InstallShellIntegration 는 pane 의 셸에 OSC 133/7 통합 스크립트를 send-keys 로 주입해
 // pane 안에서도 자동완성/프롬프트 인식이 동작하게 한다(control mode pane 은 가상 세션이라
 // 기존엔 no-op 이었다). 주입 명령의 에코는 pane 별 핸드셰이크로 마커 전까지 숨긴다.
@@ -905,18 +1005,22 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 	if !handle.markIntegrated(paneID) {
 		return nil
 	}
-	handle.armPaneHandshake(paneID)
-	initBytes := []byte(autocomplete.ShellIntegrationInitCommand())
+	// pane 의 셸은 알 수 없다(원격 호스트의 기본 셸을 tmux 가 띄운다) — bash 용·zsh 용을
+	// 연달아 보낸다. 각각 자기 버전 변수로 가드돼 있고 둘 다 MAX_CANON 아래다.
+	commands := autocomplete.ShellIntegrationInitLines("")
+	handle.armPaneHandshake(paneID, commands)
 	// 셸 통합 주입도 입력과 같은 버전별 인코더를 경유한다 — 2.6 에서도 -l+키이름 분해로
 	// OSC133 셸 통합/자동완성이 살아 있게(send-keys -H 미지원 버전에서 init 스크립트 주입).
-	for _, cmd := range encodeInput(paneID, initBytes, handle.version) {
-		if err := handle.writeStdin(cmd); err != nil {
-			return err
+	for _, command := range commands {
+		for _, cmd := range encodeInput(paneID, []byte(command), handle.version) {
+			if err := handle.writeStdin(cmd); err != nil {
+				return err
+			}
 		}
 	}
 	// 마커가 끝내 안 오면(느린/비호환 셸) 일정 시간 뒤 버퍼를 풀어 실제 출력 손실을 막는다.
 	go func() {
-		time.Sleep(1500 * time.Millisecond)
+		time.Sleep(shellIntegrationFlushDelay)
 		if hs := handle.paneHandshake(paneID); hs != nil {
 			if flushed := hs.Flush(); len(flushed) > 0 {
 				m.emitStream(coretypes.StreamFrame{
