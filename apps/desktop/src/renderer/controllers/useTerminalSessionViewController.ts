@@ -1565,6 +1565,8 @@ export function useTerminalSessionViewController({
     });
   }, [searchOpen]);
 
+  // 탭이 보이게 되거나 활성화되면 다시 재고 한 번 그린다. 숨어 있던 동안에는 xterm 이 크기를
+  // 알 수 없었으므로 이때는 즉시 해야 한다.
   useEffect(() => {
     if (!visible) {
       return;
@@ -1581,7 +1583,22 @@ export function useTerminalSessionViewController({
         requestShareSnapshot('refresh');
       }
     });
-  }, [layoutKey, refreshViewport, requestShareSnapshot, tab?.sessionShare?.status, viewActivationKey, visible]);
+  }, [refreshViewport, requestShareSnapshot, tab?.sessionShare?.status, viewActivationKey, visible]);
+
+  // pane 이 놓인 자리(layoutKey)가 바뀌면 **리사이즈 요청만** 한다.
+  //
+  // layoutKey 는 pane 사각형을 그대로 적은 문자열이라 분할선을 끄는 동안 mousemove 마다
+  // 달라진다. 여기서 refreshViewport() 를 부르던 때는 그 드래그 동안 초당 60번 뷰포트 전체가
+  // 다시 그려졌다 — 격자가 그대로여서 크기는 안 바뀌는데도 화면이 깜빡인 것이 이것이었다.
+  //
+  // 자리만 옮기는 것은 CSS 가 하는 일이라 xterm 이 다시 그릴 이유가 없다. 격자가 실제로 바뀌면
+  // 스케줄러가 정착 뒤 한 번 맞추고, 그 경로의 afterResize 가 그때 뷰포트를 다시 그린다.
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+    resizeSchedulerRef.current?.request();
+  }, [layoutKey, visible]);
 
   useEffect(() => {
     const previousStatus = previousSessionStatusRef.current;

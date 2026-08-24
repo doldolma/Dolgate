@@ -1,118 +1,163 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createTerminalResizeScheduler } from './terminal-resize';
+import { createTerminalResizeScheduler, type TerminalSize } from './terminal-resize';
 
-describe('createTerminalResizeScheduler', () => {
-  it('같은 프레임의 연속 요청을 한 번으로 묶고 동일 크기는 다시 보내지 않는다', () => {
-    const fit = vi.fn();
-    const sendResize = vi.fn();
-    const frames = new Map<number, FrameRequestCallback>();
-    let nextFrameId = 1;
-    let size = { cols: 120, rows: 32 };
+/**
+ * 프레임·타이머를 손으로 돌리는 대역.
+ *
+ * scheduleFlush 는 프레임을 **두 번** 잡는다("다음 프레임에도 요청이 오는가" 로 연속 변화를
+ * 알아보기 때문에). 그래서 한 번의 맞추기 시도는 runFrames(2) 로 끝난다.
+ */
+function createHarness(initialSize: TerminalSize) {
+  const queue: Array<{ id: number; callback: FrameRequestCallback }> = [];
+  const cancelled: number[] = [];
+  const timers: { settle?: () => void } = {};
+  let nextFrameId = 1;
+  let size = initialSize;
+  const fit = vi.fn();
+  const sendResize = vi.fn();
 
-    // 정착 타이머는 직접 발화시킨다 — "연속 변화" 와 "멈춤" 의 경계를 테스트가 정한다.
-    const timers: { settle?: () => void } = {};
-
-    const scheduler = createTerminalResizeScheduler({
-      fit,
-      readSize: () => size,
-      sendResize,
-      requestFrame: (callback) => {
-        const frameId = nextFrameId++;
-        frames.set(frameId, (timestamp) => {
-          frames.delete(frameId);
-          callback(timestamp);
-        });
-        return frameId;
-      },
-      cancelFrame: (frameId) => {
-        frames.delete(frameId);
-      },
-      setTimer: (callback) => {
-        timers.settle = callback;
-        return 1;
-      },
-      clearTimer: () => {
-        delete timers.settle;
+  const scheduler = createTerminalResizeScheduler({
+    fit,
+    readSize: () => size,
+    sendResize,
+    requestFrame: (callback) => {
+      const id = nextFrameId++;
+      queue.push({ id, callback });
+      return id;
+    },
+    cancelFrame: (id) => {
+      cancelled.push(id);
+      const index = queue.findIndex((entry) => entry.id === id);
+      if (index >= 0) {
+        queue.splice(index, 1);
       }
-    });
-
-    scheduler.request();
-    scheduler.request();
-
-    expect(frames.size).toBe(1);
-    frames.get(1)?.(16);
-
-    expect(fit).toHaveBeenCalledTimes(1);
-    expect(sendResize).toHaveBeenCalledTimes(1);
-    expect(sendResize).toHaveBeenLastCalledWith({ cols: 120, rows: 32 });
-
-    // 연속 변화 중(정착 전)의 중간 요청은 버린다 — 프레임도 잡지 않는다.
-    scheduler.request();
-    expect(frames.size).toBe(0);
-
-    // 멈추면 한 번 더 맞춘다. 크기가 그대로면 보내지 않는다.
-    timers.settle?.();
-    frames.get(2)?.(32);
-    expect(sendResize).toHaveBeenCalledTimes(1);
-
-    size = { cols: 132, rows: 40 };
-    scheduler.request();
-    frames.get(3)?.(48);
-
-    expect(sendResize).toHaveBeenCalledTimes(2);
-    expect(sendResize).toHaveBeenLastCalledWith({ cols: 132, rows: 40 });
+    },
+    setTimer: (callback) => {
+      timers.settle = callback;
+      return 1;
+    },
+    clearTimer: () => {
+      delete timers.settle;
+    }
   });
 
-  it('0x0 크기는 무시하고 reset 시 대기 중인 프레임을 취소한다', () => {
-    const fit = vi.fn();
-    const sendResize = vi.fn();
-    const frames = new Map<number, FrameRequestCallback>();
-    const cancelFrame = vi.fn((frameId: number) => {
-      frames.delete(frameId);
-    });
-    let nextFrameId = 1;
-    let size = { cols: 0, rows: 0 };
+  return {
+    fit,
+    sendResize,
+    cancelled,
+    scheduler,
+    pendingFrames: () => queue.length,
+    setSize: (next: TerminalSize) => {
+      size = next;
+    },
+    runFrames: (count = 1) => {
+      for (let index = 0; index < count; index += 1) {
+        const entry = queue.shift();
+        entry?.callback(index * 16);
+      }
+    },
+    settle: () => {
+      const callback = timers.settle;
+      delete timers.settle;
+      callback?.();
+    }
+  };
+}
 
-    const scheduler = createTerminalResizeScheduler({
-      fit,
-      readSize: () => size,
-      sendResize,
-      requestFrame: (callback) => {
-        const frameId = nextFrameId++;
-        frames.set(frameId, (timestamp) => {
-          frames.delete(frameId);
-          callback(timestamp);
-        });
-        return frameId;
-      },
-      cancelFrame
-    });
+describe('createTerminalResizeScheduler', () => {
+  it('한 번짜리 변화는 바로 맞추고, 같은 프레임의 중복 발화는 한 번으로 묶는다', () => {
+    const harness = createHarness({ cols: 120, rows: 32 });
 
-    scheduler.request();
-    frames.get(1)?.(16);
+    // ResizeObserver 는 한 번의 레이아웃 변경에도 여러 번 발화한다 — 같은 프레임 안이다.
+    harness.scheduler.request();
+    harness.scheduler.request();
+    expect(harness.pendingFrames()).toBe(1);
 
-    expect(sendResize).not.toHaveBeenCalled();
+    harness.runFrames(2);
 
-    // 첫 프레임이 이미 소비됐고 버스트가 살아 있으므로, 다음 요청은 프레임을 잡지 않는다.
-    scheduler.request();
-    expect(frames.size).toBe(0);
+    expect(harness.fit).toHaveBeenCalledTimes(1);
+    expect(harness.sendResize).toHaveBeenCalledTimes(1);
+    expect(harness.sendResize).toHaveBeenLastCalledWith({ cols: 120, rows: 32 });
 
-    // 새 버스트에서 잡힌 프레임은 reset 이 취소한다.
-    scheduler.reset();
-    scheduler.request();
-    expect(frames.size).toBe(1);
-    scheduler.reset();
-    expect(cancelFrame).toHaveBeenCalledWith(2);
-    expect(frames.size).toBe(0);
+    // 크기가 그대로면 다시 보내지 않는다.
+    harness.settle();
+    harness.runFrames(2);
+    expect(harness.sendResize).toHaveBeenCalledTimes(1);
+  });
+
+  it('드래그 중에는 한 번도 맞추지 않고 손을 뗀 뒤 한 번만 맞춘다', () => {
+    // 캔버스는 크기를 바꾸는 순간 지워지므로 재지정 횟수가 곧 깜빡임 횟수다. 드래그 중의
+    // 맞추기는 어차피 낡은 값이라 깜빡임만 남기고 값을 못 낸다.
+    const harness = createHarness({ cols: 120, rows: 32 });
+
+    for (let step = 0; step < 20; step += 1) {
+      harness.setSize({ cols: 120 - step, rows: 32 });
+      harness.scheduler.request();
+      harness.runFrames(1);
+    }
+
+    expect(harness.fit).not.toHaveBeenCalled();
+    expect(harness.sendResize).not.toHaveBeenCalled();
+
+    harness.settle();
+    harness.runFrames(2);
+
+    expect(harness.fit).toHaveBeenCalledTimes(1);
+    expect(harness.sendResize).toHaveBeenCalledTimes(1);
+    expect(harness.sendResize).toHaveBeenLastCalledWith({ cols: 101, rows: 32 });
+  });
+
+  it('드래그 중 손이 멈칫해도 맞추기는 한 번씩만 늘어난다', () => {
+    // 예전에는 멈칫할 때마다 "정착 fit + 다시 움직여 앞머리 fit" 이 쌍으로 붙어 두 번씩
+    // 깜빡였다.
+    const harness = createHarness({ cols: 120, rows: 32 });
+
+    harness.setSize({ cols: 118, rows: 32 });
+    harness.scheduler.request();
+    harness.runFrames(1);
+    harness.scheduler.request();
+    harness.runFrames(1);
+
+    // 멈칫 — 정착이 한 번 맞춘다.
+    harness.settle();
+    harness.runFrames(2);
+    expect(harness.fit).toHaveBeenCalledTimes(1);
+
+    // 다시 움직인다: 앞머리에서 또 맞추지 않는다.
+    for (let step = 0; step < 5; step += 1) {
+      harness.setSize({ cols: 112 - step, rows: 32 });
+      harness.scheduler.request();
+      harness.runFrames(1);
+    }
+    expect(harness.fit).toHaveBeenCalledTimes(1);
+
+    harness.settle();
+    harness.runFrames(2);
+    expect(harness.fit).toHaveBeenCalledTimes(2);
+    expect(harness.sendResize).toHaveBeenLastCalledWith({ cols: 108, rows: 32 });
+  });
+
+  it('0x0 크기는 보내지 않고, reset 은 대기 중인 프레임을 취소한다', () => {
+    const harness = createHarness({ cols: 0, rows: 0 });
+
+    harness.scheduler.request();
+    harness.runFrames(2);
+    expect(harness.sendResize).not.toHaveBeenCalled();
+
+    harness.scheduler.reset();
+    harness.scheduler.request();
+    expect(harness.pendingFrames()).toBe(1);
+    harness.scheduler.reset();
+    expect(harness.cancelled.length).toBeGreaterThan(0);
+    expect(harness.pendingFrames()).toBe(0);
   });
 
   it('전환 중에는 재지 않고, 끝난 뒤 한 번만 맞춘다', () => {
-    // 세션 패널 폭이 프레임마다 바뀌는 0.16초 동안 fit 이 열 번 돌면 PTY·tmux 로 리사이즈가
+    // 세션 패널 폭이 프레임마다 바뀌는 0.15초 동안 fit 이 열 번 돌면 PTY·tmux 로 리사이즈가
     // 쏟아진다. 그래서 보류 중에는 요청을 흘리고, 끝난 뒤 부르는 쪽이 한 번 더 요청한다.
+    const queue: FrameRequestCallback[] = [];
     const fit = vi.fn();
     const sendResize = vi.fn();
-    const frames = new Map<number, FrameRequestCallback>();
-    let nextFrameId = 1;
     let held = true;
 
     const scheduler = createTerminalResizeScheduler({
@@ -121,79 +166,26 @@ describe('createTerminalResizeScheduler', () => {
       readSize: () => ({ cols: 100, rows: 30 }),
       sendResize,
       requestFrame: (callback) => {
-        const frameId = nextFrameId++;
-        frames.set(frameId, (timestamp) => {
-          frames.delete(frameId);
-          callback(timestamp);
-        });
-        return frameId;
-      },
-      cancelFrame: (frameId) => {
-        frames.delete(frameId);
-      }
-    });
-
-    // 전환 중: 몇 번을 눌러도 프레임이 잡히지 않는다.
-    scheduler.request();
-    scheduler.request();
-    scheduler.request();
-    expect(frames.size).toBe(0);
-    expect(fit).not.toHaveBeenCalled();
-
-    // 전환이 끝나면 한 번.
-    held = false;
-    scheduler.request();
-    for (const frame of [...frames.values()]) {
-      frame(0);
-    }
-    expect(fit).toHaveBeenCalledTimes(1);
-    expect(sendResize).toHaveBeenCalledTimes(1);
-    expect(sendResize).toHaveBeenCalledWith({ cols: 100, rows: 30 });
-  });
-
-  it('연속 변화에서는 처음과 멈춘 뒤 두 번만 맞춘다', () => {
-    // 실측: 창 드래그 한 번(21단계)에 캔버스가 31번 재지정되고 페인트의 절반이 빈 화면이었다.
-    // 캔버스는 크기를 바꾸는 순간 지워지므로, 재지정 횟수가 곧 깜빡임 횟수다.
-    const fit = vi.fn();
-    const sendResize = vi.fn();
-    const frames: FrameRequestCallback[] = [];
-    const timers: { settle?: () => void } = {};
-    let width = 120;
-
-    const scheduler = createTerminalResizeScheduler({
-      fit,
-      readSize: () => ({ cols: width, rows: 32 }),
-      sendResize,
-      requestFrame: (callback) => {
-        frames.push(callback);
-        return frames.length;
+        queue.push(callback);
+        return queue.length;
       },
       cancelFrame: () => undefined,
-      setTimer: (callback) => {
-        timers.settle = callback;
-        return 1;
-      },
-      clearTimer: () => {
-        delete timers.settle;
-      }
+      setTimer: () => 1,
+      clearTimer: () => undefined
     });
 
-    // 드래그 20프레임: 매 프레임 요청 + 그 사이 크기 변화.
-    for (let step = 0; step < 20; step += 1) {
-      width = 120 - step;
-      scheduler.request();
-      const frame = frames.shift();
-      frame?.(step * 16);
-    }
-    // 선두 한 번만 반영됐다.
-    expect(fit).toHaveBeenCalledTimes(1);
-    expect(sendResize).toHaveBeenCalledTimes(1);
+    scheduler.request();
+    scheduler.request();
+    scheduler.request();
+    expect(queue.length).toBe(0);
+    expect(fit).not.toHaveBeenCalled();
 
-    // 손을 떼면 최종 크기로 한 번.
-    timers.settle?.();
-    frames.shift()?.(400);
-    expect(fit).toHaveBeenCalledTimes(2);
-    expect(sendResize).toHaveBeenCalledTimes(2);
-    expect(sendResize).toHaveBeenLastCalledWith({ cols: 101, rows: 32 });
+    held = false;
+    scheduler.request();
+    queue.shift()?.(0);
+    queue.shift()?.(16);
+
+    expect(fit).toHaveBeenCalledTimes(1);
+    expect(sendResize).toHaveBeenCalledWith({ cols: 100, rows: 30 });
   });
 });

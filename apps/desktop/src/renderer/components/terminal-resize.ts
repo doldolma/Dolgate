@@ -21,7 +21,12 @@ export const BOOTSTRAP_TERMINAL_SIZE: TerminalSize = { cols: 120, rows: 32 };
  * 창을 끌면 프레임마다 컨테이너가 바뀌는데, 그때마다 fit 하면 xterm 이 캔버스 백킹스토어를 다시
  * 잡는다 — 캔버스는 크기를 바꾸는 순간 지워지므로 다시 그려지기 전 한 프레임이 빈 화면이다.
  * 실측(1440→1100, 21단계): 캔버스 재지정 31회, 페인트 프레임 22개 중 11개가 거의 빈 화면.
- * 그래서 **처음 한 번 + 멈춘 뒤 한 번**만 맞추고 중간값은 버린다.
+ * 그래서 **연속 변화 중에는 아예 맞추지 않고 멈춘 뒤 한 번**만 맞춘다.
+ *
+ * 처음 한 번도 맞추던 때가 있었는데 두 가지로 손해였다. 드래그의 첫 fit 은 한 프레임 뒤의 낡은
+ * 크기로 캔버스만 비우고, 드래그 중 손이 멈칫할 때마다 "정착 fit + 다시 움직여 앞머리 fit" 이
+ * 쌍으로 붙어 깜빡임이 반복됐다. 한 번짜리 변화(탭 전환·pane 마운트)는 다음 프레임에 요청이
+ * 이어지지 않는 것으로 알아보고 그때는 바로 맞춘다(scheduleFlush 주석).
  *
  * RDP·VNC 는 같은 이유로 이미 정착 방식이다(useRdpAutoResize: 400ms). 거기는 해상도 재협상이
  * 비싸서 넉넉히 기다리지만, 터미널은 격자 계산이라 그만큼 기다리면 답답하다.
@@ -67,10 +72,10 @@ export function createTerminalResizeScheduler(options: TerminalResizeSchedulerOp
   // 지금 연속 변화(창 드래그·분할 드래그) 안에 있는가. 그 안에서는 중간값을 버린다.
   let bursting = false;
   let settleTimer: number | null = null;
+  // 요청 카운터. "다음 프레임에도 요청이 오는가" 로 연속 변화를 알아본다(아래 scheduleFlush).
+  let requestSeq = 0;
 
   const flush = () => {
-    pendingFrame = null;
-
     // 실제 측정은 브라우저가 레이아웃을 한 번 정리한 뒤에 수행해야 cols/rows가 안정적이다.
     options.fit();
     const nextSize = options.readSize();
@@ -90,8 +95,21 @@ export function createTerminalResizeScheduler(options: TerminalResizeSchedulerOp
     if (pendingFrame !== null) {
       return;
     }
+    // **한 프레임 더 보고 판단한다.** 한 번의 레이아웃 변경은 같은 프레임 안에서 여러 번
+    // 발화하고 끝나지만, 드래그는 다음 프레임에도 계속 온다. 다음 프레임에도 요청이 있으면
+    // 연속 변화이므로 이 맞추기는 버리고 정착 때 한 번만 맞춘다 — 드래그 중의 fit 은 어차피
+    // 낡은 크기라 캔버스만 비우고(=빈 프레임 하나) 값을 내지 못한다.
     pendingFrame = requestFrame(() => {
-      flush();
+      // 카운터는 **첫 프레임이 끝날 때** 적는다. 한 번의 레이아웃 변경이 같은 프레임 안에서
+      // 여러 번 발화하는 것은 여기까지 다 포함되므로 연속 변화로 오해하지 않는다.
+      const seqAfterFirstFrame = requestSeq;
+      pendingFrame = requestFrame(() => {
+        pendingFrame = null;
+        if (requestSeq !== seqAfterFirstFrame) {
+          return;
+        }
+        flush();
+      });
     });
   };
 
@@ -114,6 +132,7 @@ export function createTerminalResizeScheduler(options: TerminalResizeSchedulerOp
       if (options.isHeld?.()) {
         return;
       }
+      requestSeq += 1;
       armSettle();
       // 연속 변화 중이면 중간값은 버린다. 처음 한 번은 바로 맞춰야 한 번짜리 변화(탭 전환·
       // pane 마운트)가 정착 시간만큼 늦어지지 않는다.
@@ -133,6 +152,7 @@ export function createTerminalResizeScheduler(options: TerminalResizeSchedulerOp
         settleTimer = null;
       }
       bursting = false;
+      requestSeq = 0;
       lastSentSize = null;
     }
   };

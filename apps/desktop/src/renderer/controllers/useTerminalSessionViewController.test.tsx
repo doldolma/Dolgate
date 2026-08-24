@@ -258,6 +258,37 @@ describe('useTerminalSessionViewController', () => {
     vi.useRealTimers();
   });
 
+  // 분할선을 끄는 동안 layoutKey(pane 사각형)는 mousemove 마다 바뀐다. 그때 뷰포트를 다시
+  // 그리면 격자가 그대로여도 화면이 초당 60번 재도색돼 깜빡인다 — 자리 이동은 CSS 가 하는
+  // 일이므로 xterm 이 다시 그릴 이유가 없다. 격자가 실제로 바뀌면 스케줄러가 정착 뒤 한 번
+  // 맞추고, 그 경로의 afterResize 가 그때 다시 그린다.
+  it('pane 자리만 바뀌면 리사이즈만 요청하고 뷰포트를 다시 그리지 않는다', async () => {
+    const props = createProps();
+    const { rerenderWithProps } = renderController(props);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+
+    const record = mocks.schedulerRecords[0];
+    const runtime = mocks.runtimeRecords[0];
+    expect(record).toBeTruthy();
+    expect(runtime).toBeTruthy();
+
+    // 드래그 중에는 격자가 그대로다 — 스케줄러가 아무 것도 적용하지 않는 상태를 만든다.
+    record.scheduler.request.mockImplementation(() => {});
+    runtime.terminal.refresh.mockClear();
+
+    for (const width of ['0.9', '0.8', '0.7']) {
+      rerenderWithProps({ ...props, layoutKey: `0:0:${width}:1` });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+    }
+
+    expect(record.scheduler.request).toHaveBeenCalled();
+    expect(runtime.terminal.refresh).not.toHaveBeenCalled();
+  });
+
   it('resets prompt, search, and share state when the session changes', async () => {
     const { getController, rerenderWithProps } = renderController(
       createProps({
