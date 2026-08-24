@@ -24,6 +24,7 @@ import { ContainersShell } from './ContainersShell';
 import { HomeShell } from './HomeShell';
 import { SessionShell } from './SessionShell';
 import { SftpShell } from './SftpShell';
+import { SessionShareChromeButton } from '../components/terminal-workspace/SessionShareChromeButton';
 import {
   type DraggedSessionPayload,
   workspaceContainsSession,
@@ -193,6 +194,9 @@ export function AppShell({
           activeWorkspaceTab={homeViewModel.activeWorkspaceTab}
           sessionPanelOpen={sessionPanelOpen}
           onToggleSessionPanel={toggleSessionPanel}
+          renderSessionShareAction={(sessionId) => (
+            <SessionShareChromeButton sessionId={sessionId} />
+          )}
           draggedSession={draggedSession}
           updateState={updateState}
           windowState={windowState}

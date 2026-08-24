@@ -8,6 +8,20 @@
 //    GPU/WebGL 컨텍스트 손실로 인한 빈 화면을 복구한다.
 // B1b 덕분에 터미널이 재연결 동안 보존되므로 안내선이 스크롤백에 남는다.
 
+/** 공유 시작 payload 중 터미널이 아는 부분. sessionId·title·transport 는 부르는 쪽이 채운다. */
+export interface TerminalShareSnapshot {
+  snapshot: string;
+  cols: number;
+  rows: number;
+  terminalAppearance: {
+    fontFamily: string;
+    fontSize: number;
+    lineHeight: number;
+    letterSpacing: number;
+  };
+  viewportPx: { width: number; height: number } | null;
+}
+
 export interface TerminalHooks {
   write: (text: string) => void;
   /** 화면을 강제 재렌더한다(WebGL 컨텍스트 손실/GPU 절전 복귀 후 빈 화면 복구용). */
@@ -26,6 +40,13 @@ export interface TerminalHooks {
   captureTextSnapshot: () => string[];
   /** 셸로 입력을 보낸다(세션 패널의 "넣기/실행"). 연결이 없으면 아무 일도 하지 않는다. */
   sendInput: (data: string) => void;
+  /**
+   * 화면 공유를 시작할 때 상대에게 먼저 보내는 첫 화면(스냅샷 + 격자 + 글꼴 + 뷰포트 픽셀).
+   *
+   * 세션 패널이 pane 밖에 있어 터미널 런타임에 직접 닿을 수 없다 — 공유 섹션이 이 훅으로
+   * 받아 간다. 터미널이 아직 없으면 null 이다.
+   */
+  captureShareSnapshot: () => TerminalShareSnapshot | null;
   /**
    * 셸이 괄호 붙여넣기(`ESC[?2004h`)를 켰는가.
    *
@@ -119,6 +140,13 @@ export function sendTerminalInput(sessionId: string, data: string): boolean {
   }
   hooks.sendInput(data);
   return true;
+}
+
+/** 이 세션의 첫 화면을 뜬다(공유 시작용). 터미널이 없으면 null. */
+export function captureTerminalShareSnapshot(
+  sessionId: string,
+): TerminalShareSnapshot | null {
+  return findHooksBySessionId(sessionId)?.captureShareSnapshot() ?? null;
 }
 
 /** 셸이 괄호 붙여넣기를 켰는가. 터미널을 못 찾으면 false(=여러 줄 넣기를 막는 쪽). */

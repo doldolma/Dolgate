@@ -4,7 +4,7 @@
 // 등록해 둔 훅(terminal-write-registry)을 sessionId 로 찾아 쓴다 — AI 패널이 최근 출력을 읽는
 // 방식과 같은 결이다.
 
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useAppStore } from '../../../store/appStore';
 import { listWorkspaceSessionIds } from '../terminalWorkspaceLayout';
 import {
@@ -70,6 +70,37 @@ export function useSessionCommandBlocks(
 }
 
 /**
+ * 패널이 여닫히는 데 걸리는 시간(ms).
+ *
+ * 세 곳이 같은 값을 봐야 한다: 폭 transition, 닫힌 뒤 붙잡아 두는 시간, 그리고 터미널 fit 을
+ * 미루는 시간(layout-transition). 어긋나면 다 끝나기 전에 툭 사라지거나, 폭이 확정되기 전에
+ * 격자를 재게 된다.
+ */
+export const SESSION_PANEL_MOTION_MS = 160;
+
+/**
+ * 패널이 화면에 남아 있어야 하는가.
+ *
+ * 닫는 순간 곧바로 들어내면 접히는 모습을 그릴 수 없어, 닫힘 뒤 전환 길이만큼 붙잡아 둔다.
+ */
+function usePanelPresence(open: boolean): boolean {
+  const [present, setPresent] = useState(open);
+
+  useEffect(() => {
+    if (open) {
+      setPresent(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setPresent(false), SESSION_PANEL_MOTION_MS);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [open]);
+
+  return present;
+}
+
+/**
  * 패널이 지금 볼 세션 — 늘 포커스된 pane 의 것이다. 없으면 패널을 그리지 않는다.
  *
  * 세션 셸(레이아웃)과 패널 본체가 **같은 답**을 봐야 한다 — 레이아웃은 "카드를 좌우로 나눌지"
@@ -81,9 +112,11 @@ export function useSessionPanelTargetSessionId(
 ): string | null {
   const open = useAppStore((state) => state.sessionPanelOpen);
   const tabs = useAppStore((state) => state.tabs);
+  // 닫힌 뒤에도 전환 길이만큼 남는다 — 접히는 모습을 그리기 위해.
+  const present = usePanelPresence(open);
 
   return useMemo(() => {
-    if (!open || !activeSessionId) {
+    if (!present || !activeSessionId) {
       return null;
     }
     // 셸이 있는 세션에서만 뜬다. RDP·VNC 에는 히스토리도 스니펫도 성립하지 않아, 절반이
@@ -93,7 +126,7 @@ export function useSessionPanelTargetSessionId(
       return null;
     }
     return activeSessionId;
-  }, [activeSessionId, open, tabs]);
+  }, [activeSessionId, present, tabs]);
 }
 
 /**

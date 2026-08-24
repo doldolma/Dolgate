@@ -62,6 +62,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     active,
     style,
     showHeader = false,
+    soloView = true,
     draggingDisabled = false,
     interactiveAuth,
     onFocus,
@@ -535,20 +536,19 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     [canReceiveFileUpload, tab?.hostId, sessionId, uploadLocalFilesToHost],
   );
 
-  // Share 옆에 놓이는 AI 패널 토글(누르면 열림/닫힘). active=열림 상태 강조.
+  // pane 헤더(분할 화면)에 놓이는 한 줄 묶음 — 시리얼 액션 · Share.
   //
-  // 헤더 안(inline)과 터미널 위(floating) 두 자리에 놓이고 크기만 다르다. 헤더는 한 줄
-  // 시리얼 액션 · Share 묶음. 헤더가 있으면 헤더 안, 없으면 터미널 위에 뜬다. 어느 쪽이든
-  // 같은 컴포넌트를 쓴다 — 예전에는 위치 좌표가 두 곳에 복사돼 있었다.
-  //
-  // AI 토글은 여기 있었지만 세션 패널의 섹션으로 옮겼다(상단 바 토글 · ⌘I). 터미널 위에 뜨는
-  // 버튼이 하나 줄고, 세션에 딸린 것을 찾을 데가 한 곳이 된다.
-  const renderPaneActions = (inline: boolean) =>
+  // 헤더가 그 pane 을 가리키므로 어느 pane 을 공유하는지가 분명하다. **헤더가 없는 단독
+  // 화면에는 두지 않는다** — 예전에는 터미널 오른쪽 위에 알약이 떠서 화면을 늘 가리고 있었고,
+  // 세션에 딸린 것들(히스토리·자원·tmux·테마)이 이미 세션 패널에 모여 있는데 공유만 화면 위에
+  // 떠 있었다. 지금은 패널의 `공유` 섹션이 그 일을 한다(AI 토글도 같은 이유로 옮겼다).
+  // 하단 줄에 담을 것이 있는가. 세션 상태바는 화면을 혼자 쓸 때만, mosh 바는 늘 자기 줄에.
+  const showStatusBarStack = Boolean(tab?.moshState) || (!isTmuxPane && soloView);
+
+  const renderPaneActions = () =>
     controller.canShareSession ? (
       <TerminalSharePopover
-        variant={inline ? 'inline' : 'floating'}
         anchorRef={controller.sharePopoverRef}
-        showHeader={showHeader}
         open={controller.sharePopoverOpen}
         actions={serialActions}
         canStartShare={controller.canStartShare}
@@ -576,6 +576,19 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         visible || active
           ? 'flex pointer-events-auto opacity-100'
           : 'hidden pointer-events-none opacity-0',
+        // 브로드캐스트 참여 표시.
+        //
+        // 카드 테두리는 **포커스**를 뜻하므로 겹쳐 쓰지 않는다 — 카드 바로 밖에 점선 한 겹을
+        // 두른다(실선=포커스, 점선=동시 입력). 색은 액센트다: 앰버·초록·빨강은 이미 상태
+        // 어휘(재연결·warn·실패)이고, 바로 옆 지연 칩이 그 색을 쓰므로 링에 쓰면 "이 pane 지연이
+        // 주황" 으로 읽힌다. 브로드캐스트는 상태가 아니라 모드다.
+        //
+        // outline + 음수 offset 인 이유: 이 루트는 슬롯을 꽉 채우므로 가장자리에 그리면 창
+        // 경계에서 잘리고 이웃 pane 의 선과 겹쳐 두께가 들쭉날쭉해진다. 루트 padding(4px)만큼
+        // 안으로 넣어 카드 경계에 딱 맞춘다.
+        props.broadcastActive &&
+          !isTmuxPane &&
+          'outline-2 outline-dashed -outline-offset-4 outline-[color-mix(in_srgb,var(--accent-strong)_70%,transparent)]',
         // 헤더가 있으면 gap 을 없앤다. 헤더와 터미널은 위아래로 맞붙어 한 상자로 읽혀야 하는데
         // (헤더 border-b-0 + 터미널 border-t-0 이 이어지는 구조) flex gap 이 그 사이를 벌리면
         // 테두리가 끊긴 것처럼 보인다. 사이가 필요한 요소(알림 카드 등)는 자기 margin 을 갖고
@@ -606,6 +619,10 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           // 대상 표기는 앱의 다른 목록과 같은 헬퍼를 쓴다 — pane 헤더만 따로 만들면 같은
           // 호스트가 화면마다 다르게 적힌다(AWS·Warpgate·시리얼은 형식이 제각각이다).
           subtitle={props.host ? getHostSubtitle(props.host, hostSubtitleLabels()) : undefined}
+          // 지연은 하단바가 없는 분할에서 헤더가 든다. 이력은 재연결을 건너 이어져야 하므로
+          // stableId 를 키로 쓴다(sessionId 는 재연결마다 새로 난다).
+          rttMs={tab?.lastRttMs ?? null}
+          rttHistoryKey={tab?.stableId ?? null}
           zoomed={props.zoomed}
           onToggleZoom={props.onToggleZoom}
           onDetachToTab={props.onDetachToTab}
@@ -618,7 +635,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           }}
           onStartDrag={props.onStartDrag}
           onEndDrag={props.onEndDrag}
-          actions={renderPaneActions(true)}
+          actions={renderPaneActions()}
         />
       ) : null}
 
@@ -706,7 +723,13 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden">
         <div className="relative flex min-h-0 min-w-0 flex-1">
-          {showHeader ? null : renderPaneActions(false)}
+          {/* 단독 화면에는 Share 알약을 띄우지 않는다(세션 패널의 `공유` 섹션으로 갔다).
+              시리얼 제어만 남는다 — 그것은 이 터미널에 바로 보내는 신호라 화면 옆이 자리다. */}
+          {showHeader ? null : (
+            <div className="absolute right-[0.85rem] top-[0.85rem] z-[4] flex items-center gap-2">
+              {serialActions}
+            </div>
+          )}
 
           <div
             ref={controller.containerRef}
@@ -848,57 +871,62 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
       {/* 하단 상태바들은 서로 바짝 붙이고, 아래 여백은 이 컨테이너에서 한 번만 준다.
           각 바가 아래 여백을 들고 있으면 여러 개가 쌓일 때 간격이 그만큼 배로 벌어진다.
           tmux 경로(SessionShell)도 같은 statusBarStack 을 쓴다 — 컨테이너가 갈리면 같은
-          바가 연결 방식에 따라 다른 간격으로 놓인다. */}
-      <div
-        className={cn(
-          statusBarStack,
-          // 아래 여백만 없애 바가 카드 바닥에 닿게 한다. 위쪽 gap 을 음수 마진으로 지우려
-          // 했다가 pane 이 화면 밖으로 11px 흘러나갔다 — flex 에서 마지막 자식의 음수 top
-          // 마진은 남는 공간 계산을 키워 flex-1 인 터미널이 컨테이너보다 커진다.
-          'pb-0',
-          showHeader && 'px-0 pt-[0.25rem]',
-        )}
-      >
-        {/* mosh 는 자기 줄에 둔다. tmux·자원 바와 같이 뜨는 조합이 아니라 어차피 한 줄이다. */}
-        {tab?.moshState ? (
-          <TerminalMoshStatusBar
-            state={tab.moshState}
-            lastResponseAt={tab.lastMoshResponseAt ?? null}
-          />
-        ) : null}
-        {/* 세션 상태바. tmux pane 은 그리지 않는다 — 그쪽은 그룹 하단에 한 줄이 따로 있고,
-            여기까지 그리면 같은 값이 두 줄로 뜬다. */}
-        {isTmuxPane ? null : (
-          <TerminalSessionStatusBar
-            sessionId={sessionId}
-            status={hostMetrics.status}
-            metrics={hostMetrics.metrics}
-            onRetry={hostMetrics.retry}
-            rttMs={tab?.lastRttMs ?? null}
-            // 이력은 재연결을 건너 이어져야 한다 — sessionId 는 재연결마다 새로 발급된다.
-            historyKey={tab?.stableId ?? null}
-            // 분할이면 종류·대상은 pane 헤더가 이미 들고 있다 — 같은 것을 두 번 두지 않는다.
-            kindChip={
-              showHeader
-                ? null
-                : resolveSessionKindChip({
-                    host: props.host,
-                    shellKind: tab?.shellKind,
-                    hops: tab?.connectionHops,
-                  })
-            }
-            hopRows={showHeader ? [] : buildHopRows(tab?.connectionHops)}
-            // 감지만 된 상태에서는 버전을, 붙어 있으면 그룹 하단바가 세션명을 보여 준다.
-            tmuxLabel={
-              tab?.tmuxAvailable && !tab.tmux
-                ? translate('sessionStatusBar.tmuxDetected', {
-                    version: tab.tmuxAvailable.version,
-                  })
-                : null
-            }
-          />
-        )}
-      </div>
+          바가 연결 방식에 따라 다른 간격으로 놓인다.
+          담을 바가 하나도 없으면(분할 pane 등) 이 줄 자체를 두지 않는다 — 빈 컨테이너의
+          padding 이 pane 바닥에 몇 px 씩 남는다. */}
+      {showStatusBarStack ? (
+        <div
+          className={cn(
+            statusBarStack,
+            // 아래 여백만 없애 바가 카드 바닥에 닿게 한다. 위쪽 gap 을 음수 마진으로 지우려
+            // 했다가 pane 이 화면 밖으로 11px 흘러나갔다 — flex 에서 마지막 자식의 음수 top
+            // 마진은 남는 공간 계산을 키워 flex-1 인 터미널이 컨테이너보다 커진다.
+            'pb-0',
+            showHeader && 'px-0 pt-[0.25rem]',
+          )}
+        >
+          {/* mosh 는 자기 줄에 둔다. tmux·자원 바와 같이 뜨는 조합이 아니라 어차피 한 줄이다. */}
+          {tab?.moshState ? (
+            <TerminalMoshStatusBar
+              state={tab.moshState}
+              lastResponseAt={tab.lastMoshResponseAt ?? null}
+            />
+          ) : null}
+          {/* 세션 상태바. 화면을 혼자 쓸 때만 그린다 — 분할이면 pane 마다 바가 하나씩 붙어
+              아래가 줄로 가득 찬다(그쪽은 pane 헤더가 종류·대상을 들고 있다). tmux pane 도
+              그리지 않는다: 그룹 하단에 한 줄이 따로 있어 같은 값이 두 줄로 뜬다. */}
+          {isTmuxPane || !soloView ? null : (
+            <TerminalSessionStatusBar
+              sessionId={sessionId}
+              status={hostMetrics.status}
+              metrics={hostMetrics.metrics}
+              onRetry={hostMetrics.retry}
+              rttMs={tab?.lastRttMs ?? null}
+              // 이력은 재연결을 건너 이어져야 한다 — sessionId 는 재연결마다 새로 발급된다.
+              historyKey={tab?.stableId ?? null}
+              // 분할이면 종류·대상은 pane 헤더가 이미 들고 있다 — 같은 것을 두 번 두지 않는다.
+              kindChip={
+                showHeader
+                  ? null
+                  : resolveSessionKindChip({
+                      host: props.host,
+                      shellKind: tab?.shellKind,
+                      hops: tab?.connectionHops,
+                    })
+              }
+              hopRows={showHeader ? [] : buildHopRows(tab?.connectionHops)}
+              // 감지만 된 상태에서는 버전을, 붙어 있으면 그룹 하단바가 세션명을 보여 준다.
+              tmuxLabel={
+                tab?.tmuxAvailable && !tab.tmux
+                  ? translate('sessionStatusBar.tmuxDetected', {
+                      version: tab.tmuxAvailable.version,
+                    })
+                  : null
+              }
+            />
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

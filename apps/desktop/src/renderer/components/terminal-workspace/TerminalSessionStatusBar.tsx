@@ -10,7 +10,7 @@
 //
 // 좁아질 때 무엇부터 버리는지는 lib/session-status-bar.ts 가 정한다(폭만 넘긴다).
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/cn';
 import {
@@ -23,8 +23,9 @@ import {
   Waypoints,
 } from '../../ui/icons';
 import { Tooltip } from '../../ui';
+import { TerminalRttChip } from './TerminalRttChip';
 import { useAppStore } from '../../store/appStore';
-import { rttBandColor, rttColor } from '../../lib/rtt';
+import { rttColor } from '../../lib/rtt';
 import {
   formatBytesPerSecond,
   formatKibibytes,
@@ -38,14 +39,6 @@ import {
   type SessionHopRow,
   type SessionKindChip,
 } from '../../lib/session-status-bar';
-import {
-  buildSparklineSegments,
-  getRttHistoryVersion,
-  getRttSamples,
-  subscribeToRttHistory,
-  summarizeRtt,
-  type RttSummary,
-} from '../../lib/rtt-history';
 import type { HostMetricsStatus } from '../../controllers/useHostMetrics';
 import {
   StatusBarIcon,
@@ -108,8 +101,6 @@ const HOVER_ICON_CLASS =
 const ZONE_CLASS = `${PRESSABLE_CLASS} min-w-0 flex-1 gap-[0.9rem]`;
 
 /** 스파크라인 크기. 10분 창은 10초 간격이라 60점이고, 60px 이면 1점이 1px 이다. */
-const SPARKLINE_WIDTH = 132;
-const SPARKLINE_HEIGHT = 34;
 
 const KIND_ICON = {
   jump: Waypoints,
@@ -151,25 +142,6 @@ function formatRatio(usedKb: number | null, totalKb: number | null): string {
     return '—';
   }
   return `${formatKibibytes(usedKb)} / ${formatKibibytes(totalKb)}`;
-}
-
-/** 지연 이력 구독. 값이 올 때만(10초마다) 이 컴포넌트가 다시 그려진다. */
-function useRttSummary(key: string | null | undefined): RttSummary | null {
-  const subscribe = useCallback(
-    (onChange: () => void) => (key ? subscribeToRttHistory(key, onChange) : () => undefined),
-    [key],
-  );
-  // 스냅샷은 버전 숫자다 — 배열을 돌려주면 매번 새 참조가 되어 무한 루프가 된다.
-  const version = useSyncExternalStore(
-    subscribe,
-    () => (key ? getRttHistoryVersion(key) : 0),
-    () => 0,
-  );
-  const [summary, setSummary] = useState<RttSummary | null>(null);
-  useEffect(() => {
-    setSummary(key ? summarizeRtt(getRttSamples(key)) : null);
-  }, [key, version]);
-  return summary;
 }
 
 /**
@@ -232,12 +204,6 @@ export function TerminalSessionStatusBar({
   const selectSection = useAppStore((state) => state.selectSessionPanelSection);
   const { width: measured, attach } = useMeasuredWidth(width);
   const [hopsOpen, setHopsOpen] = useState(false);
-  const [rttOpen, setRttOpen] = useState(false);
-  const rttSummary = useRttSummary(historyKey);
-  // 점이 모자라면 빈 배열이 온다(rtt-history 가 정한다) — 그때는 차트 자리만 비어 있다.
-  const sparkline = rttSummary
-    ? buildSparklineSegments(rttSummary.samples, SPARKLINE_WIDTH, SPARKLINE_HEIGHT)
-    : [];
 
   // 재려면 한 번은 그려야 한다 — 첫 프레임은 접지 않고 그린 뒤 실측으로 좁힌다.
   const fold = resolveStatusBarFold(measured ?? 9999);
@@ -300,22 +266,9 @@ export function TerminalSessionStatusBar({
         ) : null}
 
         {showRtt ? (
-          <span
-            className="inline-flex items-center gap-1 whitespace-nowrap"
-            title={translate('paneHeader.latency', { ms: rttMs })}
-            // 최근 10분 이력은 한 줄 툴팁에 안 들어간다 — 아래 hover 패널에 스파크라인으로 뿌린다.
-            onMouseEnter={() => setRttOpen(true)}
-            onMouseLeave={() => setRttOpen(false)}
-          >
-            <span
-              className="h-[6px] w-[6px] rounded-full"
-              style={{ backgroundColor: rttColor(rttMs) }}
-              aria-hidden
-            />
-            <span className="tabular-nums" style={{ color: rttColor(rttMs) }}>
-              {translate('sessionStatusBar.latencyValue', { ms: rttMs })}
-            </span>
-          </span>
+          // 칩과 hover 차트는 pane 헤더(분할 화면)와 같은 컴포넌트다 — 색 기준·창 길이가
+          // 자리마다 갈리지 않게.
+          <TerminalRttChip rttMs={rttMs} historyKey={historyKey ?? null} placement="up" />
         ) : null}
 
         {metricsHidden ? null : (
@@ -387,6 +340,8 @@ export function TerminalSessionStatusBar({
           </button>
         ) : null}
 
+        {/* tmux 칩은 오른쪽 끝이다. 왼쪽 묶음이 flex-1 로 늘어나지 않는 조합(지표가 꺼진
+            연결 등)에서도 붙어 있게 ml-auto 를 준다. */}
         {tmuxLabel ? (
           <Tooltip className="ml-auto" label={translate('sessionStatusBar.openTmux')}>
             <button
@@ -407,59 +362,6 @@ export function TerminalSessionStatusBar({
           </Tooltip>
         ) : null}
       </div>
-
-      {rttOpen && rttSummary ? (
-        <div
-          className="absolute bottom-[calc(100%+0.3rem)] left-0 z-[8] rounded-[8px] border border-[var(--border)] bg-[var(--surface-strong)] px-[0.6rem] py-[0.5rem] shadow-[var(--shadow)]"
-          role="tooltip"
-        >
-          {/* 차트 자리는 늘 같은 크기로 둔다. x 는 10분 창에 고정이라, 갓 붙은 세션은 오른쪽
-              끝에만 선이 있고 왼쪽은 빈칸으로 남는다 — 점이 쌓이는 만큼 왼쪽으로 자란다. */}
-          <svg
-            width={SPARKLINE_WIDTH}
-            height={SPARKLINE_HEIGHT}
-            viewBox={`0 0 ${SPARKLINE_WIDTH} ${SPARKLINE_HEIGHT}`}
-            className="mb-[0.35rem] block"
-            aria-hidden
-          >
-            {/* 구간마다 색이 다르다 — 튄 자리는 그 구간만 주황·빨강으로 남는다. */}
-            {sparkline.map((segment, index) => (
-              <polyline
-                key={index}
-                points={segment.points}
-                fill="none"
-                stroke={rttBandColor(segment.band)}
-                strokeWidth="1.5"
-                strokeLinejoin="round"
-                strokeLinecap="round"
-              />
-            ))}
-          </svg>
-          <div className="flex items-baseline gap-[0.7rem] text-[0.72rem] text-[var(--text-soft)]">
-            <span>
-              {translate('sessionStatusBar.rttMin')}{' '}
-              <span className="tabular-nums" style={{ color: rttColor(rttSummary.min) }}>
-                {translate('sessionStatusBar.latencyValue', { ms: rttSummary.min })}
-              </span>
-            </span>
-            <span>
-              {translate('sessionStatusBar.rttAvg')}{' '}
-              <span className="tabular-nums" style={{ color: rttColor(rttSummary.avg) }}>
-                {translate('sessionStatusBar.latencyValue', { ms: rttSummary.avg })}
-              </span>
-            </span>
-            <span>
-              {translate('sessionStatusBar.rttMax')}{' '}
-              <span
-                className="tabular-nums"
-                style={{ color: rttColor(rttSummary.max) }}
-              >
-                {translate('sessionStatusBar.latencyValue', { ms: rttSummary.max })}
-              </span>
-            </span>
-          </div>
-        </div>
-      ) : null}
 
       {hopsOpen && hopRows.length > 0 ? (
         <div

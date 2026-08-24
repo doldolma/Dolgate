@@ -23,6 +23,7 @@ function fakeHooks(sessionId: string, bracketedPaste = false) {
     getSelection: vi.fn(() => ''),
     captureRecentText: vi.fn(() => ''),
     captureTextSnapshot: vi.fn(() => []),
+    captureShareSnapshot: () => null,
     sendInput: (data: string) => {
       sent.push(data);
     },

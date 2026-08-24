@@ -11,7 +11,9 @@ const selectSection = vi.fn();
 
 vi.mock('../../store/appStore', () => ({
   useAppStore: (selector: (state: any) => unknown) =>
-    selector({ selectSessionPanelSection: selectSection }),
+    selector({
+      selectSessionPanelSection: selectSection,
+    }),
 }));
 
 function metrics(overrides: Partial<HostMetrics> = {}): HostMetrics {

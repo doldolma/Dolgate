@@ -14,6 +14,7 @@ import {
   SquareTerminal,
 } from '../../ui/icons';
 import { useTranslation } from 'react-i18next';
+import { TerminalRttChip } from './TerminalRttChip';
 
 interface TerminalPaneHeaderProps {
   sessionId: string;
@@ -29,6 +30,13 @@ interface TerminalPaneHeaderProps {
   kind?: HostKind;
   /** `user@host:port` 같은 대상 표기. 좁아지면 가장 먼저 접힌다. */
   subtitle?: string;
+  /**
+   * 이 pane 의 왕복 지연(ms). 분할에는 하단바가 없으므로 지연은 헤더가 든다.
+   * null 이면 칩을 그리지 않는다.
+   */
+  rttMs?: number | null;
+  /** 지연 이력 키 — 재연결을 건너 이어져야 하므로 `stableId` 다. */
+  rttHistoryKey?: string | null;
   /** 이 pane 이 브로드캐스트에 참여 중인가. */
   broadcastActive?: boolean;
   /** 참여 pane 이 부족해 지금은 켤 수 없음(눌러도 아무 일이 없다는 것을 보여준다). */
@@ -124,6 +132,8 @@ export function TerminalPaneHeader({
   onEndDrag,
   kind,
   subtitle,
+  rttMs = null,
+  rttHistoryKey = null,
   broadcastActive = false,
   broadcastDisabled = false,
   onToggleBroadcast,
@@ -178,6 +188,17 @@ export function TerminalPaneHeader({
         ) : null}
       </button>
       <div className="flex shrink-0 items-center gap-[0.15rem]">
+        {/* 지연은 아이콘 묶음 맨 왼쪽이다 — 단독 화면의 하단바와 같은 칩·같은 hover 차트를
+            쓴다(분할에는 그 바가 없다). 차트는 헤더 아래로 편다. */}
+        {rttMs !== null ? (
+          <TerminalRttChip
+            rttMs={rttMs}
+            historyKey={rttHistoryKey}
+            placement="down"
+            align="right"
+            className="mr-[0.15rem] text-[0.68rem] font-normal"
+          />
+        ) : null}
         {onToggleBroadcast ? (
           <HeaderIconButton
             label={translate(

@@ -315,6 +315,7 @@ test.describe("desktop smoke", () => {
 
     const sessionId = await getCapturedSessionId(page);
 
+    // Share 버튼은 상단 바의 세션 패널 토글 옆에 있다(터미널 위에 떠 있던 알약을 옮겼다).
     await page.getByRole("button", { name: "Share" }).click();
     await page.getByRole("button", { name: "공유 시작" }).click();
 

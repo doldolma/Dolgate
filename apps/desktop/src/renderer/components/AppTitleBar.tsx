@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import type { DesktopWindowState, HostRecord, RdpMonitorSelection, SessionConnectionKind, TailnetPeer, TailnetStatus, TerminalTab, UpdateState } from '@shared';
 import { describeRdpDrives, isRdpHostRecord, isSshHostRecord, isVncHostRecord } from '@shared';
 import type {
@@ -12,6 +12,7 @@ import { DesktopWindowControls, type DesktopPlatform } from './DesktopWindowCont
 import { listTailnets, snapshotTailnets } from '../services/desktop/tailnet';
 import { cidrPrefixLength, isAddressInCidr, isIpAddress } from '../lib/ip-prefix';
 import { cn } from '../lib/cn';
+import { CHROME_TOGGLE_CLASS, CHROME_TOGGLE_ON_CLASS } from './chrome-toggle';
 import { rttColor } from '../lib/rtt';
 import { RdpMonitorPicker } from './rdp/RdpMonitorPicker';
 import { titleBarMode, useTitleBarAutoHide } from './useTitleBarAutoHide';
@@ -34,18 +35,6 @@ interface DraggedSessionPayload {
   workspaceId?: string;
 }
 
-/**
- * 상단 바(다크 크롬)의 토글 아이콘 버튼.
- *
- * 평소에는 배경 없이 아이콘만 둔다. 켜지면 옅은 칩 + 얇은 테두리로 바꾸고 아이콘만 완전한
- * 흰색이 된다 — 흰 원으로 채우면 크롬에서 그것만 튀고, hover 배경만으로는 켜진 티가 나지
- * 않는다. IconButton 의 active 색(selection-tint)은 밝은 배경을 가정한 값이라 여기선 못 쓴다.
- */
-const CHROME_TOGGLE_CLASS =
-  'h-9 w-9 rounded-full border-transparent bg-transparent text-[1.15rem] text-[rgba(255,255,255,0.66)] shadow-none hover:bg-[rgba(255,255,255,0.1)] hover:text-white';
-const CHROME_TOGGLE_ON_CLASS =
-  'bg-[rgba(255,255,255,0.16)] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.24)] hover:bg-[rgba(255,255,255,0.2)]';
-
 interface AppTitleBarProps {
   desktopPlatform: DesktopPlatform;
   tabs: TerminalTab[];
@@ -65,6 +54,12 @@ interface AppTitleBarProps {
   /** 세션 패널(오른쪽)이 열려 있는가. 셸 세션을 보고 있을 때만 토글이 뜬다. */
   sessionPanelOpen: boolean;
   onToggleSessionPanel: () => void;
+  /** 세션 하단바가 접혀 있는가(창 단위). 접으면 높이 0 이라 하단에 누를 것이 없다. */
+  /**
+   * 세션 패널 토글 **왼쪽**에 놓이는 Share 묶음. 상단 바는 스토어에 붙지 않으므로(테스트가
+   * prop 만으로 그린다) 스토어를 읽는 조각은 셸이 넣어 준다. 세션이 없으면 부르지 않는다.
+   */
+  renderSessionShareAction?: (sessionId: string) => ReactNode;
   draggedSession: DraggedSessionPayload | null;
   updateState: UpdateState;
   windowState: DesktopWindowState;
@@ -1063,10 +1058,10 @@ function getTitlebarDynamicTabButtonClass(active: boolean): string {
 
 function getTitlebarCloseButtonClass(active: boolean): string {
   if (active) {
-    return 'h-8 w-8 rounded-full text-[0.9rem] text-[color-mix(in_srgb,var(--accent-strong)_84%,var(--text)_16%)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent)] hover:text-[var(--accent-strong)]';
+    return 'h-8 w-8 rounded-[9px] text-[0.9rem] text-[color-mix(in_srgb,var(--accent-strong)_84%,var(--text)_16%)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent)] hover:text-[var(--accent-strong)]';
   }
 
-  return 'h-8 w-8 rounded-full text-[0.9rem] text-[rgba(243,247,251,0.78)] hover:bg-[rgba(255,255,255,0.12)] hover:text-white';
+  return 'h-8 w-8 rounded-[9px] text-[0.9rem] text-[rgba(243,247,251,0.78)] hover:bg-[rgba(255,255,255,0.12)] hover:text-white';
 }
 
 function isDynamicWorkspaceTab(tabId: WorkspaceTabId): boolean {
@@ -1089,6 +1084,7 @@ export function AppTitleBar({
   activeWorkspaceTab,
   sessionPanelOpen,
   onToggleSessionPanel,
+  renderSessionShareAction,
   draggedSession,
   updateState,
   windowState,
@@ -2208,6 +2204,11 @@ export function AppTitleBar({
       <div className="relative flex items-center self-center mb-[0.42rem] gap-[0.55rem] [-webkit-app-region:no-drag]">
         {/* 아래 두 버튼(패널 토글·알림)은 같은 규칙을 쓴다: 평소엔 아이콘만, 켜져 있으면 채운
             칩. 예전에는 항상 옅은 배경이 깔려 있어 눌러도 달라진 티가 나지 않았다. */}
+        {/* 공유. 예전에는 터미널 오른쪽 위에 알약으로 떠 있었다 — 화면을 가리지 않게 창 단위
+            크롬인 이 줄로 옮겼다. 누르면 열리는 팝오버는 그대로다. */}
+        {sessionPanelSessionId
+          ? renderSessionShareAction?.(sessionPanelSessionId)
+          : null}
         {/* 세션 패널 토글. 셸이 있는 세션을 보고 있을 때만 뜬다 — RDP·VNC 나 홈에서는 열 것이
             없다. 패널은 이 버튼으로만 열린다(늘 붙어 있는 세로 줄을 두지 않는다). */}
         {sessionPanelSessionId ? (

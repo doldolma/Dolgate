@@ -26,9 +26,9 @@ describe('TerminalPaneHeader', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('지연은 그리지 않는다 — 세션 하단바로 옮겼다', () => {
-    // 예전에는 여기에 점 + 숫자가 있었다. 하단바로 내린 뒤 같은 값이 두 곳에 뜨지 않게
-    // prop 째 없앴으므로, 헤더에는 ms 표기가 남아 있어서는 안 된다.
+  it('지연을 오른쪽 아이콘 묶음 앞에 그린다', () => {
+    // 분할에는 하단바가 없다(pane 마다 바가 붙으면 아래가 줄로 가득 찬다) — 그래서 지연은
+    // 여기로 돌아왔다. 값이 없으면 칩 자체가 없다.
     const { container } = render(
       <TerminalPaneHeader
         sessionId="session-1"
@@ -37,6 +37,23 @@ describe('TerminalPaneHeader', () => {
         active
         draggingDisabled={false}
         closingDisabled={false}
+        rttMs={42}
+        rttHistoryKey="stable-1"
+      />,
+    );
+
+    expect(container.textContent).toMatch(/42ms/);
+  });
+
+  it('지연 값이 없으면 칩을 두지 않는다', () => {
+    const { container } = render(
+      <TerminalPaneHeader
+        sessionId="session-1"
+        title="Prod Shell"
+        active
+        draggingDisabled={false}
+        closingDisabled={false}
+        rttMs={null}
       />,
     );
 

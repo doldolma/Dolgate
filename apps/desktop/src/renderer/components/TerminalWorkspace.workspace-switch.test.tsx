@@ -268,6 +268,21 @@ const splitWorkspace: WorkspaceTab = {
   broadcastEnabled: false
 };
 
+// 공유 팝오버는 **pane 헤더 안에만** 있다 — 단독 화면에 떠 있던 알약은 세션 패널의 `공유`
+// 섹션으로 갔다(SessionPanelShare). 그래서 팝오버를 보려면 워크스페이스 pane 으로 그린다.
+// 잎 하나짜리도 헤더가 붙는다(showHeader = activeWorkspace && placement).
+const sharePaneWorkspace: WorkspaceTab = {
+  id: 'workspace-share',
+  title: 'Workspace Share',
+  layout: {
+    id: 'leaf-share',
+    kind: 'leaf',
+    sessionId: 'session-1'
+  },
+  activeSessionId: 'session-1',
+  broadcastEnabled: false
+};
+
 class MockResizeObserver {
   observe() {}
   disconnect() {}
@@ -836,6 +851,69 @@ describe('TerminalWorkspace workspace switching', () => {
     }
   });
 
+  it('분할에서는 하단 상태바를 그리지 않는다 — 화면을 혼자 쓸 때만 둔다', () => {
+    // pane 마다 바가 하나씩 붙으면 화면 아래가 줄로 가득 찬다. 분할에서는 종류·대상·지연을
+    // pane 헤더가 이미 들고 있다.
+    //
+    // 지표가 꺼진 설정이라 바는 담을 것이 없으면 스스로 사라진다 — 그래서 tmux 감지를 넣어
+    // **그릴 것이 있는** 상태로 만든다(그러지 않으면 "안 그린다" 가 저절로 참이 된다).
+    const tmuxTabs = splitHostTabs.map((tab) => ({
+      ...tab,
+      tmuxAvailable: { version: '3.4', sessions: [] }
+    })) as TerminalTab[];
+
+    const split = renderWorkspace({
+      activeWorkspace: splitWorkspace,
+      tabs: tmuxTabs,
+      hosts: hostRecords,
+      viewActivationKey: 'workspace:workspace-split'
+    });
+    for (const pane of placedPanes(split.container)) {
+      expect(within(pane).queryByRole('status')).toBeNull();
+    }
+    split.unmount();
+
+    const solo = renderWorkspace({
+      activeWorkspace: null,
+      activeSessionId: 'session-1',
+      tabs: tmuxTabs,
+      hosts: hostRecords,
+      viewActivationKey: 'session:session-1'
+    });
+    // 스탠드얼론은 pane 슬롯 표시가 없다(워크스페이스 배치가 아니다) — 컨테이너에서 센다.
+    expect(solo.container.querySelectorAll('[role="status"]').length).toBeGreaterThan(0);
+  });
+
+  it('브로드캐스트 참여 pane 에 링을 두른다 — 포커스 테두리와 따로', () => {
+    // 버튼 하나만 켜지면 "입력이 어디로 나가는지" 가 안 보인다. 카드 테두리는 포커스를 뜻하니
+    // 겹쳐 쓰지 않고 슬롯 안쪽에 링을 한 겹 더 두른다.
+    const { container } = renderWorkspace({
+      activeWorkspace: { ...splitWorkspace, broadcastEnabled: true },
+      activeSessionId: 'session-1',
+      tabs: splitHostTabs,
+      hosts: hostRecords,
+      viewActivationKey: 'workspace:workspace-split'
+    });
+
+    const ringed = (root: HTMLElement) =>
+      Array.from(
+        root.querySelectorAll<HTMLElement>('[data-terminal-pane-slot="true"] > div'),
+        // 실선(포커스) 과 갈리는 점선 링이다 — 클래스로 그것을 확인한다.
+      ).filter((node) => node.className.includes('outline-dashed'));
+
+    expect(ringed(container)).toHaveLength(2);
+
+    // 꺼져 있으면 링이 없다(위 단정이 저절로 참이 되지 않게 함께 본다).
+    const off = renderWorkspace({
+      activeWorkspace: splitWorkspace,
+      activeSessionId: 'session-1',
+      tabs: splitHostTabs,
+      hosts: hostRecords,
+      viewActivationKey: 'workspace:workspace-split'
+    });
+    expect(ringed(off.container)).toHaveLength(0);
+  });
+
   it('shows a pane excluded from broadcast as not participating', () => {
     const hostTabs: TerminalTab[] = [
       {
@@ -1239,7 +1317,7 @@ describe('TerminalWorkspace workspace switching', () => {
     }
   });
 
-  it('opens the detached owner chat window from the share popover', async () => {
+  it('opens the detached owner chat window from the pane header share popover', async () => {
     const onOpenSessionShareChatWindow = vi.fn().mockResolvedValue(undefined);
     const hostTabs: TerminalTab[] = [
       {
@@ -1291,8 +1369,8 @@ describe('TerminalWorkspace workspace switching', () => {
         settings={settings}
         prefersDark={false}
         activeSessionId="session-1"
-        activeWorkspace={null}
-        viewActivationKey="session:session-1"
+        activeWorkspace={sharePaneWorkspace}
+        viewActivationKey="workspace:workspace-share"
         draggedSession={null}
         canDropDraggedSession={false}
         onCloseSession={vi.fn().mockResolvedValue(undefined)}
@@ -1372,8 +1450,8 @@ describe('TerminalWorkspace workspace switching', () => {
         settings={settings}
         prefersDark={false}
         activeSessionId="session-1"
-        activeWorkspace={null}
-        viewActivationKey="session:session-1"
+        activeWorkspace={sharePaneWorkspace}
+        viewActivationKey="workspace:workspace-share"
         draggedSession={null}
         canDropDraggedSession={false}
         onCloseSession={vi.fn().mockResolvedValue(undefined)}

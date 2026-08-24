@@ -22,6 +22,7 @@ function fakeHooks(snapshotLines: string[]): TerminalHooks {
     getSelection: vi.fn(() => ''),
     captureRecentText: vi.fn((maxLines: number) => snapshotLines.slice(-maxLines).join('\n')),
     captureTextSnapshot: vi.fn(() => snapshotLines.slice()),
+    captureShareSnapshot: () => null,
     sendInput: vi.fn(),
     isBracketedPasteEnabled: vi.fn(() => false),
     scrollToLine: vi.fn(),

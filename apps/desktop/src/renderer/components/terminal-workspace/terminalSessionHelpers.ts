@@ -48,6 +48,20 @@ export function resolveTerminalRuntimeWebglEnabled(input: {
   return input.terminalWebglEnabled;
 }
 
+/**
+ * 이 세션을 공유할 수 있는가.
+ *
+ * 상단 바의 Share 버튼과 pane 헤더의 Share 버튼이 **같은 답**을 봐야 한다 — 한쪽만 열리면
+ * "버튼은 있는데 눌러도 아무 일이 없다" 가 된다. tmux pane 은 제외한다: control mode 는 pane
+ * 이 여럿이라 공유가 가리키는 대상이 흐리고, 로컬 터미널(source !== 'host')은 공유할 원격이
+ * 없다.
+ */
+export function canShareSessionTab(
+  tab: { source?: string | null; tmux?: unknown } | null | undefined,
+): boolean {
+  return tab?.source === 'host' && !tab.tmux;
+}
+
 export function mergeSessionShareSnapshotKinds(
   currentKind: SessionShareSnapshotInput['kind'] | null,
   nextKind: SessionShareSnapshotInput['kind'],

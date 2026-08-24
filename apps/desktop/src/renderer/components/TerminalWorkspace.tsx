@@ -612,6 +612,11 @@ export function TerminalWorkspace({
     }
   }
 
+  // 지금 화면에 놓인 pane 수. 스탠드얼론 세션은 늘 1 이다.
+  const paneCount = activeWorkspace && workspaceLayout
+    ? workspaceLayout.placements.length
+    : 1;
+
   const workspacePaneSlots: TerminalWorkspacePaneSlot[] = tabs.map((tab) => {
     const placement = placementBySessionId.get(tab.sessionId);
     const visible = visibleSessionIds.has(tab.sessionId);
@@ -762,6 +767,9 @@ export function TerminalWorkspace({
           // tmux pane 은 헤더 없이 슬롯을 꽉 채운다(컨테이너 px = tmux 셀 그리드 → 밑 짤림 제거).
           // pane 식별/조작은 상단 윈도우 바 + tmux 자체 경계선/단축키가 담당.
           showHeader={Boolean(activeWorkspace && placement) && !tab.tmux}
+          // 이 pane 이 화면을 혼자 쓰는가. 하단 상태바는 여기서만 뜬다 — 분할하면 pane 마다
+          // 바가 하나씩 늘어 화면 아래가 줄로 가득 찬다.
+          soloView={paneCount <= 1}
           zoomed={activeWorkspace?.zoomedSessionId === tab.sessionId}
           onToggleZoom={
             canZoom && activeWorkspace && placement && !tab.tmux

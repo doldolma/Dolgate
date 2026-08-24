@@ -77,6 +77,7 @@ export {
   Boxes,
   Plug,
   LogOut,
+  Share2,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';

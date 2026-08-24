@@ -1,20 +1,24 @@
 import type { MutableRefObject, ReactNode } from 'react';
 import type { TerminalTab } from '@shared';
 import { cn } from '../../lib/cn';
-import { Button, SectionLabel } from '../../ui';
+import { Button, IconButton, SectionLabel } from '../../ui';
+import { Share2 } from '../../ui/icons';
+import {
+  CHROME_TOGGLE_CLASS,
+  CHROME_TOGGLE_ON_CLASS,
+} from '../chrome-toggle';
 import { useTranslation } from 'react-i18next';
 
 interface TerminalSharePopoverProps {
   anchorRef: MutableRefObject<HTMLDivElement | null>;
-  showHeader: boolean;
   /**
-   * 이 묶음이 어디에 놓이는가.
+   * 이 묶음이 어디에 놓이는가. 팝오버 내용은 두 자리에서 **똑같다** — 바뀌는 것은 트리거
+   * 버튼의 크기와 묶음의 정렬뿐이다.
    *
-   * `inline` = pane 헤더 안(헤더가 있는 워크스페이스 pane). `floating` = 터미널 위에 뜨는
-   * 절대 위치(헤더가 없는 tmux·standalone 경로). 팝오버는 두 경우 모두 이 묶음을 기준으로
-   * 열리므로, 바뀌는 것은 묶음 자체의 위치와 버튼 크기뿐이다.
+   * `inline` = pane 헤더 안(분할 화면). `chrome` = 상단 바의 세션 패널 토글 옆(단독 화면에서
+   * 터미널 위에 떠 있던 알약이 여기로 왔다).
    */
-  variant?: 'inline' | 'floating';
+  variant?: 'inline' | 'chrome';
   open: boolean;
   actions?: ReactNode;
   // Share 버튼 왼쪽에 함께 놓이는 토글(AI 패널 등).
@@ -30,15 +34,14 @@ interface TerminalSharePopoverProps {
   canOpenChatWindow: boolean;
 }
 
-// 헤더 안에 놓일 때의 Share 버튼 스킨. 헤더는 한 줄 크롬이라 36px 알약이 들어가면 헤더가
+// pane 헤더 안에 놓일 때의 Share 버튼 스킨. 헤더는 한 줄 크롬이라 36px 알약이 들어가면 헤더가
 // 그만큼 두꺼워진다 — 닫기 아이콘(1.25rem)과 같은 높이로 맞춘다.
 const SHARE_INLINE_BUTTON =
   'h-[1.25rem] min-h-0 rounded-[5px] border-0 bg-transparent px-[0.3rem] text-[0.65rem] font-semibold text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] hover:text-[var(--text)]';
 
 export function TerminalSharePopover({
   anchorRef,
-  showHeader,
-  variant = 'floating',
+  variant = 'inline',
   open,
   actions,
   canStartShare,
@@ -58,27 +61,39 @@ export function TerminalSharePopover({
     <div
       ref={anchorRef}
       className={cn(
-        inline
-          ? 'relative flex items-center gap-[0.15rem]'
-          : 'absolute right-[0.85rem] top-[0.85rem] z-[4] flex items-center gap-2',
-        !inline && showHeader && 'right-[0.8rem] top-[0.8rem]',
+        'relative flex items-center',
+        inline ? 'gap-[0.15rem]' : 'gap-2 [-webkit-app-region:no-drag]',
       )}
     >
       {actions}
-      <Button
-        variant="secondary"
-        size="sm"
-        className={
-          inline
-            ? SHARE_INLINE_BUTTON
-            : 'min-h-9 rounded-full px-3.5'
-        }
-        onClick={onToggle}
-      >
-        Share
-      </Button>
+      {inline ? (
+        <Button
+          variant="secondary"
+          size="sm"
+          className={SHARE_INLINE_BUTTON}
+          onClick={onToggle}
+        >
+          Share
+        </Button>
+      ) : (
+        // 상단 바에서는 옆의 패널·하단바 토글과 같은 아이콘 버튼이다 — 글자 알약을 두면 그
+        // 줄에서 그것만 튄다. 이름은 그대로 `Share` 다(스크린리더·테스트가 그것으로 찾는다).
+        <IconButton
+          tone="default"
+          size="sm"
+          className={cn(CHROME_TOGGLE_CLASS, open && CHROME_TOGGLE_ON_CLASS)}
+          aria-pressed={open}
+          aria-label="Share"
+          title="Share"
+          onClick={onToggle}
+        >
+          <Share2 className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
+        </IconButton>
+      )}
       {open ? (
-        <div className="absolute right-0 top-[calc(100%+0.6rem)] z-30 grid min-w-0 w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] gap-3 overflow-hidden rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-soft)]">
+        // 글자색을 여기서 못 박는다. 이 판은 상단 바(흰 글자 · 어두운 배경) 안에 뜨므로
+        // 색을 물려받으면 흰 배경에 흰 글자가 되어 제목이 사라진다 — 실제로 그렇게 됐다.
+        <div className="absolute right-0 top-[calc(100%+0.6rem)] z-30 grid min-w-0 w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] gap-3 overflow-hidden rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-4 text-[var(--text)] shadow-[var(--shadow-soft)]">
           {shareState?.status === 'inactive' || !shareState ? (
             <>
               <SectionLabel className="mb-2">Session Share</SectionLabel>

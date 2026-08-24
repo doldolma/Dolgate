@@ -58,6 +58,13 @@ export interface TerminalSessionAppearance {
 
 export interface TerminalSessionPaneProps {
   sessionId: string;
+  /**
+   * 이 pane 이 화면을 혼자 쓰는가(스탠드얼론 · pane 하나짜리 워크스페이스).
+   *
+   * 하단 상태바를 여기서만 그린다 — 분할하면 pane 마다 바가 하나씩 붙어 화면 아래가 줄로
+   * 가득 찬다. 분할에서는 종류·대상·지연을 pane 헤더가 이미 들고 있다.
+   */
+  soloView?: boolean;
   title: string;
   visible: boolean;
   active: boolean;

@@ -725,3 +725,34 @@ describe('AppTitleBar full-screen exit by double click', () => {
     );
   });
 });
+
+describe('AppTitleBar 공유 버튼 자리', () => {
+  it('셸 세션에서만 그 세션으로 불리고, 패널 토글 왼쪽에 놓인다', () => {
+    // 상단 바는 스토어에 붙지 않는다 — 스토어를 읽는 조각(SessionShareChromeButton)은 셸이
+    // 넣어 주고, 여기서는 "언제·어느 세션으로 불리는가" 와 자리만 본다.
+    const renderSessionShareAction = vi.fn((sessionId: string) => (
+      <button type="button">Share {sessionId}</button>
+    ));
+    const { unmount } = renderTitleBar({
+      activeWorkspaceTab: 'home',
+      renderSessionShareAction,
+    });
+    expect(renderSessionShareAction).not.toHaveBeenCalled();
+    unmount();
+
+    renderTitleBar({
+      tabs: [createSessionTab('session-1')],
+      tabStrip: [{ kind: 'session', sessionId: 'session-1' }],
+      activeWorkspaceTab: 'session:session-1',
+      renderSessionShareAction,
+    });
+    expect(renderSessionShareAction).toHaveBeenCalledWith('session-1');
+
+    const share = screen.getByRole('button', { name: 'Share session-1' });
+    const panelToggle = screen.getByRole('button', { name: '세션 패널' });
+    // DOM 순서로 왼쪽에 있는지 본다(jsdom 은 레이아웃을 재지 않는다).
+    expect(
+      share.compareDocumentPosition(panelToggle) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});

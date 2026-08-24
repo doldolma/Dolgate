@@ -67,6 +67,10 @@ import {
   createEmptyCommandBuffer,
 } from '../lib/terminal-autocomplete';
 import { detectsSubshellEntry } from '../lib/subshell-detect';
+import {
+  isLayoutTransitionActive,
+  subscribeToLayoutTransitionEnd,
+} from '../lib/layout-transition';
 import { redactAiContext } from '../lib/ai-context-redact';
 import {
   mapPrefixKey,
@@ -83,6 +87,7 @@ import {
 import type { TerminalSessionPaneProps } from '../components/terminal-workspace/types';
 import {
   SESSION_SHARE_CHAT_TOAST_TTL_MS,
+  canShareSessionTab,
   didTerminalSessionJustConnect,
   getVisibleSessionShareChatNotifications,
   isPendingConnectionSessionId,
@@ -844,6 +849,13 @@ export function useTerminalSessionViewController({
     };
   }, []);
 
+  // 훅 등록은 effect 안에서 한 번만 하므로, 최신 캡처 함수를 ref 로 물려 준다(닫힌 값이 굳지
+  // 않게).
+  const captureShareSnapshotRef = useRef(captureShareSnapshot);
+  useEffect(() => {
+    captureShareSnapshotRef.current = captureShareSnapshot;
+  }, [captureShareSnapshot]);
+
   const flushRequestedShareSnapshot = useCallback(async () => {
     const runtime = runtimeRef.current;
     const updateSnapshot = liveUpdateSessionShareSnapshotRef.current;
@@ -1100,6 +1112,8 @@ export function useTerminalSessionViewController({
       getSelection: () => runtime.getSelection(),
       captureRecentText: (maxLines: number) => runtime.captureRecentText(maxLines),
       captureTextSnapshot: () => runtime.captureTextSnapshot(),
+      // 세션 패널의 공유 섹션이 첫 화면을 뜨는 경로(패널은 pane 밖이라 런타임에 못 닿는다).
+      captureShareSnapshot: () => captureShareSnapshotRef.current(),
       // 세션 패널(워크스페이스 레벨)이 이 pane 의 셸에 입력을 보내는 경로. 연결이 죽어 있으면
       // sendInputIfConnected 가 조용히 버린다.
       sendInput: (data: string) => {
@@ -1122,6 +1136,9 @@ export function useTerminalSessionViewController({
       runtime.write(restoredSnapshot);
     }
     resizeSchedulerRef.current = createTerminalResizeScheduler({
+      // 세션 패널이 여닫히는 0.15초 동안은 재지 않는다 — 프레임마다 격자가 바뀌면 PTY·tmux 로
+      // 리사이즈가 쏟아진다. 전환이 끝나면 아래 구독이 한 번 요청한다.
+      isHeld: isLayoutTransitionActive,
       fit: () => {
         const cell = liveTmuxCellRef.current;
         if (liveIsTmuxPaneRef.current && cell) {
@@ -1190,12 +1207,17 @@ export function useTerminalSessionViewController({
       resizeSchedulerRef.current?.request();
     });
     resizeObserver.observe(containerRef.current);
+    // 전환이 끝나면(패널 폭이 확정되면) 그때 한 번 맞춘다.
+    const unsubscribeLayoutTransition = subscribeToLayoutTransitionEnd(() => {
+      resizeSchedulerRef.current?.request();
+    });
 
     resizeSchedulerRef.current.request();
     publishCurrentTerminalE2EState();
 
     return () => {
       resizeObserver.disconnect();
+      unsubscribeLayoutTransition();
       containerRef.current?.removeEventListener('mousedown', handlePointerActivate);
       containerRef.current?.removeEventListener('focusin', handleFocusIn);
       containerRef.current?.removeEventListener('focusout', handleFocusOut);
@@ -1627,10 +1649,9 @@ export function useTerminalSessionViewController({
   }, []);
 
   const shareState = tab?.sessionShare ?? null;
-  // tmux pane 에는 공유 버튼을 두지 않는다. control mode 는 pane 이 여럿이라 화면마다 떠 있는
-  // 알약이 그만큼 늘고, 공유는 pane 하나가 아니라 그 세션을 여는 일이라 pane 단위 버튼이
-  // 가리키는 대상이 흐리다. (일반 SSH 세션에서는 그대로 있다.)
-  const canShareSession = tab?.source === 'host' && !tab?.tmux;
+  // 판정은 세션 패널의 `공유` 섹션과 **같은 함수**를 쓴다 — 한쪽만 열리면 "버튼은 있는데
+  // 눌러도 아무 일이 없다" 가 된다.
+  const canShareSession = canShareSessionTab(tab);
   const canStartShare =
     canShareSession && tab?.status === 'connected' && shareState?.status !== 'starting';
   const visibleSessionShareChatNotifications = useMemo(

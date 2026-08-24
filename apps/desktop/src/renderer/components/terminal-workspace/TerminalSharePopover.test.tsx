@@ -9,7 +9,6 @@ describe('TerminalSharePopover', () => {
     render(
       <TerminalSharePopover
         anchorRef={{ current: null }}
-        showHeader={false}
         open
         canStartShare={false}
         shareCopyStatus={null}
@@ -38,7 +37,6 @@ describe('TerminalSharePopover', () => {
     render(
       <TerminalSharePopover
         anchorRef={{ current: null }}
-        showHeader
         open
         canStartShare
         shareCopyStatus="링크를 복사했습니다."
@@ -72,7 +70,6 @@ describe('TerminalSharePopover', () => {
     render(
       <TerminalSharePopover
         anchorRef={{ current: null }}
-        showHeader
         open
         canStartShare
         shareCopyStatus={null}
@@ -109,7 +106,6 @@ describe('TerminalSharePopover', () => {
     render(
       <TerminalSharePopover
         anchorRef={{ current: null }}
-        showHeader={false}
         open={false}
         actions={<button type="button">Serial actions</button>}
         canStartShare

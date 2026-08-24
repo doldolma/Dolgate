@@ -1,7 +1,7 @@
 // 배관 검증. 판정 로직은 lib/session-panel.test.ts 가 덮으므로, 여기서는 "화면의 버튼을 누르면
 // 그 세션의 셸에 정확히 무엇이 나가는가" 만 본다 — 레지스트리는 실물을 쓴다.
 
-import { fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   registerTerminalHooks,
@@ -15,7 +15,10 @@ import {
   publishHostMetrics,
 } from '../../../lib/host-metrics-registry';
 import { SessionPanel } from './SessionPanel';
-import { useSessionPanelTargetSessionId } from './useSessionPanelTarget';
+import {
+  SESSION_PANEL_MOTION_MS,
+  useSessionPanelTargetSessionId,
+} from './useSessionPanelTarget';
 
 interface FakeBlock {
   id: number;
@@ -116,6 +119,7 @@ beforeEach(() => {
     getSelection: vi.fn(() => ''),
     captureRecentText: vi.fn(() => ''),
     captureTextSnapshot: vi.fn(() => []),
+    captureShareSnapshot: () => null,
     sendInput: (data: string) => sent.push(data),
     isBracketedPasteEnabled: () => bracketedPaste,
     scrollToLine: (line: number) => scrolled.push(line),
@@ -392,6 +396,27 @@ describe('useSessionPanelTargetSessionId', () => {
 
   it('포커스가 없으면 null', () => {
     expect(target(null)).toBeNull();
+  });
+
+  it('닫은 뒤에도 전환 길이만큼 남는다 — 접히는 모습을 그리려면 필요하다', () => {
+    vi.useFakeTimers();
+    try {
+      setState({ sessionPanelOpen: true });
+      const view = renderHook(() => useSessionPanelTargetSessionId('session-1'));
+      expect(view.result.current).toBe('session-1');
+
+      setState({ sessionPanelOpen: false });
+      view.rerender();
+      // 곧바로 들어내면 폭이 줄어드는 모습이 보이지 않는다.
+      expect(view.result.current).toBe('session-1');
+
+      act(() => {
+        vi.advanceTimersByTime(SESSION_PANEL_MOTION_MS);
+      });
+      expect(view.result.current).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
