@@ -12,6 +12,10 @@
 // 없고, 보는 쪽은 구독으로 충분하다.
 
 import type { HostMetrics, HostProcess, HostSystemInfo } from './host-metrics';
+import {
+  clearHostMetricsHistory,
+  recordHostMetricsSample,
+} from './host-metrics-history';
 
 /** 패널이 보고 있을 때의 폴링 주기. 상태바용 10초로는 프로세스 목록이 굼떠 보인다. */
 export const HOST_METRICS_BOOST_INTERVAL_MS = 3_000;
@@ -121,11 +125,19 @@ export function publishHostMetrics(
   const entry = entryFor(sessionId);
   entry.snapshot = snapshot;
   entry.version += 1;
+  // 이력은 **발행 지점 한 곳에서만** 쌓는다. 패널이 열려 있는지와 무관하게 폴링은 돌고 있으니,
+  // 여기서 남겨 두면 패널을 닫았다 열어도 그동안의 10분이 이미 그려져 있다.
+  if (snapshot.metrics && snapshot.updatedAtMs !== null) {
+    recordHostMetricsSample(sessionId, snapshot.metrics, snapshot.updatedAtMs);
+  }
   notify(entry.listeners);
 }
 
 /** 세션이 끝나면 버린다 — 남겨 두면 다음 세션이 옛 값을 잠깐 보여 준다. */
 export function clearHostMetrics(sessionId: string): void {
+  // 이력은 **먼저** 지운다. 두 지도는 각자 정리되므로(disposeIfIdle), 여기서 조기 반환하면
+  // "세션이 끝났는데 이력만 남아 있는" 상태가 만들어진다.
+  clearHostMetricsHistory(sessionId);
   const entry = entries.get(sessionId);
   if (!entry) {
     return;

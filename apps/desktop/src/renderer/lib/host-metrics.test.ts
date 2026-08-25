@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildHostMetricsCommand,
   computeHostMetrics,
+  diskUsedRatio,
   formatBytesPerSecond,
   formatKibibytes,
   formatUptime,
@@ -26,6 +27,7 @@ function output(overrides: Partial<Record<string, string>> = {}): string {
       '  eth0: 987654321   54321    0    0    0     0          0         0 123456789   43210    0    0    0     0       0          0',
     ].join('\n'),
     load: '0.42 0.35 0.30 2/345 12345',
+    netdev: 'eth0',
     uptime: '123456.78 987654.32',
     cpus: '4',
     // 물리 디스크(sata1·sata2)만 세어야 한다. 파티션(sata1p1)·RAID(md0)·
@@ -67,15 +69,16 @@ describe('parseHostMetricsSample', () => {
     expect(sample.cpu).toEqual({ busy: 1250 + 890 + 45, total: 990159 });
     expect(sample.memTotalKb).toBe(16316412);
     expect(sample.memAvailableKb).toBe(10245680);
-    // loopback 은 빼고 eth0 만.
-    expect(sample.net).toEqual({ rxBytes: 987654321, txBytes: 123456789 });
+    // loopback 은 빼고 eth0 만. 합계가 아니라 **인터페이스별**로 들고 있는다 — 목록이 바뀌어도
+    // 차분이 망가지지 않게 하려면 여기서 미리 더하면 안 된다.
+    expect(sample.net).toEqual({ eth0: { rxBytes: 987654321, txBytes: 123456789 } });
     expect(sample.loadAvg1).toBe(0.42);
     expect(sample.uptimeSeconds).toBe(123456.78);
     expect(sample.cpuCount).toBe(4);
-    // (20000 + 40000) 섹터 × 512 = 30,720,000 — 파티션·md0·dm-0·loop 는 빠진다.
+    // 파티션·md0·dm-0·loop 는 빠지고 물리 디스크만, 디스크별로.
     expect(sample.diskIo).toEqual({
-      readBytes: (20000 + 40000) * 512,
-      writeBytes: (8000 + 16000) * 512,
+      sata1: { readBytes: 20000 * 512, writeBytes: 8000 * 512 },
+      sata2: { readBytes: 40000 * 512, writeBytes: 16000 * 512 },
     });
     // 큰 것부터, 장치당 하나. tmpfs·loop·rclone(google{}:) 은 빠지고,
     // 같은 cachedev_1 의 bind mount 들은 원래 볼륨(/volume1)으로 합쳐진다.
@@ -116,6 +119,59 @@ describe('parseHostMetricsSample', () => {
   });
 });
 
+describe('표준에 맞춘 계산', () => {
+  it('진짜 장치만 센다 — 브리지·veth 를 같이 더하면 같은 바이트를 두세 번 센다', () => {
+    // 도커 호스트의 흔한 모습. 컨테이너가 받은 것이 eth0 수신 · docker0 송신 · veth 송신으로
+    // 세 번 잡히면 "받기만 했는데 보내기가 두 배" 가 된다.
+    const net = [
+      'Inter-|   Receive                                                |  Transmit',
+      ' face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed',
+      '  eth0: 100000   1    0    0    0     0          0         0 5000   1    0    0    0     0       0          0',
+      '  docker0: 0   0    0    0    0     0          0         0 100000   1    0    0    0     0       0          0',
+      '  vethabc: 0   0    0    0    0     0          0         0 100000   1    0    0    0     0       0          0',
+      '  tailscale0: 100000   1    0    0    0     0          0         0 5000   1    0    0    0     0       0          0',
+    ].join('\n');
+
+    const sample = parseHostMetricsSample(output({ net, netdev: 'eth0' }), 1_000);
+    expect(sample.net).toEqual({ eth0: { rxBytes: 100000, txBytes: 5000 } });
+  });
+
+  it('물리 장치를 못 찾으면 예전처럼 전부 센다 — 컨테이너 안에서는 eth0 도 veth 다', () => {
+    const sample = parseHostMetricsSample(output({ netdev: '' }), 1_000);
+    expect(Object.keys(sample.net ?? {})).toEqual(['eth0']);
+  });
+
+  it('글롭이 안 펼쳐진 출력은 목록으로 안 읽는다', () => {
+    const sample = parseHostMetricsSample(output({ netdev: '/sys/class/net/*' }), 1_000);
+    expect(Object.keys(sample.net ?? {})).toEqual(['eth0']);
+  });
+
+  it('CPU 는 guest 를 두 번 세지 않는다 — 커널이 이미 user 안에 넣어 보고한다', () => {
+    // busy 50 / total 100 인 호스트. guest 500→550 이 user 안에 이미 들어 있다.
+    const first = parseHostMetricsSample(
+      output({ stat: 'cpu  1000 0 0 1000 0 0 0 0 500 0', uptime: '100.00 400.00' }),
+      0,
+    );
+    const second = parseHostMetricsSample(
+      output({ stat: 'cpu  1050 0 0 1050 0 0 0 0 550 0', uptime: '101.00 401.00' }),
+      1_000,
+    );
+    expect(computeHostMetrics(second, first).cpuPercent).toBeCloseTo(50, 5);
+  });
+
+  it('디스크 사용률은 df 와 같은 식이다 — 예약 블록을 여유로 세지 않는다', () => {
+    // df 가 95% 라고 적는 볼륨. used/total 로 세면 90% 가 되어 5%p 낮게 나온다.
+    const disk = [
+      'Filesystem              1024-blocks       Used  Available Capacity Mounted on',
+      '/dev/sda1                    100000      90000       5000      95% /',
+    ].join('\n');
+    const sample = parseHostMetricsSample(output({ disk }), 1_000);
+    expect(diskUsedRatio(sample.disks[0])).toBeCloseTo(0.947, 3);
+    // 총량은 줄여 적지 않는다 — 디스크 크기는 크기대로 보여 준다.
+    expect(sample.disks[0].totalKb).toBe(100000);
+  });
+});
+
 describe('computeHostMetrics', () => {
   it('첫 샘플에서는 CPU·네트워크가 비어 있고 나머지는 채워진다', () => {
     const metrics = computeHostMetrics(parseHostMetricsSample(output(), 1_000), null);
@@ -132,7 +188,7 @@ describe('computeHostMetrics', () => {
     const first = parseHostMetricsSample(output(), 0);
     // 1초 동안 busy 가 25, 전체가 100 늘었다 → 25%.
     const second = parseHostMetricsSample(
-      output({ stat: 'cpu  1275 0 890 987729 320 0 45 0 0 0' }),
+      output({ stat: 'cpu  1275 0 890 987729 320 0 45 0 0 0', uptime: '123457.78 987655.32' }),
       1_000,
     );
 
@@ -149,6 +205,7 @@ describe('computeHostMetrics', () => {
           '   8       1 sata1p1 900 0 18000 90 400 0 7000 40 0 90 130',
           '   8      16 sata2 2000 0 40000 200 800 0 16000 80 0 200 280',
         ].join('\n'),
+        uptime: '123458.78 987656.32',
       }),
       2_000,
     );
@@ -169,6 +226,7 @@ describe('computeHostMetrics', () => {
           '    lo: 500000     100    0    0    0     0          0         0   500000     100    0    0    0     0       0          0',
           '  eth0: 987664321   54321    0    0    0     0          0         0 123458789   43210    0    0    0     0       0          0',
         ].join('\n'),
+        uptime: '123458.78 987656.32',
       }),
       2_000,
     );
@@ -177,6 +235,160 @@ describe('computeHostMetrics', () => {
     // 수신 10,000 바이트 / 2초
     expect(metrics.rxBytesPerSec).toBeCloseTo(5000, 5);
     expect(metrics.txBytesPerSec).toBeCloseTo(1000, 5);
+  });
+
+  it('응답이 늦게 와도 값이 달라지지 않는다 — 분모는 원격이 잰 간격이다', () => {
+    // 같은 왕복에서 함께 읽어 온 /proc/uptime 이 3.00초 흘렀다고 말한다. 응답이 언제
+    // 도착했는지(atMs)는 그 사실을 바꾸지 못한다.
+    const first = parseHostMetricsSample(output({ uptime: '100.00 400.00' }), 0);
+    const moved = {
+      net: [
+        'Inter-|   Receive                                                |  Transmit',
+        ' face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed',
+        '  eth0: 987684321   54321    0    0    0     0          0         0 123456789   43210    0    0    0     0       0          0',
+      ].join('\n'),
+      uptime: '103.00 403.00',
+    };
+
+    const prompt = computeHostMetrics(parseHostMetricsSample(output(moved), 3_000), first);
+    const delayed = computeHostMetrics(parseHostMetricsSample(output(moved), 4_300), first);
+
+    // 수신 30,000 바이트 / 3초.
+    expect(prompt.rxBytesPerSec).toBeCloseTo(10_000, 5);
+    expect(delayed.rxBytesPerSec).toBeCloseTo(10_000, 5);
+  });
+
+  it('/proc/uptime 을 못 읽는 호스트에서는 받은 시각으로 물러선다', () => {
+    const first = parseHostMetricsSample(output({ uptime: '' }), 0);
+    const second = parseHostMetricsSample(
+      output({
+        uptime: '',
+        net: [
+          'Inter-|   Receive                                                |  Transmit',
+          ' face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed',
+          '  eth0: 987664321   54321    0    0    0     0          0         0 123456789   43210    0    0    0     0       0          0',
+        ].join('\n'),
+      }),
+      2_000,
+    );
+
+    // 수신 10,000 바이트 / 2초.
+    expect(computeHostMetrics(second, first).rxBytesPerSec).toBeCloseTo(5_000, 5);
+  });
+
+  it('간격이 너무 짧으면 초당 값을 내지 않는다 — 옆 점들과 비교할 수 없는 값이다', () => {
+    const first = parseHostMetricsSample(output({ uptime: '100.00 400.00' }), 0);
+    // 0.3초 사이에 30,000 바이트. 산술적으로는 100 K/s 지만 3초·10초짜리 점들과 나란히
+    // 놓을 수 있는 값이 아니다.
+    const second = parseHostMetricsSample(
+      output({
+        uptime: '100.30 400.30',
+        stat: 'cpu  1275 0 890 987729 320 0 45 0 0 0',
+        net: [
+          'Inter-|   Receive                                                |  Transmit',
+          ' face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed',
+          '  eth0: 987684321   54321    0    0    0     0          0         0 123458789   43210    0    0    0     0       0          0',
+        ].join('\n'),
+      }),
+      300,
+    );
+
+    const metrics = computeHostMetrics(second, first);
+    expect(metrics.rxBytesPerSec).toBeNull();
+    expect(metrics.txBytesPerSec).toBeNull();
+    expect(metrics.diskReadBytesPerSec).toBeNull();
+    expect(metrics.diskWriteBytesPerSec).toBeNull();
+    // CPU 는 jiffies 의 **비율**이라 간격과 무관하다 — 같이 버리지 않는다.
+    expect(metrics.cpuPercent).toBeCloseTo(25, 5);
+    expect(metrics.memUsedKb).toBe(16316412 - 10245680);
+  });
+
+  it('인터페이스가 사라져도 그 계열이 끊기지 않는다', () => {
+    // 컨테이너의 veth 하나가 없어진다. 합계로 다루면 총합이 뒤로 가서 송신 값이 통째로
+    // 버려졌다 — 차트에서 ↓는 이어지는데 ↑만 빵꾸 나던 것이 이것이다.
+    const withVeth = [
+      'Inter-|   Receive                                                |  Transmit',
+      ' face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed',
+      '  eth0: 1000000   1    0    0    0     0          0         0 2000000   1    0    0    0     0       0          0',
+      '  vethabc: 5000   1    0    0    0     0          0         0 3000000   1    0    0    0     0       0          0',
+    ].join('\n');
+    const withoutVeth = [
+      'Inter-|   Receive                                                |  Transmit',
+      ' face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed',
+      '  eth0: 1030000   1    0    0    0     0          0         0 2010000   1    0    0    0     0       0          0',
+    ].join('\n');
+
+    const first = parseHostMetricsSample(output({ net: withVeth, uptime: '100.00 400.00' }), 0);
+    const second = parseHostMetricsSample(
+      output({ net: withoutVeth, uptime: '103.00 403.00' }),
+      3_000,
+    );
+
+    const metrics = computeHostMetrics(second, first);
+    // 남아 있는 eth0 만 센다: 수신 30,000 / 3초, 송신 10,000 / 3초.
+    expect(metrics.rxBytesPerSec).toBeCloseTo(10_000, 5);
+    expect(metrics.txBytesPerSec).toBeCloseTo(10_000 / 3, 5);
+  });
+
+  it('인터페이스가 새로 생겨도 그 평생 누적이 한 점에 몰리지 않는다', () => {
+    const before = [
+      'Inter-|   Receive                                                |  Transmit',
+      ' face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed',
+      '  eth0: 1000000   1    0    0    0     0          0         0 2000000   1    0    0    0     0       0          0',
+    ].join('\n');
+    const after = [
+      'Inter-|   Receive                                                |  Transmit',
+      ' face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed',
+      '  eth0: 1030000   1    0    0    0     0          0         0 2010000   1    0    0    0     0       0          0',
+      // 이 컨테이너는 지금까지 40 MB 를 보냈다. 그것을 3초의 델타로 세면 12 MiB/s 가 된다.
+      '  vethabc: 9000000   1    0    0    0     0          0         0 40000000   1    0    0    0     0       0          0',
+    ].join('\n');
+
+    const first = parseHostMetricsSample(output({ net: before, uptime: '100.00 400.00' }), 0);
+    const second = parseHostMetricsSample(output({ net: after, uptime: '103.00 403.00' }), 3_000);
+
+    const metrics = computeHostMetrics(second, first);
+    expect(metrics.rxBytesPerSec).toBeCloseTo(10_000, 5);
+    expect(metrics.txBytesPerSec).toBeCloseTo(10_000 / 3, 5);
+  });
+
+  it('디스크가 하나 빠져도 나머지로 계속 센다', () => {
+    const both = [
+      '   8       0 sata1 1000 0 20000 100 500 0 8000 50 0 100 150',
+      '   8      16 sata2 2000 0 40000 200 800 0 16000 80 0 200 280',
+    ].join('\n');
+    const one = '   8       0 sata1 1000 0 22000 100 500 0 8500 50 0 100 150';
+
+    const first = parseHostMetricsSample(output({ diskio: both, uptime: '100.00 400.00' }), 0);
+    const second = parseHostMetricsSample(output({ diskio: one, uptime: '102.00 402.00' }), 2_000);
+
+    const metrics = computeHostMetrics(second, first);
+    // sata1 만: 읽기 2000 섹터 × 512 / 2초, 쓰기 500 섹터 × 512 / 2초.
+    expect(metrics.diskReadBytesPerSec).toBeCloseTo((2000 * 512) / 2, 5);
+    expect(metrics.diskWriteBytesPerSec).toBeCloseTo((500 * 512) / 2, 5);
+  });
+
+  it('한 장치가 되감기면 그 회차는 값을 내지 않는다 — 0 이라고 말하면 거짓말이다', () => {
+    // 나머지로 합계를 내면, 마침 그것들이 한가할 때 "트래픽 없음" 이라는 정상값 0 이 나온다.
+    // 32비트 카운터는 1 Gbps 에서 34초마다 되감기므로 드문 일이 아니다.
+    const before = [
+      '   8       0 sata1 1000 0 20000 100 500 0 8000 50 0 100 150',
+      '   8      16 sata2 2000 0 40000 200 800 0 16000 80 0 200 280',
+    ].join('\n');
+    // sata2 가 교체되어 카운터가 0부터 다시 센다. sata1 은 그사이 한가했다.
+    const after = [
+      '   8       0 sata1 1000 0 20000 100 500 0 8000 50 0 100 150',
+      '   8      16 sata2 1 0 10 1 1 0 5 1 0 1 1',
+    ].join('\n');
+
+    const first = parseHostMetricsSample(output({ diskio: before, uptime: '100.00 400.00' }), 0);
+    const second = parseHostMetricsSample(output({ diskio: after, uptime: '102.00 402.00' }), 2_000);
+
+    const metrics = computeHostMetrics(second, first);
+    expect(metrics.diskReadBytesPerSec).toBeNull();
+    expect(metrics.diskWriteBytesPerSec).toBeNull();
+    // 다른 계열은 멀쩡하다 — 되감긴 것은 디스크뿐이다.
+    expect(metrics.rxBytesPerSec).not.toBeNull();
   });
 
   it('카운터가 되감기면(재부팅) 그 값을 버린다', () => {
@@ -301,6 +513,26 @@ describe('프로세스 목록', () => {
     // busybox ps 처럼 옵션을 모르는 호스트에서는 빈 섹션이 되고, 그때 UI 가 안내를 바꾼다.
     expect(parseHostProcessesFromOutput('@@dolgate:mem\nMemTotal: 1 kB\n')).toBeNull();
     expect(parseHostProcessesFromOutput('@@dolgate:ps\n')).toEqual([]);
+  });
+});
+
+describe('섹션 경계', () => {
+  it('ps 출력에 섞인 우리 명령이 섹션을 자르지 않는다', () => {
+    // 수집 명령 자신이 `ps` 목록에 한 줄로 나타난다. 그 줄 가운데의 마커를 경계로 보면
+    // 그 아래 프로세스가 통째로 잘렸다.
+    const ps = [
+      ' 1234 root  0.5  1.0  20480 /usr/bin/node server.js',
+      ' 9999 root  0.0  0.1   2048 sh -c echo @@dolgate:stat; grep -m1 "^cpu " /proc/stat',
+      ' 4321 www   0.1  0.3   8192 nginx: worker process',
+    ].join('\n');
+    const processes = parseHostProcessesFromOutput(output({ ps }));
+    expect(processes?.map((entry) => entry.pid)).toEqual([1234, 9999, 4321]);
+  });
+
+  it('마커가 값 안에 들어 있어도 지표 섹션은 멀쩡하다', () => {
+    const sample = parseHostMetricsSample(output(), 1_000);
+    expect(sample.memTotalKb).toBe(16316412);
+    expect(sample.cpuCount).toBe(4);
   });
 });
 

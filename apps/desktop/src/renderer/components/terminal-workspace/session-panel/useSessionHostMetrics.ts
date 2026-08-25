@@ -13,6 +13,12 @@ import {
   watchHostMetrics,
   type HostMetricsSnapshot,
 } from '../../../lib/host-metrics-registry';
+import {
+  getHostMetricsHistory,
+  getHostMetricsHistoryVersion,
+  subscribeHostMetricsHistory,
+  type MetricsHistorySample,
+} from '../../../lib/host-metrics-history';
 
 export function useSessionHostMetrics(
   sessionId: string,
@@ -45,6 +51,31 @@ export function useSessionHostMetrics(
   return useMemo(
     () => getHostMetricsSnapshot(sessionId),
     // version 이 스냅샷이다.
+    [sessionId, version],
+  );
+}
+
+/**
+ * 차트가 읽는 최근 10분.
+ *
+ * 여기서도 폴링을 시키지 않는다 — 이력은 발행 지점에서 쌓이므로, 패널을 닫아 두는 동안에도
+ * 상태바용 10초 폴링이 창을 채워 둔다. 다시 열면 그 10분이 그려져 있다.
+ */
+export function useSessionHostMetricsHistory(
+  sessionId: string,
+): readonly MetricsHistorySample[] {
+  const subscribe = useCallback(
+    (onChange: () => void) => subscribeHostMetricsHistory(sessionId, onChange),
+    [sessionId],
+  );
+  const version = useSyncExternalStore(
+    subscribe,
+    () => getHostMetricsHistoryVersion(sessionId),
+    () => 0,
+  );
+  return useMemo(
+    // version 이 스냅샷이다.
+    () => getHostMetricsHistory(sessionId),
     [sessionId, version],
   );
 }

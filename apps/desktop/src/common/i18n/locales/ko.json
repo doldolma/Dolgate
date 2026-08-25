@@ -3653,7 +3653,13 @@
       "latencyValue": "{{ms}}ms",
       "cpuModel": "CPU",
       "arch": "아키텍처",
-      "kernel": "커널"
+      "kernel": "커널",
+      "netIn": "받음",
+      "netOut": "보냄",
+      "diskRead": "읽기",
+      "diskWrite": "쓰기",
+      "loadShort": "부하",
+      "chartScaleMax": "최대 {{value}}"
     },
     "processes": {
       "title": "프로세스",

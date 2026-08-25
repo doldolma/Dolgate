@@ -256,7 +256,17 @@ export function useHostMetrics({
       schedule(intervalMs);
     };
 
-    void poll();
+    // 주기가 바뀌어 effect 가 다시 도는 것뿐이면(패널·프로세스 섹션 여닫기) **즉시 찍지
+    // 않는다.** 직전 폴링 직후에 열면 간격이 0.x초가 되고, 그 왕복의 초당 값이 통째로 부풀어
+    // 차트 눈금을 10분 동안 붙잡는다. 남은 시간만큼 기다렸다 찍는다.
+    //
+    // 직전 샘플이 없거나(첫 폴링) 한참 지났으면(멈춘 뒤 재시도·탭 복귀) 남은 시간이 0이라
+    // 예전과 똑같이 즉시 나간다.
+    if (previous) {
+      schedule(Math.max(0, intervalMs - (Date.now() - previous.atMs)));
+    } else {
+      void poll();
+    }
 
     return () => {
       cancelled = true;

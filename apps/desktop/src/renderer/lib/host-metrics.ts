@@ -29,6 +29,10 @@ export function buildHostMetricsCommand(
     'grep -E "^(MemTotal|MemAvailable):" /proc/meminfo || true',
     `echo ${SECTION}:net`,
     'cat /proc/net/dev || true',
+    // 어느 것이 진짜 장치인지. /sys/class/net/<이름>/device 가 있으면 실제 NIC 이고,
+    // 브리지·veth·본드·VLAN·터널에는 없다(netdata 가 쓰는 판정). 자세한 이유는 parseNet 옆에.
+    `echo ${SECTION}:netdev`,
+    'for i in /sys/class/net/*; do [ -e "$i/device" ] && echo "${i##*/}"; done 2>/dev/null || true',
     `echo ${SECTION}:load`,
     'cat /proc/loadavg || true',
     `echo ${SECTION}:uptime`,
@@ -170,6 +174,15 @@ export interface HostDiskUsage {
   mount: string;
   usedKb: number;
   totalKb: number;
+  /**
+   * 이 사용자가 실제로 쓸 수 있는 여유(KB).
+   *
+   * 사용률은 `used / total` 이 아니라 **`used / (used + available)`** 이다 — `df` 가 쓰는 식이다.
+   * ext4 는 기본 5% 를 root 예약으로 잡는데 그것을 여유로 세면, df 가 95% 라고 하는 볼륨이
+   * 화면에서는 90% 가 되고 경고도 그만큼 늦게 걸린다. 총량은 그대로 보여 준다(디스크 크기를
+   * 줄여 적으면 그건 또 다른 거짓말이다).
+   */
+  availableKb: number;
 }
 
 /** 한 번의 폴링에서 읽어낸 원시 값. 차분이 필요한 항목은 누적값 그대로 담는다. */
@@ -180,10 +193,14 @@ export interface HostMetricsSample {
   cpu: { busy: number; total: number } | null;
   memTotalKb: number | null;
   memAvailableKb: number | null;
-  /** 비-loopback 인터페이스 합계(누적 바이트). */
-  net: { rxBytes: number; txBytes: number } | null;
-  /** 물리 디스크 합계(누적 바이트). 파티션·RAID/LVM 계층은 빼서 중복 합산을 막는다. */
-  diskIo: { readBytes: number; writeBytes: number } | null;
+  /**
+   * 비-loopback 인터페이스의 **인터페이스별** 누적 바이트.
+   *
+   * 여기서 미리 더하지 않는 이유는 목록이 변하기 때문이다 — 자세한 것은 `sumDelta` 주석에.
+   */
+  net: Record<string, { rxBytes: number; txBytes: number }> | null;
+  /** 물리 디스크의 **디스크별** 누적 바이트. 파티션·RAID/LVM 계층은 빼서 중복 합산을 막는다. */
+  diskIo: Record<string, { readBytes: number; writeBytes: number }> | null;
   loadAvg1: number | null;
   uptimeSeconds: number | null;
   cpuCount: number | null;
@@ -212,16 +229,21 @@ export interface HostMetrics {
 function section(output: string, name: string): string {
   // 개행까지 포함해 찾는다. 이름만으로 찾으면 `disk` 가 `diskio` 마커에 먼저 걸려
   // 엉뚱한 섹션을 읽는다(한쪽 이름이 다른 쪽의 접두사인 경우).
-  const start = output.indexOf(`${SECTION}:${name}\n`);
-  if (start < 0) {
+  //
+  // **줄 맨 앞에 있는 마커만 센다.** 우리가 띄운 `sh -c 'echo @@dolgate:stat; …'` 자신이
+  // `ps` 출력에 한 줄로 나타나기 때문이다 — 그 줄 가운데의 마커를 섹션 경계로 보면 프로세스
+  // 목록이 거기서 통째로 잘린다. 우리가 찍는 마커는 언제나 줄 처음에 온다.
+  const marker = `${SECTION}:${name}\n`;
+  let start = output.startsWith(marker) ? 0 : output.indexOf(`\n${marker}`) + 1;
+  if (start <= 0 && !output.startsWith(marker)) {
     return '';
   }
   const from = output.indexOf('\n', start);
   if (from < 0) {
     return '';
   }
-  const next = output.indexOf(SECTION, from);
-  return output.slice(from + 1, next < 0 ? undefined : next);
+  const next = output.indexOf(`\n${SECTION}`, from);
+  return output.slice(from + 1, next < 0 ? undefined : next + 1);
 }
 
 function toNumber(value: string | undefined): number | null {
@@ -248,7 +270,11 @@ function parseCpu(block: string): HostMetricsSample['cpu'] {
   if (fields.length < 4 || fields.some((value) => !Number.isFinite(value))) {
     return null;
   }
-  const total = fields.reduce((sum, value) => sum + value, 0);
+  // 앞 8개(user·nice·system·idle·iowait·irq·softirq·steal)만 센다. 커널은 `guest`(9번째)를
+  // **이미 user 안에 넣어서** 보고하고 `guest_nice`(10번째)도 nice 안에 있다 — 다 더하면 두 번
+  // 세어져, KVM 게스트를 돌리는 호스트에서 실제 50% 가 66.7% 로 나온다. procps top·htop 도
+  // 같은 이유로 이 둘을 total 에서 뺀다.
+  const total = fields.slice(0, 8).reduce((sum, value) => sum + value, 0);
   const idle = fields[3] + (fields[4] ?? 0);
   return { busy: total - idle, total };
 }
@@ -275,13 +301,13 @@ function parseMem(block: string): { totalKb: number | null; availableKb: number 
 }
 
 /**
- * /proc/net/dev 의 인터페이스별 누적 바이트를 합산한다. loopback 은 제외 — 로컬 통신이
- * 실제 회선 사용량으로 잡히면 값이 크게 부풀려진다. 어느 NIC 인지 고르게 하지 않고 합계만
- * 보여주는 것은 의도된 단순화다.
+ * /proc/net/dev 의 인터페이스별 누적 바이트. **여기서 더하지 않는다** — 어느 것을 셀지는
+ * `filterPhysicalInterfaces` 가 정하고, 차분은 인터페이스별로 낸다(`sumDelta`).
  */
 function parseNet(block: string): HostMetricsSample['net'] {
-  let rxBytes = 0;
-  let txBytes = 0;
+  // 프로토타입 없이 만든다 — 아래 차분이 "이전 샘플에 없는 장치" 를 `undefined` 로 판정하는데,
+  // 평범한 객체라면 `constructor` 같은 이름이 없는데도 `undefined` 가 아니다.
+  const interfaces: Record<string, { rxBytes: number; txBytes: number }> = Object.create(null);
   let matched = false;
   for (const line of block.split('\n')) {
     const match = /^\s*([^:\s]+):\s*(.+)$/.exec(line);
@@ -289,7 +315,7 @@ function parseNet(block: string): HostMetricsSample['net'] {
       continue;
     }
     const name = match[1];
-    if (name === 'lo' || name.startsWith('lo:')) {
+    if (name === 'lo') {
       continue;
     }
     const fields = match[2].trim().split(/\s+/).map(Number);
@@ -298,11 +324,55 @@ function parseNet(block: string): HostMetricsSample['net'] {
     if (fields.length < 9 || !Number.isFinite(fields[0]) || !Number.isFinite(fields[8])) {
       continue;
     }
-    rxBytes += fields[0];
-    txBytes += fields[8];
+    interfaces[name] = { rxBytes: fields[0], txBytes: fields[8] };
     matched = true;
   }
-  return matched ? { rxBytes, txBytes } : null;
+  return matched ? interfaces : null;
+}
+
+/**
+ * `netdev` 섹션 — 진짜 장치인 인터페이스 이름들. 못 읽었으면 null(빈 목록과 구분한다).
+ *
+ * 글롭이 안 펼쳐지면 `/sys/class/net/*` 이 그대로 한 줄로 온다 — 경로 모양이면 버린다.
+ */
+function parsePhysicalInterfaces(block: string): Set<string> | null {
+  const names = block
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.includes('/'));
+  return names.length > 0 ? new Set(names) : null;
+}
+
+/**
+ * 셀 인터페이스를 고른다. **다 더하면 안 된다** — 같은 바이트가 지나는 계층마다 세어진다.
+ *
+ * 도커 컨테이너가 100 MB 를 받으면 `eth0` 의 수신, `docker0` 의 송신, `veth…` 의 송신으로
+ * 세 번 잡혀서 "받기만 했는데 보내기가 두 배" 로 찍힌다. 본딩·VLAN·터널(Tailscale·WireGuard)은
+ * 정확히 2배다. 그래서 모니터링 툴들은 합계를 내지 않고 인터페이스별로 보여 주거나 하나를
+ * 고르게 한다.
+ *
+ * 판정은 netdata 와 같다 — `/sys/class/net/<이름>/device` 가 있으면 진짜 장치. 이름 패턴을
+ * 나열하는 것보다 정확하고, 본딩도 저절로 풀린다(본드는 빠지고 슬레이브만 세므로 2배가 안 된다).
+ *
+ * **물리 장치를 하나도 못 찾으면 예전처럼 전부 센다.** 컨테이너 안에서 붙은 세션은 자기 eth0 이
+ * veth 라 물리 장치가 없는데, 거기서 0을 보여 주느니 겹쳐 세는 편이 낫다.
+ */
+function filterPhysicalInterfaces(
+  net: HostMetricsSample['net'],
+  physical: Set<string> | null,
+): HostMetricsSample['net'] {
+  if (!net || !physical) {
+    return net;
+  }
+  const kept: Record<string, { rxBytes: number; txBytes: number }> = Object.create(null);
+  let matched = false;
+  for (const [name, entry] of Object.entries(net)) {
+    if (physical.has(name)) {
+      kept[name] = entry;
+      matched = true;
+    }
+  }
+  return matched ? kept : net;
 }
 
 /**
@@ -322,8 +392,7 @@ const PHYSICAL_DISK_PATTERN =
  * 크기와 무관하게 커널이 512 로 환산해 보고한다).
  */
 function parseDiskIo(block: string): HostMetricsSample['diskIo'] {
-  let readBytes = 0;
-  let writeBytes = 0;
+  const disks: Record<string, { readBytes: number; writeBytes: number }> = Object.create(null);
   let matched = false;
   for (const line of block.split('\n')) {
     const fields = line.trim().split(/\s+/);
@@ -339,11 +408,20 @@ function parseDiskIo(block: string): HostMetricsSample['diskIo'] {
     if (sectorsRead === null || sectorsWritten === null) {
       continue;
     }
-    readBytes += sectorsRead * 512;
-    writeBytes += sectorsWritten * 512;
+    disks[name] = { readBytes: sectorsRead * 512, writeBytes: sectorsWritten * 512 };
     matched = true;
   }
-  return matched ? { readBytes, writeBytes } : null;
+  return matched ? disks : null;
+}
+
+/**
+ * 이 파일시스템의 사용률(0~1). **`df` 와 같은 식이다** — 분모가 총량이 아니라 `used + available`
+ * 이라, root 예약 블록을 여유로 세지 않는다. 화면의 숫자가 `df` 와 어긋나지 않게 하려면 사용률을
+ * 계산하는 자리는 여기 하나여야 한다.
+ */
+export function diskUsedRatio(disk: HostDiskUsage): number {
+  const capacity = disk.usedKb + disk.availableKb;
+  return capacity > 0 ? disk.usedKb / capacity : 0;
 }
 
 /** 툴팁에 보여줄 파일시스템 최대 개수. 더 늘리면 "간략히"가 무너진다. */
@@ -376,14 +454,15 @@ function parseDisks(block: string): HostDiskUsage[] {
     }
     const totalKb = toNumber(fields[1]);
     const usedKb = toNumber(fields[2]);
+    const availableKb = toNumber(fields[3]);
     // 마운트 경로에 공백이 있을 수 있어 6번째 필드부터 끝까지 잇는다.
     const mount = fields.slice(5).join(' ');
-    if (totalKb === null || usedKb === null || totalKb <= 0 || !mount) {
+    if (totalKb === null || usedKb === null || availableKb === null || totalKb <= 0 || !mount) {
       continue;
     }
     const existing = byDevice.get(device);
     if (!existing || mount.length < existing.mount.length) {
-      byDevice.set(device, { mount, usedKb, totalKb });
+      byDevice.set(device, { mount, usedKb, totalKb, availableKb });
     }
   }
   return [...byDevice.values()]
@@ -420,7 +499,10 @@ export function parseHostMetricsSample(output: string, atMs: number): HostMetric
     cpu: parseCpu(section(output, 'stat')),
     memTotalKb: mem.totalKb,
     memAvailableKb: mem.availableKb,
-    net: parseNet(section(output, 'net')),
+    net: filterPhysicalInterfaces(
+      parseNet(section(output, 'net')),
+      parsePhysicalInterfaces(section(output, 'netdev')),
+    ),
     diskIo: parseDiskIo(section(output, 'diskio')),
     loadAvg1: toNumber(load[0]),
     uptimeSeconds: toNumber(uptime[0]),
@@ -443,11 +525,95 @@ export function hasAnyHostMetric(sample: HostMetricsSample): boolean {
  * 이전 샘플과 비교해 표시값을 만든다. previous 가 없으면 누적값에서 바로 얻을 수 있는
  * 것들(메모리·load·디스크)만 채우고 CPU·네트워크는 null 로 둔다.
  */
+
+/**
+ * 장치별로 뺀 **다음** 더한다. 합계를 먼저 내고 빼면 목록이 바뀌는 순간 값이 망가진다.
+ *
+ * 시놀로지·도커 호스트에서는 컨테이너의 `veth…` 가 수시로 생겼다 사라지고, USB 디스크도
+ * 붙었다 빠진다. 합계로 다루면:
+ *
+ * - **사라질 때** 합계가 뒤로 가고, 음수 델타라 그 회차가 통째로 버려진다 — 차트에서 그 계열만
+ *   끊긴다(같은 샘플인데 ↓는 이어지고 ↑만 빵꾸 나던 것이 이것이다).
+ * - **생길 때** 그 장치의 **평생 누적**이 한 회차의 델타로 들어온다 — 3초 만에 수십 MB 를
+ *   보낸 것으로 찍히고, 그 한 점이 차트 눈금 꼭대기를 10분 동안 붙잡는다.
+ *
+ * 그래서 양쪽 샘플에 **다 있는** 장치만 센다. 새로 생긴 장치는 이번 회차에서 빠지고 다음
+ * 회차부터 정상으로 잡힌다.
+ *
+ * 어떤 장치의 카운터가 되감겼으면(그 장치만 리셋·32비트 랩어라운드) **이번 회차는 값을 내지
+ * 않는다.** 그 장치만 빼고 나머지로 합계를 내면, 마침 나머지가 한가할 때 "트래픽 없음" 이라는
+ * 정상값 0 이 나온다 — 회선이 꽉 차 있는데 차트에 직선이 그려진다. 되감겼다는 것은 그 사이
+ * 얼마가 지나갔는지 모른다는 뜻이므로, 0 이라고 말하는 것은 거짓말이다. 재부팅으로 전부
+ * 되감긴 경우도 같은 자리에서 걸린다.
+ */
+function sumDelta<T>(
+  current: Record<string, T> | null | undefined,
+  previous: Record<string, T> | null | undefined,
+  pick: (entry: T) => number,
+): number | null {
+  if (!current || !previous) {
+    return null;
+  }
+  let total = 0;
+  let counted = 0;
+  for (const [name, entry] of Object.entries(current)) {
+    const before = previous[name];
+    if (before === undefined) {
+      continue;
+    }
+    const delta = pick(entry) - pick(before);
+    if (delta < 0) {
+      return null;
+    }
+    total += delta;
+    counted += 1;
+  }
+  return counted > 0 ? total : null;
+}
+
+/**
+ * 차분의 분모(ms).
+ *
+ * `atMs` 는 렌더러가 **응답을 받은** 때다. 그 차이로 나누면 분모에 왕복 지연의 요동이 그대로
+ * 섞인다 — 한 번은 0.2초 만에 오고 다음은 1.5초 걸리면, 원격에서 카운터를 읽은 간격이 3.0초여도
+ * 분모는 4.3초가 되어 값이 30% 작게 나온다. RTT 가 한 자릿수 ms 인 LAN 에서는 티가 안 나지만
+ * SSM 이나 점프를 여러 번 넘는 호스트에서는 크다.
+ *
+ * `/proc/uptime` 은 **원격 호스트가 스스로 잰 시각**이고 같은 왕복에서 함께 읽어 온다. 두 값의
+ * 차이가 곧 카운터를 읽은 간격이라, 지연이 끼어들 자리가 없다(분해능 10ms).
+ *
+ * 되감기면(재부팅) 벽시계로 물러선다 — 그 왕복은 어차피 카운터도 함께 리셋되어 값이 안 나온다.
+ */
+function resolveElapsedMs(
+  current: HostMetricsSample,
+  previous: HostMetricsSample | null,
+): number {
+  if (!previous) {
+    return 0;
+  }
+  if (current.uptimeSeconds !== null && previous.uptimeSeconds !== null) {
+    const remoteMs = (current.uptimeSeconds - previous.uptimeSeconds) * 1000;
+    if (remoteMs > 0) {
+      return remoteMs;
+    }
+  }
+  return current.atMs - previous.atMs;
+}
+
+/**
+ * 초당 값을 낼 수 있는 최소 간격.
+ *
+ * 0.2초 간격의 차분도 산술적으로는 초당 값이지만, **옆에 놓인 3초·10초짜리 값들과 비교할 수
+ * 있는 값이 아니다** — 그 짧은 창에 우연히 걸린 버스트가 다섯 배로 부풀어, 그 한 점이 차트
+ * 눈금을 10분 동안 붙잡는다. 그런 왕복은 값을 내지 않고 선을 끊는다.
+ */
+export const MIN_RATE_INTERVAL_MS = 1_000;
+
 export function computeHostMetrics(
   current: HostMetricsSample,
   previous: HostMetricsSample | null,
 ): HostMetrics {
-  const elapsedMs = previous ? current.atMs - previous.atMs : 0;
+  const elapsedMs = resolveElapsedMs(current, previous);
 
   let cpuPercent: number | null = null;
   if (previous?.cpu && current.cpu) {
@@ -460,27 +626,16 @@ export function computeHostMetrics(
   }
 
   // 네트워크·디스크 모두 누적 바이트라 같은 방식으로 초당 값을 낸다.
-  const perSecond = (
-    currentValue: number | undefined,
-    previousValue: number | undefined,
-  ): number | null => {
-    if (currentValue === undefined || previousValue === undefined || elapsedMs <= 0) {
-      return null;
-    }
-    const delta = currentValue - previousValue;
-    // 재부팅 등으로 카운터가 되감기면 음수가 된다 — 이번 값은 버린다.
-    return delta >= 0 ? (delta / elapsedMs) * 1000 : null;
-  };
+  const perSecond = (delta: number | null): number | null =>
+    delta === null || elapsedMs < MIN_RATE_INTERVAL_MS ? null : (delta / elapsedMs) * 1000;
 
-  const rxBytesPerSec = perSecond(current.net?.rxBytes, previous?.net?.rxBytes);
-  const txBytesPerSec = perSecond(current.net?.txBytes, previous?.net?.txBytes);
+  const rxBytesPerSec = perSecond(sumDelta(current.net, previous?.net, (e) => e.rxBytes));
+  const txBytesPerSec = perSecond(sumDelta(current.net, previous?.net, (e) => e.txBytes));
   const diskReadBytesPerSec = perSecond(
-    current.diskIo?.readBytes,
-    previous?.diskIo?.readBytes,
+    sumDelta(current.diskIo, previous?.diskIo, (e) => e.readBytes),
   );
   const diskWriteBytesPerSec = perSecond(
-    current.diskIo?.writeBytes,
-    previous?.diskIo?.writeBytes,
+    sumDelta(current.diskIo, previous?.diskIo, (e) => e.writeBytes),
   );
 
   const memUsedKb =
@@ -568,7 +723,7 @@ export function isHostMetricAlarming(metrics: HostMetrics): {
       ? metrics.memUsedKb / metrics.memTotalKb
       : null;
   const diskRatio = metrics.disks.length
-    ? Math.max(...metrics.disks.map((disk) => disk.usedKb / disk.totalKb))
+    ? Math.max(...metrics.disks.map(diskUsedRatio))
     : null;
   return {
     cpu: metrics.cpuPercent !== null && metrics.cpuPercent >= 90,

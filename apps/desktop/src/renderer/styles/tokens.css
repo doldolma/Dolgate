@@ -49,6 +49,11 @@
   --warning-text: #8a6516;
   --info-bg: rgba(52, 87, 179, 0.12);
   --info-text: #2f4ea0;
+  /* 차트 계열색. 자원 패널의 곡선 두 줄(들어옴/나감, 읽기/쓰기)이 쓴다.
+     색맹 판정(OKLab ΔE)과 배경 대비를 검증기로 통과시킨 값이라 눈대중으로 바꾸지 말 것 —
+     밝기 대역이 라이트(L 0.43~0.77)와 다크(L 0.48~0.67)에서 서로 다르다. */
+  --chart-1: #3457b3;
+  --chart-2: #368b5e;
   --selection-tint: color-mix(in srgb, var(--accent-strong) 10%, var(--surface-elevated) 90%);
   --selection-tint-strong: color-mix(in srgb, var(--accent-strong) 15%, var(--surface-elevated) 85%);
   --selection-border: color-mix(in srgb, var(--accent-strong) 28%, var(--border) 72%);
@@ -133,6 +138,11 @@
   --warning-text: #f3d28a;
   --info-bg: rgba(120, 149, 238, 0.18);
   --info-text: #b9caf7;
+  /* 차트 계열색. 자원 패널의 곡선 두 줄(들어옴/나감, 읽기/쓰기)이 쓴다.
+     색맹 판정(OKLab ΔE)과 배경 대비를 검증기로 통과시킨 값이라 눈대중으로 바꾸지 말 것 —
+     밝기 대역이 라이트(L 0.43~0.77)와 다크(L 0.48~0.67)에서 서로 다르다. */
+  --chart-1: #6180da;
+  --chart-2: #41a875;
   --selection-tint: color-mix(in srgb, var(--accent-strong) 12%, var(--surface-elevated) 88%);
   --selection-tint-strong: color-mix(in srgb, var(--accent-strong) 18%, var(--surface-elevated) 82%);
   --selection-border: color-mix(in srgb, var(--accent-strong) 32%, var(--border) 68%);

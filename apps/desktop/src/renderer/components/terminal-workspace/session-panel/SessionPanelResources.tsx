@@ -2,15 +2,18 @@
 //
 // 수집은 새로 하지 않는다 — pane 이 돌리는 폴링을 그대로 읽고, 이 섹션이 열려 있는 동안만
 // 주기가 3초로 좁아진다(useSessionHostMetrics).
+//
+// 값은 차트와 함께 보여 준다. 숫자 하나로는 "지금 12%" 만 알 뿐, 보러 온 것(방금 튀었는지,
+// 계속 높았는지)을 알 수 없다. 이력은 발행 지점에서 쌓이므로(host-metrics-history) 이 섹션은
+// 그리기만 한다.
 
 import { useTranslation } from 'react-i18next';
 import { isAwsEc2HostRecord, isSshHostRecord } from '@shared';
 import { cn } from '../../../lib/cn';
 import { useAppStore } from '../../../store/appStore';
 import {
-  formatBytesPerSecond,
+  diskUsedRatio,
   formatKibibytes,
-  formatPercent,
   formatUptime,
   type HostDiskUsage,
 } from '../../../lib/host-metrics';
@@ -29,6 +32,7 @@ import {
 } from '../../../ui/icons';
 import { HostBadge } from '../../host-browser/HostBadge';
 import { SessionPanelEmpty } from './SessionPanelEmpty';
+import { SessionPanelResourceCharts } from './SessionPanelResourceCharts';
 import { useSessionHostMetrics } from './useSessionHostMetrics';
 
 interface SessionPanelResourcesProps {
@@ -39,19 +43,6 @@ interface SessionPanelResourcesProps {
   shellKind?: string | null;
   /** 왕복 지연(ms). SSH keepalive·SSM 데이터채널이 재는 값. */
   rttMs?: number | null;
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0 rounded-[9px] bg-[var(--surface-muted)] px-2.5 py-2">
-      <p className="truncate text-[0.68rem] uppercase tracking-[0.1em] text-[var(--text-soft)]">
-        {label}
-      </p>
-      <p className="mt-0.5 truncate text-[0.9rem] font-medium tabular-nums text-[var(--text)]">
-        {value}
-      </p>
-    </div>
-  );
 }
 
 /** 사용률 막대. 숫자만으로는 "많이 쓰는지" 가 한눈에 안 들어온다. */
@@ -68,7 +59,7 @@ function UsageBar({ ratio }: { ratio: number }) {
 }
 
 function DiskRow({ disk }: { disk: HostDiskUsage }) {
-  const ratio = disk.totalKb > 0 ? disk.usedKb / disk.totalKb : 0;
+  const ratio = diskUsedRatio(disk);
   return (
     <div className="px-2.5 py-1.5">
       <div className="flex items-baseline gap-2">
@@ -186,11 +177,6 @@ export function SessionPanelResources({
   const hostLine = [system?.hostname, describeHost(host)]
     .filter((part): part is string => Boolean(part))
     .join(' · ');
-  const memRatio =
-    metrics.memUsedKb !== null && metrics.memTotalKb
-      ? metrics.memUsedKb / metrics.memTotalKb
-      : null;
-
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-3">
       {status === 'paused' ? (
@@ -198,36 +184,7 @@ export function SessionPanelResources({
           {translate('sessionPanel.resources.paused')}
         </p>
       ) : null}
-      <div className="grid grid-cols-2 gap-1.5">
-        <Metric label="CPU" value={formatPercent(metrics.cpuPercent)} />
-        <Metric
-          label={translate('sessionPanel.resources.load')}
-          value={
-            metrics.loadAvg1 === null
-              ? '—'
-              : `${metrics.loadAvg1.toFixed(2)}${
-                  metrics.cpuCount ? ` / ${metrics.cpuCount}` : ''
-                }`
-          }
-        />
-      </div>
-      <div className="mt-1.5 rounded-[9px] bg-[var(--surface-muted)] px-2.5 py-2">
-        <div className="flex items-baseline gap-2">
-          <span className="flex-1 text-[0.68rem] uppercase tracking-[0.1em] text-[var(--text-soft)]">
-            RAM
-          </span>
-          <span className="text-[0.8rem] tabular-nums text-[var(--text)]">
-            {formatKibibytes(metrics.memUsedKb)} / {formatKibibytes(metrics.memTotalKb)}
-          </span>
-        </div>
-        {memRatio === null ? null : <UsageBar ratio={memRatio} />}
-      </div>
-      <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-        <Metric label="NET ↓" value={formatBytesPerSecond(metrics.rxBytesPerSec)} />
-        <Metric label="NET ↑" value={formatBytesPerSecond(metrics.txBytesPerSec)} />
-        <Metric label="DISK R" value={formatBytesPerSecond(metrics.diskReadBytesPerSec)} />
-        <Metric label="DISK W" value={formatBytesPerSecond(metrics.diskWriteBytesPerSec)} />
-      </div>
+      <SessionPanelResourceCharts sessionId={sessionId} metrics={metrics} />
       {metrics.disks.length > 0 ? (
         <div className="mt-2.5">
           <p className="px-2.5 text-[0.68rem] uppercase tracking-[0.1em] text-[var(--text-soft)]">
