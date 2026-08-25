@@ -5,3 +5,7 @@ edition = "2021"
 rust-version = "1.94"
 publish = false
 description = "stdio frame codec shared by the Dolgate sidecars"
+
+[dependencies]
+# 오류 체인을 걸어 소켓 원인을 찾는 데만 쓴다(neterr). 두 사이드카가 이미 쓰는 크레이트다.
+anyhow = "1"

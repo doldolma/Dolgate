@@ -182,9 +182,9 @@ pub fn run(
             Err(error) => {
                 warn!(session_id, error = format!("{error:#}"), "session failed");
                 let _ = output.send_event(
-                    &Event::new("error", crate::protocol::ErrorPayload {
-                        message: format!("{error:#}"),
-                    })
+                    // 소켓 실패는 정경 문구와 원인 코드를 함께 올린다 — 윈도우의 OS 문구는
+                    // 시스템 언어로 오고, 앱의 판정기는 유닉스 문구를 안다(neterr).
+                    &Event::new("error", crate::protocol::ErrorPayload::from_error(&error))
                     .session(&session_id)
                     .request(&request_id),
                 );

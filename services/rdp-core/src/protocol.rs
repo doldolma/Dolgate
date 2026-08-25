@@ -280,6 +280,28 @@ pub struct ClipboardSetPayload {
 #[serde(rename_all = "camelCase")]
 pub struct ErrorPayload {
     pub message: String,
+    /// 실패 원인 코드("refused","timeout","reset","no-route","address-in-use","dns-unresolved").
+    /// 앱이 문구를 뒤지지 않고 원인을 알 수 있게 코어가 판정해 실어 준다. 원인을 모르면 없다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<&'static str>,
+}
+
+impl ErrorPayload {
+    /// 소켓과 무관한 실패(요청 형식 오류, 내부 중단 등). 붙일 원인 코드가 없다.
+    pub fn plain(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            failure: None,
+        }
+    }
+
+    /// 세션 실패. 소켓 원인이 체인에 있으면 정경 문구와 코드를 함께 싣는다.
+    pub fn from_error(error: &anyhow::Error) -> Self {
+        Self {
+            message: core_framing::neterr::describe(error),
+            failure: core_framing::neterr::code(error),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]

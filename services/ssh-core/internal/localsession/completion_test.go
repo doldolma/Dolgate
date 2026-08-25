@@ -92,7 +92,7 @@ func TestRunCompletionCommand(t *testing.T) {
 		t.Fatalf("Connect() error = %v", err)
 	}
 
-	out, truncated, err := m.RunCompletionCommand("s1", "printf 'a\\nb\\n'")
+	out, truncated, err := m.RunCompletionCommand("s1", "printf 'a\\nb\\n'", false, false)
 	if err != nil {
 		t.Fatalf("RunCompletionCommand() error = %v", err)
 	}
@@ -103,7 +103,7 @@ func TestRunCompletionCommand(t *testing.T) {
 		t.Fatalf("unexpected output: %q", out)
 	}
 
-	if _, _, err := m.RunCompletionCommand("missing", "echo x"); err == nil {
+	if _, _, err := m.RunCompletionCommand("missing", "echo x", false, false); err == nil {
 		t.Fatal("expected error for unknown session")
 	}
 }

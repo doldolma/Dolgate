@@ -85,8 +85,8 @@ type controlHandle struct {
 	reinjectGates map[string]*autocomplete.PromptSettleGate
 	handshakesMu  sync.Mutex
 
-	completionWorkerMu sync.Mutex
-	completionWorker   *sshcmd.CompletionWorker
+	completionPoolMu sync.Mutex
+	completionPool   *sshcmd.WorkerPool
 }
 
 // markIntegrated 는 pane 에 셸 통합 주입을 1회로 제한한다. 아직 주입 안 했으면
@@ -1062,12 +1062,26 @@ func (m *Manager) FlushShellIntegration(sessionID string) {
 
 // RunCompletionCommand 는 보조 exec 채널에서 짧은 read-only 완성 명령을 실행한다. 보조
 // 채널 기본 cwd(홈) 기준이라 pane 이 cd 한 실제 경로는 반영하지 못한다(MVP 한계).
-func (m *Manager) RunCompletionCommand(sessionID, command string) (string, bool, error) {
+// background 는 사람이 결과를 기다리지 않는 폴링이라는 뜻이다(sshsession 쪽과 같은 규칙).
+// elevate(sudo 로 되물리기)는 지원하지 않는다 — control 세션은 sshsession 과 달리 접속에 쓴
+// 비밀번호를 들고 있지 않다. 도커 섹션은 tmux pane 에서도 뜨지만, 그 호스트의 소켓이 막혀
+// 있으면 평소처럼 "읽을 수 없다" 로 끝난다.
+func (m *Manager) RunCompletionCommand(
+	sessionID, command string,
+	background, elevate bool,
+) (string, bool, error) {
+	if elevate {
+		return "", false, sshcmd.ErrSudoPasswordUnavailable
+	}
 	handle, _, err := m.controlOf(sessionID)
 	if err != nil {
 		return "", false, err
 	}
-	stdout, truncated, err := handle.runCompletionWorker(command)
+	// 예산은 폴백까지 합쳐 하나다(sshsession 쪽과 같은 규칙).
+	budget := autocomplete.CompletionTimeoutFor(background)
+	startedAt := time.Now()
+
+	stdout, truncated, err := handle.runCompletionWorker(command, background)
 	if err == nil || len(stdout) > 0 {
 		return string(stdout), truncated, err
 	}
@@ -1075,7 +1089,11 @@ func (m *Manager) RunCompletionCommand(sessionID, command string) (string, bool,
 		return "", false, err
 	}
 
-	fallbackStdout, _, err := sshcmd.RunWithTimeout(handle.client, command, autocomplete.CompletionTimeout)
+	remaining := budget - time.Since(startedAt)
+	if remaining <= 0 {
+		return "", false, err
+	}
+	fallbackStdout, _, err := sshcmd.RunWithTimeout(handle.client, command, remaining)
 	if err != nil && len(fallbackStdout) == 0 {
 		return "", false, err
 	}
@@ -1083,27 +1101,37 @@ func (m *Manager) RunCompletionCommand(sessionID, command string) (string, bool,
 	return out, truncated, nil
 }
 
-func (h *controlHandle) runCompletionWorker(command string) ([]byte, bool, error) {
-	worker := h.getCompletionWorker()
-	return worker.Run(command, autocomplete.CompletionTimeout, autocomplete.MaxCompletionBytes)
+func (h *controlHandle) runCompletionWorker(command string, background bool) ([]byte, bool, error) {
+	lane := sshcmd.LaneInteractive
+	if background {
+		lane = sshcmd.LaneBackground
+	}
+	pool := h.getCompletionPool()
+	return pool.Run(
+		lane,
+		command,
+		// 사람이 안 기다리는 폴링은 예산이 더 크다(sshsession 쪽과 같은 규칙).
+		autocomplete.CompletionTimeoutFor(background),
+		autocomplete.MaxCompletionBytes,
+	)
 }
 
-func (h *controlHandle) getCompletionWorker() *sshcmd.CompletionWorker {
-	h.completionWorkerMu.Lock()
-	defer h.completionWorkerMu.Unlock()
-	if h.completionWorker == nil {
-		h.completionWorker = sshcmd.NewCompletionWorker(h.client)
+func (h *controlHandle) getCompletionPool() *sshcmd.WorkerPool {
+	h.completionPoolMu.Lock()
+	defer h.completionPoolMu.Unlock()
+	if h.completionPool == nil {
+		h.completionPool = sshcmd.NewWorkerPool(h.client)
 	}
-	return h.completionWorker
+	return h.completionPool
 }
 
 func (h *controlHandle) closeCompletionWorker() {
-	h.completionWorkerMu.Lock()
-	worker := h.completionWorker
-	h.completionWorker = nil
-	h.completionWorkerMu.Unlock()
-	if worker != nil {
-		_ = worker.Close()
+	h.completionPoolMu.Lock()
+	pool := h.completionPool
+	h.completionPool = nil
+	h.completionPoolMu.Unlock()
+	if pool != nil {
+		_ = pool.Close()
 	}
 }
 

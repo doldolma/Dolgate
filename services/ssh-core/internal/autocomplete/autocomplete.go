@@ -23,9 +23,30 @@ const (
 
 // Dynamic-completion (host command) execution bounds.
 const (
-	CompletionTimeout  = 8 * time.Second
-	MaxCompletionBytes = 256 * 1024
+	// CompletionTimeout bounds an interactive query — someone pressed a key and is
+	// watching for the suggestion list, so waiting longer than this is worse than
+	// showing nothing.
+	CompletionTimeout = 8 * time.Second
+	// BackgroundCompletionTimeout bounds a self-driven poll (the session panel's
+	// docker and host-metrics loops). Nobody is watching, and the commands are
+	// legitimately slow on big hosts: `docker stats --no-stream` waits out two
+	// daemon collector ticks, and `docker system df` walks every layer. Holding
+	// those to the interactive budget meant they timed out on exactly the hosts
+	// the panel exists to show.
+	BackgroundCompletionTimeout = 30 * time.Second
+	MaxCompletionBytes          = 256 * 1024
 )
+
+// CompletionTimeoutFor picks the budget for a query's lane. Every path that runs
+// a completion command (worker, and the one-off exec fallback when a second
+// channel is unavailable) must use this — otherwise a background poll silently
+// gets the interactive budget on whichever path it happens to take.
+func CompletionTimeoutFor(background bool) time.Duration {
+	if background {
+		return BackgroundCompletionTimeout
+	}
+	return CompletionTimeout
+}
 
 // CapOutput truncates completion command output to MaxCompletionBytes.
 func CapOutput(data []byte) (string, bool) {
@@ -446,16 +467,53 @@ const fishIntegrationScript = `if not set -q __ds_shell_integration_installed; `
 	`end`
 
 // powerShellIntegrationScript installs OSC 133 prompt/command lifecycle hooks
-// for Windows PowerShell / PowerShell 7. The prompt wrapper is the reliable
-// baseline; PSReadLine command-start hooks are best-effort because older or
-// stripped environments may not expose Set-PSReadLineOption.
+// for Windows PowerShell / PowerShell 7. Markers mirror the POSIX shells:
+// A=prompt start, B=command input start, C=command output start, D;<exit>=done,
+// E=the command text as the shell accepted it.
+//
+// 두 가지가 다른 셸과 반대로 되어 있어서 로컬 PowerShell 이 깨졌었다. 실기기 재현 기록:
+//
+//  1. `__ds_o` 가 마커를 [Console]::Write 로 **즉시** 썼다. prompt 함수는 프롬프트 문자열을
+//     **반환**해야 화면에 찍히므로, 함수 안에서 즉시 쓴 B 는 프롬프트보다 **앞**에 놓였다
+//     (스트림: `]133;B` 다음에 `PS C:\...>`). bash·zsh 는 B 를 PS1 **끝**에 붙이는데 그 반대가
+//     된 것이다. 그래서 앱이 기록하는 promptEndX 가 0 이 되고, 화면에서 명령을 읽을 때
+//     프롬프트까지 같이 읽혀 재실행·복사에 `PS C:\Users\...> pwd` 가 들어갔다.
+//
+//     → 마커를 반환 문자열로 조립한다. D·A·cwd + 원래 프롬프트 + B 순서라 B 가 제자리에 온다.
+//
+//  2. 명령 시작(C)을 PSReadLine 의 AddToHistoryHandler 에 걸었다. 그런데 PSReadLine 은 기동
+//     시 히스토리 파일을 읽으며 **줄마다** 이 핸들러를 부른다 — 첫 프롬프트 직후 히스토리 줄
+//     수만큼(실측 394줄 → C 372개) C 가 쏟아졌다. C 하나가 블록 하나이고 짝이 되는 D 가 없어
+//     전부 running 으로 남고, running 블록은 끝을 모르니 화면 끝까지 칠해진다 — 터미널을 열면
+//     화면 전체가 한 블록이던 증상이 이것이다(400개 상한도 유령이 먹어 실제 기록이 밀려났다).
+//
+//     → PSConsoleHostReadLine 을 감싼다. 호스트가 한 줄을 읽을 때만 불리므로 히스토리 로드에
+//     오염되지 않고, 반환값이 **셸이 받아들인 명령 원문**이라 zsh 처럼 E 로 올려 보낼 수 있다.
+//     그러면 앱이 화면에서 명령을 읽지 않아 1번의 영향도 함께 사라진다.
+//
+// PSReadLine 이 없는 환경(제한된 런스페이스 등)에서는 감쌀 대상이 없어 C·E 가 오지 않는다.
+// 프롬프트 마커(A·B·D)와 cwd 는 그대로 동작한다.
 const powerShellIntegrationScript = `if (-not (Get-Variable -Name __ds_shell_integration_installed -Scope Global -ErrorAction SilentlyContinue)) { ` +
 	`Set-Variable -Name __ds_shell_integration_installed -Scope Global -Value $true; ` +
-	`function global:__ds_o { param([string]$Value) [Console]::Write(([char]27) + ']133;' + $Value + ([char]7)) }; ` +
-	`function global:__ds_cwd { try { $path = (Get-Location).ProviderPath; if ([string]::IsNullOrEmpty($path)) { $path = (Get-Location).Path }; $uri = [System.Uri]::new($path).AbsoluteUri; [Console]::Write(([char]27) + ']7;' + $uri + ([char]7)) } catch {} }; ` +
+	// 마커를 **문자열로 돌려준다**(즉시 쓰지 않는다). 쓰는 시점은 부르는 쪽이 고른다 —
+	// prompt 는 반환값에 실어 보내고, ReadLine 훅은 [Console]::Write 로 즉시 쓴다.
+	`function global:__ds_o { param([string]$Value) ([char]27) + ']133;' + $Value + ([char]7) }; ` +
+	`function global:__ds_cwd { try { $path = (Get-Location).ProviderPath; if ([string]::IsNullOrEmpty($path)) { $path = (Get-Location).Path }; return ([char]27) + ']7;' + [System.Uri]::new($path).AbsoluteUri + ([char]7) } catch { return '' } }; ` +
+	// PSConsoleHostReadLine 훅. 이스케이프는 zsh 와 같은 규칙이다(OSC 페이로드에 raw 개행이
+	// 들어가면 파서가 시퀀스를 중단한다): 역슬래시를 먼저 두 배로 만든 뒤 개행을 `\n` 으로.
+	// 정규식 리터럴은 홑따옴표라 PowerShell 이 건드리지 않고 .NET 정규식이 그대로 받는다.
+	//
+	// 빈 줄(그냥 엔터)에는 아무것도 보내지 않는다 — bash·zsh 도 그때 C 를 내지 않고, 보내면
+	// 프롬프트만 다시 뜨는 자리에 빈 블록이 생긴다.
+	`function global:__ds_hook { if ($global:__ds_hooked) { return }; $original = (Get-Command PSConsoleHostReadLine -CommandType Function -ErrorAction SilentlyContinue).ScriptBlock; if (-not $original) { return }; $global:__ds_hooked = $true; $global:__ds_readline = $original; function global:PSConsoleHostReadLine { $line = & $global:__ds_readline; if (-not [string]::IsNullOrWhiteSpace($line)) { $text = [regex]::Replace(([string]$line).Replace('\', '\\'), '\r\n?|\n', '\n'); [Console]::Write((__ds_o ('E;' + $text)) + (__ds_o 'C')) }; return $line } }; ` +
 	`$global:__ds_prompt = (Get-Command prompt -CommandType Function -ErrorAction SilentlyContinue).ScriptBlock; ` +
-	`function global:prompt { $global:__ds_last_success = $?; $global:__ds_last_exit = $LASTEXITCODE; if ($global:__ds_last_success) { $code = 0 } elseif ($null -ne $global:__ds_last_exit) { $code = [int]$global:__ds_last_exit } else { $code = 1 }; __ds_o ('D;' + $code); __ds_o 'A'; __ds_cwd; __ds_o 'B'; if ($global:__ds_prompt) { & $global:__ds_prompt } else { 'PS ' + $executionContext.SessionState.Path.CurrentLocation + ('>' * ($nestedPromptLevel + 1)) + ' ' } }; ` +
-	`try { $global:__ds_add_history = (Get-PSReadLineOption).AddToHistoryHandler; Set-PSReadLineOption -AddToHistoryHandler { param([string]$line) __ds_o 'C'; if ($global:__ds_add_history) { return & $global:__ds_add_history $line }; return $true } } catch {} ` +
+	// `$?` 는 **첫 문장**에서 잡아야 한다(그 뒤 어떤 문장이든 값을 갈아치운다). $LASTEXITCODE
+	// 읽기는 대입이라 $? 를 참으로 만들므로 순서가 이 둘 사이에서도 중요하다.
+	//
+	// 훅 설치를 프롬프트에서도 시도한다 — 기동 인자(-EncodedCommand)가 도는 시점에는 호스트가
+	// 아직 PSReadLine 을 올리지 않았을 수 있는데, 프롬프트가 뜬 뒤라면 반드시 올라와 있다.
+	`function global:prompt { $ok = $?; $last = $LASTEXITCODE; if ($ok) { $code = 0 } elseif ($null -ne $last) { $code = [int]$last } else { $code = 1 }; __ds_hook; $rendered = if ($global:__ds_prompt) { (& $global:__ds_prompt) -join '' } else { 'PS ' + $executionContext.SessionState.Path.CurrentLocation + ('>' * ($nestedPromptLevel + 1)) + ' ' }; return (__ds_o ('D;' + $code)) + (__ds_o 'A') + (__ds_cwd) + $rendered + (__ds_o 'B') }; ` +
+	`__ds_hook ` +
 	`}`
 
 // 주입 명령 하나의 크기 상한.
@@ -617,6 +675,14 @@ func (f *HandshakeFilter) echoTexts() [][]byte {
 	return injectedCommandEchoes
 }
 
+// 앞부분만 맞는 사본(줄 편집기가 다시 그리다 만 것)은 **지우지 않는다.**
+//
+// 시도해 봤고 더 나빴다: 부분 일치는 어디서 끝날지 알 수 없어 항상 토큰 중간을 자르고
+// (`…-Value $tru` 까지 지워지고 `e; function global:__ds_o {` 가 화면에 남았다), 그 과정에서
+// 줄바꿈까지 함께 지워져 원격 콘솔과 화면의 커서가 어긋난다(배너가 겹쳐 찍혔다).
+//
+// 애초에 echo 를 지워야 하는 상황 자체를 만들지 않는 것이 맞다 — 그래서 PowerShell 에는
+// 타이핑하지 않는다(shellIntegrationTypable 주석 참고).
 func (f *HandshakeFilter) stripInjectedEcho(data []byte) []byte {
 	if len(data) == 0 {
 		return data

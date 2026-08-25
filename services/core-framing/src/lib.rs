@@ -17,6 +17,8 @@
 //! Control frames carry metadata only. Stream frames carry metadata plus raw bytes — for the SSH
 //! core that is terminal output; for the RDP/VNC cores it is pixel data or PCM.
 
+pub mod neterr;
+
 use std::io::{self, Read, Write};
 
 pub const HEADER_SIZE: usize = 9;

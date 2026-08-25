@@ -265,9 +265,7 @@ fn handle_request(request: Request, output: &Output, sessions: &Sessions) {
 fn reply_error(output: &Output, request_id: &str, session_id: Option<&str>, message: &str) {
     let mut event = Event::new(
         "error",
-        ErrorPayload {
-            message: message.to_owned(),
-        },
+        ErrorPayload::plain(message),
     )
     .request(request_id);
     if let Some(session_id) = session_id {

@@ -81,7 +81,7 @@ func (stub *stubSSHManager) ReinjectShellIntegration(string, string) error {
 	return nil
 }
 func (stub *stubSSHManager) FlushShellIntegration(string) {}
-func (stub *stubSSHManager) RunCompletionCommand(string, string) (string, bool, error) {
+func (stub *stubSSHManager) RunCompletionCommand(_, _ string, _, _ bool) (string, bool, error) {
 	return stub.completionOut, stub.completionTrun, stub.completionErr
 }
 func (stub *stubSSHManager) RunHostCommand(sessionID, command string, timeoutMs int) (string, string, int, bool, error) {
@@ -204,7 +204,7 @@ func (stub *stubLocalManager) InstallShellIntegration(string) error {
 }
 func (stub *stubLocalManager) ReinjectShellIntegration(string, string) error { return nil }
 func (stub *stubLocalManager) FlushShellIntegration(string)                  {}
-func (stub *stubLocalManager) RunCompletionCommand(string, string) (string, bool, error) {
+func (stub *stubLocalManager) RunCompletionCommand(_, _ string, _, _ bool) (string, bool, error) {
 	return "", false, nil
 }
 
@@ -759,7 +759,7 @@ func TestRunCompletionQueryNeverEmitsSessionError(t *testing.T) {
 		nil,
 	)
 
-	if err := runtime.RunCompletionQuery("session-ssh", "req-1", "docker ps"); err != nil {
+	if err := runtime.RunCompletionQuery("session-ssh", "req-1", "docker ps", false, false); err != nil {
 		t.Fatalf("RunCompletionQuery() must swallow completion failures, got %v", err)
 	}
 	if errorsEmitted != 0 {
@@ -767,6 +767,79 @@ func TestRunCompletionQueryNeverEmitsSessionError(t *testing.T) {
 	}
 	if results != 1 {
 		t.Fatalf("expected exactly one completion result event, got %d", results)
+	}
+}
+
+// "the round trip failed" and "the command printed nothing" used to arrive as the
+// same empty payload, so a timed-out `docker ps` rendered as an empty container
+// list instead of a failure the panel could back off from.
+func TestRunCompletionQueryReportsFailureSeparatelyFromEmptyOutput(t *testing.T) {
+	cases := []struct {
+		name       string
+		out        string
+		err        error
+		wantFailed bool
+	}{
+		{name: "timeout with no output", err: errors.New("completion command timed out after 30s"), wantFailed: true},
+		{name: "ran and printed nothing", wantFailed: false},
+		{name: "printed something then exited non-zero", out: "partial\n", err: errors.New("exit status 1"), wantFailed: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			sshManager := &stubSSHManager{
+				hasSession:    true,
+				completionOut: testCase.out,
+				completionErr: testCase.err,
+			}
+			var payload coretypes.TerminalCompletionResultPayload
+			var seen int
+			runtime := newRuntimeWithDeps(
+				func(event coretypes.Event) {
+					if event.Type != coretypes.EventTerminalCompletionResult {
+						return
+					}
+					seen++
+					payload, _ = event.Payload.(coretypes.TerminalCompletionResultPayload)
+				},
+				func(coretypes.StreamFrame, []byte) {},
+				sshManager,
+				&stubMoshManager{},
+				&stubAWSManager{},
+				&stubLocalManager{},
+				&stubSerialManager{},
+				&stubSFTPService{},
+				&stubContainersService{},
+				&stubForwardingService{},
+				&stubSSMForwardingService{},
+				nil,
+				nil,
+			)
+
+			if err := runtime.RunCompletionQuery("session-ssh", "req-1", "docker ps -a", true, false); err != nil {
+				t.Fatalf("RunCompletionQuery() must swallow completion failures, got %v", err)
+			}
+			if seen != 1 {
+				t.Fatalf("expected exactly one result event, got %d", seen)
+			}
+			if payload.Failed != testCase.wantFailed {
+				t.Fatalf("Failed = %v, want %v", payload.Failed, testCase.wantFailed)
+			}
+			if payload.Stdout != testCase.out {
+				t.Fatalf("Stdout = %q, want %q", payload.Stdout, testCase.out)
+			}
+		})
+	}
+}
+
+// 백그라운드 레인은 예산이 더 크다 — `docker stats --no-stream` 과 `docker system df` 는 큰
+// 호스트에서 대화형 예산(8초)을 정직하게 넘긴다.
+func TestBackgroundCompletionGetsALargerBudget(t *testing.T) {
+	if autocomplete.CompletionTimeoutFor(true) <= autocomplete.CompletionTimeoutFor(false) {
+		t.Fatalf(
+			"background budget %s must exceed the interactive budget %s",
+			autocomplete.CompletionTimeoutFor(true),
+			autocomplete.CompletionTimeoutFor(false),
+		)
 	}
 }
 

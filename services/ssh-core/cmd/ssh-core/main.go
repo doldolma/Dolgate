@@ -11,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 
+	"dolssh/services/ssh-core/internal/neterr"
 	"dolssh/services/ssh-core/internal/protocol"
 	coreruntime "dolssh/services/ssh-core/pkg/runtime"
 )
@@ -50,7 +51,7 @@ type coreRuntime interface {
 	PrepareAutocomplete(sessionID, requestID string) error
 	RefreshAutocomplete(sessionID, requestID string) error
 	StopAutocomplete(sessionID string)
-	RunCompletionQuery(sessionID, requestID, command string) error
+	RunCompletionQuery(sessionID, requestID, command string, background, elevate bool) error
 	RunCommand(sessionID, requestID, command string, timeoutMs int) error
 	InstallShellIntegration(sessionID string) error
 	ReinjectShellIntegration(sessionID string, shell string) error
@@ -454,7 +455,9 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 		// event (that would tear down the terminal), so it is NOT wrapped in
 		// emitAsyncError. RunCompletionQuery always emits its own result event.
 		go func() {
-			_ = core.RunCompletionQuery(request.SessionID, request.ID, payload.Command)
+			_ = core.RunCompletionQuery(
+				request.SessionID, request.ID, payload.Command, payload.Background, payload.Elevate,
+			)
 		}()
 		return nil
 	case protocol.CommandRunCommand:
@@ -680,7 +683,8 @@ func emitAsyncError(
 				SessionID:  sessionID,
 				EndpointID: endpointID,
 				Payload: protocol.ErrorPayload{
-					Message: err.Error(),
+					Message: neterr.Normalize(err).Error(),
+					Failure: neterr.Code(err),
 				},
 			})
 		}

@@ -15,6 +15,7 @@ import (
 
 	"dolssh/services/ssh-core/internal/hostkeytrust"
 	"dolssh/services/ssh-core/internal/inflight"
+	"dolssh/services/ssh-core/internal/neterr"
 	"dolssh/services/ssh-core/internal/protocol"
 	"dolssh/services/ssh-core/internal/sshconn"
 )
@@ -536,7 +537,8 @@ func (s *Service) failRuntime(ruleID string, err error) {
 		Type:       protocol.EventPortForwardError,
 		EndpointID: ruleID,
 		Payload: protocol.ErrorPayload{
-			Message: err.Error(),
+			Message: neterr.Normalize(err).Error(),
+			Failure: neterr.Code(err),
 		},
 	})
 }

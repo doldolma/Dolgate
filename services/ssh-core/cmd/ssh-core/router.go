@@ -4,6 +4,7 @@ import (
 	"log"
 	"sync"
 
+	"dolssh/services/ssh-core/internal/neterr"
 	"dolssh/services/ssh-core/internal/protocol"
 )
 
@@ -169,7 +170,10 @@ func (router *frameRouter) run(frame protocol.Frame) {
 			EndpointID: frameEndpointID(frame),
 			JobID:      frameJobID(frame),
 			Payload: protocol.ErrorPayload{
-				Message: err.Error(),
+				// OS·netstack 문구를 정경 문구로 접어 올리고, 원인 코드도 함께 싣는다. 여기가
+				// 명령 실패가 모두 지나는 자리라, 각 dial 사이트를 빠뜨려도 새지 않는다(neterr).
+				Message: neterr.Normalize(err).Error(),
+				Failure: neterr.Code(err),
 			},
 		})
 	}

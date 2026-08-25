@@ -181,20 +181,23 @@ fn vnc_event_carries_clipboard_text() {
 }
 
 #[test]
-fn vnc_event_carries_error_message() {
+fn vnc_event_carries_error_message_and_cause() {
     let sink = Arc::new(CollectingSink::default());
     sink.on_event(
         "sess-1",
         VncEvent::Error {
-            message: "connection refused".to_owned(),
+            message: "connection refused (대상 컴퓨터에서 거부했다 (os error 10061))".to_owned(),
+            failure: Some("refused"),
         },
     )
     .unwrap();
 
     let events = sink.events.lock().unwrap();
     match &events[0].1 {
-        VncEvent::Error { message } => {
-            assert_eq!(message, "connection refused");
+        // 문구와 코드가 함께 실려야 한다 — 구버전 앱은 문구를, 새 앱은 코드를 읽는다.
+        VncEvent::Error { message, failure } => {
+            assert!(message.starts_with("connection refused"), "{message}");
+            assert_eq!(*failure, Some("refused"));
         }
         other => panic!("expected Error, got {:?}", other),
     }

@@ -18,11 +18,20 @@ var ErrCompletionWorkerUnavailable = errors.New("completion worker unavailable")
 type CompletionWorker struct {
 	start completionWorkerStarter
 
-	runMu   sync.Mutex
+	// runSem 은 채널 하나를 한 번에 한 명령만 쓰게 하는 자리다. Mutex 가 아닌 이유: 순서를
+	// 기다리는 데에도 **기한이 있어야** 한다. Lock() 은 무한정 기다리므로 앞선 명령이 오래
+	// 걸리면 뒤에 선 질의는 자기 예산을 한 번도 못 써 보고 호출자(데스크톱)의 요청 타임아웃에
+	// 먼저 걸렸다 — 코어는 아무 답도 못 보내고 "Timed out waiting for SSH core response" 만
+	// 남았다. 이제 기다리는 시간도 예산 안에서 잰다.
+	runSem  chan struct{}
 	stateMu sync.Mutex
 	process *completionWorkerProcess
 	closed  bool
 }
+
+// ErrCompletionLaneBusy 는 예산 안에 보조 채널 차례가 오지 않았다는 뜻이다. 명령을 시작조차
+// 하지 않았으므로 원격에는 아무 일도 없었다 — 호출자는 그냥 다음 주기에 다시 물으면 된다.
+var ErrCompletionLaneBusy = errors.New("completion lane busy")
 
 type completionWorkerStarter func() (*completionWorkerProcess, error)
 
@@ -33,11 +42,11 @@ type completionWorkerProcess struct {
 }
 
 func NewCompletionWorker(client *ssh.Client) *CompletionWorker {
-	return &CompletionWorker{start: sshCompletionWorkerStarter(client)}
+	return newCompletionWorkerForTest(sshCompletionWorkerStarter(client))
 }
 
 func newCompletionWorkerForTest(start completionWorkerStarter) *CompletionWorker {
-	return &CompletionWorker{start: start}
+	return &CompletionWorker{start: start, runSem: make(chan struct{}, 1)}
 }
 
 func sshCompletionWorkerStarter(client *ssh.Client) completionWorkerStarter {
@@ -77,9 +86,21 @@ func sshCompletionWorkerStarter(client *ssh.Client) completionWorkerStarter {
 	}
 }
 
+// Run 은 명령을 돌리고 stdout 을 돌려준다.
+//
+// timeout 은 **왕복 전체**의 예산이다 — 채널 차례를 기다리는 시간까지 포함한다. 실행에만 걸면
+// 앞선 명령이 예산을 다 쓰는 동안 뒤의 질의는 시계도 못 켜고, 그 합이 호출자의 요청 타임아웃을
+// 넘겨 코어가 답 자체를 못 보내게 된다. 여기서 끝을 정해 두면 늦어도 "늦었다" 는 답은 간다.
 func (worker *CompletionWorker) Run(command string, timeout time.Duration, maxBytes int) ([]byte, bool, error) {
-	worker.runMu.Lock()
-	defer worker.runMu.Unlock()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+
+	select {
+	case worker.runSem <- struct{}{}:
+		defer func() { <-worker.runSem }()
+	case <-deadline.C:
+		return nil, false, fmt.Errorf("%w: waited %s for the aux channel", ErrCompletionLaneBusy, timeout)
+	}
 
 	process, err := worker.ensureStarted()
 	if err != nil {
@@ -108,16 +129,14 @@ func (worker *CompletionWorker) Run(command string, timeout time.Duration, maxBy
 		return nil, false, err
 	}
 
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
+	// 남은 예산으로 기다린다(위에서 이미 쓴 만큼은 빠져 있다) — deadline 은 Run 시작에 걸었다.
 	select {
 	case result := <-resultCh:
 		if result.err != nil {
 			worker.resetStarted()
 		}
 		return result.output, result.truncated, result.err
-	case <-timer.C:
+	case <-deadline.C:
 		worker.resetStarted()
 		return nil, false, fmt.Errorf("completion command timed out after %s", timeout)
 	}

@@ -67,7 +67,13 @@ pub enum VncEvent {
     /// 세션이 정상 종료했다.
     Closed,
     /// 오류로 끝났다.
-    Error { message: String },
+    ///
+    /// `failure` 는 소켓 원인 코드다(refused·timeout·reset·no-route·dns-unresolved). 문구만
+    /// 올리면 앱이 문장을 뒤져 원인을 찾아야 하고, 윈도우의 OS 문구는 시스템 언어로 온다.
+    Error {
+        message: String,
+        failure: Option<&'static str>,
+    },
 }
 
 /// 출력 경계 trait. 세션이 생산하는 모든 것을 받는다.

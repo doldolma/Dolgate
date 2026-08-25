@@ -261,6 +261,14 @@ fn drain_outbound(
                     clip.pending = Some(text.clone());
                 }
                 clip.offered = Some(text.clone());
+                // 로컬 → 원격 방향이 조용히 실패했을 때 어디서 멈췄는지 알 방법이 없었다. 이
+                // 한 줄이 "애초에 안 나갔다" 와 "보냈는데 상대가 버렸다" 를 가른다.
+                debug!(
+                    len = text.len(),
+                    extended = clip.extended,
+                    peer_actions = format_args!("{:#010x}", clip.peer_actions),
+                    "로컬 클립보드를 원격으로 보낸다"
+                );
                 send_clipboard_text(transport, clip, &text)?;
                 continue;
             }
@@ -395,7 +403,9 @@ fn send_clipboard_text(
     text: &str,
 ) -> Result<()> {
     if !clip.extended {
-        clip.lossy_chars += rfb::count_latin1_losses(text);
+        let losses = rfb::count_latin1_losses(text);
+        clip.lossy_chars += losses;
+        debug!(losses, "클립보드: 고전 경로로 보낸다(상대가 확장을 알리지 않았다)");
         rfb::write_client_cut_text(transport, text)?;
         return Ok(());
     }
@@ -411,6 +421,7 @@ fn send_clipboard_text(
     // notify 를 모르는 상대(LibVNCServer/x11vnc — caps 에 그 비트가 없다)에게는 provide 를 바로
     // 보내야 한다. 그쪽은 받은 즉시 선택 영역에 넣는다.
     if clip.peer_actions & clipboard::ACTION_NOTIFY != 0 {
+        debug!("클립보드: notify 로 알린다(상대가 request 를 보내면 provide 로 답한다)");
         rfb::write_client_cut_text_extended(transport, &clipboard::encode_notify())?;
         return Ok(());
     }
@@ -428,6 +439,11 @@ fn send_clipboard_text(
     // 요청 없이 받아 주는 한도를 넘으면 확장은 보내지 않는다(잘라 보내면 사용자가 모른 채
     // 반쪽을 붙여넣는다). 고전은 이미 나갔다.
     let too_big = clip.peer_max_unsolicited > 0 && text.len() as u32 > clip.peer_max_unsolicited;
+    debug!(
+        too_big,
+        provide = clip.peer_actions & clipboard::ACTION_PROVIDE != 0,
+        "클립보드: 고전을 보냈고 확장 provide 를 이어 보낸다"
+    );
     if clip.peer_actions & clipboard::ACTION_PROVIDE != 0 && !too_big {
         if let Some(body) = clipboard::encode_provide(text) {
             rfb::write_client_cut_text_extended(transport, &body)?;
@@ -525,7 +541,10 @@ fn run_inner(
             output.emit_event(
                 &session_id,
                 VncEvent::Error {
-                    message: format!("{error:#}"),
+                    // 소켓 실패는 정경 문구와 원인 코드를 함께 올린다 — 이름 해석 실패(윈도우
+                    // WSAHOST_NOT_FOUND)까지 이 경로를 지난다(core_framing::neterr).
+                    message: core_framing::neterr::describe(&error),
+                    failure: core_framing::neterr::code(&error),
                 },
             )?;
             Err(error)
@@ -1272,6 +1291,10 @@ fn pump(
                     }
                     clipboard::Incoming::Request { .. } => {
                         // 우리가 notify 로 알린 것을 달라고 한다.
+                        debug!(
+                            has_offer = clip.offered.is_some(),
+                            "서버가 우리 클립보드를 달라고 한다"
+                        );
                         if let Some(text) = clip.offered.clone() {
                             if let Some(body) = clipboard::encode_provide(&text) {
                                 rfb::write_client_cut_text_extended(transport, &body)?;

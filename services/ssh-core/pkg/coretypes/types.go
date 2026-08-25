@@ -447,13 +447,35 @@ type TerminalAutocompleteShellStatePayload struct {
 
 // TerminalCompletionQueryPayload asks the host to run a short read-only command
 // (built by the renderer) over the auxiliary channel for dynamic completion.
+//
+// Background marks a query nobody is waiting on a keystroke for — the session
+// panel's docker and host-metrics polling. Those run on a second auxiliary
+// channel so a slow poll (docker `stats --no-stream` routinely exceeds 2s)
+// cannot stall the autocomplete the user is typing against. Omitted (false)
+// means interactive, so older renderers keep the previous single-lane behaviour.
 type TerminalCompletionQueryPayload struct {
-	Command string `json:"command"`
+	Command    string `json:"command"`
+	Background bool   `json:"background,omitempty"`
+	// Elevate wraps the command in "sudo -S" and replays the password the session
+	// authenticated with. The session panel sets it only after a plain probe found
+	// the docker socket permission-denied and "sudo -n" refused too. The core tries
+	// it once per session: a wrong sudo password increments pam_faillock, so a
+	// poller retrying every few seconds would lock the account out.
+	Elevate bool `json:"elevate,omitempty"`
 }
 
+// TerminalCompletionResultPayload carries a completion query's stdout.
+//
+// Failed distinguishes "the command ran and printed nothing" from "the round
+// trip never happened" (aux channel gone, worker restart, CompletionTimeout).
+// Both used to arrive as an empty Stdout, so a timed-out `docker ps` rendered as
+// "no containers" rather than as a failure — the panel then kept polling a list
+// it believed was empty. Callers that only want best-effort text can keep
+// ignoring it; the session panel turns it into its own retry/backoff.
 type TerminalCompletionResultPayload struct {
 	Stdout    string `json:"stdout"`
 	Truncated bool   `json:"truncated,omitempty"`
+	Failed    bool   `json:"failed,omitempty"`
 }
 
 // RunCommandPayload asks the host to run an arbitrary command on a separate exec
@@ -1101,6 +1123,13 @@ type StatusPayload struct {
 
 type ErrorPayload struct {
 	Message string `json:"message"`
+	// Failure 는 실패 원인 코드다("refused","timeout","reset","no-route","address-in-use",
+	// "dns-unresolved"). 앱이 문구를 뒤지지 않고 원인을 알 수 있게 코어가 판정해 실어 준다
+	// (internal/neterr). 원인을 모르면 비어 있다.
+	//
+	// **문구도 함께 정규화해서 올린다.** 이 필드만 믿으면 구버전 앱이 아무것도 못 읽고, 문구만
+	// 정규화하면 앱이 계속 문장을 뒤져야 한다. 둘을 같이 보내는 것이 요점이다.
+	Failure string `json:"failure,omitempty"`
 }
 
 type ClosedPayload struct {
@@ -1109,6 +1138,9 @@ type ClosedPayload struct {
 	// "transport"(전송 단절), "keepalive"(keepalive 연속 실패), "client"(클라이언트 요청).
 	// 자동 재연결 판단에서 정상 종료(exit)를 되살리지 않도록 하는 데 쓰인다.
 	Reason string `json:"reason,omitempty"`
+	// Failure 는 ErrorPayload.Failure 와 같은 원인 코드다. Reason 이 "왜 닫혔나"(정상 종료·전송
+	// 단절)를 말하고, 이쪽은 전송 단절이었다면 **무엇 때문에** 끊겼는지를 말한다.
+	Failure string `json:"failure,omitempty"`
 }
 
 // MoshStatePayload는 mosh 세션의 연결 상태 변화를 renderer에 알린다. State는

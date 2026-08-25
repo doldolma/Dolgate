@@ -14,6 +14,7 @@ import (
 
 	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/hostkeytrust"
+	"dolssh/services/ssh-core/internal/neterr"
 	"dolssh/services/ssh-core/internal/protocol"
 	"dolssh/services/ssh-core/internal/sshcmd"
 	"dolssh/services/ssh-core/internal/sshconn"
@@ -52,8 +53,47 @@ type sessionHandle struct {
 	// Connect에서 생성되며 Arm 되기 전에는 Observe가 no-op이다.
 	reinjectGate *autocomplete.PromptSettleGate
 
-	completionWorkerMu sync.Mutex
-	completionWorker   *sshcmd.CompletionWorker
+	completionPoolMu sync.Mutex
+	completionPool   *sshcmd.WorkerPool
+
+	// sudo 는 세션 패널이 도커를 읽으려는데 소켓 권한이 없고 `sudo -n` 도 막혔을 때만 쓴다.
+	//
+	// **로그인 비밀번호를 세션이 사는 동안 들고 있는다는 뜻이다.** 예전에는 인증이 끝나면
+	// 버렸다. 되물리려면 가지고 있어야 하고, 대신 범위를 좁게 둔다 — 비밀번호로 붙은 세션에서만
+	// 채우고, 명령줄이 아니라 stdin 으로만 흘리고(sshcmd.BuildSudoCommand), 한 번 틀리면
+	// denied 를 세워 이 세션에서는 다시 시도하지 않는다. 틀린 sudo 시도는 pam_faillock 카운터를
+	// 올려 계정을 잠글 수 있어서, 주기적으로 재시도하는 것이 실제 피해가 된다.
+	sudoMu       sync.Mutex
+	sudoPassword string
+	sudoDenied   bool
+}
+
+// setSudoPassword 는 비밀번호로 붙은 세션에만 되물릴 값을 남긴다.
+func (h *sessionHandle) setSudoPassword(authType, password string) {
+	if authType != "password" || password == "" {
+		return
+	}
+	h.sudoMu.Lock()
+	defer h.sudoMu.Unlock()
+	h.sudoPassword = password
+}
+
+// takeSudoPassword 는 지금 되물릴 수 있는 비밀번호를 준다. 없거나 이미 한 번 거절당했으면
+// 빈 값이다 — 호출자는 원격을 건드리지 않고 끝낸다.
+func (h *sessionHandle) takeSudoPassword() string {
+	h.sudoMu.Lock()
+	defer h.sudoMu.Unlock()
+	if h.sudoDenied {
+		return ""
+	}
+	return h.sudoPassword
+}
+
+// denySudo 는 되물린 비밀번호가 통하지 않았다고 표시한다. 이 세션에서는 다시 시도하지 않는다.
+func (h *sessionHandle) denySudo() {
+	h.sudoMu.Lock()
+	defer h.sudoMu.Unlock()
+	h.sudoDenied = true
 }
 
 // writeStdin writes p to the session's stdin as one indivisible unit. Every
@@ -308,6 +348,8 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 		closed:       make(chan struct{}),
 		reinjectGate: autocomplete.NewPromptSettleGate(0, 0),
 	}
+	// 도커 소켓이 막혔을 때 `sudo -S` 로 한 번 되물릴 값(위 sudo 필드 주석 참고).
+	handle.setSudoPassword(payload.AuthType, payload.Password)
 
 	// 세션 등록 이후에야 write/resize가 정상적으로 동작할 수 있다.
 	m.mu.Lock()
@@ -477,12 +519,53 @@ func ParseTmuxDetect(out string) protocol.TmuxAvailablePayload {
 // RunCompletionCommand runs a short read-only command on a separate exec
 // channel (not the interactive shell) and returns its stdout, for dynamic
 // completion. Bounded by CompletionTimeout and CapOutput.
-func (m *Manager) RunCompletionCommand(sessionID, command string) (string, bool, error) {
+//
+// background 는 사람이 결과를 기다리지 않는 질의(세션 패널의 도커·호스트 지표 폴링)라는
+// 뜻이다. 그런 질의는 두 번째 보조 채널에서 돌아 자동완성을 막지 않는다 — 도커의
+// `stats --no-stream` 한 번이 2초를 넘기는 일이 흔한데, 그동안 타이핑이 멈춰 보였다.
+func (m *Manager) RunCompletionCommand(
+	sessionID, command string,
+	background, elevate bool,
+) (string, bool, error) {
 	session, err := m.getSession(sessionID)
 	if err != nil {
 		return "", false, err
 	}
-	stdout, truncated, err := session.runCompletionWorker(command)
+	// 예산은 이 함수 전체에 하나다 — 아래 폴백까지 합쳐서 이 시간을 넘지 않는다. 단계마다 새
+	// 예산을 주면 합이 호출자(데스크톱)의 요청 타임아웃을 넘겨, 코어가 답을 못 보내게 된다.
+	budget := autocomplete.CompletionTimeoutFor(background)
+	startedAt := time.Now()
+
+	if elevate {
+		// 되물릴 비밀번호가 없거나 이미 한 번 거절당했으면 **원격을 건드리지 않는다.**
+		password := session.takeSudoPassword()
+		if password == "" {
+			return "", false, sshcmd.ErrSudoPasswordUnavailable
+		}
+		invocation, buildErr := sshcmd.BuildSudoCommand(command, password)
+		if buildErr != nil {
+			return "", false, buildErr
+		}
+		out, trunc, runErr := session.runCompletionWorker(invocation.Script, background)
+		if runErr != nil {
+			// 왕복 자체가 실패했다(차례를 못 얻었거나 시간이 초과됐다) — sudo 가 통했는지는
+			// 알 수 없다. 여기서 거절로 단정하면 멀쩡한 호스트를 영영 막는다.
+			return "", trunc, runErr
+		}
+		stripped, ok := sshcmd.StripSudoMarker(out, invocation.OKMarker)
+		if !ok {
+			// 표식이 없다 = sudo 가 명령을 시작하지도 못했다 = 비밀번호가 거절됐다. 이 세션에서는
+			// 다시 내밀지 않는다 — 틀린 시도를 반복하면 pam_faillock 이 계정을 잠근다.
+			//
+			// **출력이 비었다는 것만으로는 판정하지 않는다.** 컨테이너가 하나도 없는 호스트의
+			// `docker ps -a` 도 정상적으로 아무것도 찍지 않는다.
+			session.denySudo()
+			return "", false, sshcmd.ErrSudoRefused
+		}
+		return string(stripped), trunc, nil
+	}
+
+	stdout, truncated, err := session.runCompletionWorker(command, background)
 	if err == nil || len(stdout) > 0 {
 		return string(stdout), truncated, err
 	}
@@ -490,7 +573,11 @@ func (m *Manager) RunCompletionCommand(sessionID, command string) (string, bool,
 		return "", false, err
 	}
 
-	fallbackStdout, _, err := sshcmd.RunWithTimeout(session.client, command, autocomplete.CompletionTimeout)
+	remaining := budget - time.Since(startedAt)
+	if remaining <= 0 {
+		return "", false, err
+	}
+	fallbackStdout, _, err := sshcmd.RunWithTimeout(session.client, command, remaining)
 	// A completion command exiting non-zero is not fatal — return whatever it
 	// printed (best-effort). Only surface an error when nothing was captured.
 	if err != nil && len(fallbackStdout) == 0 {
@@ -556,27 +643,36 @@ func capRunCommandOutput(b []byte) (string, bool) {
 	return string(b[:runHostCommandMaxBytes]), true
 }
 
-func (h *sessionHandle) runCompletionWorker(command string) ([]byte, bool, error) {
-	worker := h.getCompletionWorker()
-	return worker.Run(command, autocomplete.CompletionTimeout, autocomplete.MaxCompletionBytes)
+func (h *sessionHandle) runCompletionWorker(command string, background bool) ([]byte, bool, error) {
+	lane := sshcmd.LaneInteractive
+	if background {
+		lane = sshcmd.LaneBackground
+	}
+	pool := h.getCompletionPool()
+	return pool.Run(
+		lane,
+		command,
+		autocomplete.CompletionTimeoutFor(background),
+		autocomplete.MaxCompletionBytes,
+	)
 }
 
-func (h *sessionHandle) getCompletionWorker() *sshcmd.CompletionWorker {
-	h.completionWorkerMu.Lock()
-	defer h.completionWorkerMu.Unlock()
-	if h.completionWorker == nil {
-		h.completionWorker = sshcmd.NewCompletionWorker(h.client)
+func (h *sessionHandle) getCompletionPool() *sshcmd.WorkerPool {
+	h.completionPoolMu.Lock()
+	defer h.completionPoolMu.Unlock()
+	if h.completionPool == nil {
+		h.completionPool = sshcmd.NewWorkerPool(h.client)
 	}
-	return h.completionWorker
+	return h.completionPool
 }
 
 func (h *sessionHandle) closeCompletionWorker() {
-	h.completionWorkerMu.Lock()
-	worker := h.completionWorker
-	h.completionWorker = nil
-	h.completionWorkerMu.Unlock()
-	if worker != nil {
-		_ = worker.Close()
+	h.completionPoolMu.Lock()
+	pool := h.completionPool
+	h.completionPool = nil
+	h.completionPoolMu.Unlock()
+	if pool != nil {
+		_ = pool.Close()
 	}
 }
 
@@ -881,7 +977,8 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 					Type:      protocol.EventError,
 					SessionID: sessionID,
 					Payload: protocol.ErrorPayload{
-						Message: err.Error(),
+						Message: neterr.Normalize(err).Error(),
+						Failure: neterr.Code(err),
 					},
 				})
 			}

@@ -50,7 +50,7 @@ type sshSessionManager interface {
 	InstallShellIntegration(sessionID string) error
 	ReinjectShellIntegration(sessionID string, shell string) error
 	FlushShellIntegration(sessionID string)
-	RunCompletionCommand(sessionID, command string) (string, bool, error)
+	RunCompletionCommand(sessionID, command string, background, elevate bool) (string, bool, error)
 	// RunHostCommand 은 보조 exec 채널에서 임의 명령을 실행하고 stdout/stderr/exit 를 돌려준다(AI run_command).
 	RunHostCommand(sessionID, command string, timeoutMs int) (string, string, int, bool, error)
 	// KillTmuxSession 은 감지 하단바에서 attach 없이 원격 tmux 세션을 종료한다(보조 exec).
@@ -91,7 +91,7 @@ type localSessionManager interface {
 	InstallShellIntegration(sessionID string) error
 	ReinjectShellIntegration(sessionID string, shell string) error
 	FlushShellIntegration(sessionID string)
-	RunCompletionCommand(sessionID, command string) (string, bool, error)
+	RunCompletionCommand(sessionID, command string, background, elevate bool) (string, bool, error)
 }
 
 type serialSessionManager interface {
@@ -558,23 +558,44 @@ func (runtime *Runtime) PrepareAutocomplete(sessionID, requestID string) error {
 // RunCompletionQuery runs a renderer-built read-only command on the host's
 // auxiliary channel (SSH exec / local subprocess) and returns its stdout for
 // dynamic completion. Unsupported on AWS SSM (single PTY, no aux channel).
-func (runtime *Runtime) RunCompletionQuery(sessionID, requestID, command string) error {
+//
+// background 는 사람이 결과를 기다리지 않는 질의라는 뜻이다(세션 패널의 도커·호스트 지표
+// 폴링). 그런 질의는 두 번째 보조 채널에서 돌아 자동완성 뒤에 줄 서지 않는다.
+//
+// elevate 는 이 명령을 `sudo -S` 로 감싸고 접속에 쓴 비밀번호를 되물려 달라는 뜻이다. 도커
+// 소켓 권한이 없고 `sudo -n` 도 막힌 호스트에서 세션 패널이 쓴다. 되물릴 값이 없거나 이미 한
+// 번 거절당한 세션이면 원격을 건드리지 않고 실패로 돌아온다(틀린 sudo 시도를 반복하면
+// pam_faillock 이 계정을 잠근다).
+func (runtime *Runtime) RunCompletionQuery(
+	sessionID, requestID, command string,
+	background, elevate bool,
+) error {
 	var (
 		stdout    string
 		truncated bool
+		runErr    error
 	)
 	switch {
 	case runtime.tmux.HasSession(sessionID):
-		stdout, truncated, _ = runtime.tmux.RunCompletionCommand(sessionID, command)
+		stdout, truncated, runErr = runtime.tmux.RunCompletionCommand(sessionID, command, background, elevate)
 	case runtime.ssh.HasSession(sessionID):
-		stdout, truncated, _ = runtime.ssh.RunCompletionCommand(sessionID, command)
+		stdout, truncated, runErr = runtime.ssh.RunCompletionCommand(sessionID, command, background, elevate)
 	case runtime.local.HasSession(sessionID):
-		stdout, truncated, _ = runtime.local.RunCompletionCommand(sessionID, command)
+		stdout, truncated, runErr = runtime.local.RunCompletionCommand(sessionID, command, background, elevate)
 	}
-	// Completion is strictly best-effort. Any failure (unknown session,
-	// non-zero exit, timeout) yields an empty result rather than an error — an
-	// error here would be emitted as a session-fatal event and tear down the
-	// terminal. Always emit a result so the desktop request resolves promptly.
+	// Completion is strictly best-effort: a failure must never be emitted as a
+	// session-scoped error event (that would tear down the terminal). Always emit
+	// a result so the desktop request resolves promptly.
+	//
+	// But "failed" and "printed nothing" are different answers, and collapsing
+	// them was a real bug: a query that hit CompletionTimeout came back as an
+	// empty stdout, so the session panel drew an empty container list instead of
+	// backing off. Report it in the payload — the terminal still lives, and the
+	// caller decides what an unanswered query means.
+	//
+	// Output beats the error: a command that printed something and then exited
+	// non-zero (or was capped) is a usable answer, not a failure.
+	failed := runErr != nil && stdout == ""
 	runtime.emitEvent(coretypes.Event{
 		Type:      coretypes.EventTerminalCompletionResult,
 		RequestID: requestID,
@@ -582,6 +603,7 @@ func (runtime *Runtime) RunCompletionQuery(sessionID, requestID, command string)
 		Payload: coretypes.TerminalCompletionResultPayload{
 			Stdout:    stdout,
 			Truncated: truncated,
+			Failed:    failed,
 		},
 	})
 	return nil

@@ -95,9 +95,9 @@ impl SessionRuntime {
                     let _ = thread_output.send_event(
                         &Event::new(
                             "error",
-                            ErrorPayload {
-                                message: format!("RDP 세션이 내부 오류로 중단되었습니다: {detail}"),
-                            },
+                            ErrorPayload::plain(format!(
+                                "RDP 세션이 내부 오류로 중단되었습니다: {detail}"
+                            )),
                         )
                         .session(&thread_session_id)
                         .request(&thread_request_id),

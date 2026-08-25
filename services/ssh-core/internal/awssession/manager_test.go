@@ -645,21 +645,56 @@ func TestManagerDoesNotHoldOutputOnPowerShellSession(t *testing.T) {
 	}
 }
 
-// Windows SSM 세션(PowerShell)도 통합을 받는다.
+// Windows SSM 세션(PowerShell)에는 **아무것도 타이핑하지 않는다.**
 //
-// 예전에는 아예 걸렀다 — POSIX 스크립트를 타이핑하면 오류가 첫 화면을 덮기 때문인데, 정작
-// pwsh 전용 스크립트는 보내지 않았다. 그때 "커서가 밀린다" 던 것은 걷어낼 echo 를 bash 로
-// 가정한 채 무장해서 생긴 일이고(지금은 실제로 보내는 명령으로 무장한다), 셸에 맞는 스크립트를
-// 보내면 Windows EC2 에서도 cwd·명령 블록·마커가 산다.
-func TestManagerInstallsPowerShellIntegrationOnWindowsSessions(t *testing.T) {
+// 한 번 "셸에 맞는 스크립트를 보내면 Windows EC2 에서도 마커가 산다" 로 뒤집었다가 되돌렸다.
+// 실기기에서는 줄이 실행되지 않아 마커가 하나도 오지 않았고(=통합은 그대로 없고), PSReadLine 이
+// 입력줄을 도착하는 대로 처음부터 다시 그려 스크립트가 화면에 겹겹이 남았다. 자세한 경위는
+// shellIntegrationTypable 주석에 있다.
+//
+// 화면도 붙잡지 않아야 한다 — 무장은 곧 출력을 버퍼에 쥐고 있는 것이라, 오지 않을 마커를 8초
+// 기다린 뒤 배너가 한꺼번에 쏟아진다.
+func TestManagerSkipsShellIntegrationOnPowerShellSessions(t *testing.T) {
+	for _, shellKind := range []string{"powershell", "pwsh"} {
+		t.Run(shellKind, func(t *testing.T) {
+			events := make(chan protocol.Event, 16)
+			streams := make(chan []byte, 16)
+			runner := newStubRunner()
+			manager := NewManagerWithRunnerFactory(func(event protocol.Event) {
+				events <- event
+			}, func(_ protocol.StreamFrame, payload []byte) {
+				streams <- payload
+			}, func(protocol.AWSConnectPayload) (sessionRunner, error) {
+				return runner, nil
+			})
+			if err := manager.Connect("session-1", "request-1", protocol.AWSConnectPayload{
+				ShellKind: shellKind,
+			}); err != nil {
+				t.Fatalf("connect: %v", err)
+			}
+			waitForEvent(t, events, protocol.EventConnected)
+
+			// 프롬프트가 안착해도(타이핑하는 경로라면 이때 보낸다) 보내지 않는다.
+			runner.emitOutput("PS C:\\Users\\Administrator> ")
+			if got := waitForStream(t, streams); !bytes.Contains(got, []byte("PS C:\\Users\\Administrator> ")) {
+				t.Fatalf("첫 프롬프트가 그대로 오지 않았다: %q", got)
+			}
+			time.Sleep(750 * time.Millisecond) // 프롬프트 안착 대기(500ms)보다 넉넉히
+			if writes := runner.writesSnapshot(); len(writes) != 0 {
+				t.Fatalf("PowerShell 세션에 타이핑했다: %q", writes)
+			}
+		})
+	}
+}
+
+// 자동완성도 기다리지 않고 바로 물러난다 — 마커가 오지 않을 셸에서 기다리면 키를 누를 때마다
+// 멈춘다.
+func TestCollectAutocompleteReturnsUnsupportedForPowerShellSessions(t *testing.T) {
 	events := make(chan protocol.Event, 16)
-	streams := make(chan []byte, 16)
 	runner := newStubRunner()
 	manager := NewManagerWithRunnerFactory(func(event protocol.Event) {
 		events <- event
-	}, func(_ protocol.StreamFrame, payload []byte) {
-		streams <- payload
-	}, func(protocol.AWSConnectPayload) (sessionRunner, error) {
+	}, func(protocol.StreamFrame, []byte) {}, func(protocol.AWSConnectPayload) (sessionRunner, error) {
 		return runner, nil
 	})
 	if err := manager.Connect("session-1", "request-1", protocol.AWSConnectPayload{
@@ -669,19 +704,16 @@ func TestManagerInstallsPowerShellIntegrationOnWindowsSessions(t *testing.T) {
 	}
 	waitForEvent(t, events, protocol.EventConnected)
 
-	// 프롬프트가 안착하면 주입한다(SSM 은 셸 프로필·run-as 를 먼저 타이핑할 수 있어 기다린다).
-	runner.emitOutput("PS C:\\Users\\Administrator> ")
-	want := autocomplete.ShellIntegrationInitLines("powershell")
-	if len(want) != 1 {
-		t.Fatalf("pwsh 주입 줄이 %d개다", len(want))
+	started := time.Now()
+	result, err := manager.CollectAutocomplete("session-1", 3)
+	if err != nil {
+		t.Fatalf("CollectAutocomplete: %v", err)
 	}
-	writes := waitForWriteCount(t, runner, 1)
-	if string(writes[0]) != want[0] {
-		t.Fatalf("pwsh 스크립트가 아니다: %q", writes[0])
+	if result.Capability.Status != "unsupported" {
+		t.Fatalf("status = %q, want unsupported", result.Capability.Status)
 	}
-	// POSIX 스크립트가 섞여 들어가면 PowerShell 이 오류로 첫 화면을 덮는다.
-	if strings.Contains(string(writes[0]), "BASH_VERSION") {
-		t.Fatalf("PowerShell 세션에 POSIX 스크립트를 보냈다: %q", writes[0])
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("물러나는 데 %v 걸렸다 — 기다리지 않아야 한다", elapsed)
 	}
 }
 

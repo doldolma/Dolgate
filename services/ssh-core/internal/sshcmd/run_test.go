@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -162,40 +161,45 @@ func newLocalCompletionWorker(t *testing.T) (*CompletionWorker, *int32) {
 	var starts int32
 	worker := newCompletionWorkerForTest(func() (*completionWorkerProcess, error) {
 		atomic.AddInt32(&starts, 1)
-		cmd := exec.Command("sh", "-s")
-		stdin, err := cmd.StdinPipe()
-		if err != nil {
-			return nil, err
-		}
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			_ = stdin.Close()
-			return nil, err
-		}
-		cmd.Stderr = io.Discard
-		if err := cmd.Start(); err != nil {
-			_ = stdin.Close()
-			return nil, err
-		}
-		done := make(chan error, 1)
-		go func() {
-			done <- cmd.Wait()
-		}()
-		return &completionWorkerProcess{
-			stdin:  stdin,
-			stdout: stdout,
-			close: func() error {
-				_ = stdin.Close()
-				if cmd.Process != nil {
-					_ = cmd.Process.Kill()
-				}
-				select {
-				case <-done:
-				case <-time.After(time.Second):
-				}
-				return nil
-			},
-		}, nil
+		return startLocalShell()
 	})
 	return worker, &starts
+}
+
+// 채널 차례를 기다리는 시간도 예산 안이어야 한다.
+//
+// 예전에는 Lock() 으로 무한정 기다렸다. 앞선 명령이 오래 걸리면(도커 `stats --no-stream` 은
+// 컨테이너가 많은 호스트에서 수십 초다) 뒤에 선 질의는 자기 시계를 켜 보지도 못했고, 그 합이
+// 데스크톱의 요청 타임아웃을 넘겨 코어가 답 자체를 못 보냈다 — 화면에는 원인을 알 수 없는
+// "Timed out waiting for SSH core response" 만 쌓였다.
+func TestCompletionWorkerBoundsTheWaitForItsTurn(t *testing.T) {
+	worker, starts := newLocalCompletionWorker(t)
+	defer worker.Close()
+
+	blocked := make(chan struct{})
+	go func() {
+		defer close(blocked)
+		_, _, _ = worker.Run("sleep 3", 10*time.Second, 1024)
+	}()
+	// 앞 명령이 채널을 잡을 때까지 기다린다(그래야 "물려 있는 동안" 을 만든다).
+	deadline := time.Now().Add(3 * time.Second)
+	for atomic.LoadInt32(starts) < 1 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	startedAt := time.Now()
+	_, _, err := worker.Run("printf ok", 300*time.Millisecond, 1024)
+	elapsed := time.Since(startedAt)
+	if !errors.Is(err, ErrCompletionLaneBusy) {
+		t.Fatalf("expected ErrCompletionLaneBusy, got %v", err)
+	}
+	// 예산이 300ms 였는데 앞 명령(3초)이 끝나기를 기다렸다면 이 한계를 넘는다.
+	if elapsed > 2*time.Second {
+		t.Fatalf("waited %s for its turn; the 300ms budget must cover the wait", elapsed)
+	}
+	// 차례를 못 얻었으면 채널을 새로 열지도 않는다(원격에는 아무 일도 없었다).
+	if got := atomic.LoadInt32(starts); got != 1 {
+		t.Fatalf("opened %d channels, want 1", got)
+	}
+	<-blocked
 }

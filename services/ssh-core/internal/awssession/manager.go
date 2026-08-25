@@ -396,15 +396,50 @@ const (
 
 // shellIntegrationTypable 은 이 셸에 통합을 타이핑할 수 있는지다.
 //
-// 예전에는 PowerShell 을 여기서 걸러 냈다. 이유는 두 가지였는데 하나만 맞았다: POSIX 스크립트를
-// PowerShell 에 타이핑하면 오류가 첫 화면을 덮는다(맞다). 그런데 pwsh 전용 스크립트를 보내면
-// "커서가 밀린다" 는 것은 원인이 달랐다 — 걷어낼 echo 를 bash 로 가정한 채 무장해서(Arm) 마커 뒤
-// 프롬프트 재출력이 화면에 남은 것이고, 지금은 실제로 보내는 명령으로 무장한다(ArmForCommand).
-// 그래서 셸에 맞는 스크립트만 보내면 된다.
+// **PowerShell 에는 타이핑하지 않는다.** 한 번 뒤집었다가 되돌린 판단이라 근거를 남긴다.
+//
+// 뒤집은 이유는 "커서가 밀리던 것은 걷어낼 echo 를 bash 로 가정한 탓이고, 실제로 보내는 명령으로
+// 무장하면(ArmForCommand) 해결된다" 였다. 실기기에서 아니었다. Windows SSM 세션에 pwsh 전용
+// 스크립트를 타이핑하면:
+//
+//   - 줄이 실행되지 않는다. 마커가 하나도 오지 않아 cwd·명령 블록·자동완성이 전부 없다 —
+//     타이핑하지 않을 때와 결과가 같으면서 화면만 더 나빠진다.
+//   - 화면이 깨진다. PSReadLine 이 입력줄을 구문 색으로, 그리고 도착하는 대로 **처음부터 다시**
+//     그려서 화면에는 그리다 만 사본이 여러 벌 남는다. 전체 일치로는 완성본 하나만 지워지고,
+//     부분 일치로 지우면 토큰 중간이 잘리고 줄바꿈까지 사라져 배너가 겹쳐 찍힌다
+//     (stripInjectedEcho 주석 참고 — 둘 다 해 봤다).
+//
+// 예전 주석이 이미 정확했다: "typing it drifts the cursor (that is why local pwsh sessions get it
+// via -EncodedCommand instead), and an SSM session takes no launch arguments." 로컬은 기동
+// 인자가 있어서 살았고, SSM 은 그것이 없다. 그래서 SSM PowerShell 은 통합 없이 간다 — 맨 SSM
+// 세션이 주는 그대로다.
+//
+// 타이핑 아닌 통로를 찾아봤고, 쓸 수 있는 것이 없다. 조사 결과를 남겨 둔다 — 다시 뒤집기 전에
+// 이만큼은 이미 확인됐다는 뜻이다.
+//
+//   - `shellProfile.windows`(Standard_Stream 의 세션 시작 명령). 이름은 기동 훅처럼 보이지만
+//     에이전트가 **stdin 으로 타이핑한다**(agent/session/shell/shell_windows.go 의 runShellProfile
+//     이 `strings.Split(…, "\n")` 후 줄마다 stdin.Write). 지금과 같은 통로다.
+//   - `sessionType: InteractiveCommands`. 이쪽은 진짜 기동 인자다 — 같은 파일에서
+//     `fullCmdToPty := winptyCmd + " " + cmdStr` 로 `powershell.exe <commands>` 를 만들어
+//     winpty.Start 에 넘긴다. 로컬의 -EncodedCommand 와 같은 모양이 된다.
+//
+// 그런데 둘 다 **SSM 문서**(계정·리전에 저장되는 AWS 리소스)를 만들거나 고쳐야 한다. 사용자
+// 계정의 세션 설정을 우리가 건드리는 일이고, 문서를 바꿔 끼우면 기본 문서에 걸린 세션 녹화·
+// 암호화가 따라오는지도 AWS 문서에 없다(조용히 로그가 끊길 수 있다). 그래서 하지 않기로 했다.
+//
+// 남는 길은 (a) 인스턴스의 PowerShell 프로필에 심기 — 남의 서버를 영구히 바꾸므로 명시적
+// opt-in 이 아니면 안 되고, (b) 짧은 여러 줄로 쪼개 타이핑 — AWS 가 shellProfile 을 넣는 방식이
+// 그것이라 가능성은 있지만 검증되지 않았다. 둘 다 지금은 하지 않는다.
 //
 // 이름을 알지만 지원하지 않는 셸(ksh·cmd)이면 보낼 것이 없다. 빈 값은 Linux/POSIX 로 본다.
 func shellIntegrationTypable(shellKind string) bool {
-	return len(autocomplete.ShellIntegrationInitLines(shellKind)) > 0
+	switch autocomplete.NormalizeShellIntegrationShell(shellKind) {
+	case "pwsh", "powershell":
+		return false
+	default:
+		return len(autocomplete.ShellIntegrationInitLines(shellKind)) > 0
+	}
 }
 
 func (h *sessionHandle) beginShellIntegration() bool {

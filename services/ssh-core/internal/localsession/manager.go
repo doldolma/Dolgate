@@ -136,7 +136,17 @@ func (m *Manager) CollectAutocomplete(sessionID string, revision int) (autocompl
 // a one-off subprocess (separate from the interactive PTY). The renderer
 // resolves directories to absolute paths (via OSC 7 cwd), so the subprocess cwd
 // is not relied upon. Bounded by CompletionTimeout and CapOutput.
-func (m *Manager) RunCompletionCommand(sessionID, command string) (string, bool, error) {
+//
+// background(폴링인가)는 여기서 쓰지 않는다 — 로컬은 호출마다 서브프로세스를 새로 띄우므로
+// 원격의 보조 채널처럼 서로 줄 서는 일이 없다. 레인을 가를 것이 애초에 없다.
+//
+// elevate(sudo 로 되물리기)도 쓰지 않는다 — 되물릴 비밀번호가 없다. 로컬 세션은 로그인이
+// 아니라 이미 이 사용자로 떠 있는 셸이라, 앱이 들고 있는 자격증명 자체가 없다.
+func (m *Manager) RunCompletionCommand(
+	sessionID, command string,
+	_ bool,
+	_ bool,
+) (string, bool, error) {
 	if _, err := m.getSession(sessionID); err != nil {
 		return "", false, err
 	}

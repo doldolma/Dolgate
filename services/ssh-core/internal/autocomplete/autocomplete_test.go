@@ -177,7 +177,7 @@ func TestPowerShellIntegrationInitCommandStructure(t *testing.T) {
 	command := PowerShellIntegrationInitCommand()
 	for _, want := range []string{
 		"function global:prompt", "__ds_cwd", "]133;", "]7;",
-		"AddToHistoryHandler", "Set-PSReadLineOption",
+		"PSConsoleHostReadLine",
 	} {
 		if !strings.Contains(command, want) {
 			t.Errorf("PowerShell init command missing %q", want)

@@ -143,7 +143,7 @@ func (stub *stubCoreRuntime) ReinjectShellIntegration(sessionID string, shell st
 	stub.reinjectShell = shell
 	return nil
 }
-func (stub *stubCoreRuntime) RunCompletionQuery(sessionID, requestID, command string) error {
+func (stub *stubCoreRuntime) RunCompletionQuery(sessionID, requestID, command string, _, _ bool) error {
 	return nil
 }
 func (stub *stubCoreRuntime) RunCommand(sessionID, requestID, command string, timeoutMs int) error {

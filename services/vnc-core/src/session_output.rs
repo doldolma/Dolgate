@@ -202,8 +202,9 @@ fn emit_event_stdio(
             }
             output.send_event(&ev)
         }
-        VncEvent::Error { message } => {
-            let mut ev = Event::new("error", ErrorPayload { message }).session(session_id);
+        VncEvent::Error { message, failure } => {
+            let mut ev =
+                Event::new("error", ErrorPayload { message, failure }).session(session_id);
             if let Some(rid) = request_id {
                 ev = ev.request(rid);
             }

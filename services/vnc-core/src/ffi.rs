@@ -331,7 +331,8 @@ impl VncSink for FfiSink {
                     unsafe { cb(self.callbacks.user_data) };
                 }
             }
-            VncEvent::Error { message } => {
+            // 모바일 콜백은 문구만 받는다 — 원인 코드는 데스크톱의 payload 경로에서 쓴다.
+            VncEvent::Error { message, .. } => {
                 if let Some(cb) = self.callbacks.on_error {
                     let c_msg =
                         std::ffi::CString::new(message).unwrap_or_else(|_| c"<error>".to_owned());

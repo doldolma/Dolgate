@@ -123,9 +123,10 @@ fn handle(request: Request, payload: Vec<u8>, output: &Arc<Output>, sessions: &S
         other => {
             warn!(kind = other, "unknown request type");
             let _ = output.send_event(
-                &Event::new("error", ErrorPayload {
-                    message: format!("unknown request type: {other}"),
-                })
+                &Event::new(
+                    "error",
+                    ErrorPayload::plain(format!("unknown request type: {other}")),
+                )
                 .request(&request.id),
             );
         }
@@ -135,9 +136,10 @@ fn handle(request: Request, payload: Vec<u8>, output: &Arc<Output>, sessions: &S
 fn connect_rdp(request: Request, output: &Arc<Output>, sessions: &Sessions) {
     let Some(session_id) = request.session_id.clone() else {
         let _ = output.send_event(
-            &Event::new("error", ErrorPayload {
-                message: "connectRdp requires a sessionId".to_owned(),
-            })
+            &Event::new(
+                "error",
+                ErrorPayload::plain("connectRdp requires a sessionId"),
+            )
             .request(&request.id),
         );
         return;
@@ -147,9 +149,10 @@ fn connect_rdp(request: Request, output: &Arc<Output>, sessions: &Sessions) {
         Ok(payload) => payload,
         Err(error) => {
             let _ = output.send_event(
-                &Event::new("error", ErrorPayload {
-                    message: format!("invalid connect payload: {error}"),
-                })
+                &Event::new(
+                    "error",
+                    ErrorPayload::plain(format!("invalid connect payload: {error}")),
+                )
                 .session(&session_id)
                 .request(&request.id),
             );
@@ -171,9 +174,10 @@ fn connect_rdp(request: Request, output: &Arc<Output>, sessions: &Sessions) {
         let mut guard = sessions.lock().expect("sessions mutex poisoned");
         if guard.contains_key(&session_id) {
             let _ = output.send_event(
-                &Event::new("error", ErrorPayload {
-                    message: format!("session {session_id} already exists"),
-                })
+                &Event::new(
+                    "error",
+                    ErrorPayload::plain(format!("session {session_id} already exists")),
+                )
                 .session(&session_id)
                 .request(&request.id),
             );
@@ -239,9 +243,9 @@ fn connect_rdp(request: Request, output: &Arc<Output>, sessions: &Sessions) {
                 let _ = thread_output.send_event(
                     &Event::new(
                         "error",
-                        ErrorPayload {
-                            message: format!("RDP 세션이 내부 오류로 중단되었습니다: {detail}"),
-                        },
+                        ErrorPayload::plain(format!(
+                            "RDP 세션이 내부 오류로 중단되었습니다: {detail}"
+                        )),
                     )
                     .session(&thread_session_id)
                     .request(&request_id),
