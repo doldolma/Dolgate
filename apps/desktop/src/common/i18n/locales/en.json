@@ -1417,9 +1417,9 @@
     },
     "tailnet": {
       "none": "Not used (regular network)",
-      "empty": "No tailnet is registered yet. Add one in Settings → Tailscale first. Each device registers its own.",
-      "missingOption": "Tailnet setting missing",
-      "missing": "The Tailnet setting selected by this host is missing. Select 'Not used' to clear it, or register the network again."
+      "empty": "No Tailscale network is registered yet. Add one in Settings → Network first. Each device registers its own.",
+      "missingOption": "Tailscale network missing",
+      "missing": "The Tailscale network selected by this host is missing. Select 'Not used' to clear it, or register the network again."
     },
     "rdp": {
       "domain": "Domain",
@@ -1534,7 +1534,7 @@
       "certificateFile": "SSH certificate file",
       "passphrase": "Passphrase",
       "savedCredentials": "Saved Credentials",
-      "tailnet": "Tailnet",
+      "tailnet": "Tailscale",
       "jumpHosts": "Jump hosts",
       "agentForwarding": "SSH Agent Forwarding",
       "envVars": "Environment Variables",

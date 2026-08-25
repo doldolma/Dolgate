@@ -271,7 +271,7 @@ describe('HostForm', () => {
       />,
     );
 
-    const missingOption = screen.getByRole('option', { name: '설정에 없는 Tailnet' });
+    const missingOption = screen.getByRole('option', { name: '설정에 없는 Tailscale 네트워크' });
     const select = missingOption.closest('select') as HTMLSelectElement;
     expect(select.disabled).toBe(false);
     expect(select.value).toBe('net-deleted');
@@ -320,7 +320,7 @@ describe('HostForm', () => {
         onSubmit={vi.fn()}
       />,
     );
-    expect(screen.queryByText(/등록된 Tailnet 이 없습니다|No tailnets/i)).not.toBeNull();
+    expect(screen.queryByText(/등록된 Tailscale 네트워크가 없습니다|No Tailscale network/i)).not.toBeNull();
     unmount();
 
     render(
@@ -332,7 +332,7 @@ describe('HostForm', () => {
         onSubmit={vi.fn()}
       />,
     );
-    expect(screen.queryByText(/등록된 Tailnet 이 없습니다|No tailnets/i)).toBeNull();
+    expect(screen.queryByText(/등록된 Tailscale 네트워크가 없습니다|No Tailscale network/i)).toBeNull();
     // 신뢰 범위 설명도 더 이상 붙지 않는다.
     expect(screen.queryByText(/이 tailnet 을 경유해|connect through this tailnet/i)).toBeNull();
   });

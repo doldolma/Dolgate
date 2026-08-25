@@ -1417,9 +1417,9 @@
     },
     "tailnet": {
       "none": "사용하지 않음 (일반 네트워크)",
-      "empty": "등록된 Tailnet 이 없습니다. 설정 → Tailscale 에서 먼저 추가하세요. Tailnet 은 기기마다 따로 등록합니다.",
-      "missingOption": "설정에 없는 Tailnet",
-      "missing": "이 호스트가 지정한 Tailnet 설정이 없습니다. '사용하지 않음'을 선택해 해제하거나 네트워크를 다시 등록하세요."
+      "empty": "등록된 Tailscale 네트워크가 없습니다. 설정 → 네트워크에서 먼저 추가하세요. 네트워크는 기기마다 따로 등록합니다.",
+      "missingOption": "설정에 없는 Tailscale 네트워크",
+      "missing": "이 호스트가 지정한 Tailscale 네트워크 설정이 없습니다. '사용하지 않음'을 선택해 해제하거나 네트워크를 다시 등록하세요."
     },
     "rdp": {
       "domain": "도메인",
@@ -1534,7 +1534,7 @@
       "certificateFile": "SSH 인증서 파일",
       "passphrase": "패스프레이즈",
       "savedCredentials": "저장된 인증 정보",
-      "tailnet": "Tailnet",
+      "tailnet": "Tailscale",
       "jumpHosts": "점프 호스트",
       "agentForwarding": "SSH 에이전트 포워딩",
       "envVars": "환경 변수",

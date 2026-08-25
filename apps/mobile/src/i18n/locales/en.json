@@ -439,11 +439,11 @@
       "createHintRoot": "Created at the top level."
     },
     "tailnet": {
-      "label": "Tailnet",
+      "label": "Tailscale",
       "none": "Not used",
-      "search": "Search tailnets",
-      "empty": "No tailnets registered.",
-      "hint": "Connections go through the tailnet you pick."
+      "search": "Search Tailscale networks",
+      "empty": "No Tailscale network registered.",
+      "hint": "Connections go through the Tailscale network you pick."
     },
     "jump": {
       "header": "Jump hosts",
