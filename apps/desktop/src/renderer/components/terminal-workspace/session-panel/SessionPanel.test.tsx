@@ -1,7 +1,14 @@
 // 배관 검증. 판정 로직은 lib/session-panel.test.ts 가 덮으므로, 여기서는 "화면의 버튼을 누르면
 // 그 세션의 셸에 정확히 무엇이 나가는가" 만 본다 — 레지스트리는 실물을 쓴다.
 
-import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   registerTerminalHooks,
@@ -45,6 +52,17 @@ vi.mock('../../../lib/terminal-command-blocks', () => ({
   noteInsertedCommand: (...args: unknown[]) => {
     notedInsertions.push(args as [string, string]);
   },
+}));
+
+const dockerQuery = vi.fn<(sessionId: string, command: string) => Promise<string>>(
+  () => Promise.resolve(''),
+);
+
+// 도커 섹션의 프로브만 대신한다 — 나머지 서비스 함수는 실물을 그대로 쓴다(tmux 섹션이 부른다).
+vi.mock('../../../services/desktop/terminal', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  queryTerminalCompletion: (sessionId: string, command: string) =>
+    dockerQuery(sessionId, command),
 }));
 
 const storeState: Record<string, unknown> = {};
@@ -111,6 +129,8 @@ function setState(overrides: Record<string, unknown> = {}): void {
 }
 
 beforeEach(() => {
+  dockerQuery.mockReset();
+  dockerQuery.mockResolvedValue('');
   blocks.length = 0;
   sent.length = 0;
   notedInsertions.length = 0;
@@ -570,7 +590,7 @@ describe('SessionPanel 관측 섹션', () => {
         loadAvg1: 0.5,
         cpuCount: 4,
         uptimeSeconds: 3600,
-        disks: [{ mount: '/', usedKb: 512, totalKb: 1024 }],
+        disks: [{ mount: '/', usedKb: 512, totalKb: 1024, availableKb: 512 }],
       },
       processes: null,
       system: null,
@@ -579,7 +599,8 @@ describe('SessionPanel 관측 섹션', () => {
     setState({ sessionPanelSectionBySessionId: { 'session-1': 'resources' } });
     render(<SessionPanel sessionId="session-1" />);
     expect(screen.getByText('42%')).toBeTruthy();
-    expect(screen.getByText('0.50 / 4')).toBeTruthy();
+    // 부하는 CPU 차트 아래 곁가지로 붙는다(라벨 + 값).
+    expect(screen.getByText(/0\.50 \/ 4/)).toBeTruthy();
     expect(screen.getByText('/')).toBeTruthy();
   });
 
@@ -911,3 +932,51 @@ describe('SessionPanel 히스토리 — 이전 명령', () => {
     expect(screen.getByText('docker ps')).toBeTruthy();
   });
 });
+
+// 도커 섹션은 **늘 레일에 있다.** 다른 섹션과 다르게 취급하지 않는다 — 안 되는 호스트에서는
+// 자리를 없애는 대신 섹션 안에서 이유를 말한다.
+describe('도커 섹션', () => {
+  it('레일에는 늘 있고, 열기 전에는 왕복을 쓰지 않는다', () => {
+    setState({
+      tabs: [{ sessionId: 'session-3', title: 'Nodocker', paneKind: 'terminal' }],
+    });
+    render(<SessionPanel sessionId="session-3" />);
+    expect(screen.getByRole('button', { name: '도커' })).toBeTruthy();
+    // 다른 섹션을 보는 동안에는 도커를 찾아보지 않는다.
+    expect(dockerQuery).not.toHaveBeenCalled();
+  });
+
+  it('열었을 때 못 부르면 그 자리에서 이유를 말한다', async () => {
+    setState({
+      tabs: [{ sessionId: 'session-4', title: 'Nodocker', paneKind: 'terminal' }],
+      sessionPanelSectionBySessionId: { 'session-4': 'docker' },
+    });
+    render(<SessionPanel sessionId="session-4" />);
+    await waitFor(() => {
+      expect(dockerQuery).toHaveBeenCalled();
+    });
+    // 보조 채널은 로그인 셸이 아니라 PATH 를 넓혀 물어본다(snap·/usr/local 의 도커).
+    expect(dockerQuery.mock.calls[0][1]).toContain('/snap/bin');
+    expect(await screen.findByText('도커가 없습니다')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '도커' })).toBeTruthy();
+  });
+
+  it('부를 수 있으면 목록을 받고, 헤더에 새로 받기가 붙는다', async () => {
+    dockerQuery.mockImplementation((_sessionId: string, command: string) =>
+      Promise.resolve(command.includes('for c in') ? 'prefix=docker\nhas=docker\n' : ''),
+    );
+    setState({ sessionPanelSectionBySessionId: { 'session-2': 'docker' } });
+    render(<SessionPanel sessionId="session-2" />);
+    expect(
+      (await screen.findByRole('button', { name: '도커' })).getAttribute('aria-pressed'),
+    ).toBe('true');
+    // 섹션이 자기 헤더를 또 만들지 않는다 — 새로고침은 패널 헤더의 섹션 동작 자리에 있다.
+    expect(screen.getByRole('button', { name: '새로 받기' })).toBeTruthy();
+    await waitFor(() => {
+      expect(
+        dockerQuery.mock.calls.some(([, command]) => command.includes('ps -a --format')),
+      ).toBe(true);
+    });
+  });
+});
+

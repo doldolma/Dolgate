@@ -3691,6 +3691,102 @@
       "create": "만들기",
       "refresh": "목록 새로고침"
     },
+    "docker": {
+      "title": "도커",
+      "refresh": "새로 받기",
+      "checking": "도커를 찾는 중",
+      "absentTitle": "도커가 없습니다",
+      "absent": "이 호스트에서 docker · podman 을 찾지 못했습니다.",
+      "blockedTitle": "도커를 읽을 수 없습니다",
+      "blocked": "소켓 권한이 없고 sudo 도 비밀번호를 요구합니다. 터미널에서 sudo 를 한 번 쓰면 그때부터 보입니다.",
+      "downTitle": "도커가 꺼져 있습니다",
+      "down": "데몬이 올라오면 알아서 나타납니다.",
+      "tab": {
+        "containers": "컨테이너",
+        "images": "이미지",
+        "volumes": "볼륨",
+        "networks": "네트워크"
+      },
+      "search": {
+        "containers": "컨테이너 검색",
+        "images": "이미지 검색",
+        "volumes": "볼륨 검색",
+        "networks": "네트워크 검색"
+      },
+      "noStack": "스택 없음",
+      "stoppedCount": "정지 {{count}}개",
+      "shell": "셸 접속",
+      "logs": "로그",
+      "more": "더 보기",
+      "unused": "미사용",
+      "noMatches": "찾는 것이 없습니다",
+      "emptyContainers": "컨테이너가 없습니다",
+      "emptyImages": "이미지가 없습니다",
+      "emptyVolumes": "볼륨이 없습니다",
+      "emptyNetworks": "네트워크가 없습니다",
+      "truncated": "목록이 잘렸습니다 — 검색으로 좁혀 주세요.",
+      "staleSeconds": "{{count}}초 전 값 · 다시 받는 중",
+      "staleMinutes": "{{count}}분 전 값 · 다시 받는 중",
+      "retrying": "다시 받는 중",
+      "action": {
+        "start": "시작",
+        "stop": "정지",
+        "restart": "재시작",
+        "remove": "삭제",
+        "copyName": "이름 복사",
+        "copyImage": "이미지 복사"
+      },
+      "stack": {
+        "restart": "스택 재시작",
+        "stop": "스택 정지",
+        "logs": "스택 로그",
+        "copyPath": "compose 경로 복사",
+        "down": "compose down"
+      },
+      "hint": {
+        "newTab": "새 탭",
+        "insertOnly": "입력만"
+      },
+      "detail": {
+        "image": "이미지",
+        "ports": "포트",
+        "status": "상태",
+        "name": "이름",
+        "stack": "스택",
+        "io": "I/O",
+        "disk": "디스크"
+      },
+      "age": {
+        "second": "{{count}}초",
+        "minute": "{{count}}분",
+        "hour": "{{count}}시간",
+        "day": "{{count}}일",
+        "week": "{{count}}주",
+        "month": "{{count}}달",
+        "year": "{{count}}년"
+      },
+      "images": {
+        "summary": "{{count}}개 · {{size}}",
+        "reclaimable": "회수 가능 {{size}}",
+        "prune": "미사용 이미지 정리"
+      },
+      "volumes": {
+        "summary": "{{count}}개",
+        "anonymous": "익명",
+        "usedBy": "{{count}}개",
+        "prune": "미사용 볼륨 정리"
+      },
+      "summary": {
+        "running": "{{running}}/{{total}} 실행"
+      },
+      "trouble": {
+        "restarting": "재시작 중",
+        "unhealthy": "unhealthy",
+        "oom": "OOM",
+        "crashed": "비정상 종료",
+        "restartCount": "재시작 {{count}}회"
+      }
+    },
     "theme": {
       "title": "터미널 테마",
       "followGlobal": "앱 설정 따르기",

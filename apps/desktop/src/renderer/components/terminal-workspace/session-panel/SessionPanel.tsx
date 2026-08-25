@@ -23,15 +23,18 @@ import {
   Activity,
   Cable,
   Columns2,
+  Container,
   History,
   ListOrdered,
   Palette,
+  RefreshCw,
   Scissors,
   Sparkles,
   X,
 } from '../../../ui/icons';
 import { Tooltip } from '../../../ui';
 import { AiChatPanel } from '../AiChatPanel';
+import { SessionPanelDocker } from './SessionPanelDocker';
 import { SessionPanelHistory } from './SessionPanelHistory';
 import { SessionPanelPorts } from './SessionPanelPorts';
 import { SessionPanelProcesses } from './SessionPanelProcesses';
@@ -40,6 +43,11 @@ import { SessionPanelSnippets } from './SessionPanelSnippets';
 import { SessionPanelTheme } from './SessionPanelTheme';
 import { SessionPanelTmux } from './SessionPanelTmux';
 import { beginLayoutTransition } from '../../../lib/layout-transition';
+import {
+  requestDockerRefresh,
+  useDockerBusy,
+  useDockerRuntime,
+} from './useSessionDocker';
 import {
   SESSION_PANEL_MOTION_MS,
   useSessionCommandBlocks,
@@ -77,6 +85,9 @@ const SECTIONS: Array<{
   { id: 'ports', Icon: Cable, labelKey: 'sessionPanel.ports.title' },
   // tmux. 하단바에는 상태 칩만 두고 세션 목록·생성·kill·detach 는 여기로 모았다.
   { id: 'tmux', Icon: Columns2, labelKey: 'sessionPanel.tmux.title' },
+  // 도커. 다른 섹션과 같이 **늘 이 자리에 있다** — 안 되는 호스트에서는 섹션 안에서 이유를
+  // 말한다(자원·프로세스가 그러는 것과 같다). 자리를 없애면 그것만 특별해진다.
+  { id: 'docker', Icon: Container, labelKey: 'sessionPanel.docker.title' },
   // 테마는 맨 아래. 세션마다 여는 것이 아니라 한 번 정하고 마는 것이다.
   { id: 'theme', Icon: Palette, labelKey: 'sessionPanel.theme.title' },
 ];
@@ -89,6 +100,7 @@ const SECTION_TITLE_KEY: Record<SessionPanelSectionId, string> = {
   processes: 'sessionPanel.processes.title',
   ports: 'sessionPanel.ports.title',
   tmux: 'sessionPanel.tmux.title',
+  docker: 'sessionPanel.docker.title',
   theme: 'sessionPanel.theme.title',
 };
 
@@ -158,6 +170,7 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
     };
   }, [open]);
 
+  const targetTab = tabs.find((tab) => tab.sessionId === sessionId);
   const blocks = useSessionCommandBlocks(sessionId ?? '');
   const shellHistory = useSessionShellHistory(sessionId ?? '');
   const sender = useSessionPanelSender(sessionId ?? '', blocks);
@@ -170,9 +183,16 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
       ? tabs.find((tab) => tab.sessionId === sessionId)?.source
       : null,
   );
-  const section = sessionId
+  const section: SessionPanelSectionId = sessionId
     ? (sectionBySessionId[sessionId] ?? defaultSection)
     : defaultSection;
+  // 도커를 부를 수 있는지는 **이 섹션을 열 때** 물어본다. 레일에 늘 있으니 미리 알 필요가 없고,
+  // 다른 섹션을 보는 동안 왕복을 쓰지 않는다.
+  const dockerRuntime = useDockerRuntime(
+    open && sessionId && section === 'docker' ? sessionId : null,
+    targetTab?.hostId ?? null,
+  );
+  const dockerBusy = useDockerBusy(sessionId);
 
   // 드래그를 끝내는 정리 함수. 언마운트에서도 불러야 한다 — 드래그 중에 세션이 끊겨 패널이
   // 사라지면(대상 세션이 null 이 되면 이 컴포넌트는 그냥 없어진다) mouseup 이 오기 전까지
@@ -206,7 +226,6 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
     return null;
   }
 
-  const targetTab = tabs.find((tab) => tab.sessionId === sessionId);
   const totalWidth = width + RAIL_WIDTH_PX;
 
   return (
@@ -270,6 +289,21 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
               {translate(SECTION_TITLE_KEY[section])}
             </span>
             {/* 섹션 고유 동작은 이 자리에 붙인다 — 섹션이 자기 헤더를 또 만들면 줄이 두 개가 된다. */}
+            {section === 'docker' ? (
+              <Tooltip label={translate('sessionPanel.docker.refresh')}>
+                <button
+                  type="button"
+                  aria-label={translate('sessionPanel.docker.refresh')}
+                  onClick={() => sessionId && requestDockerRefresh(sessionId)}
+                  className={HEADER_BUTTON_CLASS}
+                >
+                  <RefreshCw
+                    className={cn('h-3.5 w-3.5', dockerBusy && 'animate-spin')}
+                    aria-hidden
+                  />
+                </button>
+              </Tooltip>
+            ) : null}
             {section === 'ai' ? (
               <button
                 type="button"
@@ -311,6 +345,13 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
             <SessionPanelPorts hostId={targetTab?.hostId ?? null} />
           ) : section === 'tmux' ? (
             <SessionPanelTmux sessionId={sessionId} />
+          ) : section === 'docker' ? (
+            <SessionPanelDocker
+              sessionId={sessionId}
+              hostId={targetTab?.hostId ?? null}
+              sender={sender}
+              runtime={dockerRuntime}
+            />
           ) : section === 'theme' ? (
             <SessionPanelTheme hostId={targetTab?.hostId ?? null} />
           ) : (

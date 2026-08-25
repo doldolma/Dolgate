@@ -3691,6 +3691,102 @@
       "create": "Create",
       "refresh": "Refresh list"
     },
+    "docker": {
+      "title": "Docker",
+      "refresh": "Refresh",
+      "checking": "Looking for Docker",
+      "absentTitle": "No Docker here",
+      "absent": "Couldn't find docker or podman on this host.",
+      "blockedTitle": "Can't read Docker",
+      "blocked": "No socket permission, and sudo asks for a password. Run sudo once in the terminal and it shows up.",
+      "downTitle": "Docker is not running",
+      "down": "It shows up on its own once the daemon is up.",
+      "tab": {
+        "containers": "Containers",
+        "images": "Images",
+        "volumes": "Volumes",
+        "networks": "Networks"
+      },
+      "search": {
+        "containers": "Search containers",
+        "images": "Search images",
+        "volumes": "Search volumes",
+        "networks": "Search networks"
+      },
+      "noStack": "No stack",
+      "stoppedCount": "{{count}} stopped",
+      "shell": "Shell",
+      "logs": "Logs",
+      "more": "More",
+      "unused": "unused",
+      "noMatches": "No matches",
+      "emptyContainers": "No containers",
+      "emptyImages": "No images",
+      "emptyVolumes": "No volumes",
+      "emptyNetworks": "No networks",
+      "truncated": "The list was cut off — narrow it with search.",
+      "staleSeconds": "{{count}}s old · retrying",
+      "staleMinutes": "{{count}}m old · retrying",
+      "retrying": "Retrying",
+      "action": {
+        "start": "Start",
+        "stop": "Stop",
+        "restart": "Restart",
+        "remove": "Remove",
+        "copyName": "Copy name",
+        "copyImage": "Copy image"
+      },
+      "stack": {
+        "restart": "Restart stack",
+        "stop": "Stop stack",
+        "logs": "Stack logs",
+        "copyPath": "Copy compose path",
+        "down": "compose down"
+      },
+      "hint": {
+        "newTab": "New tab",
+        "insertOnly": "Insert only"
+      },
+      "detail": {
+        "image": "Image",
+        "ports": "Ports",
+        "status": "Status",
+        "name": "Name",
+        "stack": "Stack",
+        "io": "I/O",
+        "disk": "disk"
+      },
+      "age": {
+        "second": "{{count}}s",
+        "minute": "{{count}}m",
+        "hour": "{{count}}h",
+        "day": "{{count}}d",
+        "week": "{{count}}w",
+        "month": "{{count}}mo",
+        "year": "{{count}}y"
+      },
+      "images": {
+        "summary": "{{count}} · {{size}}",
+        "reclaimable": "{{size}} reclaimable",
+        "prune": "Prune unused images"
+      },
+      "volumes": {
+        "summary": "{{count}} volumes",
+        "anonymous": "anonymous",
+        "usedBy": "{{count}}",
+        "prune": "Prune unused volumes"
+      },
+      "summary": {
+        "running": "{{running}}/{{total}} running"
+      },
+      "trouble": {
+        "restarting": "restarting",
+        "unhealthy": "unhealthy",
+        "oom": "OOM",
+        "crashed": "crashed",
+        "restartCount": "{{count}} restarts"
+      }
+    },
     "theme": {
       "title": "Terminal theme",
       "followGlobal": "Follow app setting",

@@ -21,6 +21,7 @@ export type SessionPanelSectionId =
   | 'processes'
   | 'ports'
   | 'tmux'
+  | 'docker'
   | 'theme';
 
 /**

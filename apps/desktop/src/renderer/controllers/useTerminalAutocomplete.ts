@@ -20,6 +20,7 @@ import {
   type SessionCommandStat,
   type TerminalAutocompleteSuggestion,
 } from '../lib/terminal-autocomplete';
+import { AUX_PATH_ASSIGNMENT } from '../lib/aux-path';
 import {
   parseSnippetVariables,
   resolveSnippetCommand,
@@ -93,13 +94,9 @@ export function parseCwdFromOsc7(data: string): string | null {
 const DYNAMIC_DEBOUNCE_MS = 120;
 const DYNAMIC_CACHE_MAX = 32;
 
-// The aux channel is a non-login shell, so its PATH is minimal and often misses
-// tools the user has interactively (docker via snap, anything in /usr/local or
-// ~/.local). Broaden PATH to the common locations for generator commands. This
-// adds to PATH without sourcing profiles (no risk of profile output polluting
-// stdout). $HOME/$PATH are expanded by the host shell.
-const GENERATOR_PATH_PREFIX =
-  'PATH="$PATH:/usr/local/bin:/usr/local/sbin:/snap/bin:$HOME/.local/bin:$HOME/bin"';
+// 보조 채널은 로그인 셸이 아니라 PATH 가 최소한이다 — 왜 넓히는지는 lib/aux-path.ts 에 적혀
+// 있다(도커 섹션도 같은 상수를 쓴다).
+const GENERATOR_PATH_PREFIX = AUX_PATH_ASSIGNMENT;
 
 // Build the shell line for a Fig generator's command (argv → escaped string),
 // run inside the session cwd so cwd-sensitive commands (git branch) are correct.
