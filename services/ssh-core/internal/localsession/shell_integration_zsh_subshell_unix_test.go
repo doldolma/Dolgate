@@ -25,13 +25,26 @@ func TestReinjectShellIntegrationIntoAZshSubshell(t *testing.T) {
 	if err != nil {
 		t.Skip("zsh 가 없다")
 	}
-	dir := t.TempDir()
+	// t.TempDir 을 쓰지 않는다. 이 디렉터리를 서브셸의 ZDOTDIR 로 넘기는데, macOS 의 /etc/zshrc 가
+	// 셸을 나갈 때 `.zsh_sessions/` 를 그 안에 만든다 — 테스트가 끝나고 정리가 도는 사이에 파일이
+	// 생겨 t.TempDir 의 RemoveAll 이 "directory not empty" 로 **테스트를 실패시켰다**(CI 의
+	// macOS 러너에서만 났다). 우리가 지우고 실패는 무시한다.
+	dir, err := os.MkdirTemp("", "dolgate-zsh-subshell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	outerRc := filepath.Join(dir, "outer")
 	if err := os.WriteFile(outerRc, []byte("PS1='outer$ '\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// 서브셸 zsh 는 이 디렉터리를 ZDOTDIR 로 받아 우리 rc 만 읽는다(사용자 rc 영향 배제).
-	if err := os.WriteFile(filepath.Join(dir, ".zshrc"), []byte("PS1='inner%% '\n"), 0o600); err != nil {
+	// 히스토리 파일도 남기지 않게 한다 — 위 정리 문제와 같은 부류다.
+	if err := os.WriteFile(
+		filepath.Join(dir, ".zshrc"),
+		[]byte("unset HISTFILE\nPS1='inner%% '\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -59,7 +72,7 @@ func TestReinjectShellIntegrationIntoAZshSubshell(t *testing.T) {
 	}
 	markersBefore := strings.Count(captured.snapshot(), "\x1b]133;A")
 
-	if err := manager.WriteBytes("s1", []byte("ZDOTDIR="+dir+" "+zshPath+" -i\r")); err != nil {
+	if err := manager.WriteBytes("s1", []byte("ZDOTDIR="+dir+" SHELL_SESSIONS_DISABLE=1 "+zshPath+" -i\r")); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.ReinjectShellIntegration("s1", "zsh"); err != nil {
