@@ -684,3 +684,38 @@ func TestManagerInstallsPowerShellIntegrationOnWindowsSessions(t *testing.T) {
 		t.Fatalf("PowerShell 세션에 POSIX 스크립트를 보냈다: %q", writes[0])
 	}
 }
+
+// AWS SSM 윈도우(PowerShell)에서 주입 스크립트가 화면에 통째로 남던 건. PSReadLine 이 입력줄을
+// **구문 색으로 다시 그려서** 우리가 보낸 글자 사이사이에 SGR 이 끼어드는데, 그걸 그대로 대조하면
+// 한 글자도 못 지운다.
+func TestPowerShellColoredEchoIsScrubbed(t *testing.T) {
+	command := autocomplete.PowerShellIntegrationInitCommand()
+	plain := strings.TrimSuffix(strings.TrimPrefix(command, " "), "\r")
+
+	// PSReadLine 스타일로 토큰마다 색을 입힌다(내용은 그대로, 바이트만 늘어난다).
+	colored := strings.ReplaceAll(plain, "function", "\x1b[93mfunction\x1b[0m")
+	colored = strings.ReplaceAll(colored, "if", "\x1b[93mif\x1b[0m")
+	colored = strings.ReplaceAll(colored, "$global:", "\x1b[96m$global:\x1b[0m")
+
+	handshake := &autocomplete.Handshake{}
+	handshake.ArmForCommand(false, command)
+
+	var out []byte
+	out = append(out, handshake.Filter([]byte(autocomplete.PromptStartMarker+"PS C:\\Windows\\system32> "))...)
+	// SSM 데이터 채널은 잘게 온다 — 512바이트씩 흘려 넣는다.
+	for start := 0; start < len(colored); start += 512 {
+		end := start + 512
+		if end > len(colored) {
+			end = len(colored)
+		}
+		out = append(out, handshake.Filter([]byte(colored[start:end]))...)
+	}
+	out = append(out, handshake.Filter([]byte("\r\nPS C:\\Windows\\system32> "))...)
+
+	if strings.Contains(string(out), "__ds_shell_integration_installed") {
+		t.Fatalf("색 입은 주입 스크립트가 화면에 남았다:\n%q", string(out))
+	}
+	if !strings.Contains(string(out), "PS C:\\Windows\\system32> ") {
+		t.Fatalf("프롬프트까지 지웠다:\n%q", string(out))
+	}
+}

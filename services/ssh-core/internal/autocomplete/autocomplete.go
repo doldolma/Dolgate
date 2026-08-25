@@ -374,7 +374,20 @@ const shellIntegrationCommonScript = `__ds_o(){ printf '\033]133;%s\007' "$1"; }
 // bash 전용 본문. 가드(`if [ -n "${BASH_VERSION:-}" ]`)를 붙여 보낸다 — 셸을 알고 보낼 때도
 // 붙인다. 판정이 틀렸을 때(래퍼 스크립트가 실제로는 다른 셸을 띄우는 등) 엉뚱한 셸에서 실행되는
 // 것보다 조용히 아무것도 안 하는 편이 낫고, 그 값이 38바이트다.
-const bashIntegrationBody = `__ds_pc(){ local __e=$?; __ds_o "D;$__e"; __ds_o A; __ds_cwd; }; ` +
+const bashIntegrationBody = `__ds_pc(){ local __e=$?; __ds_o "D;$__e"; __ds_o A; __ds_cwd; __ds_a=1; }; ` +
+	// PS0 이 없는 bash(4.4 미만 — macOS 기본이 3.2 다)를 위한 명령 시작(133;C) 폴백.
+	//
+	// C 가 없으면 앱은 명령 블록을 만들지 못한다(beginCommandBlock 이 C 에서 블록을 연다) —
+	// A·B·D 만 오면 통합이 붙은 것처럼 보이면서 화면에는 아무 것도 안 생긴다. 실제로 macOS
+	// 로컬에서 `bash` 서브셸에 들어가면 그렇게 됐다.
+	//
+	// DEBUG 트랩은 명령마다 발화하므로 한 줄에 한 번만 내보내야 한다. 프롬프트에서 `__ds_pc`
+	// 가 깃발을 세우고(위 `__ds_a=1`) 첫 발화가 내리는 방식이다. PROMPT_COMMAND 의 다른
+	// 항목들은 우리 뒤에 실행되므로 그것들이 깃발을 먹지 않게 걸러 낸다.
+	//
+	// 배열 첨자(`${BASH_VERSINFO[0]}`)를 쓰지 않는다 — 이 줄은 셸을 모를 때 dash 에도 그대로
+	// 가고, dash 는 실행하지 않을 가지도 **파싱**해서 나쁜 치환으로 죽는다.
+	`__ds_c(){ [ -n "${COMP_LINE:-}" ] && return; case "${PROMPT_COMMAND:-}" in *"$BASH_COMMAND"*) return;; esac; [ "${__ds_a:-}" = 1 ] || return; __ds_a=0; __ds_o C; }; ` +
 	// 여러 줄을 "실행하지 않고 입력줄에 넣기" 는 셸이 괄호 붙여넣기를 받아야 성립한다. bash 는
 	// 5.1 부터 기본으로 켜지므로 그 아래 버전(우분투 20.04 = 5.0)에서는 우리가 켠다. 없는
 	// 옵션이면 bind 가 조용히 실패한다.
@@ -382,6 +395,9 @@ const bashIntegrationBody = `__ds_pc(){ local __e=$?; __ds_o "D;$__e"; __ds_o A;
 	`case ";${PROMPT_COMMAND:-};" in *__ds_pc*) ;; *) PROMPT_COMMAND="__ds_pc${PROMPT_COMMAND:+;$PROMPT_COMMAND}";; esac; ` +
 	`case "${PS1:-}" in *'133;B'*) ;; *) PS1="${PS1:-}"'\[\033]133;B\007\]';; esac; ` +
 	`case "${PS0:-}" in *'133;C'*) ;; *) PS0="${PS0:-}"'\033]133;C\007';; esac; ` +
+	// PS0 을 못 쓰는 버전에서만 트랩을 건다. 남의 DEBUG 트랩이 이미 있으면(bash-preexec 등)
+	// 건드리지 않는다 — C 를 잃더라도 남의 도구를 깨뜨리지 않는 편이 낫다.
+	`case "${BASH_VERSION:-}" in [0-3].*|4.[0-3].*) case "$(trap -p DEBUG)" in ""|*__ds_c*) trap '__ds_c' DEBUG;; esac;; esac; ` +
 	// 이어지는 줄(PS2)에도 마커를 붙인다. bash 는 명령 원문을 알려줄 방법이 없어(133;E 불가)
 	// 화면을 읽어야 하는데, 그러면 화면에 찍힌 PS2("> ")가 명령에 섞인다 — `cat \` 다음 줄이
 	// `> test.txt` 로 읽혀 이어 붙이면 `cat > test.txt`(리다이렉트)가 된다.
@@ -649,22 +665,79 @@ func findWrappedEcho(data []byte, echo []byte) (int, int, bool) {
 				matched++
 				continue
 			}
-			// 접힘 표시는 건너뛴다: CR, 그리고 CR 바로 앞의 공백.
-			if data[cursor] == '\r' {
-				cursor++
-				continue
+			next, skipped := skipEchoNoise(data, cursor)
+			if !skipped {
+				break
 			}
-			if data[cursor] == ' ' && cursor+1 < len(data) && data[cursor+1] == '\r' {
-				cursor += 2
-				continue
-			}
-			break
+			cursor = next
 		}
 		if matched == len(echo) {
-			return start, cursor, true
+			// 바로 앞에 붙은 색 지정(SGR)까지 함께 지운다. 남겨 두면 글자 없는 색만 흘러가
+			// 다음 출력이 그 색으로 물든다.
+			return expandLeadingSGR(data, start), cursor, true
 		}
 	}
 	return 0, 0, false
+}
+
+/**
+ * echo 대조에서 건너뛸 **렌더링 잡음**.
+ *
+ *  - 이스케이프 시퀀스: 셸이 입력줄을 구문 색으로 다시 그리면(PowerShell 의 PSReadLine) 글자
+ *    사이사이에 SGR 이 끼어든다. 건너뛰지 않으면 한 글자도 못 지워 주입 스크립트가 화면에
+ *    통째로 남는다(AWS SSM 윈도우에서 그랬다).
+ *  - CR, 그리고 CR 바로 앞의 공백: tty 가 화면 폭에서 줄을 접을 때 끼워 넣는 것들이다.
+ *
+ * 개행(LF)은 건너뛰지 않는다 — 그것까지 건너뛰면 서로 다른 줄에 흩어진 글자가 우연히 이어져
+ * 엉뚱한 곳을 지운다.
+ */
+func skipEchoNoise(data []byte, index int) (int, bool) {
+	if index >= len(data) {
+		return index, false
+	}
+	if data[index] == 0x1b {
+		next := skipEscapeSequenceBytes(data, index) + 1
+		if next <= index {
+			return index, false
+		}
+		return next, true
+	}
+	if data[index] == '\r' {
+		return index + 1, true
+	}
+	if data[index] == ' ' && index+1 < len(data) && data[index+1] == '\r' {
+		return index + 2, true
+	}
+	return index, false
+}
+
+/**
+ * start 바로 앞에 이어 붙은 SGR(`ESC [ … m`)들을 포함하도록 시작 위치를 앞으로 민다.
+ *
+ * 색 입은 echo 를 지울 때 앞의 색 지정만 남으면 글자 없는 색이 화면에 흘러가 다음 출력이 그
+ * 색으로 물든다.
+ */
+func expandLeadingSGR(data []byte, start int) int {
+	for start > 0 {
+		if data[start-1] != 'm' {
+			return start
+		}
+		escape := -1
+		for i := start - 2; i >= 0 && start-1-i <= 16; i-- {
+			if data[i] == 0x1b {
+				escape = i
+				break
+			}
+			if data[i] != '[' && data[i] != ';' && (data[i] < '0' || data[i] > '9') {
+				return start
+			}
+		}
+		if escape < 0 || escape+1 >= len(data) || data[escape+1] != '[' {
+			return start
+		}
+		start = escape
+	}
+	return start
 }
 
 /**
@@ -751,16 +824,59 @@ func (f *HandshakeFilter) drainPendingEcho() []byte {
 
 /** data 의 접미사이면서 동시에 prefix 의 접두사인 가장 긴 길이(prefix 전체와 같은 경우는 뺀다). */
 func prefixOverlap(data []byte, prefix []byte) int {
-	max := len(prefix) - 1
-	if len(data) < max {
-		max = len(data)
+	if len(prefix) == 0 || len(data) == 0 {
+		return 0
 	}
-	for size := max; size > 0; size-- {
-		if bytes.Equal(data[len(data)-size:], prefix[:size]) {
-			return size
+	// 색·접힘이 끼면 같은 글자라도 바이트가 늘어난다 — prefix 길이로 자르면 색 입은 echo 가
+	// 청크 경계에서 갈렸을 때 꼬리를 못 붙들어 화면에 그대로 남는다(SSM 은 청크가 잘게 온다).
+	// 넉넉히 보되 무한정 붙들지는 않게 상한을 둔다(전체 예산은 maxEchoScrubBytes 가 막는다).
+	limit := len(prefix) * maxEchoInflation
+	if limit > len(data) {
+		limit = len(data)
+	}
+	for start := len(data) - limit; start < len(data); start++ {
+		// 잡음을 건너뛴 첫 글자가 prefix 의 첫 글자가 아니면 볼 필요가 없다(대부분 여기서 걸린다).
+		cursor := start
+		for {
+			next, skipped := skipEchoNoise(data, cursor)
+			if !skipped {
+				break
+			}
+			cursor = next
+		}
+		if cursor >= len(data) || data[cursor] != prefix[0] {
+			continue
+		}
+		if isTolerantPrefix(data[start:], prefix) {
+			return len(data) - start
 		}
 	}
 	return 0
+}
+
+/** 색·접힘이 끼었을 때 echo 가 늘어날 수 있는 배수. 꼬리를 붙드는 양의 상한이다. */
+const maxEchoInflation = 4
+
+/**
+ * tail 이 (렌더링 잡음을 건너뛰면) prefix 의 **앞부분**과 같은가.
+ *
+ * 전체와 같은 경우는 뺀다 — 그건 이미 findWrappedEcho 가 지웠어야 하는 완성된 echo 다.
+ */
+func isTolerantPrefix(tail []byte, prefix []byte) bool {
+	matched := 0
+	for cursor := 0; cursor < len(tail); {
+		if matched < len(prefix) && tail[cursor] == prefix[matched] {
+			cursor++
+			matched++
+			continue
+		}
+		next, skipped := skipEchoNoise(tail, cursor)
+		if !skipped {
+			return false
+		}
+		cursor = next
+	}
+	return matched > 0 && matched < len(prefix)
 }
 
 // HandshakeFilter hides the injected shell-integration command's echo: it

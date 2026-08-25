@@ -11,12 +11,20 @@ import { terminalThemePresets } from '../lib/terminal-presets';
 import { useTerminalSessionViewController } from './useTerminalSessionViewController';
 
 const mocks = vi.hoisted(() => ({
+  reinjectShellIntegration: vi.fn().mockResolvedValue(undefined),
   runtimeRecords: [] as any[],
   schedulerRecords: [] as Array<{
     scheduler: { request: ReturnType<typeof vi.fn>; reset: ReturnType<typeof vi.fn> };
     options: any;
   }>,
   sessionDataListeners: new Map<string, (chunk: Uint8Array) => void>(),
+}));
+
+// 서브셸 재주입만 가로챈다 — 나머지 터미널 서비스는 원본 그대로 쓴다.
+vi.mock('../services/desktop/terminal', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  reinjectTerminalShellIntegration: (sessionId: string, shell?: string) =>
+    mocks.reinjectShellIntegration(sessionId, shell),
 }));
 
 vi.mock('../lib/terminal-runtime', () => ({
@@ -287,6 +295,41 @@ describe('useTerminalSessionViewController', () => {
 
     expect(record.scheduler.request).toHaveBeenCalled();
     expect(runtime.terminal.refresh).not.toHaveBeenCalled();
+  });
+
+  // 배관 검증: 서브셸 진입은 렌더러가 **입력을 보고** 판정해 코어에 재주입을 시킨다. 이 경로가
+  // 끊기면 서브셸 안에서 통합이 조용히 사라진다(단위 테스트가 다 초록이어도 그렇다 — 실제로
+  // 그 상태를 앱에 붙어 계측해서야 찾았다).
+  it('서브셸 진입 명령을 실행하면 그 셸 이름과 함께 재주입을 부른다', async () => {
+    renderController(createProps());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    const runtime = mocks.runtimeRecords[0];
+    mocks.reinjectShellIntegration.mockClear();
+
+    await act(async () => {
+      runtime.emitData('bash');
+      runtime.emitData('\r');
+    });
+
+    expect(mocks.reinjectShellIntegration).toHaveBeenCalledWith('session-1', 'bash');
+  });
+
+  it('평범한 명령에는 재주입을 부르지 않는다', async () => {
+    renderController(createProps());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    const runtime = mocks.runtimeRecords[0];
+    mocks.reinjectShellIntegration.mockClear();
+
+    await act(async () => {
+      runtime.emitData('ls -al');
+      runtime.emitData('\r');
+    });
+
+    expect(mocks.reinjectShellIntegration).not.toHaveBeenCalled();
   });
 
   it('resets prompt, search, and share state when the session changes', async () => {

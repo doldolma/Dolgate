@@ -947,13 +947,25 @@ func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error
 		return nil
 	}
 	handle.paneReinjectGate(paneID).Arm(
-		func() { m.writePaneShellIntegration(sessionID, handle, paneID, commands) },
+		func(tail []byte) {
+			// 서브셸이 뜨지 않았으면(진입 명령 실패 → 원래 셸이 새 프롬프트를 그림) 그
+			// 프롬프트에 이미 우리 마커가 있다. 보내 봐야 프롬프트만 한 번 더 남는다.
+			if autocomplete.PromptAlreadyIntegrated(tail) {
+				return
+			}
+			m.writePaneShellIntegration(sessionID, handle, paneID, commands)
+		},
 		func() {},
 	)
 	return nil
 }
 
 // writePaneShellIntegration 는 echo 억제를 무장하고 pane 에 주입 줄들을 보낸다.
+//
+// 로컬·SSH 재주입과 달리 여기서는 앞 프롬프트 줄을 지우지 않는다(`\r\x1b[2K`). pane 화면은
+// tmux 가 자기 버퍼로 들고 있어서, 우리가 스트림에 지우기를 끼워 넣으면 렌더러 화면만 바뀌고
+// tmux 가 다시 그릴 때(창 전환 등) 되살아난다 — 두 화면이 어긋나느니 프롬프트가 한 번 더 남는
+// 편이 낫다.
 func (m *Manager) writePaneShellIntegration(
 	sessionID string,
 	handle *controlHandle,

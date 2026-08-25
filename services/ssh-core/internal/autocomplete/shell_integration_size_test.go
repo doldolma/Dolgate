@@ -77,3 +77,27 @@ func TestPerShellCommandsKeepTheirVersionGuard(t *testing.T) {
 		t.Error("zsh 명령에 bash 전용 히스토리 정리가 붙어 있다")
 	}
 }
+
+// PS0 이 없는 bash(4.4 미만)용 명령 시작 폴백은 **bash 스크립트를 내보내는 모든 경로**에
+// 들어 있어야 한다 — 로컬 기동 파일, 로컬·SSH·tmux·AWS 의 주입/재주입, 셸을 모를 때의 겸용
+// 줄까지. 한 곳이라도 빠지면 그 경로에서만 명령 블록이 안 생긴다(A·B·D 만 오는 상태).
+func TestBashCommandStartFallbackReachesEveryPath(t *testing.T) {
+	carriers := map[string]string{
+		"BashShellIntegrationInitCommand": BashShellIntegrationInitCommand(),
+		"BashShellIntegrationScript":      BashShellIntegrationScript(),
+		"InitLines(bash)":                 strings.Join(ShellIntegrationInitLines("bash"), ""),
+		"InitLines(unknown)":              strings.Join(ShellIntegrationInitLines(""), ""),
+	}
+	for name, script := range carriers {
+		if !strings.Contains(script, "trap '__ds_c' DEBUG") {
+			t.Errorf("%s 에 DEBUG 트랩 폴백이 없다", name)
+		}
+		if !strings.Contains(script, "__ds_a=1") {
+			t.Errorf("%s 에 트랩 깃발이 없다", name)
+		}
+		// 배열 첨자는 dash 가 파싱하다 죽는다 — 겸용 줄에도 그대로 가므로 금지다.
+		if strings.Contains(script, "BASH_VERSINFO[") {
+			t.Errorf("%s 가 배열 첨자를 쓴다(dash 파싱 불가)", name)
+		}
+	}
+}

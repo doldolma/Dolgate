@@ -19,6 +19,10 @@ const DEFAULT_SUBSHELL_PATTERNS: readonly RegExp[] = [
   /^kubectl\s+exec(\s|$)/,
   /^(toolbox|distrobox)\s+enter(\s|$)/,
   /^nix-shell(\s|$)/,
+  // 윈도우에서 들어가는 서브셸들. `wsl` 안은 리눅스 셸(bash·zsh)이라 POSIX 스크립트가 맞고,
+  // `pwsh`·`powershell` 은 그 셸 전용 한 줄이 나간다.
+  /^wsl(\s|$)/,
+  /^(pwsh|powershell)(\s|$)/,
 ];
 
 /**

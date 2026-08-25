@@ -205,3 +205,85 @@ func TestNormalizeRemoteShellProbeOutput(t *testing.T) {
 		})
 	}
 }
+
+// 서브셸 진입 명령이 실패한 경우(없는 셸을 쳤다) 원래 셸이 **마커 붙은** 프롬프트를 그린다.
+// 그때는 주입하지 않는다 — 통합은 살아 있고, 보내면 프롬프트만 한 번 더 남는다.
+func TestReinjectIsSkippedWhenThePromptAlreadyCarriesTheMarker(t *testing.T) {
+	w := &fakeWriteCloser{}
+	h := &sessionHandle{
+		stdin:        w,
+		closed:       make(chan struct{}),
+		reinjectGate: autocomplete.NewPromptSettleGate(20*time.Millisecond, time.Second),
+	}
+	m := NewManager(func(_ protocol.Event) {}, func(_ protocol.StreamFrame, _ []byte) {})
+	m.mu.Lock()
+	m.sessions["s1"] = h
+	m.mu.Unlock()
+	defer close(h.closed)
+
+	if err := m.ReinjectShellIntegration("s1", "zsh"); err != nil {
+		t.Fatalf("arm reinject failed: %v", err)
+	}
+	h.reinjectGate.Observe([]byte("bash: zsh: command not found\r\n"))
+	h.reinjectGate.Observe([]byte(autocomplete.PromptStartMarker + "user@remote:~$ "))
+
+	time.Sleep(200 * time.Millisecond)
+	if got := w.writeCount(); got != 0 {
+		t.Fatalf("서브셸이 뜨지 않았는데 %d번 썼다: %q", got, w.written())
+	}
+}
+
+// 마커가 없는 맨 프롬프트(진짜 새 셸)에는 그대로 주입한다 — 위 규칙이 정상 경로를 막지 않는지.
+func TestReinjectStillRunsForAFreshSubshellPrompt(t *testing.T) {
+	w := &fakeWriteCloser{}
+	h := &sessionHandle{
+		stdin:        w,
+		closed:       make(chan struct{}),
+		reinjectGate: autocomplete.NewPromptSettleGate(20*time.Millisecond, time.Second),
+	}
+	m := NewManager(func(_ protocol.Event) {}, func(_ protocol.StreamFrame, _ []byte) {})
+	m.mu.Lock()
+	m.sessions["s1"] = h
+	m.mu.Unlock()
+	defer close(h.closed)
+
+	if err := m.ReinjectShellIntegration("s1", "bash"); err != nil {
+		t.Fatalf("arm reinject failed: %v", err)
+	}
+	h.reinjectGate.Observe([]byte("bash-5.2$ "))
+
+	want := strings.Join(autocomplete.ShellIntegrationInitLines("bash"), "")
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && w.written() != want {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := w.written(); got != want {
+		t.Fatalf("맨 프롬프트에는 주입해야 한다. 쓴 것: %q", got)
+	}
+}
+
+// 훅을 걸 수 없는 셸(dash·ksh)로 들어간 경우에는 아무것도 보내지 않는다 — 타이핑해 봐야
+// 화면만 더럽힌다.
+func TestReinjectSendsNothingForAnUnsupportedShellHint(t *testing.T) {
+	w := &fakeWriteCloser{}
+	h := &sessionHandle{
+		stdin:        w,
+		closed:       make(chan struct{}),
+		reinjectGate: autocomplete.NewPromptSettleGate(20*time.Millisecond, time.Second),
+	}
+	m := NewManager(func(_ protocol.Event) {}, func(_ protocol.StreamFrame, _ []byte) {})
+	m.mu.Lock()
+	m.sessions["s1"] = h
+	m.mu.Unlock()
+	defer close(h.closed)
+
+	if err := m.ReinjectShellIntegration("s1", "dash"); err != nil {
+		t.Fatalf("arm reinject failed: %v", err)
+	}
+	h.reinjectGate.Observe([]byte("$ "))
+
+	time.Sleep(200 * time.Millisecond)
+	if got := w.writeCount(); got != 0 {
+		t.Fatalf("지원하지 않는 셸에 %d번 썼다: %q", got, w.written())
+	}
+}

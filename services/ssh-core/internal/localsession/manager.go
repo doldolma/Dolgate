@@ -190,7 +190,7 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 	// 이미 rc 가 끝나 줄 편집기가 올라와 있을 시간이라, 예전처럼 잘려 나갈 위험이 낮다 — 반대로
 	// 쓰지 않으면 cwd·마커·자동완성이 조용히 전부 꺼진다.
 	session.installGate.Arm(
-		func() { m.writeShellIntegration(sessionID, commands, true) },
+		func([]byte) { m.writeShellIntegration(sessionID, commands, true) },
 		func() { m.writeShellIntegration(sessionID, commands, false) },
 	)
 	return nil
@@ -240,20 +240,30 @@ func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error
 	if err != nil {
 		return err
 	}
-	// The init script is POSIX-shell shaped; a Windows local shell subshell can't
-	// use it, so skip there (mirrors RunCompletionCommand's platform guard).
-	if runtime.GOOS == "windows" {
+	// 보낼 것이 있을 때만 무장한다 — 플랫폼이 아니라 셸이 기준이다(shouldArmSubshellReinject).
+	if !shouldArmSubshellReinject(shell) {
 		return nil
 	}
 	session.reinjectGate.Arm(
-		func() { m.performShellIntegrationReinject(sessionID, session, shell) },
+		func(tail []byte) { m.performShellIntegrationReinject(sessionID, session, shell, tail) },
 		func() {},
 	)
 	return nil
 }
 
-func (m *Manager) performShellIntegrationReinject(sessionID string, session *sessionHandle, shell string) {
+func (m *Manager) performShellIntegrationReinject(
+	sessionID string,
+	session *sessionHandle,
+	shell string,
+	tail []byte,
+) {
 	if !m.HasSession(sessionID) {
+		return
+	}
+	// 서브셸이 뜨지 않았다면(진입 명령이 실패해 원래 셸이 새 프롬프트를 그렸다면) 그 프롬프트에는
+	// 우리 마커가 이미 붙어 있다. 그때는 보내지 않는다 — 통합은 살아 있고, 보내 봐야 프롬프트가
+	// 한 번 더 남을 뿐이다.
+	if autocomplete.PromptAlreadyIntegrated(tail) {
 		return
 	}
 	// 렌더러가 실행된 명령에서 셸을 알아냈으면 그 셸 것 한 줄로 끝난다. 모르면 겸용을 여러 줄로
@@ -264,6 +274,13 @@ func (m *Manager) performShellIntegrationReinject(sessionID string, session *ses
 		return
 	}
 	session.handshake.ArmForCommand(true, commands...)
+	// 프롬프트를 보고 쓰므로 그 프롬프트가 이미 화면에 있다. 접속 경로와 같은 이유로 그 줄을
+	// 지운다 — 지우지 않으면 셸이 그리는 새 프롬프트가 같은 줄에 이어 붙어 두 번 찍힌다(bash 가
+	// 그렇다. zsh 는 zle 가 스스로 지우고 다시 그려서 티가 안 났다).
+	m.emitStream(
+		protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID},
+		[]byte("\r\x1b[2K"),
+	)
 	for _, command := range commands {
 		if err := session.runner.Write([]byte(command)); err != nil {
 			if flushed := session.handshake.Flush(); len(flushed) > 0 {

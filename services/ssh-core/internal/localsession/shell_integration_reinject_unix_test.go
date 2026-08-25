@@ -84,6 +84,26 @@ func TestReinjectShellIntegrationIntoASubshell(t *testing.T) {
 	if strings.Contains(output, "__ds_o") {
 		t.Fatalf("주입 스크립트가 화면에 남았다:\n%q", output)
 	}
+
+	// 앞 프롬프트 줄을 지웠는지. 지우지 않으면 셸이 그리는 새 프롬프트가 같은 줄에 이어 붙어
+	// 화면에 프롬프트가 두 번 남는다(bash 에서 실제로 그랬다. zsh 는 zle 가 스스로 지운다).
+	// 접속 경로도 같은 자리에서 같은 것을 보낸다 — 그래서 "서브셸 프롬프트 뒤" 로 잘라 본다.
+	afterSubshell := output[strings.Index(output, "inner$"):]
+	if !strings.Contains(afterSubshell, "\r\x1b[2K") {
+		t.Fatalf("주입 전에 프롬프트 줄을 지우지 않았다:\n%q", afterSubshell)
+	}
+
+	// **A 만 세지 않는다.** 앱은 명령 시작(133;C)에서 블록을 만들므로, A·B·D 만 오면 통합이
+	// 붙은 것처럼 보이면서 화면에는 아무 것도 안 생긴다(PS0 이 없는 bash 3.2 에서 실제로 그랬다).
+	if err := manager.WriteBytes("s1", []byte("echo subshell-ok\r")); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(t, 8*time.Second, func() bool {
+		out := captured.snapshot()
+		return strings.Contains(out, "\x1b]133;C") && strings.Contains(out, "\x1b]133;D")
+	}) {
+		t.Fatalf("서브셸에서 명령 시작(C)/종료(D) 마커가 오지 않았다:\n%q", captured.snapshot())
+	}
 }
 
 // 줄 편집기가 없는 서브셸(bash --noediting = readline 없음. sh·dash·busybox·컨테이너 셸이 이

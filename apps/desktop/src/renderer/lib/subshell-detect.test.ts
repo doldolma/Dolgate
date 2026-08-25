@@ -57,6 +57,35 @@ describe('detectsSubshellEntry', () => {
   });
 });
 
+describe('윈도우 서브셸', () => {
+  it('wsl·pwsh·powershell 진입을 잡는다', () => {
+    // 윈도우 터미널에서 들어가는 서브셸의 상당수가 리눅스 셸이다(`wsl`). 예전에는 이 셋이
+    // 패턴에 없어 재주입이 아예 불리지 않았다.
+    for (const command of ['wsl', 'wsl -d Ubuntu', 'pwsh', 'powershell -NoLogo']) {
+      expect(detectsSubshellEntry(command)).toBe(true);
+    }
+  });
+
+  it('비슷한 이름은 잡지 않는다', () => {
+    for (const command of ['wslconfig', 'wsl.exe--help', 'powershellx']) {
+      expect(detectsSubshellEntry(command)).toBe(false);
+    }
+  });
+
+  it('wsl 은 대상 셸을 모른다고 답한다 — 겸용 스크립트가 나가야 한다', () => {
+    // `wsl` 안이 bash 인지 zsh 인지는 명령에 적혀 있지 않다. 억지로 짚으면 틀린 문법을 보낸다.
+    expect(resolveSubshellShell('wsl')).toBe('');
+    expect(resolveSubshellShell('wsl -d Ubuntu')).toBe('');
+    // 셸까지 적어 준 경우에는 그 셸이다.
+    expect(resolveSubshellShell('wsl bash')).toBe('bash');
+  });
+
+  it('pwsh·powershell 은 그 셸로 짚는다', () => {
+    expect(resolveSubshellShell('pwsh')).toBe('pwsh');
+    expect(resolveSubshellShell('powershell -NoLogo')).toBe('powershell');
+  });
+});
+
 describe('resolveSubshellShell', () => {
   // 알면 그 셸 것 한 줄로 끝난다 — 특히 fish 는 겸용(POSIX) 스크립트를 받으면 문법 오류가 뜬다.
   it('명령 자체가 셸이면 그 셸이다', () => {

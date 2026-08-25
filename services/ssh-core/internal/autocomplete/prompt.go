@@ -1,6 +1,9 @@
 package autocomplete
 
-import "strings"
+import (
+	"bytes"
+	"strings"
+)
 
 // promptSuffixes are the trailing glyphs that mark the end of an interactive
 // shell prompt across bash/zsh/fish and common themes (oh-my-zsh, starship).
@@ -45,6 +48,35 @@ func StripTerminalControls(value string) string {
 		out.WriteByte(ch)
 	}
 	return out.String()
+}
+
+// skipEscapeSequenceBytes 는 skipEscapeSequence 의 []byte 판이다. echo 대조(findWrappedEcho)가
+// 한 바이트씩 훑으며 부르므로 문자열로 바꾸지 않는다(할당이 생긴다).
+func skipEscapeSequenceBytes(data []byte, esc int) int {
+	if esc+1 >= len(data) {
+		return esc
+	}
+	switch data[esc+1] {
+	case ']':
+		for i := esc + 2; i < len(data); i++ {
+			if data[i] == '\a' {
+				return i
+			}
+			if data[i] == 0x1b && i+1 < len(data) && data[i+1] == '\\' {
+				return i + 1
+			}
+		}
+		return len(data) - 1
+	case '[':
+		for i := esc + 2; i < len(data); i++ {
+			if data[i] >= 0x40 && data[i] <= 0x7e {
+				return i
+			}
+		}
+		return len(data) - 1
+	default:
+		return esc + 1
+	}
 }
 
 // skipEscapeSequence returns the index of the last byte of the escape sequence
@@ -107,4 +139,16 @@ func LooksLikePowerShellPrompt(value string) bool {
 	}
 	rest := line[len("PS "):]
 	return len(rest) >= 3 && rest[1] == ':' && (rest[2] == '\\' || rest[2] == '/')
+}
+
+// PromptAlreadyIntegrated 는 이 출력 꼬리가 **이미 우리 훅을 가진 셸의 프롬프트**로 끝나는지
+// 본다.
+//
+// 서브셸 진입 명령이 실패했을 때(`zsh` 미설치 → `command not found`) 원래 셸이 그대로 새
+// 프롬프트를 그린다. 그 프롬프트에는 우리 마커(133;A)가 붙어 있다 — 새 셸의 맨 프롬프트에는
+// 없다. 이걸 보면 "서브셸이 뜨지 않았다" 를 알 수 있고, 그때는 주입하지 않는다: 안 해도 통합은
+// 살아 있고, 주입하면 화면에 프롬프트만 한 번 더 남는다(게다가 힌트가 fish 면 zsh 에 fish
+// 문법이 들어간다).
+func PromptAlreadyIntegrated(tail []byte) bool {
+	return bytes.Contains(tail, []byte(PromptStartMarker))
 }

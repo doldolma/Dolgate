@@ -614,7 +614,7 @@ func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error
 		return err
 	}
 	session.reinjectGate.Arm(
-		func() { m.performShellIntegrationReinject(sessionID, session, shell) },
+		func(tail []byte) { m.performShellIntegrationReinject(sessionID, session, shell, tail) },
 		// No prompt settled within the window (unusual prompt, non-shell
 		// foreground, or still authenticating): leave the session untouched.
 		func() {},
@@ -622,8 +622,18 @@ func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error
 	return nil
 }
 
-func (m *Manager) performShellIntegrationReinject(sessionID string, session *sessionHandle, shell string) {
+func (m *Manager) performShellIntegrationReinject(
+	sessionID string,
+	session *sessionHandle,
+	shell string,
+	tail []byte,
+) {
 	if !m.HasSession(sessionID) {
+		return
+	}
+	// 서브셸이 뜨지 않았으면(진입 명령 실패 → 원래 셸이 새 프롬프트를 그림) 그 프롬프트에 이미
+	// 우리 마커가 있다. 보내 봐야 프롬프트만 한 번 더 남는다.
+	if autocomplete.PromptAlreadyIntegrated(tail) {
 		return
 	}
 	// Arm the handshake immediately before writing so only the injected command's
@@ -637,6 +647,12 @@ func (m *Manager) performShellIntegrationReinject(sessionID string, session *ses
 		return
 	}
 	session.handshake.ArmForCommand(true, commands...)
+	// 프롬프트를 보고 쓰므로 그 프롬프트가 이미 화면에 있다 — 그 줄을 지워 새 프롬프트가 같은
+	// 자리에 오게 한다(지우지 않으면 bash 에서 프롬프트가 두 번 찍힌다).
+	m.emitStream(
+		protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID},
+		[]byte("\r\x1b[2K"),
+	)
 	for _, command := range commands {
 		if _, err := session.writeStdin([]byte(command)); err != nil {
 			if flushed := session.handshake.Flush(); len(flushed) > 0 {

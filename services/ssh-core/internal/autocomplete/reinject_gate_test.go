@@ -9,7 +9,7 @@ import (
 func TestPromptSettleGateFiresSettledAfterPrompt(t *testing.T) {
 	gate := NewPromptSettleGate(20*time.Millisecond, time.Second)
 	var settled, timedOut atomic.Int32
-	gate.Arm(func() { settled.Add(1) }, func() { timedOut.Add(1) })
+	gate.Arm(func([]byte) { settled.Add(1) }, func() { timedOut.Add(1) })
 
 	// Banner output that is not a prompt must not fire.
 	gate.Observe([]byte("Last login: Tue\r\nWelcome\r\n"))
@@ -38,7 +38,7 @@ func TestPromptSettleGateFiresSettledAfterPrompt(t *testing.T) {
 func TestPromptSettleGateTimesOutWithoutPrompt(t *testing.T) {
 	gate := NewPromptSettleGate(20*time.Millisecond, 40*time.Millisecond)
 	var settled, timedOut atomic.Int32
-	gate.Arm(func() { settled.Add(1) }, func() { timedOut.Add(1) })
+	gate.Arm(func([]byte) { settled.Add(1) }, func() { timedOut.Add(1) })
 
 	// Password prompt never looks like a shell prompt → should time out.
 	gate.Observe([]byte("user@host's password: "))
@@ -54,7 +54,7 @@ func TestPromptSettleGateTimesOutWithoutPrompt(t *testing.T) {
 func TestPromptSettleGateResetsQuietOnMoreOutput(t *testing.T) {
 	gate := NewPromptSettleGate(50*time.Millisecond, time.Second)
 	var settled atomic.Int32
-	gate.Arm(func() { settled.Add(1) }, func() {})
+	gate.Arm(func([]byte) { settled.Add(1) }, func() {})
 
 	gate.Observe([]byte("host$ "))
 	time.Sleep(30 * time.Millisecond) // less than quiet
@@ -74,11 +74,49 @@ func TestPromptSettleGateResetsQuietOnMoreOutput(t *testing.T) {
 func TestPromptSettleGateDisarm(t *testing.T) {
 	gate := NewPromptSettleGate(20*time.Millisecond, 40*time.Millisecond)
 	var settled, timedOut atomic.Int32
-	gate.Arm(func() { settled.Add(1) }, func() { timedOut.Add(1) })
+	gate.Arm(func([]byte) { settled.Add(1) }, func() { timedOut.Add(1) })
 	gate.Disarm()
 	gate.Observe([]byte("host$ "))
 	time.Sleep(80 * time.Millisecond)
 	if settled.Load() != 0 || timedOut.Load() != 0 {
 		t.Fatalf("no callback should fire after Disarm (settled=%d timeout=%d)", settled.Load(), timedOut.Load())
+	}
+}
+
+// 게이트는 안착한 프롬프트의 **출력 꼬리**를 콜백에 넘긴다. 부르는 쪽이 그걸 보고 "서브셸이
+// 뜨지 않았다"(원래 셸이 마커 붙은 프롬프트를 그렸다)를 판정한다.
+func TestSettledCallbackReceivesTheObservedTail(t *testing.T) {
+	gate := NewPromptSettleGate(20*time.Millisecond, time.Second)
+	got := make(chan []byte, 1)
+	gate.Arm(func(tail []byte) { got <- tail }, func() {})
+
+	gate.Observe([]byte("zsh: command not found: fish\r\n"))
+	gate.Observe([]byte(PromptStartMarker + "user@host ~ % "))
+
+	select {
+	case tail := <-got:
+		if !PromptAlreadyIntegrated(tail) {
+			t.Fatalf("꼬리에 프롬프트 마커가 있어야 한다: %q", tail)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("게이트가 발화하지 않았다")
+	}
+}
+
+// 새 셸의 맨 프롬프트에는 마커가 없다 — 그때는 주입해야 한다.
+func TestFreshSubshellPromptIsNotReportedAsIntegrated(t *testing.T) {
+	gate := NewPromptSettleGate(20*time.Millisecond, time.Second)
+	got := make(chan []byte, 1)
+	gate.Arm(func(tail []byte) { got <- tail }, func() {})
+
+	gate.Observe([]byte("bash-3.2$ "))
+
+	select {
+	case tail := <-got:
+		if PromptAlreadyIntegrated(tail) {
+			t.Fatalf("마커 없는 프롬프트를 통합된 것으로 봤다: %q", tail)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("게이트가 발화하지 않았다")
 	}
 }

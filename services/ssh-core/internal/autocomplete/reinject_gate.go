@@ -43,7 +43,7 @@ type PromptSettleGate struct {
 	tail       []byte
 	quietTimer *time.Timer
 	maxTimer   *time.Timer
-	onSettled  func()
+	onSettled  func(tail []byte)
 	onTimeout  func()
 }
 
@@ -60,7 +60,11 @@ func NewPromptSettleGate(quiet, maxWait time.Duration) *PromptSettleGate {
 }
 
 // Arm starts watching for a prompt. Any prior watch is cancelled first.
-func (g *PromptSettleGate) Arm(onSettled, onTimeout func()) {
+//
+// onSettled 는 프롬프트가 안착했을 때 **그때까지의 출력 꼬리**와 함께 불린다. 부르는 쪽이 그
+// 꼬리를 보고 "이 프롬프트에 이미 우리 마커가 있나"(=서브셸이 뜨지 않았고 원래 셸이 돌아왔다)
+// 를 판정한다 — PromptAlreadyIntegrated 참고.
+func (g *PromptSettleGate) Arm(onSettled func(tail []byte), onTimeout func()) {
 	g.mu.Lock()
 	g.stopTimersLocked()
 	g.armed = true
@@ -130,11 +134,13 @@ func (g *PromptSettleGate) fireSettled() {
 		return
 	}
 	g.armed = false
+	// 꼬리는 stopTimersLocked 가 비우므로 먼저 복사한다.
+	tail := append([]byte(nil), g.tail...)
 	g.stopTimersLocked()
 	cb := g.onSettled
 	g.mu.Unlock()
 	if cb != nil {
-		cb()
+		cb(tail)
 	}
 }
 
