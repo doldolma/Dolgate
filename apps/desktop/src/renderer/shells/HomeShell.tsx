@@ -33,6 +33,7 @@ import { TermiusImportDialog } from '../components/TermiusImportDialog';
 import { WarpgateImportDialog } from '../components/WarpgateImportDialog';
 import { XshellImportDialog } from '../components/XshellImportDialog';
 import { cn } from '../lib/cn';
+import { countActivePortForwardEntries } from '../lib/port-forward-status';
 import {
   buildQuickSshHostLabel,
   findExistingQuickSshHost,
@@ -548,6 +549,10 @@ export function HomeShell({
             active={active}
             hostEditor={hostEditor}
             tmuxPrefixKey={settingsViewModel.settings.tmuxPrefixKey}
+            activePortForwardEntryCount={countActivePortForwardEntries(
+              homeViewModel.portForwardRuntimes,
+              homeViewModel.dnsOverrides,
+            )}
             desktopPlatform={desktopPlatform}
             hosts={homeViewModel.hosts}
             groups={homeViewModel.groups}
@@ -826,6 +831,7 @@ export function HomeShell({
         {homeViewModel.homeSection === 'snippets' ? (
           <SnippetsPanel
             snippets={homeViewModel.snippets}
+            hosts={homeViewModel.hosts}
             onSave={homeViewModel.saveSnippet}
             onRemove={homeViewModel.removeSnippet}
           />

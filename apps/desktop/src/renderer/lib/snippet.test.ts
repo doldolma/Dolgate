@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  countHostsUsingSnippet,
   hasSnippetVariables,
   parseSnippetVariables,
   resolveSnippetCommand,
@@ -102,5 +103,29 @@ describe("호출 순서에 상태가 남지 않는다", () => {
     hasSnippetVariables(command);
     parseSnippetVariables(command);
     expect(parseSnippetVariables(command).map((v) => v.name)).toEqual(first);
+  });
+});
+
+describe('countHostsUsingSnippet', () => {
+  // 스니펫을 지우면 이 호스트들의 시작 명령이 함께 풀린다(removeSnippet). 지우기 전에 몇 개가
+  // 풀리는지 보여 주려고 센다.
+  const hosts = [
+    { id: 'h1', kind: 'ssh', startupCommand: { type: 'snippet', snippetId: 's1' } },
+    { id: 'h2', kind: 'ssh', startupCommand: { type: 'snippet', snippetId: 's2' } },
+    { id: 'h3', kind: 'ssh', startupCommand: { type: 'command', command: 'htop' } },
+    { id: 'h4', kind: 'ssh', startupCommand: null },
+    { id: 'h5', kind: 'ssh' },
+    // 시작 명령이라는 개념이 없는 종류. 속성 자체가 없어도 터지지 않아야 한다.
+    { id: 'h6', kind: 'rdp' },
+  ] as unknown as Parameters<typeof countHostsUsingSnippet>[0];
+
+  it('그 스니펫을 시작 명령으로 쓰는 것만 센다', () => {
+    expect(countHostsUsingSnippet(hosts, 's1')).toBe(1);
+    expect(countHostsUsingSnippet(hosts, 's2')).toBe(1);
+  });
+
+  it('쓰는 곳이 없으면 0', () => {
+    expect(countHostsUsingSnippet(hosts, 'nobody')).toBe(0);
+    expect(countHostsUsingSnippet([], 's1')).toBe(0);
   });
 });

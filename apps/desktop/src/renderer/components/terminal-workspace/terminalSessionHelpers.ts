@@ -161,7 +161,9 @@ export function resolveConnectionOverlayTitle(
 
   if (tab.status === 'error') {
     return tab.errorMessage
-      ? resolveConnectionFailurePresentation(tab.errorMessage).title
+      ? resolveConnectionFailurePresentation(tab.errorMessage, {
+          failure: tab.errorFailure,
+        }).title
       : 'Connection Failed';
   }
 
@@ -206,7 +208,9 @@ export function resolveConnectionOverlayMessage(
   }
 
   if (tab?.status === 'error' && tab.errorMessage) {
-    return resolveConnectionFailurePresentation(tab.errorMessage).message;
+    return resolveConnectionFailurePresentation(tab.errorMessage, {
+      failure: tab.errorFailure,
+    }).message;
   }
 
   if (tab?.connectionProgress?.message) {

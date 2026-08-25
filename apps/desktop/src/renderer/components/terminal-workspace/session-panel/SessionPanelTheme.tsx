@@ -1,4 +1,6 @@
-// 터미널 테마 섹션. 앱 외형이 아니라 **이 호스트의 터미널 테마**다.
+// 터미널 외형 섹션. 글꼴·크기·행간·자간·최소 대비(전역 설정)가 위, 테마 목록이 아래다.
+//
+// 글꼴 쪽은 SessionPanelAppearance 가 쥔다. 테마는 앱 외형이 아니라 **이 호스트의 터미널 테마**다.
 //
 // 값을 여기에 따로 두지 않는다 — 호스트 편집에 이미 있는 `terminalThemeId` 를 그대로 읽고 쓴다.
 // 두 곳이 서로 다른 값을 들면 어느 쪽이 맞는지 알 수 없게 된다.
@@ -14,6 +16,7 @@ import {
 } from '../../../lib/terminal-presets';
 import { Check } from '../../../ui/icons';
 import { SessionPanelEmpty } from './SessionPanelEmpty';
+import { SessionPanelAppearance } from './SessionPanelAppearance';
 
 interface SessionPanelThemeProps {
   /** 이 세션의 호스트. 로컬 터미널처럼 호스트가 없으면 null. */
@@ -80,13 +83,18 @@ export function SessionPanelTheme({ hostId }: SessionPanelThemeProps) {
   // "골라도 작동을 안 한다" 와 "저장이 실패했다" 를 구분할 수 없다.
   const [error, setError] = useState<string | null>(null);
 
+  // 호스트가 없는 세션(로컬 터미널)에는 고를 테마가 없다. 글꼴은 전역이라 그대로 쓸 수 있으므로
+  // 섹션 전체를 비우지 않는다 — 예전에는 여기서 빈 화면만 보여 줬다.
   if (!host) {
     return (
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-2">
-        <SessionPanelEmpty
-          title={translate('sessionPanel.theme.noHostTitle')}
-          description={translate('sessionPanel.theme.noHost')}
-        />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <SessionPanelAppearance />
+        <div className="border-t border-[var(--border)] px-1.5 py-2">
+          <SessionPanelEmpty
+            title={translate('sessionPanel.theme.noHostTitle')}
+            description={translate('sessionPanel.theme.noHost')}
+          />
+        </div>
       </div>
     );
   }
@@ -104,7 +112,9 @@ export function SessionPanelTheme({ hostId }: SessionPanelThemeProps) {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-1.5 pb-2 pt-2">
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <SessionPanelAppearance />
+      <div className="flex flex-col gap-1 border-t border-[var(--border)] px-1.5 pb-2 pt-2">
       {error ? (
         <p className="mx-1 mb-1.5 rounded-[8px] bg-[var(--danger-bg)] px-2.5 py-1.5 text-[0.72rem] leading-[1.45] text-[var(--danger-text)]">
           {translate('sessionPanel.theme.saveFailed', { message: error })}
@@ -130,6 +140,7 @@ export function SessionPanelTheme({ hostId }: SessionPanelThemeProps) {
           onClick={() => choose(preset.id)}
         />
       ))}
+      </div>
     </div>
   );
 }

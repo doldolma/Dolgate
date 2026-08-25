@@ -12,6 +12,7 @@ import {
 import { getHostBadgeLabel } from "@shared";
 import type { HostContainerDetails, HostRecord } from "@shared";
 import { cn } from "../lib/cn";
+import { resolveHostTailnetId } from "../lib/host-tailnet";
 import { RefreshCw } from "../ui/icons";
 import { getHostBadgeTone, getHostTypeLabel } from "./host-browser/hostDisplay";
 import { formatConnectionProgressStageLabel } from "../lib/connection-progress";
@@ -1425,8 +1426,11 @@ export function ContainersWorkspace({
   );
   const connectionBanner = connectionView?.banner ?? null;
   const tailnetStatuses = useAppStore((state) => state.tailnetStatuses);
-  const containersTailnetId =
-    "tailnetId" in host ? (host.tailnetId ?? null) : null;
+  // 첫 홉을 찾는 데 쓴다(점프 체인에서 tailnet 을 타는 것은 그 홉이다).
+  const containersHosts = useAppStore((state) => state.hosts);
+  // 셸·목록이 같은 tailnet 을 타므로 판정도 하나여야 한다 — 대상의 tailnetId 만 읽으면
+  // "점프 호스트에만 tailnet" 구성에서 tailnet 계층이 통째로 안 그려진다.
+  const containersTailnetId = resolveHostTailnetId(host, containersHosts) ?? null;
   const connectionFailurePresentation = useMemo(
     () =>
       tab.errorMessage

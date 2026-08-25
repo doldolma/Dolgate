@@ -59,6 +59,16 @@ async function advance(ms: number): Promise<void> {
 }
 
 describe('useHostMetrics 폴링 간격', () => {
+  // 지표는 스스로 도는 폴링이다 — 두 번째 보조 채널에서 돌아야 사용자가 치는 자동완성이
+  // 이 왕복 뒤에 줄 서지 않는다.
+  it('백그라운드 레인으로 나간다', async () => {
+    renderHook(() => useHostMetrics({ sessionId: SESSION, enabled: true, visible: true }));
+    await advance(0);
+    expect(queryTerminalCompletion).toHaveBeenCalledWith(SESSION, expect.any(String), {
+      background: true,
+    });
+  });
+
   it('주기가 바뀌었을 뿐이면 즉시 다시 찍지 않는다 — 남은 시간만큼 기다린다', async () => {
     const view = renderHook(() =>
       useHostMetrics({ sessionId: SESSION, enabled: true, visible: true }),
@@ -113,6 +123,53 @@ describe('useHostMetrics 폴링 간격', () => {
     act(() => {
       release();
     });
+    view.unmount();
+  });
+});
+
+/**
+ * 보조 채널은 세션 패널의 다른 폴링(도커 지표)과 함께 쓴다. `docker stats` 가 몇 초씩 물고
+ * 있으면 이 왕복이 차례를 놓칠 수 있는데, 그걸 곧장 "미지원" 으로 읽으면 자원 섹션이 세션
+ * 내내 비어 버린다. 보조 채널이 **아예 없는** 연결(SSM raw shell)은 왕복이 성공하고 빈 출력이
+ * 오므로 그쪽에서 걸린다.
+ */
+describe('useHostMetrics 왕복 실패', () => {
+  it('한 번 실패했다고 접지 않는다 — 다시 물어보고 값을 채운다', async () => {
+    let attempts = 0;
+    queryTerminalCompletion.mockImplementation(() => {
+      attempts += 1;
+      if (attempts === 1) {
+        return Promise.reject(new Error('completion lane busy'));
+      }
+      return Promise.resolve(reply(attempts));
+    });
+
+    const view = renderHook(() =>
+      useHostMetrics({ sessionId: SESSION, enabled: true, visible: true }),
+    );
+    await advance(0);
+    expect(view.result.current.status).not.toBe('unsupported');
+
+    // 다음 주기에 다시 묻고, 차분이 만들어지면 값이 선다.
+    await advance(10_000);
+    await advance(10_000);
+    expect(attempts).toBeGreaterThan(2);
+    expect(view.result.current.status).toBe('ready');
+    view.unmount();
+  });
+
+  it('계속 실패하면 그때 접는다', async () => {
+    queryTerminalCompletion.mockImplementation(() =>
+      Promise.reject(new Error('completion lane busy')),
+    );
+
+    const view = renderHook(() =>
+      useHostMetrics({ sessionId: SESSION, enabled: true, visible: true }),
+    );
+    await advance(0);
+    await advance(10_000);
+    await advance(10_000);
+    expect(view.result.current.status).toBe('unsupported');
     view.unmount();
   });
 });

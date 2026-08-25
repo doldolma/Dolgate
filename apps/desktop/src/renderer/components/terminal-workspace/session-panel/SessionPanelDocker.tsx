@@ -10,7 +10,7 @@
 // 스택은 탭이 아니라 컨테이너 목록의 그룹 머리다. 스택 단위 동작이 그 머리에 붙으면 한 자리에서
 // 끝난다 — 스택 탭을 따로 두면 같은 데이터를 한 단계 더 들어가서 보게 된다.
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../../lib/cn';
 import { useAppStore } from '../../../store/appStore';
@@ -62,10 +62,12 @@ import {
   getDockerHistory,
   toggleStackCollapsed,
   useCollapsedStacks,
+  queryPrefixOf,
   useDockerLists,
   type DockerRuntime,
   type DockerTabId,
 } from './useSessionDocker';
+import { useSessionScopedState } from './useSessionScopedState';
 import type { SessionPanelSender } from './useSessionPanelTarget';
 
 interface SessionPanelDockerProps {
@@ -78,7 +80,7 @@ interface SessionPanelDockerProps {
 const ACTION_CLASS =
   'grid h-6 w-6 shrink-0 place-items-center rounded-[7px] text-[var(--text-soft)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--text)] disabled:opacity-35 disabled:hover:bg-transparent';
 
-/** 행 위에 얹히는 작은 버튼(마우스 올릴 때만 보인다). */
+/** 펼친 화면 안의 작은 아이콘 버튼(이름 복사·삭제). */
 const ACTION_TIGHT =
   'grid h-5 w-5 shrink-0 place-items-center rounded-[6px] text-[var(--text-soft)] transition-colors hover:bg-[var(--surface)] hover:text-[var(--text)] disabled:opacity-35 disabled:hover:bg-transparent';
 
@@ -99,8 +101,10 @@ export function SessionPanelDocker({
   const { t: translate } = useTranslation();
   const panelOpen = useAppStore((state) => state.sessionPanelOpen);
   const connectHost = useAppStore((state) => state.connectHost);
-  const [tab, setTab] = useState<DockerTabId>('containers');
-  const [query, setQuery] = useState('');
+  // 보던 탭과 검색어는 세션마다 따로 기억한다 — 다른 서버로 옮기면 처음 상태로, 돌아오면
+  // 보던 그대로.
+  const [tab, setTab] = useSessionScopedState<DockerTabId>(sessionId, 'docker.tab', 'containers');
+  const [query, setQuery] = useSessionScopedState(sessionId, 'docker.query', '');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [unfoldedStacks, setUnfoldedStacks] = useState<readonly string[]>([]);
@@ -108,14 +112,37 @@ export function SessionPanelDocker({
 
   // 이력·접힘은 호스트 단위로 기억한다 — 같은 서버의 다른 탭에서도 같은 모양으로 보인다.
   const collapseScope = hostId ?? `session:${sessionId}`;
-  const lists = useDockerLists(sessionId, runtime.prefix, tab, panelOpen, collapseScope);
+  const lists = useDockerLists(
+    sessionId,
+    queryPrefixOf(runtime),
+    runtime.elevate,
+    tab,
+    panelOpen,
+    collapseScope,
+  );
   const collapsedStacks = useCollapsedStacks(collapseScope);
 
-  // 탭을 옮기면 검색어와 열린 메뉴를 놓는다 — 다른 목록에 남아 있으면 빈 결과처럼 보인다.
+  /**
+   * 탭을 옮기면 검색어와 열린 메뉴를 놓는다 — 다른 목록에 남아 있으면 빈 결과처럼 보인다.
+   *
+   * **세션을 옮긴 것은 탭 이동으로 세지 않는다.** 그때 탭이 바뀌는 것은 그 세션이 보던 자리로
+   * 돌아가는 것이고, 함께 기억해 둔 검색어까지 지우면 "돌아오면 그대로" 가 깨진다. 대신 열려
+   * 있던 메뉴는 직전 호스트의 컨테이너를 가리키므로 닫는다.
+   */
+  const lastViewRef = useRef({ sessionId, tab });
   useEffect(() => {
+    const previous = lastViewRef.current;
+    lastViewRef.current = { sessionId, tab };
+    if (previous.sessionId !== sessionId) {
+      setOpenMenu(null);
+      return;
+    }
+    if (previous.tab === tab) {
+      return;
+    }
     setQuery('');
     setOpenMenu(null);
-  }, [tab]);
+  }, [sessionId, tab, setQuery]);
 
   // 메뉴는 바깥을 누르면 닫힌다.
   useEffect(() => {
@@ -180,10 +207,10 @@ export function SessionPanelDocker({
         : runtime.availability === 'down'
           ? { title: 'sessionPanel.docker.downTitle', description: 'sessionPanel.docker.down' }
           : runtime.availability === 'blocked'
-            ? {
-                title: 'sessionPanel.docker.blockedTitle',
-                description: 'sessionPanel.docker.blocked',
-              }
+            ? // 여기까지 왔으면 우리가 할 수 있는 것은 다 해 봤다 — 소켓, `sudo -n`, 그리고
+              // 접속 비밀번호로 sudo 되물리기까지. 무엇을 더 하라고 시킬 것이 없으니 한 줄로만
+              // 말한다(예전에는 "터미널에서 sudo 를 한 번 쓰라" 고 안내했다).
+              { title: 'sessionPanel.docker.blockedTitle', description: null }
             : { title: 'sessionPanel.docker.absentTitle', description: 'sessionPanel.docker.absent' };
     return (
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-2">
@@ -298,7 +325,6 @@ export function SessionPanelDocker({
             stats={lists.stats}
             inspect={lists.inspect}
             scope={collapseScope}
-            historyVersion={lists.historyVersion}
             query={query}
             prefix={prefix}
             atPrompt={sender.context.atPrompt}
@@ -337,7 +363,6 @@ export function SessionPanelDocker({
         ) : tab === 'images' ? (
           <ImagesView
             images={lists.images}
-            summary={lists.imageSummary}
             containers={lists.containers}
             query={query}
             openMenu={openMenu}
@@ -349,8 +374,6 @@ export function SessionPanelDocker({
         ) : tab === 'volumes' ? (
           <VolumesView
             volumes={lists.volumes}
-            sizes={lists.volumeSizes}
-            sizesLoading={lists.volumeSizesLoading}
             query={query}
             openMenu={openMenu}
             onToggleMenu={(id) => setOpenMenu((current) => (current === id ? null : id))}
@@ -488,8 +511,6 @@ interface ContainersViewProps {
   inspect: Map<string, DockerInspectInfo>;
   /** 이력을 담는 단위(호스트, 없으면 세션). */
   scope: string;
-  /** 이력이 바뀔 때마다 올라간다 — 스파크라인을 다시 그리게 하는 신호. */
-  historyVersion: number;
   query: string;
   prefix: string;
   atPrompt: boolean;
@@ -541,7 +562,6 @@ function ContainersView(props: ContainersViewProps) {
         stat={props.stats.get(container.id)}
         info={props.inspect.get(container.id)}
         samples={getDockerHistory(props.scope, container.id)}
-        historyVersion={props.historyVersion}
         // 묶인 줄은 머리가 프로젝트를 말하므로 서비스 이름만, 혼자인 줄은 제 이름을 쓴다.
         label={indented ? (container.service ?? container.name) : container.name}
         indented={indented}
@@ -675,7 +695,15 @@ function ContainersView(props: ContainersViewProps) {
 }
 
 /** 행의 10분 추이. 지금 값만으로는 "치솟았다" 를 못 본다. */
-function Sparkline({
+/**
+ * 행마다 하나씩, 최대 200개가 붙는다. 값이 안 바뀌었으면 다시 그리지 않는다 — 메뉴를 열거나
+ * 검색어를 치는 것만으로 200개의 선을 다시 계산할 이유가 없다.
+ *
+ * `samples` 는 이력이 쌓일 때마다 **새 배열**로 온다(useSessionDocker 의 pushHistory). 그래서
+ * 얕은 비교만으로 "달라졌나" 가 정확히 판정된다 — 예전에는 같은 배열을 제자리에서 고치고
+ * `historyVersion` 을 올려 섹션 전체를 다시 그렸다.
+ */
+const Sparkline = memo(function Sparkline({
   samples,
   tone,
 }: {
@@ -699,7 +727,7 @@ function Sparkline({
       <polyline points={points} fill="none" stroke={tone} strokeWidth="1.2" />
     </svg>
   );
-}
+});
 
 /** 이만큼 다시 뜬 컨테이너는 행에서 바로 말해 준다(지금 돌고 있어도). */
 const RESTART_FLAP_MIN = 3;
@@ -737,7 +765,6 @@ function ContainerRow({
   stat: DockerStat | undefined;
   info: DockerInspectInfo | undefined;
   samples: readonly { cpuPercent: number }[];
-  historyVersion: number;
   label: string;
   indented: boolean;
   expanded: boolean;
@@ -763,7 +790,7 @@ function ContainerRow({
       : 'var(--success-text)';
 
   return (
-    <div className={cn('group relative', running ? null : 'opacity-55')}>
+    <div className={cn(running ? null : 'opacity-55')}>
       <button
         type="button"
         aria-expanded={expanded}
@@ -786,32 +813,6 @@ function ContainerRow({
           )}
         >
           {label}
-        </span>
-        {/* 마우스를 올리면 자주 쓰는 둘이 나온다. 나머지 제어는 펼친 화면에 있다. */}
-        <span className="hidden shrink-0 items-center group-hover:flex">
-          <button
-            type="button"
-            aria-label={`${translate('sessionPanel.docker.shell')} ${label}`}
-            disabled={!running}
-            onClick={(event) => {
-              event.stopPropagation();
-              onShell();
-            }}
-            className={ACTION_TIGHT}
-          >
-            <SquareTerminal className="h-3 w-3" aria-hidden />
-          </button>
-          <button
-            type="button"
-            aria-label={`${translate('sessionPanel.docker.logs')} ${label}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              onLogs();
-            }}
-            className={ACTION_TIGHT}
-          >
-            <ClipboardList className="h-3 w-3" aria-hidden />
-          </button>
         </span>
         {trouble ? (
           <span className="shrink-0 rounded-[5px] bg-[color-mix(in_srgb,var(--danger-text)_14%,transparent)] px-[0.28rem] text-[0.58rem] font-medium text-[var(--danger-text)]">
@@ -1039,7 +1040,6 @@ function SummaryRow({
 
 function ImagesView({
   images,
-  summary,
   containers,
   query,
   openMenu,
@@ -1049,7 +1049,6 @@ function ImagesView({
   onCopy,
 }: {
   images: readonly DockerImage[];
-  summary: ReturnType<typeof useDockerLists>['imageSummary'];
   containers: readonly DockerContainer[];
   query: string;
   openMenu: string | null;
@@ -1064,8 +1063,6 @@ function ImagesView({
     () => filterByQuery(images, query, (image) => `${image.repository} ${image.tag}`),
     [images, query],
   );
-  const line = summary.find((entry) => /^images$/i.test(entry.type));
-
   if (images.length === 0) {
     return <SessionPanelEmpty title={translate('sessionPanel.docker.emptyImages')} />;
   }
@@ -1075,29 +1072,26 @@ function ImagesView({
 
   return (
     <>
-      {line ? (
-        <SummaryRow
-          text={translate('sessionPanel.docker.images.summary', {
-            count: line.total,
-            size: line.size,
-          })}
-          extra={
-            line.reclaimable
-              ? translate('sessionPanel.docker.images.reclaimable', { size: line.reclaimable })
-              : undefined
-          }
-          trailing={
-            <button
-              type="button"
-              aria-label={translate('sessionPanel.docker.images.prune')}
-              onClick={onPrune}
-              className={cn(ACTION_CLASS, 'w-[1.15rem]')}
-            >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden />
-            </button>
-          }
-        />
-      ) : null}
+      {/*
+        개수만 센다. 디스크 총량·회수 가능량은 `docker system df` 라야 정확한데, 그건 레이어를
+        전부 걷느라 이미지가 많은 호스트에서 수십 초가 걸리고 그동안 보조 채널을 혼자 물어
+        컨테이너 목록까지 멈춰 세웠다. 크기는 줄마다 이미 보인다.
+      */}
+      <SummaryRow
+        text={translate('sessionPanel.docker.images.summaryCounting', {
+          count: images.length,
+        })}
+        trailing={
+          <button
+            type="button"
+            aria-label={translate('sessionPanel.docker.images.prune')}
+            onClick={onPrune}
+            className={cn(ACTION_CLASS, 'w-[1.15rem]')}
+          >
+            <Trash2 className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        }
+      />
       {rows.map((image) => {
         const menuId = `image:${image.id}:${image.tag}`;
         const tagged =
@@ -1155,8 +1149,6 @@ function ImagesView({
 
 function VolumesView({
   volumes,
-  sizes,
-  sizesLoading,
   query,
   openMenu,
   onToggleMenu,
@@ -1165,8 +1157,6 @@ function VolumesView({
   onCopy,
 }: {
   volumes: readonly DockerVolume[];
-  sizes: Map<string, string>;
-  sizesLoading: boolean;
   query: string;
   openMenu: string | null;
   onToggleMenu: (id: string) => void;
@@ -1192,21 +1182,14 @@ function VolumesView({
       <SummaryRow
         text={translate('sessionPanel.docker.volumes.summary', { count: volumes.length })}
         trailing={
-          sizesLoading ? (
-            <RefreshCw
-              className="h-3 w-3 shrink-0 animate-spin text-[var(--text-muted)]"
-              aria-hidden
-            />
-          ) : (
-            <button
-              type="button"
-              aria-label={translate('sessionPanel.docker.volumes.prune')}
-              onClick={onPrune}
-              className={cn(ACTION_CLASS, 'w-[1.15rem]')}
-            >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden />
-            </button>
-          )
+          <button
+            type="button"
+            aria-label={translate('sessionPanel.docker.volumes.prune')}
+            onClick={onPrune}
+            className={cn(ACTION_CLASS, 'w-[1.15rem]')}
+          >
+            <Trash2 className="h-3.5 w-3.5" aria-hidden />
+          </button>
         }
       />
       {rows.map((volume) => {
@@ -1231,9 +1214,6 @@ function VolumesView({
                 )}
               >
                 {translate('sessionPanel.docker.volumes.usedBy', { count: volume.usedBy })}
-              </span>
-              <span className="w-[3.1rem] shrink-0 text-right text-[0.62rem] tabular-nums text-[var(--text-soft)]">
-                {sizes.get(volume.name) ?? '…'}
               </span>
               <MoreButton
                 label={`${translate('sessionPanel.docker.more')} ${volume.name}`}

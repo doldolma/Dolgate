@@ -16,6 +16,8 @@ interface FontSelectFieldProps {
   options: ReadonlyArray<FontSelectOption>;
   onChange: (id: string) => void;
   className?: string;
+  /** 좁은 곳(세션 패널)용으로 한 단계 작게. 기본은 설정 화면 크기다. */
+  size?: 'md' | 'sm';
 }
 
 // Distinguishing glyphs (one/ell/eye, zero/oh) plus an arrow that ligature-aware
@@ -35,6 +37,7 @@ export function FontSelectField({
   options,
   onChange,
   className,
+  size = 'md',
 }: FontSelectFieldProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -161,7 +164,12 @@ export function FontSelectField({
         aria-label={ariaLabel}
         onClick={() => setIsOpen((open) => !open)}
         onKeyDown={onTriggerKeyDown}
-        className="flex w-full min-h-11 items-center gap-2 rounded-[10px] border border-[var(--border)] bg-[var(--surface-strong)] px-4 py-[0.9rem] text-left text-[var(--text)] transition-[border-color,box-shadow,background-color] duration-150 focus:border-[var(--selection-border)] focus:outline-none focus:ring-4 focus:ring-[color-mix(in_srgb,var(--accent-strong)_10%,transparent)]"
+        className={cn(
+          'flex w-full items-center gap-2 border border-[var(--border)] bg-[var(--surface-strong)] text-left text-[var(--text)] transition-[border-color,box-shadow,background-color] duration-150 focus:border-[var(--selection-border)] focus:outline-none focus:ring-4 focus:ring-[color-mix(in_srgb,var(--accent-strong)_10%,transparent)]',
+          size === 'sm'
+            ? 'min-h-8 rounded-[8px] px-2.5 py-1 text-[0.78rem]'
+            : 'min-h-11 rounded-[10px] px-4 py-[0.9rem]',
+        )}
       >
         <span className="min-w-0 flex-1 truncate" style={{ fontFamily: selected?.stack }}>
           {selected?.title ?? ''}

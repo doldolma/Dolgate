@@ -16,6 +16,7 @@ import {
   type TerminalHooks,
 } from '../../../lib/terminal-write-registry';
 import { setShellHistory } from '../../../lib/shell-history-registry';
+import { clearSessionScopedState } from './useSessionScopedState';
 import {
   clearHostMetrics,
   getHostMetricsWatch,
@@ -101,7 +102,10 @@ function setState(overrides: Record<string, unknown> = {}): void {
     setSessionPanelWidth: vi.fn(),
     selectSessionPanelSection: vi.fn(),
     snippets: [],
+    saveSnippet: vi.fn().mockResolvedValue({}),
+    removeSnippet: vi.fn().mockResolvedValue(undefined),
     openHomeSection: vi.fn(),
+    openPortForwardEditor: vi.fn(),
     // AI·자원·프로세스 섹션이 읽는 것들.
     aiConversations: {},
     settings: { aiAssistantEnabled: true, hostMetricsEnabled: true },
@@ -129,6 +133,9 @@ function setState(overrides: Record<string, unknown> = {}): void {
 }
 
 beforeEach(() => {
+  // 검색어·필터는 세션 단위로 앱 수명 동안 남는다(모듈 저장소) — 테스트 사이에도 남으므로
+  // 여기서 놓는다. 안 그러면 앞 테스트가 친 검색어가 뒤 테스트의 목록을 통째로 걸러 버린다.
+  clearSessionScopedState('session-1');
   dockerQuery.mockReset();
   dockerQuery.mockResolvedValue('');
   blocks.length = 0;
@@ -469,6 +476,33 @@ describe('SessionPanel', () => {
     expect(screen.queryByText('exit 0')).toBeNull();
   });
 
+  /**
+   * 세션 패널은 탭을 옮겨도 같은 컴포넌트를 재사용하고 sessionId 만 갈아끼운다. 검색어를 그냥
+   * 들고 있으면 A 에서 친 것이 B 의 목록을 엉뚱하게 걸러 놓는다 — 옮기면 비고, 돌아오면 남는다.
+   */
+  it('검색어는 세션마다 따로 기억한다', () => {
+    blocks.push(
+      block({ id: 1, command: 'ls -la' }),
+      block({ id: 2, command: 'grep needle /var/log/syslog' }),
+    );
+    const view = render(<SessionPanel sessionId="session-1" />);
+    fireEvent.change(screen.getByPlaceholderText('명령 검색'), {
+      target: { value: 'needle' },
+    });
+    expect(screen.queryByText('ls -la')).toBeNull();
+
+    // 다른 세션으로 옮기면 검색창이 비고 목록이 전부 보인다.
+    view.rerender(<SessionPanel sessionId="session-2" />);
+    expect((screen.getByPlaceholderText('명령 검색') as HTMLInputElement).value).toBe('');
+    expect(screen.getByText('ls -la')).toBeTruthy();
+
+    // 돌아오면 치던 것이 그대로 있다.
+    view.rerender(<SessionPanel sessionId="session-1" />);
+    expect((screen.getByPlaceholderText('명령 검색') as HTMLInputElement).value).toBe('needle');
+    expect(screen.queryByText('ls -la')).toBeNull();
+
+    clearSessionScopedState('session-2');
+  });
   it('검색은 목록만 줄인다', () => {
     blocks.push(
       block({ id: 1, command: 'ls -la' }),
@@ -513,6 +547,93 @@ describe('SessionPanel', () => {
     fireEvent.change(inputs[1], { target: { value: 'srv1' } });
     fireEvent.click(screen.getByRole('button', { name: '삽입' }));
     expect(sent).toEqual(['\x15ssh root@srv1\r']);
+  });
+});
+
+// 목록 관리를 패널에서도 한다. 예전에는 여기서 "관리" 버튼으로 홈 화면으로 보내 버려서, 스니펫
+// 하나를 만들려면 작업 중인 세션에서 화면이 튀었다.
+describe('SessionPanel 스니펫 관리', () => {
+  const snippet = {
+    id: 's1',
+    label: 'Restart web',
+    command: 'systemctl restart web',
+    keyword: null,
+  };
+
+  function renderSnippets(overrides: Record<string, unknown> = {}): void {
+    setState({
+      sessionPanelSectionBySessionId: { 'session-1': 'snippets' },
+      snippets: [snippet],
+      ...overrides,
+    });
+    render(<SessionPanel sessionId="session-1" />);
+  }
+
+  it('편집을 누르면 그 스니펫이 채워진 폼이 열린다', () => {
+    renderSnippets();
+    fireEvent.click(screen.getByRole('button', { name: '스니펫 편집' }));
+    expect(screen.getByText('스니펫 편집')).toBeTruthy();
+    expect(
+      (screen.getByRole('textbox', { name: 'Snippet label' }) as HTMLInputElement).value,
+    ).toBe('Restart web');
+  });
+
+  it('스니펫이 없으면 홈으로 보내지 않고 여기서 만든다', () => {
+    const openHomeSection = vi.fn();
+    renderSnippets({ snippets: [], openHomeSection });
+    fireEvent.click(screen.getByRole('button', { name: '스니펫 만들기' }));
+    expect(openHomeSection).not.toHaveBeenCalled();
+    // 폼 제목이 떴으면 대화상자가 열린 것이다.
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  /**
+   * 줄에는 삭제가 없어야 한다.
+   *
+   * 처음에는 줄의 hover 버튼으로 뒀는데 삭제가 줄의 **가장 바깥**이었다 — 마우스가 오른쪽에서
+   * 들어올 때 제일 먼저 닿는 자리다. 확인 대화상자를 붙여도 매번 뜨는 확인은 습관적으로 넘긴다.
+   * 게다가 다섯 버튼이 좁은 패널의 명령 텍스트를 그만큼 잘라 먹었다.
+   */
+  it('줄에는 삭제가 없다 — 보내기 셋과 편집만', () => {
+    renderSnippets();
+    expect(screen.getByRole('button', { name: '스니펫 편집' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '스니펫 삭제' })).toBeNull();
+  });
+
+  it('삭제는 편집을 열고, 그 안에서 확인을 거친다', async () => {
+    const removeSnippet = vi.fn().mockResolvedValue(undefined);
+    renderSnippets({ removeSnippet });
+
+    fireEvent.click(screen.getByRole('button', { name: '스니펫 편집' }));
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+    // 확인이 뜨기만 하고 아직 지우지 않는다.
+    expect(removeSnippet).not.toHaveBeenCalled();
+    expect(screen.getByText('이 스니펫을 지웁니다. 되돌릴 수 없습니다.')).toBeTruthy();
+
+    // 확인 대화상자의 삭제(뒤에 그려진 것)를 누른다.
+    const confirms = screen.getAllByRole('button', { name: '삭제' });
+    fireEvent.click(confirms[confirms.length - 1]);
+    await waitFor(() => expect(removeSnippet).toHaveBeenCalledWith('s1'));
+  });
+
+  it('시작 명령으로 쓰는 호스트가 있으면 몇 개가 풀리는지 알려 준다', () => {
+    renderSnippets({
+      hosts: [
+        { id: 'h1', kind: 'ssh', startupCommand: { type: 'snippet', snippetId: 's1' } },
+        { id: 'h2', kind: 'ssh', startupCommand: { type: 'snippet', snippetId: 's1' } },
+        { id: 'h3', kind: 'ssh', startupCommand: { type: 'command', command: 'htop' } },
+      ],
+    });
+    fireEvent.click(screen.getByRole('button', { name: '스니펫 편집' }));
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+    expect(screen.getByText(/호스트 2개의 시작 명령으로 쓰이고 있습니다/)).toBeTruthy();
+  });
+
+  it('쓰는 호스트가 없으면 경고를 띄우지 않는다', () => {
+    renderSnippets({ hosts: [] });
+    fireEvent.click(screen.getByRole('button', { name: '스니펫 편집' }));
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+    expect(screen.queryByText(/시작 명령으로 쓰이고 있습니다/)).toBeNull();
   });
 });
 
@@ -802,7 +923,9 @@ describe('SessionPanel 포트 포워딩 섹션', () => {
     expect(screen.queryByRole('button', { name: '시작' })).toBeNull();
   });
 
-  it('규칙 추가·편집은 기존 화면으로 넘긴다', () => {
+  // 편집은 화면을 옮기지 않는다 — 스토어에 의도만 넣고, 모달은 AppModals 의 인스턴스가 그린다.
+  // 이 구분이 이 섹션의 요점이다: 포트 하나 고치려고 작업 중인 터미널을 떠나면 안 된다.
+  it('규칙 편집은 화면을 옮기지 않고 편집기 의도만 넣는다', () => {
     setState({
       sessionPanelSectionBySessionId: { 'session-1': 'ports' },
       tabs: [{ sessionId: 'session-1', title: 'Prod', paneKind: 'terminal', hostId: 'host-1' }],
@@ -810,8 +933,32 @@ describe('SessionPanel 포트 포워딩 섹션', () => {
       portForwardRuntimes: [],
     });
     render(<SessionPanel sessionId="session-1" />);
-    fireEvent.click(screen.getByRole('button', { name: '규칙 추가·편집' }));
-    expect(storeState.openHomeSection).toHaveBeenCalledWith('portForwarding');
+    fireEvent.click(screen.getByRole('button', { name: '편집' }));
+    expect(storeState.openPortForwardEditor).toHaveBeenCalledWith({
+      kind: 'edit',
+      ruleId: 'rule-1',
+    });
+    expect(storeState.openHomeSection).not.toHaveBeenCalled();
+  });
+
+  // 규칙이 있을 때도 추가할 수 있어야 한다. 빈 상태에만 두면 규칙이 하나 생기는 순간 추가할
+  // 방법이 사라진다. 그 세션의 호스트로 열려야 하므로 hostId 도 함께 확인한다.
+  it('규칙이 있어도 추가할 수 있고, 그 세션의 호스트로 열린다', () => {
+    setState({
+      sessionPanelSectionBySessionId: { 'session-1': 'ports' },
+      tabs: [{ sessionId: 'session-1', title: 'Prod', paneKind: 'terminal', hostId: 'host-1' }],
+      portForwards: [rule],
+      portForwardRuntimes: [],
+    });
+    render(<SessionPanel sessionId="session-1" />);
+    fireEvent.click(screen.getByRole('button', { name: '규칙 추가' }));
+    expect(storeState.openPortForwardEditor).toHaveBeenCalledWith({
+      kind: 'create',
+      transport: 'ssh',
+      hostId: 'host-1',
+    });
+    // 이 섹션에서 화면을 옮기는 버튼은 이제 없다.
+    expect(storeState.openHomeSection).not.toHaveBeenCalled();
   });
 });
 

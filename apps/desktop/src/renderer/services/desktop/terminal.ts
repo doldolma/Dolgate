@@ -49,8 +49,25 @@ export function stopTerminalAutocomplete(sessionId: string) {
   return desktopApi.ssh.stopAutocomplete(sessionId);
 }
 
-export function queryTerminalCompletion(sessionId: string, command: string) {
-  return desktopApi.ssh.queryCompletion(sessionId, command);
+/**
+ * 보조 채널에서 짧은 read-only 명령을 돌리고 stdout 을 받는다.
+ *
+ * 스스로 도는 폴링(세션 패널의 도커·호스트 지표)은 `{ background: true }` 로 부른다 — 그러면
+ * 두 번째 보조 채널에서 돌아, 몇 초씩 걸리는 왕복 뒤에 사용자가 치는 자동완성이 줄 서지 않는다.
+ * 사람이 결과를 기다리는 질의(자동완성)는 그냥 부른다.
+ */
+export async function queryTerminalCompletion(
+  sessionId: string,
+  command: string,
+  options?: { background?: boolean; elevate?: boolean },
+): Promise<string> {
+  const result = await desktopApi.ssh.queryCompletion(sessionId, command, options);
+  // 실패는 결과에 담겨 온다(IPC 거부로 보내면 메인 로그가 오류로 뒤덮인다) — 여기서 예외로
+  // 바꿔 호출부가 하던 대로 catch 하게 한다. 명령이 아무것도 안 찍은 것은 실패가 아니다.
+  if (result.failed) {
+    throw new Error(result.message ?? '보조 채널에서 명령을 끝내지 못했습니다.');
+  }
+  return result.stdout;
 }
 
 export function tmuxSplitPane(sessionId: string, direction: 'h' | 'v') {

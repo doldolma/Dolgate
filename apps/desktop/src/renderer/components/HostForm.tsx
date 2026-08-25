@@ -1168,6 +1168,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         viewOnly: host.viewOnly ?? null,
         tailnetId: host.tailnetId ?? null,
         sshTunnelHostId: host.sshTunnelHostId ?? null,
+        imageQuality: host.imageQuality ?? null,
       };
       nextSelectedSecretRef = host.secretRef ?? '';
       nextCredentialMode = host.secretRef ? 'existing' : 'new';

@@ -33,12 +33,16 @@ export function buildDockerProbeCommand(): string {
   return (
     AUX_PATH_EXPORT +
     [
-      `for c in ${candidates}; do $c ps -q >/dev/null 2>&1 && { echo "prefix=$c"; break; }; done`,
+      `p=; for c in ${candidates}; do $c ps -q >/dev/null 2>&1 && { p=$c; echo "prefix=$c"; break; }; done`,
       'command -v docker >/dev/null 2>&1 && echo has=docker',
       'command -v podman >/dev/null 2>&1 && echo has=podman',
       // 안 되면 이유까지 한 줄 받아 온다 — 권한이 없는 것과 데몬이 꺼진 것은 다른 말이고,
       // 우리가 대신 할 수 있는 일도 다르다.
-      "echo \"why=$(docker ps -q 2>&1 >/dev/null | head -n 1)\"",
+      //
+      // **되는 방법을 찾았으면 묻지 않는다.** 예전에는 첫 후보가 통해도 이 줄이 `docker ps` 를
+      // 한 번 더 돌아, 섹션을 여는 첫 왕복이 늘 두 배였다. `||` 는 왼쪽이 성공하면 오른쪽을
+      // 실행하지 않으므로 그 안의 명령 치환도 돌지 않는다.
+      '[ -n "$p" ] || echo "why=$(docker ps -q 2>&1 >/dev/null | head -n 1)"',
     ].join('; ')
   );
 }
@@ -400,53 +404,53 @@ export interface DockerInspectInfo {
   oomKilled: boolean;
 }
 
+const STATS_FIELDS =
+  '{{.ID}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}';
+
+// Health 는 헬스체크가 없으면 nil 이라 `{{if}}` 로 감싸야 템플릿이 죽지 않는다.
+const INSPECT_FIELDS =
+  '{{.Id}}\t{{.RestartCount}}\t{{if .State.Health}}{{.State.Health.Status}}{{end}}\t{{.State.OOMKilled}}';
+
 /**
- * 목록 + 지표(+ 검사)를 **한 왕복**으로 받는다.
+ * 지표(+ 검사)를 받는다. **목록과 다른 왕복이다.**
  *
- * 세 명령의 주기가 다르지만(목록은 자주, 검사는 드물게) 왕복을 나누면 채널을 세 번 잡는다 —
- * 필요할 때만 뒤에 붙여 한 번에 보낸다. 응답은 구분자로 갈라 읽는다.
+ * `stats --no-stream` 은 데몬이 CPU 차분을 내려고 컬렉터 틱을 두 번 기다린다 — 컨테이너가
+ * 하나여도 1~2초가 바닥값이고 많으면 더 걸린다. `ps -a` 는 그 100분의 1이다. 둘을 한 왕복에
+ * 묶으면 이름 몇 줄을 그리는 데 stats 시간을 통째로 기다리게 된다(그래서 갈랐다). 목록이 먼저
+ * 그려지고 CPU·MEM 은 이 왕복이 오는 대로 채워진다.
  *
- * `stats --no-stream` 은 데몬이 CPU 차분을 재는 동안 기다리므로 컨테이너가 많으면 초 단위로
- * 걸린다. 그래서 호출부가 걸린 시간을 재서 주기를 늘린다(사용자가 고르지 않는다).
+ * 검사 대상은 **방금 받은 목록의 id** 다 — 여기서 `ps -aq` 를 다시 부르지 않는다(같은 것을
+ * 묻는 데몬 왕복이 하나 준다). id 가 없으면 검사를 아예 빼는데, 인자 없는 `inspect` 는 실패하기
+ * 때문이기도 하다.
  */
-export function buildSnapshotCommand(
+export function buildContainerMetricsCommand(
   prefix: string,
-  options: { stats: boolean; inspect: boolean },
+  options: { stats: boolean; inspectIds: readonly string[] },
 ): string {
-  const parts = [buildContainerListCommand(prefix).slice(AUX_PATH_EXPORT.length)];
+  const parts: string[] = [];
   if (options.stats) {
-    parts.push(`echo ${LIST_SEPARATOR}`);
-    parts.push(
-      `${prefix} stats --no-stream --format '{{.ID}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}'`,
-    );
+    parts.push(`${prefix} stats --no-stream --format '${STATS_FIELDS}'`);
   }
-  if (options.inspect) {
-    parts.push(`echo ${LIST_SEPARATOR}`);
-    // 컨테이너가 하나도 없으면 `inspect` 는 인자 없이 실패한다 — 먼저 id 를 세어 본다.
-    // Health 는 헬스체크가 없으면 nil 이라 `{{if}}` 로 감싸야 템플릿이 죽지 않는다.
-    parts.push(
-      `ids=$(${prefix} ps -aq); [ -n "$ids" ] && ${prefix} inspect $ids --format ` +
-        `'{{.Id}}\t{{.RestartCount}}\t{{if .State.Health}}{{.State.Health.Status}}{{end}}\t{{.State.OOMKilled}}'`,
-    );
+  // 구분자는 stats 를 빼도 넣는다 — 파서가 늘 같은 자리에서 가른다.
+  parts.push(`echo ${LIST_SEPARATOR}`);
+  if (options.inspectIds.length > 0) {
+    const ids = options.inspectIds.map(quoteShellArg).join(' ');
+    // 그 사이에 지워진 컨테이너가 있으면 그것만 stderr 로 빠지고 나머지는 그대로 온다.
+    parts.push(`${prefix} inspect ${ids} --format '${INSPECT_FIELDS}' 2>/dev/null`);
   }
   return AUX_PATH_EXPORT + parts.join('; ');
 }
 
-export interface DockerSnapshot {
-  containers: DockerContainer[];
-  truncated: boolean;
+export interface DockerMetrics {
   /** 짧은 ID → 지표. stats 를 붙이지 않았거나 실패하면 빈 Map. */
   stats: Map<string, DockerStat>;
   /** 짧은 ID → 검사 결과. */
   inspect: Map<string, DockerInspectInfo>;
 }
 
-export function parseSnapshot(stdout: string): DockerSnapshot {
-  const [listPart = '', statsPart = '', inspectPart = ''] = stdout.split(LIST_SEPARATOR);
-  const list = parseContainerList(listPart);
+export function parseContainerMetrics(stdout: string): DockerMetrics {
+  const [statsPart = '', inspectPart = ''] = stdout.split(LIST_SEPARATOR);
   return {
-    containers: list.containers,
-    truncated: list.truncated,
     stats: parseStats(statsPart),
     inspect: parseInspect(inspectPart),
   };
@@ -579,27 +583,18 @@ export interface DockerImage {
   dangling: boolean;
 }
 
-export interface DockerDiskSummary {
-  /** `docker system df` 의 한 줄. */
-  type: string;
-  total: number;
-  active: number;
-  size: string;
-  reclaimable: string;
-}
-
 const LIST_SEPARATOR = '@@dolgate@@';
 
 /**
- * 이미지 목록과 총량을 한 왕복에 받는다. 총량은 `docker images` 를 더하지 않고 `system df` 에서
- * 가져온다 — 레이어를 공유하는 이미지들은 크기를 더하면 실제 디스크보다 크게 나온다.
+ * 이미지 목록. `docker images` 한 번이 전부다.
+ *
+ * **`docker system df` 는 쓰지 않는다.** 디스크 총량·회수 가능량을 정확히 내주지만 레이어를
+ * 전부 걷느라 이미지가 많은 호스트에서 수십 초가 걸리고, 그동안 보조 채널을 혼자 물고 있어
+ * 컨테이너 목록·지표까지 함께 멈춘다. 여기서 필요한 것은 "무엇이 있고 대략 얼마나 큰가" 이고,
+ * 그건 이 한 줄로 충분하다. 볼륨 크기(`system df -v`)를 뺀 것도 같은 이유다.
  */
 export function buildImageListCommand(prefix: string): string {
-  return AUX_PATH_EXPORT + [
-    `${prefix} images --format '{{.Repository}}\\t{{.Tag}}\\t{{.ID}}\\t{{.Size}}' | head -n ${DOCKER_ROW_LIMIT + 1}`,
-    `echo ${LIST_SEPARATOR}`,
-    `${prefix} system df --format '{{.Type}}\\t{{.TotalCount}}\\t{{.Active}}\\t{{.Size}}\\t{{.Reclaimable}}'`,
-  ].join('; ');
+  return `${AUX_PATH_EXPORT}${prefix} images --format '{{.Repository}}\\t{{.Tag}}\\t{{.ID}}\\t{{.Size}}' | head -n ${DOCKER_ROW_LIMIT + 1}`;
 }
 
 const SIZE_UNITS: Record<string, number> = {
@@ -620,15 +615,13 @@ export function parseDockerSize(text: string): number {
 
 export interface DockerImageList {
   images: DockerImage[];
-  summary: DockerDiskSummary[];
   truncated: boolean;
 }
 
 export function parseImageList(stdout: string): DockerImageList {
-  const [listPart = '', summaryPart = ''] = stdout.split(LIST_SEPARATOR);
   const images: DockerImage[] = [];
   let seen = 0;
-  for (const line of listPart.split('\n')) {
+  for (const line of stdout.split('\n')) {
     if (!line.includes('\t')) {
       continue;
     }
@@ -649,23 +642,9 @@ export function parseImageList(stdout: string): DockerImageList {
       dangling: repository.trim() === '<none>',
     });
   }
-  const summary: DockerDiskSummary[] = [];
-  for (const line of summaryPart.split('\n')) {
-    if (!line.includes('\t')) {
-      continue;
-    }
-    const [type, total, active, size, reclaimable] = line.split('\t');
-    summary.push({
-      type: (type ?? '').trim(),
-      total: Number((total ?? '').trim()) || 0,
-      active: Number((active ?? '').trim()) || 0,
-      size: (size ?? '').trim(),
-      reclaimable: (reclaimable ?? '').trim(),
-    });
-  }
   // 큰 것부터. 이미지 목록을 여는 이유는 거의 늘 디스크다.
   images.sort((left, right) => right.sizeBytes - left.sizeBytes);
-  return { images, summary, truncated: seen > DOCKER_ROW_LIMIT };
+  return { images, truncated: seen > DOCKER_ROW_LIMIT };
 }
 
 /** 컨테이너가 쓰고 있는 이미지 집합(`repo:tag` 와 짧은 ID 둘 다 담는다). */
@@ -756,48 +735,6 @@ export function parseVolumeList(stdout: string): { volumes: DockerVolume[]; trun
   return { volumes, truncated: seen > DOCKER_ROW_LIMIT };
 }
 
-/**
- * 볼륨 크기. `system df -v` 는 초 단위로 걸릴 수 있어서 목록과 같은 왕복에 태우지 않고,
- * 볼륨 탭을 열면 뒤에서 한 번 돌려 자리를 채운다(누르게 하지 않는다).
- */
-export function buildVolumeSizeCommand(prefix: string): string {
-  return `${AUX_PATH_EXPORT}${prefix} system df -v`;
-}
-
-/** `system df -v` 의 "Local Volumes space usage" 표에서 이름 → 크기를 뽑는다. */
-export function parseVolumeSizes(stdout: string): Map<string, string> {
-  const sizes = new Map<string, string>();
-  let inSection = false;
-  for (const line of stdout.split('\n')) {
-    if (/local volumes space usage/i.test(line)) {
-      inSection = true;
-      continue;
-    }
-    if (!inSection) {
-      continue;
-    }
-    const text = line.trim();
-    if (!text) {
-      continue;
-    }
-    if (/^VOLUME NAME/i.test(text)) {
-      continue;
-    }
-    // 다음 절이 시작되면 끝난다("Build cache usage: …").
-    if (/space usage:?$/i.test(text) || /^build cache/i.test(text)) {
-      break;
-    }
-    const parts = text.split(/\s{2,}|\t/).filter(Boolean);
-    if (parts.length < 3) {
-      continue;
-    }
-    sizes.set(parts[0].trim(), parts[parts.length - 1].trim());
-  }
-  return sizes;
-}
-
-/* ─── 네트워크 ─────────────────────────────────────────────────────────── */
-
 export interface DockerNetwork {
   name: string;
   driver: string;
@@ -808,11 +745,24 @@ export interface DockerNetwork {
 /**
  * 이름·드라이버·서브넷·붙은 컨테이너 수를 한 왕복에. `network ls` 만으로는 서브넷을 알 수 없어
  * `inspect` 를 쓰지만, 네트워크마다 부르면 왕복이 여러 번이 되므로 id 를 한꺼번에 넘긴다.
+ *
+ * **구분자는 진짜 탭이어야 한다(`\t`, 백슬래시-t 두 글자가 아니라).** docker 의 `--format` 은
+ * 두 세계다 — `ps`·`images`·`volume ls` 같은 목록 명령은 CLI 가 포맷 문자열의 `\t` 를 탭으로
+ * 치환해 주지만, `inspect` 계열은 Go 템플릿을 그대로 파싱해 아무것도 치환하지 않는다. 여기에
+ * 백슬래시-t 를 넣으면 출력에 탭이 없고, 파서가 탭 없는 줄을 전부 버려 네트워크가 **어느
+ * 호스트에서든** 빈 목록으로 보였다. 컨테이너 검사(INSPECT_FIELDS)가 멀쩡했던 것은 그쪽이
+ * 처음부터 진짜 탭을 쓰고 있어서다.
+ *
+ * 네트워크가 하나도 없으면 `network inspect` 는 인자 없이 불려 실패한다 — 먼저 id 를 세어 본다.
  */
 export function buildNetworkListCommand(prefix: string): string {
   const format =
-    '{{.Name}}\\t{{.Driver}}\\t{{range .IPAM.Config}}{{.Subnet}} {{end}}\\t{{len .Containers}}';
-  return `${AUX_PATH_EXPORT}${prefix} network inspect $(${prefix} network ls -q) --format '${format}' 2>/dev/null | head -n ${DOCKER_ROW_LIMIT + 1}`;
+    '{{.Name}}\t{{.Driver}}\t{{range .IPAM.Config}}{{.Subnet}} {{end}}\t{{len .Containers}}';
+  return (
+    AUX_PATH_EXPORT +
+    `ids=$(${prefix} network ls -q); [ -n "$ids" ] && ` +
+    `${prefix} network inspect $ids --format '${format}' | head -n ${DOCKER_ROW_LIMIT + 1}`
+  );
 }
 
 export function parseNetworkList(stdout: string): { networks: DockerNetwork[]; truncated: boolean } {

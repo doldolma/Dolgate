@@ -190,22 +190,22 @@ function createDeferred<T>() {
 }
 
 function openContainerDialog() {
-  fireEvent.click(screen.getByRole('tab', { name: 'Container' }));
-  fireEvent.click(screen.getByRole('button', { name: 'New Container Tunnel' }));
+  fireEvent.click(screen.getByRole('tab', { name: '컨테이너' }));
+  fireEvent.click(screen.getByRole('button', { name: '컨테이너 터널 추가' }));
 }
 
 function openEcsTaskDialog() {
   fireEvent.click(screen.getByRole('tab', { name: 'ECS Task' }));
-  fireEvent.click(screen.getByRole('button', { name: 'New ECS Task Tunnel' }));
+  fireEvent.click(screen.getByRole('button', { name: 'ECS Task 터널 추가' }));
 }
 
 async function chooseContainerHost(optionName: RegExp | string) {
-  fireEvent.click(screen.getByRole('button', { name: 'Host' }));
+  fireEvent.click(screen.getByRole('button', { name: '호스트' }));
   fireEvent.click(await screen.findByRole('option', { name: optionName }));
 }
 
 async function chooseContainerOption(optionName: RegExp | string) {
-  fireEvent.click(screen.getByRole('button', { name: 'Container' }));
+  fireEvent.click(screen.getByRole('button', { name: '컨테이너' }));
   fireEvent.click(await screen.findByRole('option', { name: optionName }));
 }
 
@@ -229,28 +229,34 @@ function renderPanel(options?: {
   const onStart = vi.fn().mockResolvedValue(undefined);
   const onStop = vi.fn().mockResolvedValue(undefined);
   const onClearInteractiveAuth = vi.fn();
+  // 프로덕션과 같은 배치로 띄운다 — 목록 화면 하나와, 편집기를 그리는 인스턴스 하나
+  // (실제로는 AppModals 의 PortForwardEditorHost). 화면 쪽 버튼은 스토어에 의도만 넣으므로,
+  // 다이얼로그 인스턴스가 없으면 모달이 뜨지 않는다.
+  const panelProps = {
+    hosts: options?.hosts ?? hosts,
+    containerTabs: options?.containerTabs ?? [],
+    rules: options?.rules ?? rules,
+    dnsOverrides: options?.dnsOverrides ?? dnsOverrides,
+    runtimes: options?.runtimes ?? runtimes,
+    interactiveAuth: options?.interactiveAuth ?? null,
+    discoveryInteractiveAuth: options?.discoveryInteractiveAuth ?? null,
+    onSave,
+    onSaveDnsOverride,
+    onSetStaticDnsOverrideActive,
+    onRemove,
+    onRemoveDnsOverride,
+    onStart,
+    onStop,
+    onRespondInteractiveAuth: vi.fn().mockResolvedValue(undefined),
+    onReopenInteractiveAuthUrl: vi.fn().mockResolvedValue(undefined),
+    onClearInteractiveAuth,
+  };
   const view = render(
-    <PortForwardingPanel
-      hosts={options?.hosts ?? hosts}
-      containerTabs={options?.containerTabs ?? []}
-      rules={options?.rules ?? rules}
-      dnsOverrides={options?.dnsOverrides ?? dnsOverrides}
-      runtimes={options?.runtimes ?? runtimes}
-      interactiveAuth={options?.interactiveAuth ?? null}
-      discoveryInteractiveAuth={options?.discoveryInteractiveAuth ?? null}
-      onSave={onSave}
-      onSaveDnsOverride={onSaveDnsOverride}
-      onSetStaticDnsOverrideActive={onSetStaticDnsOverrideActive}
-      onRemove={onRemove}
-      onRemoveDnsOverride={onRemoveDnsOverride}
-      onStart={onStart}
-      onStop={onStop}
-      onRespondInteractiveAuth={vi.fn().mockResolvedValue(undefined)}
-      onReopenInteractiveAuthUrl={vi.fn().mockResolvedValue(undefined)}
-      onClearInteractiveAuth={onClearInteractiveAuth}
-    />
+    <>
+      <PortForwardingPanel {...panelProps} />
+      <PortForwardingPanel {...panelProps} variant="dialog" />
+    </>
   );
-
   return {
     ...view,
     onSave,
@@ -360,7 +366,7 @@ describe('PortForwardingPanel runtime labels', () => {
       ]
     });
 
-    expect(screen.getByText('SSH Fallback')).toBeInTheDocument();
+    expect(screen.getByText('SSH 폴백')).toBeInTheDocument();
   });
 });
 
@@ -368,9 +374,9 @@ describe('PortForwardingPanel dialog', () => {
   it('exposes an accessible close button for the dialog', () => {
     renderPanel();
 
-    fireEvent.click(screen.getByRole('button', { name: 'New SSH Forward' }));
+    fireEvent.click(screen.getByRole('button', { name: 'SSH 포워딩 추가' }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close port forwarding dialog' }));
+    fireEvent.click(screen.getByRole('button', { name: '포트 포워딩 창 닫기' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -378,17 +384,17 @@ describe('PortForwardingPanel dialog', () => {
   it('renders SSH forwarding host selection as a searchable picker', async () => {
     renderPanel();
 
-    fireEvent.click(screen.getByRole('button', { name: 'New SSH Forward' }));
+    fireEvent.click(screen.getByRole('button', { name: 'SSH 포워딩 추가' }));
 
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).queryByRole('combobox', { name: 'Host' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('combobox', { name: '호스트' })).not.toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Host' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '호스트' }));
 
     await waitFor(() =>
       expect(within(dialog).getByLabelText('SSH forwarding host search')).toHaveFocus(),
     );
-    expect(within(dialog).getByRole('listbox', { name: 'Host options' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('listbox', { name: '호스트 옵션' })).toBeInTheDocument();
   });
 
   it('filters SSH forwarding hosts by label, hostname, username, group, and tags', () => {
@@ -446,23 +452,23 @@ describe('PortForwardingPanel dialog', () => {
 
     renderPanel({ hosts: searchableHosts });
 
-    fireEvent.click(screen.getByRole('button', { name: 'New SSH Forward' }));
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Host' }));
+    fireEvent.click(screen.getByRole('button', { name: 'SSH 포워딩 추가' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '호스트' }));
 
     const searchInput = screen.getByLabelText('SSH forwarding host search');
     fireEvent.change(searchInput, { target: { value: 'deploy' } });
-    let listbox = screen.getByRole('listbox', { name: 'Host options' });
+    let listbox = screen.getByRole('listbox', { name: '호스트 옵션' });
     expect(within(listbox).getByText('Production API')).toBeInTheDocument();
     expect(within(listbox).queryByText('Database')).not.toBeInTheDocument();
     expect(within(listbox).queryByText('Cache')).not.toBeInTheDocument();
 
     fireEvent.change(searchInput, { target: { value: 'infra' } });
-    listbox = screen.getByRole('listbox', { name: 'Host options' });
+    listbox = screen.getByRole('listbox', { name: '호스트 옵션' });
     expect(within(listbox).getByText('Database')).toBeInTheDocument();
     expect(within(listbox).queryByText('Production API')).not.toBeInTheDocument();
 
     fireEvent.change(searchInput, { target: { value: 'hot-path' } });
-    listbox = screen.getByRole('listbox', { name: 'Host options' });
+    listbox = screen.getByRole('listbox', { name: '호스트 옵션' });
     expect(within(listbox).getByText('Cache')).toBeInTheDocument();
     expect(within(listbox).queryByText('Database')).not.toBeInTheDocument();
   });
@@ -490,15 +496,15 @@ describe('PortForwardingPanel dialog', () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     renderPanel({ hosts: searchableHosts, onSave });
 
-    fireEvent.click(screen.getByRole('button', { name: 'New SSH Forward' }));
+    fireEvent.click(screen.getByRole('button', { name: 'SSH 포워딩 추가' }));
     const dialog = screen.getByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText('Label'), { target: { value: 'DB tunnel' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Host' }));
+    fireEvent.change(within(dialog).getByLabelText('이름'), { target: { value: 'DB tunnel' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '호스트' }));
     fireEvent.change(screen.getByLabelText('SSH forwarding host search'), { target: { value: 'database' } });
-    fireEvent.pointerDown(within(screen.getByRole('listbox', { name: 'Host options' })).getByText('Database'));
+    fireEvent.pointerDown(within(screen.getByRole('listbox', { name: '호스트 옵션' })).getByText('Database'));
 
-    expect(screen.queryByRole('listbox', { name: 'Host options' })).not.toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Host' })).toHaveTextContent('postgres@db.internal:2222');
+    expect(screen.queryByRole('listbox', { name: '호스트 옵션' })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: '호스트' })).toHaveTextContent('postgres@db.internal:2222');
 
     fireEvent.click(within(dialog).getByRole('button', { name: '저장' }));
 
@@ -517,8 +523,8 @@ describe('PortForwardingPanel dialog', () => {
   it('shows an empty SSH host search state', () => {
     renderPanel();
 
-    fireEvent.click(screen.getByRole('button', { name: 'New SSH Forward' }));
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Host' }));
+    fireEvent.click(screen.getByRole('button', { name: 'SSH 포워딩 추가' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '호스트' }));
     fireEvent.change(screen.getByLabelText('SSH forwarding host search'), {
       target: { value: 'missing-host' },
     });
@@ -529,33 +535,57 @@ describe('PortForwardingPanel dialog', () => {
   it('shows the selected SSH host when editing an existing forwarding rule', () => {
     renderPanel();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: '편집' }));
 
-    const hostButton = within(screen.getByRole('dialog')).getByRole('button', { name: 'Host' });
+    const hostButton = within(screen.getByRole('dialog')).getByRole('button', { name: '호스트' });
     expect(hostButton).toHaveTextContent('SSH Host');
     expect(hostButton).toHaveTextContent('ubuntu@ssh.example.com:22');
+  });
+
+  // 세션 패널에서 편집하면 목록 카드를 볼 수 없어서, 삭제가 모달에 없으면 지울 방법이 없었다.
+  it('deletes the rule being edited and closes the dialog', async () => {
+    const view = renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: '편집' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: '삭제' }));
+
+    await waitFor(() => expect(view.onRemove).toHaveBeenCalledWith('ssh-rule-1'));
+    // 지운 것을 계속 편집하는 화면이 남으면 저장을 눌렀을 때 무엇이 되는지 알 수 없다.
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  // 새로 만드는 중에는 지울 것이 없다.
+  it('hides delete while creating a rule', () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'SSH 포워딩 추가' }));
+
+    expect(
+      within(screen.getByRole('dialog')).queryByRole('button', { name: '삭제' }),
+    ).not.toBeInTheDocument();
   });
 
   it('renders AWS EC2 forwarding host selection as a searchable picker', () => {
     renderPanel();
 
     fireEvent.click(screen.getByRole('tab', { name: 'AWS EC2' }));
-    fireEvent.click(screen.getByRole('button', { name: 'New AWS EC2 Forward' }));
+    fireEvent.click(screen.getByRole('button', { name: 'AWS EC2 포워딩 추가' }));
 
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).queryByRole('combobox', { name: 'AWS EC2 Host' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('combobox', { name: 'AWS EC2 호스트' })).not.toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'AWS EC2 Host' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'AWS EC2 호스트' }));
     fireEvent.change(screen.getByLabelText('AWS EC2 forwarding host search'), {
       target: { value: 'i-123' },
     });
 
-    const listbox = screen.getByRole('listbox', { name: 'AWS EC2 Host options' });
+    const listbox = screen.getByRole('listbox', { name: 'AWS EC2 호스트 옵션' });
     expect(within(listbox).getByText('Bastion')).toBeInTheDocument();
     fireEvent.pointerDown(within(listbox).getByText('Bastion'));
 
-    expect(screen.queryByRole('listbox', { name: 'AWS EC2 Host options' })).not.toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'AWS EC2 Host' })).toHaveTextContent(
+    expect(screen.queryByRole('listbox', { name: 'AWS EC2 호스트 옵션' })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'AWS EC2 호스트' })).toHaveTextContent(
       'default / ap-northeast-2 / i-123',
     );
   });
@@ -564,17 +594,17 @@ describe('PortForwardingPanel dialog', () => {
     renderPanel();
 
     fireEvent.click(screen.getByRole('tab', { name: 'ECS Task' }));
-    fireEvent.click(screen.getByRole('button', { name: 'New ECS Task Tunnel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'ECS Task 터널 추가' }));
 
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).queryByRole('combobox', { name: 'AWS ECS Host' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('combobox', { name: 'AWS ECS 호스트' })).not.toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'AWS ECS Host' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'AWS ECS 호스트' }));
     fireEvent.change(screen.getByLabelText('ECS task forwarding host search'), {
       target: { value: 'acme' },
     });
 
-    const listbox = screen.getByRole('listbox', { name: 'AWS ECS Host options' });
+    const listbox = screen.getByRole('listbox', { name: 'AWS ECS 호스트 옵션' });
     expect(within(listbox).getByText('acme-ecs')).toBeInTheDocument();
   });
 
@@ -582,12 +612,12 @@ describe('PortForwardingPanel dialog', () => {
     renderPanel();
 
     openContainerDialog();
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Host' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '호스트' }));
     fireEvent.change(screen.getByLabelText('Container forwarding host search'), {
       target: { value: 'warp' },
     });
 
-    const listbox = screen.getByRole('listbox', { name: 'Host options' });
+    const listbox = screen.getByRole('listbox', { name: '호스트 옵션' });
     expect(within(listbox).getAllByText('Warpgate').length).toBeGreaterThan(0);
     expect(within(listbox).queryByText('SSH Host')).not.toBeInTheDocument();
   });
@@ -622,12 +652,12 @@ describe('PortForwardingPanel dialog', () => {
     const { onSaveDnsOverride } = renderPanel();
 
     fireEvent.click(screen.getByRole('tab', { name: 'DNS Override' }));
-    fireEvent.click(screen.getByRole('button', { name: 'New DNS Override' }));
+    fireEvent.click(screen.getByRole('button', { name: 'DNS Override 추가' }));
 
-    fireEvent.change(screen.getByLabelText('Hostname'), {
+    fireEvent.change(screen.getByLabelText('호스트 이름'), {
       target: { value: 'Basket' }
     });
-    fireEvent.change(screen.getByLabelText('Linked rule'), {
+    fireEvent.change(screen.getByLabelText('연결할 규칙'), {
       target: { value: 'aws-rule-1' }
     });
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
@@ -857,13 +887,13 @@ describe('PortForwardingPanel dialog', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'ECS Task' }));
 
     expect(screen.getByText('Running tunnels')).toBeInTheDocument();
-    expect(screen.getByText('Saved rules')).toBeInTheDocument();
+    expect(screen.getByText('저장된 규칙')).toBeInTheDocument();
     expect(screen.getByText('Ephemeral')).toBeInTheDocument();
     expect(screen.getByText('worker / api')).toBeInTheDocument();
     expect(screen.getByText('127.0.0.1:43110')).toBeInTheDocument();
     expect(screen.getByText('127.0.0.1:7001')).toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Stop' })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: '정지' })[0]!);
 
     expect(onStop).toHaveBeenCalledWith('ecs-service-tunnel:1');
   });
@@ -960,15 +990,15 @@ describe('PortForwardingPanel dialog', () => {
       ],
     });
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Container' }));
+    fireEvent.click(screen.getByRole('tab', { name: '컨테이너' }));
 
     expect(screen.getByText('Running tunnels')).toBeInTheDocument();
-    expect(screen.getByText('Saved rules')).toBeInTheDocument();
+    expect(screen.getByText('저장된 규칙')).toBeInTheDocument();
     expect(screen.getByText('Ephemeral')).toBeInTheDocument();
     expect(screen.getByText('bridge:8080')).toBeInTheDocument();
     expect(screen.getByText('127.0.0.1:43110')).toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Stop' })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: '정지' })[0]!);
 
     expect(onStop).toHaveBeenCalledWith('container-service-tunnel:1');
   });
@@ -1002,15 +1032,15 @@ describe('PortForwardingPanel dialog', () => {
       expect(awsApi.listEcsTaskTunnelServices).toHaveBeenCalledWith('ecs-host-1');
     });
 
-    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'API tunnel' } });
-    fireEvent.change(screen.getByLabelText('Service'), { target: { value: 'api' } });
+    fireEvent.change(screen.getByLabelText('이름'), { target: { value: 'API tunnel' } });
+    fireEvent.change(screen.getByLabelText('서비스'), { target: { value: 'api' } });
 
     await waitFor(() => {
       expect(awsApi.loadEcsTaskTunnelService).toHaveBeenCalledWith('ecs-host-1', 'api');
     });
 
-    fireEvent.change(screen.getByLabelText('Container'), { target: { value: 'web' } });
-    fireEvent.click(screen.getByRole('switch', { name: 'Auto (random)' }));
+    fireEvent.change(screen.getByLabelText('컨테이너'), { target: { value: 'web' } });
+    fireEvent.click(screen.getByRole('switch', { name: '자동 (임의 포트)' }));
     fireEvent.change(screen.getByPlaceholderText('9000'), { target: { value: '18080' } });
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
 
@@ -1060,14 +1090,14 @@ describe('PortForwardingPanel dialog', () => {
       expect(awsApi.listEcsTaskTunnelServices).toHaveBeenCalledWith('ecs-host-1');
     });
 
-    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'API tunnel' } });
-    fireEvent.change(screen.getByLabelText('Service'), { target: { value: 'api' } });
+    fireEvent.change(screen.getByLabelText('이름'), { target: { value: 'API tunnel' } });
+    fireEvent.change(screen.getByLabelText('서비스'), { target: { value: 'api' } });
 
     await waitFor(() => {
       expect(awsApi.loadEcsTaskTunnelService).toHaveBeenCalledWith('ecs-host-1', 'api');
     });
 
-    fireEvent.change(screen.getByLabelText('Container'), { target: { value: 'web' } });
+    fireEvent.change(screen.getByLabelText('컨테이너'), { target: { value: 'web' } });
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
 
     await waitFor(() => {
@@ -1090,7 +1120,7 @@ describe('PortForwardingPanel dialog', () => {
   it('closes when the backdrop is clicked while idle', async () => {
     const { container } = renderPanel();
 
-    fireEvent.click(screen.getByRole('button', { name: 'New SSH Forward' }));
+    fireEvent.click(screen.getByRole('button', { name: 'SSH 포워딩 추가' }));
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
 
@@ -1108,8 +1138,8 @@ describe('PortForwardingPanel dialog', () => {
     const onSave = vi.fn().mockReturnValue(deferred.promise);
     const { container } = renderPanel({ onSave });
 
-    fireEvent.click(screen.getByRole('button', { name: 'New SSH Forward' }));
-    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'My SSH Rule' } });
+    fireEvent.click(screen.getByRole('button', { name: 'SSH 포워딩 추가' }));
+    fireEvent.change(screen.getByLabelText('이름'), { target: { value: 'My SSH Rule' } });
     fireEvent.click(
       within(screen.getByRole('dialog')).getByRole('button', { name: '저장' }),
     );
@@ -1186,7 +1216,7 @@ describe('PortForwardingPanel dialog', () => {
       expect(containersApi.list).toHaveBeenCalledWith('ssh-host-1');
     });
 
-    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Web tunnel' } });
+    fireEvent.change(screen.getByLabelText('이름'), { target: { value: 'Web tunnel' } });
     await chooseContainerOption(/web.*Running/i);
 
     await waitFor(() => {
@@ -1272,8 +1302,8 @@ describe('PortForwardingPanel dialog', () => {
       expect(containersApi.list).toHaveBeenCalledWith('ssh-host-1');
     });
 
-    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Jenkins tunnel' } });
-    await chooseContainerOption(/jenkins-jenkins1.*Stopped/i);
+    fireEvent.change(screen.getByLabelText('이름'), { target: { value: 'Jenkins tunnel' } });
+    await chooseContainerOption(/jenkins-jenkins1.*정지됨/i);
 
     await waitFor(() => {
       expect(containersApi.inspect).toHaveBeenCalledWith('ssh-host-1', 'container-2');
@@ -1308,8 +1338,8 @@ describe('PortForwardingPanel dialog', () => {
 
     openContainerDialog();
 
-    const hostPicker = screen.getByRole('button', { name: 'Host' });
-    expect(screen.getByText('Select host')).toBeInTheDocument();
+    const hostPicker = screen.getByRole('button', { name: '호스트' });
+    expect(screen.getByText('호스트 선택')).toBeInTheDocument();
     expect(hostPicker).toBeEnabled();
 
     await chooseContainerHost(/SSH Host/);
@@ -1318,7 +1348,7 @@ describe('PortForwardingPanel dialog', () => {
       expect(containersApi.list).toHaveBeenCalledWith('ssh-host-1');
     });
 
-    expect(screen.getByRole('button', { name: 'Host' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '호스트' })).toBeDisabled();
 
     deferred.resolve({
       runtime: 'docker',
@@ -1327,7 +1357,7 @@ describe('PortForwardingPanel dialog', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Host' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: '호스트' })).toBeEnabled();
     });
   });
 
@@ -1377,10 +1407,10 @@ describe('PortForwardingPanel dialog', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Host' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: '호스트' })).toBeEnabled();
     });
 
-    expect(screen.queryByText('Container discovery')).not.toBeInTheDocument();
+    expect(screen.queryByText('컨테이너 탐색')).not.toBeInTheDocument();
 
     containerConnectionProgressListener?.({
       hostId: 'ssh-host-1',
@@ -1389,7 +1419,7 @@ describe('PortForwardingPanel dialog', () => {
       message: 'SSH Host 컨테이너 런타임 연결을 준비하는 중입니다.',
     });
 
-    expect(screen.queryByText('Container discovery')).not.toBeInTheDocument();
+    expect(screen.queryByText('컨테이너 탐색')).not.toBeInTheDocument();
     expect(
       screen.queryByText('SSH Host 컨테이너 런타임 연결을 준비하는 중입니다.'),
     ).not.toBeInTheDocument();
@@ -1421,7 +1451,7 @@ describe('PortForwardingPanel dialog', () => {
       expect(containersApi.list).toHaveBeenCalledWith('ssh-host-1');
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Container' }));
+    fireEvent.click(screen.getByRole('button', { name: '컨테이너' }));
 
     expect(await screen.findByRole('option', { name: /vault.*vault:1\.16.*Running/i })).toBeInTheDocument();
   });
@@ -1431,7 +1461,7 @@ describe('PortForwardingPanel dialog', () => {
 
     openContainerDialog();
 
-    const autoToggle = screen.getByRole('switch', { name: 'Auto (random)' });
+    const autoToggle = screen.getByRole('switch', { name: '자동 (임의 포트)' });
     const localPortInput = screen.getByPlaceholderText('자동 할당') as HTMLInputElement;
 
     expect(autoToggle).toHaveAttribute('aria-checked', 'true');

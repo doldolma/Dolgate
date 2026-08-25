@@ -415,6 +415,10 @@ export function useTerminalAutocomplete({
           }
           return stdout;
         })
+        // 자동완성은 끝까지 best-effort 다. 보조 채널이 답을 못 주면(타임아웃·채널 재시작)
+        // 제안이 없는 것으로 둔다 — 타이핑 중에 오류를 띄우거나, 잡히지 않은 rejection 을
+        // 흘리지 않는다. 실패를 실패로 다뤄야 하는 쪽은 세션 패널이고, 그쪽은 직접 받는다.
+        .catch(() => '')
         .finally(() => {
           completionInflightRef.current.delete(hostCommand);
         });

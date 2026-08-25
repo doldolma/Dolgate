@@ -6,7 +6,10 @@ import {
   isWarpgateSshHostRecord,
 } from '@shared';
 import { cn } from '../../lib/cn';
-import { resolveTailnetTargetAddress } from '../../lib/host-tailnet';
+import {
+  resolveHostTailnetId,
+  resolveTailnetTargetAddress,
+} from '../../lib/host-tailnet';
 import { useAppStore } from '../../store/appStore';
 import { cancelTailnet, listTailnets } from '../../services/desktop/tailnet';
 import { acquireTailnetWatch } from '../../services/desktop/tailnet-watch';
@@ -86,10 +89,20 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   // 조립하면(확인 표시 → 재연결, 취소 → 플래그 → 재시도) 같은 일에 대한 판단이 두 곳에 생기고,
   // 화면이 코어보다 앞서 결정하게 된다. 이 화면은 상태를 그리고, 사용자의 의사(취소·다시 시도)만
   // 전달한다.
-  const tailnetIdOfHost =
-    props.host && isSshHostRecord(props.host) ? props.host.tailnetId?.trim() : undefined;
-  // 진단줄이 넷맵에서 찾아야 하는 기기를 고르는 데 쓴다(점프가 있으면 첫 홉).
+  // 넷맵에서 찾아야 하는 기기와, 올라와 있어야 하는 노드를 고르는 데 쓴다(점프가 있으면 첫 홉).
   const hosts = useAppStore((state) => state.hosts);
+  /**
+   * 이 연결이 거치는 tailnet.
+   *
+   * **관문과 같은 판정을 쓴다.** 대상의 tailnetId 만 직접 읽던 시절에는 "점프 호스트에만
+   * tailnet" 구성에서 관문은 도는데(trust-auth 의 needsTailnetReady 가 이 헬퍼를 쓴다)
+   * 오버레이에는 tailnet 계층이 통째로 안 그려졌다 — 노드가 올라오는 동안 화면에는 이유 없는
+   * "연결 중…" 만 남고, 인증이 필요한 경우에는 누를 링크조차 나오지 않았다.
+   *
+   * 바로 아래 targetAddress 는 이미 첫 홉 규칙을 쓰고 있었다. 한 화면이 두 규칙을 쓰면
+   * "Tailscale 은 안 쓴다고 하면서 tailnet 안의 기기를 찾는" 상태가 된다.
+   */
+  const tailnetIdOfHost = resolveHostTailnetId(props.host, hosts);
 
 
   // tmux pane 분할은 상단 윈도우 바의 "분할" 버튼(또는 Ctrl-b % / ")이 담당한다.
@@ -387,6 +400,9 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
       connectionFailurePresentation?.layer,
       connectionFailurePresentation?.message,
       pendingHostKeyPrompt,
+      // targetAddress·tailnetIdOfHost 가 둘 다 이 목록에서 첫 홉을 찾는다. 빼면 점프 설정을
+      // 바꾼 뒤에도 낡은 진단이 그대로 남는다.
+      hosts,
       props.host,
       tab,
       tailnetIdOfHost,

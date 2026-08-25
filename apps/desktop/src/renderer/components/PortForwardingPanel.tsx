@@ -78,7 +78,7 @@ import { DialogBackdrop } from './DialogBackdrop';
 import { KnownHostPromptDialog } from './KnownHostPromptDialog';
 import { Trans, useTranslation } from 'react-i18next';
 import { ConnectionProgressModal } from './ConnectionProgressModal';
-import { useAppStore } from '../store/appStore';
+import { appStore, useAppStore } from '../store/appStore';
 import { t } from '../i18n';
 
 type ForwardTab = 'ssh' | 'aws-ssm' | 'ecs-task' | 'container' | 'dns';
@@ -90,6 +90,9 @@ let lastSelectedForwardTab: ForwardTab = 'ssh';
 
 export function resetPortForwardingPanelUiStateForTests() {
   lastSelectedForwardTab = 'ssh';
+  // 열기 의도도 이 화면의 전역 UI 상태다. 안 지우면 앞 테스트가 열어 둔 편집기가 다음 테스트에
+  // 그대로 떠 있어서, 새로 연 것과 구분이 안 된다.
+  appStore.setState({ portForwardEditor: null });
 }
 
 interface PortForwardingPanelProps {
@@ -111,6 +114,13 @@ interface PortForwardingPanelProps {
   onReopenInteractiveAuthUrl: () => Promise<void>;
   /** 카드를 내린다. 어느 것인지 반드시 지목한다 — 인자가 없으면 스토어가 전부 비운다. */
   onClearInteractiveAuth: (challengeId?: string) => void;
+  /**
+   * 이 인스턴스가 그릴 것.
+   *
+   * `screen` 은 목록만 그리고, 편집은 스토어에 열기 의도만 넣는다. `dialog` 는 모달만 그리며
+   * 그 의도를 받아 뜬다. 화면과 세션 패널이 같은 편집기 한 벌을 나눠 쓰기 위한 것이다.
+   */
+  variant?: 'screen' | 'dialog';
 }
 
 interface InteractiveAuthFormProps {
@@ -215,19 +225,19 @@ function getDiscoveryContainerStatusPresentation(status: string): DiscoveryConta
     };
   }
   return {
-    label: 'Stopped',
+    label: t('portForward.status.stopped'),
     tone: 'stopped'
   };
 }
 
 function getContainerHostKindLabel(host: HostRecord): string {
   if (isAwsEc2HostRecord(host)) {
-    return 'AWS';
+    return t('portForward.kind.aws');
   }
   if (isWarpgateSshHostRecord(host)) {
-    return 'Warpgate';
+    return t('portForward.kind.warpgate');
   }
-  return 'SSH';
+  return t('portForward.kind.ssh');
 }
 
 function getContainerHostSecondaryLabel(host: HostRecord): string {
@@ -423,45 +433,45 @@ function runtimeMethodLabel(runtime?: PortForwardRuntimeRecord) {
     return null;
   }
   if (runtime.method === 'ssh-session-proxy') {
-    return 'SSH Fallback';
+    return t('portForward.method.sshFallback');
   }
   if (runtime.method === 'ssm-remote-host') {
-    return 'SSM Remote Host';
+    return t('portForward.method.ssmRemoteHost');
   }
-  return 'SSH Native';
+  return t('portForward.method.sshNative');
 }
 
 
 function tabTitle(tab: ForwardTab) {
   if (tab === 'ssh') {
-    return 'SSH Forwarding';
+    return t('portForward.tab.ssh');
   }
   if (tab === 'aws-ssm') {
-    return 'AWS EC2';
+    return t('portForward.tab.aws');
   }
   if (tab === 'ecs-task') {
-    return 'ECS Task';
+    return t('portForward.tab.ecs');
   }
   if (tab === 'dns') {
-    return 'DNS Override';
+    return t('portForward.tab.dns');
   }
-  return 'Container Tunneling';
+  return t('portForward.tab.container');
 }
 
 function createButtonLabel(tab: ForwardTab) {
   if (tab === 'ssh') {
-    return 'New SSH Forward';
+    return t('portForward.create.ssh');
   }
   if (tab === 'aws-ssm') {
-    return 'New AWS EC2 Forward';
+    return t('portForward.create.aws');
   }
   if (tab === 'ecs-task') {
-    return 'New ECS Task Tunnel';
+    return t('portForward.create.ecs');
   }
   if (tab === 'dns') {
-    return 'New DNS Override';
+    return t('portForward.create.dns');
   }
-  return 'New Container Tunnel';
+  return t('portForward.create.container');
 }
 
 function emptyStateTitle(tab: ForwardTab) {
@@ -771,7 +781,8 @@ export function PortForwardingPanel({
   onStop,
   onRespondInteractiveAuth,
   onReopenInteractiveAuthUrl,
-  onClearInteractiveAuth
+  onClearInteractiveAuth,
+  variant = 'screen'
 }: PortForwardingPanelProps) {
   const { t: translate } = useTranslation();
   // 진행 중인 연결이 있으면 터미널과 같은 화면을 팝업으로 띄운다.
@@ -780,6 +791,10 @@ export function PortForwardingPanel({
   // 쓴다 — 시작 경로가 하나 더 생겨도 여기 손댈 일이 없다.
   const connectionViews = useAppStore((state) => state.connectionViews);
   const dismissConnectionView = useAppStore((state) => state.dismissConnectionView);
+  // 편집기 열기 의도. 화면 인스턴스는 여기에 쓰고, 다이얼로그 인스턴스는 읽어서 뜬다.
+  const portForwardEditor = useAppStore((state) => state.portForwardEditor);
+  const openPortForwardEditor = useAppStore((state) => state.openPortForwardEditor);
+  const closePortForwardEditor = useAppStore((state) => state.closePortForwardEditor);
   const connectingRule = rules.find((rule) => connectionViews[rule.id]) ?? null;
   const connectingHost = connectingRule
     ? (hosts.find((host) => host.id === connectingRule.hostId) ?? null)
@@ -923,10 +938,15 @@ export function PortForwardingPanel({
       ? discoveryContainers.find((container) => container.id === containerDraft.containerId) ?? null
       : null;
   const availableNetworks = useMemo(() => discoveryDetails?.networks ?? [], [discoveryDetails]);
-
   useEffect(() => {
+    // 화면 인스턴스만 기록한다. 다이얼로그 인스턴스는 편집하는 규칙의 transport 로 탭을 옮기므로,
+    // 여기에 쓰게 두면 세션 패널에서 컨테이너 규칙을 한 번 편집한 뒤 홈의 포트 화면이 컨테이너
+    // 탭으로 열린다 — 사용자가 고른 적 없는 탭이다.
+    if (variant !== 'screen') {
+      return;
+    }
     lastSelectedForwardTab = activeTab;
-  }, [activeTab]);
+  }, [activeTab, variant]);
 
   useEffect(() => {
     if (activeTab !== 'dns') {
@@ -1092,13 +1112,13 @@ export function PortForwardingPanel({
           </CardMain>
           <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
             <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
-              {isRunning ? 'Stop' : 'Start'}
+              {isRunning ? translate('portForward.action.stop') : translate('portForward.action.start')}
             </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => openEdit(rule)}>
-              Edit
+            <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit', ruleId: rule.id })}>
+              {translate('portForward.action.edit')}
             </Button>
             <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
-              Delete
+              {translate('portForward.action.delete')}
             </Button>
           </CardActions>
         </Card>
@@ -1139,13 +1159,13 @@ export function PortForwardingPanel({
           </CardMain>
           <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
             <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
-              {isRunning ? 'Stop' : 'Start'}
+              {isRunning ? translate('portForward.action.stop') : translate('portForward.action.start')}
             </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => openEdit(rule)}>
-              Edit
+            <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit', ruleId: rule.id })}>
+              {translate('portForward.action.edit')}
             </Button>
             <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
-              Delete
+              {translate('portForward.action.delete')}
             </Button>
           </CardActions>
         </Card>
@@ -1182,13 +1202,13 @@ export function PortForwardingPanel({
           </CardMain>
           <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
             <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
-              {isRunning ? 'Stop' : 'Start'}
+              {isRunning ? translate('portForward.action.stop') : translate('portForward.action.start')}
             </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => openEdit(rule)}>
-              Edit
+            <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit', ruleId: rule.id })}>
+              {translate('portForward.action.edit')}
             </Button>
             <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
-              Delete
+              {translate('portForward.action.delete')}
             </Button>
           </CardActions>
         </Card>
@@ -1223,13 +1243,13 @@ export function PortForwardingPanel({
         </CardMain>
         <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
           <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
-            {isRunning ? 'Stop' : 'Start'}
+            {isRunning ? translate('portForward.action.stop') : translate('portForward.action.start')}
           </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={() => openEdit(rule)}>
-            Edit
+          <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit', ruleId: rule.id })}>
+            {translate('portForward.action.edit')}
           </Button>
           <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
-            Delete
+            {translate('portForward.action.delete')}
           </Button>
         </CardActions>
       </Card>
@@ -1276,7 +1296,7 @@ export function PortForwardingPanel({
         </CardMain>
         <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
           <Button type="button" variant="secondary" size="sm" onClick={() => void onStop(runtime.ruleId)}>
-            Stop
+            {translate('portForward.action.stop')}
           </Button>
         </CardActions>
       </Card>
@@ -1319,7 +1339,7 @@ export function PortForwardingPanel({
         </CardMain>
         <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
           <Button type="button" variant="secondary" size="sm" onClick={() => void onStop(runtime.ruleId)}>
-            Stop
+            {translate('portForward.action.stop')}
           </Button>
         </CardActions>
       </Card>
@@ -1408,21 +1428,27 @@ export function PortForwardingPanel({
     }
   }
 
-  function openCreate(tab: ForwardTab = activeTab) {
+  /**
+   * 빈 규칙으로 편집기를 연다.
+   *
+   * `hostId` 는 여는 쪽이 정한 대상이다 — 세션 패널에서 열면 그 세션의 호스트여야 한다. 없으면
+   * 그 방식의 첫 호스트를 고른다(포트 화면에서 + 를 누르는 경우).
+   */
+  function openCreate(tab: ForwardTab = activeTab, hostId?: string) {
     setActiveTab(tab);
     setEditingRuleId(null);
     setEditingDnsOverrideId(null);
     setIsContainerPickerOpen(false);
     setDraft(
       tab === 'ssh'
-        ? emptySshDraft(sshHosts[0]?.id)
+        ? emptySshDraft(hostId ?? sshHosts[0]?.id)
         : tab === 'aws-ssm'
-          ? emptyAwsDraft(awsHosts[0]?.id)
+          ? emptyAwsDraft(hostId ?? awsHosts[0]?.id)
           : tab === 'ecs-task'
-            ? emptyEcsTaskDraft(ecsHosts[0]?.id)
+            ? emptyEcsTaskDraft(hostId ?? ecsHosts[0]?.id)
             : tab === 'container'
-              ? emptyContainerDraft()
-              : emptySshDraft(sshHosts[0]?.id)
+              ? emptyContainerDraft(hostId)
+              : emptySshDraft(hostId ?? sshHosts[0]?.id)
     );
     setDnsDraft(emptyDnsDraft(eligibleRules[0]?.id));
     setIsSubmitting(false);
@@ -1470,6 +1496,45 @@ export function PortForwardingPanel({
     setIsModalOpen(true);
   }
 
+
+  /**
+   * 열기 의도를 받아 편집기를 띄운다. **다이얼로그 인스턴스만** 반응한다.
+   *
+   * 화면 인스턴스가 같이 반응하면 같은 의도로 모달이 두 개 뜬다. 그래서 모달을 그리는 쪽과
+   * 의도를 소비하는 쪽을 같은 variant 로 묶어 둔다.
+   *
+   * 규칙·오버레이를 찾지 못하면(다른 창에서 지웠거나 동기화가 늦으면) 의도를 버린다. 그대로
+   * 두면 열리지 않는 의도가 남아 다음 편집을 막는다.
+   */
+  useEffect(() => {
+    if (variant !== 'dialog' || !portForwardEditor) {
+      return;
+    }
+    if (portForwardEditor.kind === 'create') {
+      openCreate(portForwardEditor.transport, portForwardEditor.hostId);
+      return;
+    }
+    if (portForwardEditor.kind === 'edit') {
+      const rule = rules.find((candidate) => candidate.id === portForwardEditor.ruleId);
+      if (!rule) {
+        closePortForwardEditor();
+        return;
+      }
+      openEdit(rule);
+      return;
+    }
+    const override = dnsOverrides.find(
+      (candidate) => candidate.id === portForwardEditor.dnsOverrideId,
+    );
+    if (!override) {
+      closePortForwardEditor();
+      return;
+    }
+    openEditDnsOverride(override);
+    // 의도 하나에 한 번만 연다. rules·dnsOverrides 가 바뀔 때마다 다시 열면 사용자가 입력하던
+    // 값이 초기화된다 — 규칙 목록은 런타임 상태가 바뀔 때도 갱신되므로 편집 중에 흔히 바뀐다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [portForwardEditor, variant]);
   function setDnsDraftType(nextType: 'linked' | 'static') {
     setDnsDraft((current) => {
       if (nextType === 'linked') {
@@ -1494,6 +1559,8 @@ export function PortForwardingPanel({
     if (isSubmitting) {
       return;
     }
+    // 의도를 지워야 같은 규칙을 다시 열 수 있다 — 남아 있으면 아래 effect 가 다시 돌지 않는다.
+    closePortForwardEditor();
     setIsModalOpen(false);
     setIsContainerPickerOpen(false);
     setKnownHostPrompt(null);
@@ -1630,6 +1697,50 @@ export function PortForwardingPanel({
     const hostId = knownHostPrompt.probe.hostId;
     setKnownHostPrompt(null);
     await loadContainerList(hostId);
+  }
+
+  /**
+   * 편집 중인 것을 지운다.
+   *
+   * **확인 창을 세우지 않는다.** 목록 카드의 삭제도 바로 지우므로(renderRuleCard 의 danger 버튼)
+   * 여기만 한 단계를 더 두면 같은 동작이 자리에 따라 다르게 굴게 된다. 대신 버튼을 저장에서
+   * 떼어 반대쪽 끝에 둔다.
+   *
+   * 성공하면 모달을 닫는다 — 지운 것을 계속 편집하는 화면이 남아 있으면, 저장을 누르면 무엇이
+   * 되는지 알 수 없다. closeModal 이 isSubmitting 에서 되돌아 나오므로 그것을 먼저 내린다.
+   */
+  async function handleRemoveEditing() {
+    if (isSubmitting) {
+      return;
+    }
+    const ruleId = editingRuleId;
+    const overrideId = editingDnsOverrideId;
+    if (!ruleId && !overrideId) {
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      if (overrideId) {
+        await onRemoveDnsOverride(overrideId);
+      } else if (ruleId) {
+        await onRemove(ruleId);
+      }
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : translate(
+              overrideId
+                ? 'portForward.error.dnsDeleteFailed'
+                : 'portForward.error.ruleDeleteFailed',
+            ),
+      );
+      setIsSubmitting(false);
+      return;
+    }
+    setIsSubmitting(false);
+    await closeModal();
   }
 
   async function handleSubmit() {
@@ -1937,173 +2048,17 @@ export function PortForwardingPanel({
     }
   }
 
-  return (
-    <>
-      {connectingRule ? (
-        <ConnectionProgressModal
-          connectionKey={connectingRule.id}
-          host={connectingHost}
-          title={connectingRule.label || translate('portForwarding.title')}
-          onClose={() => dismissConnectionView(connectingRule.id)}
-        />
-      ) : null}
-    <div className="space-y-6">
-      {/* 상단 브레드크럼(← Hosts · Port Forwarding)에 이미 제목이 있어 흰색 헤더 카드는 생략.
-          생성 버튼은 아래 탭 행 오른쪽으로 옮긴다. */}
-      {interactiveAuth ? (
-        <InteractiveAuthCard
-          auth={interactiveAuth}
-          // 어느 포워딩이 묻는지 제목에서 말한다. 규칙이 여러 개 떠 있을 때 "Container tunnel" 처럼
-          // 무관한 문구를 보여주면 어느 것을 위한 코드인지 알 수 없다.
-          title={resolveForwardAuthTitle(translate, rules, hosts, interactiveAuth)}
-          onRespond={onRespondInteractiveAuth}
-          onReopenUrl={onReopenInteractiveAuthUrl}
-          onCancel={() => {
-            // 규칙을 멈추면 진행 중인 dial·핸드셰이크와 사람 대기가 함께 끊긴다(코어의 선-중단).
-            void onStop(interactiveAuth.ruleId);
-            onClearInteractiveAuth(interactiveAuth.challengeId);
-          }}
-        />
-      ) : null}
-
-      {!isModalOpen && discoveryInteractiveAuth ? (
-        <InteractiveAuthCard
-          auth={discoveryInteractiveAuth}
-          title={translate('portForward.waiting.containerRuntime')}
-          onRespond={onRespondInteractiveAuth}
-          onReopenUrl={onReopenInteractiveAuthUrl}
-          // 이 카드의 challengeId 만 지운다. 인자를 빼면(onCancel 은 인자 없이 불린다)
-          // 다른 연결이 기다리는 카드까지 함께 사라지고, 그쪽은 답을 받지 못해 시간 초과로 죽는다.
-          onCancel={() => onClearInteractiveAuth(discoveryInteractiveAuth.challengeId)}
-        />
-      ) : null}
-
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <Tabs role="tablist" aria-label="Port forwarding transport" className="gap-2 bg-[var(--surface-elevated)] p-1.5">
-          <TabButton role="tab" aria-selected={activeTab === 'ssh'} active={activeTab === 'ssh'} onClick={() => setActiveTab('ssh')}>
-            SSH Forwarding
-          </TabButton>
-          <TabButton role="tab" aria-selected={activeTab === 'aws-ssm'} active={activeTab === 'aws-ssm'} onClick={() => setActiveTab('aws-ssm')}>
-            AWS EC2
-          </TabButton>
-          <TabButton role="tab" aria-selected={activeTab === 'ecs-task'} active={activeTab === 'ecs-task'} onClick={() => setActiveTab('ecs-task')}>
-            ECS Task
-          </TabButton>
-          <TabButton role="tab" aria-selected={activeTab === 'container'} active={activeTab === 'container'} onClick={() => setActiveTab('container')}>
-            Container
-          </TabButton>
-          <TabButton role="tab" aria-selected={activeTab === 'dns'} active={activeTab === 'dns'} onClick={() => setActiveTab('dns')}>
-            DNS Override
-          </TabButton>
-        </Tabs>
-        <Button type="button" variant="primary" onClick={() => openCreate(activeTab)}>
-          {createButtonLabel(activeTab)}
-        </Button>
-      </div>
-
-      <PanelSection>
-        {activeTab === 'dns' && dnsToggleError ? (
-          <NoticeCard tone="danger" role="alert">
-            {dnsToggleError}
-          </NoticeCard>
-        ) : null}
-        {activeTab === 'dns' ? (
-          !hasVisibleEntries ? (
-            <EmptyState title={emptyStateTitle(activeTab)} description={emptyStateDescription(activeTab)} />
-          ) : (
-            dnsOverrides.map((override) => {
-              const rule = isLinkedDnsOverrideRecord(override)
-                ? (ruleMap.get(override.portForwardRuleId) ?? null)
-                : null;
-              const runtime = rule ? runtimeMap.get(rule.id) : undefined;
-              const isRunning = runtime?.status === 'running' || runtime?.status === 'starting';
-              const isStatic = isStaticDnsOverrideRecord(override);
-
-              return (
-                <Card
-                  key={override.id}
-                  className="items-start max-[760px]:flex-col max-[760px]:items-stretch"
-                >
-                  <CardMain>
-                    <CardTitleRow>
-                      <strong>{override.hostname}</strong>
-                      <Badge>{isStatic ? 'Static' : 'Linked'}</Badge>
-                      <StatusBadge tone={portForwardStatusTone(isStatic ? (override.status === 'active' ? 'running' : 'stopped') : runtime?.status)}>
-                        {isStatic ? (override.status === 'active' ? 'On' : 'Off') : portForwardStatusLabel(runtime)}
-                      </StatusBadge>
-                    </CardTitleRow>
-                    <CardMeta>
-                      <span>Hosts file</span>
-                      <span>{isStatic ? 'Static IP' : rule?.label ?? 'Linked rule missing'}</span>
-                      <span>
-                        {isStatic
-                          ? override.address
-                          : `${runtime?.bindAddress ?? rule?.bindAddress ?? '127.0.0.1'}:${runtime?.bindPort ?? rule?.bindPort ?? 0}`}
-                      </span>
-                    </CardMeta>
-                    {!isStatic && runtime?.message ? <CardMessage>{runtime.message}</CardMessage> : null}
-                  </CardMain>
-                  <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
-                    {rule ? (
-                      <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
-                        {isRunning ? 'Stop' : 'Start'}
-                      </Button>
-                    ) : null}
-                    {isStatic ? (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => void handleSetStaticDnsOverrideActive(override.id, override.status !== 'active')}
-                        disabled={pendingDnsToggleId === override.id}
-                      >
-                        {override.status === 'active' ? 'Off' : 'On'}
-                      </Button>
-                    ) : null}
-                    <Button type="button" variant="secondary" size="sm" onClick={() => openEditDnsOverride(override)}>
-                      Edit
-                    </Button>
-                    <Button type="button" variant="danger" size="sm" onClick={() => void onRemoveDnsOverride(override.id)}>
-                      Delete
-                    </Button>
-                  </CardActions>
-                </Card>
-              );
-            })
-          )
-        ) : !hasVisibleEntries ? (
-          <EmptyState title={emptyStateTitle(activeTab)} description={emptyStateDescription(activeTab)} />
-        ) : (
-          <>
-            {activeTab === 'ecs-task' && visibleEcsEphemeralRuntimes.length > 0 ? (
-              <section className="flex flex-col gap-[0.9rem]">
-                <SectionLabel className="m-0">Running tunnels</SectionLabel>
-                {visibleEcsEphemeralRuntimes.map(renderEcsEphemeralRuntimeCard)}
-              </section>
-            ) : null}
-
-            {activeTab === 'container' &&
-            visibleContainerEphemeralRuntimes.length > 0 ? (
-              <section className="flex flex-col gap-[0.9rem]">
-                <SectionLabel className="m-0">Running tunnels</SectionLabel>
-                {visibleContainerEphemeralRuntimes.map(
-                  renderContainerEphemeralRuntimeCard,
-                )}
-              </section>
-            ) : null}
-
-            {visibleRules.length > 0 ? (
-              <section className="flex flex-col gap-[0.9rem]">
-                {activeTab === 'ecs-task' || activeTab === 'container' ? (
-                  <SectionLabel className="m-0">Saved rules</SectionLabel>
-                ) : null}
-                {visibleRules.map(renderRuleCard)}
-              </section>
-            ) : null}
-          </>
-        )}
-      </PanelSection>
-
+  // **variant='dialog' 은 모달만 그린다.**
+  //
+  // 편집기를 다른 파일로 옮기지 않는 이유: 규칙 편집 폼은 추가·편집이 같은 JSX 를 쓰고
+  // (editingRuleId 는 제목에만 관여한다) 탐색·호스트키·대화형 인증까지 얽혀 있어서, 떼면
+  // 공유 필드가 두 벌이 된다. 한 벌을 두 자리에서 **렌더**하면 갈라질 수가 없다.
+  //
+  // 모달을 그리는 것은 이 variant 뿐이다. 화면 쪽 버튼은 스토어에 열기 의도만 넣으므로,
+  // 어디서 열어도 떠 있는 모달은 언제나 하나다(AppModals 에 마운트된 이 인스턴스).
+  if (variant === 'dialog') {
+    return (
+      <>
       {isModalOpen ? (
         <DialogBackdrop onDismiss={() => void closeModal()} dismissDisabled={isSubmitting}>
           <ModalShell
@@ -2118,8 +2073,8 @@ export function PortForwardingPanel({
                 <h3 id="port-forward-title" className="mt-2">
                   {activeTab === 'dns'
                     ? editingDnsOverrideId
-                      ? 'Edit DNS Override'
-                      : 'New DNS Override'
+                      ? translate('portForward.editTitle.dns')
+                      : translate('portForward.create.dns')
                     : editingRuleId
                       ? `Edit ${tabTitle(activeTab)}`
                       : createButtonLabel(activeTab)}
@@ -2130,7 +2085,7 @@ export function PortForwardingPanel({
                 tone="ghost"
                 onClick={() => void closeModal()}
                 disabled={isSubmitting}
-                aria-label="Close port forwarding dialog"
+                aria-label={translate('portForward.action.closeDialog')}
               >
                 <CloseIcon />
               </IconButton>
@@ -2139,7 +2094,7 @@ export function PortForwardingPanel({
             <ModalBody className="grid gap-4">
               {activeTab === 'dns' ? (
                 <>
-                  <FieldGroup label="Override type">
+                  <FieldGroup label={translate('portForward.field.overrideType')}>
                     <select
                       value={dnsDraft.type}
                       onChange={(event) => setDnsDraftType(event.target.value === 'static' ? 'static' : 'linked')}
@@ -2150,7 +2105,7 @@ export function PortForwardingPanel({
                     </select>
                   </FieldGroup>
 
-                  <FieldGroup label="Hostname">
+                  <FieldGroup label={translate('portForward.field.hostname')}>
                     <input
                       value={dnsDraft.hostname}
                       onChange={(event) => setDnsDraft((current) => ({ ...current, hostname: event.target.value }))}
@@ -2160,7 +2115,7 @@ export function PortForwardingPanel({
 
                   {isLinkedDnsOverrideDraft(dnsDraft) ? (
                     <>
-                      <FieldGroup label="Linked rule">
+                      <FieldGroup label={translate('portForward.field.linkedRule')}>
                         <select
                           value={dnsDraft.portForwardRuleId}
                           onChange={(event) =>
@@ -2181,13 +2136,13 @@ export function PortForwardingPanel({
                         </select>
                       </FieldGroup>
 
-                      <FieldGroup label="Loopback target">
+                      <FieldGroup label={translate('portForward.field.loopbackTarget')}>
                         <input value={selectedDnsRule ? `${selectedDnsRule.bindAddress}:${selectedDnsRule.bindPort}` : ''} disabled readOnly />
                       </FieldGroup>
                     </>
                   ) : (
                     <>
-                      <FieldGroup label="IP Address">
+                      <FieldGroup label={translate('portForward.field.ipAddress')}>
                         <input
                           value={dnsDraft.address}
                           onChange={(event) =>
@@ -2207,16 +2162,16 @@ export function PortForwardingPanel({
                 </>
               ) : (
                 <>
-                  <FieldGroup label="Label">
+                  <FieldGroup label={translate('portForward.field.label')}>
                     <input value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} disabled={isSubmitting} />
                   </FieldGroup>
 
               {isContainerPortForwardDraft(draft) ? (
-                <FieldGroup label="Host">
+                <FieldGroup label={translate('portForward.field.host')}>
                   <SearchableSelect
-                    ariaLabel="Host"
+                    ariaLabel={translate('portForward.field.host')}
                     searchAriaLabel="Container forwarding host search"
-                    placeholder="Select host"
+                    placeholder={translate('portForward.field.selectHost')}
                     searchPlaceholder={translate('portForward.form.hostSearchPlaceholder')}
                     value={draft.hostId}
                     options={containerHostOptions}
@@ -2225,11 +2180,11 @@ export function PortForwardingPanel({
                   />
                 </FieldGroup>
               ) : isSshPortForwardDraft(draft) ? (
-                <FieldGroup label="Host">
+                <FieldGroup label={translate('portForward.field.host')}>
                   <SearchableSelect
-                    ariaLabel="Host"
+                    ariaLabel={translate('portForward.field.host')}
                     searchAriaLabel="SSH forwarding host search"
-                    placeholder="Select host"
+                    placeholder={translate('portForward.field.selectHost')}
                     searchPlaceholder={translate('portForward.form.hostSearchPlaceholder')}
                     value={draft.hostId}
                     options={sshHostOptions}
@@ -2238,11 +2193,11 @@ export function PortForwardingPanel({
                   />
                 </FieldGroup>
               ) : isAwsSsmPortForwardDraft(draft) ? (
-                <FieldGroup label="AWS EC2 Host">
+                <FieldGroup label={translate('portForward.field.awsHost')}>
                   <SearchableSelect
-                    ariaLabel="AWS EC2 Host"
+                    ariaLabel={translate('portForward.field.awsHost')}
                     searchAriaLabel="AWS EC2 forwarding host search"
-                    placeholder="Select host"
+                    placeholder={translate('portForward.field.selectHost')}
                     searchPlaceholder={translate('portForward.form.hostSearchPlaceholder')}
                     value={draft.hostId}
                     options={awsHostOptions}
@@ -2251,11 +2206,11 @@ export function PortForwardingPanel({
                   />
                 </FieldGroup>
               ) : (
-                <FieldGroup label="AWS ECS Host">
+                <FieldGroup label={translate('portForward.field.ecsHost')}>
                   <SearchableSelect
-                    ariaLabel="AWS ECS Host"
+                    ariaLabel={translate('portForward.field.ecsHost')}
                     searchAriaLabel="ECS task forwarding host search"
-                    placeholder="Select host"
+                    placeholder={translate('portForward.field.selectHost')}
                     searchPlaceholder={translate('portForward.form.hostSearchPlaceholder')}
                     value={draft.hostId}
                     options={ecsHostOptions}
@@ -2268,7 +2223,7 @@ export function PortForwardingPanel({
               {isContainerPortForwardDraft(draft) ? (
                 <>
                   {shouldShowDiscoveryProgress ? (
-                    <NoticeCard title="Container discovery">
+                    <NoticeCard title={translate('portForward.section.containerDiscovery')}>
                       <p>{discoveryProgressMessage}</p>
                     </NoticeCard>
                   ) : null}
@@ -2286,8 +2241,8 @@ export function PortForwardingPanel({
 
                   <div ref={containerPickerRef}>
                     <PickerField
-                      label="Container"
-                      placeholder="Select container"
+                      label={translate('portForward.field.container')}
+                      placeholder={translate('portForward.field.selectContainer')}
                       isOpen={isContainerPickerOpen}
                       disabled={isSubmitting || discoveryLoading || !draft.hostId}
                       onToggle={() => {
@@ -2365,7 +2320,7 @@ export function PortForwardingPanel({
                   </div>
 
                   {availableNetworks.length > 1 ? (
-                    <FieldGroup label="Network">
+                    <FieldGroup label={translate('portForward.field.network')}>
                       <div className="relative">
                         <SelectField
                           className="min-h-[5.5rem] rounded-[12px] bg-[var(--dialog-surface-muted)] px-[1.1rem] pr-11"
@@ -2404,7 +2359,7 @@ export function PortForwardingPanel({
                     </FieldGroup>
                   ) : null}
 
-                  <FieldGroup label="Container port">
+                  <FieldGroup label={translate('portForward.field.containerPort')}>
                     <div className="relative">
                       <SelectField
                         className="min-h-[5.5rem] rounded-[12px] bg-[var(--dialog-surface-muted)] px-[1.1rem] pr-11"
@@ -2435,13 +2390,13 @@ export function PortForwardingPanel({
                     </div>
                   </FieldGroup>
 
-                  <FieldGroup label="Local port">
+                  <FieldGroup label={translate('portForward.field.localPort')}>
                     <div className="grid gap-3">
                       <button
                         type="button"
                         role="switch"
                         aria-checked={isAutoLocalPort}
-                        aria-label="Auto (random)"
+                        aria-label={translate('portForward.field.autoRandom')}
                         className={cn(
                           'flex w-full items-center gap-[0.9rem] rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-4 py-[0.9rem] text-left text-[var(--text)] transition-[border-color,box-shadow,background] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_50%,white_50%)] focus-visible:outline-offset-2',
                           isAutoLocalPort &&
@@ -2476,7 +2431,7 @@ export function PortForwardingPanel({
                         </span>
                         <span className="grid gap-[0.25rem]">
                           <strong className="text-[0.9rem] text-[var(--text)]">
-                            Auto (random)
+                            {translate('portForward.field.autoRandom')}
                           </strong>
                           <span className="text-[0.82rem] leading-[1.45] text-[var(--text-soft)]">
                             {translate('portForward.form.autoLocalPortHint')}
@@ -2529,7 +2484,7 @@ export function PortForwardingPanel({
                 </>
               ) : isSshPortForwardDraft(draft) ? (
                 <>
-                  <FieldGroup label="Mode">
+                  <FieldGroup label={translate('portForward.field.mode')}>
                     <select
                       value={draft.mode}
                       onChange={(event) =>
@@ -2546,7 +2501,7 @@ export function PortForwardingPanel({
                     </select>
                   </FieldGroup>
 
-                  <FieldGroup label="Bind address">
+                  <FieldGroup label={translate('portForward.field.bindAddress')}>
                     <input
                       value={draft.bindAddress}
                       onChange={(event) =>
@@ -2561,7 +2516,7 @@ export function PortForwardingPanel({
                 </>
               ) : isEcsTaskPortForwardDraft(draft) ? (
                 <>
-                  <FieldGroup label="Service">
+                  <FieldGroup label={translate('portForward.field.service')}>
                     <select
                       value={draft.serviceName}
                       onChange={(event) =>
@@ -2587,7 +2542,7 @@ export function PortForwardingPanel({
                     </select>
                   </FieldGroup>
 
-                  <FieldGroup label="Container">
+                  <FieldGroup label={translate('portForward.field.container')}>
                     <select
                       value={draft.containerName}
                       onChange={(event) =>
@@ -2615,7 +2570,7 @@ export function PortForwardingPanel({
                     </select>
                   </FieldGroup>
 
-                  <FieldGroup label="Container port">
+                  <FieldGroup label={translate('portForward.field.containerPort')}>
                     <select
                       value={draft.targetPort || ''}
                       onChange={(event) =>
@@ -2639,13 +2594,13 @@ export function PortForwardingPanel({
                     </select>
                   </FieldGroup>
 
-                  <FieldGroup label="Local port">
+                  <FieldGroup label={translate('portForward.field.localPort')}>
                     <div className="grid gap-3">
                       <button
                         type="button"
                         role="switch"
                         aria-checked={isAutoEcsLocalPort}
-                        aria-label="Auto (random)"
+                        aria-label={translate('portForward.field.autoRandom')}
                         className={cn(
                           'flex w-full items-center gap-[0.9rem] rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-4 py-[0.9rem] text-left text-[var(--text)] transition-[border-color,box-shadow,background] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_50%,white_50%)] focus-visible:outline-offset-2',
                           isAutoEcsLocalPort &&
@@ -2680,7 +2635,7 @@ export function PortForwardingPanel({
                         </span>
                         <span className="grid gap-[0.25rem]">
                           <strong className="text-[0.9rem] text-[var(--text)]">
-                            Auto (random)
+                            {translate('portForward.field.autoRandom')}
                           </strong>
                           <span className="text-[0.82rem] leading-[1.45] text-[var(--text-soft)]">
                             {translate('portForward.form.autoLocalPortHint')}
@@ -2736,7 +2691,7 @@ export function PortForwardingPanel({
                 </>
               ) : (
                 <>
-                  <FieldGroup label="Target kind">
+                  <FieldGroup label={translate('portForward.field.targetKind')}>
                     <select
                       value={draft.targetKind}
                       onChange={(event) =>
@@ -2752,7 +2707,7 @@ export function PortForwardingPanel({
                     </select>
                   </FieldGroup>
 
-                  <FieldGroup label="Local address">
+                  <FieldGroup label={translate('portForward.field.localAddress')}>
                     <input
                       value={draft.bindAddress}
                       onChange={(event) =>
@@ -2785,7 +2740,7 @@ export function PortForwardingPanel({
 
               {isSshPortForwardDraft(draft) && draft.mode !== 'dynamic' ? (
                 <>
-                  <FieldGroup label="Target host">
+                  <FieldGroup label={translate('portForward.field.targetHost')}>
                     <input
                       value={draft.targetHost ?? ''}
                       onChange={(event) =>
@@ -2798,7 +2753,7 @@ export function PortForwardingPanel({
                     />
                   </FieldGroup>
 
-                  <FieldGroup label="Target port">
+                  <FieldGroup label={translate('portForward.field.targetPort')}>
                     <input
                       type="number"
                       value={draft.targetPort ?? ''}
@@ -2817,7 +2772,7 @@ export function PortForwardingPanel({
               {isAwsSsmPortForwardDraft(draft) ? (
                 <>
                   {shouldShowAwsRemoteHostField(draft) ? (
-                    <FieldGroup label="Remote host">
+                    <FieldGroup label={translate('portForward.field.remoteHost')}>
                       <input
                         value={draft.remoteHost ?? ''}
                         onChange={(event) =>
@@ -2831,7 +2786,7 @@ export function PortForwardingPanel({
                     </FieldGroup>
                   ) : null}
 
-                  <FieldGroup label="Target port">
+                  <FieldGroup label={translate('portForward.field.targetPort')}>
                     <input
                       type="number"
                       value={draft.targetPort}
@@ -2853,6 +2808,19 @@ export function PortForwardingPanel({
             </ModalBody>
 
             <ModalFooter>
+              {/* 새로 만드는 중이면 지울 것이 없다. mr-auto 로 저장·취소 반대쪽 끝에 둔다 —
+                  ModalFooter 가 justify-end 라 그냥 두면 저장 옆에 붙어서 오조작이 쉬워진다. */}
+              {editingRuleId || editingDnsOverrideId ? (
+                <Button
+                  type="button"
+                  variant="danger"
+                  className="mr-auto"
+                  onClick={() => void handleRemoveEditing()}
+                  disabled={isSubmitting}
+                >
+                  {translate('common.delete')}
+                </Button>
+              ) : null}
               <Button type="button" variant="secondary" onClick={() => void closeModal()} disabled={isSubmitting}>
                 {translate('common.cancel')}
               </Button>
@@ -2882,6 +2850,176 @@ export function PortForwardingPanel({
           onCancel={() => setKnownHostPrompt(null)}
         />
       ) : null}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {connectingRule ? (
+        <ConnectionProgressModal
+          connectionKey={connectingRule.id}
+          host={connectingHost}
+          title={connectingRule.label || translate('portForwarding.title')}
+          onClose={() => dismissConnectionView(connectingRule.id)}
+        />
+      ) : null}
+    <div className="space-y-6">
+      {/* 상단 브레드크럼(← Hosts · Port Forwarding)에 이미 제목이 있어 흰색 헤더 카드는 생략.
+          생성 버튼은 아래 탭 행 오른쪽으로 옮긴다. */}
+      {interactiveAuth ? (
+        <InteractiveAuthCard
+          auth={interactiveAuth}
+          // 어느 포워딩이 묻는지 제목에서 말한다. 규칙이 여러 개 떠 있을 때 "Container tunnel" 처럼
+          // 무관한 문구를 보여주면 어느 것을 위한 코드인지 알 수 없다.
+          title={resolveForwardAuthTitle(translate, rules, hosts, interactiveAuth)}
+          onRespond={onRespondInteractiveAuth}
+          onReopenUrl={onReopenInteractiveAuthUrl}
+          onCancel={() => {
+            // 규칙을 멈추면 진행 중인 dial·핸드셰이크와 사람 대기가 함께 끊긴다(코어의 선-중단).
+            void onStop(interactiveAuth.ruleId);
+            onClearInteractiveAuth(interactiveAuth.challengeId);
+          }}
+        />
+      ) : null}
+
+      {!isModalOpen && discoveryInteractiveAuth ? (
+        <InteractiveAuthCard
+          auth={discoveryInteractiveAuth}
+          title={translate('portForward.waiting.containerRuntime')}
+          onRespond={onRespondInteractiveAuth}
+          onReopenUrl={onReopenInteractiveAuthUrl}
+          // 이 카드의 challengeId 만 지운다. 인자를 빼면(onCancel 은 인자 없이 불린다)
+          // 다른 연결이 기다리는 카드까지 함께 사라지고, 그쪽은 답을 받지 못해 시간 초과로 죽는다.
+          onCancel={() => onClearInteractiveAuth(discoveryInteractiveAuth.challengeId)}
+        />
+      ) : null}
+
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <Tabs role="tablist" aria-label={translate('portForward.tab.aria')} className="gap-2 bg-[var(--surface-elevated)] p-1.5">
+          <TabButton role="tab" aria-selected={activeTab === 'ssh'} active={activeTab === 'ssh'} onClick={() => setActiveTab('ssh')}>
+            {translate('portForward.tab.ssh')}
+          </TabButton>
+          <TabButton role="tab" aria-selected={activeTab === 'aws-ssm'} active={activeTab === 'aws-ssm'} onClick={() => setActiveTab('aws-ssm')}>
+            {translate('portForward.tab.aws')}
+          </TabButton>
+          <TabButton role="tab" aria-selected={activeTab === 'ecs-task'} active={activeTab === 'ecs-task'} onClick={() => setActiveTab('ecs-task')}>
+            {translate('portForward.tab.ecs')}
+          </TabButton>
+          <TabButton role="tab" aria-selected={activeTab === 'container'} active={activeTab === 'container'} onClick={() => setActiveTab('container')}>
+            {translate('portForward.tab.containerShort')}
+          </TabButton>
+          <TabButton role="tab" aria-selected={activeTab === 'dns'} active={activeTab === 'dns'} onClick={() => setActiveTab('dns')}>
+            {translate('portForward.tab.dns')}
+          </TabButton>
+        </Tabs>
+        <Button type="button" variant="primary" onClick={() => openPortForwardEditor({ kind: 'create', transport: activeTab })}>
+          {createButtonLabel(activeTab)}
+        </Button>
+      </div>
+
+      <PanelSection>
+        {activeTab === 'dns' && dnsToggleError ? (
+          <NoticeCard tone="danger" role="alert">
+            {dnsToggleError}
+          </NoticeCard>
+        ) : null}
+        {activeTab === 'dns' ? (
+          !hasVisibleEntries ? (
+            <EmptyState title={emptyStateTitle(activeTab)} description={emptyStateDescription(activeTab)} />
+          ) : (
+            dnsOverrides.map((override) => {
+              const rule = isLinkedDnsOverrideRecord(override)
+                ? (ruleMap.get(override.portForwardRuleId) ?? null)
+                : null;
+              const runtime = rule ? runtimeMap.get(rule.id) : undefined;
+              const isRunning = runtime?.status === 'running' || runtime?.status === 'starting';
+              const isStatic = isStaticDnsOverrideRecord(override);
+
+              return (
+                <Card
+                  key={override.id}
+                  className="items-start max-[760px]:flex-col max-[760px]:items-stretch"
+                >
+                  <CardMain>
+                    <CardTitleRow>
+                      <strong>{override.hostname}</strong>
+                      <Badge>{isStatic ? 'Static' : 'Linked'}</Badge>
+                      <StatusBadge tone={portForwardStatusTone(isStatic ? (override.status === 'active' ? 'running' : 'stopped') : runtime?.status)}>
+                        {isStatic ? (override.status === 'active' ? 'On' : 'Off') : portForwardStatusLabel(runtime)}
+                      </StatusBadge>
+                    </CardTitleRow>
+                    <CardMeta>
+                      <span>Hosts file</span>
+                      <span>{isStatic ? 'Static IP' : rule?.label ?? 'Linked rule missing'}</span>
+                      <span>
+                        {isStatic
+                          ? override.address
+                          : `${runtime?.bindAddress ?? rule?.bindAddress ?? '127.0.0.1'}:${runtime?.bindPort ?? rule?.bindPort ?? 0}`}
+                      </span>
+                    </CardMeta>
+                    {!isStatic && runtime?.message ? <CardMessage>{runtime.message}</CardMessage> : null}
+                  </CardMain>
+                  <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
+                    {rule ? (
+                      <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
+                        {isRunning ? translate('portForward.action.stop') : translate('portForward.action.start')}
+                      </Button>
+                    ) : null}
+                    {isStatic ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => void handleSetStaticDnsOverrideActive(override.id, override.status !== 'active')}
+                        disabled={pendingDnsToggleId === override.id}
+                      >
+                        {override.status === 'active' ? 'Off' : 'On'}
+                      </Button>
+                    ) : null}
+                    <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit-dns', dnsOverrideId: override.id })}>
+                      {translate('portForward.action.edit')}
+                    </Button>
+                    <Button type="button" variant="danger" size="sm" onClick={() => void onRemoveDnsOverride(override.id)}>
+                      {translate('portForward.action.delete')}
+                    </Button>
+                  </CardActions>
+                </Card>
+              );
+            })
+          )
+        ) : !hasVisibleEntries ? (
+          <EmptyState title={emptyStateTitle(activeTab)} description={emptyStateDescription(activeTab)} />
+        ) : (
+          <>
+            {activeTab === 'ecs-task' && visibleEcsEphemeralRuntimes.length > 0 ? (
+              <section className="flex flex-col gap-[0.9rem]">
+                <SectionLabel className="m-0">Running tunnels</SectionLabel>
+                {visibleEcsEphemeralRuntimes.map(renderEcsEphemeralRuntimeCard)}
+              </section>
+            ) : null}
+
+            {activeTab === 'container' &&
+            visibleContainerEphemeralRuntimes.length > 0 ? (
+              <section className="flex flex-col gap-[0.9rem]">
+                <SectionLabel className="m-0">Running tunnels</SectionLabel>
+                {visibleContainerEphemeralRuntimes.map(
+                  renderContainerEphemeralRuntimeCard,
+                )}
+              </section>
+            ) : null}
+
+            {visibleRules.length > 0 ? (
+              <section className="flex flex-col gap-[0.9rem]">
+                {activeTab === 'ecs-task' || activeTab === 'container' ? (
+                  <SectionLabel className="m-0">{translate('portForward.section.savedRules')}</SectionLabel>
+                ) : null}
+                {visibleRules.map(renderRuleCard)}
+              </section>
+            ) : null}
+          </>
+        )}
+      </PanelSection>
     </div>
     </>
   );

@@ -322,6 +322,8 @@
       "containerRequired": "Choose a container.",
       "targetPortRequired": "Choose a target port.",
       "ruleSaveFailed": "Could not save the forwarding rule.",
+      "ruleDeleteFailed": "Could not delete the forwarding rule.",
+      "dnsDeleteFailed": "Could not delete the DNS override.",
       "containerNetworkRequired": "Choose a container network.",
       "ssmLoopbackRequired": "The AWS SSM local address must be a loopback address.",
       "targetPortInvalid": "Enter a valid target port.",
@@ -356,6 +358,75 @@
       "noEcsServicesDescription": "This cluster has no service usable for port forwarding.",
       "noEcsContainersTitle": "No containers to choose from.",
       "noEcsContainersDescription": "This service's task definition has no usable container."
+    },
+    "action": {
+      "edit": "Edit",
+      "delete": "Delete",
+      "start": "Start",
+      "stop": "Stop",
+      "closeDialog": "Close port forwarding dialog"
+    },
+    "tab": {
+      "aria": "Port forwarding transport",
+      "ssh": "SSH Forwarding",
+      "aws": "AWS EC2",
+      "ecs": "ECS Task",
+      "dns": "DNS Override",
+      "container": "Container Tunneling",
+      "containerShort": "Container"
+    },
+    "create": {
+      "ssh": "New SSH Forward",
+      "aws": "New AWS EC2 Forward",
+      "ecs": "New ECS Task Tunnel",
+      "dns": "New DNS Override",
+      "container": "New Container Tunnel"
+    },
+    "editTitle": {
+      "dns": "Edit DNS Override"
+    },
+    "method": {
+      "sshFallback": "SSH Fallback",
+      "ssmRemoteHost": "SSM Remote Host",
+      "sshNative": "SSH Native"
+    },
+    "kind": {
+      "aws": "AWS",
+      "warpgate": "Warpgate",
+      "ssh": "SSH"
+    },
+    "field": {
+      "overrideType": "Override type",
+      "hostname": "Hostname",
+      "linkedRule": "Linked rule",
+      "loopbackTarget": "Loopback target",
+      "ipAddress": "IP Address",
+      "label": "Label",
+      "host": "Host",
+      "awsHost": "AWS EC2 Host",
+      "ecsHost": "AWS ECS Host",
+      "container": "Container",
+      "network": "Network",
+      "containerPort": "Container port",
+      "localPort": "Local port",
+      "mode": "Mode",
+      "bindAddress": "Bind address",
+      "service": "Service",
+      "targetKind": "Target kind",
+      "localAddress": "Local address",
+      "targetHost": "Target host",
+      "targetPort": "Target port",
+      "remoteHost": "Remote host",
+      "selectHost": "Select host",
+      "selectContainer": "Select container",
+      "autoRandom": "Auto (random)"
+    },
+    "section": {
+      "savedRules": "Saved rules",
+      "containerDiscovery": "Container discovery"
+    },
+    "status": {
+      "stopped": "Stopped"
     }
   },
   "ai": {
@@ -716,7 +787,9 @@
       "qualityFast": "Speed (JPEG)",
       "viewOnly": "View only",
       "screenShare": "Screen sharing",
-      "os": "OS"
+      "os": "OS",
+      "portForward": "Forwarding",
+      "portForwardStarting": "{{count}} starting"
     },
     "update": {
       "checking": "Checking GitHub Releases for a new version.",
@@ -2448,7 +2521,9 @@
     "variableCount": "{{count}} variables",
     "insert": "Insert",
     "edit": "Edit",
-    "noResults": "No search results."
+    "noResults": "No search results.",
+    "addTitle": "New snippet",
+    "editTitle": "Edit snippet"
   },
   "sessionPane": {
     "dropPathFailed": "Could not read the dropped file paths.",
@@ -2569,6 +2644,7 @@
     "awsPermission": "AWS denied the request for lack of permission. Check this profile IAM user/role policy.",
     "awsPermissionAction": "AWS denied the {{action}} request. Check that this profile IAM user/role is allowed that action.",
     "noRoute": "Cannot reach {{target}}. There is no route to that host from the current network.",
+    "dnsUnresolved": "Could not resolve {{target}}. Check the hostname and your DNS settings.",
     "refused": "{{target}} refused the connection.",
     "timeout": "The connection to {{target}} timed out.",
     "reset": "The connection to {{target}} was reset.",
@@ -3228,7 +3304,8 @@
   "select": {
     "search": "Search",
     "noResults": "No search results.",
-    "searchAria": "Search {{label}}"
+    "searchAria": "Search {{label}}",
+    "optionsAria": "{{label}} options"
   },
   "sftpSlice": {
     "hostKeyCheckFailed": "Could not verify the host key."
@@ -3631,7 +3708,11 @@
       "noMatches": "No matching snippets.",
       "manage": "Manage snippets",
       "emptyTitle": "No snippets",
-      "noMatchesTitle": "Nothing found"
+      "noMatchesTitle": "Nothing found",
+      "add": "New snippet",
+      "edit": "Edit snippet",
+      "delete": "Delete snippet",
+      "createFirst": "Create a snippet"
     },
     "resources": {
       "title": "Resources",
@@ -3677,7 +3758,8 @@
       "emptyTitle": "No port rules",
       "empty": "Rules you add for this host appear here.",
       "noHost": "This session has no host, so there is nothing to forward.",
-      "manage": "Add or edit rules",
+      "add": "Add rule",
+      "edit": "Edit",
       "start": "Start",
       "stop": "Stop"
     },
@@ -3704,7 +3786,6 @@
       "absentTitle": "No Docker here",
       "absent": "Couldn't find docker or podman on this host.",
       "blockedTitle": "Can't read Docker",
-      "blocked": "No socket permission, and sudo asks for a password. Run sudo once in the terminal and it shows up.",
       "downTitle": "Docker is not running",
       "down": "It shows up on its own once the daemon is up.",
       "tab": {
@@ -3772,8 +3853,7 @@
         "year": "{{count}}y"
       },
       "images": {
-        "summary": "{{count}} · {{size}}",
-        "reclaimable": "{{size}} reclaimable",
+        "summaryCounting": "{{count}}",
         "prune": "Prune unused images"
       },
       "volumes": {
@@ -3794,14 +3874,26 @@
       }
     },
     "theme": {
-      "title": "Terminal theme",
+      "title": "Terminal appearance",
       "followGlobal": "Follow app setting",
       "followSystem": "Follows the system appearance",
       "noHostTitle": "No host",
       "noHost": "A theme is saved on the host, so a session without one cannot set it.",
       "saveFailed": "Could not save the theme: {{message}}"
     },
-    "copied": "Copied"
+    "copied": "Copied",
+    "appearance": {
+      "font": "Font",
+      "fontSize": "Size",
+      "lineHeight": "Line height",
+      "letterSpacing": "Letter spacing",
+      "contrast": "Minimum contrast",
+      "contrastOff": "Off",
+      "contrastHint": "Pulls faint colors away from the background.",
+      "reset": "Reset to defaults",
+      "decrease": "Decrease {{label}}",
+      "increase": "Increase {{label}}"
+    }
   },
   "localOnly": {
     "title": "Sync is off",
@@ -3815,5 +3907,9 @@
     "title": "Some changes have not been uploaded",
     "body": "Signing out now removes them from this computer. Anything already uploaded comes back when you sign in again.",
     "confirm": "Sign out anyway"
+  },
+  "snippetDelete": {
+    "body": "This snippet will be deleted. This cannot be undone.",
+    "hostUsage": "It is the startup command for {{count}} hosts — those hosts will lose their startup command."
   }
 }

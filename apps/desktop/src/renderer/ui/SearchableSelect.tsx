@@ -157,7 +157,7 @@ export function SearchableSelect({
       {isOpen ? (
         <div
           role="listbox"
-          aria-label={`${ariaLabel} options`}
+          aria-label={translate('select.optionsAria', { label: ariaLabel })}
           className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-[5] grid max-h-[280px] gap-[0.4rem] overflow-y-auto rounded-[10px] border border-[var(--border)] bg-[var(--dialog-surface)] p-[0.55rem] shadow-[0_18px_42px_rgba(16,26,40,0.18)]"
         >
           <Input

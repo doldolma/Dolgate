@@ -1303,6 +1303,49 @@ describe('HostForm RDP credential selection', () => {
     );
   });
 
+  // 편집 폼은 **나열한 필드만** 이어받는다. 화질이 그 목록에서 빠져 있어서, VNC 호스트를 열어
+  // 저장하기만 해도 화질이 조용히 무손실로 돌아갔다.
+  it('VNC 를 편집해 저장해도 화질 설정이 남는다', async () => {
+    const ref = createRef<HostFormHandle>();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <HostForm
+        ref={ref}
+        host={{
+          id: 'h-vnc',
+          kind: 'vnc',
+          label: 'lab',
+          hostname: '10.0.0.9',
+          port: 5901,
+          secretRef: null,
+          imageQuality: 'balanced',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        } as never}
+        keychainEntries={[]}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    // 저장은 바뀐 것이 있을 때만 나간다. 이 테스트가 보는 것은 **건드리지 않은 필드가 남는가** 라서,
+    // 관계없는 값 하나만 바꾼다.
+    fireEvent.change(screen.getByLabelText('호스트 이름'), {
+      target: { value: '10.0.0.10' },
+    });
+    await act(async () => {
+      await ref.current?.submit();
+    });
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'vnc',
+        hostname: '10.0.0.10',
+        imageQuality: 'balanced',
+      }),
+      undefined,
+    );
+  });
+
   // QEMU·libvirt 콘솔은 5900 을 localhost 에만 바인딩하는 것이 관행이라, 터널을 고를 수 없으면
   // 그 서버에는 아예 닿지 못한다. 필드가 없어서 DB 를 직접 만지지 않으면 켤 수 없던 기능이다.
   it('VNC SSH 터널을 고르면 draft 에 실리고 대상 주소가 채워진다', async () => {

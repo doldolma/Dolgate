@@ -17,6 +17,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../../lib/cn';
 import { useAppStore } from '../../../store/appStore';
+import { useSessionScopedState } from './useSessionScopedState';
 import { filterByQuery, splitProcessCommand } from '../../../lib/session-panel';
 import { formatKibibytes, type HostProcess } from '../../../lib/host-metrics';
 import { Button } from '../../../ui';
@@ -33,7 +34,8 @@ export function SessionPanelProcesses({ sessionId }: SessionPanelProcessesProps)
   const enabled = useAppStore((state) => state.settings?.hostMetricsEnabled ?? false);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const { status, processes } = useSessionHostMetrics(sessionId, { processes: true });
-  const [query, setQuery] = useState('');
+  // 검색어는 세션마다 따로 기억한다 — 다른 서버로 옮기면 비고, 돌아오면 치던 것이 남는다.
+  const [query, setQuery] = useSessionScopedState(sessionId, 'processes.query', '');
 
   const rows = useMemo(() => {
     if (!processes) {

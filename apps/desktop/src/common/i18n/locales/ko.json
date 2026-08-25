@@ -322,6 +322,8 @@
       "containerRequired": "컨테이너를 선택해 주세요.",
       "targetPortRequired": "대상 포트를 선택해 주세요.",
       "ruleSaveFailed": "포워딩 규칙을 저장하지 못했습니다.",
+      "ruleDeleteFailed": "포워딩 규칙을 삭제하지 못했습니다.",
+      "dnsDeleteFailed": "DNS override를 삭제하지 못했습니다.",
       "containerNetworkRequired": "컨테이너 네트워크를 선택해 주세요.",
       "ssmLoopbackRequired": "AWS SSM 로컬 주소는 loopback 주소여야 합니다.",
       "targetPortInvalid": "대상 포트를 올바르게 입력해 주세요.",
@@ -356,6 +358,75 @@
       "noEcsServicesDescription": "이 클러스터에는 포트 포워딩에 사용할 서비스가 없습니다.",
       "noEcsContainersTitle": "선택 가능한 컨테이너가 없습니다.",
       "noEcsContainersDescription": "이 서비스의 task definition에 사용할 컨테이너가 없습니다."
+    },
+    "action": {
+      "edit": "편집",
+      "delete": "삭제",
+      "start": "시작",
+      "stop": "정지",
+      "closeDialog": "포트 포워딩 창 닫기"
+    },
+    "tab": {
+      "aria": "포트 포워딩 전송 방식",
+      "ssh": "SSH 포워딩",
+      "aws": "AWS EC2",
+      "ecs": "ECS Task",
+      "dns": "DNS Override",
+      "container": "컨테이너 터널링",
+      "containerShort": "컨테이너"
+    },
+    "create": {
+      "ssh": "SSH 포워딩 추가",
+      "aws": "AWS EC2 포워딩 추가",
+      "ecs": "ECS Task 터널 추가",
+      "dns": "DNS Override 추가",
+      "container": "컨테이너 터널 추가"
+    },
+    "editTitle": {
+      "dns": "DNS Override 편집"
+    },
+    "method": {
+      "sshFallback": "SSH 폴백",
+      "ssmRemoteHost": "SSM 원격 호스트",
+      "sshNative": "SSH 네이티브"
+    },
+    "kind": {
+      "aws": "AWS",
+      "warpgate": "Warpgate",
+      "ssh": "SSH"
+    },
+    "field": {
+      "overrideType": "Override 종류",
+      "hostname": "호스트 이름",
+      "linkedRule": "연결할 규칙",
+      "loopbackTarget": "Loopback 대상",
+      "ipAddress": "IP 주소",
+      "label": "이름",
+      "host": "호스트",
+      "awsHost": "AWS EC2 호스트",
+      "ecsHost": "AWS ECS 호스트",
+      "container": "컨테이너",
+      "network": "네트워크",
+      "containerPort": "컨테이너 포트",
+      "localPort": "로컬 포트",
+      "mode": "모드",
+      "bindAddress": "Bind 주소",
+      "service": "서비스",
+      "targetKind": "대상 종류",
+      "localAddress": "로컬 주소",
+      "targetHost": "대상 호스트",
+      "targetPort": "대상 포트",
+      "remoteHost": "원격 호스트",
+      "selectHost": "호스트 선택",
+      "selectContainer": "컨테이너 선택",
+      "autoRandom": "자동 (임의 포트)"
+    },
+    "section": {
+      "savedRules": "저장된 규칙",
+      "containerDiscovery": "컨테이너 탐색"
+    },
+    "status": {
+      "stopped": "정지됨"
     }
   },
   "ai": {
@@ -716,7 +787,9 @@
       "qualityFast": "속도 우선 (JPEG)",
       "viewOnly": "보기 전용",
       "screenShare": "화면 공유",
-      "os": "운영체제"
+      "os": "운영체제",
+      "portForward": "포워딩",
+      "portForwardStarting": "{{count}}개 시작 중"
     },
     "update": {
       "checking": "GitHub Releases에서 새 버전을 확인하고 있습니다.",
@@ -2448,7 +2521,9 @@
     "variableCount": "{{count}}개 변수",
     "insert": "삽입",
     "edit": "편집",
-    "noResults": "검색 결과가 없습니다."
+    "noResults": "검색 결과가 없습니다.",
+    "addTitle": "새 스니펫",
+    "editTitle": "스니펫 편집"
   },
   "sessionPane": {
     "dropPathFailed": "드롭한 파일 경로를 읽지 못했습니다.",
@@ -2569,6 +2644,7 @@
     "awsPermission": "AWS 권한이 없어 요청이 거부되었습니다. 이 프로필의 IAM 사용자/역할 정책을 확인해 주세요.",
     "awsPermissionAction": "AWS가 {{action}} 요청을 거부했습니다. 이 프로필의 IAM 사용자/역할에 그 권한이 있는지 확인해 주세요.",
     "noRoute": "{{target}}에 연결할 수 없습니다. 현재 네트워크에서 해당 호스트로 가는 경로가 없습니다.",
+    "dnsUnresolved": "{{target}} 주소를 찾을 수 없습니다. 호스트 이름과 DNS 설정을 확인해 주세요.",
     "refused": "{{target}}에서 연결을 거부했습니다.",
     "timeout": "{{target}} 연결 시간이 초과되었습니다.",
     "reset": "{{target}} 연결이 중간에 끊겼습니다.",
@@ -3228,7 +3304,8 @@
   "select": {
     "search": "검색",
     "noResults": "검색 결과가 없습니다.",
-    "searchAria": "{{label}} 검색"
+    "searchAria": "{{label}} 검색",
+    "optionsAria": "{{label}} 옵션"
   },
   "sftpSlice": {
     "hostKeyCheckFailed": "호스트 키를 확인하지 못했습니다."
@@ -3631,7 +3708,11 @@
       "noMatches": "일치하는 스니펫이 없습니다.",
       "manage": "스니펫 관리",
       "emptyTitle": "스니펫이 없습니다",
-      "noMatchesTitle": "찾지 못했습니다"
+      "noMatchesTitle": "찾지 못했습니다",
+      "add": "새 스니펫",
+      "edit": "스니펫 편집",
+      "delete": "스니펫 삭제",
+      "createFirst": "스니펫 만들기"
     },
     "resources": {
       "title": "자원",
@@ -3677,7 +3758,8 @@
       "emptyTitle": "포트 규칙이 없습니다",
       "empty": "이 호스트에 규칙을 추가하면 여기에 보입니다.",
       "noHost": "이 세션에는 호스트가 없어 전달할 것이 없습니다.",
-      "manage": "규칙 추가·편집",
+      "add": "규칙 추가",
+      "edit": "편집",
       "start": "시작",
       "stop": "정지"
     },
@@ -3704,7 +3786,6 @@
       "absentTitle": "도커가 없습니다",
       "absent": "이 호스트에서 docker · podman 을 찾지 못했습니다.",
       "blockedTitle": "도커를 읽을 수 없습니다",
-      "blocked": "소켓 권한이 없고 sudo 도 비밀번호를 요구합니다. 터미널에서 sudo 를 한 번 쓰면 그때부터 보입니다.",
       "downTitle": "도커가 꺼져 있습니다",
       "down": "데몬이 올라오면 알아서 나타납니다.",
       "tab": {
@@ -3772,8 +3853,7 @@
         "year": "{{count}}년"
       },
       "images": {
-        "summary": "{{count}}개 · {{size}}",
-        "reclaimable": "회수 가능 {{size}}",
+        "summaryCounting": "{{count}}개",
         "prune": "미사용 이미지 정리"
       },
       "volumes": {
@@ -3794,14 +3874,26 @@
       }
     },
     "theme": {
-      "title": "터미널 테마",
+      "title": "터미널 외형",
       "followGlobal": "앱 설정 따르기",
       "followSystem": "시스템 외형을 따릅니다",
       "noHostTitle": "호스트가 없습니다",
       "noHost": "테마는 호스트에 저장되므로 호스트 없는 세션에서는 정할 수 없습니다.",
       "saveFailed": "테마를 저장하지 못했습니다: {{message}}"
     },
-    "copied": "복사했습니다"
+    "copied": "복사했습니다",
+    "appearance": {
+      "font": "글꼴",
+      "fontSize": "크기",
+      "lineHeight": "행간",
+      "letterSpacing": "자간",
+      "contrast": "최소 대비",
+      "contrastOff": "끔",
+      "contrastHint": "흐린 색을 배경과 떼어 놓습니다.",
+      "reset": "기본값으로",
+      "decrease": "{{label}} 줄이기",
+      "increase": "{{label}} 늘리기"
+    }
   },
   "localOnly": {
     "title": "동기화 꺼짐",
@@ -3815,5 +3907,9 @@
     "title": "아직 올리지 못한 변경이 있습니다",
     "body": "지금 로그아웃하면 그 변경은 이 컴퓨터에서 사라집니다. 서버에 올라간 것은 다시 로그인하면 그대로 돌아옵니다.",
     "confirm": "그래도 로그아웃"
+  },
+  "snippetDelete": {
+    "body": "이 스니펫을 지웁니다. 되돌릴 수 없습니다.",
+    "hostUsage": "호스트 {{count}}개의 시작 명령으로 쓰이고 있습니다 — 그 호스트의 시작 명령이 함께 해제됩니다."
   }
 }

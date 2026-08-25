@@ -58,6 +58,13 @@ export type HostBrowserProps = UseHostBrowserParams & {
   hostEditor?: ReactNode;
   /** 단축키 안내 모달에 실제 설정된 tmux 프리픽스를 보여주기 위해 전달한다. */
   tmuxPrefixKey?: string;
+  /**
+   * 포트 포워딩 화면에서 지금 쓰이고 있는 항목 수(다섯 탭 합계). 사이드바 배지가 쓴다.
+   *
+   * 이 서브트리는 스토어를 읽지 않고 prop 으로만 받는다 — host-browser 아래에 useAppStore 가
+   * 한 번도 없다. 그 경계를 지키려고 여기까지 흘린다.
+   */
+  activePortForwardEntryCount?: number;
 };
 
 // 우클릭 컨텍스트 메뉴 아이템 공통 스타일(아이콘+라벨, 그룹 사이 divider).
@@ -67,7 +74,12 @@ const CTX_DANGER =
   'flex w-full items-center gap-[0.7rem] rounded-[10px] px-[0.9rem] py-[0.6rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent';
 const CTX_ICON = 'h-[1.05rem] w-[1.05rem] shrink-0 text-[var(--text-soft)]';
 
-export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowserProps) {
+export function HostBrowser({
+  hostEditor,
+  tmuxPrefixKey,
+  activePortForwardEntryCount = 0,
+  ...props
+}: HostBrowserProps) {
   const { t: translate } = useTranslation();
   const hb = useHostBrowser(props);
   const { contextMenu, contextMenuStyle, groupModalState, groupDeleteTarget, hostDeleteTarget } =
@@ -89,7 +101,7 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
 
   return (
     <div className="grid h-full min-h-0 grid-cols-[240px_minmax(0,1fr)_minmax(360px,400px)] max-[1320px]:grid-cols-[220px_minmax(0,1fr)_340px] max-[1040px]:grid-cols-1">
-      <HomeSidebar hb={hb} />
+      <HomeSidebar hb={hb} activePortForwardEntryCount={activePortForwardEntryCount} />
 
       <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
         {hb.statusMessage ? (

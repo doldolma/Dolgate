@@ -4,9 +4,15 @@
 // 두 곳에서 *편집*하면 어느 쪽이 최신인지 알 수 없게 되는 것을 막으려는 것이고, 시작·정지는
 // 설정이 없는 두 상태 토글이라 그 위험이 없다(상태도 스토어 하나를 함께 본다).
 //
-// 규칙을 추가·편집하는 것은 여전히 기존 포트 화면의 몫이다.
+// 규칙 편집도 여기서 한다. 편집기는 포트 화면과 **같은 한 벌**이고(AppModals 의
+// PortForwardEditorHost), 규칙과 저장 경로도 스토어 하나라(portForwards / savePortForward)
+// 두 곳에서 고쳐도 어긋날 데가 없다. 화면을 옮기지 않는 것이 요점이다 — 포트 하나 고치려고
+// 작업 중인 터미널을 떠나게 하면 안 된다.
+//
+// 삭제와 DNS 오버라이드는 여전히 포트 화면의 몫이다(아래 "규칙 관리").
 
 import { useMemo } from 'react';
+import { isAwsEc2HostRecord } from '@shared';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../../../store/appStore';
 import {
@@ -15,7 +21,7 @@ import {
   portForwardStatusTone,
 } from '../../../lib/port-forward-status';
 import { Button, StatusBadge, Tooltip } from '../../../ui';
-import { Play, Square } from '../../../ui/icons';
+import { Pencil, Play, Square } from '../../../ui/icons';
 import { SessionPanelEmpty } from './SessionPanelEmpty';
 
 interface SessionPanelPortsProps {
@@ -30,7 +36,8 @@ export function SessionPanelPorts({ hostId }: SessionPanelPortsProps) {
   const { t: translate } = useTranslation();
   const portForwards = useAppStore((state) => state.portForwards);
   const runtimes = useAppStore((state) => state.portForwardRuntimes);
-  const openHomeSection = useAppStore((state) => state.openHomeSection);
+  const openPortForwardEditor = useAppStore((state) => state.openPortForwardEditor);
+  const hosts = useAppStore((state) => state.hosts);
   const startPortForward = useAppStore((state) => state.startPortForward);
   const stopPortForward = useAppStore((state) => state.stopPortForward);
 
@@ -52,7 +59,14 @@ export function SessionPanelPorts({ hostId }: SessionPanelPortsProps) {
       });
   }, [hostId, portForwards, runtimes]);
 
-  const openPorts = () => openHomeSection('portForwarding');
+  /**
+   * 새 규칙을 어느 방식으로 만들지. 호스트 종류가 정한다 — AWS EC2 는 SSM 터널로 나가고 그
+   * 밖은 SSH 다. 편집기에서 다시 고를 수 있지만, 처음부터 맞는 것이 떠 있어야 한다.
+   */
+  const addTransport: 'ssh' | 'aws-ssm' = useMemo(() => {
+    const host = hostId ? hosts.find((candidate) => candidate.id === hostId) : undefined;
+    return host && isAwsEc2HostRecord(host) ? 'aws-ssm' : 'ssh';
+  }, [hostId, hosts]);
 
   if (rows.length === 0) {
     return (
@@ -64,8 +78,14 @@ export function SessionPanelPorts({ hostId }: SessionPanelPortsProps) {
           )}
         >
           {hostId ? (
-            <Button variant="secondary" size="sm" onClick={openPorts}>
-              {translate('sessionPanel.ports.manage')}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() =>
+                openPortForwardEditor({ kind: 'create', transport: addTransport, hostId })
+              }
+            >
+              {translate('sessionPanel.ports.add')}
             </Button>
           ) : null}
         </SessionPanelEmpty>
@@ -91,6 +111,19 @@ export function SessionPanelPorts({ hostId }: SessionPanelPortsProps) {
                 <StatusBadge tone={portForwardStatusTone(status)} className="shrink-0">
                   {portForwardStatusLabel(runtime)}
                 </StatusBadge>
+                {/* 편집은 팝업으로 띄운다 — 화면을 옮기지 않는다. 돌고 있는 규칙도 열 수 있게
+                    둔다: 포트를 바꾸려면 정지부터 해야 하는 것을 편집 창에서 알게 되는 편이,
+                    버튼이 사라져 왜 못 고치는지 모르는 것보다 낫다. */}
+                <Tooltip label={translate('sessionPanel.ports.edit')}>
+                  <button
+                    type="button"
+                    aria-label={translate('sessionPanel.ports.edit')}
+                    onClick={() => openPortForwardEditor({ kind: 'edit', ruleId: rule.id })}
+                    className={ACTION_CLASS}
+                  >
+                    <Pencil className="h-3 w-3" aria-hidden />
+                  </button>
+                </Tooltip>
                 {/* 시작 중에도 정지를 남긴다 — OTP 를 묻는 호스트에서 몇십 초 걸릴 수 있고,
                     그때 접을 방법이 없으면 화면이 "starting" 으로 굳은 것처럼 보인다. */}
                 {active ? (
@@ -134,11 +167,28 @@ export function SessionPanelPorts({ hostId }: SessionPanelPortsProps) {
             </div>
           );
         })}
-      </div>
-      <div className="px-2.5 py-2">
-        <Button variant="secondary" size="sm" className="w-full" onClick={openPorts}>
-          {translate('sessionPanel.ports.manage')}
-        </Button>
+        {/* 목록의 끝으로 둔다. 스크롤 밖에 고정하면 규칙이 한두 개일 때 빈 공간을 건너 바닥에
+            붙어서, 목록과 무관한 패널 단위 동작처럼 읽혔다.
+
+            추가는 빈 상태에만 두면 규칙이 하나 생기는 순간 사라지므로 여기에도 둔다.
+
+            포트 화면으로 보내는 버튼은 두지 않는다. 시작·정지·편집·추가가 모두 여기서 되고,
+            남은 것은 삭제와 DNS 오버라이드뿐이다 — 둘 다 자주 쓰지 않고, 삭제는 되돌릴 수 없어
+            규칙 목록을 보면서 하는 편이 맞다. */}
+        {hostId ? (
+          <div className="px-2.5 pb-2 pt-1">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="w-full"
+              onClick={() =>
+                openPortForwardEditor({ kind: 'create', transport: addTransport, hostId })
+              }
+            >
+              {translate('sessionPanel.ports.add')}
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -1,3 +1,5 @@
+import type { HostRecord } from "@shared";
+
 // Snippet 명령에는 {{name}} 또는 {{name=default}} 형태의 변수를 넣을 수 있다.
 // 삽입 시 변수 값을 입력받아 치환한다.
 
@@ -62,4 +64,22 @@ export function resolveSnippetCommand(
       return (defaultValue ?? "").trim();
     },
   );
+}
+
+/**
+ * 이 스니펫을 시작 명령(startupCommand)으로 쓰는 호스트 수.
+ *
+ * 스니펫을 지우면 그 호스트들의 시작 명령까지 함께 풀린다(removeSnippet 이 그렇게 한다).
+ * 지우기 전에 그 연쇄를 보여 주려고 센다 — 스니펫 하나만 사라진다고 생각하고 눌렀다가
+ * 호스트 설정이 조용히 없어지는 일을 막는다.
+ */
+export function countHostsUsingSnippet(
+  hosts: readonly HostRecord[],
+  snippetId: string,
+): number {
+  return hosts.filter((host) => {
+    // 시작 명령이 아예 없는 호스트 종류도 있다(RDP·VNC) — 그쪽은 속성 자체가 없다.
+    const startup = "startupCommand" in host ? host.startupCommand : null;
+    return startup?.type === "snippet" && startup.snippetId === snippetId;
+  }).length;
 }

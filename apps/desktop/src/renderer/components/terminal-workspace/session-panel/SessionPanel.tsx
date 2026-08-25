@@ -326,12 +326,13 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
           </div>
           {section === 'history' ? (
             <SessionPanelHistory
+              sessionId={sessionId}
               blocks={blocks}
               shellHistory={shellHistory}
               sender={sender}
             />
           ) : section === 'snippets' ? (
-            <SessionPanelSnippets sender={sender} />
+            <SessionPanelSnippets sessionId={sessionId} sender={sender} />
           ) : section === 'resources' ? (
             <SessionPanelResources
               sessionId={metricsSessionId}

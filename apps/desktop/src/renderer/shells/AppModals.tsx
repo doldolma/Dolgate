@@ -3,6 +3,7 @@ import { AwsSftpConfigRetryDialog } from '../components/AwsSftpConfigRetryDialog
 import { CredentialRetryDialog } from '../components/CredentialRetryDialog';
 import { KnownHostPromptDialog } from '../components/KnownHostPromptDialog';
 import { MissingUsernameDialog } from '../components/MissingUsernameDialog';
+import { PortForwardEditorHost } from '../components/PortForwardEditorHost';
 import { SnippetVariablesDialog } from '../components/terminal-workspace/SnippetVariablesDialog';
 import {
   SecretEditDialog,
@@ -50,6 +51,8 @@ export function AppModals({
   const { t: translate } = useTranslation();
   return (
     <>
+      {/* 포트 포워딩 편집기. 포트 화면과 세션 패널이 같은 한 벌을 여기서 나눠 쓴다. */}
+      <PortForwardEditorHost />
       <KnownHostPromptDialog
         pending={modalViewModel.unownedHostKeyPrompt}
         onAccept={modalViewModel.acceptPendingHostKeyPrompt}

@@ -457,3 +457,19 @@ export function resolveTerminalThemeIdForSession(
 export function getTerminalFontOption(fontId: TerminalFontFamilyId | null | undefined): TerminalFontOption {
   return terminalFontOptions.find((option) => option.id === fontId) ?? terminalFontOptions[0];
 }
+
+/** macOS 에만 있는 글꼴. 다른 플랫폼에서는 목록에 올리지 않는다 — 골라도 대체 글꼴이 뜬다. */
+const macOnlyTerminalFonts = new Set<TerminalFontFamilyId>(['sf-mono', 'menlo', 'monaco']);
+
+/**
+ * 이 플랫폼에서 고를 수 있는 글꼴.
+ *
+ * 설정 화면과 세션 패널이 같은 목록을 보게 한 곳에 둔다 — 한쪽에만 필터가 있으면 그쪽에서만
+ * 맥 전용 글꼴이 사라져 두 화면이 다른 목록을 보인다.
+ */
+export function visibleTerminalFontOptions(platform: string | undefined): TerminalFontOption[] {
+  if (platform === "darwin") {
+    return terminalFontOptions;
+  }
+  return terminalFontOptions.filter((option) => !macOnlyTerminalFonts.has(option.id));
+}

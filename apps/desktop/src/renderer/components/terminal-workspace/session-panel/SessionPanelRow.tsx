@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../../../lib/cn';
-import { Check, Copy, Play, TextCursorInput } from '../../../ui/icons';
+import { Check, Copy, Pencil, Play, TextCursorInput } from '../../../ui/icons';
 import { Tooltip } from '../../../ui';
 import type { SessionPanelActions } from '../../../lib/session-panel';
 import { useTranslation } from 'react-i18next';
@@ -45,6 +45,17 @@ interface SessionPanelRowProps {
   onCopy: () => void;
   onInsert: () => void;
   onRun: () => void;
+  /**
+   * 편집(스니펫). 주는 쪽만 버튼이 생긴다 — 히스토리 줄에는 고칠 것이 없다.
+   *
+   * **보내기 버튼 뒤에 붙인다.** 앞에 끼우면 복사·입력·실행이 전부 오른쪽으로 밀려, 손이 기억한
+   * 자리가 바뀐다.
+   *
+   * 삭제는 여기 없다. 줄의 가장 바깥에 두었더니 마우스가 오른쪽에서 들어올 때 제일 먼저 닿았고,
+   * 다섯 버튼이 좁은 패널의 명령 텍스트를 그만큼 잘라 먹었다. 편집 폼 안으로 옮겼다
+   * (SnippetEditDialog 의 onRemove 주석).
+   */
+  onEdit?: () => void;
   /** 줄 자체를 누르면 하는 일(히스토리: 스크롤백의 그 위치로 이동). */
   onActivate?: () => void;
   activateLabel?: string;
@@ -55,6 +66,7 @@ function RowAction({
   hint,
   disabled,
   dense,
+  subtle,
   onClick,
   children,
 }: {
@@ -62,6 +74,8 @@ function RowAction({
   hint?: string | null;
   disabled: boolean;
   dense?: boolean;
+  /** 쉬는 상태의 색을 한 단계 낮춘다(주 동작이 아닌 버튼). hover 하면 같아진다. */
+  subtle?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -77,7 +91,8 @@ function RowAction({
           onClick();
         }}
         className={cn(
-          'grid place-items-center rounded-[7px] text-[var(--text-soft)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--text)] disabled:pointer-events-none disabled:opacity-30',
+          'grid place-items-center rounded-[7px] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--text)] disabled:pointer-events-none disabled:opacity-30',
+          subtle ? 'text-[var(--text-muted)]' : 'text-[var(--text-soft)]',
           // 줄 높이를 정하는 것은 글자가 아니라 이 버튼이다 — 촘촘한 목록에서는 이것도 줄여야
           // 여백만 줄인 것보다 실제로 짧아진다.
           dense ? 'h-5 w-5' : 'h-6 w-6',
@@ -158,6 +173,7 @@ export function SessionPanelRow({
   onCopy,
   onInsert,
   onRun,
+  onEdit,
   onActivate,
   activateLabel,
 }: SessionPanelRowProps) {
@@ -233,6 +249,30 @@ export function SessionPanelRow({
           >
             <Play className={iconClass(dense)} aria-hidden />
           </RowAction>
+          {onEdit ? (
+            <>
+              {/* 보내기와 관리 사이 구분선. 한 덩어리로 붙으면 목적이 다른 버튼이 같은 무리로
+                  보인다. */}
+              <span
+                aria-hidden
+                className={cn(
+                  'mx-0.5 w-px bg-[var(--border)]',
+                  dense ? 'h-3' : 'h-3.5',
+                )}
+              />
+              <RowAction
+                label={translate('sessionPanel.snippets.edit')}
+                disabled={false}
+                dense={dense}
+                // 관리 동작은 한 단계 옅게. 보내기와 같은 색이면 넷이 같은 무게로 보여 주
+                // 동작이 드러나지 않는다(hover 하면 또렷해진다).
+                subtle
+                onClick={onEdit}
+              >
+                <Pencil className={iconClass(dense)} aria-hidden />
+              </RowAction>
+            </>
+          ) : null}
         </div>
       </div>
       {meta || metaTrailing ? (

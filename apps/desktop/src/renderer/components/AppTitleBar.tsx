@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import type { DesktopWindowState, HostRecord, RdpMonitorSelection, SessionConnectionKind, TailnetPeer, TailnetStatus, TerminalTab, UpdateState } from '@shared';
+import type { DesktopWindowState, HostRecord, PortForwardRuntimeRecord, RdpMonitorSelection, SessionConnectionKind, TailnetPeer, TailnetStatus, TerminalTab, UpdateState } from '@shared';
 import { describeRdpDrives, isRdpHostRecord, isSshHostRecord, isVncHostRecord } from '@shared';
 import type {
   DynamicTabStripItem,
@@ -14,6 +14,7 @@ import { cidrPrefixLength, isAddressInCidr, isIpAddress } from '../lib/ip-prefix
 import { cn } from '../lib/cn';
 import { CHROME_TOGGLE_CLASS, CHROME_TOGGLE_ON_CLASS } from './chrome-toggle';
 import { rttColor } from '../lib/rtt';
+import { activePortForwardsForHost } from '../lib/port-forward-status';
 import { RdpMonitorPicker } from './rdp/RdpMonitorPicker';
 import { titleBarMode, useTitleBarAutoHide } from './useTitleBarAutoHide';
 import {
@@ -39,6 +40,8 @@ interface AppTitleBarProps {
   desktopPlatform: DesktopPlatform;
   tabs: TerminalTab[];
   workspaces: WorkspaceTab[];
+  /** 실행 중 포워딩. 탭 hover 가 이 호스트로 열린 포트를 보여 준다. */
+  portForwardRuntimes?: readonly PortForwardRuntimeRecord[];
   tmuxGroups: TmuxSessionGroup[];
   /** 호스트 카탈로그 — tmux 상단 탭에 호스트명을 표시하기 위해 group.hostId 해석에 사용. */
   hosts: HostRecord[];
@@ -601,6 +604,40 @@ export function shortenRouterName(name: string, max = 14): string {
 }
 
 /** 경로 한 줄을 만든다. 릴레이면 어느 DERP 지역인지까지 보여 준다. */
+
+/**
+ * 이 호스트로 열려 있는 포워딩 한 줄.
+ *
+ * **닫기 전에 보이는 것이 요점이다.** 실행 중 포워딩은 포트 화면에 가야만 보였고, 그래서 탭을
+ * 닫은 뒤에도 켜져 있다는 사실을 모른 채로 남았다. 여기 두면 닫는 행위가 이미 정보를 가진
+ * 상태에서 이뤄진다 — 닫을 때 알림을 밀어 넣지 않아도 된다.
+ *
+ * 판정은 lib 한 곳을 쓴다(activePortForwardsForHost). 사이드바 배지가 2라고 하는데 여기가
+ * 1을 말하면 안 된다.
+ *
+ * `starting` 을 따로 적는 이유: 아직 열리지 않은 것을 열린 것과 같은 수로 세면, 포트가 왜
+ * 안 되는지 찾을 때 이 줄이 거짓 단서가 된다.
+ */
+function portForwardRow(
+  runtimes: readonly PortForwardRuntimeRecord[],
+  hostId: string | null | undefined,
+): TabHoverRow | null {
+  const active = activePortForwardsForHost(runtimes, hostId);
+  if (active.length === 0) {
+    return null;
+  }
+  const starting = active.filter((runtime) => runtime.status === 'starting').length;
+  // hover 카드 폭이 좁다. 포트를 다 적으면 줄이 넘치므로 앞의 몇 개만 적고 나머지는 수로 남긴다.
+  const ports = active.slice(0, 3).map((runtime) => runtime.bindPort).join(', ');
+  const rest = active.length > 3 ? ` +${active.length - 3}` : '';
+  const detail = starting > 0
+    ? t('titleBar.hover.portForwardStarting', { count: starting })
+    : `${ports}${rest}`;
+  return {
+    label: t('titleBar.hover.portForward'),
+    value: `${active.length} · ${detail}`,
+  };
+}
 function tailnetPathRow(info: TailnetPathInfo): TabHoverRow {
   if (!info.connected) {
     return {
@@ -678,6 +715,8 @@ export function buildTabHoverInfo(
   tmuxGroups: TmuxSessionGroup[],
   workspaces: WorkspaceTab[],
   tailnetPath: TailnetPathLookup,
+  // 실행 중 포워딩. 런타임 레코드가 hostId·bindPort 를 함께 들고 있어서 규칙 목록은 필요 없다.
+  portForwardRuntimes: readonly PortForwardRuntimeRecord[] = [],
 ): TabHoverInfo {
   const rows: TabHoverRow[] = [];
 
@@ -861,6 +900,13 @@ export function buildTabHoverInfo(
         rows.push(tailnetPathRow(path));
       }
     }
+    // Tailnet 다음, 지연 앞. 이 호스트로 무엇이 흐르는지를 경로·지연과 같이 읽는 자리다.
+    {
+      const forwards = portForwardRow(portForwardRuntimes, host?.id);
+      if (forwards) {
+        rows.push(forwards);
+      }
+    }
     if (item.rttMs != null) {
       rows.push({ label: t('titleBar.hover.latency'), value: `${item.rttMs}ms`, valueColor: rttColor(item.rttMs) });
     }
@@ -909,6 +955,13 @@ export function buildTabHoverInfo(
       const path = tailnetPath(host);
       if (path) {
         rows.push(tailnetPathRow(path));
+      }
+    }
+    // Tailnet 다음, 지연 앞. 이 호스트로 무엇이 흐르는지를 경로·지연과 같이 읽는 자리다.
+    {
+      const forwards = portForwardRow(portForwardRuntimes, host?.id);
+      if (forwards) {
+        rows.push(forwards);
       }
     }
     if (item.rttMs != null) {
@@ -1085,6 +1138,7 @@ export function AppTitleBar({
   tabs,
   workspaces,
   tmuxGroups,
+  portForwardRuntimes = [],
   hosts,
   tabStrip,
   onSetRdpMonitors,
@@ -1675,7 +1729,7 @@ export function AppTitleBar({
       : null;
   const tailnetPath = useTailnetPathLookup(tabs, tmuxGroups, hosts);
   const hoverInfo = hoveredItem
-    ? buildTabHoverInfo(hoveredItem, tabs, hosts, tmuxGroups, workspaces, tailnetPath)
+    ? buildTabHoverInfo(hoveredItem, tabs, hosts, tmuxGroups, workspaces, tailnetPath, portForwardRuntimes)
     : null;
 
   // 잘리는 끝 탭은 **크롬색 덧칠 아래로 미끄러져 들어간다**(아래 fade div 둘).

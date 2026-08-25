@@ -116,6 +116,7 @@ const CONNECT_FAILURE_KEYS = {
   "host-key-untrusted": "connectFailure.hostKeyUntrusted",
   "host-key-declined": "connectFailure.hostKeyDeclined",
   cancelled: "connectFailure.cancelled",
+  "dns-unresolved": "connectFailure.dnsUnresolved",
   "no-route": "connectFailure.noRoute",
   refused: "connectFailure.refused",
   reset: "connectFailure.reset",

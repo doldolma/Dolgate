@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildContainerListCommand,
+  buildContainerMetricsCommand,
   buildDockerProbeCommand,
+  buildImageListCommand,
   buildNetworkListCommand,
   collectUsedImages,
   dockerLogsCommand,
@@ -11,6 +13,7 @@ import {
   groupContainersByStack,
   isImageUsed,
   parseContainerList,
+  parseContainerMetrics,
   parseDockerAge,
   parseDockerHealth,
   parseDockerProbe,
@@ -20,7 +23,6 @@ import {
   parseNetworkList,
   parsePublishedPorts,
   parseVolumeList,
-  parseVolumeSizes,
   stackComposeCommand,
   type DockerContainer,
 } from './docker';
@@ -54,6 +56,15 @@ describe('프로브', () => {
     // sudo 는 -n 이어야 한다 — 비밀번호를 물어보는 창이 뜨면 "알아서" 가 깨진다.
     expect(command).toContain('"sudo -n docker"');
     expect(command.indexOf('docker')).toBeLessThan(command.indexOf('podman'));
+  });
+
+  // 예전에는 첫 후보가 통해도 `why=` 줄이 `docker ps` 를 한 번 더 돌아, 섹션을 여는 첫 왕복이
+  // 늘 두 배였다. 이유는 안 될 때만 필요하다.
+  it('되는 방법을 찾으면 이유를 묻지 않는다', () => {
+    const command = buildDockerProbeCommand();
+    expect(command).toContain('[ -n "$p" ] || echo "why=');
+    // `docker ps` 는 후보 루프와 실패 경로에만 있다 — 무조건 도는 자리에는 없다.
+    expect(command).not.toContain('; echo "why=');
   });
 
   it('prefix 줄을 읽는다', () => {
@@ -174,17 +185,19 @@ describe('행에 보이는 값', () => {
 });
 
 describe('이미지', () => {
-  it('목록과 총량을 한 왕복에 받아 큰 것부터 놓는다', () => {
-    const stdout = [
-      'app\t1.0\tsha1\t412MB',
-      '<none>\t<none>\tsha2\t1.1GB',
-      '@@dolgate@@',
-      'Images\t24\t15\t8.4GB\t2.1GB (25%)',
-    ].join('\n');
-    const { images, summary } = parseImageList(stdout);
+  //  는 레이어를 전부 걷느라 수십 초가 걸리고 그동안 보조 채널을 혼자
+  // 물어 컨테이너 목록까지 멈춰 세웠다. 이미지 탭은  한 번으로 끝낸다.
+  it('목록은 images 한 번으로 끝낸다 — system df 를 부르지 않는다', () => {
+    expect(buildImageListCommand('docker')).toContain('images --format');
+    expect(buildImageListCommand('docker')).not.toContain('system df');
+  });
+
+  it('목록을 큰 것부터 놓는다', () => {
+    const { images } = parseImageList(
+      ['app\t1.0\tsha1\t412MB', '<none>\t<none>\tsha2\t1.1GB'].join('\n'),
+    );
     expect(images[0].repository).toBe('<none>');
     expect(images[0].dangling).toBe(true);
-    expect(summary[0]).toMatchObject({ type: 'Images', total: 24, size: '8.4GB' });
   });
 
   it('컨테이너가 쓰는 이미지는 미사용으로 표시하지 않는다', () => {
@@ -213,25 +226,24 @@ describe('볼륨 · 네트워크', () => {
     expect(volumes[0].anonymous).toBe(true);
   });
 
-  it('system df -v 의 볼륨 절에서 크기를 읽는다', () => {
-    const stdout = [
-      'Images space usage:',
-      'REPOSITORY   TAG   SIZE',
-      'app          1.0   412MB',
-      'Local Volumes space usage:',
-      'VOLUME NAME   LINKS     SIZE',
-      'pgdata        2         3.6GB',
-      'orphan        0         12.4MB',
-      'Build cache usage: 0B',
-    ].join('\n');
-    const sizes = parseVolumeSizes(stdout);
-    expect(sizes.get('pgdata')).toBe('3.6GB');
-    expect(sizes.get('orphan')).toBe('12.4MB');
-    expect(sizes.has('app')).toBe(false);
+  /**
+   * `inspect` 계열은 포맷 문자열의 `\t` 를 탭으로 바꿔 주지 않는다(목록 명령만 바꿔 준다).
+   * 백슬래시-t 두 글자를 넣으면 출력에 탭이 없고, 파서가 그 줄을 전부 버려 네트워크가 어느
+   * 호스트에서든 빈 목록으로 보였다.
+   */
+  it('구분자가 진짜 탭이다 — inspect 는 백슬래시-t 를 바꿔 주지 않는다', () => {
+    const command = buildNetworkListCommand('docker');
+    expect(command).toContain('\t');
+    expect(command).not.toContain('\\t');
+  });
+
+  // 네트워크가 하나도 없으면 `network inspect` 가 인자 없이 불려 실패한다.
+  it('네트워크가 없으면 inspect 를 부르지 않는다', () => {
+    expect(buildNetworkListCommand('docker')).toContain('ids=$(docker network ls -q); [ -n "$ids" ]');
   });
 
   it('네트워크는 한 번의 inspect 로 서브넷까지 받는다', () => {
-    expect(buildNetworkListCommand('docker')).toContain('network inspect $(docker network ls -q)');
+    expect(buildNetworkListCommand('docker')).toContain('network inspect $ids');
     const { networks } = parseNetworkList('lime_default\tbridge\t172.19.0.0/16 \t6');
     expect(networks[0]).toMatchObject({
       name: 'lime_default',
@@ -280,5 +292,67 @@ describe('명령 만들기', () => {
     expect(stackComposeCommand('docker', '/srv/lime', 'down')).toBe(
       "docker compose --project-directory '/srv/lime' down",
     );
+  });
+});
+
+describe('컨테이너 지표는 목록과 다른 왕복이다', () => {
+  // `stats --no-stream` 은 데몬이 CPU 차분을 내려고 컬렉터 틱을 두 번 기다린다 — 컨테이너가
+  // 하나여도 1~2초가 바닥값이다. `ps -a` 는 그 100분의 1이라, 같이 보내면 목록이 그만큼 늦는다.
+  it('목록에는 느린 것이 붙지 않는다', () => {
+    const command = buildContainerListCommand('docker');
+    expect(command).toContain('ps -a --format');
+    expect(command).not.toContain('stats');
+    expect(command).not.toContain('inspect');
+  });
+
+  it('검사는 받아 둔 id 를 쓴다 — ps 를 다시 부르지 않는다', () => {
+    const command = buildContainerMetricsCommand('docker', {
+      stats: true,
+      inspectIds: ['a1b2c3d4e5f6', 'b1c2d3e4f506'],
+    });
+    expect(command).toContain('stats --no-stream');
+    expect(command).toContain("inspect 'a1b2c3d4e5f6' 'b1c2d3e4f506'");
+    // 예전에는 여기서 `ids=$(docker ps -aq)` 로 같은 것을 한 번 더 물었다.
+    expect(command).not.toContain('ps -a');
+  });
+
+  it('지표를 못 주는 호스트에서는 stats 를 빼고 검사만 싣는다', () => {
+    const command = buildContainerMetricsCommand('docker', {
+      stats: false,
+      inspectIds: ['a1b2c3d4e5f6'],
+    });
+    expect(command).not.toContain('stats');
+    expect(command).toContain("inspect 'a1b2c3d4e5f6'");
+  });
+
+  it('검사할 차례가 아니면 지표만 싣는다', () => {
+    const command = buildContainerMetricsCommand('docker', { stats: true, inspectIds: [] });
+    expect(command).toContain('stats --no-stream');
+    expect(command).not.toContain('inspect');
+  });
+
+  it('stats 를 빼도 구분자 자리가 밀리지 않는다', () => {
+    const parsed = parseContainerMetrics(
+      ['@@dolgate@@', `a1b2c3d4e5f6${'0'.repeat(52)}\t3\tunhealthy\ttrue`].join('\n'),
+    );
+    expect(parsed.stats.size).toBe(0);
+    expect(parsed.inspect.get('a1b2c3d4e5f6')).toEqual({
+      id: 'a1b2c3d4e5f6',
+      restartCount: 3,
+      health: 'unhealthy',
+      oomKilled: true,
+    });
+  });
+
+  it('지표와 검사를 한 왕복에서 갈라 읽는다', () => {
+    const parsed = parseContainerMetrics(
+      [
+        'a1b2c3d4e5f6\t12.40%\t412MiB / 15.6GiB\t2.58%\t1.2GB / 340MB\t0B / 4.1MB\t18',
+        '@@dolgate@@',
+        `a1b2c3d4e5f6${'0'.repeat(52)}\t0\thealthy\tfalse`,
+      ].join('\n'),
+    );
+    expect(parsed.stats.get('a1b2c3d4e5f6')?.cpuPercent).toBe(12.4);
+    expect(parsed.inspect.get('a1b2c3d4e5f6')?.health).toBe('healthy');
   });
 });

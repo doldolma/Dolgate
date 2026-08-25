@@ -102,6 +102,7 @@ import {
   Toolbar,
 } from "../ui";
 import { cn } from "../lib/cn";
+import { resolveHostTailnetId } from "../lib/host-tailnet";
 import { getFormatLocale, t } from '../i18n';
 import { getAwsSftpDiagnosticAction, getAwsSftpDiagnosticTitle } from "../../common/aws-diagnostics";
 import { hostSubtitleLabels } from '../../common/shared-messages';
@@ -2011,10 +2012,11 @@ function HostPicker({
   );
   const sftpConnectionBanner = sftpConnectionView?.banner ?? null;
   const sftpTailnetStatuses = useAppStore((state) => state.tailnetStatuses);
-  const sftpTailnetId =
-    selectedHost && "tailnetId" in selectedHost
-      ? (selectedHost.tailnetId ?? null)
-      : null;
+  // 첫 홉을 찾는 데 쓴다(점프 체인에서 tailnet 을 타는 것은 그 홉이다).
+  const sftpHosts = useAppStore((state) => state.hosts);
+  // 세션·셸과 같은 판정을 쓴다 — 대상의 tailnetId 만 읽으면 "점프 호스트에만 tailnet" 구성에서
+  // tailnet 계층이 통째로 안 그려진다.
+  const sftpTailnetId = resolveHostTailnetId(selectedHost ?? undefined, sftpHosts) ?? null;
   // 단계는 터미널과 같은 빌더가 만든다.
   const sftpConnectionStages = useMemo(
     () =>

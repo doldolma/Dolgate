@@ -12,20 +12,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { queryTerminalCompletion } from '../../../services/desktop/terminal';
 import {
+  buildContainerListCommand,
+  buildContainerMetricsCommand,
   buildDockerProbeCommand,
   buildImageListCommand,
   buildNetworkListCommand,
   buildVolumeListCommand,
-  buildSnapshotCommand,
-  buildVolumeSizeCommand,
-  parseSnapshot,
+  parseContainerList,
+  parseContainerMetrics,
   parseDockerProbe,
   parseImageList,
   parseNetworkList,
   parseVolumeList,
-  parseVolumeSizes,
   type DockerContainer,
-  type DockerDiskSummary,
   type DockerImage,
   type DockerInspectInfo,
   type DockerNetwork,
@@ -40,8 +39,30 @@ export type DockerAvailability = 'checking' | 'available' | 'blocked' | 'down' |
 
 export interface DockerRuntime {
   availability: DockerAvailability;
-  /** 목록·명령에 붙일 호출 방법("docker", "sudo -n docker", "podman"). */
+  /**
+   * 호출 방법("docker", "sudo -n docker", "podman", "sudo docker").
+   *
+   * **터미널에 넣는 명령**(셸 접속·재시작·삭제)이 쓰는 값이다. 비밀번호를 요구하는 호스트에서는
+   * `sudo docker` 가 되는데, 그 자리는 사람이 보고 있는 터미널이라 sudo 가 물어보면 사람이
+   * 답하면 된다 — 우리가 비밀번호를 흘려 넣지 않는다.
+   */
   prefix: string | null;
+  /**
+   * 조회 명령을 코어가 `sudo -S` 로 감싸고 접속 비밀번호를 되물려야 하는가.
+   *
+   * 소켓 권한이 없고 `sudo -n` 도 막힌 호스트에서만 참이다. 조회는 보조 채널이라 물어볼 사람이
+   * 없어서 코어가 대신 답한다. 비밀번호는 코어 안에만 있고 여기로 오지 않는다 — 렌더러는
+   * "감싸 달라" 는 표시만 든다.
+   */
+  elevate: boolean;
+}
+
+/**
+ * 보조 채널 조회에 쓸 접두사. 코어가 sudo 를 씌우는 경우에는 명령 자체가 평범한 `docker` 여야
+ * 한다 — 안에 또 sudo 를 넣으면 감싼 sudo 안에서 sudo 를 부르게 된다.
+ */
+export function queryPrefixOf(runtime: DockerRuntime): string | null {
+  return runtime.elevate ? 'docker' : runtime.prefix;
 }
 
 interface ProbeEntry extends DockerRuntime {
@@ -62,7 +83,17 @@ const PROBE_TTL_MS = 5 * 60 * 1000;
  */
 const PROBE_RETRY_TTL_MS = 45 * 1000;
 
-const CHECKING: DockerRuntime = { availability: 'checking', prefix: null };
+/**
+ * 프로브 왕복 **자체가** 실패했을 때 다시 물어보기까지의 시간과 횟수.
+ *
+ * 실패는 "도커가 없다" 가 아니다 — 보조 채널을 세션 패널의 다른 폴링과 함께 쓰므로 이번 차례를
+ * 놓쳤을 수 있다. 그때 부재로 단정하면 섹션이 통째로 사라지고 재시도 TTL 만큼 돌아오지 않는다.
+ * 몇 번 더 물어보고, 그래도 못 물어보면 그때 접는다.
+ */
+const PROBE_FAILURE_RETRY_MS = 4_000;
+const PROBE_MAX_ATTEMPTS = 3;
+
+const CHECKING: DockerRuntime = { availability: 'checking', prefix: null, elevate: false };
 
 function probeKey(sessionId: string, hostId: string | null): string {
   // 호스트가 있으면 호스트 단위로 기억한다 — 같은 서버의 새 탭에서 다시 묻지 않게. 로컬
@@ -100,6 +131,9 @@ export function useDockerRuntime(
     () => 0,
   );
 
+  /** 왕복 자체가 실패해 다시 물어본 횟수. 이 값이 바뀌면 아래 effect 가 다시 돈다. */
+  const [attempt, setProbeAttempt] = useState(0);
+
   useEffect(() => {
     if (!sessionId || !key) {
       return;
@@ -119,11 +153,14 @@ export function useDockerRuntime(
     }
     probeInflight.add(key);
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     void (async () => {
       let probe: DockerProbe = { prefix: null, installed: false, reason: null };
       let failed = false;
       try {
-        const stdout = await queryTerminalCompletion(sessionId, buildDockerProbeCommand());
+        const stdout = await queryTerminalCompletion(sessionId, buildDockerProbeCommand(), {
+          background: true,
+        });
         probe = parseDockerProbe(stdout);
       } catch {
         // 왕복 자체가 실패했다 = 아무것도 알아내지 못했다. 보조 채널이 없는 세션(AWS SSM·
@@ -134,11 +171,62 @@ export function useDockerRuntime(
       if (cancelled) {
         return;
       }
-      if (failed && cached) {
-        // 알아낸 것이 없으면 아는 값을 지키고 시간만 미룬다 — 화면이 깜빡이지 않게.
-        publishProbe(key, { ...cached, atMs: Date.now() });
+      if (failed) {
+        // **왕복이 실패한 것은 "도커가 없다" 가 아니다.** 보조 채널을 다른 폴링과 함께 쓰므로
+        // 이번 차례를 놓쳤을 수 있는데, 그걸 부재로 단정하면 섹션이 통째로 사라진다(그리고
+        // 재시도 TTL 만큼 안 돌아온다). 도커가 정말 없는 연결은 왕복이 **성공하고 빈 출력**으로
+        // 오므로 아래 분기가 제대로 판정한다.
+        if (cached) {
+          // 아는 값을 지키고 시간만 미룬다 — 화면이 깜빡이지 않게.
+          publishProbe(key, { ...cached, atMs: Date.now() });
+          return;
+        }
+        // 아직 아는 것이 없다 — 단정하지 않고(= 'checking' 유지) 곧 다시 묻는다.
+        if (attempt < PROBE_MAX_ATTEMPTS) {
+          retryTimer = setTimeout(() => setProbeAttempt(attempt + 1), PROBE_FAILURE_RETRY_MS);
+          return;
+        }
+        // 계속 못 물어봤다. 이 세션에서는 알아낼 방법이 없다고 본다.
+        publishProbe(key, {
+          availability: 'absent',
+          prefix: null,
+          elevate: false,
+          atMs: Date.now(),
+        });
         return;
       }
+
+      // 소켓 권한만 막혔다면(데몬은 살아 있고 도커도 깔려 있다) 접속에 쓴 비밀번호로 sudo 를
+      // 한 번 되물려 본다. 비밀번호는 코어 안에서만 쓰이고 여기로 오지 않는다 — 우리는 "감싸
+      // 달라" 는 표시만 보낸다. **한 번만** 시도한다: 틀린 sudo 시도를 반복하면 pam_faillock
+      // 이 계정을 잠근다. 코어도 세션 단위로 같은 빗장을 걸어 둔다.
+      if (!probe.prefix && probe.installed && probe.reason === 'permission') {
+        let elevated: DockerProbe | null = null;
+        try {
+          const stdout = await queryTerminalCompletion(sessionId, buildDockerProbeCommand(), {
+            background: true,
+            elevate: true,
+          });
+          elevated = parseDockerProbe(stdout);
+        } catch {
+          // 되물릴 비밀번호가 없거나(키로 붙었다) 이미 거절당한 세션이다 — 아래로 떨어져
+          // 평소처럼 "읽을 수 없다" 로 끝낸다.
+        }
+        if (cancelled) {
+          return;
+        }
+        if (elevated?.prefix) {
+          publishProbe(key, {
+            availability: 'available',
+            // 터미널에 넣는 명령은 사람이 sudo 에 답할 수 있다.
+            prefix: 'sudo docker',
+            elevate: true,
+            atMs: Date.now(),
+          });
+          return;
+        }
+      }
+
       publishProbe(key, {
         availability: probe.prefix
           ? 'available'
@@ -148,20 +236,27 @@ export function useDockerRuntime(
               ? 'down'
               : 'blocked',
         prefix: probe.prefix,
+        // 여기까지 왔으면 sudo 되물리기는 통하지 않았거나 시도할 값이 없었다.
+        elevate: false,
         atMs: Date.now(),
       });
     })();
     return () => {
       cancelled = true;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+      }
     };
-  }, [key, sessionId]);
+  }, [attempt, key, sessionId]);
 
   return useMemo(() => {
     if (!key) {
       return CHECKING;
     }
     const entry = probeCache.get(key);
-    return entry ? { availability: entry.availability, prefix: entry.prefix } : CHECKING;
+    return entry
+      ? { availability: entry.availability, prefix: entry.prefix, elevate: entry.elevate }
+      : CHECKING;
     // version 이 스냅샷이다.
   }, [key, version]);
 }
@@ -176,18 +271,25 @@ export interface DockerSample {
 
 const historyByScope = new Map<string, Map<string, DockerSample[]>>();
 
+/**
+ * 표본을 쌓는다. **제자리에서 고치지 않고 새 배열을 만든다.**
+ *
+ * 화면이 이 배열의 참조로 "달라졌나" 를 판정하기 때문이다. 예전에는 push/shift 로 같은 배열을
+ * 고쳐서 React 가 변화를 볼 수 없었고, 그걸 우회하려고 `historyVersion` 을 올려 섹션 전체를
+ * 다시 그렸다 — 스파크라인 200개가 매 틱마다 통째로 다시 계산됐다. 새 배열을 주면 값이 바뀐
+ * 행만 다시 그린다.
+ */
 function pushHistory(scope: string, stats: Map<string, DockerStat>, atMs: number): void {
   const byContainer = historyByScope.get(scope) ?? new Map<string, DockerSample[]>();
+  const cutoffMs = atMs - HISTORY_WINDOW_MS;
   for (const [id, stat] of stats) {
-    const samples = byContainer.get(id) ?? [];
-    samples.push({ atMs, cpuPercent: stat.cpuPercent, memBytes: stat.memBytes });
-    while (
-      samples.length > HISTORY_MAX_SAMPLES ||
-      (samples.length > 0 && atMs - samples[0].atMs > HISTORY_WINDOW_MS)
-    ) {
-      samples.shift();
-    }
-    byContainer.set(id, samples);
+    const previous = byContainer.get(id) ?? EMPTY_SAMPLES;
+    byContainer.set(
+      id,
+      [...previous, { atMs, cpuPercent: stat.cpuPercent, memBytes: stat.memBytes }]
+        .filter((sample) => sample.atMs >= cutoffMs)
+        .slice(-HISTORY_MAX_SAMPLES),
+    );
   }
   historyByScope.set(scope, byContainer);
 }
@@ -304,18 +406,29 @@ export function useDockerBusy(sessionId: string | null): boolean {
 /* ─── 목록 ─────────────────────────────────────────────────────────────── */
 
 /**
- * 컨테이너 왕복의 **최소** 주기. 실제 주기는 걸린 시간에서 정한다 — `stats --no-stream` 은
- * 컨테이너가 많으면 초 단위로 걸리는데, 그걸 5초마다 부르면 채널이 늘 물려 있다. 사용자에게
- * "지표 끄기" 를 물어보는 대신 우리가 물러난다.
+ * 컨테이너 목록 왕복의 **최소** 주기. `ps -a` 는 데몬 API 한 번이라 대개 100ms 언저리다 —
+ * 이 루프는 빨라도 되고, 그래야 새 컨테이너가 금방 보인다.
  */
 const CONTAINER_POLL_MS = 5_000;
 const CONTAINER_POLL_MAX_MS = 20_000;
+
+/**
+ * 지표(stats + inspect) 왕복의 **최소** 주기. 목록보다 훨씬 느긋하다.
+ *
+ * `stats --no-stream` 은 데몬이 CPU 차분을 내려고 컬렉터 틱을 두 번 기다려서 1~2초가 바닥값이다.
+ * 이걸 목록과 같은 주기로 부르면 보조 채널이 늘 물려 있다. CPU·MEM 은 15초마다 와도 충분하다 —
+ * 행 스파크라인이 보는 창이 10분이라 그림이 달라지지 않는다. 사용자에게 "지표 끄기" 를 묻는
+ * 대신 우리가 물러난다.
+ */
+const METRICS_POLL_MS = 15_000;
+const METRICS_POLL_MAX_MS = 60_000;
+
 /** 걸린 시간의 이 배수를 주기로 삼는다(왕복이 채널을 절반 이상 물지 않게). */
 const POLL_DUTY_FACTOR = 3;
 const BACKOFF_MS = [5_000, 15_000, 60_000];
 
-/** 재시작 횟수·헬스·OOM 은 자주 바뀌지 않는다 — 이 횟수마다 한 번씩 얹는다. */
-const INSPECT_EVERY_TICKS = 6;
+/** 재시작 횟수·헬스·OOM 은 자주 바뀌지 않는다 — 지표 왕복 이 횟수마다 한 번씩 얹는다. */
+const INSPECT_EVERY_TICKS = 4;
 
 /** 행 스파크라인이 보는 창(ms)과 표본 상한. 이력은 앱에 쌓아 원격 왕복을 늘리지 않는다. */
 const HISTORY_WINDOW_MS = 10 * 60 * 1000;
@@ -323,9 +436,6 @@ const HISTORY_MAX_SAMPLES = 120;
 
 /** 컨테이너 말고는 스스로 변하지 않는다 — 이만큼 안에 받은 값이면 탭을 다시 열어도 그대로 쓴다. */
 const STATIC_TAB_TTL_MS = 15_000;
-
-/** 볼륨 크기(system df -v)는 비싸다 — 이만큼은 다시 재지 않는다. */
-const VOLUME_SIZE_TTL_MS = 60_000;
 
 export interface DockerSummary {
   running: number;
@@ -345,10 +455,7 @@ export interface DockerLists {
   inspect: Map<string, DockerInspectInfo>;
   summary: DockerSummary;
   images: DockerImage[];
-  imageSummary: DockerDiskSummary[];
   volumes: DockerVolume[];
-  volumeSizes: Map<string, string>;
-  volumeSizesLoading: boolean;
   networks: DockerNetwork[];
   /** 이 탭을 아직 한 번도 못 받았다. */
   loading: boolean;
@@ -357,8 +464,6 @@ export interface DockerLists {
   /** 지금 받아오기가 실패해 물러나 있는 상태. 목록은 마지막 값이다. */
   failing: boolean;
   truncated: boolean;
-  /** 이력이 갱신될 때마다 올라간다 — 스파크라인이 이 값으로 다시 그린다. */
-  historyVersion: number;
 }
 
 interface TabState {
@@ -366,7 +471,6 @@ interface TabState {
   stats: Map<string, DockerStat>;
   inspect: Map<string, DockerInspectInfo>;
   images: DockerImage[];
-  imageSummary: DockerDiskSummary[];
   volumes: DockerVolume[];
   networks: DockerNetwork[];
   updatedAtMs: number | null;
@@ -382,7 +486,6 @@ const EMPTY_TAB: TabState = {
   stats: EMPTY_STATS,
   inspect: EMPTY_INSPECT,
   images: [],
-  imageSummary: [],
   volumes: [],
   networks: [],
   updatedAtMs: null,
@@ -390,11 +493,26 @@ const EMPTY_TAB: TabState = {
   truncated: false,
 };
 
-function buildCommand(
-  tab: DockerTabId,
-  prefix: string,
-  options: { stats: boolean; inspect: boolean },
-): string {
+const EMPTY_TABS: Record<DockerTabId, TabState> = {
+  containers: EMPTY_TAB,
+  images: EMPTY_TAB,
+  volumes: EMPTY_TAB,
+  networks: EMPTY_TAB,
+};
+
+/**
+ * 탭별 목록을 **호스트(없으면 세션) 단위로** 기억한다.
+ *
+ * 컴포넌트 안에만 두면 세션 탭을 옮길 때 직전 호스트의 목록이 그대로 남는다 — 패널은 같은
+ * 인스턴스를 재사용하고 `sessionId` 만 갈아끼우기 때문이다. 다른 서버의 컨테이너가 잠깐 내
+ * 것처럼 보이고, 그 사이에 누르면 엉뚱한 호스트를 가리킨다.
+ *
+ * 여기 두면 옮기는 즉시 그 호스트의 것으로 갈아타고(없으면 빈 화면), 돌아왔을 때는 다시
+ * 받아오는 동안 아는 값이 보인다. 이력(historyByScope)·접힘(collapsedStacks)과 같은 단위다.
+ */
+const listCache = new Map<string, Record<DockerTabId, TabState>>();
+
+function buildCommand(tab: DockerTabId, prefix: string): string {
   switch (tab) {
     case 'images':
       return buildImageListCommand(prefix);
@@ -403,23 +521,21 @@ function buildCommand(
     case 'networks':
       return buildNetworkListCommand(prefix);
     default:
-      return buildSnapshotCommand(prefix, options);
+      return buildContainerListCommand(prefix);
   }
 }
 
 function applyOutput(tab: DockerTabId, previous: TabState, stdout: string): TabState {
   const next: TabState = { ...previous, updatedAtMs: Date.now(), failing: false };
   if (tab === 'containers') {
-    const parsed = parseSnapshot(stdout);
+    // 지표·검사는 이 왕복에 오지 않는다(따로 받는다) — 목록만 갈아 끼우고 나머지는 둔다.
+    const parsed = parseContainerList(stdout);
     next.containers = parsed.containers;
     next.truncated = parsed.truncated;
-    next.stats = parsed.stats.size > 0 ? parsed.stats : previous.stats;
-    // 검사 결과는 매 왕복에 오지 않는다 — 새로 온 것만 덮어쓴다.
-    next.inspect = parsed.inspect.size > 0 ? parsed.inspect : previous.inspect;
   } else if (tab === 'images') {
     const parsed = parseImageList(stdout);
     next.images = parsed.images;
-    next.imageSummary = parsed.summary;
+
     next.truncated = parsed.truncated;
   } else if (tab === 'volumes') {
     const parsed = parseVolumeList(stdout);
@@ -442,47 +558,51 @@ function applyOutput(tab: DockerTabId, previous: TabState, stdout: string): TabS
 export function useDockerLists(
   sessionId: string,
   prefix: string | null,
+  /** 조회 명령을 코어가 sudo 로 감싸야 하는가(useDockerRuntime 이 정한다). */
+  elevate: boolean,
   tab: DockerTabId,
   enabled: boolean,
   /** 이력을 담는 단위(호스트, 없으면 세션). */
   scope: string,
 ): DockerLists & { refresh: () => void } {
-  const [state, setState] = useState<Record<DockerTabId, TabState>>({
-    containers: EMPTY_TAB,
-    images: EMPTY_TAB,
-    volumes: EMPTY_TAB,
-    networks: EMPTY_TAB,
-  });
-  const [volumeSizes, setVolumeSizes] = useState<{
-    sizes: Map<string, string>;
-    atMs: number | null;
-    loading: boolean;
-  }>({ sizes: new Map(), atMs: null, loading: false });
-  // 진행 여부는 ref 로 본다 — 이 값을 effect 의 의존성에 넣으면 "재는 중" 으로 바뀌는 순간
-  // effect 가 다시 돌고 그 정리가 방금 띄운 요청을 취소해 버린다(크기가 영원히 안 채워졌다).
-  const volumeSizeGuard = useRef<{ atMs: number | null; loading: boolean }>({
-    atMs: null,
-    loading: false,
-  });
+  const [state, setState] = useState<Record<DockerTabId, TabState>>(
+    () => listCache.get(scope) ?? EMPTY_TABS,
+  );
+  // 세션 탭을 옮기면 그 호스트의 것으로 **그 자리에서** 갈아탄다. effect 로 미루면 직전 호스트의
+  // 목록이 한 프레임 더 남는다 — React 는 렌더 중의 이 갱신을 커밋 전에 흡수한다.
+  const scopeRef = useRef(scope);
+  if (scopeRef.current !== scope) {
+    scopeRef.current = scope;
+    setState(listCache.get(scope) ?? EMPTY_TABS);
+  }
+  // 받은 것은 그 호스트 자리에 남긴다(순수하게 — 갱신 함수 안에서 쓰지 않는다).
+  useEffect(() => {
+    listCache.set(scope, state);
+  }, [scope, state]);
   const [nonce, setNonce] = useState(0);
   const stateRef = useRef(state);
   stateRef.current = state;
   /**
    * 지표를 못 받는 호스트에서는 두 번째 왕복부터 stats 를 붙이지 않는다 — 매번 붙여 헛돌면
-   * 왕복만 느려진다. 옛 도커나 stats 형식을 모르는 방언에서 그렇다.
+   * 왕복만 느려진다. 옛 도커나 stats 형식을 모르는 방언에서 그렇다. 그러면 지표 루프는 검사
+   * 차례에만 나가고 나머지 틱은 왕복 없이 넘어간다.
    */
   const statsSupportedRef = useRef(true);
+  /** 지표 루프의 틱. 이 횟수마다 검사(inspect)를 얹는다 — 목록 루프와는 무관하다. */
   const tickRef = useRef(0);
-  const [historyVersion, setHistoryVersion] = useState(0);
 
   const refresh = useCallback(() => {
-    // 크기도 다시 잰다 — 새로 받기는 "지금 값" 을 뜻한다.
-    volumeSizeGuard.current = { atMs: null, loading: false };
     setNonce((current) => current + 1);
   }, []);
 
   // 헤더의 새로고침 버튼이 이 세션에 요청을 보낸다.
   useEffect(() => subscribeDockerRefresh(sessionId, refresh), [refresh, sessionId]);
+
+  /**
+   * 컨테이너 목록이 한 번이라도 왔는가. 지표 루프의 출발 신호다 — false → true 로 한 번만
+   * 뒤집히므로 아래 effect 는 그때 딱 한 번 더 돈다.
+   */
+  const listReady = state.containers.updatedAtMs !== null;
 
   useEffect(() => {
     if (!enabled || !prefix || !sessionId) {
@@ -507,15 +627,14 @@ export function useDockerLists(
         return;
       }
       publishDockerBusy(sessionId, true);
-      const wantsStats = tab === 'containers' && statsSupportedRef.current;
-      const wantsInspect = tab === 'containers' && tickRef.current % INSPECT_EVERY_TICKS === 0;
-      tickRef.current += 1;
       const startedAtMs = Date.now();
       let stdout: string;
       try {
         stdout = await queryTerminalCompletion(
           sessionId,
-          buildCommand(tab, prefix, { stats: wantsStats, inspect: wantsInspect }),
+          buildCommand(tab, prefix),
+          // 스스로 도는 폴링이다 — 두 번째 보조 채널에서 돌려 자동완성을 막지 않는다.
+          { background: true, elevate },
         );
       } catch {
         if (cancelled) {
@@ -536,23 +655,10 @@ export function useDockerLists(
       failures = 0;
       publishDockerBusy(sessionId, false);
       const elapsedMs = Date.now() - startedAtMs;
-      setState((current) => {
-        const next = applyOutput(tab, current[tab], stdout);
-        if (tab === 'containers') {
-          if (wantsStats && next.stats.size === 0 && next.containers.some(isRunningState)) {
-            // 돌고 있는 컨테이너가 있는데 지표가 한 줄도 없다 = 이 호스트에서는 못 쓴다.
-            statsSupportedRef.current = false;
-          }
-          if (next.stats.size > 0) {
-            pushHistory(scope, next.stats, Date.now());
-            setHistoryVersion((version) => version + 1);
-          }
-        }
-        return { ...current, [tab]: next };
-      });
+      setState((current) => ({ ...current, [tab]: applyOutput(tab, current[tab], stdout) }));
       // 컨테이너만 스스로 변한다 — 나머지는 탭을 열 때와 새로고침에서만 받는다.
       if (tab === 'containers') {
-        // 걸린 시간에 맞춰 물러난다(5~20초). stats 가 느린 호스트에서 채널을 계속 물지 않게.
+        // 걸린 시간에 맞춰 물러난다(5~20초). 목록만 받으므로 대개 최소 주기에 머문다.
         schedule(
           Math.min(
             CONTAINER_POLL_MAX_MS,
@@ -579,41 +685,119 @@ export function useDockerLists(
       }
       publishDockerBusy(sessionId, false);
     };
-  }, [enabled, nonce, prefix, sessionId, tab]);
+  }, [elevate, enabled, nonce, prefix, sessionId, tab]);
 
-  // 볼륨 탭을 열면 크기를 뒤에서 한 번 잰다. 오래 걸려도 목록은 이미 떠 있다.
+  /**
+   * CPU·MEM(+ 재시작 횟수·헬스)을 **목록과 따로** 받는다.
+   *
+   * `stats --no-stream` 은 1~2초가 바닥값이라(데몬이 CPU 차분을 잰다) 목록과 한 왕복에 묶으면
+   * 이름 몇 줄 그리는 데 그 시간을 통째로 기다리게 된다. 갈라 놓으면 목록은 100ms 대에 뜨고
+   * 숫자는 이 왕복이 오는 대로 채워진다.
+   *
+   * 진행 표시(헤더의 새로고침 아이콘)는 건드리지 않는다 — 사람이 기다리는 것은 목록이다.
+   *
+   * **목록이 한 번 온 뒤에 시작한다**(`listReady`). 지표는 목록을 채우는 값이라 목록 없이 먼저
+   * 그릴 것이 없고, 검사(inspect)는 목록의 id 를 쓴다. 무엇보다 이 왕복이 목록보다 먼저 채널을
+   * 물면 첫 그림이 다시 stats 만큼 늦어져 갈라 놓은 의미가 없어진다.
+   */
   useEffect(() => {
-    if (!enabled || !prefix || tab !== 'volumes') {
-      return;
-    }
-    const guard = volumeSizeGuard.current;
-    if (guard.loading) {
-      return;
-    }
-    if (guard.atMs !== null && Date.now() - guard.atMs < VOLUME_SIZE_TTL_MS) {
+    if (!enabled || !prefix || !sessionId || tab !== 'containers' || !listReady) {
       return;
     }
     let cancelled = false;
-    guard.loading = true;
-    setVolumeSizes((current) => ({ ...current, loading: true }));
-    void (async () => {
-      let sizes = new Map<string, string>();
-      try {
-        const stdout = await queryTerminalCompletion(sessionId, buildVolumeSizeCommand(prefix));
-        sizes = parseVolumeSizes(stdout);
-      } catch {
-        // 못 재면 자리를 비워 둔다 — 다시 시도하게 만들지 않는다.
-      }
-      volumeSizeGuard.current = { atMs: Date.now(), loading: false };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let failures = 0;
+
+    const schedule = (delayMs: number) => {
       if (cancelled) {
         return;
       }
-      setVolumeSizes({ sizes, atMs: volumeSizeGuard.current.atMs, loading: false });
-    })();
+      timer = setTimeout(() => {
+        void poll();
+      }, delayMs);
+    };
+
+    const poll = async (): Promise<void> => {
+      if (cancelled) {
+        return;
+      }
+      const listed = stateRef.current.containers;
+      const wantsStats = statsSupportedRef.current;
+      const wantsInspect = tickRef.current % INSPECT_EVERY_TICKS === 0;
+      const inspectIds = wantsInspect ? listed.containers.map((container) => container.id) : [];
+      if (!wantsStats && inspectIds.length === 0) {
+        // 물어볼 것이 없다(지표를 못 주는 호스트 + 검사 차례가 아님) — 왕복을 쓰지 않는다.
+        tickRef.current += 1;
+        schedule(METRICS_POLL_MS);
+        return;
+      }
+      tickRef.current += 1;
+      const startedAtMs = Date.now();
+      let stdout: string;
+      try {
+        stdout = await queryTerminalCompletion(
+          sessionId,
+          buildContainerMetricsCommand(prefix, { stats: wantsStats, inspectIds }),
+          // 이 기능에서 제일 오래 채널을 무는 왕복이다 — 반드시 백그라운드 레인으로.
+          { background: true, elevate },
+        );
+      } catch {
+        if (cancelled) {
+          return;
+        }
+        failures += 1;
+        schedule(BACKOFF_MS[Math.min(failures - 1, BACKOFF_MS.length - 1)]);
+        return;
+      }
+      if (cancelled) {
+        return;
+      }
+      failures = 0;
+      const elapsedMs = Date.now() - startedAtMs;
+      const parsed = parseContainerMetrics(stdout);
+      if (
+        wantsStats &&
+        // **아무것도 안 온 것과 지표만 안 온 것은 다르다.** 왕복이 조용히 실패하면(코어의 완성
+        // 타임아웃은 오류가 아니라 빈 문자열로 돌아온다) stdout 이 통째로 비는데, 그것을 "이
+        // 호스트는 지표를 못 준다" 로 읽으면 한 번 늦은 것 때문에 CPU·MEM 이 영영 사라진다.
+        // 명령이 돌기만 했다면 구분자라도 찍혀 있다.
+        stdout.trim() !== '' &&
+        parsed.stats.size === 0 &&
+        listed.containers.some((container) => isRunningState(container))
+      ) {
+        // 돌고 있는 컨테이너가 있는데 지표가 한 줄도 없다 = 이 호스트에서는 못 쓴다.
+        // 다음 왕복부터 stats 를 빼면 이 루프가 검사만 싣고 훨씬 빨라진다.
+        statsSupportedRef.current = false;
+      }
+      if (parsed.stats.size > 0) {
+        // 아래 setState 가 이 틱의 다시 그리기를 낸다 — 이력은 새 배열이라 그 렌더에서 바로
+        // 보인다(별도의 version 을 올려 섹션 전체를 흔들 필요가 없다).
+        pushHistory(scope, parsed.stats, Date.now());
+      }
+      // 온 것만 덮어쓴다 — 검사는 매 왕복에 오지 않고, 지표는 실패해도 마지막 값을 지운다.
+      setState((current) => ({
+        ...current,
+        containers: {
+          ...current.containers,
+          stats: parsed.stats.size > 0 ? parsed.stats : current.containers.stats,
+          inspect: parsed.inspect.size > 0 ? parsed.inspect : current.containers.inspect,
+        },
+      }));
+      // 걸린 시간에 맞춰 물러난다(15~60초). 느린 호스트에서 채널을 계속 물지 않게.
+      schedule(
+        Math.min(METRICS_POLL_MAX_MS, Math.max(METRICS_POLL_MS, elapsedMs * POLL_DUTY_FACTOR)),
+      );
+    };
+
+    void poll();
+
     return () => {
       cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
     };
-  }, [enabled, nonce, prefix, sessionId, tab]);
+  }, [elevate, enabled, listReady, nonce, prefix, scope, sessionId, tab]);
 
   const current = state[tab];
   const containerState = state.containers;
@@ -641,16 +825,12 @@ export function useDockerLists(
     inspect: containerState.inspect,
     summary,
     images: state.images.images,
-    imageSummary: state.images.imageSummary,
     volumes: state.volumes.volumes,
-    volumeSizes: volumeSizes.sizes,
-    volumeSizesLoading: volumeSizes.loading,
     networks: state.networks.networks,
     loading: current.updatedAtMs === null && !current.failing,
     updatedAtMs: current.updatedAtMs,
     failing: current.failing,
     truncated: current.truncated,
-    historyVersion,
     refresh,
   };
 }

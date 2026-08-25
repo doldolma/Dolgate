@@ -12,6 +12,7 @@ export {
   ChevronUp,
   Star,
   Plus,
+  Minus,
   X,
   Check,
   Copy,

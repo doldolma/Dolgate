@@ -1,7 +1,7 @@
 // 히스토리 섹션. 셸 통합이 이미 모아 둔 명령 블록을 그대로 읽는다 — 새로 수집하는 것은 없고,
 // 범위는 "지금 연결된 이후"(레지스트리의 수명)다.
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../../lib/cn';
 import {
@@ -19,9 +19,12 @@ import { Tooltip } from '../../../ui';
 import { SessionPanelEmpty } from './SessionPanelEmpty';
 import { SessionPanelRow } from './SessionPanelRow';
 import { SessionPanelSearch } from './SessionPanelSearch';
+import { useSessionScopedState } from './useSessionScopedState';
 import type { SessionPanelSender } from './useSessionPanelTarget';
 
 interface SessionPanelHistoryProps {
+  /** 검색어·필터를 세션마다 따로 기억하는 데 쓴다. */
+  sessionId: string;
   blocks: readonly SessionPanelHistoryItem[];
   /**
    * 셸 히스토리 파일에서 온 이전 명령들(연결 시점 스냅샷).
@@ -38,13 +41,15 @@ interface SessionPanelHistoryProps {
 // 빈 원은 "종료 코드가 없다" 는 뜻이었지만, 그 목록에는 애초에 종료 코드가 나온 적이 없다.
 
 export function SessionPanelHistory({
+  sessionId,
   blocks,
   shellHistory,
   sender,
 }: SessionPanelHistoryProps) {
   const { t: translate } = useTranslation();
-  const [query, setQuery] = useState('');
-  const [failedOnly, setFailedOnly] = useState(false);
+  // 검색어·필터는 세션마다 따로 기억한다 — 다른 서버로 옮기면 비고, 돌아오면 그대로 남는다.
+  const [query, setQuery] = useSessionScopedState(sessionId, 'history.query', '');
+  const [failedOnly, setFailedOnly] = useSessionScopedState(sessionId, 'history.failedOnly', false);
   // "몇 분 전" 이 렌더마다 흐르지 않게 목록이 바뀌는 시점으로 고정한다.
   const now = useMemo(() => Date.now(), [blocks]);
 
@@ -79,7 +84,7 @@ export function SessionPanelHistory({
               type="button"
               aria-pressed={failedOnly}
               aria-label={translate('sessionPanel.history.failedOnly')}
-              onClick={() => setFailedOnly((value) => !value)}
+              onClick={() => setFailedOnly(!failedOnly)}
               className={cn(
                 'grid h-9 w-9 shrink-0 place-items-center rounded-[9px] transition-colors',
                 failedOnly

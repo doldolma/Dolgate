@@ -195,25 +195,30 @@ export function useHostMetrics({
         stdout = await queryTerminalCompletion(
           sessionId,
           buildHostMetricsCommand({ processLimit, system: wantsSystem }),
+          // 스스로 도는 폴링이다 — 두 번째 보조 채널에서 돌려 자동완성을 막지 않는다.
+          { background: true },
         );
       } catch {
         if (cancelled) {
           return;
         }
-        // 첫 시도부터 실패하면 이 연결에는 보조 채널이 없다고 본다(SSM raw shell 등).
-        // 그 경우 재시도해도 달라지지 않으므로 조용히 접는다.
+        failures += 1;
+        if (failures < MAX_CONSECUTIVE_FAILURES) {
+          schedule(intervalMs);
+          return;
+        }
+        // **한 번 실패했다고 접지 않는다.** 보조 채널은 세션 패널의 다른 폴링(도커 지표)과
+        // 함께 쓰는데, `docker stats` 가 몇 초씩 물고 있으면 이번 차례를 놓칠 수 있다. 그걸
+        // 곧장 "미지원" 으로 읽으면 자원 섹션이 세션 내내 비어 버린다 — 보조 채널이 아예 없는
+        // 연결(SSM raw shell)은 왕복이 **성공하고 빈 출력**으로 오므로 아래 hasAnyHostMetric
+        // 에서 걸린다. 여기까지 계속 실패했다면 그때 접는다.
         if (previous === null) {
           setStatus('unsupported');
           publish({ status: 'unsupported' });
           return;
         }
-        failures += 1;
-        if (failures >= MAX_CONSECUTIVE_FAILURES) {
-          setStatus('paused');
-          publish({ status: 'paused', metrics, updatedAtMs });
-          return;
-        }
-        schedule(intervalMs);
+        setStatus('paused');
+        publish({ status: 'paused', metrics, updatedAtMs });
         return;
       }
       if (cancelled) {

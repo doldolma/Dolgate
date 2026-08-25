@@ -32,6 +32,12 @@ import { useTranslation } from 'react-i18next';
 
 interface HomeSidebarProps {
   hb: HostBrowserModel;
+  /**
+   * 포트 포워딩에서 쓰이고 있는 항목 수. 0 이면 배지를 그리지 않는다.
+   *
+   * 이 값을 여기서 스토어로 읽지 않는 이유는 host-browser 서브트리가 prop 전용이기 때문이다.
+   */
+  activePortForwardEntryCount?: number;
 }
 
 const SECTION_ITEMS: Array<{ section: HomeSection; label: string; Icon: LucideIcon }> = [
@@ -41,7 +47,10 @@ const SECTION_ITEMS: Array<{ section: HomeSection; label: string; Icon: LucideIc
   { section: 'settings', label: 'Settings', Icon: Settings },
 ];
 
-export function HomeSidebar({ hb }: HomeSidebarProps) {
+export function HomeSidebar({
+  hb,
+  activePortForwardEntryCount = 0,
+}: HomeSidebarProps) {
   const { t: translate } = useTranslation();
   const {
     hosts,
@@ -566,21 +575,38 @@ export function HomeSidebar({ hb }: HomeSidebarProps) {
           </div>
         </div>
       ) : null}
-
       {/* Footer: section entry points (temporary home — to be refined later) */}
       <div className="flex shrink-0 items-center gap-[0.4rem] border-t border-[var(--border)] px-[0.7rem] py-[0.8rem]">
-        {SECTION_ITEMS.map((item) => (
-          <Tooltip key={item.section} label={item.label} className="flex-1">
-            <button
-              type="button"
-              aria-label={item.label}
-              className="inline-grid h-[2.4rem] w-full place-items-center rounded-[10px] border border-transparent bg-transparent text-[var(--text-soft)] transition-colors duration-140 hover:border-[var(--border)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] hover:text-[var(--accent-strong)]"
-              onClick={() => onSelectSection?.(item.section)}
-            >
-              <item.Icon className="h-[1.25rem] w-[1.25rem]" aria-hidden="true" />
-            </button>
-          </Tooltip>
-        ))}
+        {SECTION_ITEMS.map((item) => {
+          // 배지는 항목의 성질로 둔다 — 이 푸터는 스스로 임시라고 적혀 있어서, 나중에 재배치할 때
+          // 포워딩 전용 분기가 아니라 항목과 함께 따라가야 한다.
+          const badge = item.section === 'portForwarding' ? activePortForwardEntryCount : 0;
+          // 아이콘만 있는 버튼이라 숫자만 읽히면 뜻이 없다. 개수가 있을 때는 이름에 붙여 준다.
+          const name = badge > 0 ? `${item.label} (${badge} active)` : item.label;
+          return (
+            <Tooltip key={item.section} label={name} className="flex-1">
+              <button
+                type="button"
+                aria-label={name}
+                className="relative inline-grid h-[2.4rem] w-full place-items-center rounded-[10px] border border-transparent bg-transparent text-[var(--text-soft)] transition-colors duration-140 hover:border-[var(--border)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] hover:text-[var(--accent-strong)]"
+                onClick={() => onSelectSection?.(item.section)}
+              >
+                <item.Icon className="h-[1.25rem] w-[1.25rem]" aria-hidden="true" />
+                {/* 점이 아니라 개수다 — 1개는 의도한 것일 수 있고 여러 개면 정리 대상이라, 몇
+                    개인지가 행동을 바꾼다. 시각 언어는 타이틀바의 업데이트 표시를 따르고 링만
+                    사이드바 배경으로 바꾼다. 두 자리를 넘기면 아이콘을 가리므로 자른다. */}
+                {badge > 0 ? (
+                  <span
+                    aria-hidden="true"
+                    className="absolute right-[0.3rem] top-[0.25rem] min-w-[1rem] rounded-full bg-[var(--accent-strong)] px-[0.2rem] text-center text-[0.62rem] font-semibold leading-[1rem] text-[var(--on-accent,#fff)] ring-2 ring-[var(--surface)]"
+                  >
+                    {badge > 9 ? '9+' : badge}
+                  </span>
+                ) : null}
+              </button>
+            </Tooltip>
+          );
+        })}
       </div>
     </aside>
   );

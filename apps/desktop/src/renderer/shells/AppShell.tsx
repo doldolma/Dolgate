@@ -31,6 +31,8 @@ import { LoginDialog } from '../components/LoginDialog';
 import { NewTabButton } from '../components/NewTabButton';
 import { buildLastConnectedByHostId } from '../lib/last-connected';
 import { isLocalOnlyAuthState } from '../lib/local-only';
+import { countActivePortForwards } from '../lib/port-forward-status';
+import { installNewTabShortcut } from '../lib/new-tab-shortcut';
 import {
   type DraggedSessionPayload,
   workspaceContainsSession,
@@ -86,19 +88,12 @@ export function AppShell({
 
   // 새 탭 단축키는 **전역**이다. 홈의 호스트 검색(⌘K)이 Hosts 화면에서만 듣는 것과 다르다 —
   // 새 탭은 앱 단위 동작이고, 터미널 안에서 ⌘T 를 쓰는 프로그램은 드물다.
+  //
+  // capture 단계로 거는 이유(윈도우에서 통째로 죽던 원인)는 installNewTabShortcut 주석에 있다.
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) {
-        return;
-      }
-      if (event.key !== 't' && event.key !== 'T') {
-        return;
-      }
-      event.preventDefault();
-      setNewTabOpenSignal((current) => current + 1);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return installNewTabShortcut(() =>
+      setNewTabOpenSignal((current) => current + 1),
+    );
   }, []);
   const [isLoginDialogOpen, setIsLoginDialogOpen] = useState(false);
   const [draggedSession, setDraggedSession] = useState<DraggedSessionPayload | null>(
@@ -156,13 +151,12 @@ export function AppShell({
       job.status === 'running' ||
       job.status === 'cancelling',
   );
-  const hasActivePortForwards = homeViewModel.portForwardRuntimes.some(
-    (runtime) => runtime.status === 'starting' || runtime.status === 'running',
-  );
+  // 판정은 lib 한 곳에 있다 — 사이드바 배지·탭 hover 와 같은 기준을 써야 한다.
+  const activePortForwardCount = countActivePortForwards(homeViewModel.portForwardRuntimes);
   const hasBlockingUpdateInstall =
     sessionViewModel.tabs.length > 0 ||
     hasActiveTransfers ||
-    hasActivePortForwards;
+    activePortForwardCount > 0;
 
   // tmux 조작은 tmux 표준 프리픽스(Ctrl-b, useTerminalSessionViewController)와
   // 윈도우 바/pane 분할 버튼으로 한다. 혼란을 주던 전역 Cmd-T/Cmd-D 단축키는 제거했다.
@@ -228,6 +222,7 @@ export function AppShell({
           tabs={sessionViewModel.tabs}
           workspaces={sessionViewModel.workspaces}
           tmuxGroups={sessionViewModel.tmuxGroups}
+          portForwardRuntimes={homeViewModel.portForwardRuntimes}
           hosts={homeViewModel.hosts}
           tabStrip={sessionViewModel.tabStrip}
           activeWorkspaceTab={homeViewModel.activeWorkspaceTab}
