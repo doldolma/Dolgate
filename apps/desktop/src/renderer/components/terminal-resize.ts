@@ -120,6 +120,13 @@ export function createTerminalResizeScheduler(options: TerminalResizeSchedulerOp
     settleTimer = setTimer(() => {
       settleTimer = null;
       bursting = false;
+      // **여기서도 hold 를 본다.** `request()` 에서만 보면, 끌기가 멈춘 직후에 전환이
+      // 시작된 경우(분할선을 놓자마자 세션 패널을 여는 등) 이미 걸려 있던 이 타이머가
+      // 전환 도중에 발화해 fit 과 리사이즈를 내보낸다 — hold 가 막으려던 바로 그것이다.
+      // 전환이 끝나면 부르는 쪽이 다시 요청한다(layout-transition 구독).
+      if (options.isHeld?.()) {
+        return;
+      }
       // 멈춘 뒤 한 번. 크기가 그대로면 fit 이 스스로 아무 것도 하지 않는다(캔버스 유지).
       scheduleFlush();
     }, settleMs);

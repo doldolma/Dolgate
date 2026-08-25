@@ -188,4 +188,59 @@ describe('createTerminalResizeScheduler', () => {
     expect(fit).toHaveBeenCalledTimes(1);
     expect(sendResize).toHaveBeenCalledWith({ cols: 100, rows: 30 });
   });
+
+  it('끌기가 멈춘 직후 전환이 시작되면 정착 맞추기도 흘린다', () => {
+    // 분할선을 놓자마자 세션 패널을 열면, 이미 걸려 있던 정착 타이머가 전환 도중에 발화한다.
+    // `request()` 에서만 hold 를 보면 그 한 번이 그대로 나가 — 전환 중 리사이즈를 막으려던
+    // 장치를 정확히 우회한다.
+    const queue: FrameRequestCallback[] = [];
+    const fit = vi.fn();
+    const sendResize = vi.fn();
+    let held = false;
+    let settle: (() => void) | undefined;
+
+    const scheduler = createTerminalResizeScheduler({
+      fit,
+      isHeld: () => held,
+      readSize: () => ({ cols: 100, rows: 30 }),
+      sendResize,
+      requestFrame: (callback) => {
+        queue.push(callback);
+        return queue.length;
+      },
+      cancelFrame: () => undefined,
+      setTimer: (callback) => {
+        settle = callback;
+        return 1;
+      },
+      clearTimer: () => {
+        settle = undefined;
+      }
+    });
+
+    // 끌기: 프레임마다 요청이 이어지므로 중간 맞추기는 버려진다.
+    scheduler.request();
+    scheduler.request();
+    queue.shift()?.(0);
+    scheduler.request();
+    queue.shift()?.(16);
+    expect(fit).not.toHaveBeenCalled();
+
+    // 손을 뗀 직후 전환 시작 → 걸려 있던 정착 타이머가 전환 중에 발화한다.
+    held = true;
+    settle?.();
+    while (queue.length > 0) {
+      queue.shift()?.(32);
+    }
+
+    expect(fit).not.toHaveBeenCalled();
+    expect(sendResize).not.toHaveBeenCalled();
+
+    // 전환이 끝나면 부르는 쪽이 다시 요청하고, 그때 한 번 맞춘다.
+    held = false;
+    scheduler.request();
+    queue.shift()?.(48);
+    queue.shift()?.(64);
+    expect(fit).toHaveBeenCalledTimes(1);
+  });
 });

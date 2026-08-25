@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   clearHostMetrics,
+  countHostMetricsEntries,
   getHostMetricsSnapshot,
   getHostMetricsVersion,
   getHostMetricsWatch,
@@ -95,5 +96,31 @@ describe('host-metrics-registry', () => {
     const release = watchHostMetrics('');
     expect(getHostMetricsWatch('').boosted).toBe(false);
     release();
+  });
+
+  // pane 이 먼저 정리되고 패널이 나중에 구독을 놓는 순서에서 항목이 남았다 — 세션 id 마다
+  // 하나씩, 앱을 켜 둔 동안 계속.
+  it('아무도 안 보게 되면 항목을 버린다', () => {
+    const before = countHostMetricsEntries();
+    const unsubscribe = subscribeHostMetrics(SESSION, () => undefined);
+    const unwatch = watchHostMetrics(SESSION, { processes: true });
+    publishHostMetrics(SESSION, snapshot(7));
+
+    // pane 이 먼저 사라진다(값도 함께 치운다). 이때는 아직 패널이 보고 있다.
+    clearHostMetrics(SESSION);
+    expect(countHostMetricsEntries()).toBe(before + 1);
+
+    unwatch();
+    unsubscribe();
+    expect(countHostMetricsEntries()).toBe(before);
+  });
+
+  // 반대로 발행자가 살아 있는데 패널만 닫은 경우는 지우면 안 된다 — 다시 열었을 때 다음
+  // 폴링까지 빈 화면이 된다.
+  it('값이 남아 있으면 구독이 끊겨도 지키다', () => {
+    const unsubscribe = subscribeHostMetrics(SESSION, () => undefined);
+    publishHostMetrics(SESSION, snapshot(9));
+    unsubscribe();
+    expect(getHostMetricsSnapshot(SESSION).metrics).toEqual({ cpuPercent: 9 });
   });
 });

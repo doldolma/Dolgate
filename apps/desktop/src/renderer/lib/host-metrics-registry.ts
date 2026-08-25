@@ -59,6 +59,30 @@ interface Entry {
 
 const entries = new Map<string, Entry>();
 
+/**
+ * 아무도 안 보고 값도 없는 항목은 지운다.
+ *
+ * `clearHostMetrics` 만으로는 모자랐다 — pane 이 먼저 정리되고 패널이 나중에 구독을 놓는
+ * 순서에서는 그때 구독자가 남아 있어 항목이 안 지워지고, 구독 해제 쪽은 지우지 않았다.
+ * 세션 id 마다 하나씩 영영 쌓인다.
+ *
+ * **값이 남아 있으면 지우지 않는다.** 발행자(pane)는 살아 있는데 패널만 닫은 경우가 그렇고,
+ * 여기서 지우면 다시 열었을 때 다음 폴링까지 빈 화면이 된다.
+ */
+function disposeIfIdle(sessionId: string, entry: Entry): void {
+  if (
+    entry.listeners.size > 0 ||
+    entry.watchers.size > 0 ||
+    entry.watchListeners.size > 0
+  ) {
+    return;
+  }
+  if (entry.snapshot !== EMPTY) {
+    return;
+  }
+  entries.delete(sessionId);
+}
+
 function entryFor(sessionId: string): Entry {
   let entry = entries.get(sessionId);
   if (!entry) {
@@ -109,9 +133,7 @@ export function clearHostMetrics(sessionId: string): void {
   entry.snapshot = EMPTY;
   entry.version += 1;
   notify(entry.listeners);
-  if (entry.listeners.size === 0 && entry.watchers.size === 0) {
-    entries.delete(sessionId);
-  }
+  disposeIfIdle(sessionId, entry);
 }
 
 export function getHostMetricsSnapshot(sessionId: string): HostMetricsSnapshot {
@@ -131,6 +153,7 @@ export function subscribeHostMetrics(
   entry.listeners.add(listener);
   return () => {
     entry.listeners.delete(listener);
+    disposeIfIdle(sessionId, entry);
   };
 }
 
@@ -169,6 +192,7 @@ export function watchHostMetrics(
     }
     entry.watchVersion += 1;
     notify(entry.watchListeners);
+    disposeIfIdle(sessionId, entry);
   };
 }
 
@@ -203,5 +227,11 @@ export function subscribeHostMetricsWatch(
   entry.watchListeners.add(listener);
   return () => {
     entry.watchListeners.delete(listener);
+    disposeIfIdle(sessionId, entry);
   };
+}
+
+/** 남아 있는 항목 수. 누수를 테스트로 잡기 위한 것이다. */
+export function countHostMetricsEntries(): number {
+  return entries.size;
 }

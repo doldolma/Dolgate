@@ -41,6 +41,58 @@ describe('mergeSyncedRecords', () => {
     expect(unpushedIds).toEqual(['local-only']);
   });
 
+  // 서버가 아는 레코드인데 우리 것이 더 최신이면 **안 올라간 편집**이다. 큐에서 어쩌다
+  // 빠졌더라도(밀기 실패·앱 종료·경합) 다음 당기기가 다시 올려 스스로 회복한다.
+  it('서버보다 최신인 로컬 레코드도 미전송으로 보고한다', () => {
+    const { unpushedIds } = mergeSyncedRecords(
+      {
+        local: [host({ label: 'local edit', updatedAt: '2026-08-02T00:00:00.000Z' })],
+        remote: {
+          live: [host({ label: 'server', updatedAt: '2026-08-01T00:00:00.000Z' })],
+          tombstones: [],
+        },
+      },
+      idOf,
+      updatedAtOf,
+    );
+    expect(unpushedIds).toEqual(['h1']);
+  });
+
+  // 성공적으로 민 뒤에는 두 시각이 같다 — 같은 것을 매번 다시 밀면 서버 revision 이 계속
+  // 올라 다른 기기들의 304 최적화가 무력해진다.
+  it('시각이 같으면 다시 올리지 않는다', () => {
+    const { unpushedIds } = mergeSyncedRecords(
+      {
+        local: [host({ updatedAt: '2026-08-02T00:00:00.000Z' })],
+        remote: {
+          live: [host({ updatedAt: '2026-08-02T00:00:00.000Z' })],
+          tombstones: [],
+        },
+      },
+      idOf,
+      updatedAtOf,
+    );
+    expect(unpushedIds).toEqual([]);
+  });
+
+  // 옛 서버는 tombstone 시각을 초 단위로 깎아 돌려준다. 글자로 견주면 `.` 이 `Z` 보다 작아
+  // 순서가 뒤집혀, 지운 직후 같은 초에 고친 레코드가 삭제된 것으로 처리됐다.
+  it('밀리초를 깎아 주는 서버의 tombstone 과도 순서를 지킨다', () => {
+    const { merged } = mergeSyncedRecords(
+      {
+        local: [host({ label: 'edited after delete', updatedAt: '2026-08-02T03:04:05.950Z' })],
+        remote: {
+          live: [],
+          // 실제로는 05.900 에 지웠는데 서버가 초 단위로만 돌려준 값.
+          tombstones: [{ id: 'h1', deletedAt: '2026-08-02T03:04:05Z' }],
+        },
+      },
+      idOf,
+      updatedAtOf,
+    );
+    expect(merged.map(idOf)).toEqual(['h1']);
+  });
+
   it('로컬이 더 최신이면 서버 값을 덮지 않는다', () => {
     const { merged } = mergeSyncedRecords(
       {

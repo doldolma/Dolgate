@@ -69,7 +69,18 @@ function isAfter(left: string | undefined, right: string | undefined): boolean {
   if (!right) {
     return true;
   }
-  return left > right;
+  // **문자열로 견주지 않는다.** 소수점 자릿수가 다르면 순서가 뒤집힌다 — `.` 는 `Z` 보다
+  // 작아서 `…05.950Z` 가 `…05Z` 보다 작은 것으로 나온다. 우리 레코드의 시각은 전부
+  // `toISOString()`(밀리초 3자리)이지만 tombstone 의 시각은 서버가 찍어 주는 값이고,
+  // 밀리초를 깎아 돌려주는 서버(옛 버전)가 있다. 그러면 지운 직후 같은 초에 고친 레코드가
+  // "삭제보다 오래된 것" 이 되어 그 편집이 조용히 사라진다.
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (Number.isNaN(leftMs) || Number.isNaN(rightMs)) {
+    // 시각으로 못 읽는 값이면 예전처럼 글자로 견준다 — 아무 판단도 못 하는 것보다 낫다.
+    return left > right;
+  }
+  return leftMs > rightMs;
 }
 
 /**
@@ -97,11 +108,19 @@ export function mergeSyncedRecords<T>(
     const id = idOf(remoteRecord);
     taken.add(id);
     const localRecord = localById.get(id);
-    merged.push(
-      localRecord && isAfter(updatedAtOf(localRecord), updatedAtOf(remoteRecord))
-        ? localRecord
-        : remoteRecord,
-    );
+    const localWins =
+      localRecord !== undefined &&
+      isAfter(updatedAtOf(localRecord), updatedAtOf(remoteRecord));
+    merged.push(localWins ? (localRecord as T) : remoteRecord);
+    if (localWins) {
+      // **안 올라간 편집이다.** 서버가 이 레코드를 알고 있는데 우리 것이 더 최신이라면 밀기가
+      // 아직 안 됐거나 도중에 잃은 것이다 — 큐에 다시 올려 다음 기회에 나른다.
+      //
+      // 이것이 없으면 어떤 이유로든 큐에서 빠진 편집은 영영 그 기기에만 남는다(자가치유가
+      // 서버에 아예 없는 레코드만 보고 있었다). 성공적으로 민 뒤에는 두 시각이 같아져
+      // 여기 걸리지 않으므로 같은 것을 계속 다시 밀지도 않는다.
+      unpushedIds.push(id);
+    }
   }
 
   for (const localRecord of local) {

@@ -539,6 +539,51 @@ describe("useMobileAppStore host mutations", () => {
     expect(useMobileAppStore.getState().hosts[0].label).toBe("Renamed");
   });
 
+  // 비운 것과 안 보낸 것을 같게 다루면, 도메인을 지우고 저장해도 옛 값이 되살아난다 —
+  // 폼은 저장됐다고 말하는데 로그인은 계속 그 도메인으로 나간다.
+  it("clears the RDP domain when the field is emptied", async () => {
+    const existing = {
+      id: "rdp-1",
+      kind: "rdp",
+      label: "Office PC",
+      hostname: "10.0.0.5",
+      port: 3389,
+      secretRef: "secret-rdp",
+      groupName: null,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    } as unknown as SshHostRecord;
+    const secret: LoadedManagedSecretPayload = {
+      secretRef: "secret-rdp",
+      label: "Office PC credentials",
+      username: "Administrator",
+      domain: "CORP",
+      password: "hunter2",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    };
+    await act(async () => {
+      resetStore({ hosts: [existing], secretsByRef: { "secret-rdp": secret } });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().saveRemoteDesktopHost({
+        hostId: existing.id,
+        kind: "rdp",
+        label: existing.label,
+        hostname: existing.hostname,
+        port: existing.port,
+        credentialMode: "replace",
+        credentials: { username: "Administrator", domain: "", password: "" },
+      });
+    });
+
+    const saved = useMobileAppStore.getState().secretsByRef["secret-rdp"];
+    expect(saved?.domain).toBeUndefined();
+    // 손대지 않은 것은 그대로다 — 지운 것은 도메인뿐이다.
+    expect(saved?.username).toBe("Administrator");
+    expect(saved?.password).toBe("hunter2");
+  });
+
   it("replaces an existing host credential only when explicitly requested", async () => {
     const pushedPayloads: SyncPayloadV2[] = [];
     fetchMock.mockImplementation(async (input, init) => {

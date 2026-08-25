@@ -32,7 +32,11 @@ export type SyncOutboxEntry =
       id: string;
       op: 'delete';
       /** 툼스톤의 시각. 로컬에 레코드가 이미 없어 다시 만들 근거가 없기 때문에 들고 간다. */
-      deletedAt?: string;
+      /**
+       * 언제 지웠는가. **필수다** — 서버·다른 기기의 병합이 이 값을 `updatedAt` 과 견주므로,
+       * 빠지면 그 삭제는 어떤 레코드보다도 오래된 것이 되어 진다(= 지운 것이 되살아난다).
+       */
+      deletedAt: string;
     };
 
 /**
@@ -58,13 +62,20 @@ export function enqueueManySyncOutbox(
   return entries.reduce(enqueueSyncOutbox, queue);
 }
 
-/** 방금 민 항목들을 큐에서 뺀다. 미는 동안 새로 들어온 것은 남는다. */
+/**
+ * 방금 민 항목들을 큐에서 뺀다. 미는 동안 새로 들어온 것은 남는다.
+ *
+ * **키(`kind:id`)가 아니라 항목 자체로 지운다.** 키로 지우면 미는 동안 같은 레코드를 다시
+ * 고친 경우 그 새 항목까지 지워진다 — 보낸 적이 없는데 큐에서 사라지므로 그 편집은 이 기기에만
+ * 남는다. `enqueueSyncOutbox` 가 고칠 때마다 새 객체를 붙이므로, 밀고 있던 옛 항목과 그 사이
+ * 들어온 새 항목은 이것으로 갈린다.
+ */
 export function removeSyncOutbox(
   queue: SyncOutboxEntry[],
   pushed: SyncOutboxEntry[]
 ): SyncOutboxEntry[] {
-  const pushedKeys = new Set(pushed.map((entry) => `${entry.kind}:${entry.id}`));
-  return queue.filter((entry) => !pushedKeys.has(`${entry.kind}:${entry.id}`));
+  const pushedEntries = new Set<SyncOutboxEntry>(pushed);
+  return queue.filter((entry) => !pushedEntries.has(entry));
 }
 
 export interface SyncOutboxPayloadInput {
@@ -110,7 +121,10 @@ export function buildSyncOutboxPayload(
 
   for (const entry of queue) {
     if (entry.op === 'delete') {
-      const deletedAt = entry.deletedAt ?? new Date(0).toISOString();
+      // 타입이 요구하므로 여기 오는 것은 전부 값이 있다. 그래도 남겨 두는 이유는 저장소에서
+      // 되살아난 옛 큐처럼 타입이 닿지 않는 경로가 생길 수 있어서다 — 그때 epoch 을 쓰면
+      // 삭제가 병합에서 항상 져서 조용히 되살아난다. 늦은 시각이 잃는 것보다 낫다.
+      const deletedAt = entry.deletedAt ?? new Date().toISOString();
       // 종류는 타입이 이미 호스트·그룹으로 좁혀 놨다 — 보낼 자리가 없는 삭제는 큐에
       // 들어올 수 없다.
       if (entry.kind === 'hosts') {

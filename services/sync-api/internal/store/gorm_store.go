@@ -1590,17 +1590,28 @@ func (s *GormStore) GetSyncSnapshot(ctx context.Context, userID string) (int64, 
 	return revision, payload, nil
 }
 
+// 클라이언트가 보낸 것과 같은 모양으로 돌려준다.
+//
+// `time.RFC3339` 로 찍으면 **밀리초가 사라진다**. 클라이언트는 전부 JS `toISOString()`
+// (밀리초 3자리)으로 시각을 만들고 그것을 문자열로 견주므로, 초 단위로 깎여 돌아오면 같은 초
+// 안에서 순서가 뒤집힌다 — 지운 직후 같은 초에 고친 레코드가 "삭제보다 오래된 것"이 되어 그
+// 편집이 사라졌다.
+//
+// `time.RFC3339Nano` 는 끝의 0 을 지워(`.450Z` → `.45Z`) 자릿수가 들쭉날쭉해지므로 쓰지
+// 않는다. 문자열로 견주는 쪽에서는 그것도 순서를 뒤집는다.
+const syncTimestampLayout = "2006-01-02T15:04:05.000Z07:00"
+
 func toSyncRecord(row syncRecordRow) syncmodel.Record {
 	var deletedAt *string
 	if row.DeletedAt != nil {
-		value := row.DeletedAt.UTC().Format(time.RFC3339)
+		value := row.DeletedAt.UTC().Format(syncTimestampLayout)
 		deletedAt = &value
 	}
 
 	return syncmodel.Record{
 		ID:               row.ID,
 		EncryptedPayload: row.EncryptedPayload,
-		UpdatedAt:        row.UpdatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:        row.UpdatedAt.UTC().Format(syncTimestampLayout),
 		DeletedAt:        deletedAt,
 	}
 }

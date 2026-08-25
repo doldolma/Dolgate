@@ -3242,19 +3242,19 @@ export const useMobileAppStore = create<MobileAppState>()(
        *
        * **던지지 않는다.** 오프라인·로그아웃·서버 오류면 큐를 그대로 두고 이유만 남긴다.
        */
-      const drainSyncOutbox = async (): Promise<void> => {
+      const runSyncOutboxDrain = async (): Promise<'pushed' | 'skipped' | 'failed'> => {
         const queued = get().syncOutbox;
         if (queued.length === 0) {
-          return;
+          return 'skipped';
         }
         if (!get().auth.session) {
-          return;
+          return 'skipped';
         }
         // 비밀은 Keychain 에서 **뒤늦게** 복원된다(secureStateReady 가 그때 켜진다).
         // 그 전에 밀면 secrets 항목이 보낼 것을 못 찾아 큐에서 조용히 빠지고, 호스트만
         // 올라가고 비밀번호는 영영 안 올라간다. 복원될 때까지 기다린다 — 다음 회차가 민다.
         if (!get().secureStateReady) {
-          return;
+          return 'skipped';
         }
 
         const local = get();
@@ -3309,7 +3309,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               },
             };
           });
-          return;
+          return 'failed';
         }
 
         // 미는 동안 사용자가 또 고쳤을 수 있다. 그 항목은 남겨야 한다.
@@ -3333,6 +3333,45 @@ export const useMobileAppStore = create<MobileAppState>()(
             syncOutboxFailure: null,
           };
         });
+        return 'pushed';
+      };
+
+      /**
+       * 밀기는 **한 번에 하나만** 돈다.
+       *
+       * 드레인을 부르는 곳이 여럿이라(큐에 넣을 때·당기기 전·수동) 겹칠 수 있었다. 겹치면
+       * 같은 레코드가 두 번 올라가고, 실패 카운트가 한 회차에 두 번 올라 "한 번 실패는 넘긴다"
+       * 는 규칙이 무너진다.
+       *
+       * 도는 동안 들어온 요청은 깃발만 세우고 끝난 뒤 한 번 더 돈다 — 그 사이 큐에 들어온
+       * 항목이 다음 폴링(30초)까지 기다리지 않게. 실패한 회차 뒤에는 다시 돌지 않는다(즉시
+       * 재시도는 같은 이유로 또 실패하고 카운트만 올린다).
+       */
+      let syncOutboxDrain: Promise<void> | null = null;
+      let syncOutboxDrainAgain = false;
+
+      const drainSyncOutbox = async (): Promise<void> => {
+        if (syncOutboxDrain) {
+          syncOutboxDrainAgain = true;
+          return syncOutboxDrain;
+        }
+        syncOutboxDrain = (async () => {
+          try {
+            for (;;) {
+              syncOutboxDrainAgain = false;
+              const outcome = await runSyncOutboxDrain();
+              if (outcome !== 'pushed') {
+                return;
+              }
+              if (!syncOutboxDrainAgain || get().syncOutbox.length === 0) {
+                return;
+              }
+            }
+          } finally {
+            syncOutboxDrain = null;
+          }
+        })();
+        return syncOutboxDrain;
       };
 
       /** 로컬을 먼저 바꾸고 큐에 넣은 뒤 밀어 본다. 오프라인이면 큐에 남는다. */
@@ -3901,12 +3940,6 @@ export const useMobileAppStore = create<MobileAppState>()(
       };
 
       /**
-       * 자격증명 창에서 고친 SSH 사용자명을 호스트에 남긴다.
-       *
-       * 로컬 우선 + 아웃박스다 — 로그인·네트워크 없이도 고쳐지고, 이번 연결이 또 실패해도
-       * 고쳐 넣은 값은 남는다(아니면 매번 같은 오타를 다시 친다).
-       */
-      /**
        * 연결에 성공했으니 **이 연결이 쓴** 자격증명을 저장한다.
        *
        * 대상 호스트만으로는 모자란다 — 점프 홉도 붙기 전에 물어보므로, 그 홉의 비밀도 같이
@@ -3925,6 +3958,12 @@ export const useMobileAppStore = create<MobileAppState>()(
         }
       };
 
+      /**
+       * 자격증명 창에서 고친 SSH 사용자명을 호스트에 남긴다.
+       *
+       * 로컬 우선 + 아웃박스다 — 로그인·네트워크 없이도 고쳐지고, 이번 연결이 또 실패해도
+       * 고쳐 넣은 값은 남는다(아니면 매번 같은 오타를 다시 친다).
+       */
       const applyHostUsername = (host: SshHostRecord, username: string) => {
         if (username === host.username.trim()) {
           return;
@@ -3957,13 +3996,6 @@ export const useMobileAppStore = create<MobileAppState>()(
         return next && isSshHostRecord(next) ? (next as T) : host;
       };
 
-      /**
-       * 이 호스트로 붙을 때 쓸 자격증명을 고른다.
-       *
-       * `override` 는 인증 실패 재시도 창이 방금 받아 온 값이다. **저장된 값보다 우선한다** —
-       * 안 그러면 저장된 비밀번호가 틀린 경우(서버에서 바꿨을 때)를 고칠 방법이 없다.
-       * 저장은 여기서 하지 않는다. 연결이 성공해야 저장하는 규칙은 그대로다.
-       */
       /** 인증이 깨진 것이면 재시도 창을 세운다. 판정과 내용은 lib/credential-retry 가 만든다. */
       const offerCredentialRetry = (
         host: HostRecord,
@@ -6683,12 +6715,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             // 여럿이라(30초 폴링·포그라운드 복귀·수동·로그인) 호출부마다 지키게 했더니
             // 폴링이 빠졌고, 앱을 켜 둔 채 네트워크가 돌아오면 큐가 영영 안 밀렸다.
             //
-            // 밀지 못해도 **막지 않는다.** 볼트가 잠겨 있으면 밀기는 잠금을 풀기 전까지
-            // 절대 성공하지 않는데, 그때 당기기까지 멈추면 동기화가 통째로 죽는다.
-            // 안 올라간 변경은 아래에서 다시 얹어 지켜 준다.
-            // 당기기 전에 큐부터 민다. 다만 **막지는 않는다** — 밀지 못하는 이유가 볼트가
-            // 아직 확정되지 않아서일 수 있고(그 확정을 pull 이 한다), 그때 pull 까지 멈추면
-            // 서로를 기다리다 동기화가 영영 죽는다. 못 민 변경은 아래에서 다시 얹어 지킨다.
+            // 밀지 못해도 **막지 않는다.** 밀기가 막히는 이유가 볼트가 아직 확정되지 않아서일
+            // 수 있고(그 확정을 pull 이 한다), 그때 pull 까지 멈추면 서로를 기다리다 동기화가
+            // 통째로 죽는다. 못 민 변경은 아래에서 다시 얹어 지킨다.
             await drainSyncOutbox();
 
             set(state => ({
@@ -8619,7 +8648,13 @@ export const useMobileAppStore = create<MobileAppState>()(
             ? input.credentials.password
             : undefined;
           const username = input.credentials?.username?.trim() || undefined;
-          const domain = input.credentials?.domain?.trim() || undefined;
+          // **비운 것과 안 보낸 것을 구분한다.** 둘 다 undefined 로 뭉개면 아래 병합이 옛
+          // 값을 되살려, 도메인을 지우고 저장해도 그대로 남는다(폼은 저장됐다고 말한다).
+          // null = 지움, undefined = 손대지 않음.
+          const domain =
+            input.credentials?.domain === undefined
+              ? undefined
+              : input.credentials.domain.trim() || null;
           const credentialMode =
             input.credentialMode ?? (previous?.secretRef ? 'preserve' : 'replace');
           const previousSecret = previous?.secretRef
@@ -8628,7 +8663,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           // RDP 는 계정이 자격증명에 딸린다 — 저장된 것이 없으면 비밀번호 없이는 만들 것이
           // 없다. 반대로 이미 있으면 계정만 바꾸는 것도 교체다(비밀번호는 아래에서 잇는다).
           const hasReplacement = Boolean(
-            password || (previousSecret && (username || domain)),
+            password || (previousSecret && (username || domain !== undefined)),
           );
           // **연결을 끊는 것은 'remove' 뿐이다.** 계정만 바꾸는 것도 교체로 받게 되면서
           // 값이 하나도 안 실린 replace 가 들어올 수 있게 됐는데(계정을 비우고 저장), 그때
@@ -8691,7 +8726,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           // 지워진다 — 비밀번호만 바꿨는데 계정이 사라지면 RDP 는 계정이 시크릿에만 있어
           // 다음 접속이 막힌다(연결 경로가 username 을 필수로 본다).
           const mergedUsername = username ?? previousSecret?.username;
-          const mergedDomain = domain ?? previousSecret?.domain;
+          // 지움(null)은 옛 값으로 되돌리지 않는다 — 위 주석의 세 갈래를 그대로 따른다.
+          const mergedDomain =
+            domain === undefined ? previousSecret?.domain : (domain ?? undefined);
           const mergedPassword = password ?? previousSecret?.password;
           const nextSecret: LoadedManagedSecretPayload | null =
             credentialMode === 'replace' && secretRef && hasReplacement

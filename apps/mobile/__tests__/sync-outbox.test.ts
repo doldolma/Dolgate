@@ -164,4 +164,25 @@ describe('sync outbox delete safety', () => {
     const rejectedKnownHost: SyncOutboxEntry = { kind: 'knownHosts', id: 'k1', op: 'delete' };
     expect([rejected, rejectedKnownHost]).toHaveLength(2);
   });
+
+  // 키(`kind:id`)로 지우면 미는 동안 같은 레코드를 다시 고친 항목까지 함께 지워진다 —
+  // 보낸 적이 없는데 큐에서 사라지므로 그 편집은 이 기기에만 남는다.
+  it("미는 동안 다시 고친 항목은 큐에 남는다", () => {
+    const first: SyncOutboxEntry = { kind: "hosts", id: "h-1", op: "upsert" };
+    let queue = enqueueSyncOutbox([], first);
+
+    // 밀기 시작(첫 항목을 들고 나간다) → 그 사이 같은 호스트를 또 고친다.
+    const second: SyncOutboxEntry = { kind: "hosts", id: "h-1", op: "upsert" };
+    queue = enqueueSyncOutbox(queue, second);
+
+    // 밀기가 끝나 첫 항목만 뺀다.
+    const remaining = removeSyncOutbox(queue, [first]);
+    expect(remaining).toEqual([second]);
+  });
+
+  it("민 항목은 큐에서 빠진다", () => {
+    const entry: SyncOutboxEntry = { kind: "hosts", id: "h-1", op: "upsert" };
+    const queue = enqueueSyncOutbox([], entry);
+    expect(removeSyncOutbox(queue, [entry])).toEqual([]);
+  });
 });

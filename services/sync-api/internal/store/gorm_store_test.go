@@ -283,6 +283,61 @@ func TestGormStoreSyncRecordsPreferNewestPayload(t *testing.T) {
 	}
 }
 
+// 시각은 **밀리초까지** 돌려줘야 한다.
+//
+// 클라이언트는 전부 JS `toISOString()`(밀리초 3자리)으로 시각을 만들고 그것을 문자열로
+// 견준다. 초 단위로 깎아 돌려주면 같은 초 안에서 순서가 뒤집혀 — 지운 직후 같은 초에 고친
+// 레코드가 "삭제보다 오래된 것" 이 되어 그 편집이 조용히 사라진다.
+func TestGormStoreSyncRecordsKeepMillisecondPrecision(t *testing.T) {
+	for _, tc := range storeTestCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := tc.open(t)
+
+			user, err := store.CreateUser(ctx, "millis@example.com", "hash")
+			if err != nil {
+				t.Fatalf("CreateUser() error = %v", err)
+			}
+
+			deletedAt := "2025-01-02T03:04:05.900Z"
+			if err := store.UpsertSyncRecords(ctx, user.ID, syncmodel.KindHosts, []syncmodel.Record{
+				{
+					ID:               "host-1",
+					EncryptedPayload: "payload",
+					UpdatedAt:        "2025-01-02T03:04:05.123Z",
+				},
+				{
+					ID:               "host-2",
+					EncryptedPayload: "gone",
+					UpdatedAt:        "2025-01-02T03:04:05.900Z",
+					DeletedAt:        &deletedAt,
+				},
+			}); err != nil {
+				t.Fatalf("UpsertSyncRecords() error = %v", err)
+			}
+
+			records, err := store.ListSyncRecords(ctx, user.ID, syncmodel.KindHosts)
+			if err != nil {
+				t.Fatalf("ListSyncRecords() error = %v", err)
+			}
+
+			byID := map[string]syncmodel.Record{}
+			for _, record := range records {
+				byID[record.ID] = record
+			}
+			if got := byID["host-1"].UpdatedAt; got != "2025-01-02T03:04:05.123Z" {
+				t.Fatalf("updated_at = %q, want millisecond precision", got)
+			}
+			if byID["host-2"].DeletedAt == nil {
+				t.Fatalf("host-2 deleted_at = nil, want tombstone")
+			}
+			if got := *byID["host-2"].DeletedAt; got != "2025-01-02T03:04:05.900Z" {
+				t.Fatalf("deleted_at = %q, want millisecond precision", got)
+			}
+		})
+	}
+}
+
 // 탈퇴(hard delete) 후 뒤늦게 도착한 push 가 삭제된 유저의 레코드를 부활시키면 안 된다.
 // postgres/mysql 은 유저 행 선잠금(lockUserRowTx)이 존재 확인을 겸해 record not found 로
 // 거부한다. sqlite 는 FOR UPDATE 미지원으로 잠금을 건너뛰어 이 보장이 store 단에 없으므로
