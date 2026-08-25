@@ -32,6 +32,7 @@ import { useResponsiveCardGrid } from '../../lib/useResponsiveCardGrid';
 import type { ParsedQuickSshCommand } from '@shared';
 import type { DesktopPlatform } from '../DesktopWindowControls';
 import { t } from '../../i18n';
+import { buildLastConnectedByHostId } from '../../lib/last-connected';
 
 export const HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX = 235;
 export const HOME_BROWSER_HOST_CARD_MAX_WIDTH_PX = 460;
@@ -604,31 +605,11 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   );
   const favoriteHostIdSet = useMemo(() => new Set(favoriteHostIds), [favoriteHostIds]);
 
-  // 활동 로그에서 호스트별 마지막 연결/활동 시각(ms). "최근 연결순" 정렬에 사용.
-  const lastConnectedByHostId = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const log of params.activityLogs ?? []) {
-      // 'audit' 은 이름 변경·자격 증명 저장 같은 편집 기록이고 그것도 metadata.hostId 를
-      // 갖는다. 종류를 가리지 않으면 호스트를 고치기만 해도 "최근 접속"이 오늘로 바뀐다.
-      if (log.category !== 'session') {
-        continue;
-      }
-      const metadata = log.metadata as { hostId?: string } | null;
-      const hostId = metadata?.hostId;
-      if (!hostId) {
-        continue;
-      }
-      const ts = Date.parse(log.createdAt);
-      if (Number.isNaN(ts)) {
-        continue;
-      }
-      const prev = map.get(hostId);
-      if (prev === undefined || ts > prev) {
-        map.set(hostId, ts);
-      }
-    }
-    return map;
-  }, [params.activityLogs]);
+  // 활동 로그에서 호스트별 마지막 연결 시각(ms). "최근 연결순" 정렬에 쓴다.
+  const lastConnectedByHostId = useMemo(
+    () => buildLastConnectedByHostId(params.activityLogs),
+    [params.activityLogs],
+  );
 
   // 검색 → 즐겨찾기 → 태그 필터 → 정렬 순으로 최종 표시 목록을 만든다.
   const visibleHosts = useMemo(() => {

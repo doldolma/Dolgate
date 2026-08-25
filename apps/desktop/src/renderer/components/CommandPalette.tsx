@@ -29,6 +29,12 @@ const GROUP_LABELS: Record<CommandPaletteItemGroup, string> = {
 };
 
 interface CommandPaletteProps {
+  /**
+   * `anchored`(기본)는 기준 요소 **아래에 떠서** 붙는다 — 검색칸 하나만 있는 화면에서 쓴다.
+   * `inline` 은 흐름 안에 그대로 놓인다 — 이미 말풍선 같은 판 안에 있을 때. 기본값으로 두면
+   * 판 밖에 또 하나의 카드가 떠서 검색칸과 목록이 따로 노는 것처럼 보인다.
+   */
+  variant?: 'anchored' | 'inline';
   items: CommandPaletteItem[];
   activeIndex: number;
   onActiveIndexChange: (index: number) => void;
@@ -36,6 +42,7 @@ interface CommandPaletteProps {
 }
 
 export function CommandPalette({
+  variant = 'anchored',
   items,
   activeIndex,
   onActiveIndexChange,
@@ -60,7 +67,12 @@ export function CommandPalette({
       id="command-palette-results"
       role="listbox"
       aria-label="Command Palette"
-      className="absolute left-0 right-0 top-[calc(100%+0.45rem)] z-[18] max-h-[min(26rem,calc(100vh-11rem))] overflow-y-auto rounded-[14px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.45rem] shadow-[var(--shadow-floating)]"
+      className={cn(
+        'max-h-[min(26rem,calc(100vh-11rem))] overflow-y-auto rounded-[14px] p-[0.45rem]',
+        variant === 'anchored'
+          ? 'absolute left-0 right-0 top-[calc(100%+0.45rem)] z-[18] border border-[var(--border)] bg-[var(--surface-strong)] shadow-[var(--shadow-floating)]'
+          : 'mt-2 p-0',
+      )}
     >
       {items.length === 0 ? (
         <div className="px-[0.75rem] py-[0.8rem] text-[0.85rem] text-[var(--text-muted)]">
@@ -70,7 +82,7 @@ export function CommandPalette({
         groupedItems.map((group) => (
           <div key={group.group} className="py-[0.15rem]">
             <div className="px-[0.55rem] pb-[0.3rem] pt-[0.45rem] text-[0.66rem] font-bold uppercase tracking-[0.14em] text-[var(--text-soft)]">
-              {GROUP_LABELS[group.group]}
+              {translate(GROUP_LABELS[group.group])}
             </div>
             <div className="grid gap-[0.15rem]">
               {group.items.map((item) => {

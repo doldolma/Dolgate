@@ -16,6 +16,7 @@ env:
 jobs:
   version-check:
     name: version check
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -35,6 +36,7 @@ jobs:
 
   root-typecheck:
     name: root typecheck
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -54,6 +56,7 @@ jobs:
 
   sync-api-test:
     name: sync-api test
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -104,6 +107,7 @@ jobs:
 
   ssh-core-test:
     name: ssh-core test (${{ matrix.os }})
+    timeout-minutes: 25
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -153,6 +157,7 @@ jobs:
   # 모듈만 쓰므로(외부 패키지 0개) 스크립트를 직접 부르면 설치가 필요 없다.
   desktop-sidecar-layout:
     name: desktop sidecar layout (${{ matrix.os }})
+    timeout-minutes: 20
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -202,6 +207,7 @@ jobs:
 
   go-hygiene:
     name: go hygiene
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -249,6 +255,7 @@ jobs:
 
   rdp-core-test:
     name: rdp-core test
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -337,6 +344,7 @@ jobs:
 
   vnc-core-test:
     name: vnc-core test
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -426,6 +434,7 @@ jobs:
   # PR 에는 이 추가 비용을 부과하지 않는다.
   rdp-core-release-cache:
     name: rdp-core release cache (${{ matrix.os }})
+    timeout-minutes: 30
     if: github.event_name == 'push'
     runs-on: ${{ matrix.os }}
     strategy:
@@ -464,6 +473,7 @@ jobs:
 
   vnc-core-release-cache:
     name: vnc-core release cache (${{ matrix.os }})
+    timeout-minutes: 30
     if: github.event_name == 'push'
     runs-on: ${{ matrix.os }}
     strategy:
@@ -502,6 +512,7 @@ jobs:
 
   desktop-test:
     name: desktop test
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -552,6 +563,7 @@ jobs:
 
   mobile-test:
     name: mobile test
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -596,6 +608,7 @@ jobs:
   # SDK·NDK·node_modules)이 그대로 재사용되므로, 잡을 새로 만드는 것보다 훨씬 싸다.
   mobile-native-check:
     name: mobile native check (Go engine + remote desktop)
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository

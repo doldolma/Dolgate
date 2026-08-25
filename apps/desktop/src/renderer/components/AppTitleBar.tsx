@@ -60,6 +60,8 @@ interface AppTitleBarProps {
    * prop 만으로 그린다) 스토어를 읽는 조각은 셸이 넣어 준다. 세션이 없으면 부르지 않는다.
    */
   renderSessionShareAction?: (sessionId: string) => ReactNode;
+  /** 마지막 탭 옆의 `+`. 새 세션을 여는 말풍선을 연다. */
+  renderNewTabAction?: () => ReactNode;
   /**
    * 계정 없이 쓰는 중임을 알리는 표시. 그 상태가 아니면 셸이 넘기지 않는다.
    *
@@ -1092,6 +1094,7 @@ export function AppTitleBar({
   onToggleSessionPanel,
   renderSessionShareAction,
   renderLocalOnlyAction,
+  renderNewTabAction,
   draggedSession,
   updateState,
   windowState,
@@ -1675,18 +1678,12 @@ export function AppTitleBar({
     ? buildTabHoverInfo(hoveredItem, tabs, hosts, tmuxGroups, workspaces, tailnetPath)
     : null;
 
-  // 오버플로우로 잘리는 끝 탭을 직각으로 자르지 않고 알파(투명도)로 부드럽게 페이드한다.
-  // overflow clip 은 사각이라 흰 활성 탭이 "깨진" 사각으로 보이는데, mask 로 색 무관하게
-  // 자연스러운 가장자리를 만든다. 더 보일 게 있는 쪽(showLeft/showRight)만 페이드.
-  const FADE = '34px';
-  const stripMaskImage =
-    showLeftTabStripFade && showRightTabStripFade
-      ? `linear-gradient(to right, transparent, #000 ${FADE}, #000 calc(100% - ${FADE}), transparent)`
-      : showRightTabStripFade
-        ? `linear-gradient(to right, #000 calc(100% - ${FADE}), transparent)`
-        : showLeftTabStripFade
-          ? `linear-gradient(to right, transparent, #000 ${FADE})`
-          : undefined;
+  // 잘리는 끝 탭은 **크롬색 덧칠 아래로 미끄러져 들어간다**(아래 fade div 둘).
+  //
+  // 예전에는 알파 마스크로 탭 자체를 투명하게 지우면서 그 위에 덧칠까지 얹어, 효과가 두 겹으로
+  // 겹쳤다 — 투명해진 흰 활성 탭 위에 반투명 크롬색이 덮여 얼룩처럼 보였고, 폭도 34px/44px 로
+  // 어긋나 경계가 두 번 생겼다. 알파로 지우면 어떤 색 탭이 걸리느냐에 따라 매번 다르게 보인다.
+  // 덧칠만 남기면 항상 같은 모양이고 "이쪽에 더 있다" 는 신호도 분명하다.
 
   return (
     <header
@@ -1810,17 +1807,24 @@ export function AppTitleBar({
             className="mx-1.5 my-[0.7rem] w-px flex-none bg-[rgba(255,255,255,0.12)]"
           />
         ) : null}
-        <div className="relative min-w-0 flex-1 self-stretch">
+        {/* `flex-1` 이 아니라 내용 폭이다(`flex-initial`).
+            남은 폭을 다 먹으면 그 오른쪽에 두는 새 탭 버튼이 탭에서 멀리 떨어져 무엇의 `+` 인지
+            읽히지 않는다. 탭이 많아지면 `min-w-0` 로 줄어들며 지금처럼 스크롤한다 — 자동 스크롤·
+            드래그 히트 테스트는 그때그때 실제 rect 와 scrollLeft 를 재므로 따라온다. */}
+        <div className="relative min-w-0 flex-initial self-stretch">
           {showLeftTabStripFade ? (
             <div
               data-testid="titlebar-tab-strip-fade-left"
-              className="pointer-events-none absolute inset-y-[0.24rem] left-[0.2rem] z-[1] w-11 rounded-l-[12px] bg-[linear-gradient(90deg,color-mix(in_srgb,var(--chrome-bg)_92%,rgba(255,255,255,0.08)_8%),transparent)]"
+              // 가장자리에 **딱 붙여 끝까지** 덮는다. 떨어뜨리거나 위아래를 비우면 그 틈으로
+              // 잘린 탭이 삐져나와 깨져 보인다. 시작색도 크롬색 그대로여야 탭이 배경 아래로
+              // 미끄러져 들어가는 것처럼 읽힌다.
+              className="pointer-events-none absolute inset-y-0 left-0 z-[1] w-11 bg-[linear-gradient(90deg,var(--chrome-bg),transparent)]"
             />
           ) : null}
           {showRightTabStripFade ? (
             <div
               data-testid="titlebar-tab-strip-fade-right"
-              className="pointer-events-none absolute inset-y-[0.24rem] right-[0.2rem] z-[1] w-11 rounded-r-[12px] bg-[linear-gradient(270deg,color-mix(in_srgb,var(--chrome-bg)_92%,rgba(255,255,255,0.08)_8%),transparent)]"
+              className="pointer-events-none absolute inset-y-0 right-0 z-[1] w-11 bg-[linear-gradient(270deg,var(--chrome-bg),transparent)]"
             />
           ) : null}
           <div
@@ -1832,7 +1836,6 @@ export function AppTitleBar({
                 ? chromeDragRegion
                 : '[-webkit-app-region:no-drag]',
             )}
-            style={{ maskImage: stripMaskImage, WebkitMaskImage: stripMaskImage }}
             onScroll={updateTitlebarTabStripFades}
             onWheel={(event) => {
               // 탭이 많아 가로 오버플로우가 있을 때, 마우스 세로 휠을 가로 스크롤로
@@ -2200,6 +2203,15 @@ export function AppTitleBar({
         ) : null}
           </div>
         </div>
+        {/* 마지막 탭 옆의 새 탭 버튼.
+            **탭 스크롤 컨테이너 밖**이다. 안에 두면 그 폭이 콘텐츠에 더해져, 탭이 다 보이는데도
+            "더 볼 게 있다" 로 잡혀 끝이 페이드된다(마지막 탭이 이유 없이 흐려졌다). 말풍선이
+            `overflow-y-hidden` 에 잘리는 문제도 있어 그쪽은 portal 로 뺐다(NewTabButton). */}
+        {renderNewTabAction ? (
+          <div className="flex flex-none items-center self-center mb-[0.42rem] pl-1">
+            {renderNewTabAction()}
+          </div>
+        ) : null}
       </div>
       {/* ② 우측 드래그 존: 탭과 컨트롤 사이 빈 공간. self-stretch 로 헤더 높이를 채워
           실제 드래그 면적을 갖고(0-height 버그 방지), min-w-16 으로 탭이 많아도 종 옆에

@@ -48,6 +48,7 @@ export function ShortcutsDialog({
     {
       title: translate('shortcuts.group.tabs'),
       items: [
+        { label: translate('shortcuts.item.newTab'), keys: [cmd, 'T'] },
         { label: translate('shortcuts.item.nextTab'), keys: mac ? ['⌘', '⌥', '→'] : ['Ctrl', 'Tab'] },
         { label: translate('shortcuts.item.prevTab'), keys: mac ? ['⌘', '⌥', '←'] : ['Ctrl', 'Shift', 'Tab'] },
         { label: translate('shortcuts.item.tab1to8'), keys: [cmd, '1…8'] },

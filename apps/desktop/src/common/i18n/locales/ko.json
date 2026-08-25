@@ -747,7 +747,9 @@
       "close": "{{title}} 닫기",
       "closeThisWindowTooltip": "이 창 닫기 — 이 tmux window 만 닫습니다. 세션 전체는 하단 바의 Detach/Kill 을 쓰세요.",
       "selectSession": "{{title}} 세션으로 이동"
-    }
+    },
+    "newTab": "새 탭",
+    "newTabSearch": "호스트 검색"
   },
   "aws": {
     "ssm": {
@@ -2257,6 +2259,7 @@
       "newWindow": "새 창",
       "searchHosts": "호스트 검색",
       "find": "검색 / 찾기",
+      "newTab": "새 탭 (호스트 검색)",
       "nextTab": "다음 탭",
       "prevTab": "이전 탭",
       "tab1to8": "1~8번째 탭",

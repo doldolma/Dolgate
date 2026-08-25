@@ -4,6 +4,7 @@ import type { AuthState, DesktopWindowState, UpdateState } from '@shared';
 import { AppTitleBar } from '../components/AppTitleBar';
 import { cn } from '../lib/cn';
 import { useAppStore } from '../store/appStore';
+import { BOOTSTRAP_TERMINAL_SIZE } from '../components/terminal-resize';
 import { titleBarMode } from '../components/useTitleBarAutoHide';
 import {
   resolveSpreadTarget,
@@ -27,6 +28,8 @@ import { SftpShell } from './SftpShell';
 import { SessionShareChromeButton } from '../components/terminal-workspace/SessionShareChromeButton';
 import { LocalOnlyChromeButton } from '../components/LocalOnlyChromeButton';
 import { LoginDialog } from '../components/LoginDialog';
+import { NewTabButton } from '../components/NewTabButton';
+import { buildLastConnectedByHostId } from '../lib/last-connected';
 import { isLocalOnlyAuthState } from '../lib/local-only';
 import {
   type DraggedSessionPayload,
@@ -72,6 +75,31 @@ export function AppShell({
   // 계정 없이 쓰는 중 로그인하는 길이 두 곳(상단 바 표시·공유 안내)이라 창은 여기서 하나만
   // 연다 — 자리마다 로그인 판을 만들면 오류 표시·서버 설정이 곳곳에 복제된다.
   const isLocalOnly = isLocalOnlyAuthState(authState);
+  // ⌘T 는 값을 하나 올려 말풍선에 "열어라" 를 알린다. 상태를 여기서 들고 있으면 단축키가 눌릴
+  // 때마다 상단 바 전체가 다시 그려진다.
+  const [newTabOpenSignal, setNewTabOpenSignal] = useState(0);
+  const activityLogs = useAppStore((state) => state.activityLogs);
+  const lastConnectedByHostId = useMemo(
+    () => buildLastConnectedByHostId(activityLogs),
+    [activityLogs],
+  );
+
+  // 새 탭 단축키는 **전역**이다. 홈의 호스트 검색(⌘K)이 Hosts 화면에서만 듣는 것과 다르다 —
+  // 새 탭은 앱 단위 동작이고, 터미널 안에서 ⌘T 를 쓰는 프로그램은 드물다.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) {
+        return;
+      }
+      if (event.key !== 't' && event.key !== 'T') {
+        return;
+      }
+      event.preventDefault();
+      setNewTabOpenSignal((current) => current + 1);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
   const [isLoginDialogOpen, setIsLoginDialogOpen] = useState(false);
   const [draggedSession, setDraggedSession] = useState<DraggedSessionPayload | null>(
     null,
@@ -210,6 +238,26 @@ export function AppShell({
               sessionId={sessionId}
               isLocalOnly={isLocalOnly}
               onRequestLogin={() => setIsLoginDialogOpen(true)}
+            />
+          )}
+          renderNewTabAction={() => (
+            <NewTabButton
+              hosts={homeViewModel.hosts}
+              lastConnectedByHostId={lastConnectedByHostId}
+              onConnectHost={(hostId) =>
+                void homeViewModel.connectHost(
+                  hostId,
+                  BOOTSTRAP_TERMINAL_SIZE.cols,
+                  BOOTSTRAP_TERMINAL_SIZE.rows,
+                )
+              }
+              onOpenLocalTerminal={() =>
+                void homeViewModel.openLocalTerminal(
+                  BOOTSTRAP_TERMINAL_SIZE.cols,
+                  BOOTSTRAP_TERMINAL_SIZE.rows,
+                )
+              }
+              openSignal={newTabOpenSignal}
             />
           )}
           renderLocalOnlyAction={

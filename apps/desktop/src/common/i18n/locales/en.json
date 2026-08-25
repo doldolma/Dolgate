@@ -747,7 +747,9 @@
       "close": "Close {{title}}",
       "closeThisWindowTooltip": "Close this window — closes only this tmux window. Use Detach/Kill in the bottom bar for the whole session.",
       "selectSession": "Go to the {{title}} session"
-    }
+    },
+    "newTab": "New tab",
+    "newTabSearch": "Search hosts"
   },
   "aws": {
     "ssm": {
@@ -2257,6 +2259,7 @@
       "newWindow": "New window",
       "searchHosts": "Search hosts",
       "find": "Search / find",
+      "newTab": "New tab (search hosts)",
       "nextTab": "Next tab",
       "prevTab": "Previous tab",
       "tab1to8": "Tabs 1–8",
