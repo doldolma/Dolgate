@@ -2,6 +2,7 @@ import type { TerminalConnectionProgress } from "@shared";
 import {
   getConnectionFailureReason,
   type ConnectionFailureCode,
+  type ConnectionFailureSignals,
 } from "@dolssh/shared-core";
 import { t } from '../../i18n';
 
@@ -57,7 +58,10 @@ function extractDialTarget(message: string): string {
   // 연결 시도 실패는 "dial tcp HOST:PORT", 핸드셰이크 중 리셋 등은
   // "read/write tcp LOCAL->REMOTE" 형태로 남는다. 둘 다에서 원격 엔드포인트를 뽑아
   // 어떤 호스트에서 끊겼는지 보여준다(기존엔 dial tcp만 봐서 리셋은 제네릭으로 폴백됐다).
-  const dial = /\bdial tcp (\[[^\]]+\]|[^:\s]+):(\d+)/iu.exec(message);
+  //
+  // tailnet 을 경유하면 gvisor netstack 이 "connect tcp" 라고 쓴다 — 같은 dial 인데 낱말이 달라서,
+  // 이것을 안 받으면 주소를 못 읽어 "대상 호스트" 라는 제네릭 문구로 떨어진다.
+  const dial = /\b(?:dial|connect) tcp (\[[^\]]+\]|[^:\s]+):(\d+)/iu.exec(message);
   if (dial) {
     return `${dial[1]}:${dial[2]}`;
   }
@@ -83,6 +87,11 @@ function extractProbeHostIdentity(
 
 export function resolveConnectionFailurePresentation(
   message: string,
+  /**
+   * 코어가 이벤트에 실어 보낸 원인 코드. 이벤트를 손에 든 자리(runtimeEventSlice)만 넘길 수 있고,
+   * 문자열만 남은 자리는 생략한다 — 코어가 문구도 정규화해 올리므로 그쪽도 판정은 된다.
+   */
+  signals?: ConnectionFailureSignals,
 ): ConnectionFailurePresentation {
   const normalized = normalizeRemoteInvokeErrorMessage(message);
   const dialTarget = extractDialTarget(normalized);
@@ -126,7 +135,7 @@ export function resolveConnectionFailurePresentation(
   // 여기부터의 분류는 shared-core 의 getConnectionFailureReason 이 한다 — 모바일도 같은
   // 규칙을 써야 해서 코드만 돌려받고 문구는 이 앱이 붙인다. 규칙을 두 벌로 두면 한쪽만
   // 고쳐진다.
-  const reason = getConnectionFailureReason(normalized);
+  const reason = getConnectionFailureReason(normalized, signals);
 
   /**
    * 서버가 인증 단계에 보낸 배너가 실패 문구에 실려 있으면 그 **원문**을 함께 보여준다.
@@ -179,6 +188,8 @@ export function resolveConnectionFailurePresentation(
       reason.awsAction
         ? t('connectFailure.awsPermissionAction', { action: reason.awsAction })
         : t('connectFailure.awsPermission'),
+    // 이름을 못 찾은 것은 경로가 없는 것과 할 일이 다르다 — 주소를 다시 보게 해야 한다.
+    "dns-unresolved": () => t('connectFailure.dnsUnresolved', { target }),
     "no-route": () => t('connectFailure.noRoute', { target }),
     refused: () => t('connectFailure.refused', { target }),
     timeout: () => t('connectFailure.timeout', { target }),
@@ -212,6 +223,29 @@ export function resolveConnectionFailurePresentation(
       withoutServerNotice || t('connectFailure.generic'),
     ),
   };
+}
+
+/**
+ * invoke 경로의 **연결 실패**를 사용자에게 보여 줄 한 줄로 바꾼다.
+ *
+ * **언제 이것을 쓰나:** IPC 요청이 거절로 끝났고(`api.sftp.connect` 등), 그 문구를 담을 상태
+ * 필드가 연결 실패만 담는 필드가 **아닐** 때. 그 필드에는 권한·경로·코어 무응답이 함께 들어오므로
+ * 화면에서 일괄로 접을 수 없다 — 연결 실패 어휘를 씌우면 방향이 틀린 안내가 된다("Timed out
+ * waiting for SSH core response" 를 "호스트가 응답하지 않습니다" 로 바꿔 버린다. 응답을 안 한 것은
+ * 로컬 코어다).
+ *
+ * **반대 경우:** 필드가 연결 실패만 담으면(터미널 탭, 컨테이너 탭, RDP 오버레이) 상태에는 **원문을
+ * 담고** 화면이 resolveConnectionFailurePresentation 을 부르는 쪽이 낫다 — 자동 재연결·자격증명
+ * 판정처럼 원문을 봐야 하는 곳이 남기 때문이다.
+ *
+ * 제목이나 실패 계층까지 필요하면 이 함수 대신 resolveConnectionFailurePresentation 을 직접 쓴다.
+ */
+export function connectFailureCopy(
+  error: unknown,
+  signals?: ConnectionFailureSignals,
+): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return resolveConnectionFailurePresentation(message, signals).message;
 }
 
 export function createConnectionProgress(

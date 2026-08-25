@@ -6,6 +6,7 @@ import { ModalShell } from '../ui';
 import { useAppStore } from '../store/appStore';
 import { resolveConnectionStages } from './terminal-workspace/connectionStages';
 import { resolveConnectionFailurePresentation } from '../store/utils';
+import { resolveHostTailnetId } from '../lib/host-tailnet';
 import type { HostRecord } from '@shared';
 
 interface ConnectionProgressModalProps {
@@ -42,6 +43,8 @@ export function ConnectionProgressModal({
   const { t: translate } = useTranslation();
   const view = useAppStore((state) => state.connectionViews[connectionKey] ?? null);
   const tailnetStatuses = useAppStore((state) => state.tailnetStatuses);
+  // 첫 홉을 찾는 데 쓴다(점프 체인에서 tailnet 을 타는 것은 그 홉이다).
+  const hosts = useAppStore((state) => state.hosts);
   /**
    * 사람에게 묻는 중이면 이 팝업은 내려간다.
    *
@@ -58,8 +61,10 @@ export function ConnectionProgressModal({
       ) || state.pendingHostKeyPrompt != null,
   );
 
-  const tailnetId =
-    host && 'tailnetId' in host ? (host.tailnetId ?? null) : null;
+  // 관문·터미널 오버레이와 같은 판정을 쓴다. 대상의 tailnetId 만 읽으면 "점프 호스트에만
+  // tailnet" 구성에서 tailnet 계층이 통째로 안 그려져, 노드가 올라오는 동안 이유 없는
+  // "연결 중…" 만 남는다.
+  const tailnetId = resolveHostTailnetId(host ?? undefined, hosts);
   const tailnetStatus = tailnetId ? tailnetStatuses[tailnetId] : undefined;
 
   const stages = useMemo(

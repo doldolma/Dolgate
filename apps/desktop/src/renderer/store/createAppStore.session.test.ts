@@ -1511,6 +1511,90 @@ describe("createAppStore sessions and auth recovery", () => {
     expect(store.getState().pendingHostKeyPrompt).toBeNull();
   });
 
+  /**
+   * 연결 중 뜨는 신뢰 물음은 **연결 중인 호스트의 hostId** 를 실어 보낸다.
+   *
+   * 실기기에서 "저장해도 매번 다시 묻는" 건의 원인이다. 메인은 이 hostId 로 tailnet 범위를 정하고
+   * (렌더러가 범위를 주장하게 두면 우회 경로가 되므로 그 규칙은 그대로 둔다), 연결은 그 범위로
+   * known_hosts 를 조회한다. 그래서 hostId 가 비거나 다른 호스트를 가리키면 범위가 어긋나
+   * **저장은 되는데 다음 연결이 못 찾는다.**
+   *
+   * 예전에는 홉 **주소**로만 호스트를 찾았다. 한 주소에 호스트 레코드가 둘이면(하나는 tailnet 이
+   * 걸리고 하나는 안 걸린 채로) 목록에서 먼저 나온 쪽을 집는다. 이제 탭의 호스트를 먼저 본다.
+   */
+  it("연결 중인 호스트의 hostId·라벨로 신뢰를 저장한다", async () => {
+    const api = createMockApi();
+    const sharedAddress = { hostname: "10.0.0.9", port: 22 };
+    const baseHost = {
+      kind: "ssh" as const,
+      username: "ubuntu",
+      authType: "password" as const,
+      privateKeyPath: null,
+      groupName: "Servers",
+      terminalThemeId: null,
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+    };
+    // 목록 순서가 중요하다 — 주소로 찾으면 tailnet 이 없는 `temp` 가 먼저 걸린다.
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        ...baseHost,
+        ...sharedAddress,
+        id: "host-temp",
+        // 라벨을 앞에 오게 둔다 — 스토어가 라벨 순으로 정렬하므로 주소 검색이 이쪽을 먼저 집는다.
+        label: "alpha",
+        secretRef: "host:host-temp",
+        tailnetId: null,
+      },
+      {
+        ...baseHost,
+        ...sharedAddress,
+        id: "host-1",
+        label: "beta",
+        secretRef: "host:host-1",
+        tailnetId: "tailnet-a",
+      },
+    ]);
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+    const sessionId = store.getState().tabs[0]?.sessionId;
+
+    store.getState().handleCoreEvent({
+      type: "hostKeyTrustChallenge",
+      sessionId: sessionId!,
+      payload: {
+        challengeId: "hostkey-trust-scope",
+        hop: { username: "ubuntu", host: sharedAddress.hostname, port: sharedAddress.port },
+        algorithm: "ssh-ed25519",
+        fingerprintSha256: "SHA256:scope",
+        publicKeyBase64: "AAAASCOPE",
+        mismatch: false,
+      },
+    });
+
+    // 라벨도 연결 중인 호스트의 것이어야 한다 — `temp` 로 물으면 사용자는 다른 서버로 읽는다.
+    expect(store.getState().pendingHostKeyPrompt?.probe.hostLabel).toBe("beta");
+    expect(store.getState().pendingHostKeyPrompt?.probe.hostId).toBe("host-1");
+
+    await store.getState().acceptPendingHostKeyPrompt("trust");
+
+    // 이것이 이 건의 핵심이다. hostId 가 `host-temp` 나 "" 로 가면 메인이 범위를 잘못(또는
+    // 없이) 정하고, 다음 연결이 그 키를 못 찾아 또 묻는다.
+    expect(api.knownHosts.trust).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostId: "host-1",
+        host: "10.0.0.9",
+        port: 22,
+      }),
+    );
+    // 범위는 렌더러가 주장하지 않는다 — 메인이 hostId 로 정한다(우회 방지).
+    expect(api.knownHosts.trust).toHaveBeenCalledWith(
+      expect.not.objectContaining({ tailnetId: expect.anything() }),
+    );
+  });
+
   // 거절하면 코어에 알려야 그 연결이 끝난다. 안 알리면 코어가 계속 기다린다.
   it("tells the core when the host key is declined", async () => {
     const api = createMockApi();

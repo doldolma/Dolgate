@@ -49,6 +49,37 @@ describe("classifyReconnect", () => {
     );
   });
 
+  // 윈도우의 OS 소켓은 winsock 문구로 끊긴다 — "connection reset/refused" 같은 표현이 없어
+  // 리눅스·gvisor 패턴에 하나도 안 걸렸고, unknown 이면 자동 재연결이 아예 안 걸린다.
+  it("treats winsock wording from Windows drops as transient", () => {
+    for (const message of [
+      "read tcp 10.0.0.5:51920->192.168.200.4:22: wsarecv: An existing connection was forcibly closed by the remote host.",
+      "write tcp 10.0.0.5:51920->192.168.200.4:22: wsasend: An established connection was aborted by the software in your host machine.",
+      "dial tcp 192.168.200.4:22: connectex: No connection could be made because the target machine actively refused it.",
+      "dial tcp 192.168.200.4:22: connectex: A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.",
+      "dial tcp 192.168.200.4:22: connectex: A socket operation was attempted to an unreachable host.",
+    ]) {
+      expect(classifyReconnect(message)).toBe("transient");
+    }
+  });
+
+  // 소켓 원인 판정은 shared-core 한 벌이 한다. 이 테스트는 그 위임이 살아 있는지를 본다 —
+  // 목록을 각자 들고 있던 시절에 윈도우 문구 계통을 통째로 놓쳐서 자동 재연결이 안 걸렸다.
+  it("delegates socket causes to the shared classifier", () => {
+    for (const message of [
+      "read tcp 10.0.0.5:51920->192.168.200.4:22: wsarecv: An existing connection was forcibly closed by the remote host.",
+      "write tcp 10.0.0.5:22: broken pipe",
+      "connect tcp 100.112.69.93:9989: connection was refused",
+      "dial tcp 192.168.200.4:22: connect: connection refused",
+    ]) {
+      expect(classifyReconnect(message)).toBe("transient");
+    }
+    // 이름이 틀린 것은 다시 붙어도 같다 — 주소를 고치는 것이 할 일이라 재연결 대상이 아니다.
+    expect(classifyReconnect("dial tcp: lookup nas.local: no such host")).toBe(
+      "unknown",
+    );
+  });
+
   it("treats ssh-core exit as transient (debounced upstream)", () => {
     expect(classifyReconnect("SSH core exited (code=1)")).toBe("transient");
     expect(isCoreExitedMessage("SSH core exited (code=1)")).toBe(true);

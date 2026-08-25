@@ -978,3 +978,42 @@ describe("registerSshIpcHandlers", () => {
     expect(ctx.coreManager.connectAwsSession).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * 완성 질의의 실패는 IPC 의 실패가 아니다. 거부로 보내면 렌더러가 제대로 받아 물러나는
+ * 경우까지 Electron 이 메인 로그에 "Error occurred in handler for 'ssh:completion-query'" 로
+ * 찍는다 — 보조 채널을 세션 패널의 폴링들이 나눠 쓰는 이상 차례를 놓치는 일은 정상적으로
+ * 생기고, 그때마다 오류가 쌓이면 진짜 문제를 덮는다.
+ */
+describe("ssh:completion-query", () => {
+  it("성공하면 stdout 을 담아 돌려준다", async () => {
+    const ctx = createContext();
+    ctx.coreManager.queryCompletion = vi.fn().mockResolvedValue("one\ntwo\n");
+    registerSshIpcHandlers(ctx);
+
+    const handler = ipcHandlers.get(ipcChannels.ssh.completionQuery);
+    await expect(
+      handler?.(null, "session-1", "docker ps -a", { background: true }),
+    ).resolves.toEqual({ stdout: "one\ntwo\n" });
+    expect(ctx.coreManager.queryCompletion).toHaveBeenCalledWith(
+      "session-1",
+      "docker ps -a",
+      { background: true },
+    );
+  });
+
+  it("실패해도 거부하지 않고 결과에 담아 알린다", async () => {
+    const ctx = createContext();
+    ctx.coreManager.queryCompletion = vi
+      .fn()
+      .mockRejectedValue(new Error("completion lane busy"));
+    registerSshIpcHandlers(ctx);
+
+    const handler = ipcHandlers.get(ipcChannels.ssh.completionQuery);
+    const result = await handler?.(null, "session-1", "docker ps -a", {
+      background: true,
+    });
+    expect(result).toMatchObject({ stdout: "", failed: true });
+    expect(result.message).toContain("completion lane busy");
+  });
+});

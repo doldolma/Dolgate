@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  connectFailureCopy,
   normalizeRemoteInvokeErrorMessage,
   resolveConnectionFailurePresentation,
 } from "./errors-and-prompts";
@@ -65,6 +66,136 @@ describe("resolveConnectionFailurePresentation", () => {
         "dial tcp 100.64.0.2:22: host is down",
       ).message,
     ).not.toContain("host is down");
+  });
+
+  // 윈도우의 OS 소켓 dial 은 winsock 오류를 FormatMessage 가 풀어 쓴 문장으로 온다 — 세 번째
+  // 문구 계통이다. "connection refused" 같은 표현이 한 번도 등장하지 않아 리눅스·gvisor 패턴에
+  // 하나도 걸리지 않고, 놓치면 unknown 으로 떨어져 영어 원문이 다이얼로그에 그대로 떴다.
+  // (포트를 옮긴 sshd 에 예전 포트로 붙었을 때 실제로 본 문구다.)
+  it("presents winsock wording from Windows dials", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "dial failed: dial tcp 192.168.200.4:22: connectex: No connection could be made because the target machine actively refused it.",
+      ),
+    ).toEqual({
+      title: "Connection Failed",
+      message: "192.168.200.4:22에서 연결을 거부했습니다.",
+    });
+    expect(
+      resolveConnectionFailurePresentation(
+        "dial failed: dial tcp 192.168.200.4:22: connectex: A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.",
+      ).message,
+    ).toBe("192.168.200.4:22 연결 시간이 초과되었습니다.");
+    expect(
+      resolveConnectionFailurePresentation(
+        "dial failed: dial tcp 192.168.200.4:22: connectex: A socket operation was attempted to an unreachable host.",
+      ).message,
+    ).toBe(
+      "192.168.200.4:22에 연결할 수 없습니다. 현재 네트워크에서 해당 호스트로 가는 경로가 없습니다.",
+    );
+    expect(
+      resolveConnectionFailurePresentation(
+        "read tcp 10.0.0.5:51920->192.168.200.4:22: wsarecv: An existing connection was forcibly closed by the remote host.",
+      ).message,
+    ).toBe("192.168.200.4:22 연결이 중간에 끊겼습니다.");
+    expect(
+      resolveConnectionFailurePresentation(
+        "write tcp 10.0.0.5:51920->192.168.200.4:22: wsasend: An established connection was aborted by the software in your host machine.",
+      ).message,
+    ).toBe("192.168.200.4:22 연결이 중간에 끊겼습니다.");
+  });
+
+  // 코어가 OS 문구를 정경 문구로 접어 올린다(ssh-core 의 internal/neterr, 두 Rust 코어의
+  // core_framing::neterr). 그 결과 문장은 "connection refused: <원문>" 꼴이 되는데, 접두사가
+  // 붙었다고 더 구체적인 판정을 잃으면 안 된다 — tailnet·취소 규칙이 여전히 이긴다.
+  it("reads core-normalized wording without losing the more specific verdict", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "connection refused: dial failed: dial tcp 192.168.200.4:22: connectex: No connection could be made because the target machine actively refused it.",
+      ).message,
+    ).toBe("192.168.200.4:22에서 연결을 거부했습니다.");
+    // 코어가 socket 원인을 붙였어도 tailnet 이 알려 준 원인이 더 확실하다.
+    const tailnet = resolveConnectionFailurePresentation(
+      "connection refused: dial failed: this tailnet is not connected yet",
+    );
+    expect(tailnet.kind).toBe("tailscale-auth");
+    expect(tailnet.layer).toBe("tailscale");
+    // 사용자가 답을 안 한 것은 타임아웃이 아니다 — 다시 시도해도, 자격증명을 다시 넣어도 같다.
+    expect(
+      resolveConnectionFailurePresentation(
+        "i/o timeout: begin connection: no answer came back in time",
+      ).message,
+    ).not.toContain("시간이 초과");
+  });
+
+  // SFTP 패널이 IPC 거절을 그대로 보여 주던 자리. 접두사("Error invoking remote method …")와
+  // Go 문장이 사용자에게 노출됐고, tailnet 경유 실패는 gvisor 가 "connect tcp" 라고 써서 주소도
+  // 못 읽혔다 — 실제로 본 문장이다.
+  it("presents a tailnet-routed sftp refusal with the address", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "Error invoking remote method 'sftp:connect': Error: connection refused: tailnet 경유 연결 실패: connect tcp 100.75.145.89:22: connection was refused",
+      ),
+    ).toEqual({
+      title: "Connection Failed",
+      message: "100.75.145.89:22에서 연결을 거부했습니다.",
+    });
+  });
+
+  // 코어는 문구와 함께 **원인 코드**도 올린다(ErrorPayload.failure). 문구를 처음 보는 경우에도
+  // 원인을 알 수 있어야 하기 때문이다 — Rust 코어(RDP·VNC)는 OS 문구를 영어로 강제하지 않아서
+  // 한국어 윈도우에서는 이런 문장이 올라온다.
+  it("falls back to the cause code when the wording is unfamiliar", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "connect: TCP connect: 대상 컴퓨터에서 연결을 거부했으므로 연결하지 못했습니다. (os error 10061)",
+        { failure: "refused" },
+      ).message,
+    ).toBe("대상 호스트에서 연결을 거부했습니다.");
+    // 코드가 없으면 예전처럼 원문을 남긴다 — 뭉뚱그린 문구로 덮으면 단서가 사라진다.
+    expect(
+      resolveConnectionFailurePresentation(
+        "connect: TCP connect: 대상 컴퓨터에서 연결을 거부했으므로 연결하지 못했습니다. (os error 10061)",
+      ).message,
+    ).toContain("os error 10061");
+  });
+
+  // **문구가 코드보다 먼저다.** 코어가 싣는 코드는 소켓 계층의 원인이고, 문장에는 그보다 구체적인
+  // 원인이 들어 있을 수 있다 — 그것을 "연결이 거부됐습니다" 로 덮으면 할 일이 사라진다.
+  it("keeps the more specific verdict when a cause code disagrees", () => {
+    const tailnet = resolveConnectionFailurePresentation(
+      "dial failed: this tailnet is not connected yet",
+      { failure: "refused" },
+    );
+    expect(tailnet.kind).toBe("tailscale-auth");
+    const hostKey = resolveConnectionFailurePresentation(
+      "host key is not trusted yet",
+      { failure: "reset" },
+    );
+    expect(hostKey.title).toBe("Host Key Not Trusted");
+  });
+
+  // 모르는 코드는 쓰지 않는다 — 새 코어가 우리가 모르는 코드를 실어 보내도 추측하지 않는다.
+  it("ignores a cause code it does not know", () => {
+    expect(
+      resolveConnectionFailurePresentation("무슨 일이 났는지 모르는 문장", {
+        failure: "quantum-collapse",
+      }).message,
+    ).toBe("무슨 일이 났는지 모르는 문장");
+  });
+
+  // 이름을 못 찾은 것은 경로가 없는 것과 할 일이 다르다 — 주소·DNS 를 봐야 한다.
+  it("tells an unresolved name apart from an unreachable host", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "dial failed: dial tcp: lookup nas.local: no such host",
+      ).message,
+    ).toContain("주소를 찾을 수 없습니다");
+    expect(
+      resolveConnectionFailurePresentation(
+        "dial failed: dial tcp 192.168.200.4:22: connectex: No such host is known.",
+      ).message,
+    ).toContain("주소를 찾을 수 없습니다");
   });
 
   // rdp-core 의 문장이 "timed out waiting for the certificate decision" 이라, timeout 규칙에
@@ -294,5 +425,36 @@ describe("resolveConnectionFailurePresentation", () => {
         "ssh-agent connection failed: dial unix /tmp/agent.sock: connect: no such file or directory",
       ).message,
     ).toBe("SSH 에이전트에 연결하지 못했습니다. 에이전트가 실행 중인지 확인해 주세요.");
+  });
+});
+
+// invoke 경로(IPC 거절)의 연결 실패를 담을 자리가 연결 실패만 담는 필드가 아닐 때 쓰는 헬퍼.
+// SFTP 패널이 그런 자리다 — 이름이 곧 "여기서 접는다" 는 규칙이다.
+describe("connectFailureCopy", () => {
+  it("folds an IPC rejection into user-facing copy", () => {
+    expect(
+      connectFailureCopy(
+        new Error(
+          "Error invoking remote method 'sftp:connect': Error: connection refused: tailnet 경유 연결 실패: connect tcp 100.75.145.89:22: connection was refused",
+        ),
+      ),
+    ).toBe("100.75.145.89:22에서 연결을 거부했습니다.");
+  });
+
+  it("takes a plain string and a core cause code too", () => {
+    expect(
+      connectFailureCopy(
+        "connect: TCP connect: 대상 컴퓨터에서 연결을 거부했으므로 연결하지 못했습니다. (os error 10061)",
+        { failure: "refused" },
+      ),
+    ).toBe("대상 호스트에서 연결을 거부했습니다.");
+  });
+
+  // 분류할 수 없는 실패는 원문을 남긴다 — 뭉뚱그린 문구로 덮으면 단서가 사라진다.
+  it("leaves an unclassified failure as its own sentence", () => {
+    expect(connectFailureCopy(new Error("sftp: 무슨 일인지 모를 실패"))).toBe(
+      "sftp: 무슨 일인지 모를 실패",
+    );
+    expect(connectFailureCopy(undefined)).toBe("연결을 완료하지 못했습니다.");
   });
 });

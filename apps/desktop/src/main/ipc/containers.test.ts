@@ -431,4 +431,92 @@ describe("registerContainersIpcHandlers", () => {
       "containers:aws-host-1",
     );
   });
+
+  // 컨테이너 목록·로그는 tailnet 을 타는데 셸만 안 타던 시절이 있었다. 밖에서 보면 목록이
+  // 잘 뜨니 tailnet 은 멀쩡해 보이고, 셸만 "연결할 수 없음" 으로 끝나거나(tailnet 안에만 있는
+  // 호스트) 조용히 공개망으로 나갔다(이름이 밖에서도 풀리는 호스트).
+  it("routes a plain SSH container shell through the host's tailnet", async () => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+      handlers.set(channel, handler);
+    });
+
+    const host = {
+      id: "host-1",
+      kind: "ssh" as const,
+      label: "Prod",
+      hostname: "prod.example.ts.net",
+      port: 22,
+      username: "deploy",
+      authType: "password" as const,
+      tailnetId: "net-a",
+    };
+    const connect = vi.fn().mockResolvedValue({ sessionId: "session-1" });
+    const resolveTailnetRoute = vi.fn().mockReturnValue({
+      tailnetId: "net-a",
+      tailnetName: "example.ts.net",
+    });
+    const resolveTrustedHostKeys = vi.fn().mockReturnValue(["AAAATEST"]);
+
+    registerContainersIpcHandlers({
+      hosts: { getById: vi.fn().mockReturnValue(host) },
+      assertSftpCompatibleHost: vi.fn(),
+      buildContainersEndpointId: vi.fn(
+        (hostId: string) => `containers:${hostId}`,
+      ),
+      ensureContainersEndpoint: vi.fn().mockResolvedValue({
+        endpointId: "containers:host-1",
+        runtime: "docker",
+        runtimeCommand: "/usr/bin/docker",
+        unsupportedReason: null,
+        hydratedHost: null,
+      }),
+      buildContainerShellCommand: vi
+        .fn()
+        .mockReturnValue("/usr/bin/docker exec -it container-1 /bin/sh"),
+      resolveTrustedHostKeys,
+      requireConfiguredSshUsername: vi.fn().mockReturnValue("deploy"),
+      resolveRuntimeSshSecrets: vi.fn().mockResolvedValue({
+        secrets: { password: "pw" },
+        shouldPersistHostSecret: false,
+      }),
+      ensureCertificateAuthReady: vi.fn().mockResolvedValue(null),
+      resolveJumpHostTarget: vi.fn().mockResolvedValue(undefined),
+      resolveTailnetRoute,
+      coreManager: {
+        connect,
+        runWithSessionOwner: vi.fn(
+          (_ownerWebContentsId: number, action: () => Promise<unknown>) =>
+            action(),
+        ),
+        assertContainerSubscriber: vi.fn(),
+      },
+      pendingSessionSecrets: new Map(),
+    } as any);
+
+    const handler = handlers.get(ipcChannels.containers.openShell);
+    expect(handler).toBeTypeOf("function");
+    if (!handler) {
+      throw new Error("expected containers.openShell handler to be registered");
+    }
+
+    await expect(
+      handler({ sender: { id: 91 } }, "host-1", "container-1"),
+    ).resolves.toEqual({ sessionId: "session-1" });
+
+    expect(connect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: "prod.example.ts.net",
+        command: "/usr/bin/docker exec -it container-1 /bin/sh",
+        transport: "ssh",
+        tailnetId: "net-a",
+        tailnetName: "example.ts.net",
+      }),
+    );
+    // dial 경로와 신뢰 범위가 같은 호스트 레코드에서 나와야 한다. 한쪽만 tailnet 을 타면
+    // 공개망에서 받은 키가 tailnet 범위에 저장되고, 그 뒤로는 진짜 tailnet 연결이 그것을
+    // 신뢰한다.
+    expect(resolveTailnetRoute).toHaveBeenCalledWith(host);
+    expect(resolveTrustedHostKeys).toHaveBeenCalledWith(host);
+  });
 });

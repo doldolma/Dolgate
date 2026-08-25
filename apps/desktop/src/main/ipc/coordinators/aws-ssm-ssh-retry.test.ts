@@ -11,6 +11,25 @@ describe("AWS SSM SSH retry policy", () => {
     );
   });
 
+  // 터널이 다 열리기 전 첫 dial 은 localhost 가 거부한다 — 윈도우에서는 그 문구가 winsock
+  // 문장으로 와서 재시도가 안 걸렸고, 사용자가 Retry 를 눌러야 했다.
+  it("treats the winsock refusal from a not-yet-open tunnel as transient", () => {
+    expect(
+      isTransientAwsSsmSshError(
+        new Error(
+          "dial failed: dial tcp 127.0.0.1:52341: connectex: No connection could be made because the target machine actively refused it.",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      isTransientAwsSsmSshError(
+        new Error(
+          "read tcp 127.0.0.1:52341: wsarecv: An existing connection was forcibly closed by the remote host.",
+        ),
+      ),
+    ).toBe(true);
+  });
+
   it("does not retry authentication or algorithm negotiation failures", () => {
     expect(
       isTransientAwsSsmSshError(

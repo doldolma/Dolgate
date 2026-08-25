@@ -130,6 +130,7 @@ export function toHostDraft(record: HostRecord, label: string): HostDraft {
       viewOnly: record.viewOnly ?? null,
       tailnetId: record.tailnetId ?? null,
       sshTunnelHostId: record.sshTunnelHostId ?? null,
+      imageQuality: record.imageQuality ?? null,
     };
   }
 

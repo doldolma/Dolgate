@@ -1593,7 +1593,21 @@ export interface DesktopApi {
     installShellIntegration: (sessionId: string) => Promise<void>;
     /** shell 은 렌더러가 실행된 명령에서 알아낸 셸 이름(모르면 생략). */
     reinjectShellIntegration: (sessionId: string, shell?: string) => Promise<void>;
-    queryCompletion: (sessionId: string, command: string) => Promise<string>;
+    /**
+     * 보조 채널에서 짧은 read-only 명령을 돌리고 stdout 을 받는다.
+     *
+     * `background: true` 는 사람이 결과를 기다리지 않는 질의다(세션 패널의 도커·호스트 지표
+     * 폴링). 그런 질의는 두 번째 보조 채널에서 돌아 자동완성을 막지 않는다 — 도커의
+     * `stats --no-stream` 한 번이 2초를 넘기는 일이 흔하다. 생략하면 대화형이다.
+     *
+     * 실패는 **결과에 담아** 온다(`failed`). 거부로 보내면 렌더러가 정상적으로 물러나는 경우까지
+     * Electron 메인 로그에 오류로 쌓인다 — 렌더러의 `queryTerminalCompletion` 이 예외로 바꾼다.
+     */
+    queryCompletion: (
+      sessionId: string,
+      command: string,
+      options?: { background?: boolean; elevate?: boolean },
+    ) => Promise<{ stdout: string; failed?: boolean; message?: string }>;
     respondKeyboardInteractive: (
       input: KeyboardInteractiveRespondInput,
     ) => Promise<void>;

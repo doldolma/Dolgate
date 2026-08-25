@@ -1,4 +1,8 @@
 import type { AuthSession } from './api';
+import {
+  getConnectionFailureReason,
+  isTransientConnectionFailure,
+} from './connection-failure';
 import type { HostDetectedOs } from './host-os';
 
 export type AuthType =
@@ -1130,20 +1134,27 @@ export function inferAwsSftpDiagnosticReasonCode(
   ) {
     return 'sftp-subsystem-failed';
   }
+  // 로컬 터널이 아직 열리지 않아 localhost 가 거부한 경우다.
+  //
+  // **원인 판정은 분류기에 맡긴다**(connection-failure.ts). 같은 거부가 플랫폼마다 다른 문장으로
+  // 오고(윈도우 winsock, gvisor netstack), 여기에 문구를 따로 적어 두면 계통이 늘 때마다 이 자리만
+  // 새서 "확인되지 않은 오류" 로 떨어진다. 이 자리에서 볼 것은 **거부한 상대가 localhost 냐** 는
+  // 것뿐이다 — 원격이 아니라 우리가 띄운 터널이라는 뜻이라 사용자가 할 일이 다르다.
   if (
     stage === 'connecting-sftp' &&
-    /dial failed: dial tcp (127\.0\.0\.1|localhost|\[?::1\]?):\d+: connect: connection refused/.test(
-      normalized,
-    )
+    /dial failed: dial tcp (127\.0\.0\.1|localhost|\[?::1\]?):\d+/.test(normalized) &&
+    getConnectionFailureReason(message).code === 'refused'
   ) {
     return 'tunnel-open-failed';
   }
   if (
     stage === 'connecting-sftp' &&
-    // "connection was refused" 는 tailnet 경유 dial(gvisor netstack) 문구다.
-    /authentication failed|unable to authenticate|permission denied|ssh handshake|unexpected message type 51|connection (was )?refused|timed out/.test(
+    (/authentication failed|unable to authenticate|permission denied|ssh handshake|unexpected message type 51/.test(
       normalized,
-    )
+    ) ||
+      // 터널은 열렸는데 그 위에서 붙지 못한 경우(거부·타임아웃·끊김)도 여기로 온다. 문구 대신
+      // 분류기의 판정을 쓴다 — 위와 같은 이유다.
+      isTransientConnectionFailure(message))
   ) {
     return 'ssh-auth-failed';
   }
@@ -3557,7 +3568,24 @@ export interface TerminalTab {
   title: string;
   shellKind?: string;
   status: 'pending' | 'connecting' | 'connected' | 'disconnecting' | 'closed' | 'error';
+  /**
+   * 코어가 올려 보낸 **원문**. 화면에 쓸 때는 분류기를 지나게 한다
+   * (데스크톱의 resolveConnectionFailurePresentation, 모바일의 getConnectFailureMessage).
+   *
+   * 원문으로 두는 이유는 이 필드를 문구 말고도 쓰기 때문이다 — 자동 재연결 판정, 자격증명 재입력
+   * 여부, 실패 단계 표시가 모두 문장에서 단서를 찾는다. 접어서 담으면 그 판정들이 우리 문구를
+   * 다시 뜯게 된다. (SFTP 패널의 같은 이름 필드는 반대 규칙이다 — 거기엔 여러 종류의 실패가
+   * 섞여 들어와 화면에서 일괄로 접을 수 없다.)
+   */
   errorMessage?: string;
+  /**
+   * 코어가 실패 이벤트에 실어 보낸 소켓 원인 코드(`ErrorPayload.failure`).
+   *
+   * 문장을 다시 뜯지 않기 위해 들고 있는다 — 판정은 코어가 errno 로 이미 끝냈고, 그쪽이 문구·
+   * 로케일과 무관하게 확실하다. 화면 문구는 여전히 문구 규칙을 먼저 본다(문장에 더 구체적인
+   * 원인이 있을 수 있다) — 이 값은 그 규칙이 아무것도 못 찾았을 때의 폴백이다.
+   */
+  errorFailure?: string | null;
   connectionProgress?: TerminalConnectionProgress | null;
   /**
    * AWS preflight 가 판정한 실패 원인 코드. 그 실패로 끝난 연결에만 남는다.

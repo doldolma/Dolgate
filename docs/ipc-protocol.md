@@ -87,6 +87,50 @@ This also rides as JSON in a `control frame`'s metadata.
 - `tailnetStatus`
 - `tailnetForgot`
 
+## Failure wording
+
+Cores fold OS socket errors into one canonical wording before they leave, and keep the original
+sentence in place. A refused connection reads the same on every platform:
+
+```text
+connection refused: dial failed: dial tcp 192.168.200.4:22: connectex: No connection could be
+made because the target machine actively refused it.
+```
+
+The same cause otherwise arrives in three different sentences — Go's own wording on Linux/macOS,
+winsock wording on Windows (system language, and Rust does not force English), and gvisor netstack
+wording for tailnet-routed dials. The apps classify the cause from the message
+(`packages/shared-core/src/connection-failure.ts`), so a fourth wording leaking through shows the
+user raw English or Korean OS text with no failure stage and no next step.
+
+The canonical vocabulary is the Unix/Go sentence, not a new slug — already-shipped apps recognise
+it, so updating a core also fixes older clients. Implementations:
+`services/ssh-core/internal/neterr` (Go) and `services/core-framing/src/neterr.rs` (shared by
+rdp-core and vnc-core).
+
+`error` and `closed` payloads also carry the cause as a code, so an app never has to read the
+sentence to know what happened:
+
+```json
+{
+  "type": "error",
+  "sessionId": "session_1",
+  "payload": {
+    "message": "connection refused: dial failed: dial tcp 192.168.200.4:22: connectex: …",
+    "failure": "refused"
+  }
+}
+```
+
+`failure` is one of `refused`, `timeout`, `reset`, `no-route`, `address-in-use`,
+`dns-unresolved`, and is omitted when the core cannot name the cause. It is derived from the
+errno, so it holds regardless of wording or system language.
+
+Apps read the sentence **first** and use `failure` as the fallback: the message may carry a more
+specific cause than the socket layer knows — an expired tailnet registration, a declined host key,
+a missing IAM action — and those decide what the user has to do. Both halves ship together because
+an older app reads only the sentence, while a newer app can classify a wording it has never seen.
+
 ## Stream frames
 
 Terminal I/O travels as `stream frames`, separate from control events. This path carries raw bytes without base64, cutting string-conversion overhead and avoiding UTF-8 corruption.

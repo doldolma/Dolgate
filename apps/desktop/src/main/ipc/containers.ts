@@ -565,6 +565,11 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
         trustedHostKeyBase64: trustedHostKeysBase64[0],
         trustedHostKeysBase64,
         jump,
+        // 셸도 목록·로그와 같은 경로를 타야 한다. 안 넘기면 tailnet 호스트의 셸이 일반
+        // 네트워크로 나가는데, 그건 실패가 아니라 성공으로 보인다. 게다가 위의
+        // resolveTrustedHostKeys 는 이미 tailnet 범위로 읽으므로, 공개망에서 TOFU 로 받은
+        // 키가 그 tailnet 범위에 저장된다.
+        ...ctx.resolveTailnetRoute(sshHost),
         authAgentEndpointKind: authAgentEndpoint?.kind,
         authAgentEndpoint: authAgentEndpoint?.endpoint,
         cols: 120,

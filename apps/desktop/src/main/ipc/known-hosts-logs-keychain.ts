@@ -115,6 +115,18 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
    * 보안 경계이기 때문이다. 렌더러가 틀리거나 조작되면 tailnet 밖에서 신뢰한 키가 tailnet
    * 안에서 통하게 된다.
    */
+  /**
+   * 신뢰를 저장할 tailnet 범위.
+   *
+   * **렌더러가 주장하는 범위는 쓰지 않는다** — 그것이 곧 우회 경로다(tailnet 밖에서 신뢰한 키를
+   * 안에서 통하게 만들 수 있다). 범위는 `hostId` 가 가리키는 호스트 레코드가 정한다.
+   *
+   * 그러니 **부르는 쪽이 hostId 를 제대로 넘기는 것**이 이 규칙의 전제다. 실기기에서 저장해도
+   * 매번 다시 묻던 건이 그 전제가 깨진 경우였다: 연결 중 뜨는 신뢰 물음이 hostId 를 홉 주소로
+   * 찾아 채우다 빈 값("")을 넘겼고, 그러면 여기서 호스트를 못 찾아 범위 없이 저장됐다. 정작
+   * 연결은 그 호스트의 tailnet 범위로 조회하니 영원히 못 찾는다. 고친 곳은 hostId 를 채우는
+   * 쪽이다(runtimeEventSlice: 탭의 호스트를 먼저 본다).
+   */
   const resolveTrustScope = (input: KnownHostTrustInput): KnownHostTrustInput => {
     const host = ctx.hosts.getById(input.hostId);
     const tailnetId =

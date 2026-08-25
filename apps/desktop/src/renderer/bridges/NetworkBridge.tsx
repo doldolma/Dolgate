@@ -13,7 +13,7 @@ import {
   onConnectivityChange,
   onSystemResume,
 } from "../store/services/reconnect-orchestrator";
-import { isSshHostRecord } from "@shared";
+import { resolveHostTailnetId } from "../lib/host-tailnet";
 
 // NetworkBridge는 재연결 오케스트레이터에 네트워크/절전 신호를 연결한다.
 //  - window online/offline: 오프라인이면 재연결 대기, 복귀하면 즉시 전부 재시도.
@@ -42,8 +42,9 @@ export function NetworkBridge() {
       const host = hostId
         ? state.hosts.find((item) => item.id === hostId)
         : undefined;
-      const tailnetId =
-        host && isSshHostRecord(host) ? host.tailnetId?.trim() : undefined;
+      // 관문·오버레이와 같은 판정을 쓴다. 대상의 tailnetId 만 읽으면 "점프 호스트에만 tailnet"
+      // 구성이 이 유예를 못 받아, 사용자가 브라우저 로그인을 마치기 전에 재연결 상한을 다 쓴다.
+      const tailnetId = resolveHostTailnetId(host, state.hosts);
       if (!tailnetId) {
         return false;
       }

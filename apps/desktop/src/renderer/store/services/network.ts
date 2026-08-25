@@ -22,7 +22,6 @@ export function createNetworkServices(deps: SliceDeps) {
     try {
       const runtime = await api.portForwards.start(ruleId);
       set((state) => ({
-        homeSection: "portForwarding",
         portForwardRuntimes: upsertForwardRuntime(
           state.portForwardRuntimes,
           runtime,

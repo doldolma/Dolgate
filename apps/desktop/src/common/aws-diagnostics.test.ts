@@ -70,6 +70,20 @@ describe("AWS 진단 원인 코드", () => {
     }
   });
 
+  // 로컬 터널이 아직 안 열려 localhost 가 거부한 것이라 할 일은 SSM 쪽 확인이다. 윈도우는
+  // 같은 상황을 winsock 문구로 줘서 판정이 unknown 으로 떨어졌고, "확인되지 않은 오류" 라는
+  // 맹탕 안내가 떴다.
+  it("터널이 안 열린 실패를 두 문구 계통에서 모두 알아본다", () => {
+    for (const message of [
+      "dial failed: dial tcp 127.0.0.1:52341: connect: connection refused",
+      "dial failed: dial tcp 127.0.0.1:52341: connectex: No connection could be made because the target machine actively refused it.",
+    ]) {
+      expect(inferAwsSftpDiagnosticReasonCode("connecting-sftp", message)).toBe(
+        "tunnel-open-failed",
+      );
+    }
+  });
+
   // 제한 시간 초과 안내에도 "권한을 확인한 뒤" 가 들어 있다. 그것까지 권한 문제로 단정하면
   // 되지도 않을 정책 수정을 시키게 된다.
   it("권한을 확인하라는 제한 시간 안내는 권한 문제로 보지 않는다", () => {

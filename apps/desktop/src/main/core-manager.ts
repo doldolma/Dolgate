@@ -24,6 +24,14 @@ import { logMessage } from "./activity-log-message";
 const TERMINAL_COMPLETION_QUERY_TIMEOUT_MS = 10_000;
 
 /**
+ * 백그라운드 질의(세션 패널의 도커·호스트 지표 폴링)의 예산.
+ *
+ * 코어가 그 레인에 주는 시간(autocomplete.BackgroundCompletionTimeout, 30초)보다 넉넉해야
+ * 한다 — 여기가 먼저 끊으면 코어의 결과(성공이든 실패든)를 받을 주체가 사라진다.
+ */
+const TERMINAL_COMPLETION_BACKGROUND_TIMEOUT_MS = 35_000;
+
+/**
  * 사람에게 인증을 묻는 동안 요청에 주는 예산.
  *
  * 왜 필요한가: 요청·응답 한 번짜리 작업(호스트 키 프로브 등)도 도중에 대화형 인증을 물을 수 있다.
@@ -3935,7 +3943,11 @@ export class CoreManager {
     );
   }
 
-  async queryCompletion(sessionId: string, command: string): Promise<string> {
+  async queryCompletion(
+    sessionId: string,
+    command: string,
+    options?: { background?: boolean; elevate?: boolean },
+  ): Promise<string> {
     await this.start();
     // 동적 완성은 보조 채널이 있는 전송에서만 지원한다(SSH/local). SSM 계열은 단일 PTY라 미지원이며,
     // 호출되더라도 원격을 건드리지 않고 빈 결과로 조용히 degrade한다.
@@ -3948,19 +3960,36 @@ export class CoreManager {
     if (transport !== "ssh" && transport !== "local-shell" && !isTmuxPane) {
       return "";
     }
+    const background = options?.background ?? false;
     const response = await this.requestResponse<{
       stdout?: string;
       truncated?: boolean;
+      failed?: boolean;
     }>(
       {
         id: randomUUID(),
         type: "terminalCompletionQuery",
         sessionId,
-        payload: { command },
+        // background 는 "사람이 이 결과를 기다리지 않는다"는 뜻이다(세션 패널의 도커·호스트 지표
+        // 폴링). 코어가 그런 질의를 두 번째 보조 채널에 태워, 몇 초씩 걸리는 폴링 뒤에
+        // 자동완성이 줄 서지 않게 하고, 타임아웃 예산도 더 크게 잡는다.
+        payload: { command, background, elevate: options?.elevate ?? false },
       },
       ["terminalCompletionResult"],
-      { timeoutMs: TERMINAL_COMPLETION_QUERY_TIMEOUT_MS },
+      {
+        timeoutMs: background
+          ? TERMINAL_COMPLETION_BACKGROUND_TIMEOUT_MS
+          : TERMINAL_COMPLETION_QUERY_TIMEOUT_MS,
+      },
     );
+    // 왕복이 아예 실패한 것과 명령이 아무것도 안 찍은 것은 다르다. 둘 다 빈 문자열로 돌려주던
+    // 탓에, 시간이 초과된 `docker ps` 가 "컨테이너 없음" 으로 그려졌다(그리고 실패가 아니니
+    // 물러나지도 않았다). 실패는 실패로 던지고 무엇으로 볼지는 호출부가 정한다.
+    if (response.failed) {
+      throw new Error(
+        `보조 채널에서 명령을 끝내지 못했습니다(sessionId=${sessionId}).`,
+      );
+    }
     return typeof response.stdout === "string" ? response.stdout : "";
   }
 

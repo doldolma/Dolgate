@@ -22,12 +22,14 @@ import { createSessionServices } from "./session";
 import { createTrustAuthServices } from "./trust-auth";
 import {
   basenameFromPath,
+  connectFailureCopy,
   getAwsEc2HostSshPort,
   getPane,
   hasProvidedSecrets,
   isAwsEc2HostRecord,
   isSshHostRecord,
   isWarpgateSshHostRecord,
+  normalizeRemoteInvokeErrorMessage,
   pushHistory,
   resolveAwsSftpFailureDiagnostic,
   resolveCredentialRetryKind,
@@ -224,9 +226,12 @@ export function createSftpServices(deps: SliceDeps) {
           connectingEndpointId: null,
           connectionProgress: null,
           connectionDiagnostic: null,
+          // 목록 조회 실패는 **연결 실패가 아니다** — 권한·경로·코어 무응답이 섞여 있다. 연결
+          // 실패 어휘를 씌우면 방향이 틀린 안내가 된다("SSH 코어 응답 대기 시간 초과" 를 "호스트가
+          // 응답하지 않습니다" 로 바꿔 버린다). 사용자에게 의미 없는 IPC 접두사만 떼어 낸다.
           errorMessage:
             error instanceof Error
-              ? error.message
+              ? normalizeRemoteInvokeErrorMessage(error.message)
               : t('sftpStore.listFailed'),
           warningMessages: [],
         }),
@@ -543,10 +548,12 @@ export function createSftpServices(deps: SliceDeps) {
             connectionDiagnostic: diagnostic,
             entries: [],
             isLoading: false,
+            // 표시용 문구만 분류기를 지난다. 위의 판정들(자격증명 재시도·AWS 진단)은 원문
+            // message 를 그대로 봐야 한다 — 문장에서 찾는 단서가 다르다.
             errorMessage:
               shouldPromptCredentialRetry || shouldPromptAwsConfig
                 ? undefined
-                : message,
+                : connectFailureCopy(message),
             warningMessages: [],
           }),
         };

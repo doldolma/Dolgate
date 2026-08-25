@@ -1723,3 +1723,87 @@ describe("CoreManager local shell sessions", () => {
     );
   });
 });
+
+describe("CoreManager.queryCompletion", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  async function startLocalSession() {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const manager = new CoreManager();
+    const window = createFakeWindow(101);
+    manager.registerWindow(window as never);
+    const { sessionId } = await manager.runWithSessionOwner(101, () =>
+      manager.connectLocalSession({ cols: 80, rows: 24, title: "Terminal" }),
+    );
+    return { manager, fakeProcess, sessionId };
+  }
+
+  async function takeQueryRequest(
+    fakeProcess: ReturnType<typeof createFakeChildProcess>,
+    before: number,
+  ) {
+    await waitForWriteCount(fakeProcess.writes, before + 1);
+    const request = decodeControlFrame(fakeProcess.writes.at(-1)!);
+    expect(request.type).toBe("terminalCompletionQuery");
+    return request;
+  }
+
+  it("백그라운드 표시를 코어에 그대로 넘긴다", async () => {
+    const { manager, fakeProcess, sessionId } = await startLocalSession();
+    const before = fakeProcess.writes.length;
+    const pending = manager.queryCompletion(sessionId, "docker ps -a", {
+      background: true,
+    });
+    const request = await takeQueryRequest(fakeProcess, before);
+    expect(request.payload).toMatchObject({
+      command: "docker ps -a",
+      background: true,
+    });
+    fakeProcess.emitControl({
+      type: "terminalCompletionResult",
+      requestId: request.id,
+      sessionId,
+      payload: { stdout: "one\n" },
+    } as never);
+    await expect(pending).resolves.toBe("one\n");
+  });
+
+  it("표시하지 않으면 대화형이다", async () => {
+    const { manager, fakeProcess, sessionId } = await startLocalSession();
+    const before = fakeProcess.writes.length;
+    const pending = manager.queryCompletion(sessionId, "ls -1Ap -- '/etc/'");
+    const request = await takeQueryRequest(fakeProcess, before);
+    expect(request.payload).toMatchObject({ background: false });
+    fakeProcess.emitControl({
+      type: "terminalCompletionResult",
+      requestId: request.id,
+      sessionId,
+      payload: { stdout: "" },
+    } as never);
+    // 명령이 아무것도 안 찍은 것은 실패가 아니다 — 그대로 빈 문자열이다.
+    await expect(pending).resolves.toBe("");
+  });
+
+  /**
+   * 예전에는 왕복 실패도 빈 stdout 으로 왔다. 그래서 시간이 초과된 `docker ps` 가 "컨테이너
+   * 없음" 으로 그려졌고, 실패가 아니니 세션 패널이 물러나지도 않았다.
+   */
+  it("왕복이 실패하면 빈 문자열이 아니라 오류로 알린다", async () => {
+    const { manager, fakeProcess, sessionId } = await startLocalSession();
+    const before = fakeProcess.writes.length;
+    const pending = manager.queryCompletion(sessionId, "docker ps -a", {
+      background: true,
+    });
+    const request = await takeQueryRequest(fakeProcess, before);
+    fakeProcess.emitControl({
+      type: "terminalCompletionResult",
+      requestId: request.id,
+      sessionId,
+      payload: { stdout: "", failed: true },
+    } as never);
+    await expect(pending).rejects.toThrow();
+  });
+});

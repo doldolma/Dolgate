@@ -161,10 +161,12 @@ import {
   toTrustInput,
   enqueueHostKeyPrompt,
   findHostByAddress,
+  hostMatchesHopAddress,
   updateConnectionView,
   upsertConnectionHop,
   clearConnectionView,
 } from "../utils";
+import { resolveHostTailnetId } from "../../lib/host-tailnet";
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
 import { createTrustAuthServices } from "../services/trust-auth";
 import { updateStoredSshUsername } from "../services/credential-retry";
@@ -813,19 +815,41 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
         const currentTab = sessionId
           ? state.tabs.find((tab) => tab.sessionId === sessionId)
           : undefined;
-        const hostRecord =
-          // 주소로 찾는 규칙은 인증 카드가 이름을 얹을 때 쓰는 것과 같아야 한다 — 따로 두면
-          // 신뢰 대화상자와 인증 카드가 같은 홉을 다른 이름으로 부른다.
-          findHostByAddress(state.hosts, host, port) ??
-          (currentTab?.source === "host" && currentTab.hostId
+        const tabHost =
+          currentTab?.source === "host" && currentTab.hostId
             ? state.hosts.find((record) => record.id === currentTab.hostId)
-            : undefined);
+            : undefined;
+        // 이 연결이 붙는 호스트. 라벨과 hostId 는 여기서 온다.
+        //
+        // **탭의 호스트를 먼저 본다.** 예전에는 주소로 먼저 찾았는데, 한 주소에 호스트 레코드가
+        // 둘이면(하나는 tailnet 이 걸리고 하나는 안 걸린 채로) 목록에서 먼저 나온 엉뚱한 것을 집어
+        // 그 이름으로 물었다. 주소 검색은 탭이 없는 홉(등록되지 않은 베스천)을 위한 폴백으로 남긴다.
+        const hostRecord =
+          (tabHost && hostMatchesHopAddress(tabHost, host, port)
+            ? tabHost
+            : undefined) ??
+          findHostByAddress(state.hosts, host, port) ??
+          tabHost;
+        /**
+         * 저장 범위. **연결에서 정한다** — 홉 주소로 찾은 레코드에서 꺼내면 안 된다.
+         *
+         * 범위가 어긋나면 저장은 되는데 다음 연결이 못 찾아 영원히 다시 묻는다. 체인이 있어도
+         * 범위는 하나다(첫 홉이 타는 tailnet). 그래서 홉이 아니라 연결의 주인(탭의 호스트)을
+         * 기준으로 구한다.
+         */
+        const tailnetId =
+          resolveHostTailnetId(tabHost ?? hostRecord, state.hosts) ?? null;
+        const scope = (tailnetId ?? "").trim();
         const existing =
           state.knownHosts.find(
             (record) =>
               record.host === host &&
               record.port === port &&
-              record.algorithm === String(payload.algorithm ?? ""),
+              record.algorithm === String(payload.algorithm ?? "") &&
+              // 범위까지 봐야 한다. 안 보면 다른 범위에 저장된 행을 "저장된 지문" 으로 보여 주고,
+              // 정작 코어는 그 키를 못 받아 "처음 연결하는 서버입니다" 를 띄운다 — 지문이 같은데
+              // 처음이라고 하는 그 화면이 나온다.
+              (record.tailnetId ?? "").trim() === scope,
           ) ?? null;
         // 보여 주는 것이 있으면 뒤에 세운다. 덮어쓰면 그 물음은 아무도 답할 수 없게 되고, 그
         // 연결은 예산이 다 될 때까지 "연결 중…"에 앉아 있는다.
@@ -1420,6 +1444,10 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
             }
 
             set((state) => ({
+              // **이 이동은 남긴다.** 저장·시작은 화면을 옮기지 않지만(세션 패널에서도 하므로),
+              // 대화형 인증은 다르다 — source 가 'portForward' 인 카드를 그리는 곳이 홈의 포트
+              // 화면뿐이라(HomeShell 의 pendingInteractiveAuths 필터), 데려가지 않으면 사용자는
+              // 답할 창구를 못 찾고 규칙이 "starting" 에 앉은 채로 끝난다.
               homeSection: "portForwarding",
               pendingInteractiveAuths:
                 currentHost === undefined
@@ -2308,6 +2336,12 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
         const currentSshHost =
           currentHost && isSshHostRecord(currentHost) ? currentHost : null;
         const errorMessage = String(event.payload.message ?? "SSH error");
+        // 코어가 errno 로 판정한 소켓 원인 코드. 문구를 다시 뜯지 않기 위해 탭에 함께 담는다
+        // (services/ssh-core 의 internal/neterr, 두 Rust 코어의 core_framing::neterr).
+        const errorFailure =
+          typeof (event.payload as { failure?: unknown }).failure === "string"
+            ? ((event.payload as { failure: string }).failure)
+            : null;
         const shouldPromptCredentialRetry =
           event.type === "error"
             ? resolveCredentialRetryKind(
@@ -2363,6 +2397,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 ? (resolvedShellKind ?? tab.shellKind)
                 : tab.shellKind,
             errorMessage: event.type === "error" ? errorMessage : undefined,
+            errorFailure: event.type === "error" ? errorFailure : undefined,
             connectionProgress: nextProgress,
             hasReceivedOutput: tab.hasReceivedOutput,
             lastEventAt: new Date().toISOString(),

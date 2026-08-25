@@ -1,13 +1,15 @@
 // 자동 재연결 판단용 오류 분류기.
 //
-// 메인 프로세스의 aws-ssm-ssh-retry.ts가 가진 패턴 리스트를 렌더러로 이식해,
-// "예기치 않은 끊김" 이벤트의 메시지를 보고 재연결할지 결정한다.
+// "예기치 않은 끊김" 이벤트를 보고 재연결할지 결정한다. 소켓 원인(거부·타임아웃·끊김·경로 없음)은
+// shared-core 의 분류기 한 벌에 맡기고, 여기서는 그 판정을 재연결 정책으로 옮기는 일만 한다.
 //
 // - permanent: 인증/호스트 키/협상 실패 등 재시도해도 같은 결과인 영구 오류.
 //   재연결 루프 금지(특히 host key mismatch는 보안상 무한 재시도가 위험).
 //   이런 경우는 기존 pendingCredentialRetry/트러스트 플로우가 처리한다.
 // - transient: 네트워크 단절/타임아웃/EOF 등 일시적 오류 → 재연결 대상.
 // - unknown: 어느 쪽도 매칭 안 됨 → 호출부에서 보수적으로 소수 횟수만 재시도.
+
+import { isTransientConnectionFailure } from "@dolssh/shared-core";
 
 export type ReconnectClassification = "transient" | "permanent" | "unknown";
 
@@ -39,32 +41,22 @@ const PERMANENT_ERROR_PATTERNS: RegExp[] = [
   /no matching host key type/i,
 ];
 
-// 일시적 오류(재연결 대상). aws-ssm-ssh-retry.ts의 TRANSIENT_ERROR_PATTERNS +
-// keepalive/원격 단절 메시지를 보강.
-// tailnet 경유 세션은 OS 소켓이 아니라 tsnet 의 사용자 공간 스택(gvisor netstack)에서
-// 끊기므로 문구가 다르다 — "connection was refused", "host is down",
-// "machine is not on the network". 여기서 놓치면 일시적 단절인데 unknown 으로 떨어져
-// 재연결을 몇 번만 시도하고 포기한다(connection aborted 는 이미 아래에 있다).
+// 일시적 오류(재연결 대상) 중 **소켓 원인이 아닌 것들**.
+//
+// 소켓 원인(거부·타임아웃·끊김·경로 없음)은 shared-core 의 분류기가 판정한다
+// (isTransientConnectionFailure). 예전에는 그 문구들이 이 목록에도 복사돼 있었는데, 같은 원인이
+// 플랫폼마다 다른 문장으로 오기 때문에(유닉스 Go / 윈도우 winsock / gvisor netstack) 계통이 늘 때
+// 목록마다 따로 새고 따로 고쳐야 했다 — 실제로 윈도우 계통을 통째로 놓쳐서, 원격이 끊은 세션이
+// unknown 으로 떨어져 자동 재연결이 걸리지 않았다.
+//
+// 남은 것들은 소켓 오류가 아니라 SSH·코어 계층의 문구다(분류기가 다루지 않는다).
 const TRANSIENT_ERROR_PATTERNS: RegExp[] = [
-  /connection (was )?refused/i,
-  /connection reset/i,
-  /reset by peer/i,
-  /broken pipe/i,
-  /\beof\b/i,
-  /i\/o timeout/i,
-  /operation timed out/i,
-  /connection timed out/i,
   /ssh handshake failed/i,
   /handshake failed/i,
   /kex_exchange_identification/i,
   /connection closed/i,
   /ssh keepalive failed/i,
   /keepalive/i,
-  /network is unreachable/i,
-  /no route to host/i,
-  /host is down/i,
-  /machine is not on the network/i,
-  /connection aborted/i,
   /use of closed network connection/i,
 ];
 
@@ -97,6 +89,12 @@ export function classifyReconnect(input: unknown): ReconnectClassification {
   if (TRANSIENT_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
     return "transient";
   }
+  // 소켓 원인은 한 벌뿐인 분류기가 판정한다. 코어가 원인 코드를 실어 보내는 경로에서는 문구를
+  // 아예 안 봐도 되지만(ErrorPayload.failure), 이 자리는 문자열만 손에 든 호출도 있어 문구
+  // 판정을 함께 쓴다.
+  if (isTransientConnectionFailure(message)) {
+    return "transient";
+  }
   return "unknown";
 }
 
@@ -107,9 +105,9 @@ export function isCoreExitedMessage(input: unknown): boolean {
 /**
  * 원격 화면(RDP·VNC)에서 다시 시도해도 결과가 같은 오류인지.
  *
- * **확실히 영구인 것만 걸러낸다** — 모르는 오류는 재시도하는 쪽이 낫다. 코어들이 아직 오류를
- * 코드로 분류하지 않고 원문을 올리므로 문자열로 가른다(rdp-core, vnc-core 의 session.rs·
- * vencrypt.rs).
+ * **확실히 영구인 것만 걸러낸다** — 모르는 오류는 재시도하는 쪽이 낫다. 소켓 실패는 코어가 원인
+ * 코드로 올려 주지만(core_framing::neterr), 아래 목록의 것들(인증·계정·미지원 보안 타입)은 아직
+ * 원문뿐이라 문자열로 가른다(rdp-core, vnc-core 의 session.rs·vencrypt.rs).
  *
  * 위의 SSH 분류기를 먼저 통과시킨다 — 호스트 키·알고리즘 협상처럼 영구인 것을 이미 알고 있고,
  * VNC 는 SSH 터널을 거칠 수 있어 그쪽 문구가 그대로 올라온다. 아래 목록은 원격 화면 고유의

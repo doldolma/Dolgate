@@ -188,6 +188,15 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
     setPendingRdpCertificatePrompt: (prompt) => {
       set({ pendingRdpCertificatePrompt: prompt });
     },
+    // 포트 포워딩 편집기의 열기 의도. 모달을 그리는 것은 AppModals 의 한 인스턴스뿐이다
+    // (types.ts 의 portForwardEditor 주석 참고).
+    portForwardEditor: null,
+    openPortForwardEditor: (intent) => {
+      set({ portForwardEditor: intent });
+    },
+    closePortForwardEditor: () => {
+      set({ portForwardEditor: null });
+    },
     tailnetStatuses: {},
     localTailnetNodeName: null,
     savePortForward: async (ruleId, draft) => {
@@ -195,7 +204,6 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
               ? await api.portForwards.update(ruleId, draft)
               : await api.portForwards.create(draft);
             set((state) => ({
-              homeSection: "portForwarding",
               portForwards: sortPortForwards([
                 ...state.portForwards.filter((rule) => rule.id !== next.id),
                 next,
@@ -207,7 +215,6 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
               ? await api.dnsOverrides.update(overrideId, draft)
               : await api.dnsOverrides.create(draft);
             set((state) => ({
-              homeSection: "portForwarding",
               dnsOverrides: sortDnsOverrides([
                 ...state.dnsOverrides.filter((override) => override.id !== next.id),
                 next,

@@ -264,6 +264,8 @@ export function updatePaneState(
 
 export function toTrustInput(probe: HostKeyProbeResult) {
   return {
+    // tailnet 범위는 담지 않는다 — 메인이 이 hostId 로 정한다(우회를 막는 규칙:
+    // known-hosts-logs-keychain 의 resolveTrustScope 주석). 그래서 **hostId 가 정확해야 한다.**
     hostId: probe.hostId,
     hostLabel: probe.hostLabel,
     host: probe.host,

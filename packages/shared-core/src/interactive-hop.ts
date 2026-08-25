@@ -33,6 +33,28 @@ export function findHostByAddress(
 }
 
 /**
+ * 이 호스트 레코드가 그 홉 주소인가.
+ *
+ * findHostByAddress 와 달리 **포트까지 정확히** 맞아야 한다. 신뢰를 저장할 범위를 정하는 데 쓰므로
+ * 느슨하게 보면 안 된다 — 같은 장비의 다른 포트는 다른 홉이다.
+ */
+export function hostMatchesHopAddress(
+  host: HostRecord | undefined,
+  address: string | null | undefined,
+  port: number | null | undefined,
+): boolean {
+  if (!host || !address) {
+    return false;
+  }
+  return (
+    "hostname" in host &&
+    host.hostname === address &&
+    "port" in host &&
+    host.port === port
+  );
+}
+
+/**
  * 누가 물었는지를 사람이 읽는 형태로.
  *
  * **이름을 앞에 둔다.** 사용자는 보통 주소가 아니라 자기가 붙인 이름을 기억하고 있어서, 주소만

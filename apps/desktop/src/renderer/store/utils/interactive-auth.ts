@@ -158,7 +158,11 @@ export function toKeyboardInteractiveHop(
 
 // findHostByAddress·formatInteractiveHop 은 shared-core 에 있다 — 모바일도 같은 이름·같은 주소
 // 형식을 보여줘야 하고, 그 둘은 문구가 아니라 주소 조립이라 UI 언어에 걸리지 않는다.
-export { findHostByAddress, formatInteractiveHop } from "@shared";
+export {
+  findHostByAddress,
+  formatInteractiveHop,
+  hostMatchesHopAddress,
+} from "@shared";
 
 export function parseWarpgateApprovalUrl(
   ...parts: Array<string | undefined | null>

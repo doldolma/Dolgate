@@ -37,6 +37,7 @@ import type {
   KnownHostRecord,
   PortForwardDraft,
   PortForwardRuleRecord,
+  PortForwardTransport,
   PortForwardRuntimeEvent,
   PortForwardRuntimeRecord,
   SessionShareChatEvent,
@@ -414,6 +415,15 @@ export interface SftpPaneState {
   selectedHostId: string | null;
   hostSearchQuery: string;
   isLoading: boolean;
+  /**
+   * 사용자에게 **그대로 보여 줄** 문구. 판정에 쓰지 말 것.
+   *
+   * 이 패널의 실패는 한 종류가 아니다(연결·권한·경로·코어 무응답). 그래서 화면에서 일괄로 접지
+   * 않고, 연결 실패인 것을 아는 자리에서 connectFailureCopy 로 접어 담는다. 원문이 필요한 판정
+   * (자격증명 재시도·AWS 진단·자동 재연결)은 이 필드가 아니라 그 자리의 원문을 본다.
+   *
+   * 터미널 탭의 같은 이름 필드는 반대다 — 그쪽은 원문을 담고 화면이 접는다(TerminalTab).
+   */
   errorMessage?: string;
   warningMessages?: string[];
 }
@@ -722,6 +732,18 @@ export type TerminalUploadResult =
       message?: string;
     };
 
+
+/**
+ * 포트 포워딩 편집기를 어떤 상태로 열지.
+ *
+ * `create` 의 transport 는 여는 쪽이 정한다 — 포트 화면은 지금 보고 있는 탭, 세션 패널은 그
+ * 호스트가 쓰는 방식. 편집기가 화면의 탭을 읽어 정하던 것을 의도로 바꾼 것이라, 세션 패널에서
+ * 열어도 홈 화면의 탭이 따라 움직이지 않는다.
+ */
+export type PortForwardEditorIntent =
+  | { kind: 'create'; transport: PortForwardTransport | 'dns'; hostId?: string }
+  | { kind: 'edit'; ruleId: string }
+  | { kind: 'edit-dns'; dnsOverrideId: string };
 interface AppStateParts {
   hosts: HostRecord[];
   groups: GroupRecord[];
@@ -788,6 +810,17 @@ interface AppStateParts {
    * 화면도 봐야 하고, 그 반대도 마찬가지다.
    */
   tailnetStatuses: Record<string, TailnetStatus>;
+  /**
+   * 지금 열어야 할 포트 포워딩 편집기. null 이면 닫혀 있다.
+   *
+   * **왜 스토어에 두는가.** 편집기는 포트 화면과 세션 패널 두 곳에서 열린다. 그 둘은 서로 다른
+   * 셸에 있어서 컴포넌트 트리를 공유하지 않으므로, 여는 쪽이 모달을 직접 렌더하면 편집기가
+   * 두 벌이 된다. 의도만 여기 담고 모달은 AppModals 의 한 인스턴스가 그린다 — 규칙 데이터와
+   * 저장 경로가 이미 스토어 하나라(portForwards / savePortForward), 여는 자리만 맞추면 된다.
+   */
+  portForwardEditor: PortForwardEditorIntent | null;
+  openPortForwardEditor: (intent: PortForwardEditorIntent) => void;
+  closePortForwardEditor: () => void;
   /** 이 기기가 tailnet 에 등록될 때 쓰는 이름. 기기 목록에서 자기를 찾는 단서다. */
   localTailnetNodeName: string | null;
   pendingCredentialRetry: PendingCredentialRetry | null;
@@ -1516,6 +1549,9 @@ export type NetworkSlice = Pick<
   | "queuedHostKeyPrompts"
   | "pendingRdpCertificatePrompt"
   | "setPendingRdpCertificatePrompt"
+  | "portForwardEditor"
+  | "openPortForwardEditor"
+  | "closePortForwardEditor"
   | "tailnetStatuses"
   | "localTailnetNodeName"
   | "savePortForward"
