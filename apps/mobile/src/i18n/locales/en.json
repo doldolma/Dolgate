@@ -81,7 +81,8 @@
         "authenticating": "Signing in",
         "authenticated": "Signed in",
         "offline-authenticated": "Offline",
-        "error": "Error"
+        "error": "Error",
+        "local-only": "Stored on this device only"
       },
       "sync": {
         "idle": "Idle",

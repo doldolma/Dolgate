@@ -76,6 +76,8 @@ export function hostSubtitleLabels(): HostSubtitleLabels {
 const AUTH_STATUS_KEYS = {
   loading: 'settings.account.status.loading',
   unauthenticated: 'settings.account.status.unauthenticated',
+  // 모바일은 이 상태로 가지 않지만(로그인 필수) 맵은 완전해야 한다 — 빠지면 컴파일이 깨진다.
+  'local-only': 'settings.account.status.local-only',
   authenticating: 'settings.account.status.authenticating',
   authenticated: 'settings.account.status.authenticated',
   'offline-authenticated': 'settings.account.status.offline-authenticated',

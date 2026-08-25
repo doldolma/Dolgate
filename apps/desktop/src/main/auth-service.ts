@@ -631,6 +631,18 @@ export class AuthService {
       return this.state;
     }
 
+    // 계정 없이 쓰기로 고른 기기는 그 상태로 연다 — 로그인 화면을 다시 보여 주면 이미 결정한
+    // 사람에게 결정을 반복시키는 것이다. 리프레시 토큰을 찾을 이유도 없다(애초에 없다).
+    if (this.stateStorage.getState().auth.status === "local-only") {
+      this.patchState({
+        status: "local-only",
+        session: null,
+        offline: null,
+        errorMessage: null,
+      });
+      return this.state;
+    }
+
     const e2eSession = readE2EAuthSessionFromEnv();
     if (e2eSession) {
       await this.notifySessionActivated({
@@ -656,7 +668,35 @@ export class AuthService {
     return this.restoreSessionFromRefreshToken(t("auth.sessionRestoreFailed"));
   }
 
+  /**
+   * 계정 없이 이 기기에서만 쓰기 시작한다.
+   *
+   * 고른 것을 저장해 다음 실행에도 이어진다. 로그아웃은 이 기억을 지운다(`clearSession` 이
+   * 상태를 `unauthenticated` 로 되돌린다) — 그래야 로그아웃한 사람이 텅 빈 워크스페이스가
+   * 아니라 로그인 화면을 본다.
+   */
+  async startLocalOnly(): Promise<AuthState> {
+    this.stateStorage.updateAuthStatus("local-only");
+    this.patchState({
+      status: "local-only",
+      session: null,
+      offline: null,
+      errorMessage: null,
+    });
+    return this.state;
+  }
+
   async refreshSession(): Promise<AuthState> {
+    // 계정 없이 쓰는 중이면 되살릴 세션이 없다.
+    //
+    // 여기서 되살리기를 시도하면 실패하면서 `unauthenticated` 를 **디스크에 적어** 계정 없이
+    // 쓰기로 한 선택까지 지운다. 서버를 거치는 기능이 토큰을 얻지 못했을 때 이 길로 온다
+    // (aws-ws-proxy 의 runWithAwsServerProxyAuthRetry) — 연결 한 번 실패했을 뿐인데 다음
+    // 실행에 로그인 화면이 떴다.
+    if (this.state.status === "local-only") {
+      return this.state;
+    }
+
     if (this.refreshPromise) {
       return this.refreshPromise;
     }
@@ -744,7 +784,61 @@ export class AuthService {
     }
   }
 
+  /**
+   * 이 서버가 계정을 담을 수 있는가 — **브라우저를 열기 전에** 본다.
+   *
+   * `/api/info` 는 인증 미들웨어 밖이라 토큰 없이 부를 수 있다. 브라우저로 보냈다가 로그인을
+   * 다 끝내고 돌아온 뒤 "이 서버는 안 됩니다" 라고 하는 것이 최악이라 여기서 먼저 막는다.
+   *
+   * 판정은 버전 문자열이 아니라 `capabilities.sync.dataFloor` 로 한다 — 자체호스팅은 버전
+   * 문자열을 임의로 박을 수 있다. "1.9.0 이상" 은 사람에게 보여 줄 문구로만 쓴다.
+   *
+   * **읽지 못하면 막지 않는다.** 네트워크가 끊겼거나 프록시가 가로챈 것을 "옛 서버" 로
+   * 오인하면 멀쩡한 계정에 못 들어간다. 그 경우는 로그인이 어차피 실패한다.
+   */
+  private async assertServerCanHoldAccount(): Promise<void> {
+    let response: Response;
+    try {
+      response = await fetch(new URL("/api/info", this.getServerUrl()));
+    } catch {
+      return;
+    }
+    if (!response.ok) {
+      // info 자체가 없는 서버는 확실한 구버전이다(sync-service 의 판정과 같은 코드들).
+      if ([404, 405, 501].includes(response.status)) {
+        throw new Error(t("auth.serverTooOld"));
+      }
+      return;
+    }
+    let payload: { capabilities?: { sync?: { dataFloor?: boolean } } };
+    try {
+      payload = (await response.json()) as typeof payload;
+    } catch {
+      return;
+    }
+    if (payload.capabilities?.sync?.dataFloor !== true) {
+      throw new Error(t("auth.serverTooOld"));
+    }
+  }
+
+  /**
+   * 로그인을 시작하기 전의 자리.
+   *
+   * 계정 없이 쓰던 사람이 로그인을 취소하거나 시작에 실패했을 때 `unauthenticated` 로
+   * 떨어뜨리면, 열어 둔 터미널과 로컬 데이터가 화면에서 사라지고 다음 실행에도 로그인 화면이
+   * 뜬다 — 아무것도 안 했는데 잃은 것처럼 보인다. 저장된 자리로 되돌린다.
+   *
+   * 로그아웃은 이 길로 오지 않는다(`clearSession` 이 먼저 `unauthenticated` 를 적는다) —
+   * 그쪽은 계정 없이 쓰던 기억까지 지우는 것이 맞다.
+   */
+  private resolveSignedOutStatus(): "unauthenticated" | "local-only" {
+    return this.stateStorage.getState().auth.status === "local-only"
+      ? "local-only"
+      : "unauthenticated";
+  }
+
   async beginBrowserLogin(): Promise<void> {
+    await this.assertServerCanHoldAccount();
     const redirectUri = await this.prepareBrowserRedirectUri();
     const browserState = randomUUID();
     const loginUrl = new URL("/login", this.getServerUrl());
@@ -773,9 +867,10 @@ export class AuthService {
       await this.closeLoopbackCallbackServer();
       this.pendingBrowserLoginState = null;
       this.pendingBrowserLoginUrl = null;
-      this.stateStorage.updateAuthStatus("unauthenticated");
+      const signedOutStatus = this.resolveSignedOutStatus();
+      this.stateStorage.updateAuthStatus(signedOutStatus);
       this.patchState({
-        status: "unauthenticated",
+        status: signedOutStatus,
         errorMessage: null,
       });
       throw error;
@@ -802,9 +897,10 @@ export class AuthService {
     this.pendingBrowserLoginState = null;
     this.pendingBrowserLoginUrl = null;
     this.exchangeInFlightCode = null;
-    this.stateStorage.updateAuthStatus("unauthenticated");
+    const signedOutStatus = this.resolveSignedOutStatus();
+    this.stateStorage.updateAuthStatus(signedOutStatus);
     this.patchState({
-      status: "unauthenticated",
+      status: signedOutStatus,
       session: null,
       offline: null,
       errorMessage: null,
@@ -1049,6 +1145,14 @@ export class AuthService {
   }
 
   async forceUnauthenticated(errorMessage?: string): Promise<void> {
+    // 계정 없이 쓰는 중에는 지울 세션이 없다.
+    //
+    // 서버를 거치는 기능(AWS 서버 프록시)이 "로그인이 필요합니다" 를 던지면 아래 판정이 그것을
+    // **세션 만료**로 읽어 상태를 통째로 지웠다. 그러면 계정 없이 쓰기로 한 선택까지 사라져서,
+    // 연결 한 번 실패했을 뿐인데 다음 실행에 로그인 화면이 떴다.
+    if (this.state.status === "local-only") {
+      return;
+    }
     if (
       errorMessage &&
       // 들어오는 오류 메시지를 판정하는 패턴이라 한국어 문구를 지우면 안 된다 — 예전
@@ -1085,6 +1189,12 @@ export class AuthService {
       throw new Error(
         t("auth.offlineUnavailable"),
       );
+    }
+    // 계정 없이 쓰는 중이면 "세션이 끊겼다" 가 아니라 "이 기능은 계정이 필요하다" 이다.
+    // 문구도 만료 판정(forceUnauthenticated)에 걸리지 않는 말로 따로 둔다 — 걸리면 연결
+    // 실패가 로그아웃으로 번진다.
+    if (this.state.status === "local-only") {
+      throw new Error(t("auth.featureNeedsAccount"));
     }
     if (
       this.state.status !== "authenticated" ||

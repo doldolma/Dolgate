@@ -293,7 +293,7 @@ describe('renderer bridges', () => {
         onStarted={onStarted}
         onAuthState={onAuthState}
         onHydrateWorkspace={onHydrateWorkspace}
-        isWorkspaceAccessibleAuthState={isWorkspaceAccessibleAuthState}
+        isWorkspaceOpenableAuthState={isWorkspaceAccessibleAuthState}
       />,
     );
 
@@ -307,7 +307,7 @@ describe('renderer bridges', () => {
         onStarted={vi.fn()}
         onAuthState={vi.fn()}
         onHydrateWorkspace={vi.fn().mockResolvedValue(undefined)}
-        isWorkspaceAccessibleAuthState={isWorkspaceAccessibleAuthState}
+        isWorkspaceOpenableAuthState={isWorkspaceAccessibleAuthState}
       />,
     );
 

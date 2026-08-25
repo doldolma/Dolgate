@@ -57,6 +57,7 @@ export {
   FileText,
   Info,
   Cloud,
+  CloudOff,
   Monitor,
   Cable,
   Maximize2,

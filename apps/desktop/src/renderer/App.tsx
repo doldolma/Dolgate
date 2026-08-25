@@ -93,6 +93,33 @@ function isWorkspaceAccessibleAuthState(
   );
 }
 
+/**
+ * 하이드레이션이 "누구의 워크스페이스인가" 를 세는 값.
+ *
+ * 계정으로 들어오면 사용자 id 이고, 계정 없이 쓰면 이 표식이다. **사용자 id 와 겹치지 않는
+ * 값이어야 한다** — 겹치면 계정 경계 판정(같은 워크스페이스인가)이 무너진다. 서버가 만드는
+ * id 에 NUL 이 들어갈 수 없으므로 그것을 앞에 붙인다(홈 화면이 즐겨찾기 경로에 쓰는 수법과 같다).
+ */
+const LOCAL_ONLY_WORKSPACE_ID = '\u0000local-only';
+
+function resolveWorkspaceIdentity(
+  authState: Pick<AuthState, 'status' | 'session'>,
+): string | null {
+  if (authState.status === 'local-only') {
+    return LOCAL_ONLY_WORKSPACE_ID;
+  }
+  return isWorkspaceAccessibleAuthState(authState)
+    ? authState.session.user.id
+    : null;
+}
+
+/** 워크스페이스를 열 수 있는 상태인가 — 계정으로 들어왔거나, 계정 없이 쓰기로 골랐거나. */
+function isWorkspaceOpenableAuthState(
+  authState: Pick<AuthState, 'status' | 'session'>,
+): boolean {
+  return resolveWorkspaceIdentity(authState) !== null;
+}
+
 // E2EE 볼트 게이트 — 동기화 암호 설정/입력 전에는 워크스페이스를 열지 않는다.
 function resolveVaultGateMode(
   authState: AuthState,
@@ -170,7 +197,8 @@ export function App() {
   );
 
   async function hydrateSessionWorkspace(nextState: AuthState): Promise<void> {
-    if (!isWorkspaceAccessibleAuthState(nextState)) {
+    const userId = resolveWorkspaceIdentity(nextState);
+    if (userId === null) {
       return;
     }
     // 볼트 게이트 중에는 하이드레이션을 미룬다 — 잠금해제 브로드캐스트에서 이어진다.
@@ -178,8 +206,8 @@ export function App() {
       return;
     }
 
-    const userId = nextState.session.user.id;
     const needsLocalBootstrap = hydratedSessionUserId !== userId;
+    // 계정 없이 쓰는 동안에는 올리고 내릴 곳이 없다 — 로컬 부트스트랩만 돈다.
     const needsOnlineSync =
       nextState.status === 'authenticated' &&
       hydratedOnlineSessionUserIdRef.current !== userId;
@@ -208,7 +236,7 @@ export function App() {
           hydratedOnlineSessionUserIdRef.current = userId;
         } catch {
           const latestAuthState = await getAuthState();
-          if (!isWorkspaceAccessibleAuthState(latestAuthState)) {
+          if (!isWorkspaceOpenableAuthState(latestAuthState)) {
             setHydratedSessionUserId(null);
             hydratedOnlineSessionUserIdRef.current = null;
             return;
@@ -219,7 +247,7 @@ export function App() {
       const latestAuthState = await getAuthState();
       setHydratedSessionUserId(null);
       hydratedOnlineSessionUserIdRef.current = null;
-      if (!isWorkspaceAccessibleAuthState(latestAuthState)) {
+      if (!isWorkspaceOpenableAuthState(latestAuthState)) {
         setWorkspaceBootstrapError(null);
         return;
       }
@@ -236,7 +264,8 @@ export function App() {
 
   function handleAuthEvent(state: AuthState) {
     setAuthState(state);
-    if (isWorkspaceAccessibleAuthState(state)) {
+    // 계정 없이 쓰는 상태도 워크스페이스를 연다 — 다만 로컬 부트스트랩만 돈다(신원으로 갈린다).
+    if (isWorkspaceOpenableAuthState(state)) {
       void hydrateSessionWorkspace(state);
       return;
     }
@@ -259,10 +288,22 @@ export function App() {
     setUpdateState,
   });
 
+  const workspaceIdentity = resolveWorkspaceIdentity(authState);
+  // 계정 없이 쓰다가 로그인을 시작하면 상태가 'authenticating' 이 된다. 그때 워크스페이스를
+  // 내리면 **열어 둔 터미널이 통째로 사라진다** — 로그인 창은 그 위에 떠 있는 것이지 화면을
+  // 바꾸는 것이 아니다.
+  //
+  // 이미 로컬 워크스페이스를 열어 둔 경우에만 유지한다. 새 설치에서 로그인을 시작한 것은
+  // 아직 연 것이 없으므로(hydratedSessionUserId 가 null) 그대로 로그인 화면이다.
+  const isLoggingInFromLocalWorkspace =
+    authState.status === 'authenticating' &&
+    !authState.session &&
+    hydratedSessionUserId === LOCAL_ONLY_WORKSPACE_ID;
   const isAuthReady =
-    isWorkspaceAccessibleAuthState(authState) &&
-    hydratedSessionUserId === authState.session.user.id &&
-    !isSyncBootstrapping;
+    (workspaceIdentity !== null &&
+      hydratedSessionUserId === workspaceIdentity &&
+      !isSyncBootstrapping) ||
+    isLoggingInFromLocalWorkspace;
   const needsWorkspaceRetry =
     isWorkspaceAccessibleAuthState(authState) &&
     hydratedSessionUserId !== authState.session.user.id &&
@@ -361,7 +402,7 @@ export function App() {
         }}
         onAuthState={setAuthState}
         onHydrateWorkspace={hydrateSessionWorkspace}
-        isWorkspaceAccessibleAuthState={isWorkspaceAccessibleAuthState}
+        isWorkspaceOpenableAuthState={isWorkspaceOpenableAuthState}
       />
       <DesktopEventBridge
         onCoreEvent={homeViewModel.handleCoreEvent}

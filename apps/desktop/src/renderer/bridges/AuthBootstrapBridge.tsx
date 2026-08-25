@@ -7,9 +7,10 @@ interface AuthBootstrapBridgeProps {
   onStarted: () => void;
   onAuthState: (state: AuthState) => void;
   onHydrateWorkspace: (state: AuthState) => Promise<void>;
-  isWorkspaceAccessibleAuthState: (
+  /** 워크스페이스를 열 수 있는 상태인가 — 계정으로 들어왔거나, 계정 없이 쓰기로 골랐거나. */
+  isWorkspaceOpenableAuthState: (
     authState: Pick<AuthState, 'status' | 'session'>
-  ) => authState is AuthState & { session: NonNullable<AuthState['session']> };
+  ) => boolean;
 }
 
 export function AuthBootstrapBridge({
@@ -17,12 +18,12 @@ export function AuthBootstrapBridge({
   onStarted,
   onAuthState,
   onHydrateWorkspace,
-  isWorkspaceAccessibleAuthState,
+  isWorkspaceOpenableAuthState,
 }: AuthBootstrapBridgeProps) {
   const markStarted = useEffectEvent(onStarted);
   const handleAuthState = useEffectEvent(onAuthState);
   const hydrateWorkspace = useEffectEvent(onHydrateWorkspace);
-  const isAccessibleWorkspaceState = useEffectEvent(isWorkspaceAccessibleAuthState);
+  const isOpenableWorkspaceState = useEffectEvent(isWorkspaceOpenableAuthState);
 
   useEffect(() => {
     if (hasStarted) {
@@ -32,7 +33,7 @@ export function AuthBootstrapBridge({
 
     void desktopApi.auth.bootstrap().then((state) => {
       handleAuthState(state);
-      if (isAccessibleWorkspaceState(state)) {
+      if (isOpenableWorkspaceState(state)) {
         void hydrateWorkspace(state);
       }
     });

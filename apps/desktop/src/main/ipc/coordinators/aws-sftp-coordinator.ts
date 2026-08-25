@@ -92,8 +92,16 @@ export function createAwsSftpCoordinator(deps: {
   awsService: AwsService;
   queueSync: () => void;
   emitSftpConnectionProgress: AwsConnectionProgressEmitter;
+  /** 계정 없이 쓰는 중인지 보기 위한 것. 서버 프록시 경로는 계정이 있어야 열린다. */
+  isLocalOnly: () => boolean;
 }): AwsSftpCoordinator {
-  const { hosts, awsService, queueSync, emitSftpConnectionProgress } = deps;
+  const {
+    hosts,
+    awsService,
+    queueSync,
+    emitSftpConnectionProgress,
+    isLocalOnly,
+  } = deps;
   const awsSftpPreflightByEndpointId = new Map<
     string,
     AwsSftpPreflightCacheEntry
@@ -480,6 +488,16 @@ export function createAwsSftpCoordinator(deps: {
       allowBrowserLogin,
       emitProgress = emitSftpConnectionProgress,
     } = input;
+    // **AWS 를 부르기 전에 막는다.** 서버 프록시로 설정된 호스트는 우리 서버를 거치는데,
+    // 계정이 없으면 그 길이 없다. 프리플라이트를 다 돌고 나서야 토큰이 없다는 것을 알면
+    // 프로필 확인·인스턴스 조회·메타데이터까지 기다린 뒤에 실패한다.
+    //
+    // EC2 경로는 전부 이 함수를 지나므로(프로브·SSH·SFTP·컨테이너·포트포워딩) 여기 한 곳이면
+    // 된다 — 분기마다 막으면 하나를 빠뜨린다.
+    if (host.awsSsmServerProxyEnabled === true && isLocalOnly()) {
+      throw new Error(t("auth.featureNeedsAccount"));
+    }
+
     let currentStage: AwsSftpProgressStage = "checking-profile";
 
     try {

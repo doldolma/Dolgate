@@ -66,6 +66,14 @@ interface SettingsPanelProps {
   keychainEntries: SecretMetadataRecord[];
   savedCredentialsSearchQuery: string;
   currentUserEmail?: string | null;
+  /**
+   * 계정 없이 이 기기에서만 쓰는 중인가.
+   *
+   * 그때는 계정 구역이 로그인 하나로 줄어든다 — 이메일이 '—' 이고 로그아웃 버튼만 있는 화면은
+   * 무엇이 잘못된 것처럼 보인다.
+   */
+  isLocalOnly?: boolean;
+  onStartLogin?: () => Promise<void>;
   passwordState?: AccountPasswordState | null;
   desktopPlatform: 'darwin' | 'win32' | 'linux' | 'unknown';
   onSelectSection: (section: SettingsSection) => void;
@@ -268,6 +276,8 @@ export function SettingsPanel({
   keychainEntries,
   savedCredentialsSearchQuery,
   currentUserEmail = null,
+  isLocalOnly = false,
+  onStartLogin,
   passwordState = null,
   vaultStatus = null,
   onChangeVaultPassphrase,
@@ -1112,7 +1122,23 @@ export function SettingsPanel({
         </>
       ) : null}
 
-      {activeSection === 'account' ? (
+      {activeSection === 'account' && isLocalOnly ? (
+        <section className="rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.6rem] shadow-[var(--shadow-soft)]">
+          <div className="mb-4">
+            <h3>Account</h3>
+          </div>
+          <p className="m-0 mb-4 text-sm leading-6 text-[var(--text-soft)]">
+            {translate('localOnly.body')}
+          </p>
+          {onStartLogin ? (
+            <Button variant="primary" onClick={async () => onStartLogin()}>
+              {translate('localOnly.login')}
+            </Button>
+          ) : null}
+        </section>
+      ) : null}
+
+      {activeSection === 'account' && !isLocalOnly ? (
         <>
           <section className="rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.6rem] shadow-[var(--shadow-soft)]">
             <div className="mb-4">

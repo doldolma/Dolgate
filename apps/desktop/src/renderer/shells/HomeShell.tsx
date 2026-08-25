@@ -17,6 +17,8 @@ import { AwsImportDialog } from '../components/AwsImportDialog';
 import { HostBrowser } from '../components/HostBrowser';
 import { HostDrawer, type HostDrawerHandle } from '../components/HostDrawer';
 import { HostEditSwitchConfirmDialog } from '../components/HostEditSwitchConfirmDialog';
+import { LogoutConfirmDialog } from '../components/LogoutConfirmDialog';
+import { isLocalOnlyAuthState } from '../lib/local-only';
 import { DolgateImportDialog, HostExportDialog } from '../components/HostTransferDialogs';
 import { changeVaultPassphrase, resetVault } from '../services/desktop/auth-window-updater';
 import { getJumpHostCandidates } from '../components/HostForm';
@@ -55,13 +57,19 @@ import { useTranslation } from 'react-i18next';
 
 interface HomeShellProps {
   active: boolean;
-  authState: AuthState & { session: NonNullable<AuthState['session']> };
+  /**
+   * 세션이 없을 수 있다 — 계정 없이 이 기기에서만 쓰는 상태(`local-only`)가 그렇다.
+   * 계정 정보를 읽는 자리는 없을 때를 다뤄야 한다.
+   */
+  authState: AuthState;
   offlineLeaseExpiryLabel: string | null;
   desktopPlatform: 'darwin' | 'win32' | 'linux' | 'unknown';
   homeViewModel: ReturnType<typeof useHomeViewModel>;
   containersViewModel: ReturnType<typeof useContainersViewModel>;
   modalViewModel: ReturnType<typeof useAppModalViewModel>;
   loginController: ReturnType<typeof useLoginController>;
+  /** 로그인 창을 연다. 창은 셸이 하나만 띄운다 — 자리마다 만들면 로그인 판이 복제된다. */
+  onRequestLogin: () => void;
   onRequestSecretEditor: (request: SecretEditDialogRequest) => void;
 }
 
@@ -74,6 +82,7 @@ export function HomeShell({
   containersViewModel,
   modalViewModel,
   loginController,
+  onRequestLogin,
   onRequestSecretEditor,
 }: HomeShellProps) {
   const { t: translate } = useTranslation();
@@ -479,7 +488,14 @@ export function HomeShell({
       }
       desktopPlatform={desktopPlatform}
       // 서버가 계정 데이터 수준을 저장할 수 있을 때만 RDP 를 만들 수 있다(HostDrawer 주석 참고).
-      serverSupportsDataFloor={authState.capabilities?.dataFloor === true}
+      // 계정 없이 쓰는 동안에는 이 게이트를 끈다. 게이트가 막는 위험은 "같은 계정의 옛 기기가
+      // 그 레코드를 받고 망가진다" 인데, 그때는 계정도 다른 기기도 없다 — 막을 대상이 없다.
+      // 흡수할 때 다시 볼 필요도 없다: 1.9.0 미만 서버는 로그인 자체가 막히므로 로그인된
+      // 계정은 언제나 데이터 수준을 판정하는 서버다.
+      serverSupportsDataFloor={
+        isLocalOnlyAuthState(authState) ||
+        authState.capabilities?.dataFloor === true
+      }
       onClose={homeViewModel.closeHostDrawer}
       onSubmit={async (draft, secrets) => {
         const isEdit = homeViewModel.hostDrawer.mode === 'edit';
@@ -832,6 +848,8 @@ export function HomeShell({
             keychainEntries={settingsViewModel.keychainEntries}
             savedCredentialsSearchQuery={settingsViewModel.savedCredentialsSearchQuery}
             currentUserEmail={authState.session?.user.email ?? null}
+            isLocalOnly={isLocalOnlyAuthState(authState)}
+            onStartLogin={async () => onRequestLogin()}
             passwordState={
               authState.status === 'authenticated'
                 ? (authState.session?.user.passwordState ?? null)
@@ -984,6 +1002,12 @@ export function HomeShell({
           await homeViewModel.saveHost(null, draft);
         }}
       />
+      <LogoutConfirmDialog
+        open={loginController.isLogoutConfirmOpen}
+        onClose={loginController.cancelLogout}
+        onConfirm={loginController.confirmLogout}
+      />
+
       <HostEditSwitchConfirmDialog
         open={pendingEditorExit !== null}
         isSaving={isEditorExitSaving}

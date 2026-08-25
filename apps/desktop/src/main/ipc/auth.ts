@@ -31,6 +31,9 @@ export function registerAuthIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(ipcChannels.auth.bootstrap, async () =>
     ctx.authService.bootstrap(),
   );
+  ipcMain.handle(ipcChannels.auth.startLocalOnly, async () =>
+    ctx.authService.startLocalOnly(),
+  );
   ipcMain.handle(ipcChannels.auth.retryOnline, async () =>
     ctx.authService.retryOnline(),
   );

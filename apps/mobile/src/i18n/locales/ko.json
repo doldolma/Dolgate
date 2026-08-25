@@ -81,7 +81,8 @@
         "authenticating": "로그인 중",
         "authenticated": "로그인됨",
         "offline-authenticated": "오프라인",
-        "error": "오류"
+        "error": "오류",
+        "local-only": "이 기기에만 저장"
       },
       "sync": {
         "idle": "대기",

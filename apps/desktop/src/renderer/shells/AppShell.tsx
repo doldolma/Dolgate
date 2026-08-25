@@ -25,6 +25,9 @@ import { HomeShell } from './HomeShell';
 import { SessionShell } from './SessionShell';
 import { SftpShell } from './SftpShell';
 import { SessionShareChromeButton } from '../components/terminal-workspace/SessionShareChromeButton';
+import { LocalOnlyChromeButton } from '../components/LocalOnlyChromeButton';
+import { LoginDialog } from '../components/LoginDialog';
+import { isLocalOnlyAuthState } from '../lib/local-only';
 import {
   type DraggedSessionPayload,
   workspaceContainsSession,
@@ -32,7 +35,11 @@ import {
 import { t } from '../i18n';
 
 interface AppShellProps {
-  authState: AuthState & { session: NonNullable<AuthState['session']> };
+  /**
+   * 세션이 없을 수 있다 — 계정 없이 이 기기에서만 쓰는 상태(`local-only`)가 그렇다.
+   * 계정 정보를 읽는 자리는 없을 때를 다뤄야 한다.
+   */
+  authState: AuthState;
   offlineLeaseExpiryLabel: string | null;
   desktopPlatform: 'darwin' | 'win32' | 'linux' | 'unknown';
   prefersDark: boolean;
@@ -62,6 +69,10 @@ export function AppShell({
   modalViewModel,
   loginController,
 }: AppShellProps) {
+  // 계정 없이 쓰는 중 로그인하는 길이 두 곳(상단 바 표시·공유 안내)이라 창은 여기서 하나만
+  // 연다 — 자리마다 로그인 판을 만들면 오류 표시·서버 설정이 곳곳에 복제된다.
+  const isLocalOnly = isLocalOnlyAuthState(authState);
+  const [isLoginDialogOpen, setIsLoginDialogOpen] = useState(false);
   const [draggedSession, setDraggedSession] = useState<DraggedSessionPayload | null>(
     null,
   );
@@ -195,8 +206,21 @@ export function AppShell({
           sessionPanelOpen={sessionPanelOpen}
           onToggleSessionPanel={toggleSessionPanel}
           renderSessionShareAction={(sessionId) => (
-            <SessionShareChromeButton sessionId={sessionId} />
+            <SessionShareChromeButton
+              sessionId={sessionId}
+              isLocalOnly={isLocalOnly}
+              onRequestLogin={() => setIsLoginDialogOpen(true)}
+            />
           )}
+          renderLocalOnlyAction={
+            isLocalOnly
+              ? () => (
+                  <LocalOnlyChromeButton
+                    onRequestLogin={() => setIsLoginDialogOpen(true)}
+                  />
+                )
+              : undefined
+          }
           draggedSession={draggedSession}
           updateState={updateState}
           windowState={windowState}
@@ -279,6 +303,7 @@ export function AppShell({
           containersViewModel={containersViewModel}
           modalViewModel={modalViewModel}
           loginController={loginController}
+          onRequestLogin={() => setIsLoginDialogOpen(true)}
           onRequestSecretEditor={setSecretEditRequest}
         />
 
@@ -352,6 +377,27 @@ export function AppShell({
         onConfirmInstallUpdate={async () => {
           setIsUpdateInstallConfirmOpen(false);
           await loginController.installUpdateAndRestart();
+        }}
+      />
+
+      <LoginDialog
+        open={isLoginDialogOpen}
+        authState={authState}
+        serverUrl={settingsViewModel.settings.serverUrl}
+        hasServerUrlOverride={Boolean(
+          settingsViewModel.settings.serverUrlOverride,
+        )}
+        onClose={() => setIsLoginDialogOpen(false)}
+        onBeginLogin={loginController.beginBrowserLogin}
+        onReopenBrowserLogin={loginController.reopenBrowserLogin}
+        onCancelBrowserLogin={loginController.cancelBrowserLogin}
+        onSaveServerUrl={async (nextServerUrl) => {
+          await settingsViewModel.updateSettings({
+            serverUrlOverride: nextServerUrl,
+          });
+        }}
+        onResetServerUrl={async () => {
+          await settingsViewModel.updateSettings({ serverUrlOverride: null });
         }}
       />
     </div>

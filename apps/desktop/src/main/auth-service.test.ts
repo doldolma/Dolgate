@@ -2110,3 +2110,152 @@ describe("AuthService E2EE vault", () => {
     expect(service.getState().session?.vaultBootstrap.version).toBe(2);
   });
 });
+
+// 로그인 없이 이 기기에서만 쓰는 상태. 데스크톱 전용이다 — 폰에서는 계정이 곧 백업이다.
+describe("AuthService 로컬 전용", () => {
+  it("계정 없이 시작하면 그 상태로 서고, 다음 실행에도 이어진다", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service } = await createService(serverUrl);
+
+    const started = await service.startLocalOnly();
+    expect(started.status).toBe("local-only");
+    expect(started.session ?? null).toBeNull();
+
+    // 다시 켠 것과 같다 — 리프레시 토큰을 찾지 않고 그 상태로 연다. 이미 결정한 사람에게
+    // 로그인 화면을 다시 보여 주지 않는다.
+    const { service: restarted } = await createService(serverUrl);
+    const restored = await restarted.bootstrap();
+    expect(restored.status).toBe("local-only");
+  });
+
+  // 로그아웃하면 로그인 화면으로 돌아가야 한다. 고른 기억이 남아 있으면 텅 빈 워크스페이스로
+  // 떨어져 "내 데이터가 어디 갔나" 가 된다.
+  it("로그아웃하면 고른 기억이 지워진다", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service } = await createService(serverUrl);
+    await service.startLocalOnly();
+    await service.logout();
+
+    const { service: restarted } = await createService(serverUrl);
+    const restored = await restarted.bootstrap();
+    expect(restored.status).not.toBe("local-only");
+  });
+
+  // 브라우저로 보냈다가 로그인을 다 끝내고 돌아온 뒤 "이 서버는 안 됩니다" 라고 하는 것이
+  // 최악이다. /api/info 는 토큰이 필요 없으므로 열기 전에 본다.
+  it("데이터 수준을 판정 못 하는 서버로는 브라우저를 열지 않는다", async () => {
+    const serverUrl = "https://old.example.com";
+    const { service } = await createService(serverUrl);
+    const { shell } = await import("electron");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            serverVersion: "1.8.9",
+            capabilities: { sync: { awsProfiles: true } },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(service.beginBrowserLogin()).rejects.toThrow();
+    expect(shell.openExternal).not.toHaveBeenCalled();
+  });
+
+  // 네트워크가 끊겼거나 프록시가 가로챈 것을 "옛 서버" 로 오인하면 멀쩡한 계정에 못 들어간다.
+  it("서버 정보를 읽지 못하면 막지 않는다", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service } = await createService(serverUrl);
+    const { shell } = await import("electron");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+
+    await service.beginBrowserLogin();
+    expect(shell.openExternal).toHaveBeenCalled();
+  });
+
+  // 취소하면 로그인을 시작하기 전으로 돌아가야 한다. `unauthenticated` 로 떨어뜨리면 열어 둔
+  // 터미널과 로컬 데이터가 화면에서 사라지고 다음 실행에도 로그인 화면이 뜬다 — 아무것도 안
+  // 했는데 잃은 것처럼 보인다.
+  it("로그인을 취소하면 계정 없이 쓰던 자리로 돌아온다", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service } = await createService(serverUrl);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            serverVersion: "1.9.5",
+            capabilities: { sync: { dataFloor: true } },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+
+    await service.startLocalOnly();
+    await service.beginBrowserLogin();
+    expect(service.getState().status).toBe("authenticating");
+
+    await service.cancelBrowserLogin();
+    expect(service.getState().status).toBe("local-only");
+
+    // 다음 실행에도 이어진다.
+    const { service: restarted } = await createService(serverUrl);
+    expect((await restarted.bootstrap()).status).toBe("local-only");
+  });
+
+  // 서버를 거치는 기능(AWS 서버 프록시)이 "로그인이 필요합니다" 를 던지면, 만료 판정이 그것을
+  // 세션이 끊긴 것으로 읽어 상태를 통째로 지웠다 — 연결 한 번 실패했을 뿐인데 다음 실행에
+  // 로그인 화면이 떴다.
+  it("연결이 로그인을 요구해도 계정 없이 쓰던 상태를 지우지 않는다", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service } = await createService(serverUrl);
+    await service.startLocalOnly();
+
+    await service.forceUnauthenticated("로그인이 필요합니다.");
+    expect(service.getState().status).toBe("local-only");
+
+    const { service: restarted } = await createService(serverUrl);
+    expect((await restarted.bootstrap()).status).toBe("local-only");
+  });
+
+  // 그 문구 자체도 만료 판정(forceUnauthenticated 의 정규식)에 걸리지 않는 말이어야 한다 —
+  // 걸리면 다른 경로에서 같은 일이 되풀이된다.
+  it("계정이 필요한 기능은 만료로 읽히지 않는 문구로 거절한다", async () => {
+    const { service } = await createService("https://ssh.doldolma.com");
+    await service.startLocalOnly();
+
+    let message = "";
+    try {
+      service.getAccessToken();
+    } catch (error) {
+      message = error instanceof Error ? error.message : "";
+    }
+    expect(message).not.toBe("");
+    expect(message).not.toMatch(
+      /세션이 만료|session has expired|token is expired|invalid claims|로그인이 필요|sign-in is required/i,
+    );
+  });
+
+  // 서버를 거치는 기능이 토큰을 못 얻으면 세션 되살리기를 시도한다
+  // (aws-ws-proxy 의 runWithAwsServerProxyAuthRetry). 계정 없이 쓰는 중에는 되살릴 세션이
+  // 없는데, 그 시도가 실패하면서 `unauthenticated` 를 디스크에 적어 선택까지 지웠다.
+  it("세션 되살리기가 계정 없이 쓰던 상태를 지우지 않는다", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service } = await createService(serverUrl);
+    await service.startLocalOnly();
+
+    const refreshed = await service.refreshSession();
+    expect(refreshed.status).toBe("local-only");
+
+    const { service: restarted } = await createService(serverUrl);
+    expect((await restarted.bootstrap()).status).toBe("local-only");
+  });
+});

@@ -76,7 +76,16 @@ export type ActivityLogKind =
   | 'sftp-lifecycle'
   | 'container-lifecycle'
   | 'container-action';
-export type AuthStatus = 'loading' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'offline-authenticated' | 'error';
+/**
+ * `local-only` 는 **계정 없이 이 기기에서만 쓰는 상태**다(데스크톱 전용).
+ *
+ * `unauthenticated` 와 나눈 이유는 뜻이 다르기 때문이다 — 저쪽은 "아직 로그인하지 않았다"(그래서
+ * 로그인 화면을 띄운다)이고, 이쪽은 "로그인하지 않기로 골랐다"(그래서 워크스페이스를 띄운다).
+ * 세션은 없으므로 `session` 은 null 이고, 계정 경계 판정에서 어떤 사용자와도 같지 않다.
+ *
+ * 모바일은 이 상태로 가지 않는다 — 폰에만 저장하면 백업이 없어 잃어버린다.
+ */
+export type AuthStatus = 'loading' | 'unauthenticated' | 'local-only' | 'authenticating' | 'authenticated' | 'offline-authenticated' | 'error';
 export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'paused' | 'error';
 export type AwsProfilesServerSupport = 'unknown' | 'supported' | 'unsupported';
 export type TermiusProbeStatus = 'ready' | 'unsupported' | 'not-installed' | 'no-data' | 'error';

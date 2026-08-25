@@ -246,4 +246,79 @@ describe('LoginGate', () => {
       expect(onCancelBrowserLogin).toHaveBeenCalledTimes(1);
     });
   });
+
+  // 로그인을 건너뛰는 길. 로그인이 주고 이것이 부다 — 대등하게 두면 "일단 건너뛰기" 를
+  // 누르는 사람이 늘어나는데, 폰에서는 로그인이 필수라 거기서 다시 막힌다.
+  it('로그인을 건너뛰는 버튼을 그린다', async () => {
+    const onStartLocalOnly = vi.fn().mockResolvedValue(undefined);
+    render(
+      <LoginGate
+        authState={{ status: 'unauthenticated', session: null, errorMessage: null }}
+        isSyncBootstrapping={false}
+        serverUrl="https://ssh.doldolma.com"
+        hasServerUrlOverride={false}
+        isLoadingServerUrl={false}
+        onBeginLogin={vi.fn().mockResolvedValue(undefined)}
+        onSaveServerUrl={vi.fn().mockResolvedValue(undefined)}
+        onResetServerUrl={vi.fn().mockResolvedValue(undefined)}
+        onStartLocalOnly={onStartLocalOnly}
+      />
+    );
+
+    // "건너뛰기" 가 "지금 안 할 뿐 나중에 할 수 있다" 를 담고 있어서 덧붙일 설명이 없다.
+    fireEvent.click(screen.getByText('로그인 건너뛰기'));
+    await waitFor(() => expect(onStartLocalOnly).toHaveBeenCalledTimes(1));
+  });
+
+  // 브라우저 로그인을 기다리는 동안에는 이 길을 감춘다 — 그때 누르면 진행 중인 로그인이
+  // 무엇이 되는지 알 수 없다.
+  it('브라우저 로그인을 기다리는 동안에는 그 버튼을 감춘다', () => {
+    render(
+      <LoginGate
+        authState={{ status: 'authenticating', session: null, errorMessage: null }}
+        isSyncBootstrapping={false}
+        serverUrl="https://ssh.doldolma.com"
+        hasServerUrlOverride={false}
+        isLoadingServerUrl={false}
+        onBeginLogin={vi.fn().mockResolvedValue(undefined)}
+        onSaveServerUrl={vi.fn().mockResolvedValue(undefined)}
+        onResetServerUrl={vi.fn().mockResolvedValue(undefined)}
+        onStartLocalOnly={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(screen.queryByText('로그인 건너뛰기')).not.toBeInTheDocument();
+  });
+
+  // 메인에서 던진 오류는 `Error invoking remote method '...': Error: ` 가 앞에 붙어서 온다.
+  // 그대로 보여 주면 사용자가 읽을 것이 아니라 우리 내부 사정이 화면에 뜬다.
+  it('로그인 실패 문구에서 IPC 래퍼 접두사를 벗긴다', async () => {
+    render(
+      <LoginGate
+        authState={{ status: 'unauthenticated', session: null, errorMessage: null }}
+        isSyncBootstrapping={false}
+        serverUrl="https://ssh.doldolma.com"
+        hasServerUrlOverride={false}
+        isLoadingServerUrl={false}
+        onBeginLogin={vi
+          .fn()
+          .mockRejectedValue(
+            new Error(
+              "Error invoking remote method 'auth:begin-browser-login': Error: 이 로그인 서버는 너무 오래됐습니다.",
+            ),
+          )}
+        onSaveServerUrl={vi.fn().mockResolvedValue(undefined)}
+        onResetServerUrl={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    fireEvent.click(screen.getByText('브라우저로 로그인하기'));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('이 로그인 서버는 너무 오래됐습니다.'),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/invoking remote method/)).not.toBeInTheDocument();
+  });
 });

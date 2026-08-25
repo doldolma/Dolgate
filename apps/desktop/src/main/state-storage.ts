@@ -148,7 +148,9 @@ export interface DesktopStateFile {
     updatedAt: string;
   };
   auth: {
-    status: 'unknown' | 'authenticated' | 'offline-authenticated' | 'unauthenticated';
+    // 'local-only' 는 계정 없이 쓰기로 고른 상태다 — 다음 실행에서 로그인 화면 대신 바로
+    // 워크스페이스를 띄우기 위해 남긴다. 로그아웃하면 'unauthenticated' 로 되돌린다.
+    status: 'unknown' | 'authenticated' | 'offline-authenticated' | 'unauthenticated' | 'local-only';
     updatedAt: string;
   };
   client: {
@@ -1310,7 +1312,10 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
     },
     auth: {
       status:
-        auth.status === 'authenticated' || auth.status === 'offline-authenticated' || auth.status === 'unauthenticated'
+        auth.status === 'authenticated' ||
+        auth.status === 'offline-authenticated' ||
+        auth.status === 'unauthenticated' ||
+        auth.status === 'local-only'
           ? auth.status
           : 'unknown',
       updatedAt: typeof auth.updatedAt === 'string' ? auth.updatedAt : fallback.auth.updatedAt

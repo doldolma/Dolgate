@@ -137,6 +137,7 @@ export function createMainIpcContext(
     awsService,
     queueSync,
     emitSftpConnectionProgress: (event) => emitSftpConnectionProgress(event),
+    isLocalOnly: () => authService.getState().status === "local-only",
   });
   coreManager.setSsmPortForwardTokenIssuer(awsService.ssmPortForwardTokenIssuer);
   const coreEventBridge = createCoreEventBridge({

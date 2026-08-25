@@ -10,6 +10,7 @@ export function buildAuthBridge(
     getState: () => ipcRenderer.invoke(ipcChannels.auth.getState),
     bootstrap: () => ipcRenderer.invoke(ipcChannels.auth.bootstrap),
     retryOnline: () => ipcRenderer.invoke(ipcChannels.auth.retryOnline),
+    startLocalOnly: () => ipcRenderer.invoke(ipcChannels.auth.startLocalOnly),
     beginBrowserLogin: () =>
       ipcRenderer.invoke(ipcChannels.auth.beginBrowserLogin),
     reopenBrowserLogin: () =>

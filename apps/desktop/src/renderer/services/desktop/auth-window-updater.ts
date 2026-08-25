@@ -29,6 +29,10 @@ export function cancelBrowserLogin() {
   return desktopApi.auth.cancelBrowserLogin();
 }
 
+export function startLocalOnly() {
+  return desktopApi.auth.startLocalOnly();
+}
+
 export function retryOnline() {
   return desktopApi.auth.retryOnline();
 }
@@ -91,6 +95,10 @@ export function changeVaultPassphrase(
 
 export function bootstrapSync() {
   return desktopApi.sync.bootstrap();
+}
+
+export function pushDirtySync() {
+  return desktopApi.sync.pushDirty();
 }
 
 export function getUpdaterState() {

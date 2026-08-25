@@ -71,6 +71,7 @@ export function LoginShell({
         onBeginLogin={loginController.beginBrowserLogin}
         onReopenBrowserLogin={loginController.reopenBrowserLogin}
         onCancelBrowserLogin={loginController.cancelBrowserLogin}
+        onStartLocalOnly={loginController.startLocalOnly}
         onSaveServerUrl={saveLoginServerUrl}
         onResetServerUrl={resetLoginServerUrl}
         actionLabel={needsWorkspaceRetry ? translate('appShell.retry') : undefined}

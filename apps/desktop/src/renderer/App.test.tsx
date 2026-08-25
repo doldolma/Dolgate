@@ -489,6 +489,78 @@ describe('App integration', () => {
     });
   });
 
+  // 계정 없이 쓰는 상태로 켜면 로그인 화면 대신 워크스페이스가 뜬다. 그리고 **올리고 내릴 곳이
+  // 없으므로** 로컬 부트스트랩만 돈다 — 동기화를 건드리면 볼트가 없다고 멈춰 서서, 신경 쓸 것이
+  // 없는 사람의 화면에 동기화 상태가 뜬다.
+  it('계정 없이 쓰는 상태로 켜면 동기화 없이 워크스페이스를 연다', async () => {
+    const api = createDolsshApi({
+      authBootstrapState: {
+        status: 'local-only',
+        session: null,
+        offline: null,
+        errorMessage: null,
+      },
+      authGetStateState: {
+        status: 'local-only',
+        session: null,
+        offline: null,
+        errorMessage: null,
+      },
+    });
+    Object.defineProperty(window, 'dolssh', {
+      configurable: true,
+      writable: true,
+      value: api,
+    });
+    mocks.desktopApi = api;
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(mocks.storeState.bootstrap).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('terminal-workspace')).toBeInTheDocument();
+    });
+    expect(api.sync.bootstrap).not.toHaveBeenCalled();
+  });
+
+  // 계정 없이 쓰다가 로그인을 시작하면 상태가 'authenticating' 이 된다. 그때 워크스페이스를
+  // 내리면 열어 둔 터미널이 통째로 사라진다 — 로그인 창은 그 위에 떠 있는 것이다.
+  it('계정 없이 쓰다가 로그인을 시작해도 워크스페이스를 내리지 않는다', async () => {
+    const localOnly = {
+      status: 'local-only',
+      session: null,
+      offline: null,
+      errorMessage: null,
+    };
+    const api = createDolsshApi({
+      authBootstrapState: localOnly,
+      authGetStateState: localOnly,
+    });
+    Object.defineProperty(window, 'dolssh', {
+      configurable: true,
+      writable: true,
+      value: api,
+    });
+    mocks.desktopApi = api;
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-workspace')).toBeInTheDocument();
+    });
+
+    // 브라우저 로그인이 시작된 것과 같다.
+    await act(async () => {
+      api.__listeners.auth?.({
+        status: 'authenticating',
+        session: null,
+        offline: null,
+        errorMessage: null,
+      });
+    });
+
+    expect(screen.getByTestId('terminal-workspace')).toBeInTheDocument();
+  });
+
   it('connects the requested host after a new window finishes authentication', async () => {
     const api = createDolsshApi({
       authBootstrapState: {

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { t } from '../i18n';
 import { Button, IconButton, Input, SectionLabel } from '../ui';
 import { getServerUrlValidationMessage } from '../../common/shared-messages';
+import { normalizeErrorMessage } from '../store/utils/errors-and-prompts';
 
 interface LoginGateProps {
   authState: AuthState;
@@ -18,6 +19,11 @@ interface LoginGateProps {
   onResetServerUrl: () => Promise<void>;
   actionLabel?: string;
   onAction?: () => Promise<void>;
+  /**
+   * 계정 없이 시작한다. 없으면 그 버튼을 그리지 않는다 — 워크스페이스를 다시 열지 못하는
+   * 자리(볼트 게이트 등)에서 이 화면을 쓸 때가 있다.
+   */
+  onStartLocalOnly?: () => Promise<void>;
 }
 
 function SettingsGearIcon() {
@@ -97,7 +103,8 @@ export function LoginGate({
   onSaveServerUrl,
   onResetServerUrl,
   actionLabel,
-  onAction
+  onAction,
+  onStartLocalOnly
 }: LoginGateProps) {
   const { t: translate } = useTranslation();
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
@@ -144,8 +151,10 @@ export function LoginGate({
         await handleAction();
       }
     } catch (error) {
+      // 메인에서 던진 오류는 `Error invoking remote method '...': Error: ` 가 앞에 붙어서 온다.
+      // 그대로 보여 주면 사용자가 읽을 것이 아니라 우리 내부 사정이 화면에 뜬다.
       setLocalErrorMessage(
-        error instanceof Error ? error.message : translate('login.startFailed')
+        normalizeErrorMessage(error, translate('login.startFailed')),
       );
     } finally {
       setIsSubmitting(false);
@@ -197,9 +206,7 @@ export function LoginGate({
       setIsAdvancedOpen(false);
     } catch (error) {
       setLocalErrorMessage(
-        error instanceof Error
-          ? error.message
-          : translate('login.server.saveFailed')
+        normalizeErrorMessage(error, translate('login.server.saveFailed')),
       );
     } finally {
       setIsSubmitting(false);
@@ -328,6 +335,35 @@ export function LoginGate({
             onClick={handleCancelBrowserLogin}
           >
             {translate('common.cancel')}
+          </Button>
+        ) : null}
+        {/* 로그인을 건너뛴다. 로그인이 주고 이것이 부다 — 대등하게 두면 "일단 건너뛰기" 를 누르는
+            사람이 늘어나는데, 폰에서는 로그인이 필수라 그 사람들이 거기서 다시 막힌다.
+
+            **오른쪽에 설명을 달지 않는다.** "건너뛰기" 가 이미 "지금 안 할 뿐 나중에 할 수 있다"
+            를 담고 있어서 덧붙일 말이 없다. 이 화면은 로그인 창(모달)으로도 뜨는데, 거기서도
+            같은 말로 읽힌다 — 그래서 맥락별로 문구를 나누지 않는다. */}
+        {onStartLocalOnly && !isPendingBrowserLogin ? (
+          <Button
+            variant="secondary"
+            fullWidth
+            className="mt-3 min-h-[56px] rounded-[12px]"
+            disabled={isSubmitting}
+            onClick={async () => {
+              setLocalErrorMessage(null);
+              setIsSubmitting(true);
+              try {
+                await onStartLocalOnly();
+              } catch (error) {
+                setLocalErrorMessage(
+                  normalizeErrorMessage(error, translate('login.localOnly.failed')),
+                );
+              } finally {
+                setIsSubmitting(false);
+              }
+            }}
+          >
+            {translate('login.localOnly.action')}
           </Button>
         ) : null}
       </div>

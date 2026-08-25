@@ -653,6 +653,18 @@ export class SyncService {
 
     this.markPendingPush();
 
+    // 계정이 없으면 밀 곳이 없다.
+    //
+    // **표시는 남긴다.** 나중에 로그인할 때 이 플래그가 흡수를 일으킨다(runBootstrap 이
+    // `hasPendingLocalChanges` 면 밀기를 먼저 한다). 옛 버전으로 되돌려도 이 값은 디스크에서
+    // 그대로 읽히므로 거기서 로그인해도 로컬이 서버 것으로 덮이지 않는다.
+    //
+    // **여기서 멈춘다.** 계속 가면 볼트가 없다고 'paused' 가 되어, 신경 쓸 것이 없는 사람의
+    // 화면에 동기화 상태가 뜬다.
+    if (this.authService.getState().status === 'local-only') {
+      return this.state;
+    }
+
     if (this.authService.getState().status === 'offline-authenticated') {
       return this.pause(t('sync.pausedOfflineUpload'));
     }

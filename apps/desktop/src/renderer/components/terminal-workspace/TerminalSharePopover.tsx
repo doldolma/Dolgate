@@ -23,6 +23,15 @@ interface TerminalSharePopoverProps {
   actions?: ReactNode;
   // Share 버튼 왼쪽에 함께 놓이는 토글(AI 패널 등).
   canStartShare: boolean;
+  /**
+   * 시작할 수 없는 이유. 있으면 버튼 대신 이것을 적는다.
+   *
+   * 버튼을 감추지 않는 이유는 감추면 그 기능이 아예 없는 줄 알기 때문이다 — 계정 없이 쓰는
+   * 동안에는 공유가 서버를 거치므로 못 하는데, 그것은 로그인하면 풀린다.
+   */
+  unavailableReason?: string | null;
+  /** 못 하는 이유가 로그인이면, 그 자리에서 로그인 창을 연다. */
+  onRequestLogin?: () => void;
   shareCopyStatus: string | null;
   shareState: TerminalTab['sessionShare'] | null;
   onToggle: () => void;
@@ -45,6 +54,8 @@ export function TerminalSharePopover({
   open,
   actions,
   canStartShare,
+  unavailableReason = null,
+  onRequestLogin,
   shareCopyStatus,
   shareState,
   onToggle,
@@ -99,15 +110,29 @@ export function TerminalSharePopover({
               {/* 판 이름("Session Share")은 두지 않는다 — 바로 아래 줄이 같은 말을 하고,
                   이 판은 Share 버튼을 눌러서 열린다. 이름표는 자리만 먹었다. */}
               <strong>{translate('sharePopover.title')}</strong>
-              <p className="mt-2 text-sm leading-[1.55] text-[var(--text-soft)]">{translate('sharePopover.hint')}</p>
-              <Button
-                variant="primary"
-                className="mt-4 w-full"
-                onClick={onStartShare}
-                disabled={!canStartShare}
-              >
-                {translate('sharePopover.start')}
-              </Button>
+              <p className="mt-2 text-sm leading-[1.55] text-[var(--text-soft)]">
+                {unavailableReason ?? translate('sharePopover.hint')}
+              </p>
+              {unavailableReason ? (
+                onRequestLogin ? (
+                  <Button
+                    variant="primary"
+                    className="mt-4 w-full"
+                    onClick={onRequestLogin}
+                  >
+                    {translate('localOnly.login')}
+                  </Button>
+                ) : null
+              ) : (
+                <Button
+                  variant="primary"
+                  className="mt-4 w-full"
+                  onClick={onStartShare}
+                  disabled={!canStartShare}
+                >
+                  {translate('sharePopover.start')}
+                </Button>
+              )}
             </>
           ) : (
             <>

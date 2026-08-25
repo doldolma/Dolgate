@@ -18,9 +18,17 @@ import { TerminalSharePopover } from './TerminalSharePopover';
 interface SessionShareChromeButtonProps {
   /** 지금 포커스된 터미널 세션(분할이면 그 pane). */
   sessionId: string;
+  /** 계정 없이 쓰는 중인가 — 공유는 서버를 거치므로 그때는 못 한다. */
+  isLocalOnly?: boolean;
+  /** 그때 안내 아래에 둘 로그인 버튼. 로그인 창은 셸이 하나만 연다. */
+  onRequestLogin?: () => void;
 }
 
-export function SessionShareChromeButton({ sessionId }: SessionShareChromeButtonProps) {
+export function SessionShareChromeButton({
+  sessionId,
+  isLocalOnly = false,
+  onRequestLogin,
+}: SessionShareChromeButtonProps) {
   const { t: translate } = useTranslation();
   const tabs = useAppStore((state) => state.tabs);
   const hosts = useAppStore((state) => state.hosts);
@@ -56,6 +64,17 @@ export function SessionShareChromeButton({ sessionId }: SessionShareChromeButton
       anchorRef={anchorRef}
       open={open}
       canStartShare={tab?.status === 'connected' && share?.status !== 'starting'}
+      unavailableReason={
+        isLocalOnly ? translate('sharePopover.needsAccount') : null
+      }
+      onRequestLogin={
+        isLocalOnly && onRequestLogin
+          ? () => {
+              setOpen(false);
+              onRequestLogin();
+            }
+          : undefined
+      }
       shareCopyStatus={copyStatus}
       shareState={share}
       onToggle={() => {

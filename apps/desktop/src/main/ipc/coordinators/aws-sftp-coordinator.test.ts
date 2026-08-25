@@ -50,6 +50,7 @@ function createCoordinator(
     },
     queueSync: vi.fn(),
     emitSftpConnectionProgress: vi.fn(),
+    isLocalOnly: () => false,
     ...overrides,
   } as any;
 
@@ -172,5 +173,26 @@ describe("AWS SFTP coordinator", () => {
     expect(error.awsSftpDiagnostic?.details).toMatchObject({ safe: "visible" });
     expect(error.awsSftpDiagnostic?.details).not.toHaveProperty("password");
     expect(error.awsSftpDiagnostic?.details).not.toHaveProperty("accessToken");
+  });
+
+  // 서버 프록시로 설정된 호스트는 우리 서버를 거친다. 계정이 없으면 그 길이 없으므로 **AWS 를
+  // 부르기 전에** 끝낸다 — 프리플라이트를 다 돌고 나서 실패하면 프로필 확인·인스턴스 조회를
+  // 기다린 뒤에야 이유를 듣는다.
+  it("계정 없이 쓰는 중이면 서버 프록시 호스트는 AWS 를 부르기 전에 거절한다", async () => {
+    const { coordinator, deps, host } = createCoordinator({
+      isLocalOnly: () => true,
+    });
+    const proxyHost = { ...host, awsSsmServerProxyEnabled: true };
+
+    await expect(
+      coordinator.resolvePreflight({
+        endpointId: "endpoint-1",
+        host: proxyHost as never,
+        allowBrowserLogin: false,
+      }),
+    ).rejects.toThrow();
+
+    expect(deps.awsService.getProfileStatus).not.toHaveBeenCalled();
+    expect(deps.awsService.describeEc2Instance).not.toHaveBeenCalled();
   });
 });

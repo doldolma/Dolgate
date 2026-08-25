@@ -96,6 +96,7 @@ function renderHome(openEditHostDrawer = vi.fn(), closeHostDrawer = vi.fn()) {
       containersViewModel={stub({ tabs: [] })}
       modalViewModel={stub({})}
       loginController={stub({})}
+      onRequestLogin={vi.fn()}
       onRequestSecretEditor={vi.fn()}
     />,
   );

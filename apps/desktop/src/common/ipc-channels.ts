@@ -3,6 +3,7 @@ export const ipcChannels = {
     getState: 'auth:get-state',
     bootstrap: 'auth:bootstrap',
     retryOnline: 'auth:retry-online',
+    startLocalOnly: 'auth:start-local-only',
     beginBrowserLogin: 'auth:begin-browser-login',
     reopenBrowserLogin: 'auth:reopen-browser-login',
     cancelBrowserLogin: 'auth:cancel-browser-login',

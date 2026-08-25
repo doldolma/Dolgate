@@ -60,6 +60,12 @@ interface AppTitleBarProps {
    * prop 만으로 그린다) 스토어를 읽는 조각은 셸이 넣어 준다. 세션이 없으면 부르지 않는다.
    */
   renderSessionShareAction?: (sessionId: string) => ReactNode;
+  /**
+   * 계정 없이 쓰는 중임을 알리는 표시. 그 상태가 아니면 셸이 넘기지 않는다.
+   *
+   * 상단 바가 인증 상태를 몰라도 되게 렌더 프롭으로 받는다(공유 버튼과 같은 이유).
+   */
+  renderLocalOnlyAction?: () => ReactNode;
   draggedSession: DraggedSessionPayload | null;
   updateState: UpdateState;
   windowState: DesktopWindowState;
@@ -1085,6 +1091,7 @@ export function AppTitleBar({
   sessionPanelOpen,
   onToggleSessionPanel,
   renderSessionShareAction,
+  renderLocalOnlyAction,
   draggedSession,
   updateState,
   windowState,
@@ -2206,6 +2213,9 @@ export function AppTitleBar({
             칩. 예전에는 항상 옅은 배경이 깔려 있어 눌러도 달라진 티가 나지 않았다. */}
         {/* 공유. 예전에는 터미널 오른쪽 위에 알약으로 떠 있었다 — 화면을 가리지 않게 창 단위
             크롬인 이 줄로 옮겼다. 누르면 열리는 팝오버는 그대로다. */}
+        {/* 계정 없이 쓰는 중이라는 표시는 **맨 왼쪽**이다. 토글(공유·패널·알림)과 종류가 다르고,
+            자기 오른쪽에 구분선을 갖고 있어 그 경계가 줄의 시작에 있어야 읽힌다. */}
+        {renderLocalOnlyAction?.()}
         {sessionPanelSessionId
           ? renderSessionShareAction?.(sessionPanelSessionId)
           : null}

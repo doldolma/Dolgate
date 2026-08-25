@@ -1263,6 +1263,8 @@ export interface DesktopApi {
     getState: () => Promise<AuthState>;
     bootstrap: () => Promise<AuthState>;
     retryOnline: () => Promise<AuthState>;
+    /** 계정 없이 이 기기에서만 쓰기 시작한다(데스크톱 전용). */
+    startLocalOnly: () => Promise<AuthState>;
     beginBrowserLogin: () => Promise<void>;
     reopenBrowserLogin: () => Promise<void>;
     cancelBrowserLogin: () => Promise<void>;

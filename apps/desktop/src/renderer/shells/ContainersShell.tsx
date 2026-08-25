@@ -24,7 +24,11 @@ import { useTranslation } from 'react-i18next';
 
 interface ContainersShellProps {
   active: boolean;
-  authState: AuthState & { session: NonNullable<AuthState['session']> };
+  /**
+   * 세션이 없을 수 있다 — 계정 없이 이 기기에서만 쓰는 상태(`local-only`)가 그렇다.
+   * 계정 정보를 읽는 자리는 없을 때를 다뤄야 한다.
+   */
+  authState: AuthState;
   offlineLeaseExpiryLabel: string | null;
   homeViewModel: ReturnType<typeof useHomeViewModel>;
   containersViewModel: ReturnType<typeof useContainersViewModel>;

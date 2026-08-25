@@ -31,6 +31,10 @@
       "reset": "기본 서버로 복원",
       "resetFailed": "기본 로그인 서버를 복원하지 못했습니다.",
       "saveFailed": "로그인 서버 주소를 저장하지 못했습니다."
+    },
+    "localOnly": {
+      "action": "로그인 건너뛰기",
+      "failed": "시작하지 못했습니다. 잠시 후 다시 시도해 주세요."
     }
   },
   "settings": {
@@ -1028,7 +1032,9 @@
     "loginFailed": "로그인에 실패했습니다.",
     "htmlResponse": "{{fallback}} 서버가 API 응답 대신 HTML 페이지를 반환했습니다. 배포 주소 또는 리버스 프록시 설정을 확인해 주세요. ({{status}})",
     "accountDeleteFailed": "회원 탈퇴에 실패했습니다. ({{status}})",
-    "requestFailed": "요청이 실패했습니다. ({{status}})"
+    "requestFailed": "요청이 실패했습니다. ({{status}})",
+    "serverTooOld": "이 로그인 서버는 너무 오래됐습니다. 서버를 1.9.0 이상으로 업데이트해 주세요.",
+    "featureNeedsAccount": "서버를 거쳐 접속하도록 설정된 호스트입니다. 로그인하거나 서버 프록시를 꺼 주세요."
   },
   "core": {
     "shutdownSession": "앱 종료로 세션이 정리되었습니다.",
@@ -2499,7 +2505,8 @@
     "readOnly": "읽기 전용",
     "allowInput": "입력 허용",
     "chatHistory": "채팅 기록",
-    "stop": "공유 종료"
+    "stop": "공유 종료",
+    "needsAccount": "세션 공유는 서버를 거칩니다. 로그인하면 쓸 수 있습니다."
   },
   "hostList": {
     "name": "이름",
@@ -3690,5 +3697,18 @@
       "saveFailed": "테마를 저장하지 못했습니다: {{message}}"
     },
     "copied": "복사했습니다"
+  },
+  "localOnly": {
+    "title": "동기화 꺼짐",
+    "body": "로그인하면 다른 기기와 자동으로 동기화됩니다.",
+    "pending": "브라우저에서 로그인을 마쳐 주세요. 끝나면 이 창으로 돌아옵니다.",
+    "login": "로그인",
+    "loginFailed": "로그인을 시작하지 못했습니다.",
+    "chip": "동기화 꺼짐"
+  },
+  "logoutConfirm": {
+    "title": "아직 올리지 못한 변경이 있습니다",
+    "body": "지금 로그아웃하면 그 변경은 이 컴퓨터에서 사라집니다. 서버에 올라간 것은 다시 로그인하면 그대로 돌아옵니다.",
+    "confirm": "그래도 로그아웃"
   }
 }

@@ -31,6 +31,10 @@
       "reset": "Restore default server",
       "resetFailed": "Could not restore the default login server.",
       "saveFailed": "Could not save the login server address."
+    },
+    "localOnly": {
+      "action": "Skip sign-in",
+      "failed": "Couldn't start. Try again in a moment."
     }
   },
   "settings": {
@@ -1028,7 +1032,9 @@
     "loginFailed": "Sign-in failed.",
     "htmlResponse": "{{fallback}} The server returned an HTML page instead of an API response. Check the deployment URL or the reverse proxy configuration. ({{status}})",
     "accountDeleteFailed": "Deleting the account failed. ({{status}})",
-    "requestFailed": "The request failed. ({{status}})"
+    "requestFailed": "The request failed. ({{status}})",
+    "serverTooOld": "This login server is too old. Update it to 1.9.0 or newer.",
+    "featureNeedsAccount": "This host connects through the server. Sign in, or turn off the server proxy."
   },
   "core": {
     "shutdownSession": "The session was closed because the app is exiting.",
@@ -2499,7 +2505,8 @@
     "readOnly": "Read-only",
     "allowInput": "Allow input",
     "chatHistory": "Chat history",
-    "stop": "Stop sharing"
+    "stop": "Stop sharing",
+    "needsAccount": "Session sharing goes through the server. Sign in to use it."
   },
   "hostList": {
     "name": "Name",
@@ -3690,5 +3697,18 @@
       "saveFailed": "Could not save the theme: {{message}}"
     },
     "copied": "Copied"
+  },
+  "localOnly": {
+    "title": "Sync is off",
+    "body": "Sign in and your devices stay in sync automatically.",
+    "pending": "Finish signing in from your browser. You will come back here when it is done.",
+    "login": "Sign in",
+    "loginFailed": "Could not start sign-in.",
+    "chip": "Sync off"
+  },
+  "logoutConfirm": {
+    "title": "Some changes have not been uploaded",
+    "body": "Signing out now removes them from this computer. Anything already uploaded comes back when you sign in again.",
+    "confirm": "Sign out anyway"
   }
 }
