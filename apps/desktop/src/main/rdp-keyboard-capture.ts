@@ -40,6 +40,11 @@ export const RDP_CAPTURE_SENSITIVE_MENU_IDS: readonly string[] = [
   'tab-index-5',
   'tab-index-6',
   'tab-index-7',
+  // 배율 단축키도 원격이 받아야 한다 — Cmd+/-/0 은 원격 앱에도 흔한 조합이다.
+  'view-zoom-in',
+  'view-zoom-in-equal',
+  'view-zoom-out',
+  'view-zoom-reset',
 ];
 
 /**

@@ -1,6 +1,10 @@
 {
   "menu": {
     "file": "파일",
+    "view": "보기",
+    "zoomIn": "확대",
+    "zoomOut": "축소",
+    "actualSize": "실제 크기",
     "newWindow": "새 창",
     "tabs": "탭",
     "nextTab": "다음 탭",

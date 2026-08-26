@@ -323,13 +323,16 @@ export function AppShell({
       )}
       {/* 헤더는 fixed 라 이 스페이서가 그 자리를 대신 차지한다. 전체화면에서는 헤더가
           위로 접히므로 스페이서도 함께 접어야 화면을 온전히 쓴다 — 안 그러면 위쪽에
-          아무것도 없는 띠가 남는다. */}
+          아무것도 없는 띠가 남는다.
+
+          헤더는 배율의 역수로 되돌아 물리 크기가 고정이다(--app-zoom). 스페이서는 되돌지
+          않으므로 같은 나눗셈을 여기서 해 줘야 둘의 높이가 어긋나지 않는다. */}
       <div
         aria-hidden
         className={cn(
           'flex-none transition-[height] duration-150',
           titleBarMode(windowState.isFullScreen, desktopPlatform) === 'visible'
-            ? 'h-[2.95rem]'
+            ? 'h-[calc(2.95rem/var(--app-zoom))]'
             : 'h-0',
         )}
       />

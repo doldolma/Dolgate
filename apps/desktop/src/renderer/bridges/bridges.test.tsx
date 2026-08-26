@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => {
     auth: null as ((state: unknown) => void) | null,
     updater: null as ((event: { state: unknown }) => void) | null,
     windowState: null as ((state: unknown) => void) | null,
+    zoom: null as ((factor: number) => void) | null,
   };
 
   return {
@@ -108,6 +109,10 @@ const mocks = vi.hoisted(() => {
         getState: vi.fn().mockResolvedValue({ isMaximized: false }),
         onStateChanged: vi.fn((listener: (state: unknown) => void) => {
           listeners.windowState = listener;
+          return vi.fn();
+        }),
+        onZoomChanged: vi.fn((listener: (factor: number) => void) => {
+          listeners.zoom = listener;
           return vi.fn();
         }),
       },

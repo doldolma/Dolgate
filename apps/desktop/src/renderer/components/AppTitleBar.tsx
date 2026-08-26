@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { DesktopWindowState, HostRecord, PortForwardRuntimeRecord, RdpMonitorSelection, SessionConnectionKind, TailnetPeer, TailnetStatus, TerminalTab, UpdateState } from '@shared';
 import { describeRdpDrives, isRdpHostRecord, isSshHostRecord, isVncHostRecord, withLocalHostDrives } from '@shared';
 import { useAppStore } from '../store/appStore';
@@ -1128,7 +1129,9 @@ function getTitlebarDynamicTabContainerClass(active: boolean): string {
 
 function getTitlebarDynamicTabButtonClass(active: boolean): string {
   return cn(
-    'min-w-0 justify-start rounded-none border-transparent bg-transparent px-3 py-[0.3rem] shadow-none hover:bg-transparent',
+    // pr 은 pl 보다 좁다. 오른쪽에는 닫기 버튼이 바로 붙어서, 같은 여백을 주면 이름과 × 사이만
+    // 크게 벌어진다(예전에 지연 숫자가 있던 자리라 넓게 잡혀 있었다).
+    'min-w-0 justify-start rounded-none border-transparent bg-transparent pl-3 pr-1 py-[0.3rem] shadow-none hover:bg-transparent',
     active
       ? 'text-[var(--text)] hover:text-[var(--text)]'
       : 'text-[rgba(243,247,251,0.82)] hover:text-white',
@@ -1137,10 +1140,10 @@ function getTitlebarDynamicTabButtonClass(active: boolean): string {
 
 function getTitlebarCloseButtonClass(active: boolean): string {
   if (active) {
-    return 'h-8 w-8 rounded-[9px] text-[0.9rem] text-[color-mix(in_srgb,var(--accent-strong)_84%,var(--text)_16%)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent)] hover:text-[var(--accent-strong)]';
+    return 'h-6 w-6 rounded-[7px] text-[0.9rem] text-[color-mix(in_srgb,var(--accent-strong)_84%,var(--text)_16%)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent)] hover:text-[var(--accent-strong)]';
   }
 
-  return 'h-8 w-8 rounded-[9px] text-[0.9rem] text-[rgba(243,247,251,0.78)] hover:bg-[rgba(255,255,255,0.12)] hover:text-white';
+  return 'h-6 w-6 rounded-[7px] text-[0.9rem] text-[rgba(243,247,251,0.78)] hover:bg-[rgba(255,255,255,0.12)] hover:text-white';
 }
 
 function isDynamicWorkspaceTab(tabId: WorkspaceTabId): boolean {
@@ -1776,13 +1779,16 @@ export function AppTitleBar({
       className={cn(
         // 상단바 chrome 배경 전체를 창 드래그 영역으로 둔다(macOS·Windows 공통). 실제 탭/버튼처럼
         // 조작 가능한 요소만 no-drag 로 좁혀, 같은 배경처럼 보이는 빈 영역은 일관되게 창을 움직인다.
-        'fixed inset-x-0 top-0 z-[7] flex min-h-[2.95rem] select-none items-stretch gap-4 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[0.9rem] pt-[0.42rem] pb-0 text-[#f3f7fb] max-[760px]:px-[0.9rem] max-[760px]:pr-[0.9rem]',
+        'fixed inset-x-0 top-0 z-[7] [zoom:calc(1/var(--app-zoom))] flex min-h-[2.95rem] select-none items-stretch gap-4 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[0.9rem] pt-[0.42rem] pb-0 text-[#f3f7fb]',
         chromeDragRegion,
         // 신호등 자리는 창 모드에서만 비워둔다. macOS 전체화면에서는 신호등이 OS 오버레이로
         // 올라가 우리 바에 없다 — 그대로 두면 왼쪽이 이유 없이 5.7rem 비어 보인다.
-        desktopPlatform === 'darwin' &&
-          !windowState.isFullScreen &&
-          'pl-[5.7rem] max-[1040px]:pl-[5.1rem] max-[760px]:px-[5.1rem] max-[760px]:pr-[0.9rem]',
+        //
+        // 좁은 창에서 이 자리를 5.1rem 으로 줄이던 규칙이 있었는데 없앴다. 신호등은 OS 가 그리고
+        // 크기가 고정이라(대략 78px) 5.1rem(76.5px)에서는 탭이 신호등을 덮는다. 좁을 때 9px 을
+        // 더 얻는 것보다 안 덮는 편이 낫다. 화면 배율을 키우면 이 침범이 더 넓은 창에서도
+        // 일어났는데, 원인은 배율이 아니라 이 규칙이었다.
+        desktopPlatform === 'darwin' && !windowState.isFullScreen && 'pl-[5.7rem]',
         // 전체화면에서는 위로 밀어 감춘다. display 대신 transform 을 쓰는 이유는 두 가지다:
         // 레이아웃을 유지해야 내려올 때 흔들리지 않고, 숨은 동안에도 포인터 진입을 받을 수 있다.
         'transition-transform duration-150',
@@ -1794,7 +1800,7 @@ export function AppTitleBar({
       {desktopPlatform === 'darwin' && !windowState.isFullScreen ? (
         <div
           aria-hidden
-          className={cn('absolute left-0 top-0 bottom-0 w-[5.7rem] max-[1040px]:w-[5.1rem]', chromeDragRegion)}
+          className={cn('absolute left-0 top-0 bottom-0 w-[5.7rem]', chromeDragRegion)}
         />
       ) : null}
       <div
@@ -2045,8 +2051,11 @@ export function AppTitleBar({
               >
                 <TabButton
                   active={item.active}
+                  // 이름과 닫기 버튼 사이를 좁힌다. 예전에는 지연 숫자(9ms → 142ms)가 그 자리에
+                  // 있었지만 세션 하단바로 내려갔고, 남은 여백은 이제 빈자리일 뿐이다.
+                  // 긴 이름이 탭 줄을 다 먹지 않도록 위쪽 한계만 둔다.
                   className={cn(
-                    'min-w-[8.5rem]',
+                    'max-w-[16rem]',
                     getTitlebarDynamicTabButtonClass(item.active),
                   )}
                   // 제목은 잘려서 보이고(truncate) 상태 점이 같은 버튼 안에 섞여 있다. 이름을
@@ -2128,8 +2137,11 @@ export function AppTitleBar({
               >
                 <TabButton
                   active={item.active}
+                  // 이름과 닫기 버튼 사이를 좁힌다. 예전에는 지연 숫자(9ms → 142ms)가 그 자리에
+                  // 있었지만 세션 하단바로 내려갔고, 남은 여백은 이제 빈자리일 뿐이다.
+                  // 긴 이름이 탭 줄을 다 먹지 않도록 위쪽 한계만 둔다.
                   className={cn(
-                    'min-w-[8.5rem]',
+                    'max-w-[16rem]',
                     getTitlebarDynamicTabButtonClass(item.active),
                   )}
                   onClick={() => onSelectTmuxGroup(item.tmuxGroupId)}
@@ -2445,7 +2457,12 @@ export function AppTitleBar({
           onCloseWindow={onCloseWindow}
         />
       </div>
-      {hoveredTab && hoverInfo ? (
+      {/* hover 카드와 탭 메뉴는 헤더 밖(body)에 그린다.
+          좌표를 getBoundingClientRect·clientX 로 잡는데, 헤더는 화면 배율의 역수로 되돌아
+          있어서(--app-zoom) 그 안에 두면 같은 숫자가 다른 길이가 된다 — 125% 에서 카드가
+          탭보다 왼쪽에 떨어졌다. */}
+      {hoveredTab && hoverInfo
+        ? createPortal(
         <div
           role="tooltip"
           className="pointer-events-none fixed z-[200] w-max max-w-[300px] rounded-[10px] border border-[var(--chrome-border)] bg-[color-mix(in_srgb,var(--chrome-bg)_92%,black_8%)] px-3 py-2.5 text-[#f3f7fb] shadow-[0_12px_32px_rgba(0,0,0,0.45)] [-webkit-app-region:no-drag]"
@@ -2479,8 +2496,10 @@ export function AppTitleBar({
               ))}
             </div>
           ) : null}
-        </div>
-      ) : null}
+        </div>,
+            document.body,
+          )
+        : null}
 
       {monitorPicker ? (
         <RdpMonitorPicker
@@ -2494,7 +2513,8 @@ export function AppTitleBar({
         />
       ) : null}
 
-      {tabMenu ? (
+      {tabMenu
+        ? createPortal(
         <>
           {/* 바깥을 누르면 닫는다. 메뉴보다 아래에 깔되 나머지 UI 는 덮는다. */}
           <div
@@ -2524,8 +2544,10 @@ export function AppTitleBar({
               </span>
             </button>
           </div>
-        </>
-      ) : null}
+        </>,
+            document.body,
+          )
+        : null}
     </header>
   );
 }

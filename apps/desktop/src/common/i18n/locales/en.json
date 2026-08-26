@@ -1,6 +1,10 @@
 {
   "menu": {
     "file": "File",
+    "view": "View",
+    "zoomIn": "Zoom In",
+    "zoomOut": "Zoom Out",
+    "actualSize": "Actual Size",
     "newWindow": "New Window",
     "tabs": "Tabs",
     "nextTab": "Next Tab",

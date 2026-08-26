@@ -73,6 +73,7 @@ const sessionShareChatEventHub = createListenerHub<SessionShareChatEvent>();
 const systemResumeHub = createListenerHub<void>();
 const closeActiveTabHub = createListenerHub<void>();
 const tabCommandHub = createListenerHub<TabCommandPayload>();
+const zoomChangedHub = createListenerHub<number>();
 const aiChatEventHub = createListenerHub<AiChatEvent>();
 const aiTerminalOutputRequestHub = createListenerHub<AiTerminalOutputRequest>();
 
@@ -532,6 +533,14 @@ export function subscribeTabCommand(
   listener: (payload: TabCommandPayload) => void,
 ): () => void {
   return tabCommandHub.subscribe(listener);
+}
+
+export function emitZoomChanged(factor: number): void {
+  zoomChangedHub.emit(factor);
+}
+
+export function subscribeZoomChanged(listener: (factor: number) => void): () => void {
+  return zoomChangedHub.subscribe(listener);
 }
 
 export function emitAiChatEvent(payload: AiChatEvent): void {

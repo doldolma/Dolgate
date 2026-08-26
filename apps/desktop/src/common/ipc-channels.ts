@@ -236,7 +236,9 @@ export const ipcChannels = {
     // 메뉴(Cmd+W)에서 렌더러로: 현재 활성 탭을 닫으라는 신호.
     closeActiveTab: 'window:close-active-tab',
     // 메뉴(탭 이동/다시 열기)에서 렌더러로: TabCommandPayload 를 실어 보낸다.
-    tabCommand: 'window:tab-command'
+    tabCommand: 'window:tab-command',
+    // 메뉴(확대/축소)에서 렌더러로: 새 배율. 상단바가 이 값으로 자신을 되돌린다.
+    zoomChanged: 'window:zoom-changed'
   },
   system: {
     // OS 절전/잠금 복귀 알림. 자동 재연결이 죽은 소켓을 즉시 재검증하는 데 쓰인다.

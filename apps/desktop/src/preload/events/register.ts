@@ -41,6 +41,7 @@ import {
   emitSessionShareEvent,
   emitCloseActiveTab,
   emitTabCommand,
+  emitZoomChanged,
   emitSftpConnectionProgress,
   emitSshData,
   emitSystemResume,
@@ -206,5 +207,8 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
   });
   ipcRenderer.on(ipcChannels.window.tabCommand, (_event, payload) => {
     emitTabCommand(payload as import('@shared').TabCommandPayload);
+  });
+  ipcRenderer.on(ipcChannels.window.zoomChanged, (_event, factor) => {
+    emitZoomChanged(factor as number);
   });
 }

@@ -1691,6 +1691,13 @@ export interface DesktopApi {
     onCloseActiveTab: (listener: () => void) => () => void;
     /** 메뉴(탭 이동/다시 열기) 단축키 신호 구독. */
     onTabCommand: (listener: (payload: TabCommandPayload) => void) => () => void;
+    /**
+     * 화면 배율(webContents.zoomFactor)이 바뀔 때마다 그 값.
+     *
+     * 페이지 줌은 렌더러 전체를 키우는데 macOS 신호등은 OS 가 물리 좌표로 그린다. 상단바가
+     * 같이 커지면 신호등과 어긋나므로, 상단바만 이 배율의 역수로 되돌려 크기를 고정한다.
+     */
+    onZoomChanged: (listener: (factor: number) => void) => () => void;
   };
   system: {
     /** OS 절전/잠금 복귀 알림 구독. 자동 재연결의 즉시 재검증 트리거. */

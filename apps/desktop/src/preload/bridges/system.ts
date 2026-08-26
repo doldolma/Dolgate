@@ -10,6 +10,7 @@ import {
   subscribeSystemResume,
   subscribeUpdateEvent,
   subscribeWindowState,
+  subscribeZoomChanged,
 } from "../events/state";
 
 export function buildShellBridge(
@@ -47,6 +48,7 @@ export function buildWindowBridge(
     onStateChanged: (listener) => subscribeWindowState(listener),
     onCloseActiveTab: (listener) => subscribeCloseActiveTab(listener),
     onTabCommand: (listener) => subscribeTabCommand(listener),
+    onZoomChanged: (listener) => subscribeZoomChanged(listener),
   };
 }
 

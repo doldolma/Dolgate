@@ -27,6 +27,7 @@ import {
   SyncOutboxRepository
 } from './database';
 import { AI_STORED_KEY_SECRET_ACCOUNTS } from './ai-service';
+import { prepareWindowZoom, stepAppZoom } from './app-zoom';
 import { DesktopConfigService } from './app-config';
 import { AuthService } from './auth-service';
 import { AwsService } from './aws-service';
@@ -115,7 +116,47 @@ function installApplicationMenu(openNewWindow: () => void): void {
       ],
     },
     { role: 'editMenu' },
-    { role: 'viewMenu' },
+    {
+      label: t('menu.view'),
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        // 배율은 기본 롤(zoomIn/zoomOut/resetZoom)을 쓰지 않는다 — 단계를 제한하고, 바뀐 값을
+        // 상단바에 알려 줘야 하기 때문이다(app-zoom.ts). id 는 RDP 가 키보드를 쥔 동안
+        // 비활성화하기 위한 것이다.
+        {
+          id: 'view-zoom-reset',
+          label: t('menu.actualSize'),
+          accelerator: 'CmdOrCtrl+0',
+          click: () => stepAppZoom(0),
+        },
+        {
+          id: 'view-zoom-in',
+          label: t('menu.zoomIn'),
+          accelerator: 'CmdOrCtrl+Plus',
+          click: () => stepAppZoom(1),
+        },
+        // 시프트 없이 누르는 `Cmd+=` 도 확대다. 메뉴에 같은 항목을 두 번 보일 수는 없으니
+        // 감춰 두고 단축키만 받는다(감춘 항목도 accelerator 는 살아 있다).
+        {
+          id: 'view-zoom-in-equal',
+          label: t('menu.zoomIn'),
+          accelerator: 'CmdOrCtrl+=',
+          visible: false,
+          click: () => stepAppZoom(1),
+        },
+        {
+          id: 'view-zoom-out',
+          label: t('menu.zoomOut'),
+          accelerator: 'CmdOrCtrl+-',
+          click: () => stepAppZoom(-1),
+        },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
     {
       label: t('menu.tabs'),
       submenu: [
@@ -576,6 +617,8 @@ if (termiusHelperArgIndex >= 0) {
     });
 
     workspaceWindowIds.add(window.id);
+    // 배율은 기억하지 않는다 — 실수로 눌린 확대가 재시작 뒤까지 남지 않도록(app-zoom.ts).
+    prepareWindowZoom(window);
     if (launchIntent) {
       launchIntentsByWindowId.set(window.id, launchIntent);
     }
