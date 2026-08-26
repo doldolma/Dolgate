@@ -173,3 +173,5 @@ SSH-over-SSM과 AWS SFTP에는 EC2 Instance Connect 공개키 주입 권한이 �
 MIT © 2026 doldolma
 
 명령어 자동완성의 generator 런타임과 번들 스펙은 Amazon Q Developer CLI(Apache-2.0/MIT)와 withfig/autocomplete(MIT)에서 가져왔으며, 해당 구성요소는 각자의 라이선스를 따릅니다.
+
+번들 터미널 색 테마는 MIT 라이선스로 가져온 외부 저작물이며 각 저작자에게 권리가 있습니다: Kanagawa(© 2021 Tommaso Laurenzi), Everforest(© 2019 sainnhe), Night Owl·Night Owl Light(© 2018 Sarah Drasner), Rosé Pine(© 2023 Rosé Pine).

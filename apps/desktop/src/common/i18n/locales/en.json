@@ -3874,9 +3874,8 @@
       }
     },
     "theme": {
-      "title": "Terminal appearance",
+      "title": "Theme",
       "followGlobal": "Follow app setting",
-      "followSystem": "Follows the system appearance",
       "noHostTitle": "No host",
       "noHost": "A theme is saved on the host, so a session without one cannot set it.",
       "saveFailed": "Could not save the theme: {{message}}"
@@ -3884,13 +3883,13 @@
     "copied": "Copied",
     "appearance": {
       "font": "Font",
-      "fontSize": "Size",
-      "lineHeight": "Line height",
-      "letterSpacing": "Letter spacing",
-      "contrast": "Minimum contrast",
+      "summary": "{{font}} · {{size}}px",
+      "fontSize": "Font Size",
+      "lineHeight": "Line Height",
+      "letterSpacing": "Letter Spacing",
+      "contrast": "Minimum Contrast",
       "contrastOff": "Off",
-      "contrastHint": "Pulls faint colors away from the background.",
-      "reset": "Reset to defaults",
+      "reset": "Reset",
       "decrease": "Decrease {{label}}",
       "increase": "Increase {{label}}"
     }

@@ -77,6 +77,7 @@ export {
   ClipboardList,
   ListOrdered,
   Palette,
+  Type,
   Waypoints,
   Network,
   Boxes,

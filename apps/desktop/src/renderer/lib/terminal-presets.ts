@@ -1,7 +1,26 @@
 import type { GlobalTerminalThemeId, TerminalFontFamilyId, TerminalThemeId, TerminalThemePreset } from '@shared';
 
+/**
+ * 남의 테마를 그대로 실어 나를 때의 출처.
+ *
+ * 아래 프리셋 여덟 개는 이름만 빌린 게 아니라 원본 저장소의 색값을 그대로 옮긴 것이다.
+ * 넷 다 MIT 라 쓰는 데 제약은 없지만, MIT 의 유일한 조건이 저작권 문구 유지다 — 어디서
+ * 왔는지를 코드가 들고 있어야 배포물 고지를 만들 때 손으로 다시 뒤지지 않는다.
+ */
+export interface TerminalThemeCredit {
+  /** 원본 프로젝트 이름. */
+  project: string;
+  /** LICENSE 파일에 적힌 저작권자. */
+  author: string;
+  /** SPDX 식별자. */
+  license: 'MIT';
+  url: string;
+}
+
 export interface TerminalThemeDefinition extends TerminalThemePreset {
   descriptionKey: string;
+  /** 우리가 만든 테마에는 없다. 외부에서 가져온 것에만 붙는다. */
+  credit?: TerminalThemeCredit;
   preview: {
     background: string;
     foreground: string;
@@ -122,6 +141,12 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'kanagawa-wave',
     title: 'Kanagawa Wave',
+    credit: {
+      project: 'Kanagawa',
+      author: 'Tommaso Laurenzi',
+      license: 'MIT',
+      url: 'https://github.com/rebelot/kanagawa.nvim'
+    },
     descriptionKey: 'termTheme.inkBlue',
     preview: { background: '#1f1f28', foreground: '#dcd7ba', accent: '#7e9cd8' },
     theme: {
@@ -150,6 +175,12 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'kanagawa-dragon',
     title: 'Kanagawa Dragon',
+    credit: {
+      project: 'Kanagawa',
+      author: 'Tommaso Laurenzi',
+      license: 'MIT',
+      url: 'https://github.com/rebelot/kanagawa.nvim'
+    },
     descriptionKey: 'termTheme.warmAsh',
     preview: { background: '#181616', foreground: '#c5c9c5', accent: '#8ba4b0' },
     theme: {
@@ -178,6 +209,12 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'kanagawa-lotus',
     title: 'Kanagawa Lotus',
+    credit: {
+      project: 'Kanagawa',
+      author: 'Tommaso Laurenzi',
+      license: 'MIT',
+      url: 'https://github.com/rebelot/kanagawa.nvim'
+    },
     descriptionKey: 'termTheme.softPaper',
     preview: { background: '#f2ecbc', foreground: '#545464', accent: '#4d699b' },
     theme: {
@@ -207,6 +244,12 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'everforest-dark',
     title: 'Everforest Dark',
+    credit: {
+      project: 'Everforest',
+      author: 'sainnhe',
+      license: 'MIT',
+      url: 'https://github.com/sainnhe/everforest'
+    },
     descriptionKey: 'termTheme.forestDark',
     preview: { background: '#2d353b', foreground: '#d3c6aa', accent: '#a7c080' },
     theme: {
@@ -235,6 +278,12 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'everforest-light',
     title: 'Everforest Light',
+    credit: {
+      project: 'Everforest',
+      author: 'sainnhe',
+      license: 'MIT',
+      url: 'https://github.com/sainnhe/everforest'
+    },
     descriptionKey: 'termTheme.forestLight',
     preview: { background: '#fdf6e3', foreground: '#5c6a72', accent: '#8da101' },
     theme: {
@@ -264,6 +313,12 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'night-owl',
     title: 'Night Owl',
+    credit: {
+      project: 'Night Owl',
+      author: 'Sarah Drasner',
+      license: 'MIT',
+      url: 'https://github.com/sdras/night-owl-vscode-theme'
+    },
     descriptionKey: 'termTheme.nightContrast',
     preview: { background: '#011627', foreground: '#d6deeb', accent: '#82aaff' },
     theme: {
@@ -291,7 +346,13 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   },
   {
     id: 'light-owl',
-    title: 'Light Owl',
+    title: 'Night Owl Light',
+    credit: {
+      project: 'Night Owl',
+      author: 'Sarah Drasner',
+      license: 'MIT',
+      url: 'https://github.com/sdras/night-owl-vscode-theme'
+    },
     descriptionKey: 'termTheme.brightPaperBlue',
     preview: { background: '#fbfbfb', foreground: '#403f53', accent: '#2c5dff' },
     theme: {
@@ -321,6 +382,12 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'rose-pine',
     title: 'Rosé Pine',
+    credit: {
+      project: 'Rosé Pine',
+      author: 'Rosé Pine',
+      license: 'MIT',
+      url: 'https://github.com/rose-pine/rose-pine-theme'
+    },
     descriptionKey: 'termTheme.roseSubtle',
     preview: { background: '#191724', foreground: '#e0def4', accent: '#c4a7e7' },
     theme: {

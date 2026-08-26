@@ -173,3 +173,5 @@ SSH-over-SSM and AWS SFTP require EC2 Instance Connect public key injection perm
 MIT © 2026 doldolma
 
 The command autocomplete generator runtime and bundled specs are derived from Amazon Q Developer CLI (Apache-2.0/MIT) and withfig/autocomplete (MIT); those components remain under their own licenses.
+
+Bundled terminal color schemes are third-party work used under the MIT license and remain the work of their authors: Kanagawa (© 2021 Tommaso Laurenzi), Everforest (© 2019 sainnhe), Night Owl and Night Owl Light (© 2018 Sarah Drasner), Rosé Pine (© 2023 Rosé Pine).

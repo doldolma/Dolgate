@@ -3874,25 +3874,24 @@
       }
     },
     "theme": {
-      "title": "터미널 외형",
+      "title": "테마",
       "followGlobal": "앱 설정 따르기",
-      "followSystem": "시스템 외형을 따릅니다",
       "noHostTitle": "호스트가 없습니다",
       "noHost": "테마는 호스트에 저장되므로 호스트 없는 세션에서는 정할 수 없습니다.",
       "saveFailed": "테마를 저장하지 못했습니다: {{message}}"
     },
     "copied": "복사했습니다",
     "appearance": {
-      "font": "글꼴",
-      "fontSize": "크기",
-      "lineHeight": "행간",
-      "letterSpacing": "자간",
-      "contrast": "최소 대비",
-      "contrastOff": "끔",
-      "contrastHint": "흐린 색을 배경과 떼어 놓습니다.",
-      "reset": "기본값으로",
-      "decrease": "{{label}} 줄이기",
-      "increase": "{{label}} 늘리기"
+      "font": "Font",
+      "summary": "{{font}} · {{size}}px",
+      "fontSize": "Font Size",
+      "lineHeight": "Line Height",
+      "letterSpacing": "Letter Spacing",
+      "contrast": "Minimum Contrast",
+      "contrastOff": "Off",
+      "reset": "Reset",
+      "decrease": "Decrease {{label}}",
+      "increase": "Increase {{label}}"
     }
   },
   "localOnly": {

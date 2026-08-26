@@ -1009,6 +1009,22 @@ describe('SessionPanel 테마 섹션', () => {
     ).toBeTruthy();
   });
 
+  // 글꼴·크기는 한 번 맞추면 끝인 값이라 접어 둔다. 펼친 채로 두면 테마 목록이 그만큼
+  // 아래로 밀린다.
+  it('글꼴 항목은 접혀 있고, 머리글을 눌러야 열린다', () => {
+    withHost(null);
+    render(<SessionPanel sessionId="session-1" />);
+    // 접혀 있어도 지금 크기는 머리글에 보인다.
+    expect(screen.getByText(/13px/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Increase Font Size' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /13px/ }));
+    expect(screen.getByRole('button', { name: 'Increase Font Size' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /13px/ }));
+    expect(screen.queryByRole('button', { name: 'Increase Font Size' })).toBeNull();
+  });
+
   it('같은 것을 다시 눌러도 저장하지 않는다', () => {
     withHost('kanagawa-wave');
     render(<SessionPanel sessionId="session-1" />);
