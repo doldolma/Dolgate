@@ -74,7 +74,7 @@ import {
   type DockerRuntime,
   type DockerTabId,
 } from './useSessionDocker';
-import { useSessionScopedState } from './useSessionScopedState';
+import { useSessionScopedState } from '../../../lib/session-scoped-state';
 import type { SessionPanelSender } from './useSessionPanelTarget';
 import type { SessionContainerTunnel } from '../../../store/types';
 

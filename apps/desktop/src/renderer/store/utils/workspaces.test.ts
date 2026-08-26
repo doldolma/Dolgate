@@ -3,7 +3,7 @@ import type { WorkspaceLayoutNode, WorkspaceTab } from "../types";
 import {
   clearSessionScopedState,
   useSessionScopedState,
-} from '../../components/terminal-workspace/session-panel/useSessionScopedState';
+} from '../../lib/session-scoped-state';
 import { removeSessionFromState } from './workspaces';
 import {
   asSessionTabId,

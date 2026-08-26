@@ -316,6 +316,7 @@ function createDolsshApi(options: {
     auth: vi.fn(),
     updater: vi.fn(),
     windowState: vi.fn(),
+    zoom: vi.fn(),
   };
 
   const api: any = {
@@ -402,6 +403,7 @@ function createDolsshApi(options: {
     window: {
       getState: vi.fn().mockResolvedValue({ isMaximized: false }),
       onStateChanged: vi.fn(() => off.windowState),
+      onZoomChanged: vi.fn(() => off.zoom),
       consumeLaunchIntent: vi.fn().mockResolvedValue(null),
       minimize: vi.fn().mockResolvedValue(undefined),
       maximize: vi.fn().mockResolvedValue(undefined),

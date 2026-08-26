@@ -2382,6 +2382,29 @@ describe("세션 패널이 여는 컨테이너 터널", () => {
     );
   });
 
+  it("대상을 알아내다 실패하면 그 줄에 실패로 남는다", async () => {
+    // 스토어가 남의 함수를 믿고 있으면 안 된다 — 여기서 던진 것이 밖으로 새면 그 줄이
+    // "여는 중" 에 남아 30초 동안 다시 누를 수도 없다.
+    const api = createMockApi();
+    const store = createAppStore(api as unknown as DesktopApi);
+
+    await store.getState().openSessionContainerTunnel({
+      sessionId: "session-1",
+      hostId: "host-1",
+      containerId: "abc123",
+      containerName: "web",
+      networkName: "",
+      targetPort: 8080,
+      resolveNetworks: () => Promise.reject(new Error("보조 채널이 답하지 않는다")),
+    });
+
+    expect(api.containers.startTunnel).not.toHaveBeenCalled();
+    expect(store.getState().sessionContainerTunnels["session-1"]?.[0]).toMatchObject({
+      containerId: "abc123",
+      status: "error",
+    });
+  });
+
   it("응답이 영영 안 오면 다시 누를 수 있다 — 그 줄이 '여는 중' 으로 굳지 않게", async () => {
     const api = createMockApi();
     // 첫 요청은 끝나지 않는다(코어가 답을 안 주는 상황).

@@ -16,7 +16,7 @@ import {
   type TerminalHooks,
 } from '../../../lib/terminal-write-registry';
 import { setShellHistory } from '../../../lib/shell-history-registry';
-import { clearSessionScopedState } from './useSessionScopedState';
+import { clearSessionScopedState } from '../../../lib/session-scoped-state';
 import {
   clearHostMetrics,
   getHostMetricsWatch,

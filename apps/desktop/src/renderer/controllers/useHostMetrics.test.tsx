@@ -3,7 +3,11 @@
 
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearHostMetrics, watchHostMetrics } from '../lib/host-metrics-registry';
+import {
+  clearHostMetrics,
+  getHostMetricsSnapshot,
+  watchHostMetrics,
+} from '../lib/host-metrics-registry';
 import { useHostMetrics } from './useHostMetrics';
 
 const queryTerminalCompletion = vi.hoisted(() => vi.fn());
@@ -35,6 +39,11 @@ function reply(callIndex: number): string {
     '@@dolgate:disk',
     'Filesystem 1024-blocks Used Available Capacity Mounted on',
     '/dev/sata1 100000 50000 50000 50% /',
+    // 정적 정보 — 자원 섹션이 열려 있을 때만 태우지만, 픽스처는 늘 넣어 둔다.
+    '@@dolgate:sys',
+    'Linux 5.15.0-91-generic x86_64',
+    'old-server',
+    'Intel(R) Xeon(R) CPU',
   ].join('\n');
 }
 
@@ -171,5 +180,39 @@ describe('useHostMetrics 왕복 실패', () => {
     await advance(10_000);
     expect(view.result.current.status).toBe('unsupported');
     view.unmount();
+  });
+});
+
+describe('세션이 바뀔 때', () => {
+  const OTHER = 'poll-session-other';
+
+  afterEach(() => {
+    clearHostMetrics(OTHER);
+  });
+
+  it('이전 세션의 기준·정적 정보를 물려받지 않는다', async () => {
+    // 누적 카운터의 기준(previous)을 옛 서버의 것으로 쓰면 첫 사용률이 엉뚱하게 나오고,
+    // hostname·커널·CPU 는 새 값이 올 때까지 옛 서버의 것이 그대로 보인다.
+    watchHostMetrics(SESSION, { system: true });
+    const view = renderHook(
+      ({ sessionId }: { sessionId: string }) =>
+        useHostMetrics({ sessionId, enabled: true, visible: true }),
+      { initialProps: { sessionId: SESSION } },
+    );
+    await advance(0);
+    await advance(10_000);
+    expect(view.result.current.status).toBe('ready');
+    expect(getHostMetricsSnapshot(SESSION).system).not.toBeNull();
+
+    // 다른 세션으로 옮긴다 — 직전 샘플이 아직 신선한 시점이다(빠르게 탭을 옮긴 경우).
+    view.rerender({ sessionId: OTHER });
+    await advance(0);
+
+    // 첫 샘플은 기준이 없어야 한다 = 사용률·초당 값은 아직 낼 수 없다. 옛 서버의 카운터로
+    // 차분을 내면 여기에 그럴듯한 숫자가 들어앉는다.
+    expect(view.result.current.metrics?.cpuPercent ?? null).toBeNull();
+    expect(view.result.current.metrics?.rxBytesPerSec ?? null).toBeNull();
+    // 정적 정보도 물려받지 않는다 — 새 세션의 화면에 옛 서버의 hostname 이 뜨지 않게.
+    expect(getHostMetricsSnapshot(OTHER).system).toBeNull();
   });
 });

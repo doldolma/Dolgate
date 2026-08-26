@@ -6,7 +6,7 @@ import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-li
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionPanelDocker } from './SessionPanelDocker';
 import { queryPrefixOf, requestDockerRefresh, useDockerRuntime } from './useSessionDocker';
-import { clearSessionScopedState } from './useSessionScopedState';
+import { clearSessionScopedState } from '../../../lib/session-scoped-state';
 import type { SessionPanelSender } from './useSessionPanelTarget';
 
 const connectHost = vi.fn();

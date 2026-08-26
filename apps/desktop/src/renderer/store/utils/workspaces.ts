@@ -28,7 +28,7 @@ import {
   createInactiveSessionShareState,
 } from "./session-share";
 import { t } from '../../i18n';
-import { clearSessionScopedState } from '../../components/terminal-workspace/session-panel/useSessionScopedState';
+import { clearSessionScopedState } from '../../lib/session-scoped-state';
 import { clearRttHistory } from "../../lib/rtt-history";
 
 export function asSessionTabId(sessionId: string): SessionWorkspaceTabId {

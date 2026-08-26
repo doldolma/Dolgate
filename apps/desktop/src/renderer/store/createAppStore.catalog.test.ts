@@ -812,6 +812,53 @@ describe("createAppStore catalog and settings", () => {
     );
   });
 
+  it("레코드에 남은 옛 공유 폴더를 복제본이 다시 동기화하지 않는다", async () => {
+    // 공유 폴더의 주인은 기기 로컬 설정이다. 마이그레이션 전에 저장된 호스트는 레코드에 아직
+    // 경로를 들고 있는데, 그것을 복제본 초안에 실어 보내면 `/Users/...` 가 다시 서버로 올라가
+    // 다른 기기까지 흘러간다.
+    const api = createMockApi();
+    vi.mocked(api.hosts.list).mockResolvedValue([
+      {
+        id: "rdp-old",
+        kind: "rdp",
+        label: "Legacy PC",
+        hostname: "10.0.0.9",
+        port: 3389,
+        groupName: null,
+        secretRef: null,
+        // 마이그레이션 전 데이터 — 레코드에 기기 경로가 남아 있다.
+        drives: [{ path: "/Users/me/legacy", readOnly: false }],
+        createdAt: "2026-08-01T00:00:00.000Z",
+        updatedAt: "2026-08-01T00:00:00.000Z",
+      } as HostRecord,
+    ]);
+    vi.mocked(api.hosts.create).mockImplementation(async (draft) => ({
+      id: "rdp-old-copy",
+      kind: "rdp",
+      label: draft.label,
+      hostname: "10.0.0.9",
+      port: 3389,
+      groupName: null,
+      secretRef: null,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    }) as never);
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().duplicateHosts(["rdp-old"]);
+
+    expect(api.hosts.create).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "rdp", drives: null }),
+    );
+    // 그러면서도 이 기기에서는 그대로 열린다 — 로컬 설정으로 옮겨 담는다.
+    expect(api.settings.update).toHaveBeenCalledWith({
+      rdpDrivesByHostId: {
+        "rdp-old-copy": [{ path: "/Users/me/legacy", readOnly: false }],
+      },
+    });
+  });
+
   it("복제본이 이 기기의 공유 폴더를 그대로 물려받는다", async () => {
     // 드라이브는 기기 로컬 설정이라 레코드를 복사하는 것만으로는 따라오지 않는다. 복제는 같은
     // 기기 안에서 일어나므로 경로가 그대로 유효한데, 조용히 사라지면 복제본에서 왜 파일이 안

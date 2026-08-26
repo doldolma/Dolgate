@@ -17,7 +17,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../../lib/cn';
 import { useAppStore } from '../../../store/appStore';
-import { useSessionScopedState } from './useSessionScopedState';
+import { useSessionScopedState } from '../../../lib/session-scoped-state';
 import { filterByQuery, splitProcessCommand } from '../../../lib/session-panel';
 import { formatKibibytes, type HostProcess } from '../../../lib/host-metrics';
 import { Button } from '../../../ui';

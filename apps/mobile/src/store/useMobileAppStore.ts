@@ -6791,10 +6791,18 @@ export const useMobileAppStore = create<MobileAppState>()(
             }
             const serverInfo = await serverInfoPromise;
 
+            // 당기기가 성공했다고 **밀 것이 없어진 것은 아니다.** 아웃박스에 남아 있으면
+            // pendingPush 를 그대로 세워 둔다 — 여기서 false 로 덮으면 올라가지 않은 변경이
+            // 있는데도 화면이 "최신" 이라고 말하고, 그 상태로 로그아웃하면 큐째로 사라진다
+            // (로그아웃은 다른 계정으로 밀려 나가지 않게 큐를 비운다).
+            const pendingOutbox = get().syncOutbox.length > 0;
             const readySyncStatus: SyncStatus = {
               status: 'ready',
-              pendingPush: false,
-              errorMessage: null,
+              pendingPush: pendingOutbox,
+              // 남은 것이 있으면 왜 못 밀었는지도 지우지 않는다.
+              errorMessage: pendingOutbox
+                ? (get().syncStatus.errorMessage ?? null)
+                : null,
               lastSuccessfulSyncAt: new Date().toISOString(),
               awsProfilesServerSupport: toServerSupport(
                 serverInfo?.capabilities.sync.awsProfiles,

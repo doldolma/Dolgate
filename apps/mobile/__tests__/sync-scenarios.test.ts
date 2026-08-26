@@ -417,6 +417,35 @@ describe('sync survives the awkward orders', () => {
     expect(server.liveIds('secrets')).toEqual([secretRef]);
   });
 
+  it('밀기가 실패했는데 당기기가 되면 "최신" 이라고 말하지 않는다', async () => {
+    // 당기기가 200 을 주면 그 뒤에 상태를 "최신 / 밀 것 없음" 으로 덮어쓰고 있었다. 큐에는
+    // 그대로 남아 있는데 화면만 멀쩡해지는 것이고, 그 상태로 로그아웃하면 큐째로 사라진다
+    // (로그아웃은 다른 계정으로 밀려 나가지 않게 큐를 비운다).
+    //
+    // **이미 서버에 있는 레코드를 지우는(또는 고치는) 경우**가 새는 자리다. 새로 만든 것은
+    // 당기기 뒤 "서버에 없는 로컬" 로 다시 큐에 담기며 플래그가 되살아나지만, 서버에 이미
+    // 있는 레코드는 그 경로에 걸리지 않는다.
+    const { hostId } = await addHostWithPassword('gone-soon', 'pass');
+    await settle();
+    expect(server.liveIds('hosts')).toEqual([hostId]);
+
+    pushBlocked = true;
+    await act(async () => {
+      await useMobileAppStore.getState().deleteHost(hostId);
+    });
+    // 당기기는 성공하는 회차다 — 그런데도 밀 것이 남아 있다고 말해야 한다.
+    await sync();
+
+    expect(useMobileAppStore.getState().syncOutbox.length).toBeGreaterThan(0);
+    expect(useMobileAppStore.getState().syncStatus.pendingPush).toBe(true);
+
+    pushBlocked = false;
+    await settle();
+    expect(useMobileAppStore.getState().syncOutbox).toEqual([]);
+    expect(useMobileAppStore.getState().syncStatus.pendingPush).toBe(false);
+    expect(server.liveIds('hosts')).toEqual([]);
+  });
+
   it('오프라인 편집 후 앱을 껐다 켜도(비밀 복원이 늦어도) 잃지 않는다', async () => {
     pushBlocked = true;
     pullBlocked = true;

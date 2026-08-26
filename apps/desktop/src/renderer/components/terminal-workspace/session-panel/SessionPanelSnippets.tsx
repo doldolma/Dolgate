@@ -28,7 +28,7 @@ import {
   type PendingSnippetInsertion,
 } from '../SnippetVariablesDialog';
 import { SnippetEditDialog } from '../../SnippetEditDialog';
-import { useSessionScopedState } from './useSessionScopedState';
+import { useSessionScopedState } from '../../../lib/session-scoped-state';
 import type { SessionPanelSender } from './useSessionPanelTarget';
 
 interface SessionPanelSnippetsProps {

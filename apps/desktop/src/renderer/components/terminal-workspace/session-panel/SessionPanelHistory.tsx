@@ -19,7 +19,7 @@ import { Tooltip } from '../../../ui';
 import { SessionPanelEmpty } from './SessionPanelEmpty';
 import { SessionPanelRow } from './SessionPanelRow';
 import { SessionPanelSearch } from './SessionPanelSearch';
-import { useSessionScopedState } from './useSessionScopedState';
+import { useSessionScopedState } from '../../../lib/session-scoped-state';
 import type { SessionPanelSender } from './useSessionPanelTarget';
 
 interface SessionPanelHistoryProps {

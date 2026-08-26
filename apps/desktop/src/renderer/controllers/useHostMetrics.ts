@@ -122,6 +122,8 @@ export function useHostMetrics({
    * 그대로 실어 보내야 캐시가 유지된다(스냅샷은 매번 새로 만든다).
    */
   const systemRef = useRef<HostSystemInfo | null>(null);
+  /** 위 ref 들이 **어느 세션의 것인지**. 세션이 바뀌면 여기서 갈라 낸다. */
+  const refsSessionRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!enabled || !sessionId) {
@@ -131,10 +133,24 @@ export function useHostMetrics({
       previousSampleRef.current = null;
       processesRef.current = null;
       systemRef.current = null;
+      refsSessionRef.current = sessionId ?? null;
       if (sessionId) {
         clearHostMetrics(sessionId);
       }
       return;
+    }
+
+    // 세션이 바뀌었으면 **이 세션의 것이 아닌 값을 전부 버린다** — 누적 카운터의 기준(previous),
+    // 프로세스 목록, 그리고 정적 정보(hostname·커널·CPU)까지.
+    //
+    // 따로 둔 effect 로는 늦다. 선언 순서상 그것은 이 아래라, 여기서 이미 이전 세션의 샘플을
+    // 지역 변수로 집어 든 뒤에 돈다 — 빠르게 탭을 옮기면 **옛 서버의 카운터로 첫 차분**을 냈고,
+    // 정적 정보는 새 값이 올 때까지 옛 서버의 것이 그대로 보였다.
+    if (refsSessionRef.current !== sessionId) {
+      previousSampleRef.current = null;
+      processesRef.current = null;
+      systemRef.current = null;
+      refsSessionRef.current = sessionId;
     }
 
     // 안 보이는 탭은 폴링하지 않는다. 이미 읽어 둔 값과 상태는 그대로 두어, 다시 보일 때
@@ -284,12 +300,6 @@ export function useHostMetrics({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- metrics·updatedAtMs 는 발행에만
     // 쓰이며 의존성에 넣으면 폴링이 값마다 재시작한다.
   }, [enabled, intervalMs, processLimit, retryToken, sessionId, visible]);
-
-  // 세션이 바뀌면 누적 카운터 기준이 달라지므로 직전 샘플을 버린다.
-  useEffect(() => {
-    previousSampleRef.current = null;
-    processesRef.current = null;
-  }, [sessionId]);
 
   // pane 이 사라지면 발행한 값도 치운다 — 남겨 두면 다음 세션이 옛 값을 잠깐 보여 준다.
   useEffect(() => {

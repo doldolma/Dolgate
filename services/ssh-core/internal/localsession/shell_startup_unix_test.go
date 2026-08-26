@@ -86,3 +86,67 @@ func TestLocalShellIntegrationComesFromStartupFiles(t *testing.T) {
 		})
 	}
 }
+
+// zsh 는 시작 파일마다 ZDOTDIR 를 다시 본다. 사용자의 .zshenv 가 ZDOTDIR 를 옮기는 구성
+// (`~/.config/zsh` 등)에서 우리 심이 그것을 되돌리지 않으면, 다음 파일부터 그 디렉터리에서
+// 읽혀 우리 .zshrc 가 실행되지 않는다 — 통합이 조용히 꺼진다.
+func TestZshStartupIntegrationSurvivesUserZdotdir(t *testing.T) {
+	shellPath, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh 가 없다")
+	}
+	home := t.TempDir()
+	userZdotdir := filepath.Join(home, "config", "zsh")
+	if err := os.MkdirAll(userZdotdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// 사용자 .zshenv 가 ZDOTDIR 를 옮긴다.
+	if err := os.WriteFile(
+		filepath.Join(home, ".zshenv"),
+		[]byte("export ZDOTDIR=\""+userZdotdir+"\"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	// 사용자 rc 는 옮긴 디렉터리에 있다 — 그것도 살아 있어야 한다.
+	if err := os.WriteFile(
+		filepath.Join(userZdotdir, ".zshrc"),
+		[]byte("export DOLGATE_RC_RAN=yes\nPS1='ready$ '\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	captured := &unixCapturedOutput{}
+	manager := NewManager(
+		func(protocol.Event) {},
+		func(_ protocol.StreamFrame, data []byte) { captured.append(data) },
+	)
+	if err := manager.Connect("s1", "r1", protocol.LocalConnectPayload{
+		Cols: 120, Rows: 32,
+		Executable: shellPath,
+		ShellKind:  "zsh",
+		Env:        map[string]string{"HOME": home, "ZDOTDIR": ""},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Disconnect("s1") })
+	if err := manager.InstallShellIntegration("s1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if !waitFor(t, 8*time.Second, func() bool {
+		output := captured.snapshot()
+		return strings.Contains(output, "\x1b]133;A") && strings.Contains(output, "ready$")
+	}) {
+		t.Fatalf("옮긴 ZDOTDIR 에서 통합이 실행되지 않았다:\n%q", captured.snapshot())
+	}
+	if err := manager.WriteBytes("s1", []byte("echo rc=$DOLGATE_RC_RAN\r")); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(t, 5*time.Second, func() bool {
+		return strings.Contains(captured.snapshot(), "rc=yes")
+	}) {
+		t.Fatalf("옮긴 디렉터리의 사용자 rc 가 실행되지 않았다:\n%q", captured.snapshot())
+	}
+}

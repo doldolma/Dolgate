@@ -363,10 +363,11 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
         },
         pendingId,
       );
-      // 대상의 근거는 **"여는 중" 을 찍은 뒤에** 구한다. 값이 이미 있으면 그 자리에서 오고,
-      // 물어봐야 하는 경우에도 화면은 이미 눌린 것으로 보인다.
-      const networks = await resolveNetworks?.();
       try {
+        // 대상의 근거는 **"여는 중" 을 찍은 뒤에** 구한다. 값이 이미 있으면 그 자리에서 오고,
+        // 물어봐야 하는 경우에도 화면은 이미 눌린 것으로 보인다. **try 안이어야 한다** —
+        // 여기서 던지면 그 줄이 "여는 중" 에 남아 30초 동안 다시 누를 수도 없다.
+        const networks = await resolveNetworks?.();
         // 로컬 포트는 0 으로 보낸다 — 코어가 빈 포트를 잡고 실제 값을 런타임으로 알려 준다.
         // 사용자에게 포트를 고르게 하지 않는 이유이자, 충돌을 우리가 떠안는 방법이다.
         const runtime = await api.containers.startTunnel({

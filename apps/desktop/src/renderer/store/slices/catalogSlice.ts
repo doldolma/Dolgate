@@ -556,8 +556,15 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
                 continue;
               }
     
+              const draft = toHostDraft(
+                current,
+                buildDuplicateHostLabel(current, workingHosts),
+              );
               const next = await api.hosts.create(
-                toHostDraft(current, buildDuplicateHostLabel(current, workingHosts)),
+                // 공유 폴더의 주인은 **기기 로컬 설정**이다. 레코드에 남아 있는 옛 값(마이그레이션
+                // 전에 저장된 것)을 복제본에 실어 보내면 `/Users/...` 같은 이 기기의 경로가 다시
+                // 동기화돼 다른 기기로 흘러간다. 아래에서 로컬 설정으로 옮겨 담는다.
+                draft.kind === "rdp" ? { ...draft, drives: null } : draft,
               );
               // 공유 폴더는 기기 로컬 설정에 있다 — 레코드를 복사하는 것만으로는 따라오지
               // 않는다. 복제는 **같은 기기 안**에서 일어나므로 경로가 그대로 유효하고, 원본이

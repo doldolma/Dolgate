@@ -125,9 +125,17 @@ func withZshStartupIntegration(args []string, env []string) ([]string, []string,
 		return `if [ -f "${` + zshUserZdotdirEnv + `}/` + name + `" ]; then ` +
 			`. "${` + zshUserZdotdirEnv + `}/` + name + `"; fi`
 	}
+	// 사용자 파일이 ZDOTDIR 를 바꿨으면 **되돌린다.** `~/.config/zsh` 처럼 .zshenv 에서
+	// ZDOTDIR 를 옮기는 구성이 흔한데, zsh 는 시작 파일마다 ZDOTDIR 를 다시 보므로 그대로
+	// 두면 다음 파일(.zprofile·.zshrc)을 그 디렉터리에서 읽는다 — 우리 .zshrc 가 아예 실행되지
+	// 않아 셸 통합이 조용히 꺼진다(자동완성·명령 블록·AI 컨텍스트가 전부). 사용자가 정한 값은
+	// 사용자 디렉터리로 승격해 두어, 마지막에 되돌릴 때 그 값으로 돌아가게 한다.
+	reclaim := `if [ "${ZDOTDIR}" != "` + dir + `" ]; then ` +
+		zshUserZdotdirEnv + `="${ZDOTDIR}"; export ` + zshUserZdotdirEnv + `; ` +
+		`ZDOTDIR="` + dir + `"; fi`
 	files := map[string]string{
-		".zshenv":   sourceUser(".zshenv"),
-		".zprofile": sourceUser(".zprofile"),
+		".zshenv":   sourceUser(".zshenv") + "\n" + reclaim,
+		".zprofile": sourceUser(".zprofile") + "\n" + reclaim,
 		// .zshrc 가 대화형 셸의 마지막 단계다 — 여기서 훅을 얹고 ZDOTDIR 를 되돌린다.
 		// 되돌린 뒤에는 zsh 가 .zlogin 을 사용자 디렉터리에서 직접 읽으므로 심이 필요 없다.
 		// 되돌리기는 우리 값이 그대로 남아 있을 때만 한다 — 사용자의 .zshrc 가 스스로 ZDOTDIR 를
