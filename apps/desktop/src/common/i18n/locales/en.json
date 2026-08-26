@@ -3841,7 +3841,9 @@
         "name": "Name",
         "stack": "Stack",
         "io": "I/O",
-        "disk": "disk"
+        "disk": "disk",
+        "ioTotal": "total",
+        "ioWaiting": "measuring"
       },
       "age": {
         "second": "{{count}}s",
@@ -3871,6 +3873,16 @@
         "oom": "OOM",
         "crashed": "crashed",
         "restartCount": "{{count}} restarts"
+      },
+      "port": {
+        "open": "Forward",
+        "openHint": "Bring this port to your computer — closes with this session",
+        "opening": "Opening",
+        "private": "not published",
+        "copy": "Copy address",
+        "browser": "Open in browser",
+        "close": "Close",
+        "failed": "Failed"
       }
     },
     "theme": {

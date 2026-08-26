@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useAppStore } from '../../../store/appStore';
 import { listWorkspaceSessionIds } from '../terminalWorkspaceLayout';
+import { reinjectShellIntegrationIfSubshell } from '../../../lib/subshell-reinject';
 import {
   getCommandBlocks,
   getCommandBlocksVersion,
@@ -254,6 +255,10 @@ export function useSessionPanelSender(
       const sent = sendTerminalInput(sessionId, buildRunPayload(command));
       if (sent) {
         noteInsertedCommand(sessionId, command);
+        // 우리가 보낸 명령은 xterm 의 onData 를 타지 않는다 — 서브셸 진입 판정을 여기서도
+        // 한 번 한다. 안 하면 패널로 `docker exec` 해서 컨테이너에 들어갔을 때 통합이 안 붙어
+        // 명령 상태가 회색으로 굳는다.
+        reinjectShellIntegrationIfSubshell(sessionId, command);
       }
       return sent;
     },

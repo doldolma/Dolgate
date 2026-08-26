@@ -7,8 +7,10 @@ import type {
   ContainerTunnelTabState,
   EcsTunnelTabState,
   RuntimeEventSlice,
+  SessionContainerTunnel,
 } from "../types";
 import type {
+  PortForwardRuntimeRecord,
   KeyboardInteractiveChallenge,
   KeyboardInteractivePrompt,
   TerminalConnectionHop,
@@ -443,6 +445,40 @@ function recordConnectionView(
     default:
       return;
   }
+}
+
+/**
+ * 세션이 연 컨테이너 터널의 상태를 런타임 이벤트로 갱신한다. 멈춘 것은 지운다 — 세션이 끝나
+ * 메인이 회수한 경우도 이 길로 사라진다(렌더러가 따로 지우지 않는다).
+ */
+function updateSessionContainerTunnels(
+  current: Record<string, SessionContainerTunnel[]>,
+  runtime: PortForwardRuntimeRecord,
+): Record<string, SessionContainerTunnel[]> {
+  let changed = false;
+  const next: Record<string, SessionContainerTunnel[]> = {};
+  for (const [sessionId, tunnels] of Object.entries(current)) {
+    const index = tunnels.findIndex((tunnel) => tunnel.ruleId === runtime.ruleId);
+    if (index < 0) {
+      next[sessionId] = tunnels;
+      continue;
+    }
+    changed = true;
+    if (runtime.status === "stopped") {
+      const remaining = tunnels.filter((tunnel) => tunnel.ruleId !== runtime.ruleId);
+      next[sessionId] = remaining;
+      continue;
+    }
+    const updated = [...tunnels];
+    updated[index] = {
+      ...tunnels[index],
+      bindPort: runtime.bindPort || tunnels[index].bindPort,
+      status: runtime.status === "running" ? "running" : runtime.status === "error" ? "error" : "starting",
+      message: runtime.message,
+    };
+    next[sessionId] = updated;
+  }
+  return changed ? next : current;
 }
 
 export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
@@ -2698,6 +2734,12 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
         } else if (
           event.runtime.ruleId.startsWith("container-service-tunnel:")
         ) {
+          // 세션 패널이 연 터널. 코어가 잡은 실제 로컬 포트와 상태를 그대로 옮긴다 — 멈췄거나
+          // 실패로 끝났으면 목록에서 지운다(세션이 끝나면 메인이 정지시키므로 여기로 온다).
+          nextState.sessionContainerTunnels = updateSessionContainerTunnels(
+            nextState.sessionContainerTunnels ?? state.sessionContainerTunnels,
+            event.runtime,
+          );
           nextState.containerTabs = (
             nextState.containerTabs ?? state.containerTabs
           ).map((tab) => {

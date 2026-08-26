@@ -59,17 +59,25 @@ const dockerQuery = vi.fn<(sessionId: string, command: string) => Promise<string
   () => Promise.resolve(''),
 );
 
-// 도커 섹션의 프로브만 대신한다 — 나머지 서비스 함수는 실물을 그대로 쓴다(tmux 섹션이 부른다).
+const reinjectShellIntegration = vi.fn<(sessionId: string, shell?: string) => Promise<void>>(
+  () => Promise.resolve(),
+);
+
+// 도커 섹션의 프로브와 통합 재주입만 대신한다 — 나머지 서비스 함수는 실물을 그대로 쓴다.
 vi.mock('../../../services/desktop/terminal', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   queryTerminalCompletion: (sessionId: string, command: string) =>
     dockerQuery(sessionId, command),
+  reinjectTerminalShellIntegration: (sessionId: string, shell?: string) =>
+    reinjectShellIntegration(sessionId, shell),
 }));
 
 const storeState: Record<string, unknown> = {};
 
 vi.mock('../../../store/appStore', () => ({
   useAppStore: (selector: (state: any) => unknown) => selector(storeState),
+  // 훅 밖(서브셸 재주입 판정)에서 설정을 읽는 경로도 있다.
+  appStore: { getState: () => storeState },
 }));
 
 function block(overrides: Partial<FakeBlock> = {}): FakeBlock {
@@ -124,6 +132,10 @@ function setState(overrides: Record<string, unknown> = {}): void {
     openSettingsSection: vi.fn(),
     openExternalUrl: vi.fn(),
     workspaces: [],
+    // 도커 섹션이 읽는 것들(세션이 연 컨테이너 터널).
+    sessionContainerTunnels: {},
+    openSessionContainerTunnel: vi.fn(),
+    closeSessionContainerTunnel: vi.fn(),
     tabs: [
       { sessionId: 'session-1', title: 'Prod', paneKind: 'terminal' },
       { sessionId: 'session-2', title: 'Staging', paneKind: 'terminal' },
@@ -136,6 +148,7 @@ beforeEach(() => {
   // 검색어·필터는 세션 단위로 앱 수명 동안 남는다(모듈 저장소) — 테스트 사이에도 남으므로
   // 여기서 놓는다. 안 그러면 앞 테스트가 친 검색어가 뒤 테스트의 목록을 통째로 걸러 버린다.
   clearSessionScopedState('session-1');
+  reinjectShellIntegration.mockClear();
   dockerQuery.mockReset();
   dockerQuery.mockResolvedValue('');
   blocks.length = 0;
@@ -1110,6 +1123,8 @@ describe('도커 섹션', () => {
   });
 
   it('열었을 때 못 부르면 그 자리에서 이유를 말한다', async () => {
+    // 도커가 없는 호스트도 이유 한 줄은 낸다 — 빈 출력은 "대답 없음" 으로 따로 다룬다.
+    dockerQuery.mockResolvedValue('why=sh: 1: docker: not found\n');
     setState({
       tabs: [{ sessionId: 'session-4', title: 'Nodocker', paneKind: 'terminal' }],
       sessionPanelSectionBySessionId: { 'session-4': 'docker' },
@@ -1143,3 +1158,20 @@ describe('도커 섹션', () => {
   });
 });
 
+// 패널이 보낸 명령은 xterm 의 onData 를 타지 않는다 — 서브셸 판정을 거기서만 하면 패널로
+// 컨테이너에 들어갔을 때 통합이 안 붙어 명령 상태가 회색으로 굳는다.
+describe('패널이 보낸 명령의 서브셸 진입', () => {
+  it('서브셸로 들어가는 명령이면 셸 통합을 다시 넣는다', () => {
+    blocks.push(block({ command: "docker exec -it 'web' bash" }));
+    render(<SessionPanel sessionId="session-1" />);
+    fireEvent.click(screen.getByRole('button', { name: '넣고 실행' }));
+    expect(reinjectShellIntegration).toHaveBeenCalledWith('session-1', 'bash');
+  });
+
+  it('평범한 명령에는 손대지 않는다', () => {
+    blocks.push(block({ command: 'ls -la' }));
+    render(<SessionPanel sessionId="session-1" />);
+    fireEvent.click(screen.getByRole('button', { name: '넣고 실행' }));
+    expect(reinjectShellIntegration).not.toHaveBeenCalled();
+  });
+});

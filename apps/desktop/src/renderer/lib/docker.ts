@@ -34,6 +34,12 @@ export function buildDockerProbeCommand(): string {
     AUX_PATH_EXPORT +
     [
       `p=; for c in ${candidates}; do $c ps -q >/dev/null 2>&1 && { p=$c; echo "prefix=$c"; break; }; done`,
+      // compose 가 v2 플러그인인지 v1 인지. **버전 확인은 데몬에 접속하지 않으므로** 소켓
+      // 권한과 무관하게, 위 루프가 실패했더라도 답이 나온다 — 이걸 루프 안에 두었다가 sudo 가
+      // 필요한 호스트에서 compose 항목이 통째로 사라졌다. 붙일 접두사는 화면 쪽에서 정해진
+      // 호출 방법에 맞춰 만든다(composeCommandFor).
+      'docker compose version >/dev/null 2>&1 && echo compose=v2',
+      'command -v docker-compose >/dev/null 2>&1 && echo compose=v1',
       'command -v docker >/dev/null 2>&1 && echo has=docker',
       'command -v podman >/dev/null 2>&1 && echo has=podman',
       // 안 되면 이유까지 한 줄 받아 온다 — 권한이 없는 것과 데몬이 꺼진 것은 다른 말이고,
@@ -47,35 +53,64 @@ export function buildDockerProbeCommand(): string {
   );
 }
 
+export type DockerComposeKind = 'v2' | 'v1' | null;
+
 export interface DockerProbe {
   /** 쓸 수 있는 호출 방법. null 이면 목록을 받을 수 없다. */
   prefix: string | null;
+  /**
+   * compose 가 어느 쪽인가. v2 는 `docker compose`(플러그인), v1 은 `docker-compose`(따로 깔린
+   * 실행 파일). 없으면 null — 그때는 스택 단위 compose 동작(로그·down)을 만들지 않는다.
+   */
+  compose: DockerComposeKind;
   /** 바이너리는 깔려 있는가(권한만 막힌 경우를 가른다). */
   installed: boolean;
+  /**
+   * 프로브가 **대답을 하기는 했는가.**
+   *
+   * 도커가 없는 호스트도 `why=`(command not found) 한 줄은 낸다. 아무 줄도 없다는 것은 명령이
+   * 제대로 돌지 않았다는 뜻이다(보조 채널이 아직 준비되지 않았거나 이번 차례를 놓쳤다) —
+   * 그걸 "도커 없음" 으로 단정하면 섹션이 통째로 "없습니다" 로 굳는다. 실제로 그렇게 굳었다.
+   */
+  answered: boolean;
   /** 안 될 때 도커가 낸 첫 줄. 데몬이 꺼진 것과 권한이 없는 것을 가른다. */
   reason: 'permission' | 'daemon' | 'unknown' | null;
 }
 
 export function parseDockerProbe(stdout: string): DockerProbe {
   let prefix: string | null = null;
+  let compose: DockerComposeKind = null;
   let installed = false;
+  let answered = false;
   let why = '';
   for (const line of stdout.split('\n')) {
     const text = line.trim();
     if (text.startsWith('prefix=')) {
       const value = text.slice('prefix='.length).trim();
       if (value) {
+        answered = true;
         prefix = value;
       }
+    } else if (text === 'compose=v2') {
+      answered = true;
+      compose = 'v2';
+    } else if (text === 'compose=v1' && compose === null) {
+      answered = true;
+      // 둘 다 있으면 v2 를 쓴다 — v1 은 옛 호스트의 마지막 수단이다.
+      compose = 'v1';
     } else if (text.startsWith('has=')) {
+      answered = true;
       installed = true;
     } else if (text.startsWith('why=')) {
+      answered = true;
       why = text.slice('why='.length).trim();
     }
   }
   return {
     prefix,
+    compose,
     installed,
+    answered,
     reason: prefix || !installed ? null : classifyDockerFailure(why),
   };
 }
@@ -319,6 +354,109 @@ export function groupContainersByStack(
   });
 }
 
+/** 초당 흐름(바이트). 누적값 두 표본의 차로 낸다. */
+export interface DockerIoRate {
+  netIn: number;
+  netOut: number;
+  blockRead: number;
+  blockWrite: number;
+}
+
+export interface DockerIoTotals {
+  atMs: number;
+  netIn: number;
+  netOut: number;
+  blockRead: number;
+  blockWrite: number;
+}
+
+export function ioTotalsOf(stat: DockerStat, atMs: number): DockerIoTotals {
+  return {
+    atMs,
+    netIn: stat.netInBytes,
+    netOut: stat.netOutBytes,
+    blockRead: stat.blockReadBytes,
+    blockWrite: stat.blockWriteBytes,
+  };
+}
+
+/**
+ * 두 누적 표본으로 초당 값을 낸다. 첫 표본이거나 시간이 안 흘렀으면 null — 화면은 그때
+ * "재는 중" 으로 둔다.
+ *
+ * 컨테이너가 다시 뜨면 누적이 0 으로 돌아간다. 그때 음수가 나오는데 0 으로 눌러 둔다(다음
+ * 표본부터 정상값이 나온다).
+ */
+export function computeIoRate(
+  previous: DockerIoTotals | undefined,
+  current: DockerIoTotals,
+): DockerIoRate | null {
+  if (!previous) {
+    return null;
+  }
+  const elapsedSeconds = (current.atMs - previous.atMs) / 1000;
+  if (elapsedSeconds <= 0) {
+    return null;
+  }
+  const perSecond = (now: number, then: number) =>
+    now >= then ? (now - then) / elapsedSeconds : 0;
+  return {
+    netIn: perSecond(current.netIn, previous.netIn),
+    netOut: perSecond(current.netOut, previous.netOut),
+    blockRead: perSecond(current.blockRead, previous.blockRead),
+    blockWrite: perSecond(current.blockWrite, previous.blockWrite),
+  };
+}
+
+export interface DockerPortEntry {
+  /** 컨테이너 쪽 포트. */
+  containerPort: number;
+  protocol: string;
+  /** 호스트에 공개된 포트. 공개되지 않았으면 null. */
+  publishedPort: number | null;
+}
+
+/**
+ * 행에 보여 줄 포트 목록. `ps` 의 공개 매핑과 `inspect` 의 노출 포트를 합친다.
+ *
+ * 둘 다 필요한 이유: 공개된 포트만 보여 주면 "컨테이너 안에서만 열린 포트" 를 열 수 없고,
+ * 노출 포트만 보여 주면 어느 것이 이미 호스트에 열려 있는지 알 수 없다.
+ */
+export function resolveContainerPorts(
+  container: DockerContainer,
+  info: DockerInspectInfo | undefined,
+): DockerPortEntry[] {
+  const entries = new Map<string, DockerPortEntry>();
+  for (const part of container.ports.split(',')) {
+    const match = /(?::(\d+))?->(\d+)\/(\w+)/.exec(part.trim());
+    if (!match) {
+      continue;
+    }
+    const containerPort = Number(match[2]);
+    const key = `${containerPort}/${match[3]}`;
+    const published = match[1] ? Number(match[1]) : null;
+    const existing = entries.get(key);
+    // 같은 포트가 IPv4·IPv6 두 줄로 오므로 먼저 온 공개 포트를 지킨다.
+    if (!existing || (existing.publishedPort === null && published !== null)) {
+      entries.set(key, { containerPort, protocol: match[3], publishedPort: published });
+    }
+  }
+  for (const exposed of info?.exposedPorts ?? []) {
+    const [portText, protocol = 'tcp'] = exposed.split('/');
+    const containerPort = Number(portText);
+    if (!Number.isFinite(containerPort)) {
+      continue;
+    }
+    const key = `${containerPort}/${protocol}`;
+    if (!entries.has(key)) {
+      entries.set(key, { containerPort, protocol, publishedPort: null });
+    }
+  }
+  return [...entries.values()].sort(
+    (left, right) => left.containerPort - right.containerPort,
+  );
+}
+
 /** 호스트에 열린 포트만 뽑는다(`0.0.0.0:5050->5050/tcp, :::5050->…` → ['5050']). */
 export function parsePublishedPorts(ports: string): string[] {
   const found: string[] = [];
@@ -394,6 +532,14 @@ export interface DockerStat {
   netOut: string;
   blockRead: string;
   blockWrite: string;
+  /**
+   * 누적 바이트. `docker stats` 의 NET·BLOCK I/O 는 **컨테이너가 뜬 뒤로 쌓인 총량**이라 그대로
+   * 보여 주면 "지금 얼마나 흐르는지" 로 잘못 읽힌다. 두 표본의 차로 초당 값을 낸다.
+   */
+  netInBytes: number;
+  netOutBytes: number;
+  blockReadBytes: number;
+  blockWriteBytes: number;
   pids: number;
 }
 
@@ -402,14 +548,19 @@ export interface DockerInspectInfo {
   restartCount: number;
   health: 'healthy' | 'unhealthy' | 'starting' | null;
   oomKilled: boolean;
+  /** 컨테이너가 여는 포트("80/tcp"). 공개 여부와 무관하다. */
+  exposedPorts: string[];
 }
 
 const STATS_FIELDS =
   '{{.ID}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}';
 
 // Health 는 헬스체크가 없으면 nil 이라 `{{if}}` 로 감싸야 템플릿이 죽지 않는다.
+// 마지막 칸은 컨테이너가 여는 포트다 — `ps` 는 **호스트에 공개된 것만** 준다. 공개되지 않은
+// 포트도 컨테이너 네트워크로는 열 수 있어야 하므로 여기서 함께 받는다.
 const INSPECT_FIELDS =
-  '{{.Id}}\t{{.RestartCount}}\t{{if .State.Health}}{{.State.Health.Status}}{{end}}\t{{.State.OOMKilled}}';
+  '{{.Id}}\t{{.RestartCount}}\t{{if .State.Health}}{{.State.Health.Status}}{{end}}' +
+  '\t{{.State.OOMKilled}}\t{{range $port, $unused := .Config.ExposedPorts}}{{$port}} {{end}}';
 
 /**
  * 지표(+ 검사)를 받는다. **목록과 다른 왕복이다.**
@@ -515,6 +666,10 @@ export function parseStats(stdout: string): Map<string, DockerStat> {
       netOut,
       blockRead,
       blockWrite,
+      netInBytes: parseBinarySize(netIn),
+      netOutBytes: parseBinarySize(netOut),
+      blockReadBytes: parseBinarySize(blockRead),
+      blockWriteBytes: parseBinarySize(blockWrite),
       pids: Number((pids ?? '').trim()) || 0,
     });
   }
@@ -527,7 +682,7 @@ export function parseInspect(stdout: string): Map<string, DockerInspectInfo> {
     if (!line.includes('\t')) {
       continue;
     }
-    const [id, restarts, health, oom] = line.split('\t');
+    const [id, restarts, health, oom, exposed] = line.split('\t');
     if (!id) {
       continue;
     }
@@ -541,6 +696,7 @@ export function parseInspect(stdout: string): Map<string, DockerInspectInfo> {
           ? healthText
           : null,
       oomKilled: (oom ?? '').trim() === 'true',
+      exposedPorts: (exposed ?? '').trim().split(/\s+/).filter(Boolean),
     });
   }
   return info;
@@ -847,13 +1003,48 @@ export function dockerNetworkRemoveCommand(prefix: string, network: DockerNetwor
 }
 
 /**
- * 스택 로그·down 은 compose 가 필요하다. 디렉터리를 모르면(라벨이 없으면) 그 항목을 아예 만들지
- * 않는다 — 눌리지 않는 메뉴를 보여 주는 것보다 없는 것이 낫다.
+ * 정해진 호출 방법에 맞춰 compose 를 부르는 방법을 만든다.
+ *
+ * 접두사는 도커를 부르는 방법 그대로다 — `sudo docker` 로 풀린 호스트면 compose 도 `sudo docker
+ * compose` 여야 한다. v1 은 별도 실행 파일이라 마지막 낱말만 갈아 끼운다(`sudo docker` →
+ * `sudo docker-compose`).
+ */
+export function composeCommandFor(
+  prefix: string | null,
+  kind: DockerComposeKind,
+): string | null {
+  if (!prefix || !kind) {
+    return null;
+  }
+  if (kind === 'v2') {
+    return `${prefix} compose`;
+  }
+  const parts = prefix.split(' ');
+  parts[parts.length - 1] = 'docker-compose';
+  return parts.join(' ');
+}
+
+/**
+ * 스택 단위 compose 명령.
+ *
+ * **프로젝트 디렉터리로 들어가서 부른다.** `--project-directory` 는 compose 파일을 찾아 주지
+ * 않는다 — v1·v2 모두 설정 파일은 **현재 디렉터리**(또는 `-f`)에서 찾는다. 그래서 그것만
+ * 넘기면 `no configuration file provided: not found` 가 난다(실제로 그렇게 났다).
+ *
+ * 괄호로 감싸 서브셸에서 `cd` 한다 — 사용자가 보고 있는 셸의 현재 위치를 바꾸지 않는다.
+ * 그 디렉터리의 `.env` 도 그때 함께 읽히므로 변수 치환이 up 할 때와 같아진다.
+ *
+ * 이름은 `-p` 로 명시한다. 디렉터리 이름에서 유추한 이름은 up 할 때 쓴 이름과 다를 수 있다
+ * (`/data/compose/11` 처럼 번호로 된 디렉터리가 그렇다).
  */
 export function stackComposeCommand(
-  prefix: string,
-  workingDir: string,
+  composeCommand: string,
+  stack: { project: string | null; workingDir: string | null },
   args: string,
 ): string {
-  return `${prefix} compose --project-directory ${quoteShellArg(workingDir)} ${args}`;
+  const name = stack.project ? ` -p ${quoteShellArg(stack.project)}` : '';
+  const command = `${composeCommand}${name} ${args}`;
+  return stack.workingDir
+    ? `(cd ${quoteShellArg(stack.workingDir)} && ${command})`
+    : command;
 }

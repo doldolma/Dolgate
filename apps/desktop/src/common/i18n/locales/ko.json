@@ -3841,7 +3841,9 @@
         "name": "이름",
         "stack": "스택",
         "io": "I/O",
-        "disk": "디스크"
+        "disk": "디스크",
+        "ioTotal": "누적",
+        "ioWaiting": "재는 중"
       },
       "age": {
         "second": "{{count}}초",
@@ -3871,6 +3873,16 @@
         "oom": "OOM",
         "crashed": "비정상 종료",
         "restartCount": "재시작 {{count}}회"
+      },
+      "port": {
+        "open": "포워딩",
+        "openHint": "이 포트를 내 컴퓨터로 가져온다 — 이 세션이 끝나면 함께 닫힌다",
+        "opening": "여는 중",
+        "private": "비공개",
+        "copy": "주소 복사",
+        "browser": "브라우저로 열기",
+        "close": "닫기",
+        "failed": "실패"
       }
     },
     "theme": {

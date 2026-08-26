@@ -1133,6 +1133,11 @@ export interface HostContainersEphemeralTunnelInput {
   targetPort: number;
   bindAddress: string;
   bindPort: number;
+  /**
+   * 이 터널의 주인 세션. 주면 그 세션이 끝날 때(탭 닫기·연결 끊김) 메인이 함께 정지시킨다.
+   * 세션 패널에서 연 터널이 이 값을 준다. 컨테이너 화면은 창 단위로만 매인다.
+   */
+  ownerSessionId?: string | null;
 }
 
 export interface KnownHostProbeInput {

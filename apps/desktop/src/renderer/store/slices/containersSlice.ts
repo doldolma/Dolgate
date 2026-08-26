@@ -1,5 +1,5 @@
 import type { SliceDeps } from "../services/context";
-import type { ContainersSlice } from "../types";
+import type { ContainersSlice, SessionContainerTunnel } from "../types";
 import { createDefaultLogsRelativeRange } from "../../lib/log-range";
 import {
   AWS_SFTP_DEFAULT_PORT,
@@ -308,6 +308,95 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
   return {
     containerTabs: [],
     activeContainerHostId: null,
+    sessionContainerTunnels: {},
+    openSessionContainerTunnel: async ({
+      sessionId,
+      hostId,
+      containerId,
+      containerName,
+      networkName,
+      targetPort,
+    }) => {
+      // 누른 즉시 "여는 중" 을 남긴다. 터널 하나 여는 데 1~2초가 걸리는데 그동안 화면이 그대로면
+      // 눌린 것인지 알 수 없어 다시 누르게 된다(실제로 그랬다).
+      const pendingId = `pending:${containerId}:${targetPort}`;
+      const put = (tunnel: SessionContainerTunnel, replaceId: string) => {
+        set((state) => ({
+          sessionContainerTunnels: {
+            ...state.sessionContainerTunnels,
+            [sessionId]: [
+              ...(state.sessionContainerTunnels[sessionId] ?? []).filter(
+                (entry) => entry.ruleId !== replaceId && entry.ruleId !== tunnel.ruleId,
+              ),
+              tunnel,
+            ],
+          },
+        }));
+      };
+      put(
+        {
+          ruleId: pendingId,
+          containerId,
+          containerName,
+          targetPort,
+          bindPort: 0,
+          status: 'starting',
+        },
+        pendingId,
+      );
+      try {
+        // 로컬 포트는 0 으로 보낸다 — 코어가 빈 포트를 잡고 실제 값을 런타임으로 알려 준다.
+        // 사용자에게 포트를 고르게 하지 않는 이유이자, 충돌을 우리가 떠안는 방법이다.
+        const runtime = await api.containers.startTunnel({
+          hostId,
+          containerId,
+          networkName,
+          targetPort,
+          bindAddress: '127.0.0.1',
+          bindPort: 0,
+          // 주인 세션. 이 세션이 끝나면 메인이 이 터널을 회수한다(렌더러가 아니라 메인이 한다 —
+          // 창을 닫거나 렌더러가 죽어도 새지 않게).
+          ownerSessionId: sessionId,
+        });
+        put(
+          {
+            ruleId: runtime.ruleId,
+            containerId,
+            containerName,
+            targetPort,
+            bindPort: runtime.bindPort,
+            status: runtime.status === 'running' ? 'running' : 'starting',
+          },
+          pendingId,
+        );
+      } catch (error) {
+        // 실패는 그 줄에 남긴다 — 로그에만 찍히면 사용자는 아무 일도 안 일어난 것으로 본다.
+        put(
+          {
+            ruleId: pendingId,
+            containerId,
+            containerName,
+            targetPort,
+            bindPort: 0,
+            status: 'error',
+            message: error instanceof Error ? error.message : String(error),
+          },
+          pendingId,
+        );
+      }
+    },
+    closeSessionContainerTunnel: async (sessionId, ruleId) => {
+      // 먼저 화면에서 지운다 — 눌렀는데 남아 있으면 다시 누르게 된다. 실제 정지는 뒤따른다.
+      set((state) => ({
+        sessionContainerTunnels: {
+          ...state.sessionContainerTunnels,
+          [sessionId]: (state.sessionContainerTunnels[sessionId] ?? []).filter(
+            (tunnel) => tunnel.ruleId !== ruleId,
+          ),
+        },
+      }));
+      await api.containers.stopTunnel(ruleId).catch(() => undefined);
+    },
     openHostContainersTab: connectHostContainersTab,
     closeHostContainersTab: async (hostId) => {
             const host = get().hosts.find((item) => item.id === hostId);

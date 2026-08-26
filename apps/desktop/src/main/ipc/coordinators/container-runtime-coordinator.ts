@@ -472,7 +472,7 @@ export function createContainerRuntimeCoordinator(deps: {
       if (host.kind === "aws-ec2") {
         tunnelRegistry.moveContainersTunnelRuntime(endpointId, ruleId);
         publishRuntime("starting", "Starting container tunnel");
-        return coreManager.startPortForward({
+        return await coreManager.startPortForward({
           ruleId,
           hostId: host.id,
           host: "",
@@ -492,7 +492,7 @@ export function createContainerRuntimeCoordinator(deps: {
 
       if (host.kind === "warpgate-ssh") {
         publishRuntime("starting", "Starting container tunnel");
-        return coreManager.startPortForward({
+        return await coreManager.startPortForward({
           ruleId,
           hostId: host.id,
           host: host.warpgateSshHost,
@@ -512,7 +512,11 @@ export function createContainerRuntimeCoordinator(deps: {
 
       publishRuntime("starting", "Starting container tunnel");
       const username = hostCoordinator.requireConfiguredSshUsername(host);
-      return coreManager.startPortForward({
+      // **await 없이 돌려주면 안 된다.** try/finally 에서 `return promise` 는 finally 를
+      // 곧바로 실행한다 — 그 finally 가 컨테이너 엔드포인트를 끊어 버려서, 코어가 그 연결을
+      // 가져가려는 순간(sourceEndpointId → TakeClient) 이미 사라진 상태가 됐다. 실기기에서
+      // "containers endpoint … not found" 로 터진 원인이다. 끝난 뒤에 정리해야 한다.
+      return await coreManager.startPortForward({
         ruleId,
         hostId: host.id,
         host: host.hostname,

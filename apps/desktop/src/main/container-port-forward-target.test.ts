@@ -65,3 +65,39 @@ describe("container tunnel target resolution", () => {
     });
   });
 });
+
+describe("네트워크를 고르지 않았을 때", () => {
+  it("IP 가 있는 첫 네트워크를 우리가 고른다", () => {
+    const details = createDetails();
+    const target = resolveContainerTunnelTarget(details, "", 3306);
+    expect(target.host).toBe(
+      details.networks.find((network) => network.ipAddress)?.ipAddress,
+    );
+    expect(target.port).toBe(3306);
+  });
+
+  it("IP 없는 네트워크는 건너뛴다", () => {
+    const details = {
+      ...createDetails(),
+      networks: [
+        { name: "none", ipAddress: "", aliases: [] },
+        { name: "bridge", ipAddress: "172.18.0.5", aliases: [] },
+      ],
+    };
+    expect(resolveContainerTunnelTarget(details, "", 3306).host).toBe("172.18.0.5");
+  });
+
+  it("붙은 네트워크가 없으면 무엇을 봤는지 적어 알린다", () => {
+    const details = { ...createDetails(), networks: [] };
+    expect(() => resolveContainerTunnelTarget(details, "", 3306)).toThrow();
+  });
+
+  it("공개되지 않은 포트도 대상이 된다 — 컨테이너 네트워크로 바로 간다", () => {
+    // 코어의 inspect 는 Config.Exposed 까지 포함하므로 공개 안 된 포트도 목록에 있다.
+    const details = {
+      ...createDetails(),
+      ports: [{ containerPort: 9090, protocol: "tcp", publishedBindings: [] }],
+    };
+    expect(resolveContainerTunnelTarget(details, "", 9090).port).toBe(9090);
+  });
+});

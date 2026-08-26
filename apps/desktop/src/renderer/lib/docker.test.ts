@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildContainerListCommand,
+  composeCommandFor,
+  computeIoRate,
+  resolveContainerPorts,
   buildContainerMetricsCommand,
   buildDockerProbeCommand,
   buildImageListCommand,
@@ -68,9 +71,11 @@ describe('프로브', () => {
   });
 
   it('prefix 줄을 읽는다', () => {
-    expect(parseDockerProbe('prefix=sudo -n docker\nhas=docker\nwhy=\n')).toEqual({
+    expect(parseDockerProbe('prefix=sudo -n docker\ncompose=v2\nhas=docker\n')).toEqual({
       prefix: 'sudo -n docker',
+      compose: 'v2',
       installed: true,
+      answered: true,
       reason: null,
     });
   });
@@ -88,8 +93,53 @@ describe('프로브', () => {
     ).toBe('daemon');
   });
 
-  it('아무것도 없으면 설치되지 않은 것으로 본다', () => {
-    expect(parseDockerProbe('')).toEqual({ prefix: null, installed: false, reason: null });
+  it('빈 응답은 "도커 없음" 이 아니라 "대답이 없음" 이다', () => {
+    // 도커가 없는 호스트도 why= 한 줄은 온다. 아무 줄도 없으면 명령이 제대로 돌지 않은 것이라
+    // 단정하면 안 된다 — 그렇게 단정해서 섹션이 "없습니다" 로 굳었다.
+    expect(parseDockerProbe('')).toEqual({
+      prefix: null,
+      compose: null,
+      installed: false,
+      answered: false,
+      reason: null,
+    });
+    // 진짜 없는 호스트: 이유 줄이 온다.
+    const absent = parseDockerProbe('why=sh: 1: docker: not found');
+    expect(absent.answered).toBe(true);
+    expect(absent.installed).toBe(false);
+  });
+
+  it('compose 는 v2 가 있으면 v2, 없으면 v1 로 잡힌다', () => {
+    expect(parseDockerProbe('compose=v1\ncompose=v2\n').compose).toBe('v2');
+    expect(parseDockerProbe('compose=v1\n').compose).toBe('v1');
+    // 둘 다 없으면 null 이고, 그러면 화면이 compose 항목을 만들지 않는다.
+    expect(parseDockerProbe('prefix=docker\nhas=docker\n').compose).toBeNull();
+  });
+
+  it('compose 판정은 소켓 권한과 무관하다 — 그래서 루프 밖에 있다', () => {
+    // sudo 가 필요한 호스트에서는 `docker ps` 가 실패해 prefix 줄이 없다. 그래도 compose 는
+    // 알아낼 수 있어야 한다(버전 확인은 데몬에 접속하지 않는다).
+    const probe = parseDockerProbe('compose=v2\nhas=docker\nwhy=permission denied');
+    expect(probe.prefix).toBeNull();
+    expect(probe.compose).toBe('v2');
+  });
+
+  it('compose 는 도커를 부르는 방법을 그대로 물려받는다', () => {
+    expect(composeCommandFor('docker', 'v2')).toBe('docker compose');
+    expect(composeCommandFor('sudo docker', 'v2')).toBe('sudo docker compose');
+    // v1 은 별도 실행 파일이라 마지막 낱말만 갈아 끼운다.
+    expect(composeCommandFor('sudo -n docker', 'v1')).toBe('sudo -n docker-compose');
+    expect(composeCommandFor('docker', null)).toBeNull();
+    expect(composeCommandFor(null, 'v2')).toBeNull();
+  });
+
+  it('프로브가 compose 를 v2 → v1 순서로 물어본다', () => {
+    const command = buildDockerProbeCommand();
+    expect(command).toContain('compose version');
+    expect(command).toContain('docker-compose');
+    expect(command.indexOf('$c compose version')).toBeLessThan(
+      command.indexOf('docker-compose'),
+    );
   });
 });
 
@@ -253,6 +303,82 @@ describe('볼륨 · 네트워크', () => {
   });
 });
 
+describe('초당 I/O', () => {
+  const totals = (atMs: number, netIn: number, blockWrite: number) => ({
+    atMs,
+    netIn,
+    netOut: 0,
+    blockRead: 0,
+    blockWrite,
+  });
+
+  it('두 누적 표본의 차를 시간으로 나눈다', () => {
+    // docker stats 의 NET·BLOCK 은 컨테이너가 뜬 뒤로 쌓인 총량이다 — 그대로 보여 주면
+    // "지금 흐르는 양" 으로 잘못 읽힌다.
+    const rate = computeIoRate(totals(0, 1_000, 500), totals(10_000, 21_000, 1_500));
+    expect(rate).toEqual({ netIn: 2_000, netOut: 0, blockRead: 0, blockWrite: 100 });
+  });
+
+  it('첫 표본에서는 아직 낼 수 없다', () => {
+    expect(computeIoRate(undefined, totals(0, 1_000, 0))).toBeNull();
+  });
+
+  it('같은 시각의 두 표본은 버린다 — 0 으로 나누지 않는다', () => {
+    expect(computeIoRate(totals(5_000, 1_000, 0), totals(5_000, 2_000, 0))).toBeNull();
+  });
+
+  it('컨테이너가 다시 뜨어 누적이 0 으로 돌아가면 음수 대신 0 이다', () => {
+    const rate = computeIoRate(totals(0, 900_000, 0), totals(10_000, 1_000, 0));
+    expect(rate?.netIn).toBe(0);
+  });
+});
+
+describe('행에 보여 줄 포트', () => {
+  function inspect(exposed: string[]) {
+    return {
+      id: 'a1b2c3d4e5f6',
+      restartCount: 0,
+      health: null,
+      oomKilled: false,
+      exposedPorts: exposed,
+    };
+  }
+
+  it('공개된 것과 공개 안 된 것을 합친다', () => {
+    const ports = resolveContainerPorts(
+      container({ ports: '0.0.0.0:5050->5050/tcp' }),
+      inspect(['5050/tcp', '8080/tcp']),
+    );
+    expect(ports).toEqual([
+      { containerPort: 5050, protocol: 'tcp', publishedPort: 5050 },
+      { containerPort: 8080, protocol: 'tcp', publishedPort: null },
+    ]);
+  });
+
+  it('같은 포트의 IPv4·IPv6 두 줄을 하나로 본다', () => {
+    const ports = resolveContainerPorts(
+      container({ ports: '0.0.0.0:5050->5050/tcp, :::5050->5050/tcp' }),
+      undefined,
+    );
+    expect(ports).toHaveLength(1);
+    expect(ports[0].publishedPort).toBe(5050);
+  });
+
+  it('검사 결과가 아직 없어도 공개된 포트는 보여 준다', () => {
+    const ports = resolveContainerPorts(
+      container({ ports: '0.0.0.0:3311->3306/tcp' }),
+      undefined,
+    );
+    expect(ports).toEqual([
+      { containerPort: 3306, protocol: 'tcp', publishedPort: 3311 },
+    ]);
+  });
+
+  it('포트가 없으면 빈 목록', () => {
+    expect(resolveContainerPorts(container({ ports: '' }), undefined)).toEqual([]);
+  });
+});
+
 describe('명령 만들기', () => {
   it('셸은 bash 가 있으면 bash, 없으면 sh 로 떨어진다', () => {
     const command = dockerShellCommand('docker', container({ name: 'web' }));
@@ -288,10 +414,20 @@ describe('명령 만들기', () => {
     );
   });
 
-  it('compose 명령은 프로젝트 디렉터리를 명시한다', () => {
-    expect(stackComposeCommand('docker', '/srv/lime', 'down')).toBe(
-      "docker compose --project-directory '/srv/lime' down",
-    );
+  it('compose 는 프로젝트 디렉터리로 들어가서 부른다 — 그래야 설정 파일을 찾는다', () => {
+    // `--project-directory` 는 파일을 찾아 주지 않는다(v1·v2 모두 cwd 나 -f 에서 찾는다).
+    // 괄호로 감싸 사용자의 현재 위치는 그대로 둔다.
+    expect(
+      stackComposeCommand('docker compose', { project: 'lime', workingDir: '/srv/lime' }, 'down'),
+    ).toBe("(cd '/srv/lime' && docker compose -p 'lime' down)");
+    // v1 만 있는 호스트.
+    expect(
+      stackComposeCommand(
+        'sudo -n docker-compose',
+        { project: 'lime', workingDir: '/data/compose/11' },
+        'logs -f --tail 200',
+      ),
+    ).toBe("(cd '/data/compose/11' && sudo -n docker-compose -p 'lime' logs -f --tail 200)");
   });
 });
 
@@ -341,7 +477,19 @@ describe('컨테이너 지표는 목록과 다른 왕복이다', () => {
       restartCount: 3,
       health: 'unhealthy',
       oomKilled: true,
+      exposedPorts: [],
     });
+  });
+
+  it('NET·BLOCK 은 누적값이라 바이트로도 담는다 — 초당 값은 두 표본의 차로 낸다', () => {
+    const parsed = parseContainerMetrics(
+      'a1b2c3d4e5f6\t12.40%\t412MiB / 15.6GiB\t2.58%\t632kB / 4.38MB\t22.6MB / 12.3kB\t11',
+    );
+    const stat = parsed.stats.get('a1b2c3d4e5f6');
+    expect(stat?.netInBytes).toBe(632_000);
+    expect(stat?.netOutBytes).toBe(4_380_000);
+    expect(stat?.blockReadBytes).toBe(22_600_000);
+    expect(stat?.blockWriteBytes).toBe(12_300);
   });
 
   it('지표와 검사를 한 왕복에서 갈라 읽는다', () => {

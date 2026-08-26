@@ -10,6 +10,9 @@ import { clearSessionScopedState } from './useSessionScopedState';
 import type { SessionPanelSender } from './useSessionPanelTarget';
 
 const connectHost = vi.fn();
+const openTunnel = vi.fn(() => Promise.resolve());
+const closeTunnel = vi.fn(() => Promise.resolve());
+const openExternalUrl = vi.fn();
 const query = vi.fn();
 
 const storeState: Record<string, unknown> = {};
@@ -45,8 +48,9 @@ const METRICS = [
    'a2b3c4d5e6f7\t0.30%\t96MiB / 15.6GiB\t0.60%\t2MB / 1MB\t0B / 0B\t7'].join('\n'),
   '@@dolgate@@',
   [
-    `a1b2c3d4e5f6${'0'.repeat(52)}\t0\thealthy\tfalse`,
-    `a2b3c4d5e6f7${'0'.repeat(52)}\t14\t\tfalse`,
+    // 마지막 칸은 컨테이너가 여는 포트다 — `ps` 는 공개된 것만 주므로 여기서 함께 받는다.
+    `a1b2c3d4e5f6${'0'.repeat(52)}\t0\thealthy\tfalse\t5050/tcp 9090/tcp `,
+    `a2b3c4d5e6f7${'0'.repeat(52)}\t14\t\tfalse\t`,
   ].join('\n'),
 ].join('\n');
 
@@ -71,7 +75,7 @@ function renderSection(options: {
       sessionId="session-1"
       hostId={options.hostId === undefined ? 'host-1' : options.hostId}
       sender={senderStub}
-      runtime={{ availability: 'available', prefix: 'docker', elevate: false }}
+      runtime={{ availability: 'available', prefix: 'docker', elevate: false, compose: 'docker compose' }}
     />,
   );
   return { ...view, sender: senderStub };
@@ -94,8 +98,18 @@ beforeEach(() => {
   // 여기서 놓는다. 안 그러면 앞 테스트가 옮겨 둔 탭에서 뒤 테스트가 시작한다.
   clearSessionScopedState('session-1');
   connectHost.mockReset();
+  openTunnel.mockClear();
+  closeTunnel.mockClear();
+  openExternalUrl.mockClear();
   query.mockReset();
-  Object.assign(storeState, { connectHost, sessionPanelOpen: true });
+  Object.assign(storeState, {
+    connectHost,
+    sessionPanelOpen: true,
+    sessionContainerTunnels: {},
+    openSessionContainerTunnel: openTunnel,
+    closeSessionContainerTunnel: closeTunnel,
+    openExternalUrl,
+  });
   respond({ 'ps -a --format': CONTAINERS, 'stats --no-stream': METRICS });
 });
 
@@ -132,25 +146,21 @@ describe('컨테이너', () => {
     }
   });
 
-  it('셸은 새 탭에서 열고 지금 셸을 건드리지 않는다', async () => {
+  it('셸은 새 탭을 열지 않고 지금 터미널에서 실행한다', async () => {
     const { sender: senderStub } = renderSection();
     fireEvent.click(await screen.findByText('gateway'));
     fireEvent.click(screen.getByRole('button', { name: '셸 접속' }));
-    expect(connectHost).toHaveBeenCalledTimes(1);
-    const args = connectHost.mock.calls[0];
-    expect(args[0]).toBe('host-1');
-    expect(args[9]).toContain("docker exec -it 'lime-gateway'");
-    expect(senderStub.run).not.toHaveBeenCalled();
-  });
-
-  it('호스트가 없는 로컬 터미널에서는 지금 셸에서 그대로 실행한다', async () => {
-    const { sender: senderStub } = renderSection({ hostId: null });
-    fireEvent.click(await screen.findByText('gateway'));
-    fireEvent.click(screen.getByRole('button', { name: '셸 접속' }));
-    expect(connectHost).not.toHaveBeenCalled();
     expect(senderStub.run).toHaveBeenCalledWith(
       expect.stringContaining("docker exec -it 'lime-gateway'"),
     );
+    expect(connectHost).not.toHaveBeenCalled();
+  });
+
+  it('로그도 지금 터미널에서 따라간다', async () => {
+    const { sender: senderStub } = renderSection();
+    fireEvent.click(await screen.findByRole('button', { name: '로그 gateway' }));
+    expect(senderStub.run).toHaveBeenCalledWith("docker logs -f --tail 200 'lime-gateway'");
+    expect(connectHost).not.toHaveBeenCalled();
   });
 
   it('정지된 컨테이너는 셸이 꺼진다', async () => {
@@ -183,13 +193,10 @@ describe('컨테이너', () => {
     renderSection({ sender: sender({ context: { atPrompt: false, bracketedPaste: false } }) });
     await screen.findByText('gateway');
     fireEvent.click(screen.getByText('gateway'));
-    expect((screen.getByRole('button', { name: '재시작' }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
-    // 셸·로그는 새 탭이라 프롬프트와 무관하게 된다.
-    expect((screen.getByRole('button', { name: '로그' }) as HTMLButtonElement).disabled).toBe(
-      false,
-    );
+    // 이제 셸·로그도 지금 터미널에 넣으므로 넣을 자리가 없으면 함께 꺼진다.
+    for (const name of ['재시작', '로그', '셸 접속']) {
+      expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
+    }
   });
 
   /**
@@ -221,9 +228,29 @@ describe('컨테이너', () => {
     await screen.findByText('lime');
     fireEvent.click(screen.getByRole('button', { name: '더 보기 lime' }));
     fireEvent.click(screen.getByRole('menuitem', { name: /compose down/ }));
+    // 프로젝트 디렉터리로 들어가서 부른다 — `--project-directory` 는 설정 파일을 찾아 주지
+    // 않는다. 괄호 덕에 사용자의 현재 위치는 그대로다.
     expect(senderStub.insert).toHaveBeenCalledWith(
-      "docker compose --project-directory '/srv/lime' down",
+      "(cd '/srv/lime' && docker compose -p 'lime' down)",
     );
+  });
+
+  it('compose 가 없는 호스트에서는 그 항목을 만들지 않는다', async () => {
+    // 옛 호스트에는 `docker compose` 도 `docker-compose` 도 없을 수 있다. 눌리지 않는 메뉴를
+    // 보여 주는 것보다 없는 편이 낫다 — 재시작·정지는 compose 없이 되므로 그대로 남는다.
+    render(
+      <SessionPanelDocker
+        sessionId="session-1"
+        hostId="host-1"
+        sender={sender()}
+        runtime={{ availability: 'available', prefix: 'docker', elevate: false, compose: null }}
+      />,
+    );
+    await screen.findByText('lime');
+    fireEvent.click(screen.getByRole('button', { name: '더 보기 lime' }));
+    expect(screen.getByRole('menuitem', { name: '스택 재시작' })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: /compose down/ })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: '스택 로그' })).toBeNull();
   });
 
   it('행을 누르면 이미 받아 온 값으로 상세를 펼친다(왕복 없음)', async () => {
@@ -233,10 +260,12 @@ describe('컨테이너', () => {
     await screen.findByText('12.4%');
     const before = query.mock.calls.length;
     fireEvent.click(screen.getByText('gateway'));
-    expect(screen.getByText('0.0.0.0:5050->5050/tcp')).toBeTruthy();
+    // 포트는 줄로 나뉘어 그려진다(열 수 있는 단위라서).
+    expect(screen.getByText('5050 → 5050/tcp')).toBeTruthy();
     expect(screen.getByText('lime-gateway')).toBeTruthy();
     // 지표는 이미 받아 둔 값으로 그린다 — 누른다고 다시 묻지 않는다.
-    expect(screen.getByText(/↓1\.2GB ↑340MB/)).toBeTruthy();
+    // I/O 는 누적값이 아니라 초당 값으로 그린다(첫 표본에서는 '재는 중').
+    expect(screen.getByText('I/O')).toBeTruthy();
     expect(query.mock.calls.length).toBe(before);
   });
 
@@ -458,7 +487,7 @@ describe('sudo 까지 해 본 뒤에도 막힌 경우', () => {
         sessionId="session-1"
         hostId="host-1"
         sender={sender()}
-        runtime={{ availability: 'blocked', prefix: null, elevate: false }}
+        runtime={{ availability: 'blocked', prefix: null, elevate: false, compose: null }}
       />,
     );
     expect(screen.getByText('도커를 읽을 수 없습니다')).toBeTruthy();
@@ -511,10 +540,32 @@ describe('도커를 부를 수 있는지 알아보기', () => {
     }
   });
 
-  it('빈 출력으로 성공하면 도커가 없는 것이다 — 다시 묻지 않는다', async () => {
+  it('빈 출력은 "없음" 이 아니라 "대답이 없음" 이다 — 몇 번 더 물어본다', async () => {
+    // 도커가 없는 호스트도 why= 한 줄은 낸다. 아무 줄도 없으면 명령이 제대로 돌지 않은 것이라
+    // (보조 채널이 아직 준비되지 않았거나 이번 차례를 놓쳤다) 단정하면 섹션이 "없습니다" 로
+    // 굳는다 — 실기기에서 그렇게 굳었다.
     vi.useFakeTimers();
     try {
-      const { view, attempts } = probeOnce('host-probe-absent', () => Promise.resolve(''));
+      const { view, attempts } = probeOnce('host-probe-empty', () => Promise.resolve(''));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(view.result.current.availability).toBe('checking');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(attempts()).toBeGreaterThan(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('이유 줄이 오면 그때는 없다고 단정한다 — 더 묻지 않는다', async () => {
+    vi.useFakeTimers();
+    try {
+      const { view, attempts } = probeOnce('host-probe-absent', () =>
+        Promise.resolve('why=sh: 1: docker: not found\n'),
+      );
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
@@ -638,7 +689,7 @@ describe('세션마다 보던 자리를 기억한다', () => {
         sessionId="session-a"
         hostId="host-a"
         sender={senderStub}
-        runtime={{ availability: 'available', prefix: 'docker', elevate: false }}
+        runtime={{ availability: 'available', prefix: 'docker', elevate: false, compose: 'docker compose' }}
       />,
     );
     await screen.findByText('gateway');
@@ -651,7 +702,7 @@ describe('세션마다 보던 자리를 기억한다', () => {
         sessionId="session-b"
         hostId="host-b"
         sender={senderStub}
-        runtime={{ availability: 'available', prefix: 'docker', elevate: false }}
+        runtime={{ availability: 'available', prefix: 'docker', elevate: false, compose: 'docker compose' }}
       />,
     );
     expect(await screen.findByText('gateway')).toBeTruthy();
@@ -663,12 +714,82 @@ describe('세션마다 보던 자리를 기억한다', () => {
         sessionId="session-a"
         hostId="host-a"
         sender={senderStub}
-        runtime={{ availability: 'available', prefix: 'docker', elevate: false }}
+        runtime={{ availability: 'available', prefix: 'docker', elevate: false, compose: 'docker compose' }}
       />,
     );
     expect(await screen.findByText('pgdata')).toBeTruthy();
 
     clearSessionScopedState('session-a');
     clearSessionScopedState('session-b');
+  });
+});
+
+describe('컨테이너 포트 열기', () => {
+  it('공개된 포트와 공개 안 된 포트를 함께 보여 준다', async () => {
+    renderSection();
+    fireEvent.click(await screen.findByText('gateway'));
+    expect(screen.getByText('5050 → 5050/tcp')).toBeTruthy();
+    // inspect 가 알려 준 것 — ps 에는 없다.
+    expect(screen.getByText(/9090\/tcp/)).toBeTruthy();
+  });
+
+  it('열기를 누르면 이 세션이 주인인 터널을 연다 — 로컬 포트는 우리가 고른다', async () => {
+    renderSection();
+    fireEvent.click(await screen.findByText('gateway'));
+    fireEvent.click(screen.getAllByRole('button', { name: '포워딩' })[0]);
+    expect(openTunnel).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      hostId: 'host-1',
+      containerId: 'a1b2c3d4e5f6',
+      containerName: 'lime-gateway',
+      networkName: '',
+      targetPort: 5050,
+    });
+  });
+
+  it('열려 있으면 주소와 닫기가 뜨고, 접힌 행에도 포트가 붙는다', async () => {
+    Object.assign(storeState, {
+      sessionContainerTunnels: {
+        'session-1': [
+          {
+            ruleId: 'container-service-tunnel:1',
+            containerId: 'a1b2c3d4e5f6',
+            containerName: 'lime-gateway',
+            targetPort: 5050,
+            bindPort: 12345,
+            status: 'running',
+          },
+        ],
+      },
+    });
+    renderSection();
+    // 펼치지 않아도 어디가 열렸는지 보인다.
+    expect(await screen.findByText(':12345')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('gateway'));
+    fireEvent.click(screen.getByRole('button', { name: '닫기' }));
+    expect(closeTunnel).toHaveBeenCalledWith('session-1', 'container-service-tunnel:1');
+  });
+
+  it('정지된 컨테이너는 열 수 없다', async () => {
+    renderSection();
+    fireEvent.click(await screen.findByText('loose'));
+    const open = screen.queryAllByRole('button', { name: '포워딩' }) as HTMLButtonElement[];
+    expect(open.every((button) => button.disabled)).toBe(true);
+  });
+});
+
+describe('보던 것을 기억한다', () => {
+  it('다른 탭을 보다 돌아와도 펼쳐 둔 행은 그대로다', async () => {
+    // 세션 패널은 탭을 옮겨도 같은 컴포넌트를 재사용하고 sessionId 만 갈아끼운다. 그냥
+    // useState 로 두면 돌아왔을 때 접혀 있어 다시 찾아 눌러야 한다.
+    const view = renderSection();
+    fireEvent.click(await screen.findByText('gateway'));
+    expect(screen.getByText('5050 → 5050/tcp')).toBeTruthy();
+
+    // 세션 패널이 통째로 다시 그려지는 상황(다른 탭에 갔다 옴).
+    view.unmount();
+    renderSection();
+    expect(await screen.findByText('5050 → 5050/tcp')).toBeTruthy();
   });
 });

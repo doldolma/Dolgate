@@ -2,9 +2,8 @@
 //
 // 어디서 실행되나(이 섹션의 규칙):
 //   · 목록·상세 — 보조 채널. 자원·프로세스 섹션과 같은 경로다.
-//   · 셸·로그 — **새 탭**. 지금 보고 있는 셸을 잃지 않는다(tmux 섹션의 attach 와 같은 규칙).
-//     호스트가 없는 로컬 터미널에서는 새 탭이 없으니 지금 셸에서 그대로 실행한다.
-//   · 시작·정지·재시작 — 지금 터미널에 넣고 실행한다. 결과가 스크롤백에 남아 확인창이 필요 없다.
+//   · 셸·로그·시작·정지·재시작 — **지금 터미널에 넣고 실행한다.** 명령이 스크롤백에 남아
+//     무엇을 했는지 되짚을 수 있고, 셸 접속은 그 자리에서 이어진다(exit 하면 원래 셸로 돌아온다).
 //   · 삭제·prune·compose down — 넣기만 하고 엔터는 사람이 친다. 파괴적인 것에만 이 예외를 둔다.
 //
 // 스택은 탭이 아니라 컨테이너 목록의 그룹 머리다. 스택 단위 동작이 그 머리에 붙으면 한 자리에서
@@ -31,11 +30,12 @@ import {
   isImageUsed,
   layoutContainers,
   parseDockerAge,
-  parsePublishedPorts,
+  resolveContainerPorts,
   stackComposeCommand,
   troubleOf,
   type DockerContainer,
   type DockerInspectInfo,
+  type DockerPortEntry,
   type DockerStat,
   type DockerImage,
   type DockerNetwork,
@@ -43,7 +43,9 @@ import {
   type DockerVolume,
 } from '../../../lib/docker';
 import { Button, Tooltip } from '../../../ui';
+import { ExternalLink, Star } from 'lucide-react';
 import {
+  ArrowLeftRight,
   ChevronDown,
   ChevronRight,
   ClipboardList,
@@ -54,8 +56,8 @@ import {
   Square,
   SquareTerminal,
   Trash2,
+  X,
 } from '../../../ui/icons';
-import { BOOTSTRAP_TERMINAL_SIZE } from '../../terminal-resize';
 import { SessionPanelEmpty } from './SessionPanelEmpty';
 import { SessionPanelSearch } from './SessionPanelSearch';
 import {
@@ -64,11 +66,13 @@ import {
   useCollapsedStacks,
   queryPrefixOf,
   useDockerLists,
+  type DockerIoRate,
   type DockerRuntime,
   type DockerTabId,
 } from './useSessionDocker';
 import { useSessionScopedState } from './useSessionScopedState';
 import type { SessionPanelSender } from './useSessionPanelTarget';
+import type { SessionContainerTunnel } from '../../../store/types';
 
 interface SessionPanelDockerProps {
   sessionId: string;
@@ -92,6 +96,9 @@ const STOPPED_FOLD_MIN = 3;
 
 const TABS: DockerTabId[] = ['containers', 'images', 'volumes', 'networks'];
 
+/** 셀렉터가 매번 새 배열을 만들지 않게 — 그러면 무한 리렌더가 된다. */
+const EMPTY_TUNNELS: readonly SessionContainerTunnel[] = [];
+
 export function SessionPanelDocker({
   sessionId,
   hostId,
@@ -100,14 +107,23 @@ export function SessionPanelDocker({
 }: SessionPanelDockerProps) {
   const { t: translate } = useTranslation();
   const panelOpen = useAppStore((state) => state.sessionPanelOpen);
-  const connectHost = useAppStore((state) => state.connectHost);
   // 보던 탭과 검색어는 세션마다 따로 기억한다 — 다른 서버로 옮기면 처음 상태로, 돌아오면
   // 보던 그대로.
   const [tab, setTab] = useSessionScopedState<DockerTabId>(sessionId, 'docker.tab', 'containers');
   const [query, setQuery] = useSessionScopedState(sessionId, 'docker.query', '');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [unfoldedStacks, setUnfoldedStacks] = useState<readonly string[]>([]);
+  // 펼쳐 둔 행과 펼쳐 본 정지 그룹도 **세션마다** 기억한다. 다른 탭을 보다 돌아왔는데 보던 것이
+  // 접혀 있으면 다시 찾아 눌러야 한다 — 검색어·탭을 기억하는 것과 같은 이유다.
+  const [expandedId, setExpandedId] = useSessionScopedState<string | null>(
+    sessionId,
+    'docker.expanded',
+    null,
+  );
+  const [unfoldedStacks, setUnfoldedStacks] = useSessionScopedState<readonly string[]>(
+    sessionId,
+    'docker.unfoldedStacks',
+    [],
+  );
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
   // 이력·접힘은 호스트 단위로 기억한다 — 같은 서버의 다른 탭에서도 같은 모양으로 보인다.
@@ -120,6 +136,13 @@ export function SessionPanelDocker({
     panelOpen,
     collapseScope,
   );
+  // 이 세션이 연 컨테이너 터널. 주인이 세션이라 세션이 끝나면 메인이 회수한다(여기서 치우지 않는다).
+  const tunnels = useAppStore(
+    (state) => state.sessionContainerTunnels[sessionId] ?? EMPTY_TUNNELS,
+  );
+  const openTunnel = useAppStore((state) => state.openSessionContainerTunnel);
+  const closeTunnel = useAppStore((state) => state.closeSessionContainerTunnel);
+  const openExternalUrl = useAppStore((state) => state.openExternalUrl);
   const collapsedStacks = useCollapsedStacks(collapseScope);
 
   /**
@@ -163,26 +186,7 @@ export function SessionPanelDocker({
   }, [openMenu]);
 
   const prefix = runtime.prefix;
-
-  /** 새 탭에서 돌린다. 호스트가 없으면(로컬 터미널) 지금 셸에서 그대로 돌린다. */
-  function openInNewTab(command: string): void {
-    if (!hostId) {
-      sender.run(command);
-      return;
-    }
-    void connectHost(
-      hostId,
-      BOOTSTRAP_TERMINAL_SIZE.cols,
-      BOOTSTRAP_TERMINAL_SIZE.rows,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      command,
-    );
-  }
+  const compose = runtime.compose;
 
   function runHere(command: string): void {
     sender.run(command);
@@ -323,8 +327,25 @@ export function SessionPanelDocker({
           <ContainersView
             containers={lists.containers}
             stats={lists.stats}
+            ioRates={lists.ioRates}
             inspect={lists.inspect}
             scope={collapseScope}
+            tunnels={tunnels}
+            canForward={hostId !== null}
+            onOpenPort={(container, port) =>
+              void openTunnel({
+                sessionId,
+                hostId: hostId ?? '',
+                containerId: container.id,
+                containerName: container.name,
+                networkName: '',
+                targetPort: port.containerPort,
+              })
+            }
+            onClosePort={(tunnel) => void closeTunnel(sessionId, tunnel.ruleId)}
+            onOpenBrowser={(tunnel) =>
+              openExternalUrl(`http://127.0.0.1:${tunnel.bindPort}`)
+            }
             query={query}
             prefix={prefix}
             atPrompt={sender.context.atPrompt}
@@ -333,29 +354,28 @@ export function SessionPanelDocker({
             unfoldedStacks={unfoldedStacks}
             collapsedStacks={collapsedStacks}
             onToggleCollapse={(project) => toggleStackCollapsed(collapseScope, project)}
-            onToggleExpand={(id) => setExpandedId((current) => (current === id ? null : id))}
+            onToggleExpand={(id) => setExpandedId(expandedId === id ? null : id)}
             onToggleMenu={(id) => setOpenMenu((current) => (current === id ? null : id))}
             onUnfoldStack={(key) =>
-              setUnfoldedStacks((current) =>
-                current.includes(key) ? current : [...current, key],
+              setUnfoldedStacks(
+                unfoldedStacks.includes(key) ? unfoldedStacks : [...unfoldedStacks, key],
               )
             }
-            onShell={(container) => openInNewTab(dockerShellCommand(prefix, container))}
-            onLogs={(container) => openInNewTab(dockerLogsCommand(prefix, container))}
+            onShell={(container) => runHere(dockerShellCommand(prefix, container))}
+            onLogs={(container) => runHere(dockerLogsCommand(prefix, container))}
             onState={(action, containers) =>
               runHere(dockerStateCommand(prefix, action, containers))
             }
             onRemove={(container) => insertHere(dockerRemoveCommand(prefix, container))}
+            compose={compose}
             onCompose={(stack, args) =>
-              stack.workingDir
-                ? insertHere(stackComposeCommand(prefix, stack.workingDir, args))
+              compose && stack.workingDir
+                ? insertHere(stackComposeCommand(compose, stack, args))
                 : undefined
             }
             onStackLogs={(stack) =>
-              stack.workingDir
-                ? openInNewTab(
-                    stackComposeCommand(prefix, stack.workingDir, 'logs -f --tail 200'),
-                  )
+              compose && stack.workingDir
+                ? runHere(stackComposeCommand(compose, stack, 'logs -f --tail 200'))
                 : undefined
             }
             onCopy={copyText}
@@ -508,15 +528,25 @@ function MoreButton({
 interface ContainersViewProps {
   containers: readonly DockerContainer[];
   stats: Map<string, DockerStat>;
+  ioRates: Map<string, DockerIoRate>;
   inspect: Map<string, DockerInspectInfo>;
   /** 이력을 담는 단위(호스트, 없으면 세션). */
   scope: string;
+  /** 이 세션이 연 컨테이너 터널. */
+  tunnels: readonly SessionContainerTunnel[];
+  /** 포워딩을 걸 호스트가 있는가(로컬 터미널에는 없다). */
+  canForward: boolean;
+  onOpenPort: (container: DockerContainer, port: DockerPortEntry) => void;
+  onClosePort: (tunnel: SessionContainerTunnel) => void;
+  onOpenBrowser: (tunnel: SessionContainerTunnel) => void;
   query: string;
   prefix: string;
   atPrompt: boolean;
   expandedId: string | null;
   openMenu: string | null;
   unfoldedStacks: readonly string[];
+  /** compose 를 부르는 방법. 없으면 compose 가 필요한 항목을 만들지 않는다. */
+  compose: string | null;
   /** 접어 둔 스택 이름들. */
   collapsedStacks: ReadonlySet<string>;
   onToggleCollapse: (project: string) => void;
@@ -560,8 +590,14 @@ function ContainersView(props: ContainersViewProps) {
         key={container.id}
         container={container}
         stat={props.stats.get(container.id)}
+        ioRate={props.ioRates.get(container.id)}
         info={props.inspect.get(container.id)}
         samples={getDockerHistory(props.scope, container.id)}
+        tunnels={props.tunnels.filter((tunnel) => tunnel.containerId === container.id)}
+        canForward={props.canForward}
+        onOpenPort={(port) => props.onOpenPort(container, port)}
+        onClosePort={props.onClosePort}
+        onOpenBrowser={props.onOpenBrowser}
         // 묶인 줄은 머리가 프로젝트를 말하므로 서비스 이름만, 혼자인 줄은 제 이름을 쓴다.
         label={indented ? (container.service ?? container.name) : container.name}
         indented={indented}
@@ -641,13 +677,13 @@ function ContainersView(props: ContainersViewProps) {
                     disabled: !props.atPrompt || running.length === 0,
                     onSelect: () => props.onState('stop', running),
                   },
-                  ...(stack.workingDir
+                  ...(stack.workingDir && props.compose
                     ? [
                         {
                           key: 'logs',
                           label: translate('sessionPanel.docker.stack.logs'),
                           icon: <ClipboardList className="h-3.5 w-3.5" aria-hidden />,
-                          hint: translate('sessionPanel.docker.hint.newTab'),
+                          disabled: !props.atPrompt,
                           onSelect: () => props.onStackLogs(stack),
                         },
                         {
@@ -732,6 +768,11 @@ const Sparkline = memo(function Sparkline({
 /** 이만큼 다시 뜬 컨테이너는 행에서 바로 말해 준다(지금 돌고 있어도). */
 const RESTART_FLAP_MIN = 3;
 
+/** 초당 흐름을 짧게. 0 은 `0B/s` 로 적어 "안 흐른다" 가 읽히게 한다. */
+function formatPerSecond(bytesPerSecond: number): string {
+  return `${formatKibibytes(Math.round(bytesPerSecond / 1024))}/s`.replace(' ', '');
+}
+
 const CPU_WARN_PERCENT = 20;
 const CPU_DANGER_PERCENT = 50;
 
@@ -748,8 +789,10 @@ function cpuToneClass(percent: number): string {
 function ContainerRow({
   container,
   stat,
+  ioRate,
   info,
   samples,
+  tunnels,
   label,
   indented,
   expanded,
@@ -760,11 +803,18 @@ function ContainerRow({
   onState,
   onRemove,
   onCopy,
+  onOpenPort,
+  onClosePort,
+  onOpenBrowser,
+  canForward,
 }: {
   container: DockerContainer;
   stat: DockerStat | undefined;
+  ioRate: DockerIoRate | undefined;
   info: DockerInspectInfo | undefined;
   samples: readonly { cpuPercent: number }[];
+  /** 이 컨테이너로 열려 있는 임시 터널들. */
+  tunnels: readonly SessionContainerTunnel[];
   label: string;
   indented: boolean;
   expanded: boolean;
@@ -775,10 +825,19 @@ function ContainerRow({
   onState: (action: 'start' | 'stop' | 'restart') => void;
   onRemove: () => void;
   onCopy: (value: string) => void;
+  onOpenPort: (port: DockerPortEntry) => void;
+  onClosePort: (tunnel: SessionContainerTunnel) => void;
+  onOpenBrowser: (tunnel: SessionContainerTunnel) => void;
+  /** 포워딩을 걸 호스트가 있는가. 로컬 터미널에는 없다 — 그때는 열 수 없다. */
+  canForward: boolean;
 }) {
   const { t: translate } = useTranslation();
   const running = isContainerRunning(container);
-  const ports = parsePublishedPorts(container.ports);
+  const ports = resolveContainerPorts(container, info);
+  const openTunnel = tunnels.find((tunnel) => tunnel.status === 'running') ?? null;
+  const publishedPorts = ports
+    .filter((port) => port.publishedPort !== null)
+    .map((port) => port.publishedPort as number);
   const age = parseDockerAge(container.status);
   const trouble = troubleOf(container, info);
   const flapping = (info?.restartCount ?? 0) >= RESTART_FLAP_MIN;
@@ -790,7 +849,7 @@ function ContainerRow({
       : 'var(--success-text)';
 
   return (
-    <div className={cn(running ? null : 'opacity-55')}>
+    <div className={cn('group relative', running ? null : 'opacity-55')}>
       <button
         type="button"
         aria-expanded={expanded}
@@ -826,6 +885,12 @@ function ContainerRow({
             })}
           </span>
         ) : null}
+        {/* 포워딩이 열려 있으면 펼치지 않아도 보인다. 여러 개면 첫 포트와 개수만. */}
+        {openTunnel ? (
+          <span className="shrink-0 rounded-[5px] bg-[var(--accent-surface)] px-[0.3rem] text-[0.6rem] font-medium tabular-nums text-[var(--accent-strong)]">
+            {`:${openTunnel.bindPort}${tunnels.length > 1 ? `+${tunnels.length - 1}` : ''}`}
+          </span>
+        ) : null}
         {running && cpu !== null ? (
           <>
             <Sparkline
@@ -848,10 +913,11 @@ function ContainerRow({
           </>
         ) : (
           <>
-            {ports.length > 0 ? (
+            {publishedPorts.length > 0 ? (
               <span className="shrink-0 text-[0.62rem] tabular-nums text-[var(--text-soft)]">
-                :{ports[0]}
-                {ports.length > 1 ? `+${ports.length - 1}` : ''}
+                {`:${publishedPorts[0]}${
+                  publishedPorts.length > 1 ? `+${publishedPorts.length - 1}` : ''
+                }`}
               </span>
             ) : null}
             {age ? (
@@ -862,6 +928,33 @@ function ContainerRow({
           </>
         )}
       </button>
+      {/* 자주 쓰는 둘(셸·로그)은 마우스를 올렸을 때만 행 위에 **겹쳐** 나온다. 버튼 안에 버튼을
+          넣으면 유효하지 않은 HTML 이고 접근성 트리에서 안쪽이 사라진다. 숫자를 가려도 되는
+          이유: 값을 읽는 중이라면 마우스가 그 행에 있지 않다. */}
+      <span
+        className={cn(
+          'absolute right-1 top-[0.2rem] hidden items-center gap-[0.1rem] rounded-[7px] bg-[var(--surface-muted)] pl-1.5 group-hover:flex',
+        )}
+      >
+        <button
+          type="button"
+          aria-label={`${translate('sessionPanel.docker.shell')} ${label}`}
+          disabled={!running || !atPrompt}
+          onClick={onShell}
+          className={ACTION_TIGHT}
+        >
+          <SquareTerminal className="h-3 w-3" aria-hidden />
+        </button>
+        <button
+          type="button"
+          aria-label={`${translate('sessionPanel.docker.logs')} ${label}`}
+          disabled={!atPrompt}
+          onClick={onLogs}
+          className={ACTION_TIGHT}
+        >
+          <ClipboardList className="h-3 w-3" aria-hidden />
+        </button>
+      </span>
       {expanded ? (
         <div
           className={cn(
@@ -869,16 +962,29 @@ function ContainerRow({
             indented ? 'ml-[1.05rem]' : null,
           )}
         >
-          <dl className="grid grid-cols-[3.5rem_1fr] gap-x-2 gap-y-[0.15rem] text-[0.66rem]">
+          <dl className="grid grid-cols-[3.5rem_1fr] gap-x-2 gap-y-[0.15rem] text-[0.7rem]">
             <DetailRow
               label={translate('sessionPanel.docker.detail.image')}
               value={container.image}
             />
-            {container.ports ? (
-              <DetailRow
-                label={translate('sessionPanel.docker.detail.ports')}
-                value={container.ports}
-              />
+            {ports.length > 0 ? (
+              <div className="col-span-2 grid grid-cols-subgrid">
+                <dt className="truncate text-[var(--text-muted)]">
+                  {translate('sessionPanel.docker.detail.ports')}
+                </dt>
+                <dd className="min-w-0">
+                  <PortLines
+                    ports={ports}
+                    tunnels={tunnels}
+                    running={running}
+                    canForward={canForward}
+                    onOpen={onOpenPort}
+                    onClose={onClosePort}
+                    onOpenBrowser={onOpenBrowser}
+                    onCopy={onCopy}
+                  />
+                </dd>
+              </div>
             ) : null}
             <DetailRow
               label={translate('sessionPanel.docker.detail.status')}
@@ -891,7 +997,12 @@ function ContainerRow({
             {stat ? (
               <DetailRow
                 label={translate('sessionPanel.docker.detail.io')}
-                value={`↓${stat.netIn} ↑${stat.netOut} · ${translate('sessionPanel.docker.detail.disk')} ${stat.blockRead}/${stat.blockWrite} · ${stat.pids}p`}
+                value={
+                  ioRate
+                    ? `↓${formatPerSecond(ioRate.netIn)} ↑${formatPerSecond(ioRate.netOut)} · ${translate('sessionPanel.docker.detail.disk')} ${formatPerSecond(ioRate.blockRead)}/${formatPerSecond(ioRate.blockWrite)} · ${stat.pids}p`
+                    : translate('sessionPanel.docker.detail.ioWaiting')
+                }
+                title={`${translate('sessionPanel.docker.detail.ioTotal')} ↓${stat.netIn} ↑${stat.netOut} · ${translate('sessionPanel.docker.detail.disk')} ${stat.blockRead}/${stat.blockWrite}`}
               />
             ) : null}
             <DetailRow
@@ -915,12 +1026,13 @@ function ContainerRow({
               icon={<SquareTerminal className="h-3.5 w-3.5" aria-hidden />}
               label={translate('sessionPanel.docker.shell')}
               accent
-              disabled={!running}
+              disabled={!running || !atPrompt}
               onClick={onShell}
             />
             <DetailAction
               icon={<ClipboardList className="h-3.5 w-3.5" aria-hidden />}
               label={translate('sessionPanel.docker.logs')}
+              disabled={!atPrompt}
               onClick={onLogs}
             />
             {running ? (
@@ -973,6 +1085,119 @@ function ContainerRow({
   );
 }
 
+/**
+ * 상세의 포트 줄. 포트마다 한 줄이고, 오른쪽이 그 포트의 상태다.
+ *
+ * 여는 것은 **임시 터널**이다 — 주인이 이 세션이라 세션이 끝나면 메인이 회수한다. 로컬 포트는
+ * 코어가 빈 것을 잡아 알려 준다(사용자가 포트를 고르지 않는다).
+ */
+function PortLines({
+  ports,
+  tunnels,
+  running,
+  canForward,
+  onOpen,
+  onClose,
+  onOpenBrowser,
+  onCopy,
+}: {
+  ports: readonly DockerPortEntry[];
+  tunnels: readonly SessionContainerTunnel[];
+  running: boolean;
+  canForward: boolean;
+  onOpen: (port: DockerPortEntry) => void;
+  onClose: (tunnel: SessionContainerTunnel) => void;
+  onOpenBrowser: (tunnel: SessionContainerTunnel) => void;
+  onCopy: (value: string) => void;
+}) {
+  const { t: translate } = useTranslation();
+  return (
+    <div className="flex flex-col gap-[0.15rem]">
+      {ports.map((port) => {
+        const tunnel =
+          tunnels.find((entry) => entry.targetPort === port.containerPort) ?? null;
+        const address = tunnel ? `127.0.0.1:${tunnel.bindPort}` : '';
+        return (
+          <div key={`${port.containerPort}/${port.protocol}`} className="flex items-center gap-1">
+            {/* 동작은 포트 **바로 옆**에 둔다 — 오른쪽 끝으로 밀면 어느 포트의 버튼인지 눈이
+                한 번 더 오간다. 남는 자리는 뒤에 둔다. */}
+            <span className="shrink truncate font-mono text-[var(--text-soft)]">
+              {port.publishedPort
+                ? `${port.publishedPort} → ${port.containerPort}/${port.protocol}`
+                : `${port.containerPort}/${port.protocol}`}
+              {port.publishedPort ? null : (
+                <span className="text-[0.6rem] text-[var(--text-muted)]">
+                  {' '}
+                  {translate('sessionPanel.docker.port.private')}
+                </span>
+              )}
+            </span>
+            {tunnel === null ? (
+              <button
+                type="button"
+                disabled={!running || !canForward}
+                onClick={() => onOpen(port)}
+                title={translate('sessionPanel.docker.port.openHint')}
+                className="flex shrink-0 items-center gap-1 rounded-[7px] border border-[var(--border)] bg-[var(--surface)] px-1.5 py-[0.12rem] text-[0.68rem] font-medium text-[var(--accent-strong)] transition-colors hover:border-[var(--selection-border)] hover:bg-[var(--selection-tint)] disabled:opacity-35 disabled:hover:border-[var(--border)] disabled:hover:bg-[var(--surface)]"
+              >
+                <ArrowLeftRight className="h-3 w-3" aria-hidden />
+                {translate('sessionPanel.docker.port.open')}
+              </button>
+            ) : tunnel.status === 'starting' ? (
+              <span className="flex shrink-0 items-center gap-1 px-1.5 text-[0.68rem] text-[var(--text-muted)]">
+                <RefreshCw className="h-3 w-3 animate-spin" aria-hidden />
+                {translate('sessionPanel.docker.port.opening')}
+              </span>
+            ) : tunnel.status === 'error' ? (
+              <button
+                type="button"
+                onClick={() => onOpen(port)}
+                title={tunnel.message}
+                className="shrink-0 rounded-[7px] border border-[color-mix(in_srgb,var(--danger-text)_30%,var(--border))] bg-[var(--danger-bg)] px-1.5 py-[0.12rem] text-[0.68rem] font-medium text-[var(--danger-text)]"
+              >
+                {translate('sessionPanel.docker.port.failed')}
+              </button>
+            ) : (
+              <span className="flex shrink-0 items-center gap-[0.1rem]">
+                {/* 주소를 누르면 **브라우저로 연다** — 열어 본 뒤에 하는 일이 대개 그것이다.
+                    주소 글자만 필요하면 옆의 복사를 쓴다. */}
+                <button
+                  type="button"
+                  aria-label={translate('sessionPanel.docker.port.browser')}
+                  title={translate('sessionPanel.docker.port.browser')}
+                  onClick={() => onOpenBrowser(tunnel)}
+                  className="flex items-center gap-1 rounded-[7px] border border-[var(--selection-border)] bg-[var(--selection-tint)] px-[0.35rem] py-[0.08rem] text-[0.66rem] font-medium tabular-nums text-[var(--accent-strong)] transition-colors hover:bg-[color-mix(in_srgb,var(--accent-strong)_16%,transparent)]"
+                >
+                  {address}
+                  <ExternalLink className="h-3 w-3" aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  aria-label={translate('sessionPanel.docker.port.copy')}
+                  title={translate('sessionPanel.docker.port.copy')}
+                  onClick={() => onCopy(address)}
+                  className={ACTION_TIGHT}
+                >
+                  <Copy className="h-3 w-3" aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  aria-label={translate('sessionPanel.docker.port.close')}
+                  onClick={() => onClose(tunnel)}
+                  className={ACTION_TIGHT}
+                >
+                  <X className="h-3 w-3" aria-hidden />
+                </button>
+              </span>
+            )}
+            <span className="min-w-0 flex-1" />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** 펼친 화면의 제어 버튼. 글자를 붙여 무엇인지 읽히게 한다. */
 function DetailAction({
   icon,
@@ -1005,11 +1230,19 @@ function DetailAction({
   );
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function DetailRow({
+  label,
+  value,
+  title,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+}) {
   return (
     <div className="col-span-2 grid grid-cols-subgrid">
       <dt className="truncate text-[var(--text-muted)]">{label}</dt>
-      <dd className="min-w-0 truncate font-mono text-[var(--text-soft)]" title={value}>
+      <dd className="min-w-0 truncate font-mono text-[var(--text-soft)]" title={title ?? value}>
         {value}
       </dd>
     </div>

@@ -30,13 +30,20 @@ function metrics(overrides: Partial<HostMetrics> = {}): HostMetrics {
   };
 }
 
-/** 축이 딱 1분이 되도록 60초를 세 점으로. x 가 0 · 50 · 100 으로 떨어진다. */
+/**
+ * 축이 딱 1분이 되도록 60초를 네 점으로. x 가 0 · 33.33 · 66.67 · 100 으로 떨어진다.
+ *
+ * 간격이 20초인 이유: 그보다 벌어지면 "폴링이 멈췄던 구간" 으로 보고 이력을 버린다
+ * (host-metrics-history 의 GAP_RESET). 실제 주기도 10초(패널이 열려 있으면 3초)라 이쪽이
+ * 진짜 데이터에 가깝다.
+ */
 function seed(): HostMetrics {
   recordHostMetricsSample(SESSION, metrics({ cpuPercent: 0 }), NOW - 60_000);
+  recordHostMetricsSample(SESSION, metrics({ cpuPercent: 25 }), NOW - 40_000);
   recordHostMetricsSample(
     SESSION,
     metrics({ cpuPercent: 50, memUsedKb: 1024 * 1024, txBytesPerSec: 1024 * 1024 }),
-    NOW - 30_000,
+    NOW - 20_000,
   );
   const latest = metrics({
     cpuPercent: 100,
@@ -63,7 +70,9 @@ describe('자원 차트', () => {
       <SessionPanelResourceCharts sessionId={SESSION} metrics={latest} />,
     );
     const cpu = container.querySelectorAll('svg')[0];
-    expect(cpu.querySelector('polyline')?.getAttribute('points')).toBe('0,100 50,50 100,0');
+    expect(cpu.querySelector('polyline')?.getAttribute('points')).toBe(
+      '0,100 33.33,75 66.67,50 100,0',
+    );
   });
 
   it('네 판을 값과 함께 그린다', () => {
@@ -108,6 +117,26 @@ describe('자원 차트', () => {
     expect(getByText('최대 512 K/s', { selector: 'span.absolute' })).toBeTruthy();
   });
 
+  it('네 판이 같은 점에서 시작한다 — 차분이 없는 첫 표본은 그리지 않는다', () => {
+    // RAM 은 그 순간 값이라 첫 표본부터 그릴 수 있지만 나머지 셋은 차분이라 한 틱 뒤부터다.
+    // 그대로 두면 RAM 곡선만 한 칸 먼저 나간다.
+    recordHostMetricsSample(
+      SESSION,
+      metrics({ cpuPercent: null, memUsedKb: 512 * 1024 }),
+      NOW - 80_000,
+    );
+    const latest = seed();
+    const { container } = render(
+      <SessionPanelResourceCharts sessionId={SESSION} metrics={latest} />,
+    );
+    const [cpu, mem] = [...container.querySelectorAll('svg')].map(
+      (svg) => svg.querySelector('polyline')?.getAttribute('points') ?? '',
+    );
+    // 두 곡선의 첫 x 가 같다 = 같은 점에서 시작한다.
+    expect(mem.split(' ')[0].split(',')[0]).toBe(cpu.split(' ')[0].split(',')[0]);
+    expect(cpu.startsWith('0,')).toBe(true);
+  });
+
   it('이력이 한 점뿐이면 곡선 없이 최신 값만 보여 준다', () => {
     const latest = metrics({ cpuPercent: 7 });
     recordHostMetricsSample(SESSION, latest, NOW);
@@ -130,15 +159,15 @@ describe('자원 차트', () => {
       );
       const plot = container.querySelectorAll('svg')[0].parentElement as HTMLElement;
       // 가리킨 지점은 네 판이 함께 쓴다 — CPU 위를 지나면 RAM 값도 그때 것으로 바뀐다.
-      // 폭 200px 의 한가운데 = 축의 50% = 30초 전 점.
+      // 폭 200px 의 66.67% = 20초 전 점(네 점 중 셋째).
       // jsdom 에는 PointerEvent 가 없어 fireEvent.pointerMove 가 clientX 를 흘린다 —
       // MouseEvent 로 같은 타입을 직접 쏜다(React 는 타입만 보고 onPointerMove 를 부른다).
-      fireEvent(plot, new MouseEvent('pointermove', { clientX: 100, bubbles: true }));
+      fireEvent(plot, new MouseEvent('pointermove', { clientX: 133, bubbles: true }));
       expect(getByText('50%')).toBeTruthy();
       expect(getByText('1.0 GiB / 4.0 GiB')).toBeTruthy();
       expect(container.querySelectorAll('line[stroke-dasharray="2 2"]')).toHaveLength(4);
       // 시각은 커서가 있는 판에만 적는다 — 네 번 적으면 읽을 값이 그 사이에 묻힌다.
-      const clock = new Date(NOW - 30_000).toLocaleTimeString('ko-KR', {
+      const clock = new Date(NOW - 20_000).toLocaleTimeString('ko-KR', {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',

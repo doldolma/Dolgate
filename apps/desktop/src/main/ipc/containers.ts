@@ -210,24 +210,40 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.containers.startTunnel,
     async (event, input: HostContainersEphemeralTunnelInput) => {
-      assertContainerSubscriber(ctx, event, input.hostId);
+      // **컨테이너 탭 구독을 요구하지 않는다.** 세션 패널의 도커 섹션에서도 열기 때문이다 —
+      // 그 화면에는 컨테이너 탭이 없다. 터널은 자기 전용 엔드포인트를 새로 만들므로(ruleId 로
+      // 키를 잡는다) 남의 구독을 건드리지도 않는다. 대신 아래에서 주인을 등록해 창·세션이
+      // 끝날 때 메인이 회수한다.
       const host = ctx.hosts.getById(input.hostId);
       ctx.assertSftpCompatibleHost(host);
-      return ctx.startContainerTunnelRuntime({
-        ruleId: `container-service-tunnel:${randomUUID()}`,
-        host: host as SftpCompatibleHostRecord,
-        containerId: input.containerId,
-        networkName: input.networkName,
-        targetPort: input.targetPort,
-        bindAddress: input.bindAddress,
-        bindPort: input.bindPort,
+      const ruleId = `container-service-tunnel:${randomUUID()}`;
+      // 주인을 먼저 적는다 — 시작 도중에 창이 닫혀도 회수 대상에 들어 있어야 한다.
+      // 창은 언제나, 세션은 세션 패널에서 연 것만.
+      ctx.coreManager.registerContainerTunnelOwner(ruleId, {
+        ownerWebContentsId: event.sender.id,
+        sessionId: input.ownerSessionId ?? null,
       });
+      try {
+        return await ctx.startContainerTunnelRuntime({
+          ruleId,
+          host: host as SftpCompatibleHostRecord,
+          containerId: input.containerId,
+          networkName: input.networkName,
+          targetPort: input.targetPort,
+          bindAddress: input.bindAddress,
+          bindPort: input.bindPort,
+        });
+      } catch (error) {
+        ctx.coreManager.releaseContainerTunnelOwner(ruleId);
+        throw error;
+      }
     },
   );
 
   ipcMain.handle(
     ipcChannels.containers.stopTunnel,
     async (_event, runtimeId: string) => {
+      ctx.coreManager.releaseContainerTunnelOwner(runtimeId);
       await ctx.coreManager.stopPortForward(runtimeId);
     },
   );

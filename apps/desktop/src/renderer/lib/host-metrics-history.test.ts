@@ -7,6 +7,7 @@ import {
   collectSeriesValues,
   countHostMetricsHistoryEntries,
   getHostMetricsHistory,
+  HOST_METRICS_HISTORY_GAP_RESET_MS,
   HOST_METRICS_HISTORY_WINDOW_MS,
   METRICS_BYTE_SCALE_FLOOR,
   recordHostMetricsSample,
@@ -90,6 +91,26 @@ describe('이력 쌓기', () => {
       recordHostMetricsSample(SESSION, metrics(), 1_000 + i * 3_000);
     }
     expect(getHostMetricsHistory(SESSION, 20_000)).toHaveLength(5);
+  });
+
+  it('폴링이 멈췄던 구간이 있으면 그 점부터 다시 그린다', () => {
+    // 안 보이는 탭은 폴링하지 않는다 — 다른 탭을 보다 돌아오면 그 사이가 비어 차트에 구멍이
+    // 남고, 0 이라 바닥에 붙은 것인지 못 잰 것인지 화면에서 구분되지 않는다.
+    for (let i = 0; i < 4; i += 1) {
+      recordHostMetricsSample(SESSION, metrics({ cpuPercent: 10 }), 1_000 + i * 3_000);
+    }
+    const afterGap = 1_000 + 3 * 3_000 + HOST_METRICS_HISTORY_GAP_RESET_MS + 1;
+    recordHostMetricsSample(SESSION, metrics({ cpuPercent: 42 }), afterGap);
+    const samples = getHostMetricsHistory(SESSION, afterGap);
+    expect(samples).toHaveLength(1);
+    expect(samples[0]).toMatchObject({ atMs: afterGap, cpuPercent: 42 });
+  });
+
+  it('잠깐 비운 것은 이력을 버리지 않는다 — 차분이 그대로 이어지는 구간이다', () => {
+    recordHostMetricsSample(SESSION, metrics({ cpuPercent: 10 }), 1_000);
+    const shortGap = 1_000 + HOST_METRICS_HISTORY_GAP_RESET_MS - 1;
+    recordHostMetricsSample(SESSION, metrics({ cpuPercent: 11 }), shortGap);
+    expect(getHostMetricsHistory(SESSION, shortGap)).toHaveLength(2);
   });
 
   it('같은 초에 두 번 발행한 것은 여전히 버린다', () => {

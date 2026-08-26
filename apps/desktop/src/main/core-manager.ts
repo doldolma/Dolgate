@@ -1039,6 +1039,17 @@ export class CoreManager {
   private readonly windowsByWebContentsId = new Map<number, BrowserWindow>();
   private readonly sessionOwnerStorage = new AsyncLocalStorage<number>();
   private readonly sessionOwnerById = new Map<string, number>();
+  /**
+   * 임시 컨테이너 터널의 주인. **회수를 렌더러에 맡기지 않는다** — 탭 닫기만 처리하면 창을
+   * 닫거나 렌더러가 죽었을 때 터널이 남는다(세션·SFTP·컨테이너 구독이 이미 소유자 방식인 이유).
+   *
+   * 주인은 둘이다: 창(그 창이 닫히면 회수)과 세션(그 세션이 끝나면 회수). 세션은 없을 수 있다 —
+   * 호스트 컨테이너 화면에서 연 터널은 창에만 매인다.
+   */
+  private readonly containerTunnelOwners = new Map<
+    string,
+    { ownerWebContentsId: number | null; sessionId: string | null }
+  >();
   private readonly tabs = new Map<string, TerminalTab>();
   /** 이미 열어 준 tailnet 인증 링크. 연결을 여러 번 시도하면 같은 URL 이 반복해서 온다. */
   private readonly openedTailnetAuthUrls = new Set<string>();
@@ -1340,6 +1351,7 @@ export class CoreManager {
       this.disconnectSessionsOwnedBy(ownerWebContentsId);
       void this.disconnectSftpResourcesOwnedBy(ownerWebContentsId);
       void this.releaseContainerSubscriptionsOwnedBy(ownerWebContentsId);
+      void this.stopContainerTunnelsOwnedBy(ownerWebContentsId);
     });
   }
 
@@ -4243,6 +4255,46 @@ export class CoreManager {
     }
   }
 
+  /** 임시 컨테이너 터널의 주인을 기록한다. 시작한 IPC 가 부른다. */
+  registerContainerTunnelOwner(
+    ruleId: string,
+    owner: { ownerWebContentsId?: number | null; sessionId?: string | null },
+  ): void {
+    this.containerTunnelOwners.set(ruleId, {
+      ownerWebContentsId: owner.ownerWebContentsId ?? null,
+      sessionId: owner.sessionId ?? null,
+    });
+  }
+
+  /** 정지시킨 뒤(또는 남의 손으로 끝난 뒤) 기록을 지운다. */
+  releaseContainerTunnelOwner(ruleId: string): void {
+    this.containerTunnelOwners.delete(ruleId);
+  }
+
+  /** 창이 닫혔다 — 그 창이 연 임시 터널을 전부 정지시킨다. */
+  async stopContainerTunnelsOwnedBy(ownerWebContentsId: number): Promise<void> {
+    await this.stopContainerTunnelsWhere(
+      (owner) => owner.ownerWebContentsId === ownerWebContentsId,
+    );
+  }
+
+  /** 세션이 끝났다 — 그 세션이 연 임시 터널을 전부 정지시킨다. */
+  async stopContainerTunnelsForSession(sessionId: string): Promise<void> {
+    await this.stopContainerTunnelsWhere((owner) => owner.sessionId === sessionId);
+  }
+
+  private async stopContainerTunnelsWhere(
+    matches: (owner: { ownerWebContentsId: number | null; sessionId: string | null }) => boolean,
+  ): Promise<void> {
+    const ruleIds = Array.from(this.containerTunnelOwners)
+      .filter(([, owner]) => matches(owner))
+      .map(([ruleId]) => ruleId);
+    for (const ruleId of ruleIds) {
+      this.containerTunnelOwners.delete(ruleId);
+      await this.stopPortForward(ruleId).catch(() => undefined);
+    }
+  }
+
   disconnectSessionsOwnedBy(ownerWebContentsId: number): void {
     for (const [sessionId, ownerId] of Array.from(this.sessionOwnerById)) {
       if (ownerId === ownerWebContentsId) {
@@ -4653,7 +4705,17 @@ export class CoreManager {
     this.desiredResizeBySession.delete(sessionId);
     this.sentResizeBySession.delete(sessionId);
     this.sessionLifecycleById.delete(sessionId);
+    this.forgetSessionOwner(sessionId);
+  }
+
+  /**
+   * 세션이 끝났다. 소유 기록을 지우고, **그 세션에 매인 임시 터널도 함께 회수한다.**
+   * 세션이 사라지는 길(탭 닫기·원격 종료·투기적 세션 정리)이 전부 여기로 모이게 한다 —
+   * 한 군데라도 빠지면 터널이 남는다.
+   */
+  private forgetSessionOwner(sessionId: string): void {
     this.sessionOwnerById.delete(sessionId);
+    void this.stopContainerTunnelsForSession(sessionId);
   }
 
   private handleControlEvent(event: CoreEvent<Record<string, unknown>>): void {
@@ -4831,7 +4893,7 @@ export class CoreManager {
           }
           this.sessionLifecycleById.delete(event.sessionId);
           this.broadcastTerminalEvent(event);
-          this.sessionOwnerById.delete(event.sessionId);
+          this.forgetSessionOwner(event.sessionId);
           return;
         }
         // 코어 이벤트를 탭 상태로 축약해 renderer가 바로 표시할 수 있게 한다.
@@ -4941,7 +5003,7 @@ export class CoreManager {
       }
       this.broadcastTerminalEvent(event);
       if (event.type === "closed") {
-        this.sessionOwnerById.delete(event.sessionId);
+        this.forgetSessionOwner(event.sessionId);
       }
       return;
     }

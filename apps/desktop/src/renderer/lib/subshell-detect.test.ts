@@ -128,3 +128,26 @@ describe('resolveSubshellShell', () => {
     expect(resolveSubshellShell('docker exec -it bash-runner env')).toBe('');
   });
 });
+
+describe('sudo 로 감싼 명령', () => {
+  it('`sudo docker exec` 도 서브셸로 본다 — 소켓 권한이 없는 호스트가 그렇게 나간다', () => {
+    expect(detectsSubshellEntry("sudo docker exec -it 'web' sh")).toBe(true);
+    expect(detectsSubshellEntry('sudo -n docker exec -it web bash')).toBe(true);
+    expect(detectsSubshellEntry('sudo -u deploy ssh box')).toBe(true);
+  });
+
+  it('sudo 자체로 셸을 여는 것도 그대로 잡힌다', () => {
+    expect(detectsSubshellEntry('sudo -i')).toBe(true);
+    expect(detectsSubshellEntry('sudo su -')).toBe(true);
+  });
+
+  it('sudo 로 도는 평범한 명령은 아니다', () => {
+    expect(detectsSubshellEntry('sudo systemctl restart nginx')).toBe(false);
+    expect(detectsSubshellEntry('sudo docker ps')).toBe(false);
+  });
+
+  it('sudo 뒤의 셸 이름도 짚는다', () => {
+    expect(resolveSubshellShell("sudo docker exec -it 'web' bash")).toBe('bash');
+    expect(resolveSubshellShell('sudo -n docker exec web fish')).toBe('fish');
+  });
+});

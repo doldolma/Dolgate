@@ -322,6 +322,23 @@ export interface ContainerTunnelTabState {
   runtime: PortForwardRuntimeRecord | null;
 }
 
+/**
+ * 세션 패널의 도커 섹션에서 연 임시 터널. **저장되는 규칙이 아니다** — 주인이 세션이라
+ * 그 세션이 끝나면 메인이 정지시키고, 여기 기록도 그 런타임 이벤트를 받아 사라진다.
+ */
+export interface SessionContainerTunnel {
+  /** 포워딩 런타임 id(`container-service-tunnel:…`). */
+  ruleId: string;
+  containerId: string;
+  containerName: string;
+  /** 컨테이너 쪽 포트. 같은 컨테이너의 포트를 여럿 열 수 있어 키의 일부다. */
+  targetPort: number;
+  /** 우리가 잡은 로컬 포트. 코어가 빈 포트를 골라 알려 줄 때까지 0. */
+  bindPort: number;
+  status: 'starting' | 'running' | 'error';
+  message?: string;
+}
+
 export interface EcsServiceLogsViewState {
   loading: boolean;
   refreshing: boolean;
@@ -1277,6 +1294,24 @@ interface AppStateParts {
     sourceKind: SftpSourceKind,
   ) => Promise<void>;
   disconnectSftpPane: (paneId: SftpPaneId) => Promise<void>;
+  /**
+   * 세션별로 연 컨테이너 임시 터널. `sessionId → 터널 목록`.
+   *
+   * 런타임 레코드에는 컨테이너 이름이 없어서(ruleId·hostId·bindPort·status 뿐) 화면에 무엇이
+   * 열렸는지 보여 주려면 이 짝이 필요하다.
+   */
+  sessionContainerTunnels: Record<string, SessionContainerTunnel[]>;
+  /** 컨테이너 포트를 연다. 로컬 포트는 코어가 빈 것을 고른다. */
+  openSessionContainerTunnel: (input: {
+    sessionId: string;
+    hostId: string;
+    containerId: string;
+    containerName: string;
+    networkName: string;
+    targetPort: number;
+  }) => Promise<void>;
+  /** 연 터널을 닫는다. */
+  closeSessionContainerTunnel: (sessionId: string, ruleId: string) => Promise<void>;
   setSftpPaneFilter: (paneId: SftpPaneId, query: string) => void;
   setSftpHostSearchQuery: (paneId: SftpPaneId, query: string) => void;
   navigateSftpHostGroup: (paneId: SftpPaneId, path: string | null) => void;
@@ -1470,6 +1505,9 @@ export type ContainersSlice = Pick<
   AppStateParts,
   | "containerTabs"
   | "activeContainerHostId"
+  | "sessionContainerTunnels"
+  | "openSessionContainerTunnel"
+  | "closeSessionContainerTunnel"
   | "openHostContainersTab"
   | "closeHostContainersTab"
   | "reorderContainerTab"

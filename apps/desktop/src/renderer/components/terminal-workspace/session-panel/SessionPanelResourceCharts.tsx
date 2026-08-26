@@ -59,7 +59,20 @@ export function SessionPanelResourceCharts({
   metrics,
 }: SessionPanelResourceChartsProps) {
   const { t: translate } = useTranslation();
-  const samples = useSessionHostMetricsHistory(sessionId);
+  const history = useSessionHostMetricsHistory(sessionId);
+  /**
+   * 네 판이 **같은 점에서 시작하게** 자른다.
+   *
+   * RAM 은 그 순간 값이라 첫 표본부터 그려지는데 CPU·네트워크·디스크는 두 표본의 차분이라
+   * 한 틱 뒤부터 그려진다 — 그대로 두면 RAM 곡선만 늘 한 칸 먼저 나가 판마다 시작점이
+   * 어긋난다. 차분이 나오는 첫 표본(= CPU 를 읽을 수 있는 첫 점)부터 모두 함께 시작한다.
+   *
+   * CPU 를 못 읽는 호스트에서는 자르지 않는다 — 자르면 그런 호스트에서 RAM 곡선까지 사라진다.
+   */
+  const samples = useMemo(() => {
+    const start = history.findIndex((sample) => sample.cpuPercent !== null);
+    return start <= 0 ? history : history.slice(start);
+  }, [history]);
   // 가리킨 지점은 네 판이 함께 쓴다 — CPU 가 튄 그 순간의 메모리·네트워크를 같이 읽는다.
   // 누가 가리켰는지까지 들고 있는 이유는 "얼마나 전" 을 커서가 있는 판에만 적기 위해서다.
   const [hover, setHover] = useState<{ index: number; owner: string } | null>(null);

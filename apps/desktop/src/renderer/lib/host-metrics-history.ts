@@ -88,6 +88,20 @@ function toPercent(usedKb: number | null, totalKb: number | null): number | null
 }
 
 /**
+ * 표본이 이만큼 벌어지면 **이력을 버리고 그 점부터 다시 쌓는다.**
+ *
+ * 안 보이는 탭은 폴링하지 않는다(useHostMetrics). 그래서 다른 탭을 보다 돌아오면 그동안의
+ * 구간에 표본이 없고, 차트에는 구멍이 남는다 — 값이 0 이라 바닥에 붙은 것인지 아예 못 잰
+ * 것인지 화면에서 구분되지 않는다.
+ *
+ * 문턱은 폴링 쪽이 **차분 기준을 버리는 기준과 같은 값**이다(상시 주기 10초의 두 배). 그만큼
+ * 벌어지면 CPU·네트워크·디스크는 어차피 이어 낼 수 없어(첫 점이 null) 선이 끊긴다. 끊길 선을
+ * 남겨 구멍으로 보여 주느니 처음부터 다시 그린다. 그보다 짧게 비운 경우는 차분이 그대로
+ * 이어지므로 이력도 그대로 둔다 — 잠깐 다른 탭을 봤다고 10분치를 버리지 않는다.
+ */
+export const HOST_METRICS_HISTORY_GAP_RESET_MS = 20_000;
+
+/**
  * 새 폴링 결과를 남긴다. 발행자는 세션당 하나다.
  *
  * 같은 시각(또는 더 이른 시각)은 버린다 — 폴링이 아니라 상태만 바뀐 발행에서 같은 값이 두 번
@@ -112,6 +126,9 @@ export function recordHostMetricsSample(
     } else {
       return;
     }
+  } else if (last && atMs - last.atMs > HOST_METRICS_HISTORY_GAP_RESET_MS) {
+    // 폴링이 멈췄던 구간이다(다른 탭·연달아 실패). 이어 붙이면 구멍이 남으므로 처음부터.
+    entry.samples = [];
   }
   entry.samples.push({
     atMs,

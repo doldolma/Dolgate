@@ -18,6 +18,9 @@ import {
   buildImageListCommand,
   buildNetworkListCommand,
   buildVolumeListCommand,
+  composeCommandFor,
+  computeIoRate,
+  ioTotalsOf,
   parseContainerList,
   parseContainerMetrics,
   parseDockerProbe,
@@ -27,6 +30,8 @@ import {
   type DockerContainer,
   type DockerImage,
   type DockerInspectInfo,
+  type DockerIoRate,
+  type DockerIoTotals,
   type DockerNetwork,
   type DockerProbe,
   type DockerStat,
@@ -55,6 +60,13 @@ export interface DockerRuntime {
    * "감싸 달라" 는 표시만 든다.
    */
   elevate: boolean;
+  /**
+   * compose 를 부르는 방법 전체("sudo docker compose" · "docker-compose"). 없으면 null.
+   *
+   * 접두사는 도커를 부르는 방법을 그대로 물려받는다 — sudo 가 필요한 호스트면 compose 도
+   * sudo 로 불러야 한다. 둘 다 없으면 스택 단위 compose 동작(로그·down)을 만들지 않는다.
+   */
+  compose: string | null;
 }
 
 /**
@@ -93,7 +105,12 @@ const PROBE_RETRY_TTL_MS = 45 * 1000;
 const PROBE_FAILURE_RETRY_MS = 4_000;
 const PROBE_MAX_ATTEMPTS = 3;
 
-const CHECKING: DockerRuntime = { availability: 'checking', prefix: null, elevate: false };
+const CHECKING: DockerRuntime = {
+  availability: 'checking',
+  prefix: null,
+  elevate: false,
+  compose: null,
+};
 
 function probeKey(sessionId: string, hostId: string | null): string {
   // 호스트가 있으면 호스트 단위로 기억한다 — 같은 서버의 새 탭에서 다시 묻지 않게. 로컬
@@ -155,7 +172,13 @@ export function useDockerRuntime(
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     void (async () => {
-      let probe: DockerProbe = { prefix: null, installed: false, reason: null };
+      let probe: DockerProbe = {
+        prefix: null,
+        compose: null,
+        installed: false,
+        answered: false,
+        reason: null,
+      };
       let failed = false;
       try {
         const stdout = await queryTerminalCompletion(sessionId, buildDockerProbeCommand(), {
@@ -171,7 +194,10 @@ export function useDockerRuntime(
       if (cancelled) {
         return;
       }
-      if (failed) {
+      // **대답이 없으면 실패로 친다.** 도커가 없는 호스트도 최소한 why= 한 줄은 온다 —
+      // 아무 줄도 없다는 것은 명령이 제대로 돌지 않은 것이고(보조 채널이 아직 준비되지 않았거나
+      // 이번 차례를 놓쳤다) 그걸 "없음" 으로 굳히면 섹션이 통째로 사라진 채로 남는다.
+      if (failed || !probe.answered) {
         // **왕복이 실패한 것은 "도커가 없다" 가 아니다.** 보조 채널을 다른 폴링과 함께 쓰므로
         // 이번 차례를 놓쳤을 수 있는데, 그걸 부재로 단정하면 섹션이 통째로 사라진다(그리고
         // 재시도 TTL 만큼 안 돌아온다). 도커가 정말 없는 연결은 왕복이 **성공하고 빈 출력**으로
@@ -191,6 +217,7 @@ export function useDockerRuntime(
           availability: 'absent',
           prefix: null,
           elevate: false,
+          compose: null,
           atMs: Date.now(),
         });
         return;
@@ -221,6 +248,8 @@ export function useDockerRuntime(
             // 터미널에 넣는 명령은 사람이 sudo 에 답할 수 있다.
             prefix: 'sudo docker',
             elevate: true,
+            // compose 판정은 데몬과 무관하다 — 첫 프로브에서 이미 알아냈다.
+            compose: composeCommandFor('sudo docker', probe.compose),
             atMs: Date.now(),
           });
           return;
@@ -238,6 +267,7 @@ export function useDockerRuntime(
         prefix: probe.prefix,
         // 여기까지 왔으면 sudo 되물리기는 통하지 않았거나 시도할 값이 없었다.
         elevate: false,
+        compose: composeCommandFor(probe.prefix, probe.compose),
         atMs: Date.now(),
       });
     })();
@@ -255,7 +285,12 @@ export function useDockerRuntime(
     }
     const entry = probeCache.get(key);
     return entry
-      ? { availability: entry.availability, prefix: entry.prefix, elevate: entry.elevate }
+      ? {
+          availability: entry.availability,
+          prefix: entry.prefix,
+          elevate: entry.elevate,
+          compose: entry.compose,
+        }
       : CHECKING;
     // version 이 스냅샷이다.
   }, [key, version]);
@@ -270,6 +305,32 @@ export interface DockerSample {
 }
 
 const historyByScope = new Map<string, Map<string, DockerSample[]>>();
+
+/**
+ * 직전 누적 I/O. `docker stats` 의 NET·BLOCK 은 컨테이너가 뜬 뒤로 쌓인 총량이라 그대로 보여
+ * 주면 "지금 흐르는 양" 으로 잘못 읽힌다. 표본 사이의 차를 시간으로 나눠 초당 값을 만든다.
+ */
+const ioTotalsByScope = new Map<string, Map<string, DockerIoTotals>>();
+
+function computeIoRates(
+  scope: string,
+  stats: Map<string, DockerStat>,
+  atMs: number,
+): Map<string, DockerIoRate> {
+  const previous = ioTotalsByScope.get(scope) ?? new Map<string, DockerIoTotals>();
+  const rates = new Map<string, DockerIoRate>();
+  const next = new Map<string, DockerIoTotals>();
+  for (const [id, stat] of stats) {
+    const totals = ioTotalsOf(stat, atMs);
+    next.set(id, totals);
+    const rate = computeIoRate(previous.get(id), totals);
+    if (rate) {
+      rates.set(id, rate);
+    }
+  }
+  ioTotalsByScope.set(scope, next);
+  return rates;
+}
 
 /**
  * 표본을 쌓는다. **제자리에서 고치지 않고 새 배열을 만든다.**
@@ -449,9 +510,13 @@ export interface DockerSummary {
   hasStats: boolean;
 }
 
+export type { DockerIoRate };
+
 export interface DockerLists {
   containers: DockerContainer[];
   stats: Map<string, DockerStat>;
+  /** 컨테이너별 초당 I/O. 누적값의 차라 첫 표본에서는 비어 있다. */
+  ioRates: Map<string, DockerIoRate>;
   inspect: Map<string, DockerInspectInfo>;
   summary: DockerSummary;
   images: DockerImage[];
@@ -588,6 +653,8 @@ export function useDockerLists(
    * 차례에만 나가고 나머지 틱은 왕복 없이 넘어간다.
    */
   const statsSupportedRef = useRef(true);
+  /** 초당 I/O. 표본마다 새로 계산해 담는다(렌더는 아래 setState 가 낸다). */
+  const ioRatesRef = useRef<Map<string, DockerIoRate>>(new Map());
   /** 지표 루프의 틱. 이 횟수마다 검사(inspect)를 얹는다 — 목록 루프와는 무관하다. */
   const tickRef = useRef(0);
 
@@ -770,6 +837,7 @@ export function useDockerLists(
         statsSupportedRef.current = false;
       }
       if (parsed.stats.size > 0) {
+        ioRatesRef.current = computeIoRates(scope, parsed.stats, Date.now());
         // 아래 setState 가 이 틱의 다시 그리기를 낸다 — 이력은 새 배열이라 그 렌더에서 바로
         // 보인다(별도의 version 을 올려 섹션 전체를 흔들 필요가 없다).
         pushHistory(scope, parsed.stats, Date.now());
@@ -822,6 +890,7 @@ export function useDockerLists(
   return {
     containers: containerState.containers,
     stats: containerState.stats,
+    ioRates: ioRatesRef.current,
     inspect: containerState.inspect,
     summary,
     images: state.images.images,

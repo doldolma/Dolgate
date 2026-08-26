@@ -26,6 +26,33 @@ const DEFAULT_SUBSHELL_PATTERNS: readonly RegExp[] = [
 ];
 
 /**
+ * `sudo` 로 시작하면 그것과 옵션을 걷어낸 나머지를 돌려준다. 아니면 원문 그대로.
+ *
+ * 왜 필요한가: 소켓 권한이 없는 호스트에서는 우리가 넣는 명령이 `sudo docker exec …` 가 된다.
+ * 패턴은 앞에서부터 맞추므로 `docker` 로 시작하지 않으면 하나도 걸리지 않아, 컨테이너에
+ * 들어가도 통합이 안 붙었다(명령 상태가 회색으로 굳는다).
+ *
+ * 값을 받는 옵션(-u user 등)은 그 값까지 함께 건너뛴다.
+ */
+const SUDO_VALUE_FLAGS = new Set(['-u', '-g', '-p', '-C', '-h', '-r', '-t', '-T', '--user']);
+
+function stripPrivilegePrefix(command: string): string {
+  const tokens = command.trim().split(/\s+/).filter(Boolean);
+  if (tokens[0] !== 'sudo' && tokens[0] !== 'doas') {
+    return command.trim();
+  }
+  let index = 1;
+  while (index < tokens.length && tokens[index].startsWith('-')) {
+    const flag = tokens[index];
+    index += 1;
+    if (SUDO_VALUE_FLAGS.has(flag) && index < tokens.length) {
+      index += 1;
+    }
+  }
+  return tokens.slice(index).join(' ');
+}
+
+/**
  * Reports whether `command` (the raw line the user just ran) enters a subshell
  * that needs shell-integration re-injection. `customPatterns` are user-provided
  * regex sources (from settings); invalid patterns are ignored.
@@ -38,8 +65,15 @@ export function detectsSubshellEntry(
   if (!trimmed) {
     return false;
   }
+  // 원문과 `sudo` 를 걷어낸 것 둘 다 본다 — `sudo -i` 는 원문이, `sudo docker exec` 는 걷어낸
+  // 쪽이 걸린다.
+  const candidates = [trimmed];
+  const stripped = stripPrivilegePrefix(trimmed);
+  if (stripped && stripped !== trimmed) {
+    candidates.push(stripped);
+  }
   for (const pattern of DEFAULT_SUBSHELL_PATTERNS) {
-    if (pattern.test(trimmed)) {
+    if (candidates.some((candidate) => pattern.test(candidate))) {
       return true;
     }
   }
@@ -48,7 +82,8 @@ export function detectsSubshellEntry(
       continue;
     }
     try {
-      if (new RegExp(source).test(trimmed)) {
+      const pattern = new RegExp(source);
+      if (candidates.some((candidate) => pattern.test(candidate))) {
         return true;
       }
     } catch {
@@ -94,7 +129,8 @@ function shellNameOf(token: string): string {
  * 추측하지 않는다.
  */
 export function resolveSubshellShell(command: string): string {
-  const tokens = command.trim().split(/\s+/).filter(Boolean);
+  // `sudo docker exec … bash` 에서도 셸 이름을 짚을 수 있게 앞의 sudo 를 걷어낸다.
+  const tokens = stripPrivilegePrefix(command).split(/\s+/).filter(Boolean);
   if (tokens.length === 0) {
     return '';
   }
