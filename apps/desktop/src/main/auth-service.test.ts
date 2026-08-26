@@ -2128,6 +2128,26 @@ describe("AuthService 로컬 전용", () => {
     expect(restored.status).toBe("local-only");
   });
 
+  // 기록(활동 로그·세션 리플레이)은 활성화된 범위에만 쌓인다. 계정 없이 쓰는 동안 이 알림이
+  // 오지 않으면 범위가 없어 append 가 조용히 아무것도 하지 않았다 — 로그아웃하고 쓰면 로그가
+  // 한 줄도 남지 않았고, 화면에는 오류도 뜨지 않았다.
+  it("계정 없이 시작해도 기록 자리를 연다", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service } = await createService(serverUrl);
+    const onSessionActivated = vi.fn();
+    service.setOnSessionActivated(onSessionActivated);
+
+    await service.startLocalOnly();
+    expect(onSessionActivated).toHaveBeenCalledWith({ kind: "local-only" });
+
+    // 다시 켤 때도 마찬가지다. 이 길로 들어오면 로그인 화면을 거치지 않는다.
+    const { service: restarted } = await createService(serverUrl);
+    const onRestartActivated = vi.fn();
+    restarted.setOnSessionActivated(onRestartActivated);
+    expect((await restarted.bootstrap()).status).toBe("local-only");
+    expect(onRestartActivated).toHaveBeenCalledWith({ kind: "local-only" });
+  });
+
   // 로그아웃하면 로그인 화면으로 돌아가야 한다. 고른 기억이 남아 있으면 텅 빈 워크스페이스로
   // 떨어져 "내 데이터가 어디 갔나" 가 된다.
   it("로그아웃하면 고른 기억이 지워진다", async () => {

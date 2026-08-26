@@ -28,6 +28,10 @@ import {
 } from './database';
 import { AI_STORED_KEY_SECRET_ACCOUNTS } from './ai-service';
 import { prepareWindowZoom, stepAppZoom } from './app-zoom';
+import {
+  migrateLocalOnlyHistoryInto,
+  resolveLocalHistoryScope,
+} from './local-history-scope';
 import { DesktopConfigService } from './app-config';
 import { AuthService } from './auth-service';
 import { AwsService } from './aws-service';
@@ -456,6 +460,16 @@ if (termiusHelperArgIndex >= 0) {
   );
 
   authService.setOnSessionActivated((owner) => {
+    // 계정으로 들어오는 길이면, 계정 없이 쌓아 둔 기록을 이 계정 자리로 먼저 옮긴다.
+    // **범위를 열기 전에** 해야 한다 — 열고 나서 옮기면 이미 읽어 둔 목록에 반영되지 않아
+    // 앱을 다시 켤 때까지 보이지 않는다.
+    if (owner.kind !== 'local-only') {
+      try {
+        migrateLocalOnlyHistoryInto(resolveLocalHistoryScope(owner));
+      } catch {
+        // 옮기지 못해도 로그인은 막지 않는다 — 기록은 로컬 전용 자리에 그대로 남는다.
+      }
+    }
     activityLogRepository.activate(owner);
     sessionReplayService.activate(owner);
   });

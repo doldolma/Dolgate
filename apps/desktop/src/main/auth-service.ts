@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { AuthSession } from "@shared";
+import { LOCAL_ONLY_HISTORY_OWNER, type LocalHistoryOwner } from "./local-history-scope";
 import type { AuthState } from "@shared";
 import type { PasskeyCredential } from "@shared";
 import type { VaultMutationResponse } from "@shared";
@@ -340,10 +341,9 @@ type SessionInvalidationContext = {
   purgeLocalData?: boolean;
 };
 
-type SessionActivatedContext = {
-  userId: string;
-  serverUrl: string;
-};
+// 기록(활동 로그·세션 리플레이)이 쌓일 자리를 정하는 값. 계정이면 그 계정의 자리, 계정 없이
+// 쓰는 모드면 이 기기의 로컬 전용 자리다(local-history-scope 의 LocalHistoryOwner).
+type SessionActivatedContext = LocalHistoryOwner;
 
 function createFallbackOfflineLease(): AuthSession["offlineLease"] {
   return {
@@ -634,6 +634,8 @@ export class AuthService {
     // 계정 없이 쓰기로 고른 기기는 그 상태로 연다 — 로그인 화면을 다시 보여 주면 이미 결정한
     // 사람에게 결정을 반복시키는 것이다. 리프레시 토큰을 찾을 이유도 없다(애초에 없다).
     if (this.stateStorage.getState().auth.status === "local-only") {
+      // 계정이 없어도 기록은 쌓인다 — 이 기기의 로컬 전용 자리를 연다.
+      await this.notifySessionActivated(LOCAL_ONLY_HISTORY_OWNER);
       this.patchState({
         status: "local-only",
         session: null,
@@ -676,6 +678,8 @@ export class AuthService {
    * 아니라 로그인 화면을 본다.
    */
   async startLocalOnly(): Promise<AuthState> {
+    // 계정이 없어도 기록은 쌓인다(bootstrap 의 같은 분기와 짝).
+    await this.notifySessionActivated(LOCAL_ONLY_HISTORY_OWNER);
     this.stateStorage.updateAuthStatus("local-only");
     this.patchState({
       status: "local-only",
