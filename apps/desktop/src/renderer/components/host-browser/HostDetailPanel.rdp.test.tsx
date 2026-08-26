@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { HostRecord, RdpHostRecord, SecretMetadataRecord, SshHostRecord } from '@shared';
 import { HostDetailPanel } from './HostDetailPanel';
+import { appStore } from '../../store/appStore';
 import type { HostBrowserModel } from './useHostBrowser';
 
 // RDP 호스트의 Connection 탭이 "Type: SSH" 한 줄만 보여주던 버그를 잠근다. 여기 없는 설정은
@@ -119,6 +120,46 @@ describe('HostDetailPanel — RDP Connection 탭', () => {
 
     // tailnet 목록은 비동기로 도착한다.
     expect(await screen.findByText('corp-tailnet')).toBeTruthy();
+  });
+
+  // 공유 폴더는 **기기 로컬 설정**이다. 이 줄이 원격에서 어느 폴더가 보이는지 알려주는 유일한
+  // 자리이므로, 실제로 붙이는 것과 다른 값을 보여주면 안 된다 — 파일이 노출되는 문제다.
+  it('공유 폴더는 이 기기의 값을 보여준다 — 레코드에 남은 값이 아니라', () => {
+    appStore.setState((state) => ({
+      settings: {
+        ...(state.settings ?? ({} as never)),
+        rdpDrivesByHostId: {
+          'h-rdp': [{ path: '/Users/me/here', readOnly: false }],
+        },
+      } as never,
+    }));
+    try {
+      // 레코드에는 다른 기기에서 고른 경로가 남아 있다.
+      renderPanel(makeHost({ drives: [{ path: '/Volumes/elsewhere', readOnly: true }] }));
+      expect(rowValue('공유 폴더')).toBe('here');
+      expect(screen.queryByText('elsewhere')).toBeNull();
+    } finally {
+      appStore.setState((state) => ({
+        settings: { ...(state.settings ?? ({} as never)), rdpDrivesByHostId: {} } as never,
+      }));
+    }
+  });
+
+  it('이 기기에서 공유를 끄면 그 줄이 사라진다 — 레코드로 되살아나지 않는다', () => {
+    appStore.setState((state) => ({
+      settings: {
+        ...(state.settings ?? ({} as never)),
+        rdpDrivesByHostId: { 'h-rdp': [] },
+      } as never,
+    }));
+    try {
+      renderPanel(makeHost({ drives: [{ path: '/Users/me/docs', readOnly: true }] }));
+      expect(screen.queryByText('공유 폴더')).toBeNull();
+    } finally {
+      appStore.setState((state) => ({
+        settings: { ...(state.settings ?? ({} as never)), rdpDrivesByHostId: {} } as never,
+      }));
+    }
   });
 
   // 원격에 소리가 넘어가는 설정이라, 켜져 있다는 사실이 이 표에서 보여야 한다.

@@ -1,5 +1,6 @@
 import {
   describeRdpDrives,
+  resolveHostDrives,
   isRdpHostRecord,
   type RdpCertificatePrompt,
   type RdpHostRecord,
@@ -628,7 +629,17 @@ export function registerRdpIpcHandlers(
           monitors: layout.monitors,
           // 원격에 보일 드라이브 이름은 여기서 확정해 보낸다. 편집 화면이 같은 함수로 같은
           // 이름을 보여주므로, 코어가 다시 만들면 둘이 갈린다.
-          drives: describeRdpDrives(host.drives).map((drive) => ({
+          //
+          // 공유 폴더는 **이 기기의 설정**에서 읽는다(모니터와 같다) — 경로가 기기의 것이라
+          // 호스트 레코드에 두면 다른 기기까지 따라간다. 레코드의 값은 옛 빌드에서 설정한
+          // 호스트를 위한 폴백으로만 쓴다(resolveHostDrives).
+          drives: describeRdpDrives(
+            resolveHostDrives(
+              host.id,
+              ctx.settings.get().rdpDrivesByHostId,
+              host.drives,
+            ),
+          ).map((drive) => ({
             label: drive.name,
             path: drive.path,
             readOnly: drive.readOnly,

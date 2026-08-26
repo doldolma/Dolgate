@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { DesktopWindowState, HostRecord, PortForwardRuntimeRecord, RdpMonitorSelection, SessionConnectionKind, TailnetPeer, TailnetStatus, TerminalTab, UpdateState } from '@shared';
-import { describeRdpDrives, isRdpHostRecord, isSshHostRecord, isVncHostRecord } from '@shared';
+import { describeRdpDrives, isRdpHostRecord, isSshHostRecord, isVncHostRecord, withLocalHostDrives } from '@shared';
+import { useAppStore } from '../store/appStore';
 import type {
   DynamicTabStripItem,
   TmuxSessionGroup,
@@ -618,6 +619,23 @@ export function shortenRouterName(name: string, max = 14): string {
  * `starting` 을 따로 적는 이유: 아직 열리지 않은 것을 열린 것과 같은 수로 세면, 포트가 왜
  * 안 되는지 찾을 때 이 줄이 거짓 단서가 된다.
  */
+/**
+ * 호스트 목록의 공유 폴더만 **이 기기의 값**으로 갈아 끼운다.
+ *
+ * 드라이브는 기기 로컬 설정이다(경로가 이 기기의 것이라 동기화하면 다른 기기에서 열 수 없다).
+ * 그런데 보여주는 자리가 레코드 값을 그대로 읽으면, 연결이 실제로 붙이는 폴더와 화면이 말하는
+ * 폴더가 갈린다 — 어느 폴더가 원격에 열려 있는지는 틀리면 안 되는 정보다.
+ */
+function useHostsWithLocalDrives(hosts: HostRecord[]): HostRecord[] {
+  const drivesByHostId = useAppStore(
+    (state) => state.settings?.rdpDrivesByHostId,
+  );
+  return useMemo(
+    () => withLocalHostDrives(hosts, drivesByHostId),
+    [hosts, drivesByHostId],
+  );
+}
+
 function portForwardRow(
   runtimes: readonly PortForwardRuntimeRecord[],
   hostId: string | null | undefined,
@@ -1175,6 +1193,9 @@ export function AppTitleBar({
   onCloseWindow
 }: AppTitleBarProps) {
   const { t: translate } = useTranslation();
+  // 탭 툴팁이 말하는 공유 폴더는 연결이 실제로 붙이는 것과 같아야 한다 — 드라이브는 기기 로컬
+  // 설정이라 레코드 값을 그대로 읽으면 둘이 갈린다.
+  const hostsWithLocalDrives = useHostsWithLocalDrives(hosts);
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [isDetachHovering, setIsDetachHovering] = useState(false);
   const [tabDropPreview, setTabDropPreview] = useState<{ targetKey: string; placement: 'before' | 'after' } | null>(null);
@@ -1729,7 +1750,15 @@ export function AppTitleBar({
       : null;
   const tailnetPath = useTailnetPathLookup(tabs, tmuxGroups, hosts);
   const hoverInfo = hoveredItem
-    ? buildTabHoverInfo(hoveredItem, tabs, hosts, tmuxGroups, workspaces, tailnetPath, portForwardRuntimes)
+    ? buildTabHoverInfo(
+        hoveredItem,
+        tabs,
+        hostsWithLocalDrives,
+        tmuxGroups,
+        workspaces,
+        tailnetPath,
+        portForwardRuntimes,
+      )
     : null;
 
   // 잘리는 끝 탭은 **크롬색 덧칠 아래로 미끄러져 들어간다**(아래 fade div 둘).

@@ -14,6 +14,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  View,
 } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NavigationProp, RouteProp } from "@react-navigation/native";
@@ -24,10 +25,12 @@ import {
 } from "@dolssh/shared-core";
 import type { VncImageQuality } from "@dolssh/shared-core";
 import {
+  ChipField,
   FieldRow,
   HostKindField,
   type HostFormKind,
 } from "../components/HostFormFields";
+import Ionicons from "react-native-vector-icons/Ionicons";
 import { ListPickerModal } from "../components/ListPickerModal";
 import { SettingsGroup, SettingsRow } from "../components/SettingsList";
 import type { RootStackParamList } from "../navigation/RootNavigator";
@@ -36,6 +39,9 @@ import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
 
 const DEFAULT_PORTS: Record<"rdp" | "vnc", number> = { rdp: 3389, vnc: 5900 };
+/** 색 깊이 선택지. 32가 기본이고 16은 느린 회선에서 쓴다. */
+const COLOR_DEPTHS = [32, 16] as const;
+
 const QUALITY_OPTIONS: VncImageQuality[] = ["fast", "balanced", "lossless"];
 
 interface RemoteDesktopHostFormScreenProps {
@@ -78,6 +84,7 @@ export function RemoteDesktopHostFormScreen({
   const kind: "rdp" | "vnc" =
     existing?.kind ?? (createKind === "vnc" ? "vnc" : "rdp");
   const vnc = existing && isVncHostRecord(existing) ? existing : null;
+  const rdp = existing && isRdpHostRecord(existing) ? existing : null;
 
   const [label, setLabel] = useState(existing?.label ?? "");
   const [hostname, setHostname] = useState(existing?.hostname ?? "");
@@ -89,6 +96,36 @@ export function RemoteDesktopHostFormScreen({
    * VNC 호스트는 연결이 거부된다.
    */
   const [portOverride, setPortOverride] = useState<string | null>(null);
+  /**
+   * RDP 고급 항목. **전부 동기화되는 호스트 값**이라 여기서 고치면 데스크톱에도 적용된다.
+   *
+   * 기본값은 데스크톱 연결 경로가 읽는 것과 같게 맞춘다 — 소리·클립보드는 없으면 켜짐,
+   * 나머지는 없으면 꺼짐, 색 깊이는 없으면 32다.
+   */
+  const [adminSession, setAdminSession] = useState(rdp?.adminSession === true);
+  const [colorDepth, setColorDepth] = useState<16 | 32>(
+    rdp?.colorDepth === 16 ? 16 : 32,
+  );
+  const [audioEnabled, setAudioEnabled] = useState(rdp?.audioEnabled !== false);
+  const [clipboardEnabled, setClipboardEnabled] = useState(
+    rdp?.clipboardEnabled !== false,
+  );
+  // 태그는 SSH 폼과 같은 값이다 — 데스크톱에서 붙여 둔 것을 모바일이 보존만 하고 있었다.
+  const [tags, setTags] = useState<string[]>(existing?.tags ?? []);
+  const [tagDraft, setTagDraft] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  // 접어 둔 채로도 기본과 다른 것이 있는지는 보여야 한다 — 안 그러면 열어 봐야만 알 수 있다.
+  const advancedSummary = [
+    tags.length > 0
+      ? translate("hostForm.tags.count", { count: tags.length })
+      : null,
+    adminSession ? translate("hostForm.rd.adminSession") : null,
+    audioEnabled ? null : translate("hostForm.rd.audioOff"),
+    clipboardEnabled ? null : translate("hostForm.rd.clipboardOff"),
+    colorDepth === 16 ? translate("hostForm.rd.colorDepthValue.16") : null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
   const portDraft = portOverride ?? String(existing?.port ?? DEFAULT_PORTS[kind]);
   const setPortDraft = (next: string): void => setPortOverride(next);
   // 그룹을 보다가 들어왔으면 그 그룹에 만든다(SSH 폼과 같다) — 무시하면 최상위에 생기고,
@@ -232,6 +269,7 @@ export function RemoteDesktopHostFormScreen({
         hostname,
         port,
         groupName: groupName.trim() ? groupName : null,
+        tags,
         tailnetId,
         // 비밀번호를 비워 두면 저장된 자격증명을 그대로 둔다 — 이름만 고치려고 들어왔다가
         // 비밀번호가 지워지면 다음 접속이 막힌다. 다만 **계정을 고친 것도 교체다** —
@@ -249,7 +287,15 @@ export function RemoteDesktopHostFormScreen({
           : null,
         ...(kind === "vnc"
           ? { shared, viewOnly, imageQuality }
-          : {}),
+          : {
+              adminSession,
+              colorDepth,
+              audioEnabled,
+              clipboardEnabled,
+              // 마이크·카메라는 **보내지 않는다.** 폰이 붙이지 않는 설정이라 폼에도 없고,
+              // 저장부는 생략을 보존으로 읽으므로 데스크톱에서 켜 둔 값이 그대로 남는다
+              // (`useAllMonitors` 도 같은 방식이다).
+            }),
       });
       savedRef.current = true;
       navigation.goBack();
@@ -397,6 +443,104 @@ export function RemoteDesktopHostFormScreen({
           </SettingsGroup>
         ) : null}
 
+        {kind === "rdp" ? (
+          <>
+            {/* 고급 — 평소에는 접어 둔다. SSH 폼과 같은 모양이다(HostFormScreen). 대부분의
+                사람이 쓰는 것(이름·주소·계정·비밀번호)이 안 쓰는 항목들 사이에 묻히면 안 된다. */}
+            <Pressable
+              onPress={() => setAdvancedOpen(open => !open)}
+              accessibilityRole="button"
+              accessibilityLabel={translate("hostForm.advancedSection")}
+              accessibilityState={{ expanded: advancedOpen }}
+              style={styles.advancedHeader}
+            >
+              <Text style={[styles.advancedTitle, { color: palette.text }]}>
+                {translate("hostForm.advancedSection")}
+              </Text>
+              <Ionicons
+                name={advancedOpen ? "chevron-down" : "chevron-forward"}
+                size={15}
+                color={palette.tabInactive}
+              />
+              <View style={styles.advancedSpacer} />
+              {!advancedOpen && advancedSummary ? (
+                <Text
+                  numberOfLines={1}
+                  style={[styles.advancedSummary, { color: palette.mutedText }]}
+                >
+                  {advancedSummary}
+                </Text>
+              ) : null}
+            </Pressable>
+
+            {advancedOpen ? (
+              <>
+                <SettingsGroup footer={translate("hostForm.toggles.hint")}>
+                  <ChipField
+                    label={translate("hostForm.tags.header")}
+                    chips={tags.map(tag => ({ id: tag, text: tag }))}
+                    removeLabel={chip =>
+                      translate("hostForm.tags.remove", { tag: chip.text })
+                    }
+                    onRemove={tag =>
+                      setTags(current => current.filter(item => item !== tag))
+                    }
+                    input={{
+                      value: tagDraft,
+                      label: translate("hostForm.tags.add"),
+                      placeholder: translate("hostForm.tags.placeholder"),
+                      onChangeText: setTagDraft,
+                      onSubmit: () => {
+                        const next = tagDraft.trim();
+                        if (!next || tags.includes(next)) {
+                          setTagDraft("");
+                          return;
+                        }
+                        setTags(current => [...current, next]);
+                        setTagDraft("");
+                      },
+                    }}
+                  />
+                </SettingsGroup>
+
+                <SettingsGroup footer={translate("hostForm.rd.sessionHint")}>
+                  <SettingsRow
+                    icon="shield-outline"
+                    label={translate("hostForm.rd.adminSession")}
+                    toggle={{ value: adminSession, onValueChange: setAdminSession }}
+                  />
+                  <SettingsRow
+                    icon="volume-medium-outline"
+                    label={translate("hostForm.rd.audio")}
+                    toggle={{ value: audioEnabled, onValueChange: setAudioEnabled }}
+                  />
+                  <SettingsRow
+                    icon="clipboard-outline"
+                    label={translate("hostForm.rd.clipboard")}
+                    toggle={{
+                      value: clipboardEnabled,
+                      onValueChange: setClipboardEnabled,
+                    }}
+                  />
+                </SettingsGroup>
+
+                {/* 고르는 방식은 같은 화면의 VNC 화질과 같게 둔다 — 값이 둘뿐이라도 한 화면에서
+                    고르는 방법이 두 가지면 어느 것이 지금 값인지 읽는 규칙이 달라진다. */}
+                <SettingsGroup header={translate("hostForm.rd.colorDepth")}>
+                  {COLOR_DEPTHS.map(option => (
+                    <SettingsRow
+                      key={option}
+                      label={translate(`hostForm.rd.colorDepthValue.${option}`)}
+                      check={colorDepth === option}
+                      onPress={() => setColorDepth(option)}
+                    />
+                  ))}
+                </SettingsGroup>
+              </>
+            ) : null}
+          </>
+        ) : null}
+
         <SettingsGroup footer={translate("hostForm.tailnet.hint")}>
           <SettingsRow
             icon="globe-outline"
@@ -467,6 +611,26 @@ export function RemoteDesktopHostFormScreen({
 }
 
 const styles = StyleSheet.create({
+  // SSH 폼(HostFormScreen)의 고급 머리글과 같은 값이다 — 두 폼이 다르게 보이면 같은 구획인
+  // 줄을 모른다.
+  advancedHeader: {
+    minHeight: 34,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 4,
+  },
+  advancedTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    letterSpacing: -0.3,
+  },
+  advancedSpacer: { flex: 1 },
+  advancedSummary: {
+    fontSize: 13,
+    flexShrink: 1,
+    textAlign: "right",
+  },
   screen: { flex: 1 },
   content: { gap: 16, paddingTop: 12 },
   error: { fontSize: 13, paddingHorizontal: 4 },

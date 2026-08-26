@@ -347,9 +347,15 @@ export interface RdpHostRecord extends HostBaseRecord {
    */
   certificateFingerprint?: string | null;
   /**
-   * 원격 세션에 노출할 로컬 폴더들. 비어 있거나 없으면 드라이브를 붙이지 않는다.
+   * @deprecated 기기 로컬 설정(`AppSettings.rdpDrivesByHostId`)으로 옮겼다.
    *
-   * 공유하면 그 폴더 안의 파일이 원격 머신에 그대로 노출된다 — 신뢰하는 호스트에만 켤 것.
+   * 공유할 폴더는 **그 기기의 파일 경로**라 동기화되는 레코드에 둘 자리가 아니었다. 모니터
+   * 선택이 같은 이유로 먼저 옮겨 갔는데(`rdpMonitorsByHostId`) 드라이브는 남아 있었고, 그래서
+   * 데스크톱에서 공유한 `C:\Users\…` 가 폰까지 따라가 RDP 가 아예 안 붙었다.
+   *
+   * 새로 쓰지 않는다. **읽기만 한다** — 값이 여기에만 있는 호스트(옛 빌드에서 설정한 것)를 위해
+   * 기기 로컬 값이 없을 때의 폴백으로 쓴다(`resolveHostDrives`). 타입에서 지우지 않는 이유는
+   * 아래 `drivePath` 와 같다.
    */
   drives?: RdpDriveShare[] | null;
   /**
@@ -1556,6 +1562,20 @@ export interface AppSettings extends TerminalAppearanceSettings {
    * 여러 군데 지나는데, 선택으로 두면 한 곳만 빠뜨려도 컴파일러가 못 잡고 조용히 사라진다.
    */
   rdpMonitorsByHostId: Record<string, RdpMonitorSelection[]>;
+  /**
+   * RDP 호스트별로 원격에 노출할 로컬 폴더들. **기기 로컬 전용이다 — 동기화하지 않는다.**
+   *
+   * 공유할 폴더는 그 기기의 파일 경로다. 호스트 레코드(동기화 대상)에 두면 데스크톱에서 고른
+   * `C:\Users\…` 가 맥이나 폰까지 따라가고, 거기서는 열 수 없는 경로가 된다 —
+   * `rdpMonitorsByHostId` 와 완전히 같은 이유다.
+   *
+   * 모니터와 달리 호스트 레코드에 남는 정책 비트가 없다. 모니터는 "여러 화면을 쓸 의도인가"가
+   * 기기와 무관한 뜻을 갖지만, 드라이브는 경로가 곧 설정이라 고른 폴더가 없으면 안 붙이면 된다.
+   *
+   * `tailnetHostname` 과 같은 이유로 선택 필드가 아니다 — 설정 객체를 필드별로 다시 만드는 곳을
+   * 여러 군데 지나는데, 선택으로 두면 한 곳만 빠뜨려도 컴파일러가 못 잡고 조용히 사라진다.
+   */
+  rdpDrivesByHostId: Record<string, RdpDriveShare[]>;
   dismissedUpdateVersion?: string | null;
   updatedAt: string;
 }

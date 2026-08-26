@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"dolssh/services/ssh-core/mobile/internal/sshtest"
+	"dolssh/services/ssh-core/pkg/coretypes"
 )
 
 // fakeDialer connects to a real TCP listener (the fake VNC/RDP target).
@@ -487,4 +490,128 @@ func TestOpenRemoteDesktopTunnelSSMWrapsLocalForward(t *testing.T) {
 	if result.Transport != "ssm" || result.AuthToken == "" {
 		t.Fatalf("expected authenticated SSM wrapper, got %#v", result)
 	}
+}
+
+// --- SSH 터널 페이로드 조립 ---
+
+// 터널용 SSH 접속이 tailnet 을 타야 한다. 이것이 빠지면 게이트웨이가 서브넷 라우터 뒤에 있을 때
+// 폰의 일반 네트워크에서 그 주소를 찾다가 "no route to host" 로 죽는다 — 화면에는 tailnet 단계가
+// 전부 초록인 채로.
+func TestSSHPayloadCarriesTailnet(t *testing.T) {
+	raw := `{
+	  "id": "rd-1",
+	  "host": "192.168.200.37",
+	  "port": 22,
+	  "transport": "ssh",
+	  "username": "doyoung",
+	  "authType": "password",
+	  "password": "secret",
+	  "tailnetId": "tn-abc",
+	  "tailnetName": "doldolma.ts.net",
+	  "targetHost": "127.0.0.1",
+	  "targetPort": 5901
+	}`
+	var req rdTunnelRequest
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	payload := sshPayloadFrom(req)
+	if payload.TailnetID != "tn-abc" {
+		t.Errorf("TailnetID = %q, want %q", payload.TailnetID, "tn-abc")
+	}
+	if payload.TailnetName != "doldolma.ts.net" {
+		t.Errorf("TailnetName = %q, want %q", payload.TailnetName, "doldolma.ts.net")
+	}
+	// 게이트웨이 주소는 최상위 host/port 다 — VNC 대상은 targetHost/targetPort 로 따로 간다.
+	if payload.Host != "192.168.200.37" || payload.Port != 22 {
+		t.Errorf("게이트웨이 주소 = %s:%d, want 192.168.200.37:22", payload.Host, payload.Port)
+	}
+	// 이름이 겹치지 않는 필드는 원래도 멀쩡했다 — 회귀 여부를 가르는 대조군이다.
+	if payload.Username != "doyoung" || payload.Password != "secret" {
+		t.Errorf("자격증명이 유실됐다: %+v", payload)
+	}
+}
+
+// 겹치는 이름이 늘어나도 사람이 기억하지 않게 한다.
+//
+// rdTunnelRequest 의 최상위 필드와 임베딩한 ConnectPayload 가 같은 json 이름을 쓰면, Go 는 얕은
+// 쪽에만 값을 넣고 안쪽은 조용히 빈 채로 둔다. 그 목록을 여기서 직접 훑어, sshPayloadFrom 이
+// 하나도 빠뜨리지 않는지 본다. ConnectPayload 에 겹치는 이름이 새로 생기면 이 테스트가 먼저 깨진다.
+func TestSSHPayloadCarriesEveryShadowedField(t *testing.T) {
+	shadowed := shadowedJSONNames()
+	if len(shadowed) == 0 {
+		t.Fatal("겹치는 이름이 하나도 없다 — 구조가 바뀌었으면 이 테스트도 다시 봐야 한다")
+	}
+
+	// 겹치는 이름마다 값을 하나씩 넣은 요청을 만든다.
+	fields := map[string]any{"id": "rd-1", "transport": "ssh"}
+	for name, kind := range shadowed {
+		switch kind {
+		case reflect.String:
+			fields[name] = "값-" + name
+		case reflect.Int:
+			fields[name] = 4242
+		default:
+			t.Fatalf("%s: 다루지 않는 종류 %s — 이 테스트를 넓혀야 한다", name, kind)
+		}
+	}
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req rdTunnelRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		t.Fatal(err)
+	}
+
+	payload := sshPayloadFrom(req)
+	value := reflect.ValueOf(payload)
+	payloadType := value.Type()
+	for i := 0; i < payloadType.NumField(); i++ {
+		name := jsonName(payloadType.Field(i))
+		if _, ok := shadowed[name]; !ok {
+			continue
+		}
+		if value.Field(i).IsZero() {
+			t.Errorf(
+				"%s(%s) 가 SSH 페이로드에 실리지 않았다 — sshPayloadFrom 에 되돌려 놓는 줄을 더해야 한다",
+				payloadType.Field(i).Name, name,
+			)
+		}
+	}
+}
+
+/** 최상위 필드와 ConnectPayload 가 같이 쓰는 json 이름 → 그 필드의 종류. */
+func shadowedJSONNames() map[string]reflect.Kind {
+	outer := map[string]struct{}{}
+	requestType := reflect.TypeOf(rdTunnelRequest{})
+	for i := 0; i < requestType.NumField(); i++ {
+		field := requestType.Field(i)
+		if field.Anonymous {
+			continue
+		}
+		if name := jsonName(field); name != "" {
+			outer[name] = struct{}{}
+		}
+	}
+
+	shadowed := map[string]reflect.Kind{}
+	payloadType := reflect.TypeOf(coretypes.ConnectPayload{})
+	for i := 0; i < payloadType.NumField(); i++ {
+		field := payloadType.Field(i)
+		name := jsonName(field)
+		if _, ok := outer[name]; ok && name != "" {
+			shadowed[name] = field.Type.Kind()
+		}
+	}
+	return shadowed
+}
+
+func jsonName(field reflect.StructField) string {
+	tag := field.Tag.Get("json")
+	if tag == "" || tag == "-" {
+		return ""
+	}
+	return strings.Split(tag, ",")[0]
 }

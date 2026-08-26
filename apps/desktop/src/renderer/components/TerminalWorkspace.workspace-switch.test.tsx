@@ -78,6 +78,7 @@ const settings: AppSettings = {
   theme: 'system',
   tailnetHostname: null,
   rdpMonitorsByHostId: {},
+      rdpDrivesByHostId: {},
   globalTerminalThemeId: 'dolssh-dark',
   terminalFontFamily: 'sf-mono',
   terminalFontSize: 13,

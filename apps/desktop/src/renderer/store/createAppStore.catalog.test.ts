@@ -204,6 +204,7 @@ describe("createAppStore catalog and settings", () => {
         theme: "system",
         tailnetHostname: null,
         rdpMonitorsByHostId: {},
+      rdpDrivesByHostId: {},
         globalTerminalThemeId: "dolssh-dark",
         terminalFontFamily: "sf-mono",
         terminalFontSize: 13,
@@ -235,6 +236,7 @@ describe("createAppStore catalog and settings", () => {
         theme: "dark",
         tailnetHostname: null,
         rdpMonitorsByHostId: {},
+      rdpDrivesByHostId: {},
         globalTerminalThemeId: "dolssh-dark",
         terminalFontFamily: "sf-mono",
         terminalFontSize: 13,
@@ -809,4 +811,56 @@ describe("createAppStore catalog and settings", () => {
       }),
     );
   });
+
+  it("복제본이 이 기기의 공유 폴더를 그대로 물려받는다", async () => {
+    // 드라이브는 기기 로컬 설정이라 레코드를 복사하는 것만으로는 따라오지 않는다. 복제는 같은
+    // 기기 안에서 일어나므로 경로가 그대로 유효한데, 조용히 사라지면 복제본에서 왜 파일이 안
+    // 보이는지 알 수 없다.
+    const api = createMockApi();
+    vi.mocked(api.hosts.list).mockResolvedValue([
+      {
+        id: "rdp-1",
+        kind: "rdp",
+        label: "Office PC",
+        hostname: "10.0.0.5",
+        port: 3389,
+        groupName: null,
+        secretRef: null,
+        // 레코드는 비어 있다 — 이 호스트는 이미 새 방식으로 한 번 저장됐다.
+        drives: null,
+        createdAt: "2026-08-01T00:00:00.000Z",
+        updatedAt: "2026-08-01T00:00:00.000Z",
+      } as HostRecord,
+    ]);
+    vi.mocked(api.hosts.create).mockImplementation(async (draft) => ({
+      id: "rdp-2",
+      kind: "rdp",
+      label: draft.label,
+      hostname: "10.0.0.5",
+      port: 3389,
+      groupName: null,
+      secretRef: null,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    }) as never);
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      settings: {
+        ...state.settings!,
+        rdpDrivesByHostId: { "rdp-1": [{ path: "/Users/me/here", readOnly: true }] },
+      },
+    }));
+
+    await store.getState().duplicateHosts(["rdp-1"]);
+
+    expect(api.settings.update).toHaveBeenCalledWith({
+      rdpDrivesByHostId: {
+        "rdp-1": [{ path: "/Users/me/here", readOnly: true }],
+        "rdp-2": [{ path: "/Users/me/here", readOnly: true }],
+      },
+    });
+  });
+
 });

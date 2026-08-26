@@ -81,6 +81,8 @@ function createHarness(
   /** 이 기기에서 골라 둔 모니터. 호스트 레코드가 아니라 기기 로컬 설정에 있다. */
   monitors: Array<{ id: number; label: string; width: number; height: number }> | null = null,
   hostOverrides: Record<string, unknown> = {},
+  /** 이 기기에서 공유해 둔 폴더. 모니터와 같이 기기 로컬 설정에 있다(null 이면 항목 없음). */
+  localDrives: Array<{ path: string; readOnly: boolean | null }> | null = null,
 ) {
   const host = {
     id: "rdp-1",
@@ -110,6 +112,7 @@ function createHarness(
     settings: {
       get: vi.fn(() => ({
         rdpMonitorsByHostId: monitors ? { "rdp-1": monitors } : {},
+        rdpDrivesByHostId: localDrives ? { "rdp-1": localDrives } : {},
       })),
     },
     hosts: {
@@ -468,6 +471,45 @@ describe("registerRdpIpcHandlers monitor layout", () => {
     );
   });
 
+  it("uses this device's shared folders, not the ones on the synced record", async () => {
+    // 드라이브는 기기 로컬 설정이다 — 경로가 이 기기의 것이라, 레코드에 두면 다른 기기까지
+    // 따라가서 열 수 없는 경로가 된다(모바일에서 RDP 가 아예 안 붙던 원인).
+    const harness = createHarness(
+      "AA:BB:CC",
+      null,
+      { drives: [{ path: "C:\\Users\\other\\Downloads", readOnly: null }] },
+      [{ path: "/Users/me/here", readOnly: true }],
+    );
+
+    await harness.connectAndVerify();
+
+    expect(harness.rdpManager.connect).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({
+        drives: [{ label: "here", path: "/Users/me/here", readOnly: true }],
+      }),
+      expect.objectContaining({ hostId: "rdp-1" }),
+    );
+  });
+
+  it("shares nothing when this device cleared the list, even if the record still has one", async () => {
+    // 빈 목록도 이 기기의 결정이다. 레코드로 폴백하면 여기서 끈 것이 다시 살아난다.
+    const harness = createHarness(
+      "AA:BB:CC",
+      null,
+      { drives: [{ path: "/Users/me/docs", readOnly: null }] },
+      [],
+    );
+
+    await harness.connectAndVerify();
+
+    expect(harness.rdpManager.connect).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ drives: [] }),
+      expect.objectContaining({ hostId: "rdp-1" }),
+    );
+  });
+
   it("sends no drives when none are shared", async () => {
     const harness = createHarness("AA:BB:CC");
     await harness.connectAndVerify();
@@ -795,7 +837,9 @@ describe("registerRdpIpcHandlers monitor spread", () => {
         startSsmTunnel: vi.fn(),
         stopSsmTunnel: vi.fn(async () => {}),
       },
-      settings: { get: vi.fn(() => ({ rdpMonitorsByHostId: {} })) },
+      settings: {
+        get: vi.fn(() => ({ rdpMonitorsByHostId: {}, rdpDrivesByHostId: {} })),
+      },
       hosts: {
         getById: vi.fn(() => host),
         updateRdpCertificateFingerprint: vi.fn(),

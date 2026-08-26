@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   describeRdpDrives,
+  resolveHostDrives,
+  type RdpDriveShare,
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
   isRdpHostRecord,
@@ -46,6 +48,7 @@ import {
 import { ShortcutsDialog } from '../ShortcutsDialog';
 import { SshKeyInstallDialog } from '../SshKeyInstallDialog';
 import { loadSavedCredential } from '../../services/desktop/settings';
+import { useAppStore } from '../../store/appStore';
 import { terminalThemePresets } from '../../lib/terminal-presets';
 import { getHostAddress, getHostRegion, getHostTypeLabel } from './hostDisplay';
 import {
@@ -529,6 +532,8 @@ function buildRdpRows(
   tailnets: Array<{ id: string; label: string }>,
   tailnetsLoaded: boolean,
   awsProfiles: Array<{ id: string | null; name: string }>,
+  /** 이 기기에 저장된 공유 폴더. 드라이브는 기기 로컬이라 레코드에서 읽으면 안 된다. */
+  localDrives: RdpDriveShare[],
 ): Array<{ label: string; value: React.ReactNode }> {
   const rows: Array<{ label: string; value: React.ReactNode }> = [];
   const account = buildRdpAccount(host, keychainEntries);
@@ -584,7 +589,7 @@ function buildRdpRows(
 
   // 이름은 원격에 그대로 뜨는 값이다 — 편집 화면과 같은 규칙(describeRdpDrives)으로 만든다.
   // 공유한 폴더는 원격에 그 안의 파일이 다 노출되므로, 무엇을 열어 뒀는지 여기서 보여야 한다.
-  const drives = describeRdpDrives(host.drives);
+  const drives = describeRdpDrives(localDrives);
   if (drives.length > 0) {
     rows.push({
       label: t('hostDetail.row.redirectedFolders'),
@@ -625,6 +630,8 @@ function buildConnectionRows(
   tailnets: Array<{ id: string; label: string }>,
   tailnetsLoaded: boolean,
   awsProfiles: Array<{ id: string | null; name: string }>,
+  /** 이 기기에 저장된 호스트별 공유 폴더. 드라이브는 동기화되지 않는다. */
+  drivesByHostId: Readonly<Record<string, RdpDriveShare[]>> | undefined,
 ): Array<{ label: string; value: React.ReactNode }> {
   const rows: Array<{ label: string; value: React.ReactNode }> = [];
   const address = getHostAddress(host);
@@ -651,7 +658,16 @@ function buildConnectionRows(
       rows.push({ label: 'Agent Forwarding', value: t('hostDetail.row.enabled') });
     }
   } else if (isRdpHostRecord(host)) {
-    rows.push(...buildRdpRows(host, keychainEntries, tailnets, tailnetsLoaded, awsProfiles));
+    rows.push(
+      ...buildRdpRows(
+        host,
+        keychainEntries,
+        tailnets,
+        tailnetsLoaded,
+        awsProfiles,
+        resolveHostDrives(host.id, drivesByHostId, host.drives),
+      ),
+    );
   } else if (isVncHostRecord(host)) {
     rows.push(...buildVncRows(host, hosts, keychainEntries, tailnets, tailnetsLoaded));
   } else if (host.kind === 'aws-ec2') {
@@ -1040,6 +1056,11 @@ function EmptyDetail({
 }
 
 export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
+  // 공유 폴더는 기기 로컬 설정이다 — 어느 폴더가 원격에 열려 있는지는 이 기기 기준으로 말해야
+  // 한다. 레코드 값을 그대로 보여주면 연결이 실제로 붙이는 것과 갈린다.
+  const localDrivesByHostId = useAppStore(
+    (state) => state.settings?.rdpDrivesByHostId,
+  );
   const { t: translate } = useTranslation();
   const { selectedHostId, hosts, favoriteHostIdSet } = hb;
   const host = useMemo(
@@ -1305,6 +1326,7 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
                 tailnets,
                 tailnetsLoaded,
                 awsProfiles,
+                localDrivesByHostId,
               ).map((row) => (
                 <InfoRow key={row.label} label={row.label} value={row.value} />
               ))}

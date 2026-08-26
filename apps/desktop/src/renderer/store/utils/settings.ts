@@ -72,6 +72,7 @@ export const defaultSettings: AppSettings = {
   // 기기 로컬 설정. 비면 코어가 `dolgate-<기기이름>` 을 쓴다.
   tailnetHostname: null,
   rdpMonitorsByHostId: {},
+  rdpDrivesByHostId: {},
   theme: "system",
   homeHostViewMode: "grid",
   globalTerminalThemeId: "system",

@@ -124,8 +124,8 @@ function createRdpHost(overrides: Partial<RdpHostRecord> = {}): RdpHostRecord {
     secretRef: 'rdp-secret',
     audioEnabled: true,
     clipboardEnabled: true,
-    microphoneEnabled: false,
-    cameraEnabled: false,
+    microphoneEnabled: true,
+    cameraEnabled: true,
     adminSession: true,
     colorDepth: 32,
     drives: [{ path: '/Users/mobile/Documents', readOnly: true }],
@@ -897,19 +897,18 @@ describe('mobile remote desktop connection paths', () => {
         username: secret.username,
         password: secret.password,
         domain: secret.domain,
+        // 소리는 호스트 설정을 따른다 — 폰에서도 쓸모가 있고 권한이 필요 없다.
         audioEnabled: true,
         clipboardEnabled: true,
+        // 마이크·카메라는 호스트에 켜 두었어도 폰에서는 붙이지 않는다(아래 픽스처가 켜 둔다).
         microphoneEnabled: false,
         cameraEnabled: false,
         adminSession: true,
         colorDepth: 32,
-        drives: [
-          {
-            label: 'Documents',
-            path: '/Users/mobile/Documents',
-            readOnly: true,
-          },
-        ],
+        // **호스트에 공유 폴더가 적혀 있어도 폰에서는 붙이지 않는다.** 폰에는 폴더를 고르는
+        // 화면이 없으니 그 값은 언제나 다른 기기 것이고, 네이티브가 못 여는 경로를 받으면
+        // 그 드라이브만 빼는 게 아니라 연결 자체를 거부한다.
+        drives: [],
       }),
     );
     expect(options?.dialAddress).toBeUndefined();

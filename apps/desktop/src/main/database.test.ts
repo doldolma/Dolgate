@@ -156,6 +156,38 @@ describe('HostRepository', () => {
     });
   });
 
+  it('호스트를 지우면 그 호스트의 기기 로컬 설정도 함께 버린다', async () => {
+    // 남겨 두면 없는 호스트의 설정이 쌓이고, 같은 id 가 재사용되면(가져오기 등) 엉뚱한 폴더
+    // 목록·모니터 배치가 되살아난다. **파일은 건드리지 않는다** — 경로를 적어 둔 줄만 지운다.
+    //
+    // SettingsRepository.get() 은 electron 의 app 을 읽어서 여기서는 못 쓴다(이 파일은 electron
+    // 을 목킹하지 않는다). 저장된 상태를 직접 본다.
+    const { HostRepository } = await loadRepositories();
+    const stateStorage = (await import('./state-storage')).getDesktopStateStorage();
+    const hosts = new HostRepository();
+
+    hosts.create('rdp-1', {
+      kind: 'rdp',
+      label: 'Office PC',
+      hostname: '10.0.0.5',
+      port: 3389,
+    });
+    stateStorage.updateState((state) => {
+      state.settings.rdpDrivesByHostId = {
+        'rdp-1': [{ path: '/Users/me/here', readOnly: true }],
+      };
+      state.settings.rdpMonitorsByHostId = {
+        'rdp-1': [{ id: 0, label: 'Main', width: 1920, height: 1080 }],
+      };
+    });
+
+    hosts.remove('rdp-1');
+
+    const settings = stateStorage.getState().settings;
+    expect(settings.rdpDrivesByHostId).not.toHaveProperty('rdp-1');
+    expect(settings.rdpMonitorsByHostId).not.toHaveProperty('rdp-1');
+  });
+
   it('toggles favorite and preserves it across host edits', async () => {
     const { HostRepository } = await loadRepositories();
     const hosts = new HostRepository();
@@ -438,6 +470,50 @@ describe('HostRepository', () => {
       awsProfileId: null,
       awsProfileName: '',
     });
+  });
+
+  it('공유를 껐다는 결정이 앱을 다시 켜도 살아남는다', async () => {
+    // 빈 목록은 "이 기기에서는 공유하지 않는다" 는 결정이다. 저장된 설정을 읽으며 항목째
+    // 지워 버리면(모니터 쪽 정규화가 그렇게 한다) 레코드에 남아 있는 옛 값이 폴백으로
+    // 되살아나서, 껐던 폴더가 다시 열린다.
+    const { HostRepository } = await loadRepositoriesWithStateFile({
+      schemaVersion: 1,
+      settings: {
+        theme: 'system',
+        sftpBrowserColumnWidths: DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
+        sessionReplayRetentionCount: 100,
+        serverUrlOverride: null,
+        rdpDrivesByHostId: {
+          'rdp-off': [],
+          'rdp-on': [{ path: '/Users/me/here', readOnly: true }],
+          // 경로가 빈 항목은 원격에 드라이브만 뜨고 접근이 전부 실패한다 — 버린다.
+          'rdp-bad': [{ path: '   ' }],
+        },
+        updatedAt: '2025-01-01T00:00:00.000Z'
+      },
+      terminal: {
+        globalThemeId: 'dolssh-dark',
+        globalThemeUpdatedAt: '2025-01-01T00:00:00.000Z',
+        fontFamily: 'jetbrains-mono',
+        fontSize: 13,
+        scrollbackLines: 5000,
+        lineHeight: 1,
+        letterSpacing: 0,
+        minimumContrastRatio: 1,
+        altIsMeta: false,
+        webglEnabled: true,
+        localUpdatedAt: '2025-01-01T00:00:00.000Z'
+      },
+      updater: { dismissedVersion: null, updatedAt: '2025-01-01T00:00:00.000Z' },
+      data: { hosts: [], groups: [] }
+    });
+    void HostRepository;
+
+    const stateStorage = (await import('./state-storage')).getDesktopStateStorage();
+    const drives = stateStorage.getState().settings.rdpDrivesByHostId;
+    expect(drives['rdp-off']).toEqual([]);
+    expect(drives['rdp-on']).toEqual([{ path: '/Users/me/here', readOnly: true }]);
+    expect(drives['rdp-bad']).toEqual([]);
   });
 
   it('keeps persisted AWS SFTP metadata after reloading state storage', async () => {

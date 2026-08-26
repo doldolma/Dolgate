@@ -125,20 +125,10 @@ func (e *Engine) openRDTunnelSSH(req rdTunnelRequest) (string, error) {
 		targetPort = req.Port
 	}
 
-	// Keep the complete payload intact and let internal/sshdial resolve its
-	// Tailnet route, host-key policy, authentication and jump chain exactly as a
-	// normal mobile SSH connection does. Re-resolving part of that path here is
-	// how new connection lifecycle features used to miss Remote Desktop.
-	payload := req.ConnectPayload
-	// rdTunnelRequest also has top-level Host/Port fields. encoding/json assigns
-	// those explicit fields instead of the embedded ConnectPayload fields with
-	// the same tags, so copy the gateway address back into the shared SSH payload.
-	payload.Host = req.Host
-	payload.Port = req.Port
 	dialer := &sshRDDialer{
 		engine:       e,
 		connectionID: req.ID,
-		payload:      payload,
+		payload:      sshPayloadFrom(req),
 		targetHost:   targetHost,
 		targetPort:   targetPort,
 	}
@@ -147,6 +137,33 @@ func (e *Engine) openRDTunnelSSH(req rdTunnelRequest) (string, error) {
 		return "", err
 	}
 	return marshalTunnelResult(t, "ssh")
+}
+
+// sshPayloadFrom 은 터널 요청에서 SSH 접속 페이로드를 조립한다.
+//
+// 페이로드는 통째로 넘긴다 — Tailnet 경로·호스트키 정책·인증·점프 체인을 internal/sshdial 이
+// 일반 모바일 SSH 접속과 똑같이 풀게 하려는 것이다. 그중 일부를 여기서 다시 해석하던 것이,
+// 연결 수명주기에 새 기능이 붙을 때마다 원격 데스크톱만 빠지던 이유였다.
+//
+// **되돌려 놓는 필드들이 이 함수의 존재 이유다.** rdTunnelRequest 는 최상위에도 host·port·
+// tailnetId·tailnetName 을 갖는데(tailscale 전송이 쓴다), 임베딩한 ConnectPayload 에도 같은
+// 이름의 필드가 있다. encoding/json 은 이름이 겹치면 **얕은 쪽에만** 값을 넣으므로, 안쪽
+// 페이로드는 그 넷이 빈 채로 온다. 조용히 빈다 — 오류도 경고도 없다.
+//
+// tailnetId 를 빠뜨렸을 때 실제로 벌어진 일: 게이트웨이로 가는 SSH 가 tailnet 없이 나가서,
+// 서브넷 라우터 뒤의 주소를 폰의 일반 네트워크에서 찾다가 "no route to host" 로 죽었다.
+// 화면에는 tailnet 단계가 전부 초록이었다(JS 는 제대로 넘겼으니까). 터미널은 이 구조체를 거치지
+// 않아 멀쩡했고, 데스크톱은 경로가 달라 멀쩡했다 — 그래서 모바일 VNC 에서만 안 됐다.
+//
+// 겹치는 이름이 늘면 여기도 같이 늘어야 한다. 그것을 사람 기억에 맡기지 않으려고
+// rdtunnel_test.go 가 두 구조체의 겹치는 json 이름을 훑어 이 함수가 전부 실어 보내는지 본다.
+func sshPayloadFrom(req rdTunnelRequest) coretypes.ConnectPayload {
+	payload := req.ConnectPayload
+	payload.Host = req.Host
+	payload.Port = req.Port
+	payload.TailnetID = req.TailnetID
+	payload.TailnetName = req.TailnetName
+	return payload
 }
 
 func (e *Engine) openRDTunnelSSM(req rdTunnelRequest) (string, error) {

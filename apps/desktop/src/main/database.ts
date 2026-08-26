@@ -1269,6 +1269,7 @@ export class HostRepository {
       // 이 호스트에 대해 기기 로컬로 골라 둔 모니터도 같이 버린다. 남겨 두면 없는 호스트의
       // 설정이 계속 쌓이고, 같은 id 가 재사용되면(가져오기 등) 엉뚱한 배치가 되살아난다.
       delete state.settings.rdpMonitorsByHostId[id];
+      delete state.settings.rdpDrivesByHostId[id];
     });
   }
 
@@ -1667,6 +1668,7 @@ export class SettingsRepository {
       // 상태에서 읽어야 한다. 여기 빈 객체를 두면 저장은 되는데 읽을 때마다 사라진다 —
       // get() 은 필드를 하나하나 나열하는 화이트리스트다.
       rdpMonitorsByHostId: state.settings.rdpMonitorsByHostId ?? {},
+      rdpDrivesByHostId: state.settings.rdpDrivesByHostId ?? {},
       dismissedUpdateVersion: state.updater.dismissedVersion,
       updatedAt: [
         state.settings.updatedAt,
@@ -1956,6 +1958,22 @@ export class SettingsRepository {
           }
         }
         state.settings.rdpMonitorsByHostId = next;
+        state.settings.updatedAt = nowIso();
+      }
+
+      // RDP 호스트별 공유 폴더. 같은 이유로 기기 로컬 전용이다.
+      //
+      // **모니터와 달리 빈 목록도 항목으로 남긴다.** 여기서 지우면 호스트 레코드에 남아 있는 옛
+      // 값이 다시 보이게 된다(resolveHostDrives 의 폴백) — 이 기기에서 공유를 끈 것이 다음
+      // 실행에 되살아난다.
+      if (Object.prototype.hasOwnProperty.call(input, 'rdpDrivesByHostId')) {
+        const next: Record<string, RdpDriveShare[]> = {};
+        for (const [hostId, drives] of Object.entries(input.rdpDrivesByHostId ?? {})) {
+          if (hostId.trim() && Array.isArray(drives)) {
+            next[hostId] = drives.filter((drive) => drive?.path?.trim());
+          }
+        }
+        state.settings.rdpDrivesByHostId = next;
         state.settings.updatedAt = nowIso();
       }
 

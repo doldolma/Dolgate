@@ -127,6 +127,7 @@ export interface DesktopStateFile {
      * 모니터를 쓸 것인가"(useAllMonitors)만 남고 세부 선택은 여기 있다.
      */
     rdpMonitorsByHostId: Record<string, RdpMonitorSelection[]>;
+    rdpDrivesByHostId: Record<string, RdpDriveShare[]>;
     updatedAt: string;
   };
   terminal: {
@@ -572,6 +573,7 @@ function createDefaultStateFile(): DesktopStateFile {
       serverUrlOverride: null,
       tailnetHostname: null,
       rdpMonitorsByHostId: {},
+      rdpDrivesByHostId: {},
       updatedAt: timestamp
     },
     terminal: {
@@ -760,6 +762,33 @@ function normalizeStoredRdpMonitorsByHost(
     if (normalized) {
       result[hostId] = normalized;
     }
+  }
+  return result;
+}
+
+/**
+ * 기기 로컬 드라이브 목록. **빈 목록도 항목으로 남긴다** — "이 기기에서는 공유하지 않는다" 는
+ * 결정이라, 지워 버리면 레코드에 남아 있는 옛 값이 다음 실행에 되살아난다(resolveHostDrives).
+ */
+function normalizeStoredRdpDrivesByHost(
+  value: unknown
+): Record<string, RdpDriveShare[]> {
+  if (!isObject(value)) {
+    return {};
+  }
+  const result: Record<string, RdpDriveShare[]> = {};
+  for (const [hostId, drives] of Object.entries(value)) {
+    if (!hostId.trim() || !Array.isArray(drives)) {
+      continue;
+    }
+    const normalized: RdpDriveShare[] = [];
+    for (const drive of drives) {
+      if (!isObject(drive) || typeof drive.path !== 'string' || !drive.path.trim()) {
+        continue;
+      }
+      normalized.push({ path: drive.path, readOnly: drive.readOnly === true });
+    }
+    result[hostId] = normalized;
   }
   return result;
 }
@@ -1284,6 +1313,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
           ? settings.tailnetHostname.trim()
           : null,
       rdpMonitorsByHostId: normalizeStoredRdpMonitorsByHost(settings.rdpMonitorsByHostId),
+      rdpDrivesByHostId: normalizeStoredRdpDrivesByHost(settings.rdpDrivesByHostId),
       updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : fallback.settings.updatedAt
     },
     terminal: {

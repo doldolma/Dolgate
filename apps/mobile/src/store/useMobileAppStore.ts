@@ -61,7 +61,6 @@ import {
 import { mergeSyncedState } from '../lib/sync-merge';
 import {
   buildAwsSsmKnownHostIdentity,
-  describeRdpDrives,
   computeVaultDekVerifier,
   createVaultDek,
   createVaultKdfDescriptor,
@@ -828,6 +827,18 @@ export interface MobileRemoteDesktopDraftInput {
   viewOnly?: boolean | null;
   imageQuality?: VncImageQuality | null;
   sshTunnelHostId?: string | null;
+  /**
+   * RDP 전용. 전부 **동기화되는 호스트 값**이라, 여기서 고치면 데스크톱에도 적용된다.
+   *
+   * 마이크·카메라는 폰이 붙이지 않지만 값은 그대로 저장한다 — 이 폼은 호스트를 고치는 것이고,
+   * 폰에서만 안 보이면 폰으로 호스트를 만든 사람은 데스크톱에서 왜 꺼져 있는지 알 수 없다.
+   */
+  adminSession?: boolean | null;
+  colorDepth?: 16 | 32 | null;
+  audioEnabled?: boolean | null;
+  clipboardEnabled?: boolean | null;
+  microphoneEnabled?: boolean | null;
+  cameraEnabled?: boolean | null;
 }
 
 interface MobileAppState {
@@ -5734,15 +5745,29 @@ export const useMobileAppStore = create<MobileAppState>()(
                   domain: secret?.domain?.trim() || undefined,
                   audioEnabled: host.audioEnabled ?? true,
                   clipboardEnabled: host.clipboardEnabled ?? true,
-                  microphoneEnabled: host.microphoneEnabled ?? false,
-                  cameraEnabled: host.cameraEnabled ?? false,
+                  // **마이크·카메라는 폰에서 붙이지 않는다.** 폰의 마이크·카메라를 원격에
+                  // 넘기는 것은 쓸 일이 드물고 OS 권한 프롬프트만 뜬다. 호스트에 켜 두었더라도
+                  // 그것은 데스크톱에서 쓰겠다는 뜻이므로, 편집 화면은 값을 그대로 보여주고
+                  // 붙이는 것만 여기서 뺀다.
+                  //
+                  // 소리는 다르다 — 원격의 소리를 폰 스피커로 듣는 것은 실제로 쓸모가 있고
+                  // 권한도 필요 없어서 호스트 설정을 그대로 따른다.
+                  microphoneEnabled: false,
+                  cameraEnabled: false,
                   adminSession: host.adminSession ?? false,
                   colorDepth: host.colorDepth ?? 32,
-                  drives: describeRdpDrives(host.drives).map(drive => ({
-                    label: drive.name,
-                    path: drive.path,
-                    readOnly: drive.readOnly,
-                  })),
+                  // **드라이브 공유는 모바일에서 붙이지 않는다.**
+                  //
+                  // 폰에는 공유할 폴더를 고르는 화면이 없다. 그래서 호스트에 적힌 경로는 언제나
+                  // 다른 기기에서 온 것이고(`C:\Users\…` 같은), 폰에서 유효할 수가 없다.
+                  //
+                  // 그냥 무시되는 것도 아니다 — 네이티브가 못 여는 경로를 받으면 그 드라이브만
+                  // 빼는 게 아니라 **연결 자체를 거부한다**. 그래서 데스크톱에서 폴더 하나를
+                  // 공유해 둔 것만으로 폰에서 RDP 가 아예 안 붙었다.
+                  //
+                  // 나중에 폰에서도 공유하고 싶어지면 먼저 폰 안의 경로를 고르는 화면부터
+                  // 만들어야 한다. 여기서 호스트의 값을 그대로 쓰는 일은 없다.
+                  drives: [],
                 };
           await nativeConnect(rdId, connectOptions);
           runtime.nativeStarted = true;
@@ -8720,7 +8745,38 @@ export const useMobileAppStore = create<MobileAppState>()(
                     ? { sshTunnelHostId: input.sshTunnelHostId }
                     : {}),
                 } as HostRecord)
-              : ({ ...base, kind: 'rdp' } as HostRecord);
+              : ({
+                  ...base,
+                  kind: 'rdp',
+                  // VNC 와 같은 규약 — **기본값인 쪽은 null 로 쓴다.** 소리·클립보드는 없으면
+                  // 켜짐, 나머지는 없으면 꺼짐, 색 깊이는 없으면 32다(데스크톱 연결 경로가
+                  // 그렇게 읽는다). 기본을 명시값으로 굳혀 두면 나중에 기본을 바꿀 여지가
+                  // 사라지고 데스크톱이 쓰는 정규형과도 달라진다.
+                  ...(input.adminSession !== undefined
+                    ? { adminSession: input.adminSession === true ? true : null }
+                    : {}),
+                  ...(input.colorDepth !== undefined
+                    ? { colorDepth: input.colorDepth === 16 ? 16 : null }
+                    : {}),
+                  ...(input.audioEnabled !== undefined
+                    ? { audioEnabled: input.audioEnabled === false ? false : null }
+                    : {}),
+                  ...(input.clipboardEnabled !== undefined
+                    ? {
+                        clipboardEnabled:
+                          input.clipboardEnabled === false ? false : null,
+                      }
+                    : {}),
+                  ...(input.microphoneEnabled !== undefined
+                    ? {
+                        microphoneEnabled:
+                          input.microphoneEnabled === true ? true : null,
+                      }
+                    : {}),
+                  ...(input.cameraEnabled !== undefined
+                    ? { cameraEnabled: input.cameraEnabled === true ? true : null }
+                    : {}),
+                } as HostRecord);
 
           // **저장된 시크릿을 잇는다.** 처음부터 다시 만들면 이번에 넘어오지 않은 항목이
           // 지워진다 — 비밀번호만 바꿨는데 계정이 사라지면 RDP 는 계정이 시크릿에만 있어

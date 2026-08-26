@@ -1,6 +1,6 @@
 import React from "react";
 import renderer, { act } from "react-test-renderer";
-import { TextInput } from "react-native";
+import { Text, TextInput } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import type { HostRecord, VncHostRecord } from "@dolssh/shared-core";
 import {
@@ -405,6 +405,131 @@ describe("원격 데스크톱 호스트 폼", () => {
   });
 
   // 주소만 봐서는 SSM 을 거치는지 알 수 없다 — 사설 IP 가 적혀 있어 직접 붙는 것처럼 보인다.
+  it("RDP 고급은 접혀 있고, 열면 동기화되는 설정들이 나온다", async () => {
+    const host = rdpHost();
+    resetStore([host]);
+    mockRouteParams = { hostId: host.id };
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = render();
+    });
+
+    // 접혀 있는 동안에는 안쪽 항목이 없다 — 자주 쓰는 칸이 안 쓰는 항목에 묻히면 안 된다.
+    expect(() => findPressableByText(tree!.root, "마이크")).toThrow();
+
+    await act(async () => {
+      findPressableByText(tree!.root, "고급").props.onPress();
+    });
+
+    for (const label of ["관리 세션", "소리", "클립보드", "32비트", "16비트"]) {
+      expect(findPressableByText(tree!.root, label)).toBeTruthy();
+    }
+    // 폰이 붙이지 않는 설정은 아예 두지 않는다 — 손에 든 기기에서 아무 일도 안 하는 토글은
+    // footer 로 해명해야만 읽히는 거짓말이 된다. 값은 저장부가 보존한다.
+    for (const label of ["마이크", "카메라", "전체 모니터"]) {
+      expect(() => findPressableByText(tree!.root, label)).toThrow();
+    }
+  });
+
+  it("RDP 고급에서 고친 값이 호스트에 저장된다", async () => {
+    const host = rdpHost();
+    resetStore([host]);
+    useMobileAppStore.setState({
+      secretsByRef: {
+        "secret-rdp": {
+          secretRef: "secret-rdp",
+          label: "Office PC credentials",
+          kind: "rdp",
+          username: "Administrator",
+          domain: "CORP",
+          password: "hunter2",
+          updatedAt: "2026-08-01T00:00:00.000Z",
+        },
+      },
+    });
+    mockRouteParams = { hostId: host.id };
+    const saveMock = jest.fn(async () => undefined);
+    useMobileAppStore.setState({ saveRemoteDesktopHost: saveMock });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = render();
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "고급").props.onPress();
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "16비트").props.onPress();
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "변경 사항 저장").props.onPress();
+    });
+
+    expect(saveMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostId: "rdp-1",
+        kind: "rdp",
+        colorDepth: 16,
+        // 손대지 않은 것은 기본값 그대로 실린다(저장부가 기본이면 null 로 접는다).
+        adminSession: false,
+        audioEnabled: true,
+        clipboardEnabled: true,
+      }),
+    );
+    // 폼에 없는 것은 **보내지 않는다** — 저장부가 생략을 보존으로 읽어, 데스크톱에서 켜 둔
+    // 마이크·카메라가 폰에서 저장했다고 꺼지면 안 된다.
+    const saved = (saveMock.mock.calls as unknown as Array<
+      [Record<string, unknown>]
+    >)[0][0];
+    expect(saved).not.toHaveProperty("microphoneEnabled");
+    expect(saved).not.toHaveProperty("cameraEnabled");
+    expect(saved).not.toHaveProperty("useAllMonitors");
+  });
+
+  it("RDP 고급에서 태그를 붙여 저장한다", async () => {
+    // 데스크톱에서 붙인 태그를 모바일이 보존만 하고 있었다 — 여기서도 고칠 수 있어야 한다.
+    const host = rdpHost();
+    resetStore([host]);
+    useMobileAppStore.setState({
+      secretsByRef: {
+        "secret-rdp": {
+          secretRef: "secret-rdp",
+          label: "Office PC credentials",
+          kind: "rdp",
+          username: "Administrator",
+          domain: "CORP",
+          password: "hunter2",
+          updatedAt: "2026-08-01T00:00:00.000Z",
+        },
+      },
+    });
+    mockRouteParams = { hostId: host.id };
+    const saveMock = jest.fn(async () => undefined);
+    useMobileAppStore.setState({ saveRemoteDesktopHost: saveMock });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = render();
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "고급").props.onPress();
+    });
+    await act(async () => {
+      findInput(tree!.root, "태그 추가").props.onChangeText("사무실");
+    });
+    await act(async () => {
+      findInput(tree!.root, "태그 추가").props.onSubmitEditing();
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "변경 사항 저장").props.onPress();
+    });
+
+    expect(saveMock).toHaveBeenCalledWith(
+      expect.objectContaining({ hostId: "rdp-1", tags: ["사무실"] }),
+    );
+  });
+
   it("SSM 경유 호스트는 인스턴스·리전·프로파일을 보여준다", async () => {
     const host = rdpHost();
     resetStore([host]);

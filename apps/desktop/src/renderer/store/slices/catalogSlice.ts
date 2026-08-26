@@ -5,6 +5,8 @@ import {
   getGroupLabel,
   isDirectGroupChild,
   planGroupReorder,
+  resolveHostDrives,
+  withHostDrives,
 } from "@shared";
 import {
   AWS_SFTP_DEFAULT_PORT,
@@ -557,6 +559,26 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
               const next = await api.hosts.create(
                 toHostDraft(current, buildDuplicateHostLabel(current, workingHosts)),
               );
+              // 공유 폴더는 기기 로컬 설정에 있다 — 레코드를 복사하는 것만으로는 따라오지
+              // 않는다. 복제는 **같은 기기 안**에서 일어나므로 경로가 그대로 유효하고, 원본이
+              // 열어 둔 폴더가 복제본에서 조용히 사라지면 왜 파일이 안 보이는지 알 수 없다.
+              if (current.kind === "rdp") {
+                const drives = resolveHostDrives(
+                  current.id,
+                  get().settings.rdpDrivesByHostId,
+                  current.drives,
+                );
+                if (drives.length > 0) {
+                  const settings = await api.settings.update({
+                    rdpDrivesByHostId: withHostDrives(
+                      get().settings.rdpDrivesByHostId,
+                      next.id,
+                      drives,
+                    ),
+                  });
+                  set({ settings });
+                }
+              }
               workingHosts = sortHosts([
                 ...workingHosts.filter((host) => host.id !== next.id),
                 next,

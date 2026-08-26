@@ -472,7 +472,18 @@
         "fast": "Fastest",
         "balanced": "Balanced",
         "lossless": "Lossless"
-      }
+      },
+      "adminSession": "Admin session",
+      "audio": "Sound",
+      "audioOff": "Sound off",
+      "clipboard": "Clipboard",
+      "clipboardOff": "Clipboard off",
+      "colorDepth": "Color depth",
+      "colorDepthValue": {
+        "16": "16-bit",
+        "32": "32-bit"
+      },
+      "sessionHint": "An admin session uses no license and connects even when sessions are full."
     },
     "kindSection": "Kind",
     "kindUnsupported": "This server cannot host RDP or VNC entries. Update the server to enable them."

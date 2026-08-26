@@ -5,9 +5,13 @@ import {
   getGroupLabel,
   getParentGroupPath,
   getHostSecretRef,
+  detachHostDrives,
   isAwsEc2HostRecord,
+  isRdpHostRecord,
   isSshHostRecord,
   normalizeGroupPath,
+  resolveHostDrives,
+  withHostDrives,
   type AuthState,
   type HostDraft,
   type HomeHostViewMode,
@@ -132,7 +136,27 @@ export function HomeShell({
     homeViewModel.hostDrawer.mode === 'edit'
       ? homeViewModel.hostDrawer.hostId
       : null;
-  const currentHost = findHost(homeViewModel.hosts, editingHostId);
+  const editedHost = findHost(homeViewModel.hosts, editingHostId);
+  /**
+   * 편집기에 넘길 호스트. 공유 폴더만 **이 기기의 값**으로 갈아 끼운다.
+   *
+   * 드라이브는 기기 로컬 설정이지만(경로가 이 기기의 것이다) 편집 화면은 호스트 하나만 받는
+   * 프롭 컴포넌트다. 폼에 설정을 따로 흘려보내는 대신 여기서 한 번 바꿔 주면, 폼은 예전과 똑같이
+   * `host.drives` 만 보면 된다 — 저장은 아래 onSubmit 이 레코드가 아니라 설정으로 보낸다.
+   */
+  const currentHost = useMemo(() => {
+    if (!editedHost || !isRdpHostRecord(editedHost)) {
+      return editedHost;
+    }
+    return {
+      ...editedHost,
+      drives: resolveHostDrives(
+        editedHost.id,
+        settingsViewModel.settings.rdpDrivesByHostId,
+        editedHost.drives,
+      ),
+    };
+  }, [editedHost, settingsViewModel.settings.rdpDrivesByHostId]);
   const hostDrawerRef = useRef<HostDrawerHandle | null>(null);
   /**
    * 편집기를 떠나려는 동작. 저장하지 않은 변경이 있어서 확인을 기다리는 동안만 값이 있다.
@@ -500,11 +524,24 @@ export function HomeShell({
       onClose={homeViewModel.closeHostDrawer}
       onSubmit={async (draft, secrets) => {
         const isEdit = homeViewModel.hostDrawer.mode === 'edit';
+        // 공유 폴더는 **레코드로 내보내지 않는다.** 경로가 이 기기의 것이라 동기화되면 다른
+        // 기기에서 열 수 없는 값이 된다(모니터 세부 선택과 같은 이유). 저장한 뒤 그 호스트의
+        // 기기 로컬 설정에 넣는다 — 새로 만든 경우에도 id 는 저장이 끝나야 나온다.
+        const { draft: outgoing, drives } = detachHostDrives(draft);
         const saved = await homeViewModel.saveHost(
           isEdit ? currentHost?.id ?? null : null,
-          draft,
+          outgoing,
           secrets,
         );
+        if (drives !== null) {
+          await settingsViewModel.updateSettings({
+            rdpDrivesByHostId: withHostDrives(
+              settingsViewModel.settings.rdpDrivesByHostId,
+              saved.id,
+              drives,
+            ),
+          });
+        }
         // 새로 생성한 경우엔 편집 창으로 넘어가지 않고, saveHost가 닫은 드로어 뒤로 방금
         // 만든 호스트를 선택(상세) 화면으로 보여준다. 편집 저장은 드로어에서 기존대로 처리.
         if (!isEdit) {
