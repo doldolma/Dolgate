@@ -101,3 +101,54 @@ describe("네트워크를 고르지 않았을 때", () => {
     expect(resolveContainerTunnelTarget(details, "", 9090).port).toBe(9090);
   });
 });
+
+describe("host 네트워킹", () => {
+  function createHostNetworked(): HostContainerDetails {
+    return {
+      ...createDetails(),
+      name: "node-exporter",
+      // host 모드 컨테이너는 자기 IP 가 없다 — inspect 가 이름만 주고 IP 는 빈 문자열이다.
+      networks: [{ name: "host", ipAddress: "", aliases: [] }],
+      ports: [{ containerPort: 9100, protocol: "tcp", publishedBindings: [] }],
+    };
+  }
+
+  it("IP 가 없으면 그 호스트의 루프백으로 간다", () => {
+    expect(resolveContainerTunnelTarget(createHostNetworked(), "", 9100)).toEqual({
+      host: "127.0.0.1",
+      port: 9100,
+      source: "host-network",
+    });
+  });
+
+  it("네트워크를 host 로 지정해도 같다", () => {
+    expect(resolveContainerTunnelTarget(createHostNetworked(), "host", 9100)).toEqual({
+      host: "127.0.0.1",
+      port: 9100,
+      source: "host-network",
+    });
+  });
+
+  it("IP 가 있는 네트워크가 있으면 그쪽이 이긴다", () => {
+    const details = {
+      ...createHostNetworked(),
+      networks: [
+        { name: "host", ipAddress: "", aliases: [] },
+        { name: "bridge", ipAddress: "172.19.0.4", aliases: [] },
+      ],
+    };
+    expect(resolveContainerTunnelTarget(details, "", 9100).host).toBe("172.19.0.4");
+  });
+
+  it("host 가 아니면서 IP 도 없으면 여전히 알린다 — --network none 같은 경우", () => {
+    const details = {
+      ...createHostNetworked(),
+      networks: [{ name: "none", ipAddress: "", aliases: [] }],
+    };
+    expect(() => resolveContainerTunnelTarget(details, "", 9100)).toThrow();
+  });
+
+  it("host 네트워킹이어도 모르는 포트는 대상이 되지 않는다", () => {
+    expect(() => resolveContainerTunnelTarget(createHostNetworked(), "", 9200)).toThrow();
+  });
+});

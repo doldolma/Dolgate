@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { WorkspaceLayoutNode, WorkspaceTab } from "../types";
 import {
+  clearSessionScopedState,
+  useSessionScopedState,
+} from '../../components/terminal-workspace/session-panel/useSessionScopedState';
+import { removeSessionFromState } from './workspaces';
+import {
   asSessionTabId,
   asWorkspaceTabId,
   parseTmuxLayout,
@@ -188,5 +193,54 @@ describe("parseTmuxLayout", () => {
     expect(parseTmuxLayout("", id)).toBeNull();
     expect(parseTmuxLayout("garbage", id)).toBeNull();
     expect(parseTmuxLayout("bd5e,80x24,0,0{40x24,0,0,1", id)).toBeNull();
+  });
+});
+
+describe("세션이 사라지면 그 세션 것도 함께 버린다", () => {
+  it("패널이 기억해 둔 화면 상태와 열어 둔 터널을 지운다", () => {
+    // 앱을 오래 켜 두면 죽은 세션의 검색어·펼침 상태가 모듈 맵에 쌓인다. 재연결은 이 함수를
+    // 지나지 않으므로 "돌아오면 보던 그대로" 는 그대로다.
+    const state = {
+      tabs: [{ sessionId: "session-1", stableId: "stable-1" }],
+      tabStrip: [],
+      workspaces: [],
+      activeWorkspaceTab: "home",
+      homeSection: "hosts",
+      settingsSection: null,
+      activeContainerHostId: null,
+      sessionReturnTargets: {},
+      resolvedStartupCommandsBySessionId: {},
+      pendingConnectionAttempts: [],
+      pendingInteractiveAuths: [],
+      pendingCredentialRetry: null,
+      sessionShareChatNotifications: {},
+      tmuxGroups: [],
+      portForwardRuntimes: [],
+      recentlyClosedHosts: [],
+      queuedHostKeyPrompts: [],
+      pendingHostKeyPrompt: null,
+      connectionHops: {},
+      aiConversations: {},
+      sessionContainerTunnels: {
+        "session-1": [
+          {
+            ruleId: "container-service-tunnel:1",
+            containerId: "abc",
+            containerName: "web",
+            targetPort: 80,
+            bindPort: 12345,
+            status: "running",
+          },
+        ],
+        "session-2": [],
+      },
+    } as never;
+
+    const next = removeSessionFromState(state, "session-1") as {
+      sessionContainerTunnels: Record<string, unknown[]>;
+    };
+
+    expect(next.sessionContainerTunnels["session-1"]).toBeUndefined();
+    expect(next.sessionContainerTunnels["session-2"]).toBeDefined();
   });
 });

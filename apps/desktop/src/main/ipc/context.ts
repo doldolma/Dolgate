@@ -209,6 +209,8 @@ export interface MainIpcContext {
     targetPort: number;
     bindAddress: string;
     bindPort: number;
+    /** 패널이 이미 알고 있는 네트워크. 있으면 코어에 다시 묻지 않는다. */
+    networks?: readonly { name: string; ipAddress: string }[];
   }) => Promise<unknown>;
   resolveWindowFromSender: (sender: WebContents) => BrowserWindow;
   buildWindowState: (window: BrowserWindow) => DesktopWindowState;

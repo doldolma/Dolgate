@@ -336,6 +336,8 @@ export interface SessionContainerTunnel {
   /** 우리가 잡은 로컬 포트. 코어가 빈 포트를 골라 알려 줄 때까지 0. */
   bindPort: number;
   status: 'starting' | 'running' | 'error';
+  /** 열기를 누른 시각. 응답이 영영 안 와도 다시 누를 수 있게 하는 기준이다. */
+  startedAtMs: number;
   message?: string;
 }
 
@@ -1309,6 +1311,11 @@ interface AppStateParts {
     containerName: string;
     networkName: string;
     targetPort: number;
+    /**
+     * 어디로 연결할지의 근거를 가져오는 함수. **"여는 중" 을 찍은 뒤에 부른다** — 값이 이미
+     * 있으면 그 자리에서 돌아오고, 없으면 한 번 물어보는 동안 화면은 이미 반응해 있다.
+     */
+    resolveNetworks?: () => Promise<readonly { name: string; ipAddress: string }[]>;
   }) => Promise<void>;
   /** 연 터널을 닫는다. */
   closeSessionContainerTunnel: (sessionId: string, ruleId: string) => Promise<void>;

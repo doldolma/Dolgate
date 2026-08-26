@@ -422,39 +422,94 @@ export interface DockerPortEntry {
  * 둘 다 필요한 이유: 공개된 포트만 보여 주면 "컨테이너 안에서만 열린 포트" 를 열 수 없고,
  * 노출 포트만 보여 주면 어느 것이 이미 호스트에 열려 있는지 알 수 없다.
  */
+/**
+ * 한 컨테이너가 목록에 올릴 포트 상한. 범위 게시(`-p 3000-3100:3000-3100`)는 줄이 수백 개가 될
+ * 수 있어 앞에서 끊는다 — 그 이상은 터미널에서 볼 일이다.
+ */
+export const MAX_PORT_ENTRIES = 24;
+
+/** `3000` 또는 `3000-3002` 를 포트 배열로. 범위는 상한까지만 편다. */
+function expandPortRange(text: string, limit: number): number[] {
+  const [fromText, toText] = text.split('-');
+  const from = Number(fromText);
+  if (!Number.isFinite(from)) {
+    return [];
+  }
+  const to = toText === undefined ? from : Number(toText);
+  if (!Number.isFinite(to) || to < from) {
+    return [from];
+  }
+  const ports: number[] = [];
+  for (let port = from; port <= to && ports.length < limit; port += 1) {
+    ports.push(port);
+  }
+  return ports;
+}
+
+/**
+ * 행에 보여 줄 포트 목록. `ps` 의 공개 매핑과 `inspect` 의 노출 포트를 합친다.
+ *
+ * 둘 다 필요한 이유: 공개된 포트만 보여 주면 "컨테이너 안에서만 열린 포트" 를 열 수 없고,
+ * 노출 포트만 보여 주면 어느 것이 이미 호스트에 열려 있는지 알 수 없다.
+ *
+ * `ps` 의 포트 칸은 세 가지 모양으로 온다. 셋 다 읽는다 — 예전에는 첫 줄만 읽어서 **범위로 게시한
+ * 컨테이너는 포트가 하나도 안 보였다.**
+ *   `0.0.0.0:5050->5050/tcp`            공개된 하나
+ *   `0.0.0.0:3000-3002->3000-3002/tcp`  범위로 공개
+ *   `8080/tcp`                          공개되지 않은 노출 포트
+ */
+export interface DockerPortList {
+  entries: DockerPortEntry[];
+  /** 상한을 넘어 빼놓은 포트 수. 0 이 아니면 화면이 그렇게 말한다(조용히 자르지 않는다). */
+  omitted: number;
+}
+
 export function resolveContainerPorts(
   container: DockerContainer,
   info: DockerInspectInfo | undefined,
-): DockerPortEntry[] {
+): DockerPortList {
   const entries = new Map<string, DockerPortEntry>();
-  for (const part of container.ports.split(',')) {
-    const match = /(?::(\d+))?->(\d+)\/(\w+)/.exec(part.trim());
-    if (!match) {
-      continue;
-    }
-    const containerPort = Number(match[2]);
-    const key = `${containerPort}/${match[3]}`;
-    const published = match[1] ? Number(match[1]) : null;
+  const put = (containerPort: number, protocol: string, publishedPort: number | null) => {
+    const key = `${containerPort}/${protocol}`;
     const existing = entries.get(key);
     // 같은 포트가 IPv4·IPv6 두 줄로 오므로 먼저 온 공개 포트를 지킨다.
-    if (!existing || (existing.publishedPort === null && published !== null)) {
-      entries.set(key, { containerPort, protocol: match[3], publishedPort: published });
+    if (!existing || (existing.publishedPort === null && publishedPort !== null)) {
+      entries.set(key, { containerPort, protocol, publishedPort });
+    }
+  };
+  for (const part of container.ports.split(',')) {
+    const mapped = /^(?:.*?:)?([\d-]+)->([\d-]+)\/(\w+)$/.exec(part.trim());
+    if (mapped) {
+      const hostPorts = expandPortRange(mapped[1], MAX_PORT_ENTRIES);
+      const containerPorts = expandPortRange(mapped[2], MAX_PORT_ENTRIES);
+      containerPorts.forEach((containerPort, index) => {
+        // 범위는 앞에서부터 짝이 맞는다(3000-3002 → 3000-3002). 짝이 없으면 공개된 것으로
+        // 보지 않는다 — 첫 포트로 돌려 쓰면 "3001 이 8000 에 열려 있다" 는 거짓이 된다.
+        put(containerPort, mapped[3], hostPorts[index] ?? null);
+      });
+      continue;
+    }
+    // 공개되지 않은 노출 포트도 `ps` 가 준다(`8080/tcp`).
+    const exposed = /^([\d-]+)\/(\w+)$/.exec(part.trim());
+    if (exposed) {
+      for (const containerPort of expandPortRange(exposed[1], MAX_PORT_ENTRIES)) {
+        put(containerPort, exposed[2], null);
+      }
     }
   }
   for (const exposed of info?.exposedPorts ?? []) {
     const [portText, protocol = 'tcp'] = exposed.split('/');
-    const containerPort = Number(portText);
-    if (!Number.isFinite(containerPort)) {
-      continue;
-    }
-    const key = `${containerPort}/${protocol}`;
-    if (!entries.has(key)) {
-      entries.set(key, { containerPort, protocol, publishedPort: null });
+    for (const containerPort of expandPortRange(portText, MAX_PORT_ENTRIES)) {
+      put(containerPort, protocol, null);
     }
   }
-  return [...entries.values()].sort(
+  const sorted = [...entries.values()].sort(
     (left, right) => left.containerPort - right.containerPort,
   );
+  return {
+    entries: sorted.slice(0, MAX_PORT_ENTRIES),
+    omitted: Math.max(0, sorted.length - MAX_PORT_ENTRIES),
+  };
 }
 
 /** 호스트에 열린 포트만 뽑는다(`0.0.0.0:5050->5050/tcp, :::5050->…` → ['5050']). */
@@ -550,17 +605,36 @@ export interface DockerInspectInfo {
   oomKilled: boolean;
   /** 컨테이너가 여는 포트("80/tcp"). 공개 여부와 무관하다. */
   exposedPorts: string[];
+  /** 붙어 있는 네트워크. 터널이 어디로 갈지 정하는 근거다(host 네트워킹은 IP 가 빈다). */
+  networks: DockerContainerNetwork[];
+}
+
+/** 컨테이너가 붙은 네트워크 한 줄. */
+export interface DockerContainerNetwork {
+  name: string;
+  ipAddress: string;
 }
 
 const STATS_FIELDS =
   '{{.ID}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}';
 
-// Health 는 헬스체크가 없으면 nil 이라 `{{if}}` 로 감싸야 템플릿이 죽지 않는다.
+// **선택 키는 `index` 로 읽는다.** docker 는 `{{.Id}}`(구조체 필드명은 `ID` 다)를 만나면 구조체
+// 렌더링을 포기하고 원본 JSON 맵으로 물러나는데, 맵 모드는 `missingkey=error` 라서 없는 키를
+// 만지는 순간 그 줄이 통째로 사라진다(여러 id 를 넘기면 그 줄만 조용히 빠진다). `.State.Health` 는
+// 헬스체크가 없는 컨테이너에 아예 없는 키라 `{{if}}` 로 감싸도 소용없다 — 검사가 아니라 접근이
+// 오류다. 그래서 헬스체크 없는 컨테이너에서 재시작·헬스·OOM·노출 포트가 전부 오지 않았다.
+// `index` 는 없는 키에 빈 값을 준다.
 // 마지막 칸은 컨테이너가 여는 포트다 — `ps` 는 **호스트에 공개된 것만** 준다. 공개되지 않은
-// 포트도 컨테이너 네트워크로는 열 수 있어야 하므로 여기서 함께 받는다.
+// 포트도 컨테이너 네트워크로는 열 수 있어야 하므로 여기서 함께 받는다(host 네트워킹 컨테이너는
+// `ps` 가 포트를 아예 주지 않아 이것이 유일한 출처다).
 const INSPECT_FIELDS =
-  '{{.Id}}\t{{.RestartCount}}\t{{if .State.Health}}{{.State.Health.Status}}{{end}}' +
-  '\t{{.State.OOMKilled}}\t{{range $port, $unused := .Config.ExposedPorts}}{{$port}} {{end}}';
+  '{{.Id}}\t{{index . "RestartCount"}}\t{{with index .State "Health"}}{{index . "Status"}}{{end}}' +
+  '\t{{index .State "OOMKilled"}}' +
+  '\t{{range $port, $unused := index .Config "ExposedPorts"}}{{$port}} {{end}}' +
+  // 네트워크도 여기서 함께 받는다 — 터널을 열 때 컨테이너 IP 를 다시 물으러 가지 않게.
+  // **`$net.IPAddress` 로 읽으면 안 된다**: 구조체 모드에서 host 네트워킹의 빈 IP 가
+  // `invalid IP` 라는 글자로 찍힌다(실제로 그렇게 나왔다). `index` 는 빈 문자열을 준다.
+  '\t{{range $name, $net := index .NetworkSettings "Networks"}}{{$name}}={{index $net "IPAddress"}};{{end}}';
 
 /**
  * 지표(+ 검사)를 받는다. **목록과 다른 왕복이다.**
@@ -676,13 +750,49 @@ export function parseStats(stdout: string): Map<string, DockerStat> {
   return stats;
 }
 
+/**
+ * `name=ip;` 로 온 네트워크 목록을 가른다. host 네트워킹이면 IP 가 빈 채로 이름만 온다 —
+ * **그 빈 값이 정보다**(그 컨테이너는 호스트의 네트워크를 그대로 쓴다).
+ */
+export function parseContainerNetworks(text: string): DockerContainerNetwork[] {
+  const networks: DockerContainerNetwork[] = [];
+  for (const part of text.split(';')) {
+    const entry = part.trim();
+    if (!entry) {
+      continue;
+    }
+    const separator = entry.indexOf('=');
+    if (separator <= 0) {
+      continue;
+    }
+    networks.push({
+      name: entry.slice(0, separator),
+      ipAddress: entry.slice(separator + 1).trim(),
+    });
+  }
+  return networks;
+}
+
+/**
+ * 한 컨테이너의 네트워크만 묻는다. 검사 결과가 아직 없을 때(방금 만든 컨테이너의 공개 포트는
+ * `ps` 가 먼저 준다) 터널을 열기 직전에 한 번 쓰는 길이다.
+ */
+export function buildContainerNetworksCommand(prefix: string, containerId: string): string {
+  const format =
+    '{{range $name, $net := index .NetworkSettings "Networks"}}{{$name}}={{index $net "IPAddress"}};{{end}}';
+  return (
+    AUX_PATH_EXPORT +
+    `${prefix} inspect ${quoteShellArg(containerId)} --format ${quoteShellArg(format)} 2>/dev/null`
+  );
+}
+
 export function parseInspect(stdout: string): Map<string, DockerInspectInfo> {
   const info = new Map<string, DockerInspectInfo>();
   for (const line of stdout.split('\n')) {
     if (!line.includes('\t')) {
       continue;
     }
-    const [id, restarts, health, oom, exposed] = line.split('\t');
+    const [id, restarts, health, oom, exposed, networks] = line.split('\t');
     if (!id) {
       continue;
     }
@@ -696,10 +806,52 @@ export function parseInspect(stdout: string): Map<string, DockerInspectInfo> {
           ? healthText
           : null,
       oomKilled: (oom ?? '').trim() === 'true',
+      networks: parseContainerNetworks(networks ?? ''),
       exposedPorts: (exposed ?? '').trim().split(/\s+/).filter(Boolean),
     });
   }
   return info;
+}
+
+/** 검사(inspect)를 몇 틱마다 전부 훑는가. */
+export const INSPECT_EVERY_TICKS = 4;
+
+/**
+ * 이번 틱에 검사할 컨테이너 id. 전체는 `INSPECT_EVERY_TICKS` 마다 훑되 **아직 한 번도 못 본
+ * 컨테이너는 매 틱 물어본다** — 방금 만든 컨테이너의 포트·헬스·재시작이 다음 훑기까지(느린
+ * 호스트면 몇 분) 비어 있으면 안 된다. host 네트워킹 컨테이너는 검사가 포트의 유일한 출처다.
+ */
+export function inspectTargets(
+  tick: number,
+  ids: readonly string[],
+  known: ReadonlyMap<string, DockerInspectInfo>,
+): string[] {
+  if (tick % INSPECT_EVERY_TICKS === 0) {
+    return [...ids];
+  }
+  return ids.filter((id) => !known.has(id));
+}
+
+/**
+ * 온 검사 결과를 이전 값에 덮는다. **부분 검사가 나머지를 지우지 않게** 합치고, 목록에서 사라진
+ * 컨테이너는 버린다.
+ */
+export function mergeInspectInfo(
+  previous: ReadonlyMap<string, DockerInspectInfo>,
+  incoming: ReadonlyMap<string, DockerInspectInfo>,
+  liveIds: readonly string[],
+): Map<string, DockerInspectInfo> {
+  const live = new Set(liveIds);
+  const merged = new Map<string, DockerInspectInfo>();
+  for (const [id, info] of previous) {
+    if (live.has(id)) {
+      merged.set(id, info);
+    }
+  }
+  for (const [id, info] of incoming) {
+    merged.set(id, info);
+  }
+  return merged;
 }
 
 /** 행이 "아픈" 이유. 없으면 null — 문제 그룹에 올릴지 판정하는 데도 쓴다. */

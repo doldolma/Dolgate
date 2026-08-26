@@ -520,3 +520,70 @@ describe("registerContainersIpcHandlers", () => {
     expect(resolveTrustedHostKeys).toHaveBeenCalledWith(host);
   });
 });
+
+describe("임시 컨테이너 터널 정지", () => {
+  function setup(owner: { ownerWebContentsId: number | null; sessionId: string | null } | null) {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    electronSpies.ipcMainHandle.mockReset();
+    electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+      handlers.set(channel, handler);
+    });
+    const stopPortForward = vi.fn().mockResolvedValue(undefined);
+    const releaseContainerTunnelOwner = vi.fn();
+    registerContainersIpcHandlers({
+      hosts: { getById: vi.fn() },
+      buildContainersEndpointId: vi.fn(() => "containers:host-1"),
+      coreManager: {
+        getContainerTunnelOwner: vi.fn(() => owner),
+        releaseContainerTunnelOwner,
+        stopPortForward,
+      },
+    } as any);
+    return {
+      stop: handlers.get(ipcChannels.containers.stopTunnel),
+      stopPortForward,
+      releaseContainerTunnelOwner,
+    };
+  }
+
+  it("등록된 터널은 멈추고 기록도 지운다", async () => {
+    const { stop, stopPortForward, releaseContainerTunnelOwner } = setup({
+      ownerWebContentsId: 91,
+      sessionId: "session-1",
+    });
+
+    await stop?.({ sender: { id: 91 } }, "container-service-tunnel:1");
+
+    expect(stopPortForward).toHaveBeenCalledWith("container-service-tunnel:1");
+    expect(releaseContainerTunnelOwner).toHaveBeenCalledWith("container-service-tunnel:1");
+  });
+
+  it("등록에 없는 id 는 건드리지 않는다 — 저장해 둔 SSH 규칙이 이 통로로 꺼지지 않게", async () => {
+    // `stopPortForward` 는 모든 포워딩의 공용 정지 함수다. 확인 없이 부르면 홈에서 켜 둔
+    // 규칙 id 를 넣어 그것을 끌 수 있다.
+    const { stop, stopPortForward } = setup(null);
+
+    await stop?.({ sender: { id: 91 } }, "rule-saved-ssh-forward");
+
+    expect(stopPortForward).not.toHaveBeenCalled();
+  });
+
+  it("연 창이 아니면 멈추지 않는다", async () => {
+    const { stop, stopPortForward } = setup({
+      ownerWebContentsId: 91,
+      sessionId: "session-1",
+    });
+
+    await stop?.({ sender: { id: 92 } }, "container-service-tunnel:1");
+
+    expect(stopPortForward).not.toHaveBeenCalled();
+  });
+
+  it("주인을 모르는 옛 기록은 그대로 통과시킨다", async () => {
+    const { stop, stopPortForward } = setup({ ownerWebContentsId: null, sessionId: null });
+
+    await stop?.({ sender: { id: 92 } }, "container-service-tunnel:1");
+
+    expect(stopPortForward).toHaveBeenCalledWith("container-service-tunnel:1");
+  });
+});

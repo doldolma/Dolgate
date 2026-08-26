@@ -9,13 +9,15 @@
 // 스택은 탭이 아니라 컨테이너 목록의 그룹 머리다. 스택 단위 동작이 그 머리에 붙으면 한 자리에서
 // 끝난다 — 스택 탭을 따로 두면 같은 데이터를 한 단계 더 들어가서 보게 된다.
 
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../../lib/cn';
 import { useAppStore } from '../../../store/appStore';
 import { filterByQuery } from '../../../lib/session-panel';
-import { formatKibibytes } from '../../../lib/host-metrics';
+import { formatBytesPerSecond, formatKibibytes } from '../../../lib/host-metrics';
+import { queryTerminalCompletion } from '../../../services/desktop/terminal';
 import {
+  buildContainerNetworksCommand,
   collectUsedImages,
   dockerImagePruneCommand,
   dockerImageRemoveCommand,
@@ -29,11 +31,13 @@ import {
   isContainerRunning,
   isImageUsed,
   layoutContainers,
+  parseContainerNetworks,
   parseDockerAge,
   resolveContainerPorts,
   stackComposeCommand,
   troubleOf,
   type DockerContainer,
+  type DockerContainerNetwork,
   type DockerInspectInfo,
   type DockerPortEntry,
   type DockerStat,
@@ -136,6 +140,40 @@ export function SessionPanelDocker({
     panelOpen,
     collapseScope,
   );
+  /**
+   * 터널이 향할 곳의 근거. **검사 결과에 이미 담겨 온다** — 그래서 대개 왕복이 없다. 방금 만든
+   * 컨테이너의 공개 포트는 `ps` 가 검사보다 먼저 주므로, 그럴 때만 한 번 묻는다.
+   *
+   * 이 값을 우리가 실어 보내야 하는 이유: sudo 가 필요한 호스트에서 도커를 읽을 수 있는 것은
+   * 이 세션(그 세션의 sudo)뿐이고, 코어의 컨테이너 연결은 같은 비밀번호를 갖고 있지 않다.
+   */
+  const resolveNetworks = useCallback(
+    async (containerId: string): Promise<readonly DockerContainerNetwork[]> => {
+      const known = lists.inspect.get(containerId)?.networks ?? [];
+      if (known.length > 0) {
+        return known;
+      }
+      const prefix = queryPrefixOf(runtime);
+      if (!prefix) {
+        return [];
+      }
+      try {
+        return parseContainerNetworks(
+          await queryTerminalCompletion(
+            sessionId,
+            buildContainerNetworksCommand(prefix, containerId),
+            { background: true, elevate: runtime.elevate },
+          ),
+        );
+      } catch {
+        // 못 물어봤다 — 빈 값으로 넘긴다. 코어가 자기 방식으로 알아내 보고, 그마저 안 되면
+        // 그 줄에 실패가 남는다(조용히 사라지지 않는다).
+        return [];
+      }
+    },
+    [lists.inspect, runtime, sessionId],
+  );
+
   // 이 세션이 연 컨테이너 터널. 주인이 세션이라 세션이 끝나면 메인이 회수한다(여기서 치우지 않는다).
   const tunnels = useAppStore(
     (state) => state.sessionContainerTunnels[sessionId] ?? EMPTY_TUNNELS,
@@ -340,6 +378,10 @@ export function SessionPanelDocker({
                 containerName: container.name,
                 networkName: '',
                 targetPort: port.containerPort,
+                // 어디로 연결할지는 **우리가 이미 안다**(검사 결과에 담겨 온다). 스토어가
+                // "여는 중" 을 찍은 뒤에 이걸 부르므로, 아직 안 왔으면 한 번 물어야 하는
+                // 경우에도 화면은 곧바로 반응한다.
+                resolveNetworks: () => resolveNetworks(container.id),
               })
             }
             onClosePort={(tunnel) => void closeTunnel(sessionId, tunnel.ruleId)}
@@ -768,11 +810,6 @@ const Sparkline = memo(function Sparkline({
 /** 이만큼 다시 뜬 컨테이너는 행에서 바로 말해 준다(지금 돌고 있어도). */
 const RESTART_FLAP_MIN = 3;
 
-/** 초당 흐름을 짧게. 0 은 `0B/s` 로 적어 "안 흐른다" 가 읽히게 한다. */
-function formatPerSecond(bytesPerSecond: number): string {
-  return `${formatKibibytes(Math.round(bytesPerSecond / 1024))}/s`.replace(' ', '');
-}
-
 const CPU_WARN_PERCENT = 20;
 const CPU_DANGER_PERCENT = 50;
 
@@ -835,7 +872,7 @@ function ContainerRow({
   const running = isContainerRunning(container);
   const ports = resolveContainerPorts(container, info);
   const openTunnel = tunnels.find((tunnel) => tunnel.status === 'running') ?? null;
-  const publishedPorts = ports
+  const publishedPorts = ports.entries
     .filter((port) => port.publishedPort !== null)
     .map((port) => port.publishedPort as number);
   const age = parseDockerAge(container.status);
@@ -967,14 +1004,15 @@ function ContainerRow({
               label={translate('sessionPanel.docker.detail.image')}
               value={container.image}
             />
-            {ports.length > 0 ? (
+            {ports.entries.length > 0 ? (
               <div className="col-span-2 grid grid-cols-subgrid">
                 <dt className="truncate text-[var(--text-muted)]">
                   {translate('sessionPanel.docker.detail.ports')}
                 </dt>
                 <dd className="min-w-0">
                   <PortLines
-                    ports={ports}
+                    ports={ports.entries}
+                    omitted={ports.omitted}
                     tunnels={tunnels}
                     running={running}
                     canForward={canForward}
@@ -999,7 +1037,7 @@ function ContainerRow({
                 label={translate('sessionPanel.docker.detail.io')}
                 value={
                   ioRate
-                    ? `↓${formatPerSecond(ioRate.netIn)} ↑${formatPerSecond(ioRate.netOut)} · ${translate('sessionPanel.docker.detail.disk')} ${formatPerSecond(ioRate.blockRead)}/${formatPerSecond(ioRate.blockWrite)} · ${stat.pids}p`
+                    ? `↓${formatBytesPerSecond(ioRate.netIn)} ↑${formatBytesPerSecond(ioRate.netOut)} · ${translate('sessionPanel.docker.detail.disk')} ${formatBytesPerSecond(ioRate.blockRead)}/${formatBytesPerSecond(ioRate.blockWrite)} · ${stat.pids}p`
                     : translate('sessionPanel.docker.detail.ioWaiting')
                 }
                 title={`${translate('sessionPanel.docker.detail.ioTotal')} ↓${stat.netIn} ↑${stat.netOut} · ${translate('sessionPanel.docker.detail.disk')} ${stat.blockRead}/${stat.blockWrite}`}
@@ -1093,6 +1131,7 @@ function ContainerRow({
  */
 function PortLines({
   ports,
+  omitted,
   tunnels,
   running,
   canForward,
@@ -1102,6 +1141,8 @@ function PortLines({
   onCopy,
 }: {
   ports: readonly DockerPortEntry[];
+  /** 상한 때문에 빼놓은 포트 수. 조용히 자르지 않고 그렇게 말한다. */
+  omitted: number;
   tunnels: readonly SessionContainerTunnel[];
   running: boolean;
   canForward: boolean;
@@ -1194,6 +1235,11 @@ function PortLines({
           </div>
         );
       })}
+      {omitted > 0 ? (
+        <p className="text-[0.62rem] text-[var(--text-muted)]">
+          {translate('sessionPanel.docker.port.omitted', { count: omitted })}
+        </p>
+      ) : null}
     </div>
   );
 }

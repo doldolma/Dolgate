@@ -3886,7 +3886,8 @@
         "copy": "Copy address",
         "browser": "Open in browser",
         "close": "Close",
-        "failed": "Failed"
+        "failed": "Failed",
+        "omitted": "{{count}} more ports — check in the terminal"
       }
     },
     "theme": {

@@ -28,6 +28,7 @@ import {
   createInactiveSessionShareState,
 } from "./session-share";
 import { t } from '../../i18n';
+import { clearSessionScopedState } from '../../components/terminal-workspace/session-panel/useSessionScopedState';
 import { clearRttHistory } from "../../lib/rtt-history";
 
 export function asSessionTabId(sessionId: string): SessionWorkspaceTabId {
@@ -621,6 +622,11 @@ export function removeSessionFromState(
   if (closingStableId) {
     clearRttHistory(closingStableId);
   }
+  // 세션 패널이 그 세션에 대해 기억해 둔 화면 상태(보던 탭·검색어·펼쳐 둔 행)도 함께 버린다.
+  // 재연결은 이 함수를 지나지 않으므로 "돌아오면 보던 그대로" 는 그대로 지켜진다.
+  clearSessionScopedState(sessionId);
+  const nextSessionContainerTunnels = { ...state.sessionContainerTunnels };
+  delete nextSessionContainerTunnels[sessionId];
   const tabs = state.tabs.filter((tab) => tab.sessionId !== sessionId);
   const standaloneIndex = state.tabStrip.findIndex(
     (item) => item.kind === "session" && item.sessionId === sessionId,
@@ -793,6 +799,7 @@ export function removeSessionFromState(
     ),
     sessionReturnTargets: nextSessionReturnTargets,
     resolvedStartupCommandsBySessionId: nextResolvedStartupCommands,
+    sessionContainerTunnels: nextSessionContainerTunnels,
   };
 }
 

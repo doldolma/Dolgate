@@ -19,7 +19,7 @@ import {
 } from "../../aws-ws-proxy";
 import type { CoreManager } from "../../core-manager";
 import { resolveLocalAgentEndpoint } from "../agent-endpoint";
-import { resolveContainerTunnelTarget } from "../../container-port-forward-target";
+import { pickContainerTunnelHost, resolveContainerTunnelTarget } from "../../container-port-forward-target";
 import type { KnownHostRepository } from "../../database";
 import type { AwsSftpCoordinator } from "./aws-sftp-coordinator";
 import { retryAwsSsmSshOperation } from "./aws-ssm-ssh-retry";
@@ -60,6 +60,8 @@ export interface ContainerRuntimeCoordinator {
     targetPort: number;
     bindAddress: string;
     bindPort: number;
+    /** 패널이 이미 아는 네트워크. 있으면 코어의 검사를 건너뛴다. */
+    networks?: readonly { name: string; ipAddress: string }[];
   }) => Promise<unknown>;
   buildContainerShellCommand: (
     runtimeCommand: string,
@@ -404,6 +406,7 @@ export function createContainerRuntimeCoordinator(deps: {
     targetPort: number;
     bindAddress: string;
     bindPort: number;
+    networks?: readonly { name: string; ipAddress: string }[];
   }) => {
     const {
       ruleId,
@@ -413,6 +416,7 @@ export function createContainerRuntimeCoordinator(deps: {
       targetPort,
       bindAddress,
       bindPort,
+      networks,
     } = input;
     const endpointId = buildContainerPortForwardEndpointId(host.id, ruleId);
     const publishRuntime = (status: "starting" | "error", message?: string) =>
@@ -449,25 +453,34 @@ export function createContainerRuntimeCoordinator(deps: {
         );
       }
 
-      publishRuntime("starting", "Inspecting container");
-      const details = await coreManager.containersInspect(
-        runtimeInfo.endpointId,
-        containerId,
-      );
-      const normalizedStatus = details.status.trim().toLowerCase();
-      if (normalizedStatus !== "running") {
-        throw new Error(
-          t('runtimeCoord.notRunning', { name: details.name, status: details.status }),
+      // 패널이 이미 알아낸 네트워크가 있으면 그것으로 정한다 — 코어가 도커에 다시 묻지 않는다.
+      // sudo 가 필요한 호스트에서는 이 길만 통한다: 패널은 그 세션의 sudo 로 읽지만 코어의
+      // 컨테이너 연결은 같은 비밀번호를 갖고 있지 않다.
+      const supplied =
+        networks && networks.length > 0
+          ? pickContainerTunnelHost(networks, networkName)
+          : null;
+      let targetHost: string;
+      let resolvedTargetPort = targetPort;
+      if (supplied) {
+        targetHost = supplied.host;
+      } else {
+        publishRuntime("starting", "Inspecting container");
+        const details = await coreManager.containersInspect(
+          runtimeInfo.endpointId,
+          containerId,
         );
-      }
+        const normalizedStatus = details.status.trim().toLowerCase();
+        if (normalizedStatus !== "running") {
+          throw new Error(
+            t('runtimeCoord.notRunning', { name: details.name, status: details.status }),
+          );
+        }
 
-      const target = resolveContainerTunnelTarget(
-        details,
-        networkName,
-        targetPort,
-      );
-      const targetHost = target.host;
-      const resolvedTargetPort = target.port;
+        const target = resolveContainerTunnelTarget(details, networkName, targetPort);
+        targetHost = target.host;
+        resolvedTargetPort = target.port;
+      }
 
       if (host.kind === "aws-ec2") {
         tunnelRegistry.moveContainersTunnelRuntime(endpointId, ruleId);

@@ -3886,7 +3886,8 @@
         "copy": "주소 복사",
         "browser": "브라우저로 열기",
         "close": "닫기",
-        "failed": "실패"
+        "failed": "실패",
+        "omitted": "포트 {{count}}개 더 있습니다 — 터미널에서 보세요"
       }
     },
     "theme": {

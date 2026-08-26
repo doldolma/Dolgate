@@ -232,6 +232,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
           targetPort: input.targetPort,
           bindAddress: input.bindAddress,
           bindPort: input.bindPort,
+          networks: input.networks,
         });
       } catch (error) {
         ctx.coreManager.releaseContainerTunnelOwner(ruleId);
@@ -242,7 +243,22 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.stopTunnel,
-    async (_event, runtimeId: string) => {
+    async (event, runtimeId: string) => {
+      // **이 통로는 임시 컨테이너 터널만 다룬다.** `stopPortForward` 는 모든 포워딩의 공용
+      // 정지 함수라, 확인 없이 부르면 홈에서 켜 둔 SSH 규칙이 여기로 꺼질 수 있다. 등록에
+      // 없으면 이미 끝난 것이거나 우리 것이 아니므로 조용히 끝낸다(오류로 만들 일이 아니다).
+      const owner = ctx.coreManager.getContainerTunnelOwner(runtimeId);
+      if (!owner) {
+        return;
+      }
+      // 연 창만 닫는다. 지금은 각 창의 스토어에 자기 것만 들어 있어 남의 id 를 넘길 경로가
+      // 없지만, 그 전제가 깨지면 여기서 막힌다(주인을 모르는 옛 기록은 그대로 통과시킨다).
+      if (
+        owner.ownerWebContentsId !== null &&
+        owner.ownerWebContentsId !== event.sender.id
+      ) {
+        return;
+      }
       ctx.coreManager.releaseContainerTunnelOwner(runtimeId);
       await ctx.coreManager.stopPortForward(runtimeId);
     },

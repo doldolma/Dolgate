@@ -2325,3 +2325,112 @@ describe("createAppStore containers", () => {
     );
   });
 });
+
+describe("세션 패널이 여는 컨테이너 터널", () => {
+  it("빠르게 두 번 눌러도 한 번만 나간다", async () => {
+    // 화면은 누른 즉시 "여는 중" 으로 바뀌지만, 그 사이 두 번째 클릭이 IPC 를 또 태우면 같은
+    // 포트로 터널이 둘 열린다(로컬 포트만 다르게). 그래서 스토어가 막는다.
+    const api = createMockApi();
+    const store = createAppStore(api as unknown as DesktopApi);
+    const open = () =>
+      store.getState().openSessionContainerTunnel({
+        sessionId: "session-1",
+        hostId: "host-1",
+        containerId: "abc123",
+        containerName: "web",
+        networkName: "",
+        targetPort: 8080,
+      });
+
+    await Promise.all([open(), open()]);
+
+    expect(api.containers.startTunnel).toHaveBeenCalledTimes(1);
+    expect(store.getState().sessionContainerTunnels["session-1"]).toHaveLength(1);
+  });
+
+  it("대상을 물어보는 동안에도 화면은 이미 '여는 중' 이다", async () => {
+    // 검사 결과가 아직 없으면 어디로 연결할지 그때 한 번 묻는다(수백 ms). 그 왕복을 기다린 뒤에
+    // 화면을 바꾸면 누른 사람은 아무 일도 안 일어난 것으로 본다 — 실제로 그렇게 보였다.
+    const api = createMockApi();
+    const store = createAppStore(api as unknown as DesktopApi);
+    let release: ((networks: readonly { name: string; ipAddress: string }[]) => void) | undefined;
+    const opening = store.getState().openSessionContainerTunnel({
+      sessionId: "session-1",
+      hostId: "host-1",
+      containerId: "abc123",
+      containerName: "web",
+      networkName: "",
+      targetPort: 8080,
+      resolveNetworks: () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    });
+
+    // 아직 물어보는 중인데 그 줄은 이미 "여는 중" 이다.
+    expect(store.getState().sessionContainerTunnels["session-1"]?.[0]).toMatchObject({
+      containerId: "abc123",
+      status: "starting",
+    });
+    expect(api.containers.startTunnel).not.toHaveBeenCalled();
+
+    release?.([{ name: "host", ipAddress: "" }]);
+    await opening;
+
+    expect(api.containers.startTunnel).toHaveBeenCalledWith(
+      expect.objectContaining({ networks: [{ name: "host", ipAddress: "" }] }),
+    );
+  });
+
+  it("응답이 영영 안 오면 다시 누를 수 있다 — 그 줄이 '여는 중' 으로 굳지 않게", async () => {
+    const api = createMockApi();
+    // 첫 요청은 끝나지 않는다(코어가 답을 안 주는 상황).
+    api.containers.startTunnel = vi.fn(
+      () => new Promise<never>(() => undefined),
+    );
+    const store = createAppStore(api as unknown as DesktopApi);
+    const input = {
+      sessionId: "session-1",
+      hostId: "host-1",
+      containerId: "abc123",
+      containerName: "web",
+      networkName: "",
+      targetPort: 8080,
+    };
+    void store.getState().openSessionContainerTunnel(input);
+    await flushMicrotasks();
+    // 바로 다시 누르면 막힌다.
+    void store.getState().openSessionContainerTunnel(input);
+    await flushMicrotasks();
+    expect(api.containers.startTunnel).toHaveBeenCalledTimes(1);
+
+    // 오래 기다린 뒤에는 놓아 준다.
+    const entry = store.getState().sessionContainerTunnels["session-1"][0];
+    store.setState({
+      sessionContainerTunnels: {
+        "session-1": [{ ...entry, startedAtMs: entry.startedAtMs - 60_000 }],
+      },
+    });
+    void store.getState().openSessionContainerTunnel(input);
+    await flushMicrotasks();
+    expect(api.containers.startTunnel).toHaveBeenCalledTimes(2);
+  });
+
+  it("실패하면 그 줄에 남겨 다시 누를 수 있게 한다", async () => {
+    const api = createMockApi();
+    api.containers.startTunnel = vi.fn().mockRejectedValue(new Error("포트를 열지 못했습니다"));
+    const store = createAppStore(api as unknown as DesktopApi);
+
+    await store.getState().openSessionContainerTunnel({
+      sessionId: "session-1",
+      hostId: "host-1",
+      containerId: "abc123",
+      containerName: "web",
+      networkName: "",
+      targetPort: 8080,
+    });
+
+    const tunnels = store.getState().sessionContainerTunnels["session-1"];
+    expect(tunnels[0]).toMatchObject({ status: "error", message: "포트를 열지 못했습니다" });
+  });
+});

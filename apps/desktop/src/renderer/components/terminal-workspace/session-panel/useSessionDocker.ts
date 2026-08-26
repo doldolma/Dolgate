@@ -20,7 +20,9 @@ import {
   buildVolumeListCommand,
   composeCommandFor,
   computeIoRate,
+  inspectTargets,
   ioTotalsOf,
+  mergeInspectInfo,
   parseContainerList,
   parseContainerMetrics,
   parseDockerProbe,
@@ -488,9 +490,6 @@ const METRICS_POLL_MAX_MS = 60_000;
 const POLL_DUTY_FACTOR = 3;
 const BACKOFF_MS = [5_000, 15_000, 60_000];
 
-/** 재시작 횟수·헬스·OOM 은 자주 바뀌지 않는다 — 지표 왕복 이 횟수마다 한 번씩 얹는다. */
-const INSPECT_EVERY_TICKS = 4;
-
 /** 행 스파크라인이 보는 창(ms)과 표본 상한. 이력은 앱에 쌓아 원격 왕복을 늘리지 않는다. */
 const HISTORY_WINDOW_MS = 10 * 60 * 1000;
 const HISTORY_MAX_SAMPLES = 120;
@@ -659,6 +658,8 @@ export function useDockerLists(
   const tickRef = useRef(0);
 
   const refresh = useCallback(() => {
+    // 다음 지표 왕복이 검사를 전부 얹게 한다 — 누른 사람은 "지금 다 다시 본다" 를 기대한다.
+    tickRef.current = 0;
     setNonce((current) => current + 1);
   }, []);
 
@@ -790,8 +791,8 @@ export function useDockerLists(
       }
       const listed = stateRef.current.containers;
       const wantsStats = statsSupportedRef.current;
-      const wantsInspect = tickRef.current % INSPECT_EVERY_TICKS === 0;
-      const inspectIds = wantsInspect ? listed.containers.map((container) => container.id) : [];
+      const listedIds = listed.containers.map((container) => container.id);
+      const inspectIds = inspectTargets(tickRef.current, listedIds, listed.inspect);
       if (!wantsStats && inspectIds.length === 0) {
         // 물어볼 것이 없다(지표를 못 주는 호스트 + 검사 차례가 아님) — 왕복을 쓰지 않는다.
         tickRef.current += 1;
@@ -848,7 +849,10 @@ export function useDockerLists(
         containers: {
           ...current.containers,
           stats: parsed.stats.size > 0 ? parsed.stats : current.containers.stats,
-          inspect: parsed.inspect.size > 0 ? parsed.inspect : current.containers.inspect,
+          inspect:
+            parsed.inspect.size > 0
+              ? mergeInspectInfo(current.containers.inspect, parsed.inspect, listedIds)
+              : current.containers.inspect,
         },
       }));
       // 걸린 시간에 맞춰 물러난다(15~60초). 느린 호스트에서 채널을 계속 물지 않게.

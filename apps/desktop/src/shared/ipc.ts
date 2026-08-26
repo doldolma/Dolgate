@@ -1138,6 +1138,12 @@ export interface HostContainersEphemeralTunnelInput {
    * 세션 패널에서 연 터널이 이 값을 준다. 컨테이너 화면은 창 단위로만 매인다.
    */
   ownerSessionId?: string | null;
+  /**
+   * 컨테이너가 붙은 네트워크(이름·IP). 세션 패널은 이미 이 값을 알고 있으므로 실어 보낸다 —
+   * 그러면 코어가 도커에 다시 묻지 않는다. **sudo 가 필요한 호스트에서 중요하다**: 패널은 그
+   * 세션의 sudo 로 읽지만, 코어의 컨테이너 연결은 그 비밀번호를 모른다.
+   */
+  networks?: readonly { name: string; ipAddress: string }[];
 }
 
 export interface KnownHostProbeInput {

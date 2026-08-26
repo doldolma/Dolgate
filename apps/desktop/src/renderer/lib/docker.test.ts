@@ -15,6 +15,11 @@ import {
   dockerStateCommand,
   groupContainersByStack,
   isImageUsed,
+  INSPECT_EVERY_TICKS,
+  inspectTargets,
+  mergeInspectInfo,
+  buildContainerNetworksCommand,
+  parseContainerNetworks,
   parseContainerList,
   parseContainerMetrics,
   parseDockerAge,
@@ -28,6 +33,7 @@ import {
   parseVolumeList,
   stackComposeCommand,
   type DockerContainer,
+  type DockerInspectInfo,
 } from './docker';
 
 function row(fields: Partial<Record<number, string>>): string {
@@ -341,11 +347,12 @@ describe('행에 보여 줄 포트', () => {
       health: null,
       oomKilled: false,
       exposedPorts: exposed,
+      networks: [],
     };
   }
 
   it('공개된 것과 공개 안 된 것을 합친다', () => {
-    const ports = resolveContainerPorts(
+    const { entries: ports } = resolveContainerPorts(
       container({ ports: '0.0.0.0:5050->5050/tcp' }),
       inspect(['5050/tcp', '8080/tcp']),
     );
@@ -356,7 +363,7 @@ describe('행에 보여 줄 포트', () => {
   });
 
   it('같은 포트의 IPv4·IPv6 두 줄을 하나로 본다', () => {
-    const ports = resolveContainerPorts(
+    const { entries: ports } = resolveContainerPorts(
       container({ ports: '0.0.0.0:5050->5050/tcp, :::5050->5050/tcp' }),
       undefined,
     );
@@ -365,7 +372,7 @@ describe('행에 보여 줄 포트', () => {
   });
 
   it('검사 결과가 아직 없어도 공개된 포트는 보여 준다', () => {
-    const ports = resolveContainerPorts(
+    const { entries: ports } = resolveContainerPorts(
       container({ ports: '0.0.0.0:3311->3306/tcp' }),
       undefined,
     );
@@ -374,8 +381,51 @@ describe('행에 보여 줄 포트', () => {
     ]);
   });
 
+  it('범위로 게시한 포트도 읽는다 — 예전에는 통째로 사라졌다', () => {
+    const { entries: ports } = resolveContainerPorts(
+      container({ ports: '0.0.0.0:3000-3002->3000-3002/tcp' }),
+      undefined,
+    );
+    expect(ports).toEqual([
+      { containerPort: 3000, protocol: 'tcp', publishedPort: 3000 },
+      { containerPort: 3001, protocol: 'tcp', publishedPort: 3001 },
+      { containerPort: 3002, protocol: 'tcp', publishedPort: 3002 },
+    ]);
+  });
+
+  it('공개되지 않은 노출 포트는 ps 만으로도 보인다(검사가 오기 전)', () => {
+    const { entries: ports } = resolveContainerPorts(container({ ports: '8080/tcp' }), undefined);
+    expect(ports).toEqual([{ containerPort: 8080, protocol: 'tcp', publishedPort: null }]);
+  });
+
+  it('아주 넓은 범위는 앞에서 끊고 **몇 개를 뺐는지 말한다**', () => {
+    const { entries, omitted } = resolveContainerPorts(
+      container({ ports: '0.0.0.0:3000-3100->3000-3100/tcp' }),
+      // 검사 결과까지 오면 101 개가 다 모인다 — 상한을 넘은 만큼은 화면이 말한다.
+      inspect(Array.from({ length: 101 }, (_, index) => `${3000 + index}/tcp`)),
+    );
+    expect(entries).toHaveLength(24);
+    expect(entries[0].containerPort).toBe(3000);
+    expect(omitted).toBe(77);
+  });
+
+  it('호스트 범위가 짧으면 짝 없는 포트는 공개된 것으로 보지 않는다', () => {
+    const { entries } = resolveContainerPorts(
+      container({ ports: '0.0.0.0:8000->3000-3002/tcp' }),
+      undefined,
+    );
+    expect(entries).toEqual([
+      { containerPort: 3000, protocol: 'tcp', publishedPort: 8000 },
+      { containerPort: 3001, protocol: 'tcp', publishedPort: null },
+      { containerPort: 3002, protocol: 'tcp', publishedPort: null },
+    ]);
+  });
+
   it('포트가 없으면 빈 목록', () => {
-    expect(resolveContainerPorts(container({ ports: '' }), undefined)).toEqual([]);
+    expect(resolveContainerPorts(container({ ports: '' }), undefined)).toEqual({
+      entries: [],
+      omitted: 0,
+    });
   });
 });
 
@@ -461,6 +511,22 @@ describe('컨테이너 지표는 목록과 다른 왕복이다', () => {
     expect(command).toContain("inspect 'a1b2c3d4e5f6'");
   });
 
+  it('선택 키는 index 로 읽는다 — 없는 키 하나가 줄을 통째로 날린다', () => {
+    // docker 는 `{{.Id}}`(구조체 필드명은 `ID`)를 만나면 원본 JSON 맵으로 렌더하고, 맵 모드는
+    // `missingkey=error` 다. `.State.Health` 는 헬스체크가 없는 컨테이너에 아예 없는 키라
+    // `{{if}}` 로 감싸도 그 줄이 사라진다(실제로 헬스체크 없는 컨테이너에서 재시작·헬스·OOM·
+    // 노출 포트가 전부 오지 않았다). 되돌리지 못하게 여기서 막는다.
+    const command = buildContainerMetricsCommand('docker', {
+      stats: false,
+      inspectIds: ['a1b2c3d4e5f6'],
+    });
+    expect(command).toContain('{{with index .State "Health"}}');
+    expect(command).toContain('{{index .State "OOMKilled"}}');
+    expect(command).toContain('index .Config "ExposedPorts"');
+    expect(command).not.toContain('{{if .State.Health}}');
+    expect(command).not.toContain('.Config.ExposedPorts');
+  });
+
   it('검사할 차례가 아니면 지표만 싣는다', () => {
     const command = buildContainerMetricsCommand('docker', { stats: true, inspectIds: [] });
     expect(command).toContain('stats --no-stream');
@@ -477,7 +543,7 @@ describe('컨테이너 지표는 목록과 다른 왕복이다', () => {
       restartCount: 3,
       health: 'unhealthy',
       oomKilled: true,
-      exposedPorts: [],
+      exposedPorts: [], networks: [],
     });
   });
 
@@ -502,5 +568,112 @@ describe('컨테이너 지표는 목록과 다른 왕복이다', () => {
     );
     expect(parsed.stats.get('a1b2c3d4e5f6')?.cpuPercent).toBe(12.4);
     expect(parsed.inspect.get('a1b2c3d4e5f6')?.health).toBe('healthy');
+  });
+});
+
+describe('검사 대상 고르기', () => {
+  const known = new Map<string, DockerInspectInfo>([
+    ['a1b2c3d4e5f6', { id: 'a1b2c3d4e5f6', restartCount: 0, health: null, oomKilled: false, exposedPorts: [], networks: [] }],
+  ]);
+
+  it('훑는 틱에는 전부 물어본다', () => {
+    expect(inspectTargets(0, ['a1b2c3d4e5f6', 'b1c2d3e4f506'], known)).toEqual([
+      'a1b2c3d4e5f6',
+      'b1c2d3e4f506',
+    ]);
+    expect(inspectTargets(INSPECT_EVERY_TICKS, ['a1b2c3d4e5f6'], known)).toEqual(['a1b2c3d4e5f6']);
+  });
+
+  it('훑는 틱이 아니면 아직 못 본 것만 물어본다 — 방금 만든 컨테이너가 몇 분을 기다리지 않게', () => {
+    expect(inspectTargets(1, ['a1b2c3d4e5f6', 'b1c2d3e4f506'], known)).toEqual(['b1c2d3e4f506']);
+  });
+
+  it('다 아는 것뿐이면 아무것도 얹지 않는다', () => {
+    expect(inspectTargets(1, ['a1b2c3d4e5f6'], known)).toEqual([]);
+  });
+});
+
+describe('검사 결과 합치기', () => {
+  const info = (id: string, restartCount: number): DockerInspectInfo => ({
+    id,
+    restartCount,
+    health: null,
+    oomKilled: false,
+    exposedPorts: [], networks: [],
+  });
+
+  it('부분 검사가 나머지를 지우지 않는다', () => {
+    const merged = mergeInspectInfo(
+      new Map([['a', info('a', 1)]]),
+      new Map([['b', info('b', 2)]]),
+      ['a', 'b'],
+    );
+    expect([...merged.keys()].sort()).toEqual(['a', 'b']);
+    expect(merged.get('a')?.restartCount).toBe(1);
+  });
+
+  it('온 값이 이전 값을 덮는다', () => {
+    const merged = mergeInspectInfo(
+      new Map([['a', info('a', 1)]]),
+      new Map([['a', info('a', 5)]]),
+      ['a'],
+    );
+    expect(merged.get('a')?.restartCount).toBe(5);
+  });
+
+  it('목록에서 사라진 컨테이너는 버린다', () => {
+    const merged = mergeInspectInfo(
+      new Map([
+        ['a', info('a', 1)],
+        ['gone', info('gone', 1)],
+      ]),
+      new Map(),
+      ['a'],
+    );
+    expect([...merged.keys()]).toEqual(['a']);
+  });
+});
+
+describe('컨테이너 네트워크', () => {
+  it('name=ip 목록을 가른다', () => {
+    expect(parseContainerNetworks('bridge=172.17.0.5;dolgate_default=172.19.0.4;')).toEqual([
+      { name: 'bridge', ipAddress: '172.17.0.5' },
+      { name: 'dolgate_default', ipAddress: '172.19.0.4' },
+    ]);
+  });
+
+  it('host 네트워킹은 이름만 오고 IP 가 빈다 — 그 빈 값이 정보다', () => {
+    expect(parseContainerNetworks('host=;')).toEqual([{ name: 'host', ipAddress: '' }]);
+  });
+
+  it('빈 출력과 부스러기는 버린다', () => {
+    expect(parseContainerNetworks('')).toEqual([]);
+    expect(parseContainerNetworks(';=;garbage;')).toEqual([]);
+  });
+
+  it('IPv6 주소의 콜론을 건드리지 않는다', () => {
+    expect(parseContainerNetworks('bridge=fd00::2;')).toEqual([
+      { name: 'bridge', ipAddress: 'fd00::2' },
+    ]);
+  });
+
+  it('검사 왕복이 네트워크 칸까지 실어 온다', () => {
+    const parsed = parseContainerMetrics(
+      [
+        '@@dolgate@@',
+        `a1b2c3d4e5f6${'0'.repeat(52)}\t0\thealthy\tfalse\t80/tcp \thost=;`,
+      ].join('\n'),
+    );
+    expect(parsed.inspect.get('a1b2c3d4e5f6')?.networks).toEqual([
+      { name: 'host', ipAddress: '' },
+    ]);
+  });
+
+  it('네트워크를 따로 묻는 명령은 index 로 읽는다 — $net.IPAddress 는 host 모드에서 "invalid IP" 를 찍는다', () => {
+    const command = buildContainerNetworksCommand('sudo docker', 'a1b2c3d4e5f6');
+    expect(command).toContain("inspect 'a1b2c3d4e5f6'");
+    expect(command).toContain('index .NetworkSettings "Networks"');
+    expect(command).toContain('index $net "IPAddress"');
+    expect(command).not.toContain('$net.IPAddress');
   });
 });

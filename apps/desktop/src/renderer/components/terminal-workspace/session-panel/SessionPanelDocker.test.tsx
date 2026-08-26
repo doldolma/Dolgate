@@ -29,6 +29,14 @@ vi.mock('../../../services/desktop/terminal', () => ({
   ) => query(sessionId, command, options),
 }));
 
+/** 패널이 넘긴 "대상 알아내기" 함수를 꺼낸다. 스토어가 "여는 중" 을 찍은 뒤에 부르는 값이다. */
+function resolveNetworksOf(spy: ReturnType<typeof vi.fn>) {
+  const input = spy.mock.calls[0]?.[0] as {
+    resolveNetworks: () => Promise<readonly { name: string; ipAddress: string }[]>;
+  };
+  return input.resolveNetworks;
+}
+
 function row(cells: string[]): string {
   return [...cells, ...Array.from({ length: 9 - cells.length }, () => '')].join('\t');
 }
@@ -49,8 +57,8 @@ const METRICS = [
   '@@dolgate@@',
   [
     // 마지막 칸은 컨테이너가 여는 포트다 — `ps` 는 공개된 것만 주므로 여기서 함께 받는다.
-    `a1b2c3d4e5f6${'0'.repeat(52)}\t0\thealthy\tfalse\t5050/tcp 9090/tcp `,
-    `a2b3c4d5e6f7${'0'.repeat(52)}\t14\t\tfalse\t`,
+    `a1b2c3d4e5f6${'0'.repeat(52)}\t0\thealthy\tfalse\t5050/tcp 9090/tcp \tbridge=172.17.0.5;`,
+    `a2b3c4d5e6f7${'0'.repeat(52)}\t14\t\tfalse\t\t`,
   ].join('\n'),
 ].join('\n');
 
@@ -737,14 +745,60 @@ describe('컨테이너 포트 열기', () => {
     renderSection();
     fireEvent.click(await screen.findByText('gateway'));
     fireEvent.click(screen.getAllByRole('button', { name: '포워딩' })[0]);
-    expect(openTunnel).toHaveBeenCalledWith({
-      sessionId: 'session-1',
-      hostId: 'host-1',
-      containerId: 'a1b2c3d4e5f6',
-      containerName: 'lime-gateway',
-      networkName: '',
-      targetPort: 5050,
+    await waitFor(() => expect(openTunnel).toHaveBeenCalled());
+    expect(openTunnel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-1',
+        hostId: 'host-1',
+        containerId: 'a1b2c3d4e5f6',
+        containerName: 'lime-gateway',
+        networkName: '',
+        targetPort: 5050,
+      }),
+    );
+    // 어디로 연결할지는 검사 결과에 이미 담겨 왔다 — 다시 묻지 않고 그것을 넘긴다.
+    await expect(resolveNetworksOf(openTunnel)()).resolves.toEqual([
+      { name: 'bridge', ipAddress: '172.17.0.5' },
+    ]);
+  });
+
+  it('네트워크를 아직 모르면 그때 한 번 묻고 실어 보낸다', async () => {
+    // 방금 만든 컨테이너의 공개 포트는 `ps` 가 검사보다 먼저 준다 — 그 순간에 눌린 경우다.
+    query.mockImplementation((_sessionId: string, command: string) => {
+      if (command.includes('NetworkSettings')) {
+        return Promise.resolve('host=;');
+      }
+      if (command.includes('stats --no-stream')) {
+        // 구분자만 온다 = 검사 결과가 아직 없다.
+        return Promise.resolve('@@dolgate@@');
+      }
+      if (command.includes('ps -a --format')) {
+        return Promise.resolve(
+          row(['c1d2e3f40506', 'fresh', 'running', 'Up 3 seconds', 'nginx', '0.0.0.0:8080->80/tcp']),
+        );
+      }
+      return Promise.resolve('');
     });
+    renderSection({ hostId: 'host-fresh-port' });
+    fireEvent.click(await screen.findByText('fresh'));
+    fireEvent.click(screen.getAllByRole('button', { name: '포워딩' })[0]);
+    await waitFor(() => expect(openTunnel).toHaveBeenCalled());
+    expect(openTunnel).toHaveBeenCalledWith(
+      expect.objectContaining({ containerId: 'c1d2e3f40506', targetPort: 80 }),
+    );
+    await expect(resolveNetworksOf(openTunnel)()).resolves.toEqual([
+      { name: 'host', ipAddress: '' },
+    ]);
+  });
+
+  it('빠르게 두 번 눌러도 한 번만 나간다', async () => {
+    renderSection();
+    fireEvent.click(await screen.findByText('gateway'));
+    const open = screen.getAllByRole('button', { name: '포워딩' })[0];
+    fireEvent.click(open);
+    fireEvent.click(open);
+    // 스토어가 "여는 중" 을 남기므로 두 번째 클릭은 그 자리에서 접힌다(터널이 둘 열리지 않게).
+    await waitFor(() => expect(openTunnel).toHaveBeenCalledTimes(2));
   });
 
   it('열려 있으면 주소와 닫기가 뜨고, 접힌 행에도 포트가 붙는다', async () => {
@@ -791,5 +845,51 @@ describe('보던 것을 기억한다', () => {
     view.unmount();
     renderSection();
     expect(await screen.findByText('5050 → 5050/tcp')).toBeTruthy();
+  });
+});
+
+describe('새로 생긴 컨테이너', () => {
+  it('훑는 차례를 기다리지 않고 다음 틱에 검사한다 — 포트·헬스가 몇 분씩 비어 있지 않게', async () => {
+    vi.useFakeTimers();
+    try {
+      const commands: string[] = [];
+      let listed = CONTAINERS;
+      query.mockImplementation((_sessionId: string, command: string) => {
+        commands.push(command);
+        if (command.includes('stats --no-stream')) {
+          return Promise.resolve(METRICS);
+        }
+        if (command.includes('ps -a --format')) {
+          return Promise.resolve(listed);
+        }
+        return Promise.resolve('');
+      });
+      renderSection({ hostId: 'host-fresh-container' });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      // 첫 틱은 전부 훑는다.
+      expect(commands.some((command) => command.includes("inspect 'a1b2c3d4e5f6'"))).toBe(true);
+
+      // host 네트워킹 컨테이너를 하나 띄웠다 — `ps` 는 포트를 주지 않으므로 검사만이 출처다.
+      listed = [
+        CONTAINERS,
+        row(['c1d2e3f40506', 'hostnet-test', 'running', 'Up 5 seconds', 'nginx']),
+      ].join('\n');
+      commands.length = 0;
+      // 5초씩 나눠 흘린다 — 한 번에 30초를 흘리면 목록 왕복이 해소되기 전에 지표 틱이 먼저 돈다.
+      for (let step = 0; step < 6; step += 1) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5_000);
+        });
+      }
+      const inspects = commands.filter((command) => command.includes('inspect '));
+      expect(inspects.length).toBeGreaterThan(0);
+      expect(inspects[0]).toContain("'c1d2e3f40506'");
+      // 이미 아는 것은 다시 묻지 않는다 — 왕복이 커지지 않게.
+      expect(inspects[0]).not.toContain("'a1b2c3d4e5f6'");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

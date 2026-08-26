@@ -4266,6 +4266,18 @@ export class CoreManager {
     });
   }
 
+  /**
+   * 그 규칙이 임시 컨테이너 터널로 등록돼 있는지, 주인이 누구인지 돌려준다. 없으면 null.
+   *
+   * 정지 IPC 가 이걸 먼저 본다 — `stopPortForward` 는 **모든 포워딩의 공용 정지 함수**라,
+   * 확인 없이 부르면 저장해 둔 SSH 규칙이 컨테이너 통로를 통해 꺼질 수 있다.
+   */
+  getContainerTunnelOwner(
+    ruleId: string,
+  ): { ownerWebContentsId: number | null; sessionId: string | null } | null {
+    return this.containerTunnelOwners.get(ruleId) ?? null;
+  }
+
   /** 정지시킨 뒤(또는 남의 손으로 끝난 뒤) 기록을 지운다. */
   releaseContainerTunnelOwner(ruleId: string): void {
     this.containerTunnelOwners.delete(ruleId);

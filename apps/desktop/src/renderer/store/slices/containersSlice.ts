@@ -142,6 +142,9 @@ import {
 import { createContainersServices } from "../services/containers";
 import { t } from '../../i18n';
 
+/** 이만큼 지나도 응답이 없으면 다시 누를 수 있게 놓아 준다(그 줄이 굳지 않게). */
+const TUNNEL_START_STALE_MS = 30_000;
+
 export function createContainersSlice(deps: SliceDeps): ContainersSlice {
   const { api, set, get } = deps;
   const services = createContainersServices(deps);
@@ -316,10 +319,25 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
       containerName,
       networkName,
       targetPort,
+      resolveNetworks,
     }) => {
+      // 빠르게 두 번 눌러도 한 번만 나간다. 화면은 곧바로 "여는 중" 으로 바뀌지만 그 사이의
+      // 두 번째 클릭이 IPC 를 또 태우면 같은 포트로 터널이 둘 열린다(로컬 포트만 다르게).
+      const existing = (get().sessionContainerTunnels[sessionId] ?? []).find(
+        (entry) => entry.containerId === containerId && entry.targetPort === targetPort,
+      );
+      // 열려 있거나 여는 중이면 무시한다. 다만 **오래 걸린 대기는 놓아 준다** — 응답이 영영
+      // 오지 않으면 그 줄이 "여는 중" 으로 굳어 다시 누를 방법이 없다.
+      const stalled =
+        existing?.status === 'starting' &&
+        Date.now() - (existing.startedAtMs ?? 0) > TUNNEL_START_STALE_MS;
+      if (existing && existing.status !== 'error' && !stalled) {
+        return;
+      }
       // 누른 즉시 "여는 중" 을 남긴다. 터널 하나 여는 데 1~2초가 걸리는데 그동안 화면이 그대로면
       // 눌린 것인지 알 수 없어 다시 누르게 된다(실제로 그랬다).
       const pendingId = `pending:${containerId}:${targetPort}`;
+      const startedAtMs = Date.now();
       const put = (tunnel: SessionContainerTunnel, replaceId: string) => {
         set((state) => ({
           sessionContainerTunnels: {
@@ -341,9 +359,13 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
           targetPort,
           bindPort: 0,
           status: 'starting',
+          startedAtMs,
         },
         pendingId,
       );
+      // 대상의 근거는 **"여는 중" 을 찍은 뒤에** 구한다. 값이 이미 있으면 그 자리에서 오고,
+      // 물어봐야 하는 경우에도 화면은 이미 눌린 것으로 보인다.
+      const networks = await resolveNetworks?.();
       try {
         // 로컬 포트는 0 으로 보낸다 — 코어가 빈 포트를 잡고 실제 값을 런타임으로 알려 준다.
         // 사용자에게 포트를 고르게 하지 않는 이유이자, 충돌을 우리가 떠안는 방법이다.
@@ -354,6 +376,9 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
           targetPort,
           bindAddress: '127.0.0.1',
           bindPort: 0,
+          // 패널이 이미 읽어 둔 네트워크. sudo 가 필요한 호스트에서는 이 값이 있어야 열린다 —
+          // 코어의 컨테이너 연결은 그 세션의 sudo 비밀번호를 갖고 있지 않다.
+          networks,
           // 주인 세션. 이 세션이 끝나면 메인이 이 터널을 회수한다(렌더러가 아니라 메인이 한다 —
           // 창을 닫거나 렌더러가 죽어도 새지 않게).
           ownerSessionId: sessionId,
@@ -366,6 +391,7 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
             targetPort,
             bindPort: runtime.bindPort,
             status: runtime.status === 'running' ? 'running' : 'starting',
+            startedAtMs,
           },
           pendingId,
         );
@@ -379,6 +405,7 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
             targetPort,
             bindPort: 0,
             status: 'error',
+            startedAtMs,
             message: error instanceof Error ? error.message : String(error),
           },
           pendingId,

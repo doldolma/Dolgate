@@ -364,6 +364,72 @@ describe("세션 패널이 여는 컨테이너 터널", () => {
     });
   });
 
+  it("패널이 네트워크를 실어 보내면 코어에 다시 묻지 않는다", async () => {
+    // sudo 가 필요한 호스트에서는 이 길만 통한다 — 패널은 그 세션의 sudo 로 도커를 읽지만
+    // 코어의 컨테이너 연결은 같은 비밀번호를 갖고 있지 않다(그래서 inspect 가 권한 오류로 죽었다).
+    const { coordinator, host, startPortForward, deps } = createSshCoordinator();
+
+    await coordinator.startContainerTunnelRuntime({
+      ruleId: "container-service-tunnel:supplied",
+      host,
+      containerId: "abc123",
+      networkName: "",
+      targetPort: 8080,
+      bindAddress: "127.0.0.1",
+      bindPort: 0,
+      networks: [
+        { name: "none", ipAddress: "" },
+        { name: "dolgate-dev_default", ipAddress: "172.19.0.4" },
+      ],
+    });
+
+    expect(deps.coreManager.containersInspect).not.toHaveBeenCalled();
+    expect(startPortForward.mock.calls[0][0]).toMatchObject({
+      targetHost: "172.19.0.4",
+      targetPort: 8080,
+    });
+  });
+
+  it("실어 온 것이 host 네트워킹이면 그 호스트의 루프백으로 간다", async () => {
+    const { coordinator, host, startPortForward, deps } = createSshCoordinator();
+
+    await coordinator.startContainerTunnelRuntime({
+      ruleId: "container-service-tunnel:hostnet",
+      host,
+      containerId: "abc123",
+      networkName: "",
+      targetPort: 80,
+      bindAddress: "127.0.0.1",
+      bindPort: 0,
+      networks: [{ name: "host", ipAddress: "" }],
+    });
+
+    expect(deps.coreManager.containersInspect).not.toHaveBeenCalled();
+    expect(startPortForward.mock.calls[0][0]).toMatchObject({
+      targetHost: "127.0.0.1",
+      targetPort: 80,
+    });
+  });
+
+  it("실어 온 네트워크로 정할 수 없으면 코어에 물어본다", async () => {
+    // 빈 배열이나 정할 수 없는 목록은 "모른다" 는 뜻이다 — 예전 길로 떨어진다.
+    const { coordinator, host, startPortForward, deps } = createSshCoordinator();
+
+    await coordinator.startContainerTunnelRuntime({
+      ruleId: "container-service-tunnel:fallback",
+      host,
+      containerId: "abc123",
+      networkName: "",
+      targetPort: 8080,
+      bindAddress: "127.0.0.1",
+      bindPort: 0,
+      networks: [{ name: "none", ipAddress: "" }],
+    });
+
+    expect(deps.coreManager.containersInspect).toHaveBeenCalledTimes(1);
+    expect(startPortForward.mock.calls[0][0]).toMatchObject({ targetHost: "172.19.0.4" });
+  });
+
   it("돌지 않는 컨테이너는 이유를 들고 실패한다", async () => {
     const { coordinator, host, deps } = createSshCoordinator();
     deps.coreManager.containersInspect.mockResolvedValue({
