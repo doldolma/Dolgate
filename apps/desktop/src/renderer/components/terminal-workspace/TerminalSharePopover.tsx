@@ -1,8 +1,8 @@
 import type { MutableRefObject, ReactNode } from 'react';
-import type { TerminalTab } from '@shared';
+import type { SessionShareStatus, TerminalTab } from '@shared';
 import { cn } from '../../lib/cn';
 import { Button, IconButton } from '../../ui';
-import { Share2 } from '../../ui/icons';
+import { Keyboard, Share2 } from '../../ui/icons';
 import {
   CHROME_TOGGLE_CLASS,
   CHROME_TOGGLE_ON_CLASS,
@@ -43,10 +43,70 @@ interface TerminalSharePopoverProps {
   canOpenChatWindow: boolean;
 }
 
+/** 공유가 돌고 있는가. 이때는 버튼이 평소 스킨을 버리고 색으로 채워진다. */
+function isShareLive(status: SessionShareStatus | undefined): boolean {
+  return status === 'starting' || status === 'active' || status === 'error';
+}
+
+/**
+ * 공유 중일 때 상단 바 버튼을 채우는 색.
+ *
+ * **이 자리만 고정값이다.** 상단 바는 라이트·다크 양쪽에서 늘 진한 남색(`--chrome-bg`)인데
+ * `--success`·`--accent` 같은 토큰은 밝은 표면 기준으로 잡혀 있어 그 위에서 죽는다 — 처음엔
+ * 토큰으로 작은 점을 찍었더니 남색 위 남색이 되어 켜져 있는지 보이지 않았다.
+ * `CHROME_TOGGLE_CLASS` 가 `rgba(255,255,255,…)` 를 박아 둔 것과 같은 이유다.
+ *
+ * 세 색 모두 남색 배경과 3:1 을 넘기면서 그 위의 흰 글자도 읽히는 선에서 골랐다.
+ *
+ * **입력을 허용한 공유는 다른 색이다.** 보기만 하는 것과 남이 내 터미널에 명령을 칠 수 있는
+ * 것은 위험이 다른데, 켜 둔 채로 잊기 쉬운 쪽은 후자다. 초록(보기만)과 앰버(칠 수 있음)로
+ * 가르고, 색만으로 갈리지 않게 아이콘도 함께 바꾼다.
+ *
+ * `starting` 도 채운다: 링크가 아직 없어도 세션 화면은 이미 넘어가고 있다. `error` 는 붉게
+ * 채운다 — 공유가 끊긴 것을 모르는 편이 더 나쁘다.
+ */
+function chromeShareFill(
+  status: SessionShareStatus | undefined,
+  inputAllowed: boolean,
+): string | undefined {
+  if (status === 'error') {
+    return '#e2504a';
+  }
+  if (!isShareLive(status)) {
+    return undefined;
+  }
+  return inputAllowed ? '#b8770c' : '#15916b';
+}
+
+// 채워졌을 때의 상단 바 버튼. 이 상태만 IconButton 을 쓰지 않는다 — 그쪽은 정사각 아이콘
+// 한 칸(`inline-grid`, 고정 너비)이라 아이콘 옆에 사람 수를 세우려면 크기·정렬·앱 표면
+// 기준의 배경·테두리·글자색을 전부 되돌려야 한다. 평소 상태는 그대로 IconButton 이다.
+const CHROME_SHARE_LIVE_BUTTON =
+  'relative inline-flex h-9 min-h-9 items-center gap-[0.3rem] rounded-[10px] border border-transparent px-[0.55rem] text-white shadow-none transition-[background-color,filter] duration-150 hover:brightness-110 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(255,255,255,0.24)]';
+
 // pane 헤더 안에 놓일 때의 Share 버튼 스킨. 헤더는 한 줄 크롬이라 36px 알약이 들어가면 헤더가
 // 그만큼 두꺼워진다 — 닫기 아이콘(1.25rem)과 같은 높이로 맞춘다.
 const SHARE_INLINE_BUTTON =
-  'h-[1.25rem] min-h-0 rounded-[5px] border-0 bg-transparent px-[0.3rem] text-[0.65rem] font-semibold text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] hover:text-[var(--text)]';
+  'h-[1.25rem] min-h-0 rounded-[5px] border-0 px-[0.3rem] text-[0.65rem] font-semibold';
+const SHARE_INLINE_IDLE =
+  'bg-transparent text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] hover:text-[var(--text)]';
+
+// pane 헤더는 상단 바와 달리 앱 표면 위에 있다 — 여기서는 토큰이 제 일을 하므로 고정값을
+// 쓰지 않는다(테마를 따라 같이 바뀐다). 가르는 기준은 상단 바와 같다.
+function shareInlineLiveClass(
+  status: SessionShareStatus | undefined,
+  inputAllowed: boolean,
+): string | undefined {
+  if (status === 'error') {
+    return 'bg-[var(--danger-bg)] text-[var(--danger-text)]';
+  }
+  if (!isShareLive(status)) {
+    return undefined;
+  }
+  return inputAllowed
+    ? 'bg-[var(--warning-bg)] text-[var(--warning-text)]'
+    : 'bg-[var(--success-bg)] text-[var(--success-text)]';
+}
 
 export function TerminalSharePopover({
   anchorRef,
@@ -68,6 +128,26 @@ export function TerminalSharePopover({
 }: TerminalSharePopoverProps) {
   const { t: translate } = useTranslation();
   const inline = variant === 'inline';
+  const status = shareState?.status;
+  const live = isShareLive(status);
+  // 실패한 공유에는 입력이랄 것이 없다 — 그 상태는 붉은색 하나로만 말한다.
+  const inputAllowed = live && status !== 'error' && Boolean(shareState?.inputEnabled);
+  // 색만으로 갈리면 색약인 사람에게는 같은 칩이다. 아이콘도 함께 바꾼다.
+  const ChipIcon = inputAllowed ? Keyboard : Share2;
+  // 버튼 이름은 어느 상태에서도 'Share' 다(스크린리더·테스트가 그것으로 찾는다). 상태와 보는
+  // 사람 수는 tooltip 으로 붙인다 — 화면에 보이는 숫자를 이름에 섞으면 이름이 흔들린다.
+  const shareTitle =
+    status === 'active'
+      ? [
+          'Share',
+          translate('sharePopover.viewers', { count: shareState?.viewerCount ?? 0 }),
+          translate(inputAllowed ? 'sharePopover.allowInput' : 'sharePopover.readOnly'),
+        ].join(' · ')
+      : status === 'starting'
+        ? `Share · ${translate('sharePopover.preparing')}`
+        : status === 'error'
+          ? `Share · ${translate('sharePopover.failed')}`
+          : 'Share';
   return (
     <div
       ref={anchorRef}
@@ -81,11 +161,59 @@ export function TerminalSharePopover({
         <Button
           variant="secondary"
           size="sm"
-          className={SHARE_INLINE_BUTTON}
+          className={cn(
+            SHARE_INLINE_BUTTON,
+            shareInlineLiveClass(status, inputAllowed) ?? SHARE_INLINE_IDLE,
+          )}
+          aria-label="Share"
+          title={shareTitle}
           onClick={onToggle}
         >
+          {/* 읽기 전용에는 아이콘을 두지 않는다 — 여기 아이콘은 "남이 칠 수 있다" 는 표시다. */}
+          {inputAllowed ? (
+            <Keyboard
+              data-testid="session-share-input-icon"
+              className="mr-[0.2rem] inline-block h-[0.7rem] w-[0.7rem] align-middle"
+              aria-hidden="true"
+            />
+          ) : null}
           Share
+          {status === 'active' ? (
+            <span data-testid="session-share-viewers" className="ml-[0.25rem]">
+              {shareState?.viewerCount ?? 0}
+            </span>
+          ) : null}
         </Button>
+      ) : live ? (
+        // 공유 중에는 아이콘만으로는 티가 나지 않는다 — 칩을 색으로 채우고 보는 사람 수를
+        // 함께 세운다. 켜고 끌 때만 너비가 바뀌므로 상단 바가 흔들리지는 않는다.
+        <button
+          type="button"
+          data-testid="session-share-live"
+          className={cn(
+            CHROME_SHARE_LIVE_BUTTON,
+            status === 'starting' && 'animate-pulse',
+          )}
+          style={{ backgroundColor: chromeShareFill(status, inputAllowed) }}
+          aria-pressed={open}
+          aria-label="Share"
+          title={shareTitle}
+          onClick={onToggle}
+        >
+          <ChipIcon
+            data-testid={inputAllowed ? 'session-share-input-icon' : 'session-share-icon'}
+            className="h-[1.15rem] w-[1.15rem]"
+            aria-hidden="true"
+          />
+          {status === 'active' ? (
+            <span
+              data-testid="session-share-viewers"
+              className="text-[0.78rem] font-semibold leading-none"
+            >
+              {shareState?.viewerCount ?? 0}
+            </span>
+          ) : null}
+        </button>
       ) : (
         // 상단 바에서는 옆의 패널·하단바 토글과 같은 아이콘 버튼이다 — 글자 알약을 두면 그
         // 줄에서 그것만 튄다. 이름은 그대로 `Share` 다(스크린리더·테스트가 그것으로 찾는다).
@@ -95,7 +223,7 @@ export function TerminalSharePopover({
           className={cn(CHROME_TOGGLE_CLASS, open && CHROME_TOGGLE_ON_CLASS)}
           aria-pressed={open}
           aria-label="Share"
-          title="Share"
+          title={shareTitle}
           onClick={onToggle}
         >
           <Share2 className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
