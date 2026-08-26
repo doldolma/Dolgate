@@ -126,6 +126,35 @@ describe('countActivePortForwardEntries', () => {
     ).toBe(3);
   });
 
+  /**
+   * RDP-over-SSM·VNC-over-SSH 는 붙는 동안 전송 터널을 하나씩 연다. 그것은 사용자가 만든 규칙이
+   * 아니라 포트 포워딩 화면에 나오지 않는다 — 세면 배지에 1이 뜨는데 눌러 들어가면 아무것도 없다.
+   */
+  it('우리가 여는 전송 터널은 세지 않는다', () => {
+    expect(
+      countActivePortForwardEntries(
+        [
+          active({ ruleId: 'rdp:session-1' }),
+          active({ ruleId: 'vnc:session-2' }),
+          active({ ruleId: 'aws-ec2-ssh:session-3' }),
+        ],
+        [],
+      ),
+    ).toBe(0);
+  });
+
+  it('사용자가 만든 규칙은 그대로 센다 — 접두사가 붙은 사용자용 터널도 포함', () => {
+    expect(
+      countActivePortForwardEntries(
+        [
+          active(),
+          active({ ruleId: 'container-service-tunnel:abc' }),
+          active({ ruleId: 'rdp:session-1' }),
+        ],
+        [],
+      ),
+    ).toBe(2);
+  });
   it('켜진 것이 없으면 0 이다 — 배지를 그리지 않는 조건이다', () => {
     expect(countActivePortForwardEntries([active({ status: 'stopped' })], [dns('inactive')])).toBe(0);
   });

@@ -14,6 +14,7 @@ export * from "./quick-connect";
 export * from "./interactive-hop";
 export * from "./locale";
 export * from "./models";
+export * from "./port-forward-internal";
 export * from "./rdp-drives";
 export * from "./server-url";
 export * from "./vault";

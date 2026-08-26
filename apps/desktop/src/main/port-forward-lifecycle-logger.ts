@@ -8,6 +8,9 @@ import type {
   PortForwardRuleRecord,
   PortForwardTransport,
 } from '@shared';
+// 연결의 전송 계층으로 우리가 여는 터널 판정. **렌더러의 사이드바 배지와 같은 것을 써야 한다** —
+// 목록이 갈라지면 로그에 안 남는 터널이 배지에는 세어진다(shared-core/port-forward-internal).
+import { isInternalTransportTunnel } from '@shared';
 import type { ActivityLogRepository, HostRepository, PortForwardRepository } from './database';
 import { t } from './i18n';
 import { logMessage } from "./activity-log-message";
@@ -17,28 +20,6 @@ type HostLookup = Pick<HostRepository, 'getById'>;
 type PortForwardLookup = Pick<PortForwardRepository, 'getById'>;
 
 // 세션·SFTP·컨테이너 연결의 전송 계층으로 잠깐 열렸다 닫히는 내부 SSM 터널들의 runtimeId
-// 접두사. 사용자가 만든 포워딩 규칙이 아니라 연결의 구현 세부라 활동 로그(감사)에는 남기지
-// 않는다 — 안 그러면 EC2 SSH-over-SSM 연결마다 "내부 터널 + 세션" 2줄이 남고, 터널 줄은
-// 매칭되는 규칙이 없어 합성 runtimeId 가 라벨로 노출된다. 사용자용 터널(container-service-tunnel:
-// ·ecs-service-tunnel: 및 일반 SSH/SSM 규칙)은 그대로 로깅된다.
-const INTERNAL_TRANSPORT_TUNNEL_PREFIXES = [
-  'aws-ec2-ssh:', // EC2 SSH-over-SSM 전송 터널
-  'aws-ec2-install-key:', // EC2 Instance Connect 임시 키 주입 터널
-  'aws-sftp:', // AWS SFTP 전송 터널
-  'aws-sftp-probe:', // AWS SFTP 프리플라이트 프로브 터널
-  'aws-container-shell:', // 컨테이너 셸 전송 터널
-  'aws-containers:', // 컨테이너 리소스 조회 터널
-  // 원격 화면 세션의 전송 터널. `rdp:<sessionId>`(RDP over SSM)·`vnc:<sessionId>`(VNC over SSH
-  // 터널)로 `ipc/rdp.ts`·`ipc/vnc.ts` 가 연결마다 열고 끊을 때 닫는다. 사용자가 만든 규칙은
-  // randomUUID 라 이 접두사와 겹치지 않는다.
-  'rdp:', // RDP-over-SSM 전송 터널
-  'vnc:', // VNC-over-SSH 전송 터널
-] as const;
-
-function isInternalTransportTunnel(ruleId: string): boolean {
-  return INTERNAL_TRANSPORT_TUNNEL_PREFIXES.some((prefix) => ruleId.startsWith(prefix));
-}
-
 interface ActivePortForwardLifecycleAttempt {
   logId: string;
   ruleId: string;

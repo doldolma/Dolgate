@@ -2,6 +2,7 @@
 // 쓰면 같은 규칙이 다른 상태인 것처럼 보인다.
 
 import type { DnsOverrideResolvedRecord, PortForwardRuntimeRecord } from '@shared';
+import { isInternalTransportTunnel } from '@shared';
 import type { StatusBadgeTone } from '../ui/StatusBadge';
 import { resolveConnectionFailurePresentation } from '../store/utils';
 
@@ -115,12 +116,18 @@ export function countActiveDnsOverrides(
  * 사용자가 만들고 켠 항목이 둘이고 화면에도 둘로 보이므로, "구분되는 터널 수" 가 아니라 "켜 둔
  * 항목 수" 를 세는 것이 배지의 뜻과 맞다.
  *
+ * **우리가 여는 전송 터널은 빼고 센다.** RDP-over-SSM·VNC-over-SSH 는 붙는 동안 터널을 하나씩
+ * 여는데, 그것은 사용자가 만든 규칙이 아니라 연결의 구현 세부라 이 화면에 나오지 않는다. 세어
+ * 버리면 배지에 1이 뜨는데 눌러 들어가면 아무것도 없다 — 사용자는 자기가 켠 적 없는 것을 찾게
+ * 된다. 판정은 감사 로그와 같은 것을 쓴다(shared-core 의 isInternalTransportTunnel).
+ *
  * 업데이트 설치를 막을지 정하는 판정(AppShell)과 일부러 다른 함수다. 그쪽 질문은 "다시 시작하면
- * 끊기는 것이 있는가" 이고 그 대상은 터널이다.
+ * 끊기는 것이 있는가" 이고, 전송 터널도 끊기므로 그쪽은 **함께 센다**.
  */
 export function countActivePortForwardEntries(
   runtimes: readonly PortForwardRuntimeRecord[],
   overrides: readonly DnsOverrideResolvedRecord[],
 ): number {
-  return countActivePortForwards(runtimes) + countActiveDnsOverrides(overrides);
+  const visible = runtimes.filter((runtime) => !isInternalTransportTunnel(runtime.ruleId));
+  return countActivePortForwards(visible) + countActiveDnsOverrides(overrides);
 }

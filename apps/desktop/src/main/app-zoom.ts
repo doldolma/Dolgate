@@ -31,6 +31,14 @@ export const APP_ZOOM_STEPS = [0.75, 0.9, 1, 1.1, 1.25, 1.5] as const;
 
 const DEFAULT_ZOOM = 1;
 
+/**
+ * 창이 지금 쓰기로 한 배율. **창이 사는 동안만 산다** — 여기 없으면 100% 다.
+ *
+ * 이 표가 필요한 이유는 Chromium 이 배율을 우리 대신 기억하기 때문이다(아래 참고). 우리가 쥔
+ * 값을 로드가 끝날 때마다 다시 걸어야 "기억하지 않는다" 가 실제로 지켜진다.
+ */
+const desiredZoomByWindowId = new Map<number, number>();
+
 /** 목록 밖 값(옛 빌드에서 올라온 상태 파일 등)은 가장 가까운 단계로 끌어당긴다. */
 export function nearestZoomStepIndex(factor: number): number {
   let best = 0;
@@ -69,12 +77,27 @@ export function prepareWindowZoom(window: BrowserWindow): void {
   contents.setVisualZoomLevelLimits(1, 1).catch(() => {
     // 플랫폼에 따라 거절될 수 있다. 키보드 배율은 그대로 동작한다.
   });
+  desiredZoomByWindowId.set(window.id, DEFAULT_ZOOM);
+  window.on('closed', () => {
+    desiredZoomByWindowId.delete(window.id);
+  });
   contents.setZoomFactor(DEFAULT_ZOOM);
   notify(contents, DEFAULT_ZOOM);
 
   contents.on('did-finish-load', () => {
-    // 리로드하면 렌더러가 --app-zoom 을 잃는다. 이 창이 지금 쓰는 배율을 다시 알려 준다.
-    notify(contents, contents.getZoomFactor());
+    // **여기서 다시 거는 것이 핵심이다.**
+    //
+    // Chromium 은 배율을 호스트마다 **디스크에** 기억한다(userData 의 Preferences 안
+    // `partition.per_host_zoom_levels`). 창을 만들 때 건 100% 는 페이지 로드가 끝나는 순간
+    // 그 기억으로 덮어써진다 — 예전에는 여기서 getZoomFactor() 를 *읽어* 렌더러에 알리기만
+    // 해서, 되살아난 배율을 그대로 받아들이고 상단바까지 거기 맞춰 보정했다. 그래서 "배율은
+    // 기억하지 않는다" 고 적어 두고도 실수로 누른 확대가 재시작 뒤까지 남았다.
+    //
+    // 리로드하면 렌더러가 --app-zoom 을 잃으므로 알려 주는 것도 그대로 필요하다. 이 창이 쓰기로
+    // 한 값을 걸고 알리면 둘 다 된다 — 첫 로드는 100%, 리로드는 사용자가 고른 그 배율.
+    const factor = desiredZoomByWindowId.get(window.id) ?? DEFAULT_ZOOM;
+    contents.setZoomFactor(factor);
+    notify(contents, factor);
   });
 
   // 윈도우·리눅스에서는 감춘 메뉴 항목의 단축키가 살아나지 않는다(acceleratorWorksWhenHidden 은
@@ -118,6 +141,8 @@ export function stepAppZoom(direction: -1 | 0 | 1): void {
   if (factor === contents.getZoomFactor()) {
     return;
   }
+  // 이 창이 쓰기로 한 값이다 — 리로드가 나면 did-finish-load 가 이 값을 다시 건다.
+  desiredZoomByWindowId.set(window.id, factor);
   contents.setZoomFactor(factor);
   notify(contents, factor);
 }
