@@ -44,6 +44,8 @@ type sessionHandle struct {
 	// 데스크톱이 알려 준 셸 종류(Windows 면 powershell). 알면 그 셸 것만 보낸다 — 빈 값이면
 	// Linux/POSIX 로 보고 bash·zsh 겸용을 보낸다(SSM 세션 문서가 정하는 셸이라 물어볼 데가 없다).
 	shellKind string
+	// 셸을 모를 때 "누구냐" 를 묻고 답을 기다리는 곳.
+	shellProbe autocomplete.ShellProbe
 }
 
 type autocompleteProbe struct {
@@ -354,6 +356,9 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 			chunk := make([]byte, n)
 			copy(chunk, buffer[:n])
 			m.observeShellIntegrationOutput(sessionID, handle, chunk)
+			// 셸을 모른 채 접속하는 리눅스 SSM 세션은 먼저 "누구냐" 를 묻는다. 그 답도 핸드셰이크
+			// 필터 전에 봐야 한다 — 필터는 이 답을 앵커로 삼아 버퍼를 버린다.
+			handle.shellProbe.Observe(chunk)
 			// Suppress the integration command echo until the first prompt
 			// marker, then let the 6973 snapshot probe parsing run on what
 			// remains (the marker is injected before the probe, so it arrives
@@ -438,6 +443,11 @@ func shellIntegrationTypable(shellKind string) bool {
 	case "pwsh", "powershell":
 		return false
 	default:
+		// 빈 값(리눅스 SSM)은 먼저 프로브로 셸을 확인한다 — 겸용 스크립트를 던지던 길은
+		// 없앴다(dash·busybox 화면에 스크립트가 그대로 남았다).
+		if strings.TrimSpace(shellKind) == "" {
+			return true
+		}
 		return len(autocomplete.ShellIntegrationInitLines(shellKind)) > 0
 	}
 }
@@ -464,6 +474,11 @@ func (h *sessionHandle) beginShellIntegration() bool {
 // Windows 면 데스크톱이 셸 종류를 실어 보낸다 — 그 셸 것 한 줄이면 된다. Linux 는 세션 문서가
 // 정하는 셸(계정마다 sh·bash 가 다르다)이라 물어볼 채널이 없어 bash·zsh 겸용을 여러 줄로 보낸다.
 func (h *sessionHandle) shellIntegrationCommands() []string {
+	if strings.TrimSpace(h.shellKind) == "" {
+		// 아직 누구인지 모른다. 이번에 나가는 것은 프로브 한 줄이고, 답을 받으면 shellKind 가
+		// 채워져 다음 호출에서 그 셸 전용 한 줄이 나간다.
+		return []string{autocomplete.ShellProbeCommand()}
+	}
 	return autocomplete.ShellIntegrationInitLines(h.shellKind)
 }
 
@@ -478,15 +493,40 @@ func (m *Manager) writeShellIntegrationCommands(session *sessionHandle) error {
 
 func (m *Manager) writeShellIntegrationCommand(sessionID string, session *sessionHandle) (bool, error) {
 	session.shellIntegrationMu.Lock()
+	// 셸을 모르면 이번에 나가는 것은 프로브 한 줄이다. 답이 오면 shellKind 를 채우고 다시 부른다.
+	probing := strings.TrimSpace(session.shellKind) == ""
 	switch session.shellIntegrationState {
 	case shellIntegrationInstalling, shellIntegrationInstalled, shellIntegrationUnsupported:
 		session.shellIntegrationMu.Unlock()
 		return false, nil
 	case shellIntegrationUnknown:
 		session.shellIntegrationState = shellIntegrationInstalling
-		session.handshake.ArmForCommand(false, session.shellIntegrationCommands()...)
+		if probing {
+			session.handshake.ArmForShellProbe(false, autocomplete.ShellProbeCommand())
+		} else {
+			session.handshake.ArmForCommand(false, session.shellIntegrationCommands()...)
+		}
 	default:
 		session.shellIntegrationState = shellIntegrationInstalling
+		if probing {
+			session.handshake.ArmForShellProbe(false, autocomplete.ShellProbeCommand())
+		}
+	}
+	if probing {
+		session.shellProbe.Arm(func(shell string) {
+			session.shellIntegrationMu.Lock()
+			if shell == "" {
+				// dash·busybox 등. 이 셸에는 넣을 것이 없다 — 다시 묻지도 않는다.
+				session.shellIntegrationState = shellIntegrationUnsupported
+				session.shellIntegrationMu.Unlock()
+				m.FlushShellIntegration(sessionID)
+				return
+			}
+			session.shellKind = shell
+			session.shellIntegrationState = shellIntegrationUnknown
+			session.shellIntegrationMu.Unlock()
+			_, _ = m.writeShellIntegrationCommand(sessionID, session)
+		})
 	}
 	session.stopShellIntegrationInstallTimersLocked()
 	session.shellIntegrationMu.Unlock()
@@ -502,6 +542,10 @@ func (m *Manager) writeShellIntegrationCommand(sessionID string, session *sessio
 		return false, err
 	}
 
+	if probing {
+		// 프로브만 나갔다. 상태는 답을 받은 콜백이 옮긴다.
+		return true, nil
+	}
 	session.shellIntegrationMu.Lock()
 	session.shellIntegrationState = shellIntegrationInstalled
 	shouldScheduleFlush := !session.shellIntegrationFlushScheduled

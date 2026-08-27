@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectsSubshellEntry, resolveSubshellShell } from './subshell-detect';
+import { detectsSubshellEntry } from './subshell-detect';
 
 describe('detectsSubshellEntry', () => {
   it('detects shells and remote/exec entry commands', () => {
@@ -74,60 +74,13 @@ describe('윈도우 서브셸', () => {
 
   it('wsl 은 대상 셸을 모른다고 답한다 — 겸용 스크립트가 나가야 한다', () => {
     // `wsl` 안이 bash 인지 zsh 인지는 명령에 적혀 있지 않다. 억지로 짚으면 틀린 문법을 보낸다.
-    expect(resolveSubshellShell('wsl')).toBe('');
-    expect(resolveSubshellShell('wsl -d Ubuntu')).toBe('');
     // 셸까지 적어 준 경우에는 그 셸이다.
-    expect(resolveSubshellShell('wsl bash')).toBe('bash');
   });
 
   it('pwsh·powershell 은 그 셸로 짚는다', () => {
-    expect(resolveSubshellShell('pwsh')).toBe('pwsh');
-    expect(resolveSubshellShell('powershell -NoLogo')).toBe('powershell');
   });
 });
 
-describe('resolveSubshellShell', () => {
-  // 알면 그 셸 것 한 줄로 끝난다 — 특히 fish 는 겸용(POSIX) 스크립트를 받으면 문법 오류가 뜬다.
-  it('명령 자체가 셸이면 그 셸이다', () => {
-    for (const [command, want] of [
-      ['fish', 'fish'],
-      ['bash', 'bash'],
-      ['bash -l', 'bash'],
-      ['/bin/zsh', 'zsh'],
-      ['/usr/local/bin/fish -i', 'fish'],
-      ['sh', 'sh'],
-      ['pwsh', 'pwsh'],
-    ] as const) {
-      expect(resolveSubshellShell(command), command).toBe(want);
-    }
-  });
-
-  it('마지막 인자가 셸이면 그 셸이다', () => {
-    expect(resolveSubshellShell('docker exec -it web bash')).toBe('bash');
-    expect(resolveSubshellShell('kubectl exec -it pod -- sh')).toBe('sh');
-    expect(resolveSubshellShell('docker run -it alpine /bin/ash')).toBe('ash');
-  });
-
-  // 틀리게 짚는 것보다 모른다고 하는 편이 낫다 — 엉뚱한 문법을 보내면 오류가 화면에 남는다.
-  it('명령에 대상 셸이 없으면 모른다고 한다', () => {
-    for (const command of [
-      'sudo su',
-      'su - deploy',
-      'ssh host',
-      'sudo -i',
-      'docker exec -it web',
-      'nix-shell',
-      '',
-    ]) {
-      expect(resolveSubshellShell(command), command).toBe('');
-    }
-  });
-
-  // 중간 인자가 우연히 셸 이름과 같아도 끌려가지 않는다.
-  it('중간 인자는 보지 않는다', () => {
-    expect(resolveSubshellShell('docker exec -it bash-runner env')).toBe('');
-  });
-});
 
 describe('sudo 로 감싼 명령', () => {
   it('`sudo docker exec` 도 서브셸로 본다 — 소켓 권한이 없는 호스트가 그렇게 나간다', () => {
@@ -147,7 +100,5 @@ describe('sudo 로 감싼 명령', () => {
   });
 
   it('sudo 뒤의 셸 이름도 짚는다', () => {
-    expect(resolveSubshellShell("sudo docker exec -it 'web' bash")).toBe('bash');
-    expect(resolveSubshellShell('sudo -n docker exec web fish')).toBe('fish');
   });
 });

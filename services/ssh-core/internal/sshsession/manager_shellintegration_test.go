@@ -164,16 +164,16 @@ func TestReinjectShellIntegrationInjectsAfterPromptSettles(t *testing.T) {
 
 	// A settled subshell prompt then quiet triggers the injection.
 	//
-	// 서브셸은 무엇으로 들어갔는지 모르므로 bash 용·zsh 용이 **한 명령의 여러 줄** 로 나간다 —
-	// 한 줄로 합치면 MAX_CANON(1024)을 넘어 줄 편집기가 없는 셸에서 잘린다.
+	// 서브셸이 무엇인지 모르므로 먼저 "누구냐" 한 줄이 나간다. 스크립트는 그 답을 받은 뒤에
+	// 나간다 — 모른 채 겸용을 던지면 dash·busybox 화면에 그대로 남았다.
 	h.reinjectGate.Observe([]byte("user@remote2:~$ "))
-	want := strings.Join(autocomplete.ShellIntegrationInitLines(""), "")
+	want := autocomplete.ShellProbeCommand()
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) && w.written() != want {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if got := w.writeCount(); got != len(autocomplete.ShellIntegrationInitLines("")) {
-		t.Fatalf("expected one write per injected line after prompt settle, got %d", got)
+	if got := w.writeCount(); got != 1 {
+		t.Fatalf("expected a single probe write after prompt settle, got %d", got)
 	}
 	if got := w.written(); got != want {
 		t.Fatalf("unexpected injected command: %q", got)
@@ -285,5 +285,173 @@ func TestReinjectSendsNothingForAnUnsupportedShellHint(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if got := w.writeCount(); got != 0 {
 		t.Fatalf("지원하지 않는 셸에 %d번 썼다: %q", got, w.written())
+	}
+}
+
+// 프로브의 답을 받으면 **그 셸 전용 한 줄이 실제로 나가야** 한다.
+//
+// 여기가 끊기면 화면은 깨끗한데 통합이 영영 안 붙는다 — bash 컨테이너에 들어갔는데 명령 상태가
+// 회색으로 굳는 증상이 그것이다.
+func TestProbeReplyTriggersTheShellSpecificInjection(t *testing.T) {
+	w := &fakeWriteCloser{}
+	h := &sessionHandle{
+		stdin:        w,
+		closed:       make(chan struct{}),
+		reinjectGate: autocomplete.NewPromptSettleGate(20*time.Millisecond, time.Second),
+	}
+	m := NewManager(func(_ protocol.Event) {}, func(_ protocol.StreamFrame, _ []byte) {})
+	m.mu.Lock()
+	m.sessions["s1"] = h
+	m.mu.Unlock()
+	defer close(h.closed)
+
+	if err := m.ReinjectShellIntegration("s1", ""); err != nil {
+		t.Fatalf("arm reinject failed: %v", err)
+	}
+	h.reinjectGate.Observe([]byte("root@container:/app# "))
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && w.writeCount() < 1 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := w.written(); got != autocomplete.ShellProbeCommand() {
+		t.Fatalf("프로브가 나가지 않았다: %q", got)
+	}
+
+	// 컨테이너의 bash 가 답한다(스트림 경로와 같은 순서: 프로브 관찰 → 핸드셰이크 필터).
+	reply := []byte(autocomplete.ShellProbeReplyPrefix + "5.2.15(1)-release||\a")
+	h.shellProbe.Observe(reply)
+	h.handshake.Filter(reply)
+
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && w.writeCount() < 2 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := w.writeCount(); got < 2 {
+		t.Fatalf("답을 받고도 주입하지 않았다: writes=%d, %q", got, w.written())
+	}
+	if got := w.written(); !strings.Contains(got, "__ds_o") {
+		t.Fatalf("bash 스크립트가 아니다: %q", got)
+	}
+}
+
+// 통합이 없는 셸이면 **실행 중이던 명령 블록을 닫아 준다.**
+//
+// 안 닫으면 바깥 셸의 133;D 가 그 셸을 빠져나올 때까지 오지 않아, 컨테이너 안에서 친 모든 것이
+// 한 블록에 빨려 들어가고 상태 점이 계속 도는 것처럼 보인다.
+func TestUnsupportedSubshellClosesTheRunningCommandBlock(t *testing.T) {
+	var streamed []byte
+	w := &fakeWriteCloser{}
+	h := &sessionHandle{
+		stdin:        w,
+		closed:       make(chan struct{}),
+		reinjectGate: autocomplete.NewPromptSettleGate(20*time.Millisecond, time.Second),
+	}
+	m := NewManager(
+		func(_ protocol.Event) {},
+		func(_ protocol.StreamFrame, data []byte) {
+			streamed = append(streamed, data...)
+		},
+	)
+	m.mu.Lock()
+	m.sessions["s1"] = h
+	m.mu.Unlock()
+	defer close(h.closed)
+
+	if err := m.ReinjectShellIntegration("s1", ""); err != nil {
+		t.Fatalf("arm reinject failed: %v", err)
+	}
+	h.reinjectGate.Observe([]byte("/ # "))
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && w.writeCount() < 1 {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// busybox 가 답한다: bash 도 zsh 도 fish 도 아니다.
+	reply := []byte(autocomplete.ShellProbeReplyPrefix + "|||\a")
+	h.shellProbe.Observe(reply)
+	h.handshake.Filter(reply)
+
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !strings.Contains(string(streamed), autocomplete.CommandFinishedMarker) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(string(streamed), autocomplete.CommandFinishedMarker) {
+		t.Fatalf("명령 블록을 닫지 않았다: %q", streamed)
+	}
+	if got := w.writeCount(); got != 1 {
+		t.Fatalf("통합을 넣을 수 없는 셸에 %d줄을 보냈다", got)
+	}
+}
+
+// 통합이 붙는 셸에서도 **바깥 블록은 닫아야 한다.**
+//
+// 안 닫으면 아직 열려 있는 바깥 블록(`docker exec …`) 안에 안쪽 셸의 블록들이 들어앉아, 화면이
+// 블록 속 블록처럼 보인다. 통합이 실제로 붙기 시작하면서 드러난 상태다.
+func TestSupportedSubshellAlsoClosesTheOuterCommandBlock(t *testing.T) {
+	var streamed []byte
+	w := &fakeWriteCloser{}
+	h := &sessionHandle{
+		stdin:        w,
+		closed:       make(chan struct{}),
+		reinjectGate: autocomplete.NewPromptSettleGate(20*time.Millisecond, time.Second),
+	}
+	m := NewManager(
+		func(_ protocol.Event) {},
+		func(_ protocol.StreamFrame, data []byte) { streamed = append(streamed, data...) },
+	)
+	m.mu.Lock()
+	m.sessions["s1"] = h
+	m.mu.Unlock()
+	defer close(h.closed)
+
+	if err := m.ReinjectShellIntegration("s1", ""); err != nil {
+		t.Fatalf("arm reinject failed: %v", err)
+	}
+	h.reinjectGate.Observe([]byte("root@container:/app# "))
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && w.writeCount() < 1 {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	reply := []byte(autocomplete.ShellProbeReplyPrefix + "5.2.15(1)-release|||\a")
+	h.shellProbe.Observe(reply)
+	h.handshake.Filter(reply)
+
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && w.writeCount() < 2 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(string(streamed), autocomplete.CommandFinishedMarker) {
+		t.Fatalf("바깥 블록을 닫지 않았다: %q", streamed)
+	}
+}
+
+// 지원 불가 표시는 **그 셸에서 나오면 지워져야** 한다.
+//
+// 세션에 영구히 걸어 두었더니 alpine 에 한 번 들어갔다 나온 뒤로는 bash 컨테이너에도 묻지 않아
+// 통합이 안 붙었고, 바깥 블록도 못 닫아 계속 열린 채로 남았다.
+func TestUnsupportedFlagClearsWhenTheOuterPromptReturns(t *testing.T) {
+	h := &sessionHandle{
+		stdin:        &fakeWriteCloser{},
+		closed:       make(chan struct{}),
+		reinjectGate: autocomplete.NewPromptSettleGate(20*time.Millisecond, time.Second),
+	}
+	defer close(h.closed)
+	h.shellIntegrationUnsupported.Store(true)
+
+	// 통합 없는 셸 안에서의 출력에는 마커가 없다 — 표시는 그대로다.
+	if h.shellIntegrationUnsupported.Load() &&
+		bytes.Contains([]byte("/ # ls\r\n"), []byte(autocomplete.PromptStartMarker)) {
+		t.Fatal("마커 없는 출력에서 표시가 지워졌다")
+	}
+
+	// 바깥 셸로 돌아오면 그 셸의 프롬프트 마커가 온다.
+	chunk := []byte(autocomplete.PromptStartMarker + "user@host:~$ ")
+	if h.shellIntegrationUnsupported.Load() && bytes.Contains(chunk, []byte(autocomplete.PromptStartMarker)) {
+		h.shellIntegrationUnsupported.Store(false)
+	}
+	if h.shellIntegrationUnsupported.Load() {
+		t.Fatal("바깥 프롬프트가 돌아왔는데 표시가 남아 있다")
 	}
 }

@@ -1200,7 +1200,9 @@ describe('패널이 보낸 명령의 서브셸 진입', () => {
     blocks.push(block({ command: "docker exec -it 'web' bash" }));
     render(<SessionPanel sessionId="session-1" />);
     fireEvent.click(screen.getByRole('button', { name: '넣고 실행' }));
-    expect(reinjectShellIntegration).toHaveBeenCalledWith('session-1', 'bash');
+    // 셸 이름은 넘기지 않는다 — 명령만 봐서는 어느 셸이 뜨는지 알 수 없어서, 도착한 셸에게
+    // 코어가 직접 묻는다.
+    expect(reinjectShellIntegration).toHaveBeenCalledWith('session-1', undefined);
   });
 
   it('평범한 명령에는 손대지 않는다', () => {

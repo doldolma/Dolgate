@@ -1,12 +1,15 @@
 package localsession
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"dolssh/services/ssh-core/internal/autocomplete"
@@ -40,7 +43,9 @@ type sessionHandle struct {
 	// reinjectGate re-installs OSC 133/7 hooks after the user enters a subshell
 	// (sudo su, docker exec, ssh from a local shell). Created in Connect; a no-op
 	// until Armed by ReinjectShellIntegration.
-	reinjectGate *autocomplete.PromptSettleGate
+	shellProbe                  autocomplete.ShellProbe
+	shellIntegrationUnsupported atomic.Bool
+	reinjectGate                *autocomplete.PromptSettleGate
 	// installGate 는 접속 직후 통합 주입을 **첫 프롬프트가 뜬 뒤로** 미룬다. 재주입과 따로
 	// 두는 이유는 두 가지다: 둘이 겹칠 수 있고, 기다리는 시간이 다르다(로컬 출력은 즉시 오므로
 	// 조용해지는 창이 짧아도 된다).
@@ -276,20 +281,28 @@ func (m *Manager) performShellIntegrationReinject(
 	if autocomplete.PromptAlreadyIntegrated(tail) {
 		return
 	}
-	// 렌더러가 실행된 명령에서 셸을 알아냈으면 그 셸 것 한 줄로 끝난다. 모르면 겸용을 여러 줄로
-	// 보낸다. 이름은 알지만 지원하지 않는 셸(dash·ksh 등)이면 아무것도 보내지 않는다 — 훅을 걸
-	// 방법이 없는 셸에 타이핑해 봐야 화면만 더럽힌다.
+	// 셸을 모르면 먼저 묻는다 — 예전에는 겸용 스크립트를 여러 줄로 보냈고, 그것이 dash·busybox
+	// 화면에 그대로 남았다. 이름은 알지만 지원하지 않는 셸(dash·ksh 등)이면 아무것도 보내지
+	// 않는다 — 훅을 걸 방법이 없는 셸에 타이핑해 봐야 화면만 더럽힌다.
+	if strings.TrimSpace(shell) == "" {
+		if session.shellIntegrationUnsupported.Load() {
+			return
+		}
+		m.probeShellThenReinject(sessionID, session)
+		return
+	}
 	commands := autocomplete.ShellIntegrationInitLines(shell)
 	if len(commands) == 0 {
 		return
 	}
-	session.handshake.ArmForCommand(true, commands...)
+	session.handshake.ArmForCommand(false, commands...)
 	// 프롬프트를 보고 쓰므로 그 프롬프트가 이미 화면에 있다. 접속 경로와 같은 이유로 그 줄을
 	// 지운다 — 지우지 않으면 셸이 그리는 새 프롬프트가 같은 줄에 이어 붙어 두 번 찍힌다(bash 가
 	// 그렇다. zsh 는 zle 가 스스로 지우고 다시 그려서 티가 안 났다).
+	// 바깥 명령 블록도 함께 닫는다 — 여기서부터는 안쪽 셸이 자기 블록을 만든다.
 	m.emitStream(
 		protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID},
-		[]byte("\r\x1b[2K"),
+		[]byte(autocomplete.CommandFinishedMarker+"\r\x1b[2K"),
 	)
 	for _, command := range commands {
 		if err := session.runner.Write([]byte(command)); err != nil {
@@ -377,6 +390,15 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 			// 설치와 서브셸 재주입이 각자의 문을 쓴다 — 무장하지 않은 쪽은 no-op 이다.
 			handle.installGate.Observe(chunk)
 			handle.reinjectGate.Observe(chunk)
+			// 셸을 모를 때 나가는 "누구냐" 의 답. 필터가 이 답을 앵커로 삼아 버퍼를 버리므로
+			// 필터 전에 봐야 한다.
+			handle.shellProbe.Observe(chunk)
+			// 통합 없는 셸에서 나오면(=바깥 프롬프트 마커가 다시 보이면) 표시를 지운다. 안 지우면
+			// 그 세션의 다음 서브셸에 영영 묻지 않는다.
+			if handle.shellIntegrationUnsupported.Load() &&
+				bytes.Contains(chunk, []byte(autocomplete.PromptStartMarker)) {
+				handle.shellIntegrationUnsupported.Store(false)
+			}
 			chunk = handle.handshake.Filter(chunk)
 			if len(chunk) > 0 {
 				m.emitStream(protocol.StreamFrame{

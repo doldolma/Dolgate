@@ -33,17 +33,15 @@ func (r *fakeRunner) Write(data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
-	// 주입은 조각이 여러 개일 수 있다(셸을 모를 때 bash 용·zsh 용). 실제 셸도 훅이 걸린 뒤
-	// 프롬프트에서 마커를 내므로, 마지막 조각 뒤에만 마커를 낸다.
-	commands := autocomplete.ShellIntegrationInitLines("")
-	for index, command := range commands {
-		if string(data) != command {
-			continue
-		}
-		if index < len(commands)-1 {
-			_, err := r.outputWriter.Write(data)
-			return err
-		}
+	// 진짜 리눅스 SSM 세션을 흉내 낸다. 셸을 모른 채 접속하므로 먼저 "누구냐" 가 오고,
+	// 우리는 bash 라고 답한다. 그다음에 오는 bash 전용 한 줄에만 프롬프트 마커를 붙인다.
+	if string(data) == autocomplete.ShellProbeCommand() {
+		reply := autocomplete.ShellProbeReplyPrefix + "5.2.15(1)-release||\a"
+		payload := append(append([]byte(nil), data...), []byte(reply)...)
+		_, err := r.outputWriter.Write(payload)
+		return err
+	}
+	if string(data) == autocomplete.BashShellIntegrationInitCommand() {
 		r.mu.Lock()
 		initial := r.initial
 		r.initial = ""

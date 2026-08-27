@@ -102,8 +102,13 @@ func TestReinjectShellIntegrationWaitsForThePanePrompt(t *testing.T) {
 	}
 
 	handle.observePaneOutput("%0", []byte("root@box:/# "))
-	if !waitForStdin(t, recorder, "__ds_o", 3*time.Second) {
-		t.Fatalf("프롬프트가 안착했는데 주입하지 않았다: %q", recorder.snapshot())
+	// 셸을 모르므로 먼저 "누구냐" 한 줄이 나간다. 스크립트는 그 답을 받은 뒤에 나간다 —
+	// 모른 채 겸용을 던지면 dash·busybox pane 화면에 그대로 남는다.
+	if !waitForStdin(t, recorder, "dg-shell", 3*time.Second) {
+		t.Fatalf("프롬프트가 안착했는데 묻지 않았다: %q", recorder.snapshot())
+	}
+	if decoded := decodePaneStdin(recorder.snapshot()); strings.Contains(decoded, "__ds_o") {
+		t.Fatalf("묻기도 전에 스크립트를 보냈다: %q", decoded)
 	}
 	// 다른 pane 은 건드리지 않는다.
 	if strings.Contains(recorder.snapshot(), "-t %1") {

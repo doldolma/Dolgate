@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// 셸을 모른 채 무장했을 때 기본으로 지우는 첫 echo(=bash 용). 기존 테스트들이 "주입 echo" 하나를
-// 놓고 검사하므로 그 대표값으로 쓴다.
-var injectedCommandEcho = injectedCommandEchoes[0]
+// 기존 테스트들이 "주입 echo" 하나를 놓고 검사하므로 그 대표값으로 bash 줄을 쓴다.
+// (셸을 모를 때 실제로 나가는 것은 이제 프로브 한 줄이고, 스크립트는 셸을 안 뒤에 나간다.)
+var injectedCommandEcho = visibleInjectedEcho(BashShellIntegrationInitCommand())
 
 // 주입 명령 하나는 MAX_CANON(1024)을 넘어서는 안 된다.
 //
@@ -18,11 +18,12 @@ var injectedCommandEcho = injectedCommandEchoes[0]
 func TestInjectedLinesStayUnderTheCanonicalLineLimit(t *testing.T) {
 	// PowerShell 은 제외한다. POSIX tty 의 canonical 모드를 지나지 않는다 — Windows 로컬은
 	// 기동 인자(-EncodedCommand)로 넣고, 그 밖의 경로는 PSReadLine 이 raw 모드로 읽는다.
-	for _, shell := range []string{"", "bash", "zsh", "fish"} {
+	// 프로브도 같은 tty 를 지난다 — 한 줄이고 짧지만 상한은 함께 지킨다.
+	if probe := ShellProbeCommand(); len(probe) > MaxShellIntegrationCommandBytes {
+		t.Errorf("probe: %d바이트 — 상한 %d 초과", len(probe), MaxShellIntegrationCommandBytes)
+	}
+	for _, shell := range []string{"bash", "zsh", "fish"} {
 		label := shell
-		if label == "" {
-			label = "unknown"
-		}
 		lines := ShellIntegrationInitLines(shell)
 		if len(lines) == 0 {
 			t.Fatalf("%s: 주입할 줄이 없다", label)
@@ -38,10 +39,12 @@ func TestInjectedLinesStayUnderTheCanonicalLineLimit(t *testing.T) {
 	}
 }
 
-// 셸을 알면 하나, 모르면 둘. 모른다고 주입을 포기하면 서브셸 통합이 조용히 사라진다.
+// 셸을 알면 하나, 모르면 없음(프로브가 먼저 간다).
 func TestInjectedLineCountFollowsWhatWeKnow(t *testing.T) {
 	for shell, want := range map[string]int{
-		"":           3, // 모름 → `{ bash…` / `zsh…` / `}` 세 줄이 한 명령
+		// 모르면 아무것도 안 보낸다 — 먼저 프로브로 셸을 확인하고 그 셸 것 한 줄만 보낸다.
+		// 예전에는 여기서 겸용 세 줄이 나갔고, 그것이 dash·busybox 화면을 더럽혔다.
+		"":           0,
 		"bash":       1,
 		"/bin/zsh":   1,
 		"fish":       1,
@@ -86,7 +89,6 @@ func TestBashCommandStartFallbackReachesEveryPath(t *testing.T) {
 		"BashShellIntegrationInitCommand": BashShellIntegrationInitCommand(),
 		"BashShellIntegrationScript":      BashShellIntegrationScript(),
 		"InitLines(bash)":                 strings.Join(ShellIntegrationInitLines("bash"), ""),
-		"InitLines(unknown)":              strings.Join(ShellIntegrationInitLines(""), ""),
 	}
 	for name, script := range carriers {
 		if !strings.Contains(script, "trap '__ds_c' DEBUG") {

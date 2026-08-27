@@ -82,6 +82,7 @@ type controlHandle struct {
 	// pane(%N)별 서브셸 재주입 게이트. 사용자가 pane 안에서 서브셸(sudo su·docker exec …)로
 	// 들어가면 그 셸에는 훅이 없다 — 새 프롬프트가 안착하면 다시 심는다. nil/미armed 면 no-op.
 	reinjectGates map[string]*autocomplete.PromptSettleGate
+	shellProbes   map[string]*autocomplete.ShellProbe
 	handshakesMu  sync.Mutex
 
 	completionPoolMu sync.Mutex
@@ -151,8 +152,23 @@ func (h *controlHandle) armPaneHandshake(paneID string, commands []string) {
 		h.handshakes[paneID] = hs
 	}
 	h.handshakesMu.Unlock()
-	// 걷어낼 echo 는 지금 보내는 조각들이다(셸을 모르면 bash 용·zsh 용 둘).
+	// 걷어낼 echo 는 지금 보내는 조각들이다.
 	hs.ArmForCommand(false, commands...)
+}
+
+// armPaneShellProbe 는 "누구냐" 한 줄을 무장한다 — 끝내는 신호는 마커가 아니라 그 답이다.
+func (h *controlHandle) armPaneShellProbe(paneID string, command string) {
+	h.handshakesMu.Lock()
+	if h.handshakes == nil {
+		h.handshakes = make(map[string]*autocomplete.Handshake)
+	}
+	hs := h.handshakes[paneID]
+	if hs == nil {
+		hs = &autocomplete.Handshake{}
+		h.handshakes[paneID] = hs
+	}
+	h.handshakesMu.Unlock()
+	hs.ArmForShellProbe(false, command)
 }
 
 // filterPaneOutput 는 pane 출력에 핸드셰이크 필터를 적용한다(없으면 그대로 통과).
@@ -181,14 +197,34 @@ func (h *controlHandle) paneReinjectGate(paneID string) *autocomplete.PromptSett
 	return gate
 }
 
+// paneShellProbe 는 pane 의 "누구냐" 대기자를 돌려준다(없으면 만든다).
+func (h *controlHandle) paneShellProbe(paneID string) *autocomplete.ShellProbe {
+	h.handshakesMu.Lock()
+	defer h.handshakesMu.Unlock()
+	if h.shellProbes == nil {
+		h.shellProbes = make(map[string]*autocomplete.ShellProbe)
+	}
+	probe := h.shellProbes[paneID]
+	if probe == nil {
+		probe = &autocomplete.ShellProbe{}
+		h.shellProbes[paneID] = probe
+	}
+	return probe
+}
+
 // observePaneOutput 는 재주입 대기 중인 pane 에 원본 출력을 흘려 프롬프트 안착을 보게 한다.
 // 대기 중이 아니면 no-op 이다(필터 **전** 에 봐야 원본 프롬프트를 본다).
 func (h *controlHandle) observePaneOutput(paneID string, data []byte) {
 	h.handshakesMu.Lock()
 	gate := h.reinjectGates[paneID]
+	probe := h.shellProbes[paneID]
 	h.handshakesMu.Unlock()
 	if gate != nil {
 		gate.Observe(data)
+	}
+	// 셸 프로브의 답도 필터 전에 본다 — 필터는 이 답을 앵커로 삼아 버퍼를 버린다.
+	if probe != nil {
+		probe.Observe(data)
 	}
 }
 
@@ -977,8 +1013,11 @@ func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error
 	if paneID == "" {
 		return nil // pane 세션이 아니면 할 일 없음
 	}
+	// 셸을 모르면 프로브 한 줄로 먼저 묻는다. 예전에는 겸용 스크립트를 보냈고, 그것이 여러 줄이라
+	// dash·busybox pane 에서 화면에 그대로 남았다.
+	probing := strings.TrimSpace(shell) == ""
 	commands := autocomplete.ShellIntegrationInitLines(shell)
-	if len(commands) == 0 {
+	if !probing && len(commands) == 0 {
 		// 훅을 걸 수 없는 셸이다(dash·ksh 등). 타이핑해 봐야 화면만 더럽힌다.
 		return nil
 	}
@@ -989,11 +1028,51 @@ func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error
 			if autocomplete.PromptAlreadyIntegrated(tail) {
 				return
 			}
+			if probing {
+				m.probePaneShellThenInject(sessionID, handle, paneID)
+				return
+			}
 			m.writePaneShellIntegration(sessionID, handle, paneID, commands)
 		},
 		func() {},
 	)
 	return nil
+}
+
+// probePaneShellThenInject 는 pane 에 "누구냐" 한 줄을 보내고, 답이 오면 그 셸 것만 넣는다.
+func (m *Manager) probePaneShellThenInject(
+	sessionID string,
+	handle *controlHandle,
+	paneID string,
+) {
+	command := autocomplete.ShellProbeCommand()
+	handle.paneShellProbe(paneID).Arm(func(shell string) {
+		if shell == "" {
+			// dash·busybox 등. 넣을 것이 없다.
+			m.flushPaneShellIntegration(sessionID, handle, paneID)
+			// 실행 중으로 남을 명령 블록을 닫는다(CommandFinishedMarker 주석 참고).
+			m.emitStream(coretypes.StreamFrame{
+				Type:      coretypes.StreamTypeData,
+				SessionID: sessionID,
+			}, []byte(autocomplete.CommandFinishedMarker))
+			return
+		}
+		m.writePaneShellIntegration(sessionID, handle, paneID, autocomplete.ShellIntegrationInitLines(shell))
+	})
+	handle.armPaneShellProbe(paneID, command)
+	for _, cmd := range encodeInput(paneID, []byte(command), handle.version) {
+		if err := handle.writeStdin(cmd); err != nil {
+			handle.paneShellProbe(paneID).Disarm()
+			m.flushPaneShellIntegration(sessionID, handle, paneID)
+			return
+		}
+	}
+	// 답이 끝내 오지 않으면 붙잡고 있던 출력을 풀어 준다.
+	go func() {
+		time.Sleep(shellIntegrationFlushDelay)
+		handle.paneShellProbe(paneID).Disarm()
+		m.flushPaneShellIntegration(sessionID, handle, paneID)
+	}()
 }
 
 // writePaneShellIntegration 는 echo 억제를 무장하고 pane 에 주입 줄들을 보낸다.
@@ -1053,31 +1132,9 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 	if !handle.markIntegrated(paneID) {
 		return nil
 	}
-	// pane 의 셸은 알 수 없다(원격 호스트의 기본 셸을 tmux 가 띄운다) — bash 용·zsh 용을
-	// 연달아 보낸다. 각각 자기 버전 변수로 가드돼 있고 둘 다 MAX_CANON 아래다.
-	commands := autocomplete.ShellIntegrationInitLines("")
-	handle.armPaneHandshake(paneID, commands)
-	// 셸 통합 주입도 입력과 같은 버전별 인코더를 경유한다 — 2.6 에서도 -l+키이름 분해로
-	// OSC133 셸 통합/자동완성이 살아 있게(send-keys -H 미지원 버전에서 init 스크립트 주입).
-	for _, command := range commands {
-		for _, cmd := range encodeInput(paneID, []byte(command), handle.version) {
-			if err := handle.writeStdin(cmd); err != nil {
-				return err
-			}
-		}
-	}
-	// 마커가 끝내 안 오면(느린/비호환 셸) 일정 시간 뒤 버퍼를 풀어 실제 출력 손실을 막는다.
-	go func() {
-		time.Sleep(shellIntegrationFlushDelay)
-		if hs := handle.paneHandshake(paneID); hs != nil {
-			if flushed := hs.Flush(); len(flushed) > 0 {
-				m.emitStream(coretypes.StreamFrame{
-					Type:      coretypes.StreamTypeData,
-					SessionID: sessionID,
-				}, flushed)
-			}
-		}
-	}()
+	// pane 의 셸은 알 수 없다(원격 호스트의 기본 셸을 tmux 가 띄운다) — 먼저 한 줄로 묻고,
+	// 답이 온 셸 것만 보낸다. 예전에는 bash·zsh 겸용을 여러 줄로 보냈고 dash pane 이 더러워졌다.
+	m.probePaneShellThenInject(sessionID, handle, paneID)
 	return nil
 }
 

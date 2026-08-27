@@ -478,32 +478,48 @@ export function noteContinuationPrompt(sessionId: string, terminal: Terminal): v
 /**
  * OSC 133;C — 명령 실행 시작. 여기서 블록을 만들고 명령 줄에 액센트를 붙인다.
  */
+/**
+ * 명령 실행 시작(OSC 133;C). 만들어진 블록의 명령 원문을 돌려준다(못 읽었으면 null).
+ *
+ * 원문을 돌려주는 이유: 서브셸 진입 판정이 이것을 쓴다. 예전에는 사용자가 **친 키**를 모아
+ * 재구성했는데, ↑ 로 부른 명령이나 붙여넣기는 글자가 입력으로 오지 않아 판정 자체가 안 걸렸다
+ * (`ssh host` 를 두 번째에 ↑ 로 실행하면 통합이 안 붙었다). 화면에서 읽은 값은 어떻게 입력했든
+ * 같다.
+ */
 export function beginCommandBlock(
   sessionId: string,
   terminal: Terminal,
   cwd: string | null,
-): void {
-  safely(sessionId, undefined, () => {
-    beginCommandBlockUnsafe(sessionId, terminal, cwd);
-  });
+): string | null {
+  return safely(sessionId, null, () =>
+    beginCommandBlockUnsafe(sessionId, terminal, cwd),
+  );
 }
 
 function beginCommandBlockUnsafe(
   sessionId: string,
   terminal: Terminal,
   cwd: string | null,
-): void {
+): string | null {
   if (!sessionId || !isNormalBuffer(terminal)) {
-    return;
+    return null;
   }
   const session = getSession(sessionId);
+  // 실행 중인 블록이 남아 있는데 새 명령이 시작됐다면 앞 블록은 이미 끝난 것이다 — 셸은 앞
+  // 명령이 끝나기 전에 다음 명령을 시작하지 못한다.
+  //
+  // 이것이 필요한 이유: 서브셸(`docker exec`·`bash`)로 들어가면 바깥 셸의 D 는 그 셸을 빠져나올
+  // 때까지 오지 않는다. 그동안 안쪽 셸이 자기 블록을 만들면 바깥 블록 안에 안쪽 블록들이
+  // 들어앉아 화면이 중첩된 것처럼 보였다. 코어가 진입 시점에 D 를 흘려 닫아 주지만 그 신호는
+  // 에코 억제 창과 경합해 간헐적으로 유실됐다 — 여기서 닫으면 타이밍과 무관하게 성립한다.
+  closeRunningBlock(session, sessionId, terminal);
   const pending = session.pendingPrompt;
   session.pendingPrompt = null;
 
   // B 를 못 받은 셸(통합이 부분 적용된 경우)에서는 현재 행을 명령 줄로 본다.
   const marker = pending?.marker ?? terminal.registerMarker(0);
   if (!marker) {
-    return;
+    return null;
   }
 
   const buffer = terminal.buffer.active;
@@ -576,6 +592,7 @@ function beginCommandBlockUnsafe(
     }
   }
   notifyCommandBlocksChanged(session, sessionId);
+  return block.command;
 }
 
 /**
@@ -603,6 +620,16 @@ function finishCommandBlockUnsafe(
   if (!session) {
     return;
   }
+  closeRunningBlock(session, sessionId, terminal, exitCode);
+}
+
+/** 가장 최근 실행 중 블록을 닫는다. 없으면 아무 일도 하지 않는다. */
+function closeRunningBlock(
+  session: SessionBlocks,
+  sessionId: string,
+  terminal: Terminal,
+  exitCode: number | null = null,
+): void {
   for (let index = session.blocks.length - 1; index >= 0; index -= 1) {
     const block = session.blocks[index];
     if (block.state !== 'running') {

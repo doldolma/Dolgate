@@ -462,7 +462,16 @@ const fishIntegrationScript = `if not set -q __ds_shell_integration_installed; `
 	`set -g __ds_shell_integration_installed 1; ` +
 	`function __ds_cwd; printf '\033]7;file://%s\007' (pwd); end; ` +
 	`function __ds_prompt --on-event fish_prompt; printf '\033]133;A\007'; __ds_cwd; printf '\033]133;B\007'; end; ` +
-	`function __ds_preexec --on-event fish_preexec; printf '\033]133;C\007'; end; ` +
+	// 명령 원문을 셸이 직접 알려 준다(133;E). fish 는 B 를 프롬프트가 **그려지기 전**에 내보내서
+	// (fish_prompt 이벤트가 그 시점이다) 앱이 기록하는 promptEndX 가 0 이 된다. 그러면 화면에서
+	// 명령을 읽을 때 프롬프트까지 같이 읽혀, 재실행·복사에 `ubuntu@ubuntu ~> pwd` 가 들어갔다.
+	// PowerShell 에서 겪은 것과 같은 함정이다(위 주석). 원문을 받으면 화면을 읽지 않으므로
+	// 프롬프트가 섞일 자리가 사라진다. 이스케이프는 앱 규약대로 `\\`·`\n` 둘뿐이고,
+	// string collect 는 여러 줄 명령이 목록으로 쪼개지는 것을 막는다.
+	`function __ds_preexec --on-event fish_preexec; ` +
+	`set -l __ds_c (string replace -a -- \\ \\\\ $argv[1] | string collect); ` +
+	`set __ds_c (string replace -a -- \n \\n $__ds_c | string collect); ` +
+	`printf '\033]133;E;%s\007' $__ds_c; printf '\033]133;C\007'; end; ` +
 	`function __ds_postexec --on-event fish_postexec; printf "\033]133;D;$status\007"; end; ` +
 	`end`
 
@@ -608,12 +617,17 @@ func FishShellIntegrationScript() string {
 // shell 이 빈 문자열이면 "모른다" 는 뜻이고, 이름은 알지만 지원하지 않는 셸(ksh·cmd 등)이면 빈
 // 목록이다 — 그 둘을 구분해야 한다(모른다고 주입을 포기하면 서브셸 통합이 사라진다).
 func ShellIntegrationInitLines(shell string) []string {
+	// 셸을 모르면 아무것도 보내지 않는다.
+	//
+	// 예전에는 여기서 bash·zsh 겸용 스크립트를 여러 줄로 보냈다. 그것이 dash·busybox 에서
+	// PS2 계속 프롬프트와 스크립트 전문을 화면에 남겼고(도커 컨테이너), 줄 모양을 어떻게 바꿔도
+	// bash 와 dash 를 동시에 만족시킬 수 없었다 — 한 덩어리면 dash 가 PS2 를 뱉고, 나누면 bash 가
+	// 첫 줄에서 마커를 보내 핸드셰이크를 끝내 버려 둘째 줄 echo 가 남는다.
+	//
+	// 그래서 "모르면 보낸다" 를 없앴다. 모르면 먼저 물어본다(ShellProbeCommand). 물어본 답으로
+	// 이 함수를 다시 부르면 그 셸 전용 한 줄이 나간다.
 	if strings.TrimSpace(shell) == "" {
-		return []string{
-			" { " + shellIntegrationCommonScript + bashIntegrationGuarded() + "\r",
-			zshIntegrationGuarded() + "\r",
-			"}" + bashHistoryCleanupTail + "\r",
-		}
+		return nil
 	}
 	switch NormalizeShellIntegrationShell(shell) {
 	case "bash":
@@ -644,12 +658,18 @@ func zshIntegrationGuarded() string {
 // 133;A marker — so the handshake's "drop everything before the marker" rule
 // can't hide that second copy. We strip this text from every forwarded path
 // instead, so the injection never reaches the screen regardless of timing.
-// 셸을 모른 채 무장한 경우의 기본값이다 — 그때 실제로 보내는 것이 이 둘이다.
+// 무장 없이 걸러야 할 때의 기본값이다 — 우리가 셸에 써 넣을 수 있는 것 전부를 담는다.
+// 셸을 모를 때 실제로 나가는 것은 프로브 한 줄이고, 답을 받은 뒤에는 그 셸 전용 한 줄이다.
 var injectedCommandEchoes = func() [][]byte {
-	lines := ShellIntegrationInitLines("")
-	echoes := make([][]byte, 0, len(lines))
-	for _, line := range lines {
-		if echo := visibleInjectedEcho(line); len(echo) > 0 {
+	commands := []string{
+		ShellProbeCommand(),
+		BashShellIntegrationInitCommand(),
+		ZshShellIntegrationInitCommand(),
+		FishShellIntegrationInitCommand(),
+	}
+	echoes := make([][]byte, 0, len(commands))
+	for _, command := range commands {
+		if echo := visibleInjectedEcho(command); len(echo) > 0 {
 			echoes = append(echoes, echo)
 		}
 	}
@@ -963,6 +983,12 @@ type HandshakeFilter struct {
 	// echoes 는 이 세션에 실제로 주입한 명령들의 보이는 텍스트다. 비어 있으면 bash·zsh 기본값을
 	// 쓴다(셸을 모른 채 무장한 경우 실제로 보내는 것이 그 둘이다).
 	echoes [][]byte
+	// probeReply 가 참이면 OSC 133;A 대신 **셸 프로브의 답**이 핸드셰이크를 끝낸다.
+	//
+	// 프로브는 통합이 붙기 전에 나가므로 마커가 올 리 없다. 답 자체를 앵커로 삼으면 마커가
+	// 영영 오지 않는 셸(dash·busybox)에서도 시한을 기다리지 않고 곧바로 echo 를 걷어낸다.
+	// 답 시퀀스는 화면에 나가면 안 되므로 **답이 끝나는 지점 뒤부터** 흘려보낸다.
+	probeReply bool
 	// 아직 지우지 못한 echo 들. echoesScrubbed 가 false 면 아직 한 번도 훑지 않은 상태다.
 	echoesPending  [][]byte
 	echoesScrubbed bool
@@ -998,11 +1024,21 @@ func (f *HandshakeFilter) Filter(chunk []byte) (forward []byte, handshakeDone bo
 	// motd가 이후 append에 덮이지 않도록 남은 버퍼는 새 백킹으로 복사한다.
 	var motd []byte
 	if f.preserveMotd && !f.motdSeen {
-		// 경계는 **첫 줄** 의 echo 다. 뒤 줄로 잡으면 그 앞에 있던 앞 줄들의 echo 까지 motd 로
-		// 흘려보내게 된다(여러 줄로 보내면서 실제로 그렇게 새어 나갔다).
+		// 경계는 **가장 앞선** echo 다. 뒤 것으로 잡으면 그 앞에 있던 echo 까지 motd 로
+		// 흘려보내게 된다(예전에 여러 줄로 보내면서 실제로 그렇게 새어 나갔다).
+		//
+		// 무장 없이 걸러야 할 때는 우리가 보낼 수 있는 명령 전부가 후보다(프로브·bash·zsh·fish).
+		// 그중 실제로 화면에 찍힌 것 하나만 맞으므로, 맞는 것 중 가장 앞을 고른다.
 		echoIdx := -1
-		if echoes := f.echoTexts(); len(echoes) > 0 && len(echoes[0]) > 0 {
-			if at, _, ok := findWrappedEcho(f.buffer, echoes[0]); ok {
+		for _, echo := range f.echoTexts() {
+			if len(echo) == 0 {
+				continue
+			}
+			at, _, ok := findWrappedEcho(f.buffer, echo)
+			if !ok {
+				continue
+			}
+			if echoIdx < 0 || at < echoIdx {
 				echoIdx = at
 			}
 		}
@@ -1014,6 +1050,15 @@ func (f *HandshakeFilter) Filter(chunk []byte) (forward []byte, handshakeDone bo
 		}
 	}
 
+	if f.probeReply {
+		if _, end, ok := ParseShellProbeReply(f.buffer); ok {
+			f.done = true
+			// 답 시퀀스까지는 전부 버린다 — 주입 echo 도 그 앞에 있다.
+			out := append(append([]byte(nil), motd...), f.stripInjectedEcho(f.buffer[end:])...)
+			f.buffer = nil
+			return out, true
+		}
+	}
 	if idx := bytes.Index(f.buffer, []byte(PromptStartMarker)); idx >= 0 {
 		f.done = true
 		// Forward motd (preserveMotd) then everything from the marker on, dropping
@@ -1076,6 +1121,16 @@ func (h *Handshake) Arm(preserveMotd bool) {
 // 셸마다 주입 스크립트가 다른 경로(ShellIntegrationInitCommandForShell)에서는 이것을 써야 한다.
 // Arm 은 bash/zsh 스크립트를 가정하므로, pwsh·fish 세션에서는 마커 뒤에 오는 프롬프트 재출력이
 // 걸러지지 않고 화면에 남는다.
+// ArmForShellProbe 는 셸 프로브 한 줄을 무장한다. 끝내는 신호는 마커가 아니라 프로브의 답이다.
+func (h *Handshake) ArmForShellProbe(preserveMotd bool, command string) {
+	h.ArmForCommand(preserveMotd, command)
+	h.mu.Lock()
+	if h.filter != nil {
+		h.filter.probeReply = true
+	}
+	h.mu.Unlock()
+}
+
 func (h *Handshake) ArmForCommand(preserveMotd bool, commands ...string) {
 	echoes := make([][]byte, 0, len(commands))
 	for _, command := range commands {

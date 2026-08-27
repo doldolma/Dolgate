@@ -168,9 +168,8 @@ func TestReinjectShellIntegrationIntoASubshellWithoutLineEditor(t *testing.T) {
 
 // 셸을 알려 주면 그 셸 것만 보낸다.
 //
-// fish 서브셸이 이 힌트로 살아난다 — 모른 채 POSIX 겸용을 보내면 fish 가 `__ds_o(){ … }` 를
-// 파싱하지 못해 오류가 화면에 남는다. 이름은 알지만 훅을 걸 방법이 없는 셸(dash 등)에는 아예
-// 보내지 않는다.
+// fish 서브셸이 이 힌트로 살아난다 — 이름을 알면 그 셸 것 한 줄로 끝난다. 이름은 알지만 훅을
+// 걸 방법이 없는 셸(dash 등)에는 아예 보내지 않고, 이름을 모르면 프로브 한 줄로 먼저 묻는다.
 func TestReinjectShellIntegrationUsesTheShellHint(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -179,7 +178,8 @@ func TestReinjectShellIntegrationUsesTheShellHint(t *testing.T) {
 	}{
 		{name: "fish", shell: "fish", want: []string{autocomplete.FishShellIntegrationInitCommand()}},
 		{name: "bash", shell: "bash", want: []string{autocomplete.BashShellIntegrationInitCommand()}},
-		{name: "모름", shell: "", want: autocomplete.ShellIntegrationInitLines("")},
+		// 모르면 먼저 "누구냐" 한 줄만 나간다. 스크립트는 답을 받은 뒤에 나간다.
+		{name: "모름", shell: "", want: []string{autocomplete.ShellProbeCommand()}},
 		{name: "지원 안 함", shell: "dash", want: nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

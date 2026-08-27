@@ -63,7 +63,6 @@ import {
   tmuxCommand,
 } from '../services/desktop/terminal';
 import {
-  applyTerminalInput,
   createEmptyCommandBuffer,
 } from '../lib/terminal-autocomplete';
 import { reinjectShellIntegrationIfSubshell } from '../lib/subshell-reinject';
@@ -515,7 +514,6 @@ export function useTerminalSessionViewController({
   const liveAutocompleteCwdRef = useRef(autocomplete.handleCwd);
   // 서브셸 진입 감지용 명령줄 버퍼. autocomplete 훅과 독립적으로(설정 off 여도) 실행돼
   // 사용자가 방금 실행한 명령을 재구성한다. \r 마다 리셋되므로 세션 간 오염은 없다.
-  const subshellCommandBufferRef = useRef(createEmptyCommandBuffer());
 
   useEffect(() => {
     liveAutocompleteInputRef.current = terminalAlternateScreen
@@ -971,19 +969,8 @@ export function useTerminalSessionViewController({
             return;
           }
           liveAutocompleteInputRef.current(data);
-          // 서브셸(중첩 ssh·sudo su·docker exec …) 진입을 감지해 셸 통합을 다시 주입한다.
-          // autocomplete 게이트와 무관하게 항상 추적하므로 자동완성을 꺼도 동작한다.
-          const trackedInput = applyTerminalInput(
-            subshellCommandBufferRef.current,
-            data,
-          );
-          subshellCommandBufferRef.current = trackedInput.state;
-          if (trackedInput.executed) {
-            reinjectShellIntegrationIfSubshell(
-              liveSessionIdRef.current,
-              trackedInput.executed,
-            );
-          }
+          // 서브셸 진입 판정은 여기(키 입력)가 아니라 명령 블록이 시작될 때 한다 — ↑ 로 부른
+          // 명령이나 붙여넣기는 글자가 입력으로 오지 않아 여기서는 보이지 않는다.
         },
         onBinary: (data) => {
           const currentSessionId = liveSessionIdRef.current;
@@ -1020,11 +1007,19 @@ export function useTerminalSessionViewController({
             noteReportedCommand(liveSessionIdRef.current, marker.slice(2));
           } else if (marker === 'C') {
             if (blockTerminal) {
-              beginCommandBlock(
+              const started = beginCommandBlock(
                 liveSessionIdRef.current,
                 blockTerminal,
                 getSessionCwd(liveSessionIdRef.current),
               );
+              // 서브셸 진입 판정은 **화면에서 읽은 명령**으로 한다. 키 입력을 모아 재구성하면
+              // ↑ 로 부른 명령이나 붙여넣기를 놓친다(그때는 글자가 입력으로 오지 않는다).
+              if (started) {
+                reinjectShellIntegrationIfSubshell(
+                  liveSessionIdRef.current,
+                  started,
+                );
+              }
             }
             appStore
               .getState()

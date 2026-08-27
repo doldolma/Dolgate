@@ -12,6 +12,8 @@ import { useTerminalSessionViewController } from './useTerminalSessionViewContro
 
 const mocks = vi.hoisted(() => ({
   reinjectShellIntegration: vi.fn().mockResolvedValue(undefined),
+  // 화면에서 읽은 명령을 돌려주는 자리. 서브셸 진입 판정이 이 값을 쓴다.
+  beginCommandBlock: vi.fn<(...args: unknown[]) => string | null>(() => null),
   runtimeRecords: [] as any[],
   schedulerRecords: [] as Array<{
     scheduler: { request: ReturnType<typeof vi.fn>; reset: ReturnType<typeof vi.fn> };
@@ -27,16 +29,23 @@ vi.mock('../services/desktop/terminal', async (importOriginal) => ({
     mocks.reinjectShellIntegration(sessionId, shell),
 }));
 
+vi.mock('../lib/terminal-command-blocks', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  beginCommandBlock: (...args: unknown[]) => mocks.beginCommandBlock(...args),
+}));
+
 vi.mock('../lib/terminal-runtime', () => ({
   createTerminalRuntime: vi.fn(
     ({
       container,
       onData,
       onBinary,
+      onShellIntegration,
     }: {
       container: HTMLElement;
       onData: (value: string) => void;
       onBinary: (value: string) => void;
+      onShellIntegration?: (marker: string) => void;
     }) => {
       const terminal = {
         rows: 24,
@@ -70,6 +79,8 @@ vi.mock('../lib/terminal-runtime', () => ({
         }),
         emitData: onData,
         emitBinary: onBinary,
+        // 셸이 보낸 OSC 133 마커를 흉내 낸다(서브셸 진입 판정이 여기로 들어온다).
+        emitShellIntegration: (marker: string) => onShellIntegration?.(marker),
         findNext: vi.fn(() => false),
         findPrevious: vi.fn(() => false),
         clearSearch: vi.fn(),
@@ -300,7 +311,11 @@ describe('useTerminalSessionViewController', () => {
   // 배관 검증: 서브셸 진입은 렌더러가 **입력을 보고** 판정해 코어에 재주입을 시킨다. 이 경로가
   // 끊기면 서브셸 안에서 통합이 조용히 사라진다(단위 테스트가 다 초록이어도 그렇다 — 실제로
   // 그 상태를 앱에 붙어 계측해서야 찾았다).
-  it('서브셸 진입 명령을 실행하면 그 셸 이름과 함께 재주입을 부른다', async () => {
+  // 서브셸 진입 판정은 **화면에서 읽은 명령**으로 한다. 예전에는 사용자가 친 키를 모아
+  // 재구성했는데, ↑ 로 부른 명령이나 붙여넣기는 글자가 입력으로 오지 않아 판정이 아예 안 걸렸다
+  // (`ssh host` 를 두 번째에 ↑ 로 실행하면 통합이 안 붙었다).
+  it('명령 블록이 시작되면 그 명령으로 서브셸 진입을 판정한다', async () => {
+    mocks.beginCommandBlock.mockReturnValue('docker exec -it web sh');
     renderController(createProps());
     await act(async () => {
       await vi.advanceTimersByTimeAsync(50);
@@ -309,14 +324,14 @@ describe('useTerminalSessionViewController', () => {
     mocks.reinjectShellIntegration.mockClear();
 
     await act(async () => {
-      runtime.emitData('bash');
-      runtime.emitData('\r');
+      runtime.emitShellIntegration('C');
     });
 
-    expect(mocks.reinjectShellIntegration).toHaveBeenCalledWith('session-1', 'bash');
+    expect(mocks.reinjectShellIntegration).toHaveBeenCalledWith('session-1', undefined);
   });
 
   it('평범한 명령에는 재주입을 부르지 않는다', async () => {
+    mocks.beginCommandBlock.mockReturnValue('ls -al');
     renderController(createProps());
     await act(async () => {
       await vi.advanceTimersByTimeAsync(50);
@@ -325,8 +340,7 @@ describe('useTerminalSessionViewController', () => {
     mocks.reinjectShellIntegration.mockClear();
 
     await act(async () => {
-      runtime.emitData('ls -al');
-      runtime.emitData('\r');
+      runtime.emitShellIntegration('C');
     });
 
     expect(mocks.reinjectShellIntegration).not.toHaveBeenCalled();

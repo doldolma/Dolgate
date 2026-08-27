@@ -1,6 +1,10 @@
 package localsession
 
-import "testing"
+import (
+	"testing"
+
+	"dolssh/services/ssh-core/internal/autocomplete"
+)
 
 func TestShouldArmSubshellReinject(t *testing.T) {
 	for _, tc := range []struct {
@@ -27,6 +31,34 @@ func TestShouldArmSubshellReinject(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := shouldArmSubshellReinject(tc.shell); got != tc.want {
 				t.Fatalf("shouldArmSubshellReinject(%q) = %v, want %v", tc.shell, got, tc.want)
+			}
+		})
+	}
+}
+
+// 프로브는 **우리가 띄운 셸**로 고른다. 사용자가 친 명령이 아니라 프로세스 이름이라 틀릴 수 없다.
+func TestProbeCommandFollowsTheLaunchedShell(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		shell string
+		want  string
+		ok    bool
+	}{
+		{name: "bash", shell: "bash", want: autocomplete.ShellProbeCommand(), ok: true},
+		{name: "이름 없음", shell: "", want: autocomplete.ShellProbeCommand(), ok: true},
+		// PowerShell 에 printf 를 보내면 "인식할 수 없는 명령" 이 화면에 남는다.
+		{name: "pwsh", shell: "pwsh", want: autocomplete.PowerShellProbeCommand(), ok: true},
+		{name: "powershell.exe", shell: `C:\Windows\System32\powershell.exe`, want: autocomplete.PowerShellProbeCommand(), ok: true},
+		// cmd 는 물어볼 방법도 넣을 것도 없다.
+		{name: "cmd", shell: "cmd", ok: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := probeCommandFor(tc.shell)
+			if ok != tc.ok {
+				t.Fatalf("ok=%v, 기대 %v", ok, tc.ok)
+			}
+			if ok && got != tc.want {
+				t.Fatalf("프로브가 다르다:\nwant %q\ngot  %q", tc.want, got)
 			}
 		})
 	}

@@ -1,6 +1,10 @@
 package localsession
 
-import "dolssh/services/ssh-core/internal/autocomplete"
+import (
+	"strings"
+
+	"dolssh/services/ssh-core/internal/autocomplete"
+)
 
 // shouldArmSubshellReinject 는 이 힌트로 서브셸 재주입을 무장할지 정한다.
 //
@@ -15,6 +19,12 @@ import "dolssh/services/ssh-core/internal/autocomplete"
 // 있는가" 만 본다.
 //
 // 훅을 걸 수 없는 셸(dash·ksh·cmd)이면 보낼 것이 없다 — 타이핑해 봐야 화면만 더럽힌다.
+//
+// 이름을 모르면(빈 값) 무장한다. 예전에는 그때 겸용 스크립트를 보냈지만, 지금은 프로브 한 줄로
+// 셸을 먼저 확인하고 그 답에 따라 보내거나 만다.
 func shouldArmSubshellReinject(shell string) bool {
+	if strings.TrimSpace(shell) == "" {
+		return true
+	}
 	return len(autocomplete.ShellIntegrationInitLines(shell)) > 0
 }

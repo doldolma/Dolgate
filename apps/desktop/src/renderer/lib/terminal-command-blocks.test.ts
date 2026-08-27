@@ -154,6 +154,33 @@ describe('terminal-command-blocks', () => {
     expect(finished[0].durationMs).not.toBeNull();
   });
 
+  // 서브셸(`docker exec`·`bash`)에 들어가면 바깥 셸의 D 는 그 셸을 빠져나올 때까지 오지 않는다.
+  // 그동안 안쪽 셸이 자기 블록을 만들면 바깥 블록 안에 안쪽 블록이 들어앉아 화면이 중첩된 것처럼
+  // 보였다 — 셸은 앞 명령이 끝나기 전에 다음 명령을 시작하지 못하므로, 새 C 가 오면 앞 블록은
+  // 끝난 것으로 본다.
+  it('실행 중 블록이 남아 있는데 새 명령이 시작되면 앞 블록을 닫는다', () => {
+    const fake = createFakeTerminal(['$ docker exec -it web bash', '', '$ ls'], [0, 2]);
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    fake.buffer.cursorY = 1;
+    beginCommandBlock(SESSION, fake.terminal, null);
+    expect(getCommandBlocks(SESSION)[0].state).toBe('running');
+
+    // 안쪽 셸에 통합이 붙어 자기 명령을 시작한다. 바깥 D 는 아직 오지 않았다.
+    fake.buffer.cursorY = 2;
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    fake.buffer.cursorY = 3;
+    beginCommandBlock(SESSION, fake.terminal, null);
+
+    const blocks = getCommandBlocks(SESSION);
+    expect(blocks).toHaveLength(2);
+    // 앞 블록은 닫혔고, 종료 코드는 모르므로 싣지 않는다.
+    expect(blocks[0].state).toBe('ok');
+    expect(blocks[0].exitCode).toBeNull();
+    expect(blocks[1].state).toBe('running');
+  });
+
   // 아래 셋은 "화면에서 읽은 명령"이 실제 입력과 어긋나는 경우들이다. 그대로 재실행하면
   // 사용자가 친 적 없는 명령이 실행되므로 commandUnreliable 로 표시해 막아야 한다.
   it('행 예산을 넘겨 잘리면 재실행 불가로 표시한다', () => {

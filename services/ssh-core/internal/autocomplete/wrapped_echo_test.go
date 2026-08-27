@@ -12,7 +12,7 @@ import (
 // 스크립트가 화면에 그대로 남은 원인이 이것이었다. 주입 명령은 어떤 셸에서도 한 줄 폭(보통 80~200
 // 칸)보다 길므로 접힘은 예외가 아니라 기본이다.
 func TestHandshakeScrubsAnEchoFoldedByTheTerminalWidth(t *testing.T) {
-	lines := ShellIntegrationInitLines("")
+	lines := ShellIntegrationInitLines("bash")
 	var handshake Handshake
 	handshake.ArmForCommand(true, lines...)
 
@@ -31,8 +31,6 @@ func TestHandshakeScrubsAnEchoFoldedByTheTerminalWidth(t *testing.T) {
 	}
 	for _, chunk := range []string{
 		wrapped(lines[0]) + "\r\n",
-		"> " + wrapped(lines[1]) + "\r\n",
-		"> " + wrapped(lines[2]) + "\r\n",
 		PromptStartMarker + "inner$ ",
 	} {
 		out.Write(handshake.Filter([]byte(chunk)))

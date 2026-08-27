@@ -1,6 +1,7 @@
 package sshsession
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -48,6 +50,10 @@ type sessionHandle struct {
 	shellIntegrationState          shellIntegrationState
 	shellIntegrationFlushScheduled bool
 
+	// shellProbe 는 "너 누구냐" 한 줄의 답을 기다린다. 셸을 모를 때만 무장된다.
+	shellProbe autocomplete.ShellProbe
+	// 이 세션의 앞 셸이 통합을 넣을 수 없는 것(dash·busybox 등)으로 확인됐다. 다시 묻지 않는다.
+	shellIntegrationUnsupported atomic.Bool
 	// reinjectGate는 서브셸(중첩 ssh·sudo su·docker exec 등) 진입 후 새 프롬프트가
 	// 안착하면 OSC 133/7 통합 스크립트를 1회 다시 주입하기 위한 프롬프트 감지기다.
 	// Connect에서 생성되며 Arm 되기 전에는 Observe가 no-op이다.
@@ -676,22 +682,41 @@ func (m *Manager) performShellIntegrationReinject(
 	if autocomplete.PromptAlreadyIntegrated(tail) {
 		return
 	}
+	// 셸을 모르면 **먼저 물어본다.**
+	//
+	// 예전에는 모를 때 bash·zsh 겸용 스크립트를 보냈는데, 그것이 여러 줄이라 dash·busybox 에서
+	// PS2 계속 프롬프트와 스크립트 전문이 화면에 남았다. 짧은 한 줄로 셸을 확인하고 그 셸 전용
+	// 한 줄만 보내면, 지원하지 않는 셸에는 애초에 아무것도 가지 않는다.
+	if strings.TrimSpace(shell) == "" {
+		if session.shellIntegrationUnsupported.Load() {
+			// 지금 앞에 있는 그 셸에는 이미 물어봤고 답이 "없다" 였다. 다시 묻지 않는다.
+			//
+			// 표시는 **그 셸에서 나오면 지워진다**(stream 이 바깥 프롬프트 마커를 보고 지운다).
+			// 세션에 영구히 걸어 두면 alpine 에 한 번 들어갔다 나온 뒤로는 bash 컨테이너에도
+			// 통합이 안 붙고, 바깥 블록을 닫아 주지도 못해 블록이 계속 열린 채로 남았다.
+			return
+		}
+		m.probeShellThenReinject(sessionID, session)
+		return
+	}
 	// Arm the handshake immediately before writing so only the injected command's
 	// echo (and its prompt redraw) is hidden — the subshell's own login/motd and
 	// prompt were already shown to the user while the gate was waiting.
-	// 렌더러가 실행된 명령에서 셸을 알아냈으면 그 셸 것 한 줄로 끝난다. 모르면 bash·zsh 겸용이
-	// **한 명령의 여러 줄** 로 나간다 — 한 줄로 합치면 MAX_CANON(1024)을 넘어 줄 편집기가 없는
-	// 셸(dash·busybox)에서 잘린다. 지원하지 않는 셸이면 아무것도 보내지 않는다.
+	// 셸을 알면 그 셸 것 한 줄로 끝난다. 지원하지 않는 셸이면 아무것도 보내지 않는다.
 	commands := autocomplete.ShellIntegrationInitLines(shell)
 	if len(commands) == 0 {
 		return
 	}
-	session.handshake.ArmForCommand(true, commands...)
+	// preserveMotd=false 인 이유는 프로브 쪽과 같다(shell_probe.go 주석).
+	session.handshake.ArmForCommand(false, commands...)
 	// 프롬프트를 보고 쓰므로 그 프롬프트가 이미 화면에 있다 — 그 줄을 지워 새 프롬프트가 같은
 	// 자리에 오게 한다(지우지 않으면 bash 에서 프롬프트가 두 번 찍힌다).
+	//
+	// 함께 바깥 명령 블록을 닫는다. 여기서부터는 **안쪽 셸이 자기 블록을 만들기 때문**이다 —
+	// 안 닫으면 아직 열려 있는 바깥 블록(`docker exec …`) 안에 안쪽 블록들이 들어앉는다.
 	m.emitStream(
 		protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID},
-		[]byte("\r\x1b[2K"),
+		[]byte(autocomplete.CommandFinishedMarker+"\r\x1b[2K"),
 	)
 	for _, command := range commands {
 		if _, err := session.writeStdin([]byte(command)); err != nil {
@@ -906,6 +931,17 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 			// 서브셸 재주입 대기 중이면 raw 출력으로 프롬프트 안착을 감지한다(핸드셰이크
 			// 필터 전에 관찰해야 원본 프롬프트를 본다). Arm 전에는 no-op이다.
 			handle.reinjectGate.Observe(chunk)
+			// 셸 프로브의 답도 필터 전에 본다 — 필터는 이 답을 앵커로 삼아 버퍼를 버리므로
+			// 뒤에서 보면 이미 사라지고 없다.
+			handle.shellProbe.Observe(chunk)
+			// 통합 없는 셸에 들어가 있는 동안에는 프롬프트 마커가 올 리 없다. 그러니 마커가
+			// 보이면 그 셸에서 나와 원래 셸로 돌아온 것이다 — 다음 서브셸은 다시 물어봐야 한다.
+			// 세션에 영구히 걸어 두었더니 alpine 에 한 번 들어갔다 나온 뒤로는 bash 컨테이너에도
+			// 통합이 안 붙고, 바깥 블록도 안 닫혀 계속 열린 채로 남았다.
+			if handle.shellIntegrationUnsupported.Load() &&
+				bytes.Contains(chunk, []byte(autocomplete.PromptStartMarker)) {
+				handle.shellIntegrationUnsupported.Store(false)
+			}
 			chunk = handle.handshake.Filter(chunk)
 			if len(chunk) > 0 {
 				m.emitStream(protocol.StreamFrame{
