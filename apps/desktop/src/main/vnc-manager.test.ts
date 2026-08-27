@@ -198,6 +198,52 @@ describe("VncManager", () => {
     await expect(connecting).rejects.toThrow("authentication failed");
   });
 
+  // 원인 코드를 버리면 화면이 문구로 다시 판정해야 한다. 인증 실패는 그것이 불가능하다 —
+  // 서버가 붙이는 거부 사유는 서버가 정하는 문장이라(RFB 는 형식을 정하지 않았다) 우리가 아는
+  // 문구가 없다. vnc-core 가 프로토콜에서 읽어 실어 준 코드를 그대로 렌더러까지 올린다.
+  it("오류 이벤트에 코어가 판정한 원인 코드를 함께 올린다", () => {
+    const core = fakeCore();
+    const window = windowStub(1);
+    const manager = managerWith(core, [window]);
+
+    void manager.connect({ sessionId: "sess-1", host: "10.0.0.5", port: 5900 });
+    core.emit(
+      encodeControlFrameOf({
+        type: "error",
+        sessionId: "sess-1",
+        payload: { message: "authentication failed", failure: "password-truncated" },
+      }),
+    );
+
+    const sent = window.webContents.send.mock.calls
+      .map(([, event]) => event as { type?: string; failure?: string | null })
+      .filter((event) => event?.type === "error");
+    expect(sent).toHaveLength(1);
+    expect(sent[0].failure).toBe("password-truncated");
+  });
+
+  // 코드를 안 싣는 실패(소켓·프로토콜 오류)는 null 로 둔다 — 빈 문자열이나 없는 키로 두면
+  // 화면이 "코드가 있다" 와 "모른다" 를 구분하지 못한다.
+  it("코드가 없으면 null 로 올린다", () => {
+    const core = fakeCore();
+    const window = windowStub(1);
+    const manager = managerWith(core, [window]);
+
+    void manager.connect({ sessionId: "sess-1", host: "10.0.0.5", port: 5900 });
+    core.emit(
+      encodeControlFrameOf({
+        type: "error",
+        sessionId: "sess-1",
+        payload: { message: "ZRLE run length out of range" },
+      }),
+    );
+
+    const sent = window.webContents.send.mock.calls
+      .map(([, event]) => event as { type?: string; failure?: string | null })
+      .filter((event) => event?.type === "error");
+    expect(sent[0].failure).toBeNull();
+  });
+
   // 화면 한 장이 수 MB 다. 구독하지 않은 창에 보내면 그만큼 직렬화·복사가 메인에서 나간다.
   it("픽셀은 구독한 창에만 보낸다", () => {
     const core = fakeCore();

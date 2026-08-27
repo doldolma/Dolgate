@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSettings, HostRecord, TerminalTab } from '@shared';
 import type { WorkspaceTab } from '../store/createAppStore';
 import { SESSION_SHARE_CHAT_TOAST_TTL_MS, TerminalWorkspace } from './TerminalWorkspace';
+import { getTerminalThemePreset } from '../lib/terminal-presets';
 
 const mocks = vi.hoisted(() => ({
   storeState: {} as any,
@@ -338,6 +339,7 @@ function renderWorkspace(input: {
   onToggleSessionBroadcast?: (workspaceId: string, sessionId: string) => void;
   onToggleWorkspaceZoom?: (workspaceId: string, sessionId: string) => void;
   onDetachSessionToStandalone?: (workspaceId: string, sessionId: string) => void;
+  settings?: AppSettings;
 }) {
   const renderTabs = input.tabs ?? tabs;
   const renderHosts = input.hosts ?? [];
@@ -347,11 +349,17 @@ function renderWorkspace(input: {
     tabs: renderTabs,
     hosts: renderHosts
   };
-  return render(
+  return render(workspaceElement(input));
+}
+
+function workspaceElement(input: Parameters<typeof renderWorkspace>[0]) {
+  const renderTabs = input.tabs ?? tabs;
+  const renderHosts = input.hosts ?? [];
+  return (
     <TerminalWorkspace
       tabs={renderTabs}
       hosts={renderHosts}
-      settings={settings}
+      settings={input.settings ?? settings}
       prefersDark={false}
       activeSessionId={input.activeSessionId ?? null}
       activeWorkspace={input.activeWorkspace}
@@ -404,6 +412,43 @@ describe('TerminalWorkspace workspace switching', () => {
         writeText: vi.fn().mockResolvedValue(undefined)
       }
     });
+  });
+
+  // 로컬 셸도 자기 팔레트를 갖는다. 외형은 sessionId 별로 memo 해 두는데 그 의존성 목록에서
+  // 로컬 팔레트가 빠져 있었다 — 골라도 캐시된 외형이 계속 나가 터미널이 그대로였다.
+  it('로컬 팔레트를 바꾸면 열려 있는 로컬 터미널에 바로 나간다', async () => {
+    // **탭·호스트 배열은 두 렌더가 같은 참조를 써야 한다.** 새로 만들면 그것만으로 memo 가
+    // 다시 계산되어, 팔레트가 의존성에 없어도 통과하는 시험이 된다.
+    const localTabs = [tabs[0]];
+    const noHosts: HostRecord[] = [];
+    expect(localTabs[0].source).toBe('local');
+    const view = renderWorkspace({
+      activeWorkspace: null,
+      viewActivationKey: null,
+      tabs: localTabs,
+      hosts: noHosts,
+      settings: { ...settings, localTerminalThemeId: null }
+    });
+    await waitFor(() => {
+      expect(mocks.runtimeRecords).toHaveLength(1);
+    });
+    const runtime = mocks.runtimeRecords[0];
+    runtime.setAppearance.mockClear();
+
+    view.rerender(
+      workspaceElement({
+        activeWorkspace: null,
+        viewActivationKey: null,
+        tabs: localTabs,
+        hosts: noHosts,
+        settings: { ...settings, localTerminalThemeId: 'kanagawa-wave' }
+      })
+    );
+
+    expect(runtime.setAppearance).toHaveBeenCalled();
+    expect(runtime.setAppearance.mock.calls.at(-1)[0].theme).toEqual(
+      getTerminalThemePreset('kanagawa-wave').theme
+    );
   });
 
   it('uses the latest workspace focus callback after switching workspaces', async () => {

@@ -115,13 +115,13 @@ export function tmuxCommand(sessionId: string, command: string) {
   return desktopApi.ssh.tmuxCommand(sessionId, command);
 }
 
-// Go ControlCommand 의 RefreshSessionsCommand 와 같은 값이어야 한다(세션 목록 즉시 재조회).
-const TMUX_REFRESH_SESSIONS = '__dolssh_refresh_sessions__';
-
-// refreshTmuxSessions 는 control 세션의 tmux 세션 목록을 즉시 재조회시킨다(드롭다운 열 때).
-// %sessions-changed 가 다른 SSH 연결의 새 세션엔 안 오는 경우가 있어 명시적으로 pull.
+// refreshTmuxSessions 는 tmux 세션 목록을 즉시 다시 읽힌다(드롭다운 열 때·새로고침 버튼).
+//
+// **control 채널로 직접 보내지 않는다.** 예전에는 control 명령(`__dolssh_refresh_sessions__`)을
+// 보냈는데, attach 전 감지 상태에는 control 채널이 없어 조용히 무시됐다 — 목록은 접속 시
+// 스냅샷에 멈춰 있고 버튼은 눌리는 느낌만 났다. 이제 코어가 세션 종류를 보고 통로를 고른다.
 export function refreshTmuxSessions(sessionId: string) {
-  return desktopApi.ssh.tmuxCommand(sessionId, TMUX_REFRESH_SESSIONS);
+  return desktopApi.ssh.tmuxRefreshSessions(sessionId);
 }
 
 export function subscribeToTerminalEvents(

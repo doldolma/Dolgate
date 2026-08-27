@@ -81,14 +81,19 @@ export function SessionPanelProcesses({ sessionId }: SessionPanelProcessesProps)
       />
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
         {processes === null ? (
+          /* **'off' 를 로딩이라고 말하면 안 된다.** 발행자가 꺼져 있으면 다음 샘플은 영원히
+             오지 않는데, 예전에는 "다음 샘플에 목록이 함께 옵니다" 가 그대로 남아 있었다 —
+             오지 않는 것을 기다리라고 말하는 유일한 자리였다(로컬 셸·tmux pane). */
           <SessionPanelEmpty
             title={
               status === 'unsupported'
                 ? translate('sessionPanel.resources.unsupportedTitle')
-                : translate('sessionPanel.processes.loadingTitle')
+                : status === 'off'
+                  ? translate('sessionPanel.processes.offTitle')
+                  : translate('sessionPanel.processes.loadingTitle')
             }
             description={
-              status === 'unsupported'
+              status === 'unsupported' || status === 'off'
                 ? undefined
                 : translate('sessionPanel.processes.loading')
             }

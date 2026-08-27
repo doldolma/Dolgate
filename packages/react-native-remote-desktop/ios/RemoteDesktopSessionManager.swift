@@ -1077,12 +1077,19 @@ private func onRdpEventCallback(userData: UnsafeMutableRawPointer?,
 
   case "error":
     let message = payload["message"] as? String ?? "RDP session error"
+    // 코어가 판정한 원인 코드도 함께 올린다. 자바스크립트가 문구를 다시 뜯지 않게 하려는
+    // 것이고, 인증 실패는 문구로는 가릴 수 없다 — 서버가 붙이는 사유는 서버가 정하는 문장이다.
+    var errorFields: [String: Any] = [:]
+    if let failure = payload["failure"] as? String, !failure.isEmpty {
+      errorFields["failure"] = failure
+    }
     entry.setStatus(.error)
     DispatchQueue.main.async {
       RemoteDesktopSessionManager.shared.emitEvent(
         sessionId: entry.sessionId,
         status: .error,
-        error: message
+        error: message,
+        extraFields: errorFields
       )
     }
 

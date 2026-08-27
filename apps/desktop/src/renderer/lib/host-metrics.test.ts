@@ -66,7 +66,7 @@ describe('parseHostMetricsSample', () => {
     const sample = parseHostMetricsSample(output(), 1_000);
 
     // busy = 전체 - (idle 987654 + iowait 320)
-    expect(sample.cpu).toEqual({ busy: 1250 + 890 + 45, total: 990159 });
+    expect(sample.cpu).toEqual({ kind: 'ticks', busy: 1250 + 890 + 45, total: 990159 });
     expect(sample.memTotalKb).toBe(16316412);
     expect(sample.memAvailableKb).toBe(10245680);
     // loopback 은 빼고 eth0 만. 합계가 아니라 **인터페이스별**로 들고 있는다 — 목록이 바뀌어도
@@ -169,6 +169,33 @@ describe('표준에 맞춘 계산', () => {
     expect(diskUsedRatio(sample.disks[0])).toBeCloseTo(0.947, 3);
     // 총량은 줄여 적지 않는다 — 디스크 크기는 크기대로 보여 준다.
     expect(sample.disks[0].totalKb).toBe(100000);
+  });
+
+  // 같은 파일시스템을 두 번 마운트하면(bind mount·btrfs 서브볼륨) total·available 이 같아
+  // 컨테이너 합치기에 함께 걸린다. 그쪽은 **줄마다 Used 까지 같으므로** df 의 Used 를 그대로
+  // 써야 한다 — total - available 로 바꾸면 예약 블록이 사용량으로 들어간다.
+  it('같은 파일시스템을 두 번 마운트한 것은 한 줄로 모으고 df 의 Used 를 지킨다', () => {
+    const disk = [
+      'Filesystem              1024-blocks       Used  Available Capacity Mounted on',
+      '/dev/sda1                    100000      90000       5000      95% /',
+      '/dev/sda1                    100000      90000       5000      95% /var/lib/docker',
+    ].join('\n');
+    const sample = parseHostMetricsSample(output({ disk }), 1_000);
+    expect(sample.disks).toHaveLength(1);
+    expect(sample.disks[0].mount).toBe('/');
+    // 예약 블록 5000 이 사용량에 섞이지 않는다(95000 이 아니라 90000).
+    expect(sample.disks[0].usedKb).toBe(90000);
+  });
+
+  // 예약을 크게 준 파일시스템은 한 줄만으로도 used + available 이 total 에 한참 못 미친다.
+  // 그것만으로 "컨테이너를 나눠 쓴다" 고 보면 예약분이 사용량으로 들어간다.
+  it('예약이 큰 파일시스템 한 줄은 df 의 Used 를 그대로 쓴다', () => {
+    const disk = [
+      'Filesystem              1024-blocks       Used  Available Capacity Mounted on',
+      '/dev/sda1                    100000      50000      39000      57% /',
+    ].join('\n');
+    const sample = parseHostMetricsSample(output({ disk }), 1_000);
+    expect(sample.disks[0].usedKb).toBe(50000);
   });
 });
 

@@ -55,6 +55,8 @@ type sshSessionManager interface {
 	RunHostCommand(sessionID, command string, timeoutMs int) (string, string, int, bool, error)
 	// KillTmuxSession 은 감지 하단바에서 attach 없이 원격 tmux 세션을 종료한다(보조 exec).
 	KillTmuxSession(sessionID, sessionName string) error
+	// RefreshTmuxDetection 은 감지 상태(attach 전)의 tmux 세션 목록을 다시 읽어 emit 한다.
+	RefreshTmuxDetection(sessionID string) error
 }
 
 // moshSessionManager는 mosh(UDP) 세션을 다룬다. SSH bootstrap+UDP를 캡슐화하며,
@@ -92,6 +94,8 @@ type localSessionManager interface {
 	ReinjectShellIntegration(sessionID string, shell string) error
 	FlushShellIntegration(sessionID string)
 	RunCompletionCommand(sessionID, command string, background, elevate bool) (string, bool, error)
+	// RunHostCommand 은 보조 채널에서 임의 명령을 실행한다(AI run_command). SSH 쪽과 같은 규약.
+	RunHostCommand(sessionID, command string, timeoutMs int) (string, string, int, bool, error)
 }
 
 type serialSessionManager interface {
@@ -464,6 +468,18 @@ func (runtime *Runtime) TmuxKillSession(sessionID, sessionName string) error {
 	return runtime.ssh.KillTmuxSession(sessionID, sessionName)
 }
 
+// TmuxRefreshSessions 는 세션 목록을 즉시 다시 읽는다.
+//
+// **어느 통로로 읽는지가 상태에 따라 다르다.** control mode 로 붙어 있으면 control 채널이
+// 목록의 주인이므로 그쪽에 재조회를 시키고, attach 전 감지 상태면 보조 exec 채널로 다시
+// 훑는다. 렌더러가 이 둘을 구분해 부르게 하면 화면이 세션의 내부 상태를 알아야 한다.
+func (runtime *Runtime) TmuxRefreshSessions(sessionID string) error {
+	if runtime.tmux.HasSession(sessionID) {
+		return runtime.tmux.ControlCommand(sessionID, tmuxsession.RefreshSessionsCommand)
+	}
+	return runtime.ssh.RefreshTmuxDetection(sessionID)
+}
+
 func (runtime *Runtime) TmuxRenameWindow(sessionID, windowID, name string) error {
 	return runtime.tmux.RenameWindow(sessionID, windowID, name)
 }
@@ -611,12 +627,26 @@ func (runtime *Runtime) RunCompletionQuery(
 
 // RunCommand runs an arbitrary command on the session's auxiliary exec channel
 // for the AI assistant's run_command tool, and emits the result correlated by
-// requestID. v1 supports SSH sessions only (plain SSH / Warpgate / EC2-over-SSM);
-// tmux control-mode, local and AWS SSM are unsupported and report an error in the
-// result payload. Like RunCompletionQuery it is best-effort and never emits a
-// session-fatal error that would tear down the terminal.
+// requestID. SSH 세션(일반 SSH / Warpgate / EC2-over-SSM)과 **로컬 셸**을 지원한다 — 둘 다
+// 보조 채널로 로그인 셸을 돌릴 수 있다. tmux control-mode 와 AWS SSM 은 그 통로가 없어
+// 결과 payload 로 지원하지 않는다고 알린다. RunCompletionQuery 와 같이 best-effort 이며
+// 터미널을 내리는 세션 오류는 절대 올리지 않는다.
 func (runtime *Runtime) RunCommand(sessionID, requestID, command string, timeoutMs int) error {
-	if !runtime.ssh.HasSession(sessionID) {
+	var (
+		stdout    string
+		stderr    string
+		exitCode  int
+		truncated bool
+		err       error
+	)
+	switch {
+	case runtime.ssh.HasSession(sessionID):
+		stdout, stderr, exitCode, truncated, err = runtime.ssh.RunHostCommand(sessionID, command, timeoutMs)
+	case runtime.local.HasSession(sessionID):
+		// 로컬도 같은 규약이다(로그인 셸·타임아웃·출력 상한). Windows 는 POSIX 셸이 없어
+		// 매니저가 오류를 돌려주고, 그것이 아래 payload 의 Error 로 그대로 나간다.
+		stdout, stderr, exitCode, truncated, err = runtime.local.RunHostCommand(sessionID, command, timeoutMs)
+	default:
 		runtime.emitEvent(coretypes.Event{
 			Type:      coretypes.EventRunCommandResult,
 			RequestID: requestID,
@@ -628,7 +658,6 @@ func (runtime *Runtime) RunCommand(sessionID, requestID, command string, timeout
 		})
 		return nil
 	}
-	stdout, stderr, exitCode, truncated, err := runtime.ssh.RunHostCommand(sessionID, command, timeoutMs)
 	errMsg := ""
 	if err != nil {
 		errMsg = err.Error()

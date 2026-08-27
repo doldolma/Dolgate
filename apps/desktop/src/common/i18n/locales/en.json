@@ -2665,7 +2665,12 @@
     "addressInUse": "That port is already in use.",
     "addressInUseAt": "That port is already in use ({{address}}).",
     "certificateDeclined": "The server certificate was not approved, so the connection stopped.",
-    "certificateUndecided": "Timed out waiting for the certificate to be confirmed. Reconnect and approve it."
+    "certificateUndecided": "Timed out waiting for the certificate to be confirmed. Reconnect and approve it.",
+    "authRejected": "Check the account name and password.",
+    "accountAuthRejected": "Account-based authentication uses this computer's login password. To connect with the separately configured VNC password instead, leave the account empty in the credentials.",
+    "passwordRequired": "This server requires a password. Add one to the credentials.",
+    "accountRequired": "This server requires an account name. Add one to the credentials.",
+    "passwordTruncated": "The password was rejected. VNC only uses the first 8 characters, so try one that is 8 characters or shorter."
   },
   "knownHostsIpc": {
     "noSecrets": "There is no credential to save.",
@@ -3758,7 +3763,8 @@
       "diskRead": "Read",
       "diskWrite": "Write",
       "loadShort": "load",
-      "chartScaleMax": "max {{value}}"
+      "chartScaleMax": "max {{value}}",
+      "offTitle": "Metrics are not read for this session"
     },
     "processes": {
       "title": "Processes",
@@ -3769,7 +3775,8 @@
       "unreadableTitle": "Can't read processes",
       "unreadable": "This host's ps does not support the options this needs.",
       "noMatches": "No process matches.",
-      "disabled": "Turn on host metrics to read the process list."
+      "disabled": "Turn on host metrics to read the process list.",
+      "offTitle": "Processes are not read for this session"
     },
     "ports": {
       "title": "Port forwarding",

@@ -471,6 +471,19 @@ func (m *Manager) detectAndEmitTmux(sessionID string) {
 	})
 }
 
+// RefreshTmuxDetection 은 원격 tmux 세션 목록을 **다시 읽어** EventTmuxAvailable 로 올린다.
+//
+// 접속 직후 한 번 찍은 스냅샷만으로는 그 뒤에 다른 창에서 만든 세션이 보이지 않는다. control
+// mode 로 붙은 세션은 control 채널이 목록을 계속 알려 주지만(tmuxsession), attach 전 감지
+// 상태에는 그 통로가 없다 — 그 자리를 이 명령이 채운다.
+//
+// 실패는 올리지 않는다(KillTmuxSession 과 같은 이유): 재감지가 안 되는 것보다 SSH 세션이
+// 영향받는 것이 나쁘고, tmux 가 사라졌으면 감지 이벤트가 안 오는 것으로 이미 드러난다.
+func (m *Manager) RefreshTmuxDetection(sessionID string) error {
+	m.detectAndEmitTmux(sessionID)
+	return nil
+}
+
 // KillTmuxSession 은 감지 하단바(attach 전)에서 원격 tmux 세션을 보조 exec 채널로
 // 종료한다. control mode 진입 없이 kill-session 을 실행한 뒤 목록을 재감지해 하단바를
 // 갱신한다. kill 실패(이미 없는 세션 등)는 무시하고 항상 재감지로 실제 상태를 반영한다

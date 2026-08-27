@@ -81,6 +81,7 @@ const (
 	CommandTmuxKillPane                CommandType = "tmuxKillPane"
 	CommandTmuxKillWindow              CommandType = "tmuxKillWindow"
 	CommandTmuxKillSession             CommandType = "tmuxKillSession"
+	CommandTmuxRefreshSessions         CommandType = "tmuxRefreshSessions"
 	CommandTmuxRenameWindow            CommandType = "tmuxRenameWindow"
 	CommandTmuxDetach                  CommandType = "tmuxDetach"
 	CommandTmuxSelectPane              CommandType = "tmuxSelectPane"

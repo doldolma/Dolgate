@@ -219,6 +219,37 @@ describe("resolveConnectionFailurePresentation", () => {
     expect(presented.layer).toBe("hostKey");
   });
 
+  // VNC 인증 실패는 **코드로만** 판정된다. 서버가 붙이는 거부 사유는 서버가 정하는 문장이라
+  // (RFB 는 형식을 정하지 않았다) 문구 규칙으로 가를 수 없다 — vnc-core 가 프로토콜에서 읽어
+  // 코드로 올려 준다(services/vnc-core/src/failure.rs).
+  it("presents VNC credential failures from the cause code", () => {
+    const rejected = resolveConnectionFailurePresentation(
+      "the server rejected the credentials: authentication failed",
+      { failure: "auth-rejected" },
+    );
+    expect(rejected.title).toBe("Authentication Failed");
+    expect(rejected.message).toBe("계정 또는 비밀번호를 확인하세요.");
+
+    // 8자 절단은 갈 길이 다르다 — 비밀번호를 줄여야 한다.
+    expect(
+      resolveConnectionFailurePresentation("…", { failure: "password-truncated" }).message,
+    ).toContain("8자");
+
+    // 계정 기반 인증(ARD)이 거부됐고 같은 서버가 VNC 암호도 받는 경우. 계정을 비우라고
+    // 말해 주지 않으면 사용자는 같은 비밀번호를 계속 넣는다.
+    expect(
+      resolveConnectionFailurePresentation("…", { failure: "account-auth-rejected" }).message,
+    ).toContain("계정을 비워");
+
+    // 없는 것을 채우라는 두 갈래.
+    expect(
+      resolveConnectionFailurePresentation("…", { failure: "password-required" }).title,
+    ).toBe("Password Required");
+    expect(
+      resolveConnectionFailurePresentation("…", { failure: "account-required" }).title,
+    ).toBe("Account Required");
+  });
+
   it("presents timeout errors without raw Go wording", () => {
     expect(
       resolveConnectionFailurePresentation(

@@ -545,15 +545,26 @@ export class RdpManager {
       }
 
       case "error": {
-        const message =
-          (event.payload as { message?: string } | undefined)?.message ??
-          "unknown RDP error";
+        const payload = event.payload as
+          | { message?: string; failure?: string }
+          | undefined;
+        const message = payload?.message ?? "unknown RDP error";
+        // 코어가 판정한 원인 코드. 화면이 문구를 다시 뜯지 않게 함께 올린다(VNC 와 같은 규칙).
+        const failure =
+          typeof payload?.failure === "string" && payload.failure.trim()
+            ? payload.failure
+            : null;
         if (pending && event.requestId) {
           this.pending.delete(event.requestId);
           pending.reject(new Error(message));
         }
         if (event.sessionId) {
-          this.emitEvent({ type: "error", sessionId: event.sessionId, message });
+          this.emitEvent({
+            type: "error",
+            sessionId: event.sessionId,
+            message,
+            failure,
+          });
         }
         return;
       }

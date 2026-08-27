@@ -280,6 +280,7 @@ export type CoreCommandType =
   | "tmuxKillPane"
   | "tmuxKillWindow"
   | "tmuxKillSession"
+  | "tmuxRefreshSessions"
   | "tmuxRenameWindow"
   | "tmuxDetach"
   | "tmuxCommand";
@@ -1634,6 +1635,7 @@ export interface DesktopApi {
     tmuxKillPane: (sessionId: string) => Promise<void>;
     tmuxKillWindow: (sessionId: string, windowId: string) => Promise<void>;
     tmuxKillSession: (sessionId: string, sessionName: string) => Promise<void>;
+    tmuxRefreshSessions: (sessionId: string) => Promise<void>;
     tmuxRenameWindow: (
       sessionId: string,
       windowId: string,

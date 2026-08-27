@@ -98,7 +98,11 @@ export function RdpConnectionOverlay({ sessionId }: RdpConnectionOverlayProps) {
    */
   const message =
     failed && rawMessage
-      ? resolveConnectionFailurePresentation(rawMessage).message
+      ? resolveConnectionFailurePresentation(rawMessage, {
+          // **코드를 함께 넘긴다.** 문구만으로는 판정할 수 없는 실패가 있다 — RFB 의 거부
+          // 사유는 서버가 정하는 문장이고, 코어가 프로토콜에서 읽은 코드만이 원인을 안다.
+          failure: tab.errorFailure,
+        }).message
       : rawMessage;
 
   return (

@@ -364,6 +364,36 @@ describe('SessionPanel', () => {
     expect(screen.getByPlaceholderText('명령 검색')).toBeTruthy();
   });
 
+  // 로컬 셸도 자기 팔레트를 갖는다. 이 배선(탭 → source → 테마 섹션)이 끊기면 팔레트가 아니라
+  // "호스트가 없습니다" 가 뜨고, 그때는 골라도 아무 일이 일어나지 않는다.
+  it('로컬 터미널에서 팔레트를 고르면 설정에 담는다', () => {
+    const updateSettings = vi.fn(() => Promise.resolve());
+    setState({
+      sessionPanelSectionBySessionId: { 'session-1': 'theme' },
+      settings: {
+        aiAssistantEnabled: true,
+        hostMetricsEnabled: true,
+        globalTerminalThemeId: 'system',
+        localTerminalThemeId: null,
+      },
+      updateSettings,
+      tabs: [
+        {
+          sessionId: 'session-1',
+          title: 'Terminal',
+          paneKind: 'terminal',
+          source: 'local',
+          hostId: null,
+        },
+      ],
+    });
+    render(<SessionPanel sessionId="session-1" />);
+
+    const row = screen.getByRole('button', { name: /Kanagawa Wave/ });
+    fireEvent.click(row);
+    expect(updateSettings).toHaveBeenCalledWith({ localTerminalThemeId: 'kanagawa-wave' });
+  });
+
   // 사용자가 넣은 뒤 직접 엔터를 쳐서 만들어지는 이력이 재실행 가능하려면, 넣는 시점에 원문을
   // 남겨야 한다(대조로 증명한다 — terminal-command-blocks 참고).
   it('넣기·실행은 보낸 원문을 블록 쪽에 남긴다', () => {

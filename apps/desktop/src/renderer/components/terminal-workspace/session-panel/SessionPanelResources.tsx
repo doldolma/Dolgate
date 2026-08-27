@@ -154,9 +154,14 @@ export function SessionPanelResources({
     return (
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-2">
         {/* 왜 못 읽는지까지 적었더니("백그라운드 명령을 쓸 수 없습니다") 사용자가 할 수 있는
-            것도 없는 설명이 한 줄 더 붙는 셈이었다. 제목만 남긴다. */}
+            것도 없는 설명이 한 줄 더 붙는 셈이었다. 제목만 남긴다.
+            'off' 와 'unsupported' 는 다른 말이어야 한다 — 못 읽는 것과 아예 묻지 않는 것이다. */}
         <SessionPanelEmpty
-          title={translate('sessionPanel.resources.unsupportedTitle')}
+          title={translate(
+            status === 'off'
+              ? 'sessionPanel.resources.offTitle'
+              : 'sessionPanel.resources.unsupportedTitle',
+          )}
         />
       </div>
     );

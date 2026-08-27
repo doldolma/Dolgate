@@ -7,7 +7,7 @@
 
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { TerminalThemeId } from '@shared';
+import type { TerminalSessionSource, TerminalThemeId } from '@shared';
 import { cn } from '../../../lib/cn';
 import { useAppStore } from '../../../store/appStore';
 import {
@@ -23,6 +23,8 @@ import { SessionPanelAppearance } from './SessionPanelAppearance';
 interface SessionPanelThemeProps {
   /** 이 세션의 호스트. 로컬 터미널처럼 호스트가 없으면 null. */
   hostId: string | null;
+  /** 세션 종류. 로컬 셸은 호스트가 없어도 자기 팔레트를 갖는다. */
+  source?: TerminalSessionSource | null;
 }
 
 /**
@@ -58,20 +60,24 @@ const THUMBNAIL_BARS = [
   { key: 'brightBlack', width: '34%' },
 ] as const;
 
-export function SessionPanelTheme({ hostId }: SessionPanelThemeProps) {
+export function SessionPanelTheme({ hostId, source }: SessionPanelThemeProps) {
   const { t: translate } = useTranslation();
   const host = useAppStore((state) =>
     hostId ? (state.hosts.find((entry) => entry.id === hostId) ?? null) : null,
   );
   const globalThemeId = useAppStore((state) => state.settings?.globalTerminalThemeId);
+  const localThemeId = useAppStore((state) => state.settings?.localTerminalThemeId ?? null);
   const setHostTerminalTheme = useAppStore((state) => state.setHostTerminalTheme);
+  const updateSettings = useAppStore((state) => state.updateSettings);
   // 저장이 실패하면 말해 준다. 예전에는 `void` 로 던져 버려서 아무 반응이 없었고, 그러면
   // "골라도 작동을 안 한다" 와 "저장이 실패했다" 를 구분할 수 없다.
   const [error, setError] = useState<string | null>(null);
 
-  // 호스트가 없는 세션(로컬 터미널)에는 고를 테마가 없다. 글꼴은 전역이라 그대로 쓸 수 있으므로
-  // 섹션 전체를 비우지 않는다 — 예전에는 여기서 빈 화면만 보여 줬다.
-  if (!host) {
+  // 호스트가 없는 세션 중 **로컬 셸만** 자기 팔레트를 갖는다(설정에 담는다). 컨테이너·ECS
+  // 셸은 이 갈래로 오지 않는다 — 붙어 있는 호스트의 레코드를 그대로 들고 있어 위의 `host` 가
+  // 잡힌다. 남는 것은 호스트가 지워진 탭처럼 담을 데가 없는 경우라, 예전처럼 빈 상태로 둔다.
+  const isLocal = !host && source === 'local';
+  if (!host && !isLocal) {
     return (
       <div className="min-h-0 flex-1 overflow-y-auto">
         <SessionPanelAppearance />
@@ -85,14 +91,18 @@ export function SessionPanelTheme({ hostId }: SessionPanelThemeProps) {
     );
   }
 
-  const selected = host.terminalThemeId ?? null;
+  const selected = host ? host.terminalThemeId ?? null : localThemeId;
 
   const choose = (themeId: TerminalThemeId | null) => {
     if (themeId === selected) {
       return;
     }
     setError(null);
-    void setHostTerminalTheme(host.id, themeId).catch((cause: unknown) => {
+    // 저장 자리가 다르다: 호스트는 그 레코드에, 로컬은 설정에. 실패를 말하는 방식은 같다.
+    const saved = host
+      ? setHostTerminalTheme(host.id, themeId)
+      : updateSettings({ localTerminalThemeId: themeId });
+    void saved.catch((cause: unknown) => {
       setError(cause instanceof Error ? cause.message : String(cause));
     });
   };

@@ -617,6 +617,13 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
   );
 
   ipcMain.handle(
+    ipcChannels.ssh.tmuxRefreshSessions,
+    async (_event, sessionId: string) => {
+      ctx.coreManager.tmuxRefreshSessions(sessionId);
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.ssh.tmuxCommand,
     async (_event, sessionId: string, command: string) => {
       ctx.coreManager.tmuxCommand(sessionId, command);

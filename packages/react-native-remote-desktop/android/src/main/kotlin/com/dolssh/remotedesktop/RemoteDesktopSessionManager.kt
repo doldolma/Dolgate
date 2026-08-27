@@ -819,7 +819,7 @@ object RemoteDesktopSessionManager {
         attachedTextureView(state)?.notifyFrameAvailable()
     }
 
-    private fun handleError(sessionId: String, message: String) {
+    private fun handleError(sessionId: String, message: String, failure: String?) {
         val state = sessions[sessionId]
         state?.lock?.lock()
         try {
@@ -829,11 +829,13 @@ object RemoteDesktopSessionManager {
         }
         state?.active = false
         state?.audioPlayer?.setActive(false)
-        eventListener?.onSessionEvent(
-            sessionId,
-            "error",
-            mapOf("message" to message),
-        )
+        // 코어가 판정한 원인 코드도 함께 올린다(iOS 와 같은 계약). 자바스크립트가 문구를 다시
+        // 뜯지 않게 하려는 것이고, 인증 실패는 문구로는 가릴 수 없다.
+        val fields = mutableMapOf<String, Any>("message" to message)
+        if (!failure.isNullOrEmpty()) {
+            fields["failure"] = failure
+        }
+        eventListener?.onSessionEvent(sessionId, "error", fields)
     }
 
     private fun handleClosed(
@@ -899,6 +901,7 @@ object RemoteDesktopSessionManager {
             "error" -> handleError(
                 sessionId,
                 payload.optString("message", "RDP session error"),
+                payload.optString("failure").ifEmpty { null },
             )
             "closed" -> handleClosed(
                 sessionId,

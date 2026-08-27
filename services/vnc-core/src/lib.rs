@@ -80,6 +80,8 @@ pub mod clipboard;
 /// 커서 모양(Cursor 의사 인코딩).
 pub mod cursor;
 pub mod decode;
+/// 인증 실패에 붙이는 원인 코드(앱이 문구를 고르는 열쇠).
+pub mod failure;
 pub mod output;
 /// 데스크톱과 주고받는 제어 프로토콜(rdp-core 의 같은 이름과 같은 뜻이다).
 pub mod protocol;

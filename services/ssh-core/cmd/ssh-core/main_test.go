@@ -10,6 +10,8 @@ import (
 )
 
 type stubCoreRuntime struct {
+	// tmuxRefreshSessions 가 어느 세션으로 들어왔는지. 프레임이 라우팅되는지 확인한다.
+	tmuxRefreshedSession string
 	// 재주입 요청에 실려 온 셸 이름(렌더러가 알아낸 값). 힌트가 흘러오는지 확인한다.
 	reinjectShell       string
 	awsConnectSession   string
@@ -99,6 +101,10 @@ func (stub *stubCoreRuntime) TmuxControlCommand(sessionID, command string) error
 func (stub *stubCoreRuntime) TmuxKillPane(sessionID string) error                 { return nil }
 func (stub *stubCoreRuntime) TmuxKillWindow(sessionID, windowID string) error     { return nil }
 func (stub *stubCoreRuntime) TmuxKillSession(sessionID, sessionName string) error { return nil }
+func (stub *stubCoreRuntime) TmuxRefreshSessions(sessionID string) error {
+	stub.tmuxRefreshedSession = sessionID
+	return nil
+}
 func (stub *stubCoreRuntime) TmuxRenameWindow(sessionID, windowID, name string) error {
 	return nil
 }

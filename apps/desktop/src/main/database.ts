@@ -1614,6 +1614,7 @@ export class SettingsRepository {
       language: normalizeAppLanguage(state.settings.language),
       homeHostViewMode: normalizeHomeHostViewMode(state.settings.homeHostViewMode),
       globalTerminalThemeId: state.terminal.globalThemeId,
+      localTerminalThemeId: state.terminal.localThemeId,
       terminalFontFamily: state.terminal.fontFamily,
       terminalFontSize: state.terminal.fontSize,
       terminalScrollbackLines: state.terminal.scrollbackLines,
@@ -1878,6 +1879,13 @@ export class SettingsRepository {
         state.terminal.globalThemeUpdatedAt = nowIso();
       }
 
+      // **`null` 과 생략을 가른다.** null 은 "전역을 따른다"(로컬 전용 팔레트 해제)이고
+      // 생략은 "건드리지 않는다" 다. truthy 검사로 묶으면 해제를 표현할 길이 없다.
+      if (input.localTerminalThemeId !== undefined) {
+        state.terminal.localThemeId = input.localTerminalThemeId;
+        state.terminal.localUpdatedAt = nowIso();
+      }
+
       if (input.terminalFontFamily) {
         state.terminal.fontFamily = normalizeTerminalFontFamilyForPlatform(input.terminalFontFamily);
         state.terminal.localUpdatedAt = nowIso();
@@ -1993,6 +2001,7 @@ export class SettingsRepository {
         input.sessionReplayRetentionCount == null &&
         input.theme == null &&
         input.globalTerminalThemeId == null &&
+        input.localTerminalThemeId === undefined &&
         input.terminalFontFamily == null &&
         input.terminalFontSize == null &&
         input.terminalScrollbackLines == null &&

@@ -1403,6 +1403,14 @@ export interface XshellImportResult {
 
 export interface TerminalAppearanceSettings {
   globalTerminalThemeId: GlobalTerminalThemeId;
+  /**
+   * 로컬 터미널에만 쓰는 팔레트. `null` 이면 전역 설정을 따른다.
+   *
+   * **호스트 테마를 담을 곳이 없어서 생긴 필드다.** 팔레트는 `HostRecord.terminalThemeId` 에
+   * 저장하는데 로컬 셸에는 호스트 레코드가 없다 — 그래서 로컬 세션은 전역 값만 쓸 수 있었고
+   * 패널의 팔레트 자리는 "호스트가 없습니다" 로 비어 있었다.
+   */
+  localTerminalThemeId?: TerminalThemeId | null;
   terminalFontFamily: TerminalFontFamilyId;
   terminalFontSize: number;
   terminalScrollbackLines: number;

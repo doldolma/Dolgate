@@ -42,6 +42,7 @@ function quote(name: string): string {
 
 export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
   const { t: translate } = useTranslation();
+  const [refreshing, setRefreshing] = useState(false);
   const tabs = useAppStore((state) => state.tabs);
   const tmuxGroups = useAppStore((state) => state.tmuxGroups);
   const workspaces = useAppStore((state) => state.workspaces);
@@ -182,9 +183,20 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
             type="button"
             aria-label={translate('sessionPanel.tmux.refresh')}
             className={ACTION_CLASS}
-            onClick={() => void refreshTmuxSessions(sessionId)}
+            disabled={refreshing}
+            onClick={() => {
+              // 목록은 이벤트로 돌아오므로 "언제 끝났는지" 를 알 수 없다. 잠깐 도는 표시만
+              // 준다 — 눌렀는지조차 알 수 없던 것이 이 버튼의 문제였다.
+              setRefreshing(true);
+              void Promise.resolve(refreshTmuxSessions(sessionId)).finally(() => {
+                window.setTimeout(() => setRefreshing(false), 600);
+              });
+            }}
           >
-            <RefreshCw className="h-3 w-3" aria-hidden />
+            <RefreshCw
+              className={cn('h-3 w-3', refreshing && 'animate-spin')}
+              aria-hidden
+            />
           </button>
         </Tooltip>
         {group && workspace ? (

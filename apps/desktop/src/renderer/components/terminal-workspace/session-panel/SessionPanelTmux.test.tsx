@@ -221,6 +221,36 @@ describe('붙어 있는 상태', () => {
     fireEvent.click(screen.getByRole('button', { name: '목록 새로고침' }));
     expect(refreshTmuxSessions).toHaveBeenCalledWith('session-1');
   });
+
+  // 새로고침은 목록을 이벤트로 받으므로 "끝났다" 를 알 수 없다. 최소한 눌렀다는 표시는
+  // 있어야 한다 — 예전에는 눌러도 아무 변화가 없어서 고장과 구분되지 않았다.
+  it('새로고침을 누르면 도는 표시가 남는다', () => {
+    render(<SessionPanelTmux sessionId="session-1" />);
+    const button = screen.getByRole('button', { name: '목록 새로고침' });
+    fireEvent.click(button);
+    expect(button.querySelector('.animate-spin')).toBeTruthy();
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+// attach 전 감지 상태(control 채널이 없다). 예전에는 이 상태에서 새로고침이 control 명령으로
+// 나가 조용히 무시됐다 — 목록은 접속 시 스냅샷에 멈춰 있었다.
+describe('감지 상태의 새로고침', () => {
+  it('control 세션이 없어도 같은 경로로 재조회를 요청한다', () => {
+    setState({
+      tabs: [
+        {
+          sessionId: 'session-plain',
+          hostId: 'host-1',
+          tmuxAvailable: { version: '3.4', sessions: ['work'] },
+        },
+      ],
+      tmuxWorkspaces: [],
+    });
+    render(<SessionPanelTmux sessionId="session-plain" />);
+    fireEvent.click(screen.getByRole('button', { name: '목록 새로고침' }));
+    expect(refreshTmuxSessions).toHaveBeenCalledWith('session-plain');
+  });
 });
 
 describe('쓸 수 없을 때', () => {

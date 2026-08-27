@@ -482,6 +482,56 @@ describe('알아서 다시 받는다', () => {
     });
   });
 
+  // 값이 안 바뀐 호스트에서는 새로 덮어도 화면이 한 픽셀도 안 움직여서 눌렸는지 알 수 없다.
+  // 받아오는 동안 스켈레톤을 한 번 지나가게 한다.
+  it('새로고침을 누르면 받는 동안 목록 대신 스켈레톤이 보인다', async () => {
+    // 홀더에 담는다 — 지역 변수로 두면 콜백 안의 대입을 좁히기가 못 보고 never 가 된다.
+    const held: { release?: () => void } = {};
+    renderSection();
+    await screen.findByText('gateway');
+
+    query.mockImplementation((_sessionId: string, command: string) => {
+      if (command.includes('ps -a --format')) {
+        // 이 왕복을 붙잡아 "받는 중" 화면을 확인한다.
+        return new Promise<string>((resolve) => {
+          held.release = () => resolve(CONTAINERS);
+        });
+      }
+      return Promise.resolve('');
+    });
+
+    requestDockerRefresh('session-1');
+    await waitFor(() => expect(screen.queryByText('gateway')).toBeNull());
+
+    held.release?.();
+    expect(await screen.findByText('gateway')).toBeTruthy();
+  });
+
+  // 정적 탭(이미지·볼륨·네트워크)은 15초 동안 받아 둔 값을 그대로 보여 준다 — 탭을 왕복 없이
+  // 여는 장치다. 그 창 안에서 새로고침을 누르면 그 판단이 왕복을 생략해 버려, 눌러 세운
+  // 스켈레톤을 내릴 응답이 오지 않는다. 이 effect 를 다시 돌릴 것은 탭 전환뿐이라 목록이
+  // 영구히 돌아오지 않는다.
+  it('정적 탭은 받아 둔 값이 새것이어도 새로고침에는 다시 받아온다', async () => {
+    respond({
+      'ps -a --format': CONTAINERS,
+      'images --format': 'app\t1\tsha1\t412MB',
+    });
+    renderSection();
+    await screen.findByText('gateway');
+    fireEvent.click(screen.getByRole('button', { name: /이미지/ }));
+    expect(await screen.findByText('app')).toBeTruthy();
+
+    const asked = () =>
+      query.mock.calls.filter(([, command]) => command.includes('images --format')).length;
+    const before = asked();
+    requestDockerRefresh('session-1');
+
+    // 다시 물어보고,
+    await waitFor(() => expect(asked()).toBeGreaterThan(before));
+    // 목록이 돌아온다.
+    expect(await screen.findByText('app')).toBeTruthy();
+  });
+
   it('받아오기가 실패하면 마지막 목록을 남기고 물러난다 — 누를 것은 없다', async () => {
     renderSection();
     await screen.findByText('gateway');

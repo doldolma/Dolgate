@@ -3,6 +3,7 @@ package localsession
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -170,6 +171,72 @@ func (m *Manager) RunCompletionCommand(
 	}
 	out, truncated := autocomplete.CapOutput(output)
 	return out, truncated, nil
+}
+
+const (
+	runHostCommandDefaultTimeout = 15 * time.Second
+	runHostCommandMaxTimeout     = 120 * time.Second
+	runHostCommandMaxBytes       = 64 * 1024
+)
+
+// RunHostCommand 은 보조 채널에서 명령을 돌려 stdout/stderr/exit 를 돌려준다(AI 의 조회 도구).
+//
+// **SSH 쪽과 같은 규약이다**(sshsession.Manager.RunHostCommand): 로그인 셸로 감싸 대화형
+// 세션과 같은 PATH 를 얻고, 타임아웃을 재고, 출력에 상한을 둔다. 다른 것은 통로뿐이다 —
+// 저쪽은 ssh.Client, 여기는 이 컴퓨터의 프로세스다.
+//
+// Windows 는 지원하지 않는다. RunCompletionCommand 과 같은 이유로 POSIX 셸이 없다 — 여기서
+// 억지로 cmd/pwsh 를 부르면 AI 가 만든 sh 문법이 그대로 실패한다. 상위(runtime)가 이 세션
+// 유형은 지원하지 않는다고 말하는 편이 낫다.
+func (m *Manager) RunHostCommand(
+	sessionID, command string,
+	timeoutMs int,
+) (string, string, int, bool, error) {
+	if _, err := m.getSession(sessionID); err != nil {
+		return "", "", -1, false, err
+	}
+	if runtime.GOOS == "windows" {
+		return "", "", -1, false, errors.New("local shell command execution is not supported on Windows")
+	}
+	timeout := time.Duration(timeoutMs) * time.Millisecond
+	if timeout <= 0 {
+		timeout = runHostCommandDefaultTimeout
+	}
+	if timeout > runHostCommandMaxTimeout {
+		timeout = runHostCommandMaxTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	// 로그인 셸로 감싸는 이유는 SSH 쪽 주석과 같다 — 그냥 exec 하면 docker 처럼 rc 파일이
+	// 넣어 주는 PATH 항목을 못 찾는다.
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-lc", command)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	exitCode := 0
+	var execErr error
+	if runErr != nil {
+		var exitError *exec.ExitError
+		if errors.As(runErr, &exitError) {
+			// 명령이 돌고 비-0 으로 끝났다 — 실행 실패가 아니다.
+			exitCode = exitError.ExitCode()
+		} else {
+			// 타임아웃·시그널 등으로 종료 코드를 얻지 못한 경우. -1 이 그 뜻이다.
+			exitCode = -1
+			execErr = runErr
+		}
+	}
+	outStr, outTrunc := capRunCommandOutput(stdout.Bytes())
+	errStr, errTrunc := capRunCommandOutput(stderr.Bytes())
+	return outStr, errStr, exitCode, outTrunc || errTrunc, execErr
+}
+
+func capRunCommandOutput(b []byte) (string, bool) {
+	if len(b) <= runHostCommandMaxBytes {
+		return string(b), false
+	}
+	return string(b[:runHostCommandMaxBytes]), true
 }
 
 // InstallShellIntegration arms the OSC 133 handshake filter and writes the

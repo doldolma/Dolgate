@@ -132,6 +132,8 @@ export interface DesktopStateFile {
   };
   terminal: {
     globalThemeId: GlobalTerminalThemeId;
+    /** 로컬 터미널 전용 팔레트. null 이면 전역을 따른다. */
+    localThemeId: TerminalThemeId | null;
     globalThemeUpdatedAt: string;
     fontFamily: TerminalFontFamilyId;
     fontSize: number;
@@ -578,6 +580,7 @@ function createDefaultStateFile(): DesktopStateFile {
     },
     terminal: {
       globalThemeId: 'system',
+      localThemeId: null,
       globalThemeUpdatedAt: timestamp,
       fontFamily: defaultTerminalFontFamily,
       fontSize: 13,
@@ -1318,6 +1321,8 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
     },
     terminal: {
       globalThemeId: isGlobalTerminalThemeId(terminal.globalThemeId) ? terminal.globalThemeId : fallback.terminal.globalThemeId,
+      // **명시 필드 화이트리스트다** — 여기 없는 값은 디스크를 다시 읽는 순간 사라진다.
+      localThemeId: isTerminalThemeId(terminal.localThemeId) ? terminal.localThemeId : null,
       globalThemeUpdatedAt:
         typeof terminal.globalThemeUpdatedAt === 'string' ? terminal.globalThemeUpdatedAt : fallback.terminal.globalThemeUpdatedAt,
       fontFamily: normalizedTerminalFontFamily,

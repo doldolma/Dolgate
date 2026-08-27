@@ -563,7 +563,17 @@ export class VncManager {
         if (sessionId) {
           this.sessions.delete(sessionId);
           this.finalizeLifecycle(sessionId, "error", message);
-          this.emitEvent({ type: "error", sessionId, message });
+          // 원인 코드를 함께 올린다. 문구는 서버가 정하는 문장일 수 있어(RFB 의 거부 사유)
+          // 화면에서 문구로 판정할 수 없다 — 코어가 프로토콜에서 읽은 코드만이 안다.
+          this.emitEvent({
+            type: "error",
+            sessionId,
+            message,
+            failure:
+              typeof payload.failure === "string" && payload.failure.trim()
+                ? payload.failure
+                : null,
+          });
         }
         return;
       }

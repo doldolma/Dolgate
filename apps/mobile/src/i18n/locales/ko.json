@@ -152,7 +152,12 @@
     "targetHost": "호스트",
     "addressInUse": "해당 포트는 이미 사용 중입니다.",
     "certificateDeclined": "서버 인증서를 승인하지 않아 연결을 멈췄습니다.",
-    "certificateUndecided": "인증서 확인을 기다리다 시간이 지났습니다. 다시 연결해 승인해 주세요."
+    "certificateUndecided": "인증서 확인을 기다리다 시간이 지났습니다. 다시 연결해 승인해 주세요.",
+    "authRejected": "계정 또는 비밀번호를 확인하세요.",
+    "accountAuthRejected": "계정 기반 인증은 이 컴퓨터의 로그인 비밀번호를 씁니다. 따로 설정한 VNC 암호로 붙으려면 자격증명의 계정을 비워 두세요.",
+    "passwordRequired": "이 서버는 비밀번호를 요구합니다. 자격증명에 비밀번호를 입력하세요.",
+    "accountRequired": "이 서버는 계정이 필요합니다. 자격증명에 계정을 입력하세요.",
+    "passwordTruncated": "비밀번호를 거부했습니다. VNC 는 앞 8자만 사용하므로 8자 이내로 맞춰 다시 시도해 보세요."
   },
   "store": {
     "serverSlow": "서버 응답이 지연되고 있습니다. 다시 시도해 주세요.",

@@ -14,6 +14,8 @@ import (
 )
 
 type stubSSHManager struct {
+	// RefreshTmuxDetection 이 어느 세션으로 불렸는지. 감지 경로로 갔는지 확인한다.
+	refreshedTmuxDetection string
 	cancelledInFlight     []string
 	hasSession            bool
 	writeSession          string
@@ -90,6 +92,11 @@ func (stub *stubSSHManager) RunHostCommand(sessionID, command string, timeoutMs 
 	return stub.runOut, stub.runStderr, stub.runExit, stub.runTrunc, stub.runErr
 }
 func (stub *stubSSHManager) KillTmuxSession(string, string) error { return nil }
+
+func (stub *stubSSHManager) RefreshTmuxDetection(sessionID string) error {
+	stub.refreshedTmuxDetection = sessionID
+	return nil
+}
 
 type stubMoshManager struct {
 	hasSession   bool
@@ -172,6 +179,9 @@ func (stub *stubAWSManager) InstallShellIntegration(string) error { return nil }
 func (stub *stubAWSManager) FlushShellIntegration(string)         {}
 
 type stubLocalManager struct {
+	// RunHostCommand 이 로컬로 라우팅됐는지(AI 조회 도구).
+	hostCommandSession string
+	hostCommandInput   string
 	hasSession        bool
 	writeSession      string
 	resizeID          string
@@ -206,6 +216,15 @@ func (stub *stubLocalManager) ReinjectShellIntegration(string, string) error { r
 func (stub *stubLocalManager) FlushShellIntegration(string)                  {}
 func (stub *stubLocalManager) RunCompletionCommand(_, _ string, _, _ bool) (string, bool, error) {
 	return "", false, nil
+}
+
+func (stub *stubLocalManager) RunHostCommand(
+	sessionID, command string,
+	_ int,
+) (string, string, int, bool, error) {
+	stub.hostCommandSession = sessionID
+	stub.hostCommandInput = command
+	return "local-out", "local-err", 0, false, nil
 }
 
 type stubSerialManager struct {
@@ -494,6 +513,38 @@ func TestRuntimeRoutesSessionIOResizeDisconnectAndSignals(t *testing.T) {
 	}
 }
 
+// 목록을 다시 읽는 통로가 상태에 따라 다르다. control mode 로 붙어 있으면 control 채널이
+// 목록의 주인이고, attach 전 감지 상태에는 그 통로가 없어 보조 exec 로 다시 훑어야 한다.
+// 감지 상태에서 control 채널을 부르면 조용히 아무 일도 일어나지 않는다(그게 이 갈래의 이유다).
+func TestTmuxRefreshSessionsUsesDetectionPathWithoutControlSession(t *testing.T) {
+	sshManager := &stubSSHManager{}
+	runtime := newRuntimeWithDeps(
+		func(coretypes.Event) {},
+		func(coretypes.StreamFrame, []byte) {},
+		sshManager,
+		&stubMoshManager{},
+		&stubAWSManager{},
+		&stubLocalManager{},
+		&stubSerialManager{},
+		&stubSFTPService{},
+		&stubContainersService{},
+		&stubForwardingService{},
+		&stubSSMForwardingService{},
+		nil,
+		nil,
+	)
+
+	if err := runtime.TmuxRefreshSessions("session-plain"); err != nil {
+		t.Fatalf("TmuxRefreshSessions() error = %v", err)
+	}
+	if sshManager.refreshedTmuxDetection != "session-plain" {
+		t.Fatalf(
+			"detection refresh not routed to the SSH manager: %q",
+			sshManager.refreshedTmuxDetection,
+		)
+	}
+}
+
 func TestRuntimeRunCommandEmitsResultForSSHSession(t *testing.T) {
 	var events []coretypes.Event
 	sshManager := &stubSSHManager{
@@ -572,6 +623,47 @@ func TestRuntimeRunCommandRejectsUnsupportedSession(t *testing.T) {
 	}
 	if payload.Error == "" || payload.ExitCode != -1 {
 		t.Fatalf("expected unsupported-session error payload, got %#v", payload)
+	}
+}
+
+// AI 의 조회 도구는 보조 채널로 로그인 셸을 돌릴 수 있는 전송에서만 가능하다. 로컬 셸도
+// 그 통로가 있는데(localsession.RunHostCommand) 예전에는 SSH 만 보고 거절했다.
+func TestRunCommandRoutesLocalSessionsToTheLocalManager(t *testing.T) {
+	var events []coretypes.Event
+	localManager := &stubLocalManager{hasSession: true}
+	runtime := newRuntimeWithDeps(
+		func(event coretypes.Event) { events = append(events, event) },
+		func(coretypes.StreamFrame, []byte) {},
+		&stubSSHManager{},
+		&stubMoshManager{},
+		&stubAWSManager{},
+		localManager,
+		&stubSerialManager{},
+		&stubSFTPService{},
+		&stubContainersService{},
+		&stubForwardingService{},
+		&stubSSMForwardingService{},
+		nil,
+		nil,
+	)
+
+	if err := runtime.RunCommand("session-local", "req-1", "uname -a", 0); err != nil {
+		t.Fatalf("RunCommand() error = %v", err)
+	}
+	if localManager.hostCommandSession != "session-local" ||
+		localManager.hostCommandInput != "uname -a" {
+		t.Fatalf("local manager did not receive the command: %#v", localManager)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected one result event, got %d", len(events))
+	}
+	payload, ok := events[0].Payload.(coretypes.RunCommandResultPayload)
+	if !ok {
+		t.Fatalf("unexpected payload type: %#v", events[0].Payload)
+	}
+	// 거절이 아니라 실제 결과가 나가야 한다.
+	if payload.Error != "" || payload.Stdout != "local-out" || payload.ExitCode != 0 {
+		t.Fatalf("unexpected result payload: %#v", payload)
 	}
 }
 

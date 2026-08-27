@@ -4536,6 +4536,27 @@ export class CoreManager {
     });
   }
 
+  /**
+   * tmux 세션 목록을 즉시 다시 읽는다.
+   *
+   * **control 세션이 아니어도 보낸다.** 여기서 control 연결만 확인하고 끊으면(다른 tmux 명령들이
+   * 그렇게 한다) attach 전 감지 상태에서는 아무 일도 일어나지 않는다 — 목록이 접속 시 스냅샷에
+   * 멈춰 있는데 새로고침이 조용히 무시되던 자리가 그것이다. 어느 통로로 읽을지는 Go runtime 이
+   * sessionId 로 판단한다(control 채널 / 보조 exec).
+   */
+  tmuxRefreshSessions(sessionId: string): void {
+    const sshTabConnected = this.tabs.get(sessionId)?.status === "connected";
+    if (!this.isTmuxControlConnected(sessionId) && !sshTabConnected) {
+      return;
+    }
+    this.sendControl({
+      id: randomUUID(),
+      type: "tmuxRefreshSessions",
+      sessionId,
+      payload: {},
+    });
+  }
+
   tmuxKillSession(sessionId: string, sessionName: string): void {
     // control 세션(pane id)이면 control 채널로, 감지 하단바의 연결된 SSH 세션이면 보조
     // exec 채널로 kill 한다(Go runtime 이 sessionId 종류로 라우팅). 둘 다 아니면 무시.

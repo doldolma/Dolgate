@@ -3397,6 +3397,46 @@ export const useMobileAppStore = create<MobileAppState>()(
         void drainSyncOutbox();
       };
 
+      /**
+       * 호스트 한 건(+ 딸린 시크릿)을 저장하고 동기화 큐에 넣는다.
+       *
+       * **로컬 먼저다.** 오프라인이어도 저장되고 큐가 다음 기회에 서버로 나른다 — 저장이
+       * 서버 왕복을 기다리면 지하철에서 호스트를 못 만든다.
+       *
+       * 순서가 규약이다: 목록을 정렬해 넣고(`sortHosts`), 시크릿 상태를 **새 목록과 함께**
+       * 갱신하고(`updateSecretsState` 가 그 목록으로 메타데이터를 다시 만든다), 그 뒤에 큐에
+       * 넣는다. SSH·원격 데스크톱 두 저장 경로가 이 순서를 각자 적어 두고 있었다.
+       */
+      const persistHostAndSecret = async (
+        record: HostRecord,
+        nextSecret: LoadedManagedSecretPayload | null,
+      ) => {
+        const nextHosts = sortHosts([
+          ...get().hosts.filter(host => host.id !== record.id),
+          record,
+        ]);
+        set({ hosts: nextHosts });
+        await updateSecretsState(
+          nextSecret
+            ? { ...get().secretsByRef, [nextSecret.secretRef]: nextSecret }
+            : get().secretsByRef,
+          nextHosts,
+        );
+
+        enqueueAndDrain([
+          { kind: 'hosts', id: record.id, op: 'upsert' },
+          ...(nextSecret
+            ? [
+                {
+                  kind: 'secrets' as const,
+                  id: nextSecret.secretRef,
+                  op: 'upsert' as const,
+                },
+              ]
+            : []),
+        ]);
+      };
+
       // Every key on file for an address, so the engine can connect without
       // probing the host first. All of them rather than one: the server chooses
       // the algorithm, and a host with both Ed25519 and ECDSA on file would
@@ -5667,8 +5707,15 @@ export const useMobileAppStore = create<MobileAppState>()(
             }
             if (event.type === 'error') {
               // 네이티브가 올려 보내는 문장도 같은 처지다 — 위 catch 와 같은 분류를 쓴다.
+              // **코드를 함께 넘긴다**: 문구로 판정할 수 없는 실패가 있다(RFB 의 거부 사유는
+              // 서버가 정하는 문장이라, 코어가 프로토콜에서 읽은 코드만이 원인을 안다).
+              const signals = { failure: event.failure ?? null };
               const errorMessage = event.message?.trim()
-                ? getConnectFailureMessage(event.message, rdFailureTarget(host))
+                ? getConnectFailureMessage(
+                    event.message,
+                    rdFailureTarget(host),
+                    signals,
+                  )
                 : t('session.remoteDesktopError');
               get().updateRemoteDesktopSession(rdId, {
                 status: 'error',
@@ -5680,7 +5727,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 // 어느 단계에 붙일지도 분류가 정한다 — null 로 고정하면 tailnet 계층에서 난
                 // 실패까지 호스트 단계에 붙는다(SSH·SFTP 는 같은 분류를 쓴다).
                 failureLayer: event.message
-                  ? getConnectFailureLayer(event.message)
+                  ? getConnectFailureLayer(event.message, signals)
                   : null,
                 failureMessage: errorMessage,
               });
@@ -8616,33 +8663,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 }
               : null;
 
-          // **로컬 먼저.** 오프라인이어도 호스트가 저장되고, 큐가 다음 기회에 서버로 나른다.
-          const nextHosts = sortHosts([
-            ...get().hosts.filter(host => host.id !== record.id),
-            record,
-          ]);
-          set({ hosts: nextHosts });
-          if (nextSecret) {
-            await updateSecretsState(
-              { ...get().secretsByRef, [nextSecret.secretRef]: nextSecret },
-              nextHosts,
-            );
-          } else {
-            await updateSecretsState(get().secretsByRef, nextHosts);
-          }
-
-          enqueueAndDrain([
-            { kind: 'hosts', id: record.id, op: 'upsert' },
-            ...(nextSecret
-              ? [
-                  {
-                    kind: 'secrets' as const,
-                    id: nextSecret.secretRef,
-                    op: 'upsert' as const,
-                  },
-                ]
-              : []),
-          ]);
+          await persistHostAndSecret(record, nextSecret);
         },
         saveRemoteDesktopHost: async (
           input: MobileRemoteDesktopDraftInput,
@@ -8809,33 +8830,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 }
               : null;
 
-          // **로컬 먼저.** 오프라인이어도 저장되고 큐가 다음 기회에 나른다(SSH 와 같다).
-          const nextHosts = sortHosts([
-            ...get().hosts.filter(host => host.id !== record.id),
-            record,
-          ]);
-          set({ hosts: nextHosts });
-          if (nextSecret) {
-            await updateSecretsState(
-              { ...get().secretsByRef, [nextSecret.secretRef]: nextSecret },
-              nextHosts,
-            );
-          } else {
-            await updateSecretsState(get().secretsByRef, nextHosts);
-          }
-
-          enqueueAndDrain([
-            { kind: 'hosts', id: record.id, op: 'upsert' },
-            ...(nextSecret
-              ? [
-                  {
-                    kind: 'secrets' as const,
-                    id: nextSecret.secretRef,
-                    op: 'upsert' as const,
-                  },
-                ]
-              : []),
-          ]);
+          await persistHostAndSecret(record, nextSecret);
         },
         // 즐겨찾기 토글 — 데스크톱과 같은 host.favorite 필드를 뒤집는다. saveHost 와 같은
         // 경로(로컬 먼저 → 아웃박스)를 쓴다. 시크릿은 건드리지 않으므로 호스트만 큐에 넣는다.

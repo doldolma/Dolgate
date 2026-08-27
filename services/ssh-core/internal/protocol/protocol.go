@@ -84,6 +84,7 @@ const (
 	CommandTmuxKillPane                = coretypes.CommandTmuxKillPane
 	CommandTmuxKillWindow              = coretypes.CommandTmuxKillWindow
 	CommandTmuxKillSession             = coretypes.CommandTmuxKillSession
+	CommandTmuxRefreshSessions         = coretypes.CommandTmuxRefreshSessions
 	CommandTmuxRenameWindow            = coretypes.CommandTmuxRenameWindow
 	CommandTmuxDetach                  = coretypes.CommandTmuxDetach
 	CommandTmuxCommand                 = coretypes.CommandTmuxCommand

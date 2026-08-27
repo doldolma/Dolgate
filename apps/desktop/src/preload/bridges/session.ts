@@ -75,6 +75,8 @@ export function buildSshBridge(ipcRenderer: IpcRenderer): DesktopApi["ssh"] {
       ipcRenderer.invoke(ipcChannels.ssh.tmuxKillWindow, sessionId, windowId),
     tmuxKillSession: (sessionId: string, sessionName: string) =>
       ipcRenderer.invoke(ipcChannels.ssh.tmuxKillSession, sessionId, sessionName),
+    tmuxRefreshSessions: (sessionId: string) =>
+      ipcRenderer.invoke(ipcChannels.ssh.tmuxRefreshSessions, sessionId),
     tmuxRenameWindow: (sessionId: string, windowId: string, name: string) =>
       ipcRenderer.invoke(
         ipcChannels.ssh.tmuxRenameWindow,

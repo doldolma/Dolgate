@@ -23,24 +23,43 @@ export function buildHostMetricsCommand(
   options: { processLimit?: number; system?: boolean } = {},
 ): string {
   const parts = [
+    // **OS 판정을 밖에서 하지 않는다.** 명령이 한 번에 나가는 편이 왕복이 적고, 무엇보다
+    // 로컬 셸은 접속 시 OS 를 감지해 두지 않는다(detectedOs 는 호스트 레코드의 값이다).
+    // 그래서 각 섹션이 스스로 /proc 을 보고 없으면 BSD(macOS) 소스로 떨어진다.
     `echo ${SECTION}:stat`,
-    'grep -m1 "^cpu " /proc/stat || true',
+    // macOS 에는 누적 CPU 틱을 셸로 읽는 길이 없다(`kern.cp_time` 은 FreeBSD 것이고 macOS
+    // sysctl 에는 없다. `top -l 2` 는 1초를 먹고, `top -l 1` 은 제 사용량을 섞어 유휴 장비를
+    // 50% 로 부른다). 그래서 **프로세스별 %cpu 를 다 더한다** — BSD 의 %cpu 는 최근 실시간에
+    // 대한 감쇠 평균이라, 코어 4개를 태우는 실험에서 합이 3초 안에 +406 만큼 올랐다(코어 수로
+    // 나누면 오차 1.5%p). 순간값은 아니어서 짧은 뾰족한 봉우리는 뭉개진다.
+    // **`ps` 폴백은 /proc 이 없을 때만이다.** BSD 의 %cpu 는 최근 실시간의 감쇠 평균이지만
+    // 리눅스의 %cpu 는 **프로세스가 살아 있는 동안의 평균**이라, 오래 뜬 프로세스가 많으면
+    // 유휴 장비도 한참 바쁜 것으로 나온다. /proc 이 있는데 /proc/stat 만 못 읽는 경우(막아
+    // 둔 컨테이너)에는 값을 내지 않는 편이 낫다 — 그럴듯한 틀린 숫자보다 없는 것이 낫다.
+    'grep -m1 "^cpu " /proc/stat 2>/dev/null || [ -d /proc ] || ps -A -o %cpu= 2>/dev/null | awk "{s+=\\$1} END {print \\"cpusum\\", s}" || true',
     `echo ${SECTION}:mem`,
-    'grep -E "^(MemTotal|MemAvailable):" /proc/meminfo || true',
+    'if [ -r /proc/meminfo ]; then grep -E "^(MemTotal|MemAvailable):" /proc/meminfo; else vm_stat 2>/dev/null; sysctl -n hw.memsize 2>/dev/null; fi || true',
     `echo ${SECTION}:net`,
-    'cat /proc/net/dev || true',
+    'if [ -r /proc/net/dev ]; then cat /proc/net/dev; else netstat -ibn 2>/dev/null; fi || true',
     // 어느 것이 진짜 장치인지. /sys/class/net/<이름>/device 가 있으면 실제 NIC 이고,
     // 브리지·veth·본드·VLAN·터널에는 없다(netdata 가 쓰는 판정). 자세한 이유는 parseNet 옆에.
     `echo ${SECTION}:netdev`,
     'for i in /sys/class/net/*; do [ -e "$i/device" ] && echo "${i##*/}"; done 2>/dev/null || true',
     `echo ${SECTION}:load`,
-    'cat /proc/loadavg || true',
+    'if [ -r /proc/loadavg ]; then cat /proc/loadavg; else sysctl -n vm.loadavg 2>/dev/null; fi || true',
     `echo ${SECTION}:uptime`,
-    'cat /proc/uptime || true',
+    // macOS 는 부팅 시각만 알려 주므로 지금 시각을 함께 실어 보내 차이로 계산한다.
+    'if [ -r /proc/uptime ]; then cat /proc/uptime; else sysctl -n kern.boottime 2>/dev/null; date +%s; fi || true',
     `echo ${SECTION}:cpus`,
-    'nproc 2>/dev/null || grep -c "^processor" /proc/cpuinfo || true',
+    'nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || grep -c "^processor" /proc/cpuinfo || true',
     `echo ${SECTION}:diskio`,
-    'cat /proc/diskstats || true',
+    // macOS 는 ioreg 로 간다 — `iostat` 은 읽기·쓰기를 합쳐서만 주는데 블록 장치의 Statistics
+    // 에는 누적 `Bytes (Read)`·`Bytes (Write)` 가 나뉘어 있다(root 필요 없음, 0.02초).
+    //
+    // 장치(IOBlockStorageDevice)에서 깊이 2까지만 훑는 이유는 **어느 것이 진짜 디스크인지**
+    // 알아야 하기 때문이다 — 그 판정은 장치의 `Physical Interconnect` 에 있고 통계는 그
+    // 자식(driver)에 있다. 깊이를 안 자르면 APFS 볼륨 속성까지 따라와 출력이 몇백 KB 가 된다.
+    'cat /proc/diskstats 2>/dev/null || ioreg -rlc IOBlockStorageDevice -w0 -d2 2>/dev/null | grep -oE "^\\+-o|Physical Interconnect\\"=\\"[^\\"]*\\"|Bytes \\((Read|Write)\\)\\"=[0-9]+" || true',
     `echo ${SECTION}:disk`,
     'df -Pk || true',
   ];
@@ -53,7 +72,9 @@ export function buildHostMetricsCommand(
   if (processLimit > 0) {
     parts.push(
       `echo ${SECTION}:ps`,
-      `ps -eo pid=,user=,pcpu=,pmem=,rss=,args= --sort=-pcpu 2>/dev/null | head -n ${processLimit} || true`,
+      // GNU 와 BSD 의 정렬 옵션이 다르다(`--sort=-pcpu` vs `-r`). 열 구성은 같으므로 파서는
+      // 하나로 충분하다 — macOS 에서 확인했다.
+      `{ ps -eo pid=,user=,pcpu=,pmem=,rss=,args= --sort=-pcpu 2>/dev/null || ps -A -o pid=,user=,pcpu=,pmem=,rss=,args= -r 2>/dev/null; } | head -n ${processLimit} || true`,
     );
   }
   // 정적인 값(호스트명·커널·아키텍처·CPU 종류)은 **한 번만** 태운다. 세션이 사는 동안 바뀌지
@@ -189,8 +210,17 @@ export interface HostDiskUsage {
 export interface HostMetricsSample {
   /** 수집 시각(epoch ms). 차분의 분모가 된다. */
   atMs: number;
-  /** /proc/stat 의 busy·total jiffies 누적값. */
-  cpu: { busy: number; total: number } | null;
+  /**
+   * CPU 사용률의 재료. 갈래가 둘인 이유는 OS 가 셸에 내주는 것이 다르기 때문이다.
+   *
+   * - `ticks`: /proc/stat 의 busy·total 누적 jiffies. **두 표본을 차분**해서 쓴다(리눅스).
+   * - `coreSum`: 프로세스별 %cpu 의 합. 이미 비율이라 차분하지 않지만 **코어를 다 더한
+   *   단위**다 — 10코어가 꽉 차면 1000 이므로 코어 수로 나눠야 사용률이 된다(macOS·BSD).
+   */
+  cpu:
+    | { kind: 'ticks'; busy: number; total: number }
+    | { kind: 'coreSum'; percent: number }
+    | null;
   memTotalKb: number | null;
   memAvailableKb: number | null;
   /**
@@ -262,9 +292,14 @@ function toNumber(value: string | undefined): number | null {
  * idle + iowait 를 idle 로 보고 나머지를 busy 로 친다(top 과 같은 관례).
  */
 function parseCpu(block: string): HostMetricsSample['cpu'] {
-  const line = block.split('\n').find((entry) => entry.startsWith('cpu '));
+  const lines = block.split('\n');
+  const line = lines.find((entry) => entry.startsWith('cpu '));
   if (!line) {
-    return null;
+    // macOS: `ps` 의 %cpu 합. ps 가 아무것도 못 내면 awk 가 `cpusum ` 만 찍고 지나가므로,
+    // 그때는 값이 없는 것으로 본다(0% 로 두면 유휴로 보인다).
+    const sumLine = lines.find((entry) => entry.startsWith('cpusum '));
+    const percent = sumLine === undefined ? null : toNumber(sumLine.slice('cpusum '.length));
+    return percent === null ? null : { kind: 'coreSum', percent };
   }
   const fields = line.trim().split(/\s+/).slice(1).map(Number);
   if (fields.length < 4 || fields.some((value) => !Number.isFinite(value))) {
@@ -276,7 +311,7 @@ function parseCpu(block: string): HostMetricsSample['cpu'] {
   // 같은 이유로 이 둘을 total 에서 뺀다.
   const total = fields.slice(0, 8).reduce((sum, value) => sum + value, 0);
   const idle = fields[3] + (fields[4] ?? 0);
-  return { busy: total - idle, total };
+  return { kind: 'ticks', busy: total - idle, total };
 }
 
 /**
@@ -284,6 +319,31 @@ function parseCpu(block: string): HostMetricsSample['cpu'] {
  * 거의 항상 "메모리 꽉 참"으로 보인다.
  */
 function parseMem(block: string): { totalKb: number | null; availableKb: number | null } {
+  // macOS: vm_stat(페이지 수) + hw.memsize(바이트). 페이지 크기는 머리글에 있다.
+  //
+  // **"여유" 를 free 로만 세면 안 된다.** macOS 는 남는 램을 캐시(speculative·file-backed)로
+  // 채워 두고 필요할 때 회수하므로, free 만 보면 늘 "거의 가득" 으로 보인다. 리눅스의
+  // MemAvailable 과 같은 뜻이 되도록 free + speculative + purgeable + file-backed 를 센다.
+  if (/Mach Virtual Memory Statistics/i.test(block)) {
+    const pageSize = Number(/page size of (\d+) bytes/i.exec(block)?.[1] ?? 0);
+    const memBytes = Number(/^\s*(\d{6,})\s*$/m.exec(block)?.[1] ?? 0);
+    if (!pageSize) {
+      return { totalKb: null, availableKb: null };
+    }
+    const pagesOf = (label: string): number =>
+      Number(
+        new RegExp(`^${label}:\\s+(\\d+)\\.?`, 'im').exec(block)?.[1] ?? 0,
+      );
+    const availablePages =
+      pagesOf('Pages free') +
+      pagesOf('Pages speculative') +
+      pagesOf('Pages purgeable') +
+      pagesOf('File-backed pages');
+    return {
+      totalKb: memBytes > 0 ? Math.round(memBytes / 1024) : null,
+      availableKb: Math.round((availablePages * pageSize) / 1024),
+    };
+  }
   let totalKb: number | null = null;
   let availableKb: number | null = null;
   for (const line of block.split('\n')) {
@@ -309,6 +369,33 @@ function parseNet(block: string): HostMetricsSample['net'] {
   // 평범한 객체라면 `constructor` 같은 이름이 없는데도 `undefined` 가 아니다.
   const interfaces: Record<string, { rxBytes: number; txBytes: number }> = Object.create(null);
   let matched = false;
+  // macOS: netstat -ibn. `<Link#N>` 줄만 센다 — 같은 인터페이스가 주소마다 한 줄씩 더 나오고
+  // 그 줄들의 바이트는 같은 값이라 그냥 더하면 2~3배가 된다.
+  if (/^Name\s+Mtu\s+Network/m.test(block)) {
+    for (const line of block.split('\n')) {
+      const fields = line.trim().split(/\s+/);
+      if (fields.length < 10 || !fields[2]?.startsWith('<Link#')) {
+        continue;
+      }
+      const name = fields[0];
+      // 루프백과 가상 장치는 제외한다(리눅스 쪽은 /sys/class/net/*/device 로 가르는 자리다).
+      if (/^(lo\d*|utun\d*|bridge\d*|awdl\d*|llw\d*|gif\d*|stf\d*|anpi\d*|ap\d*)$/.test(name)) {
+        continue;
+      }
+      // **뒤에서부터 센다.** 주소가 없는 인터페이스는 Address 열이 통째로 비어 필드 수가
+      // 하나 줄어든다(`gif0*`, 주소 없는 `en5` 등). 꼬리 일곱 개는 항상
+      // Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll 이다.
+      const tail = fields.slice(-7);
+      const rxBytes = Number(tail[2]);
+      const txBytes = Number(tail[5]);
+      if (!Number.isFinite(rxBytes) || !Number.isFinite(txBytes)) {
+        continue;
+      }
+      interfaces[name] = { rxBytes, txBytes };
+      matched = true;
+    }
+    return matched ? interfaces : null;
+  }
   for (const line of block.split('\n')) {
     const match = /^\s*([^:\s]+):\s*(.+)$/.exec(line);
     if (!match) {
@@ -411,7 +498,74 @@ function parseDiskIo(block: string): HostMetricsSample['diskIo'] {
     disks[name] = { readBytes: sectorsRead * 512, writeBytes: sectorsWritten * 512 };
     matched = true;
   }
-  return matched ? disks : null;
+  if (matched) {
+    return disks;
+  }
+  /**
+   * macOS(ioreg): 장치마다 세 가지 토큰이 파일 순서대로 온다.
+   *
+   *     +-o
+   *     Physical Interconnect"="Apple Fabric"
+   *     Bytes (Read)"=12191403245568
+   *     Bytes (Write)"=5401191211008
+   *
+   * **가상 인터페이스는 뺀다.** 마운트한 디스크 이미지(시뮬레이터 런타임 DMG 등)는 제 블록
+   * 장치에 읽기가 쌓이고, 그 이미지 파일을 담은 실제 디스크에도 같은 바이트가 다시 쌓인다 —
+   * 다 더하면 이미지를 읽는 동안 읽기가 두 배로 보인다. 리눅스에서 파티션·LVM 계층을 빼는
+   * 것과 같은 이유다.
+   *
+   * 남은 것들은 한 항목으로 모은다. 장치 이름은 이 토큰에 없고(자식 IOMedia 의 속성이다),
+   * 이 값을 쓰는 화면은 초당 읽기·쓰기 두 줄뿐이라 장치 구분이 필요하지 않다.
+   */
+  const devices: {
+    virtual: boolean;
+    seenBytes: boolean;
+    readBytes: number;
+    writeBytes: number;
+  }[] = [];
+  for (const line of block.split('\n')) {
+    const token = line.trim();
+    if (token === '+-o') {
+      devices.push({ virtual: false, seenBytes: false, readBytes: 0, writeBytes: 0 });
+      continue;
+    }
+    const current = devices[devices.length - 1];
+    if (current === undefined) {
+      continue;
+    }
+    const interconnect = /^Physical Interconnect"="(.*)"$/.exec(token);
+    if (interconnect) {
+      current.virtual = interconnect[1] === 'Virtual Interface';
+      continue;
+    }
+    const bytes = /^Bytes \((Read|Write)\)"?=(\d+)$/.exec(token);
+    if (bytes === null) {
+      continue;
+    }
+    const value = Number(bytes[2]);
+    if (!Number.isFinite(value)) {
+      continue;
+    }
+    // 진짜 디스크인지는 `Physical Interconnect` 가 정하는데, 그 줄이 통계보다 먼저 온다는
+    // 보장은 없다(같은 속성 사전을 ioreg 가 어떤 순서로 찍든 상관없어야 한다). 그래서
+    // 장치별로 담아 두고 빼는 판단은 다 읽은 뒤에 한다.
+    current.seenBytes = true;
+    if (bytes[1] === 'Read') {
+      current.readBytes += value;
+    } else {
+      current.writeBytes += value;
+    }
+  }
+  const real = devices.filter((device) => !device.virtual && device.seenBytes);
+  if (real.length === 0) {
+    return null;
+  }
+  return {
+    block: {
+      readBytes: real.reduce((sum, device) => sum + device.readBytes, 0),
+      writeBytes: real.reduce((sum, device) => sum + device.writeBytes, 0),
+    },
+  };
 }
 
 /**
@@ -439,7 +593,10 @@ const MAX_DISKS = 4;
  *   데이터가 있는 /volume1 을 못 본다.
  */
 function parseDisks(block: string): HostDiskUsage[] {
-  const byDevice = new Map<string, HostDiskUsage>();
+  // 컨테이너 키 → 그 컨테이너에 속한 df 줄들. **여기서는 아무것도 걸러 내지 않는다** —
+  // macOS 가 자기 몫으로 쓰는 볼륨들이 곧 "여러 볼륨이 한 컨테이너를 나눠 쓴다" 는 단서라,
+  // 묶기 전에 빼면 그 판단을 할 수 없다.
+  const containers = new Map<string, DiskRow[]>();
   for (const [index, line] of block.split('\n').entries()) {
     if (index === 0 || line.trim().length === 0) {
       continue;
@@ -453,21 +610,80 @@ function parseDisks(block: string): HostDiskUsage[] {
       continue;
     }
     const totalKb = toNumber(fields[1]);
-    const usedKb = toNumber(fields[2]);
+    const reportedUsedKb = toNumber(fields[2]);
     const availableKb = toNumber(fields[3]);
     // 마운트 경로에 공백이 있을 수 있어 6번째 필드부터 끝까지 잇는다.
     const mount = fields.slice(5).join(' ');
-    if (totalKb === null || usedKb === null || availableKb === null || totalKb <= 0 || !mount) {
+    if (
+      totalKb === null ||
+      reportedUsedKb === null ||
+      availableKb === null ||
+      totalKb <= 0 ||
+      !mount
+    ) {
       continue;
     }
-    const existing = byDevice.get(device);
-    if (!existing || mount.length < existing.mount.length) {
-      byDevice.set(device, { mount, usedKb, totalKb, availableKb });
+    // 같은 컨테이너를 한 묶음으로. 장치 이름의 슬라이스 번호(`/dev/disk3s5`)를 떼고 total·
+    // available 이 같은 것끼리 묶는다. 리눅스의 장치명은 이 치환에 걸리지 않는다.
+    const key = `${device.replace(/^(\/dev\/disk\d+)s\d+.*$/, '$1')}:${totalKb}:${availableKb}`;
+    const rows = containers.get(key);
+    const row: DiskRow = { mount, reportedUsedKb, totalKb, availableKb };
+    if (rows) {
+      rows.push(row);
+    } else {
+      containers.set(key, [row]);
     }
   }
-  return [...byDevice.values()]
-    .sort((left, right) => right.totalKb - left.totalKb)
-    .slice(0, MAX_DISKS);
+  const disks: HostDiskUsage[] = [];
+  for (const rows of containers.values()) {
+    // 이 묶음을 대표할 마운트. `/System/Volumes/*` 는 이름으로 세우지 않는다 — macOS 의 VM·
+    // Preboot·Update·Data 는 `/` 와 같은 컨테이너라 `/` 하나로 말하는 것이 맞다.
+    const named = rows.filter((row) => !row.mount.startsWith('/System/Volumes/'));
+    if (named.length === 0) {
+      // 애플 내부용 컨테이너(`/dev/disk1` 의 512 MB 볼륨 셋)뿐이다 — 보여 줄 이름이 없다.
+      continue;
+    }
+    const label = named.reduce((shortest, row) =>
+      row.mount.length < shortest.mount.length ? row : shortest,
+    );
+    // Xcode 시뮬레이터 런타임은 읽기 전용 이미지라 **항상** 97% 쯤 차 있다. 그대로 세면
+    // 상태바의 디스크 경고(가장 찬 볼륨이 90% 이상)가 Xcode 를 깐 맥에서 영구히 켜진다.
+    if (label.mount.startsWith('/Library/Developer/CoreSimulator/Volumes/')) {
+      continue;
+    }
+    disks.push({
+      mount: label.mount,
+      usedKb: sharesContainer(rows) ? label.totalKb - label.availableKb : label.reportedUsedKb,
+      totalKb: label.totalKb,
+      availableKb: label.availableKb,
+    });
+  }
+  return disks.sort((left, right) => right.totalKb - left.totalKb).slice(0, MAX_DISKS);
+}
+
+/** 컨테이너로 묶기 전의 df 한 줄. */
+interface DiskRow {
+  mount: string;
+  /** df 가 적어 준 Used. 컨테이너를 나눠 쓰는 볼륨이면 이 디스크가 얼마나 찼는지와 다르다. */
+  reportedUsedKb: number;
+  totalKb: number;
+  availableKb: number;
+}
+
+/**
+ * 이 묶음이 **여러 볼륨이 한 컨테이너를 나눠 쓰는** 경우인가(APFS).
+ *
+ * 그런 경우 df 는 볼륨마다 컨테이너의 total·available 을 되풀이하면서 Used 만 그 볼륨 몫으로
+ * 준다. 그래서 `/` 는 "12 GiB / 926 GiB" 로 보이는데 실제로는 컨테이너에 559 GiB 가 차 있다
+ * (대부분은 Data 볼륨이다). 그때는 total - available 로 세야 Finder 와 같은 값이 된다.
+ *
+ * **판정은 줄마다 Used 가 다른가로 한다.** 같은 파일시스템을 두 번 마운트한 것(bind mount·
+ * btrfs 서브볼륨)도 total·available 이 같아 한 묶음이 되는데, 그쪽은 줄마다 Used 까지 같다 —
+ * 한 파일시스템을 두 번 본 것이므로 df 의 Used 가 이미 맞고, total - available 로 바꾸면
+ * 예약 블록(ext4 의 5%)이 사용량에 들어가 버린다.
+ */
+function sharesContainer(rows: DiskRow[]): boolean {
+  return rows.length > 1 && new Set(rows.map((row) => row.reportedUsedKb)).size > 1;
 }
 
 /** 명령 출력 한 덩어리를 샘플로 만든다. 읽지 못한 항목은 null 로 남기고 나머지는 살린다. */
@@ -492,8 +708,12 @@ export function parseHostSystemInfoFromOutput(output: string): HostSystemInfo | 
 
 export function parseHostMetricsSample(output: string, atMs: number): HostMetricsSample {
   const mem = parseMem(section(output, 'mem'));
-  const load = section(output, 'load').trim().split(/\s+/);
-  const uptime = section(output, 'uptime').trim().split(/\s+/);
+  // load: 리눅스는 "0.15 0.20 0.19 1/234 5678", macOS 는 "{ 3.98 6.49 7.77 }".
+  const load = section(output, 'load')
+    .replace(/[{}]/g, ' ')
+    .trim()
+    .split(/\s+/);
+  const uptime = parseUptimeSeconds(section(output, 'uptime'));
   return {
     atMs,
     cpu: parseCpu(section(output, 'stat')),
@@ -505,10 +725,40 @@ export function parseHostMetricsSample(output: string, atMs: number): HostMetric
     ),
     diskIo: parseDiskIo(section(output, 'diskio')),
     loadAvg1: toNumber(load[0]),
-    uptimeSeconds: toNumber(uptime[0]),
+    uptimeSeconds: uptime,
     cpuCount: toNumber(section(output, 'cpus').trim().split(/\s+/)[0]),
     disks: parseDisks(section(output, 'disk')),
   };
+}
+
+/**
+ * 업타임 초.
+ *
+ * 리눅스는 /proc/uptime 이 초를 그대로 준다. macOS 에는 그런 값이 없어 부팅 시각
+ * (`kern.boottime` → `{ sec = 1783705689, usec = … } …`)과 지금 시각(`date +%s`)을 함께 실어
+ * 보내고 여기서 차를 낸다 — 기기 시계 차이를 타지 않게 계산을 원격 값끼리로 맞춘다.
+ */
+function parseUptimeSeconds(block: string): number | null {
+  const trimmed = block.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const boot = /sec\s*=\s*(\d+)/.exec(trimmed);
+  if (boot) {
+    // date +%s 는 마지막 줄로 온다.
+    const nowLine = trimmed
+      .split('\n')
+      .map((line) => line.trim())
+      .reverse()
+      .find((line) => /^\d{9,}$/.test(line));
+    const now = Number(nowLine ?? 0);
+    const bootedAt = Number(boot[1]);
+    if (!now || !bootedAt || now <= bootedAt) {
+      return null;
+    }
+    return now - bootedAt;
+  }
+  return toNumber(trimmed.split(/\s+/)[0]);
 }
 
 /** 이 값들 중 하나라도 읽혔는지 — 전부 실패면 이 호스트에서는 지표를 못 쓴다고 본다. */
@@ -616,7 +866,13 @@ export function computeHostMetrics(
   const elapsedMs = resolveElapsedMs(current, previous);
 
   let cpuPercent: number | null = null;
-  if (previous?.cpu && current.cpu) {
+  if (current.cpu?.kind === 'coreSum') {
+    // **코어 수로 나눈다.** 안 나누면 10코어의 40% 가 400% 로 나간다. 코어 수를 못 읽었으면
+    // 나눌 수가 없으니 값을 내지 않는다 — 이 갈래는 차분이 아니라 첫 표본부터 값이 있다.
+    if (current.cpuCount !== null && current.cpuCount > 0) {
+      cpuPercent = Math.min(100, Math.max(0, current.cpu.percent / current.cpuCount));
+    }
+  } else if (previous?.cpu?.kind === 'ticks' && current.cpu?.kind === 'ticks') {
     const totalDelta = current.cpu.total - previous.cpu.total;
     const busyDelta = current.cpu.busy - previous.cpu.busy;
     // 재부팅이나 카운터 리셋이면 음수가 나온다 — 그때는 이번 값을 버린다.

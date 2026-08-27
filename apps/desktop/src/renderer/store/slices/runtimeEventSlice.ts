@@ -564,6 +564,9 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                     ...item,
                     status: "error" as const,
                     errorMessage: event.message,
+                    // 코어가 판정한 원인 코드. 화면이 문구로 다시 판정하지 못하는 실패가
+                    // 있다(RFB 의 거부 사유는 서버가 정하는 문장이다).
+                    errorFailure: event.failure ?? null,
                     connectionProgress: resolveErrorProgress(
                       event.message,
                       true,
@@ -695,6 +698,9 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                     ...item,
                     status: "error" as const,
                     errorMessage: event.message,
+                    // 코어가 판정한 원인 코드. 화면이 문구로 다시 판정하지 못하는 실패가
+                    // 있다(RFB 의 거부 사유는 서버가 정하는 문장이다).
+                    errorFailure: event.failure ?? null,
                     connectionProgress: resolveErrorProgress(
                       event.message,
                       true,

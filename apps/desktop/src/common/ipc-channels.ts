@@ -191,6 +191,7 @@ export const ipcChannels = {
     tmuxKillPane: 'ssh:tmux-kill-pane',
     tmuxKillWindow: 'ssh:tmux-kill-window',
     tmuxKillSession: 'ssh:tmux-kill-session',
+    tmuxRefreshSessions: 'ssh:tmux-refresh-sessions',
     tmuxRenameWindow: 'ssh:tmux-rename-window',
     tmuxDetach: 'ssh:tmux-detach',
     tmuxCommand: 'ssh:tmux-command',

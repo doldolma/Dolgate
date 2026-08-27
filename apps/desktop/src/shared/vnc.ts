@@ -107,7 +107,19 @@ export type VncSessionEvent =
       desktopWidth: number;
       desktopHeight: number;
     }
-  | { type: 'error'; sessionId: string; message: string }
+  | {
+      type: 'error';
+      sessionId: string;
+      message: string;
+      /**
+       * 코어가 판정한 실패 원인 코드(`ErrorPayload.failure`).
+       *
+       * 문구를 다시 뜯지 않기 위해 함께 싣는다 — 소켓 원인은 errno 로(core_framing::neterr),
+       * 인증 실패는 프로토콜에서(vnc-core 의 src/failure.rs) 코어가 이미 판정했다. 원인을
+       * 모르면 없다.
+       */
+      failure?: string | null;
+    }
   | { type: 'closed'; sessionId: string };
 
 /**

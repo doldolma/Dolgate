@@ -34,6 +34,13 @@ export interface RemoteDesktopSessionEvent {
   rawType?: string;
   status?: "connecting" | "connected" | "disconnecting";
   message?: string;
+  /**
+   * 코어가 판정한 실패 원인 코드(`type: "error"` 에만 온다).
+   *
+   * 문구를 다시 뜯지 않기 위해 함께 온다 — 소켓 원인은 errno 로, 인증 실패는 프로토콜에서
+   * 코어가 이미 판정했다(services/vnc-core 의 src/failure.rs). 원인을 모르면 없다.
+   */
+  failure?: string;
   width?: number;
   height?: number;
   name?: string;
@@ -329,6 +336,7 @@ function normalizeSessionEvent(
       sessionId,
       type: "error",
       message: stringField(raw, "message") ?? stringField(raw, "error"),
+      failure: stringField(raw, "failure"),
     };
   }
   if (

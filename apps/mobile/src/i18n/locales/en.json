@@ -152,7 +152,12 @@
     "targetHost": "the host",
     "addressInUse": "That port is already in use.",
     "certificateDeclined": "The server certificate was not approved, so the connection stopped.",
-    "certificateUndecided": "Timed out waiting for the certificate to be confirmed. Reconnect and approve it."
+    "certificateUndecided": "Timed out waiting for the certificate to be confirmed. Reconnect and approve it.",
+    "authRejected": "Check the account name and password.",
+    "accountAuthRejected": "Account-based authentication uses this computer's login password. To connect with the separately configured VNC password instead, leave the account empty in the credentials.",
+    "passwordRequired": "This server requires a password. Add one to the credentials.",
+    "accountRequired": "This server requires an account name. Add one to the credentials.",
+    "passwordTruncated": "The password was rejected. VNC only uses the first 8 characters, so try one that is 8 characters or shorter."
   },
   "store": {
     "serverSlow": "The server is slow to respond. Try again.",

@@ -28,6 +28,7 @@ use crate::auth;
 use crate::clipboard;
 use crate::cursor;
 use crate::decode::{Framebuffer, Rect};
+use crate::failure::Failure;
 use crate::output::Output;
 use crate::protocol::{CapabilitiesPayload, ConnectPayload, InputEvent};
 use crate::rfb::{self, encoding, PixelFormat, SecurityType};
@@ -544,7 +545,10 @@ fn run_inner(
                     // 소켓 실패는 정경 문구와 원인 코드를 함께 올린다 — 이름 해석 실패(윈도우
                     // WSAHOST_NOT_FOUND)까지 이 경로를 지난다(core_framing::neterr).
                     message: core_framing::neterr::describe(&error),
-                    failure: core_framing::neterr::code(&error),
+                    // 소켓 계층이 모르는 실패는 인증 계층에 물어본다 — 비밀번호가 틀렸다는
+                    // 것을 소켓 errno 로는 알 수 없다(crate::failure).
+                    failure: core_framing::neterr::code(&error)
+                        .or_else(|| crate::failure::code(&error)),
                 },
             )?;
             Err(error)
@@ -764,7 +768,7 @@ fn authenticate(
 /// VncAuth 챌린지 응답. TLS 안에서도 같은 절차라 따로 빼 둔다.
 fn vnc_auth(transport: &mut Transport, version: rfb::Version, password: &str) -> Result<()> {
     if password.is_empty() {
-        bail!("이 서버는 비밀번호를 요구합니다");
+        bail!(Failure::PasswordRequired);
     }
     let mut challenge = [0_u8; auth::CHALLENGE_LEN];
     transport.read_exact(&mut challenge)?;
@@ -772,12 +776,13 @@ fn vnc_auth(transport: &mut Transport, version: rfb::Version, password: &str) ->
     transport.write_all(&response)?;
     transport.flush()?;
     rfb::read_security_result(transport, version).map_err(|error| {
-        // 서버는 왜 틀렸는지 말하지 않는다. 8자 절단이 실제로 가장 흔한 원인이라 그것을 알려 준다.
-        if password.len() > 8 {
-            anyhow::anyhow!("{error} (비밀번호가 8자를 넘습니다 — VNC 는 앞 8자만 사용합니다)")
+        // 서버는 왜 틀렸는지 말하지 않는다. 8자 절단이 실제로 가장 흔한 원인이라 그것을 코드로
+        // 갈라 준다 — 문구는 앱이 자기 언어로 붙인다. 서버가 붙인 사유는 원인 아래에 남는다.
+        anyhow::Error::new(error).context(if password.len() > 8 {
+            Failure::PasswordTruncated
         } else {
-            error.into()
-        }
+            Failure::AuthRejected
+        })
     })?;
     Ok(())
 }
@@ -794,7 +799,7 @@ fn apple_remote_desktop_auth(
     vnc_auth_also_offered: bool,
 ) -> Result<()> {
     if username.is_empty() {
-        bail!("macOS 화면 공유는 계정이 필요합니다 — 자격증명에 계정을 입력하세요");
+        bail!(Failure::AccountRequired);
     }
 
     let mut head = [0_u8; 4];
@@ -824,19 +829,15 @@ fn apple_remote_desktop_auth(
     transport.flush()?;
 
     rfb::read_security_result(transport, version).map_err(|error| {
-        // ARD 는 계정도 틀릴 수 있으니 둘 다 짚어 준다.
-        //
-        // **macOS 에서 실제로 헷갈리는 자리다.** 화면 공유 설정에는 "VNC 뷰어 암호" 가 따로 있고,
-        // 그것은 로그인 비밀번호와 다르다. 계정을 적으면 우리는 ARD(로그인 비밀번호)를 고르므로,
-        // VNC 암호를 넣은 사용자는 왜 틀렸는지 알 수 없다 — 서버가 둘 다 제시했으면 그 길을 알려 준다.
-        if vnc_auth_also_offered {
-            anyhow::anyhow!(
-                "{error} — 계정 기반 인증(ARD)은 이 컴퓨터의 **로그인 비밀번호**를 씁니다. \
-                 별도로 설정한 VNC 암호로 붙으려면 자격증명의 계정을 비워 두세요"
-            )
+        // ARD 는 계정도 틀릴 수 있고, **macOS 에서 실제로 헷갈리는 자리다** — 화면 공유 설정에는
+        // 로그인 비밀번호와 별개로 "VNC 뷰어 암호" 가 있다. 계정을 적으면 우리는 ARD(로그인
+        // 비밀번호)를 고르므로, VNC 암호를 넣은 사용자는 왜 틀렸는지 알 수 없다. 서버가 둘 다
+        // 제시했으면 갈 길이 다르므로 코드를 갈라 준다.
+        anyhow::Error::new(error).context(if vnc_auth_also_offered {
+            Failure::AccountAuthRejected
         } else {
-            anyhow::anyhow!("{error} (계정 또는 비밀번호를 확인하세요)")
-        }
+            Failure::AuthRejected
+        })
     })?;
     Ok(())
 }
@@ -887,8 +888,9 @@ fn vencrypt_authenticate(
             // 계정 기반 인증. 8자 제한이 없다 — 통로가 이미 TLS 라서 평문으로 보내도 된다.
             vencrypt::write_plain_credentials(&mut secured, &payload.username, &payload.password)?;
             rfb::read_security_result(&mut secured, version).map_err(|error| {
-                // 서버는 이유를 말하지 않는다. Plain 은 계정도 틀릴 수 있으니 둘 다 짚어 준다.
-                anyhow::anyhow!("{error} (계정 또는 비밀번호를 확인하세요)")
+                // 서버는 이유를 말하지 않는다. Plain 은 계정도 틀릴 수 있어 둘을 함께 짚는
+                // 문구가 필요한데, 그 문구는 앱이 코드를 보고 붙인다.
+                anyhow::Error::new(error).context(Failure::AuthRejected)
             })?;
         }
         other => bail!(vencrypt::describe_unsupported(&[other])),

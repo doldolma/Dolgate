@@ -10,6 +10,7 @@ import {
   type AuthStatus,
   getConnectionFailureReason,
   type ConnectionFailureLayer,
+  type ConnectionFailureSignals,
   type HostSubtitleLabels,
   type SyncBootstrapStatus,
 } from '@dolssh/shared-core';
@@ -127,6 +128,13 @@ const CONNECT_FAILURE_KEYS = {
   "tailnet-mismatch": "connectFailure.tailnetMismatch",
   "certificate-declined": "connectFailure.certificateDeclined",
   "certificate-undecided": "connectFailure.certificateUndecided",
+  // 자격증명 실패. 코어가 프로토콜 수준에서 판정해 코드로 올려 준다(vnc-core 의
+  // src/failure.rs) — 서버가 붙이는 거부 사유는 서버가 정하는 문장이라 문구로는 못 가른다.
+  "auth-rejected": "connectFailure.authRejected",
+  "account-auth-rejected": "connectFailure.accountAuthRejected",
+  "password-required": "connectFailure.passwordRequired",
+  "account-required": "connectFailure.accountRequired",
+  "password-truncated": "connectFailure.passwordTruncated",
 } as const;
 
 export const CONNECT_FAILURE_MESSAGE_KEYS: readonly string[] = [
@@ -146,16 +154,22 @@ export const CONNECT_FAILURE_MESSAGE_KEYS: readonly string[] = [
  */
 export function getConnectFailureLayer(
   rawMessage: string,
+  signals?: ConnectionFailureSignals,
 ): ConnectionFailureLayer | null {
-  return getConnectionFailureReason(rawMessage.trim()).layer ?? null;
+  return getConnectionFailureReason(rawMessage.trim(), signals).layer ?? null;
 }
 
 export function getConnectFailureMessage(
   rawMessage: string,
   target?: string | null,
+  /**
+   * 코어가 실어 보낸 원인 코드. 문구로 판정할 수 없는 실패가 있어 함께 받는다 — RFB 의 거부
+   * 사유는 서버가 정하는 문장이라, 코어가 프로토콜에서 읽은 코드만이 원인을 안다.
+   */
+  signals?: ConnectionFailureSignals,
 ): string {
   const normalized = rawMessage.trim();
-  const reason = getConnectionFailureReason(normalized);
+  const reason = getConnectionFailureReason(normalized, signals);
   if (reason.code === "unknown") {
     return normalized;
   }

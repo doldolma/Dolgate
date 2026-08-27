@@ -180,6 +180,13 @@ export function resolveConnectionFailurePresentation(
     // RDP 인증서. 호스트 키와 같은 성격이라(신원 승인) 같은 자리에 둔다.
     "certificate-declined": () => t('connectFailure.certificateDeclined'),
     "certificate-undecided": () => t('connectFailure.certificateUndecided'),
+    // 자격증명 실패. 코어가 프로토콜 수준에서 판정해 코드로 올려 준다(vnc-core 의
+    // src/failure.rs) — 서버가 붙이는 거부 사유는 서버가 정하는 문장이라 문구로는 못 가른다.
+    "auth-rejected": () => t('connectFailure.authRejected'),
+    "account-auth-rejected": () => t('connectFailure.accountAuthRejected'),
+    "password-required": () => t('connectFailure.passwordRequired'),
+    "account-required": () => t('connectFailure.accountRequired'),
+    "password-truncated": () => t('connectFailure.passwordTruncated'),
     cancelled: () => t('connectFailure.cancelled'),
     "aws-auth": () => t('connectFailure.awsAuthFailed'),
     // 권한 부족은 다시 로그인해도 풀리지 않는다 — 고칠 곳은 정책이다. 어느 액션이 거부됐는지
@@ -201,6 +208,12 @@ export function resolveConnectionFailurePresentation(
     "host-key-declined": "Host Key Declined",
     "certificate-declined": "Certificate Declined",
     "certificate-undecided": "Certificate Not Confirmed",
+    // 자격증명이 틀린 것과 연결이 안 되는 것은 사용자가 할 일이 다르다 — 제목에서 갈라 준다.
+    "auth-rejected": "Authentication Failed",
+    "account-auth-rejected": "Authentication Failed",
+    "password-required": "Password Required",
+    "account-required": "Account Required",
+    "password-truncated": "Authentication Failed",
     "aws-auth": "AWS Authentication Required",
     "aws-permission": "AWS Permission Required",
   };

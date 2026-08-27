@@ -115,6 +115,53 @@ function getExternalSourcePaths(podfileLockContent) {
   return externalPaths;
 }
 
+/**
+ * node_modules 에서 iOS 네이티브 코드를 들고 있는 패키지들의 절대 경로.
+ *
+ * RN 의 autolink 는 의존성 중 podspec 을 가진 것을 Podfile 에 이름을 적지 않고 자동으로 넣는다.
+ * 그래서 **새 패키지를 깔면 Podfile 도 Podfile.lock 도 Manifest.lock 도 그대로**이고, 아래의
+ * 다른 검사들이 모두 통과한다. 그 상태로 빌드하면 자바스크립트만 들어간 앱이 떠서, 그 모듈을
+ * 처음 부르는 순간에야 없다고 터진다.
+ *
+ * dependencies 만 본다 — 네이티브를 들고 오는 패키지가 devDependencies 에 있을 이유가 없고,
+ * 넓게 보면 그만큼 헛되게 `pod install` 을 돌릴 위험이 커진다.
+ */
+function getNativeDependencyPaths() {
+  const manifest = readFileIfExists(path.join(appRoot, "package.json"));
+  if (!manifest) {
+    return [];
+  }
+  let dependencies;
+  try {
+    dependencies = Object.keys(JSON.parse(manifest).dependencies || {});
+  } catch {
+    return [];
+  }
+
+  const paths = [];
+  for (const name of dependencies) {
+    // 워크스페이스라 설치 위치가 앱과 저장소 뿌리 두 곳으로 갈린다.
+    const packageDir = [
+      path.join(appRoot, "node_modules", name),
+      path.join(repoRoot, "node_modules", name),
+    ].find((candidate) => fs.existsSync(candidate));
+    if (!packageDir) {
+      continue;
+    }
+    let entries;
+    try {
+      entries = fs.readdirSync(packageDir);
+    } catch {
+      continue;
+    }
+    if (entries.some((entry) => entry.endsWith(".podspec"))) {
+      paths.push(path.resolve(packageDir));
+    }
+  }
+
+  return paths;
+}
+
 function shouldInstallPods() {
   const workspacePath = path.join(iosRoot, xcodeWorkspaceName);
   const podfilePath = path.join(iosRoot, "Podfile");
@@ -139,7 +186,21 @@ function shouldInstallPods() {
   // pointing at the vanished directory and the build dies on an (l)stat of a
   // framework that is no longer there, which reads as an Xcode problem rather
   // than a stale install. The recorded paths are the honest signal.
-  if (getExternalSourcePaths(podfileLockContent).some((externalPath) => !fs.existsSync(externalPath))) {
+  const recordedPaths = getExternalSourcePaths(podfileLockContent);
+  if (recordedPaths.some((externalPath) => !fs.existsSync(externalPath))) {
+    return true;
+  }
+
+  // 반대 방향도 본다: 지운 pod 은 위에서 잡히지만 **새로 깐** pod 은 아무 파일도 건드리지
+  // 않아 여기까지 통과한다. 기록된 경로가 그 패키지 안(또는 그 패키지 자체)을 가리키는지로
+  // 본다 — react-native 처럼 하위 디렉터리 여러 개가 따로 적히는 경우가 있다.
+  const linked = (dependencyPath) =>
+    recordedPaths.some(
+      (externalPath) =>
+        externalPath === dependencyPath ||
+        externalPath.startsWith(`${dependencyPath}${path.sep}`),
+    );
+  if (getNativeDependencyPaths().some((dependencyPath) => !linked(dependencyPath))) {
     return true;
   }
 

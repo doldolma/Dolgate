@@ -1606,6 +1606,32 @@ describe('SettingsRepository', () => {
     expect(settings.get().globalTerminalThemeId).toBe('system');
   });
 
+  it('로컬 터미널 팔레트를 저장하고 해제까지 구분한다', async () => {
+    const { SettingsRepository } = await loadRepositories();
+    const settings = new SettingsRepository({
+      getConfig: () => ({
+        sync: {
+          serverUrl: 'https://bundled.example.com',
+          desktopClientId: 'dolgate-desktop',
+          redirectUri: 'dolgate://auth/callback'
+        }
+      })
+    } as never);
+
+    expect(settings.update({ localTerminalThemeId: 'kanagawa-wave' }).localTerminalThemeId).toBe(
+      'kanagawa-wave'
+    );
+    expect(settings.get().localTerminalThemeId).toBe('kanagawa-wave');
+
+    // 다른 설정을 건드려도 살아 있어야 한다 — 기기 로컬 값을 되돌리는 갈래가 이 필드를 빼먹으면
+    // 여기서 null 로 돌아간다.
+    settings.update({ theme: 'dark' });
+    expect(settings.get().localTerminalThemeId).toBe('kanagawa-wave');
+
+    // null 은 "전역을 따른다" 다.
+    expect(settings.update({ localTerminalThemeId: null }).localTerminalThemeId).toBeNull();
+  });
+
   it('persists shared SFTP browser column widths and clamps them to minimums', async () => {
     const { SettingsRepository } = await loadRepositories();
     const settings = new SettingsRepository({

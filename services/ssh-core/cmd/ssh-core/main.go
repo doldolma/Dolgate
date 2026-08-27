@@ -29,6 +29,7 @@ type coreRuntime interface {
 	TmuxKillPane(sessionID string) error
 	TmuxKillWindow(sessionID, windowID string) error
 	TmuxKillSession(sessionID, sessionName string) error
+	TmuxRefreshSessions(sessionID string) error
 	TmuxRenameWindow(sessionID, windowID, name string) error
 	TmuxDetach(sessionID string) error
 	TailnetTest(requestID string, payload protocol.TailnetTestPayload) error
@@ -417,6 +418,8 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 			return err
 		}
 		return core.TmuxKillSession(request.SessionID, payload.SessionName)
+	case protocol.CommandTmuxRefreshSessions:
+		return core.TmuxRefreshSessions(request.SessionID)
 	case protocol.CommandTmuxRenameWindow:
 		var payload protocol.TmuxRenameWindowPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {

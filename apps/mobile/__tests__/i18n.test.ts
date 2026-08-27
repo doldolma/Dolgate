@@ -185,4 +185,27 @@ describe('연결 실패 문구', () => {
       'some brand new failure',
     );
   });
+
+  // VNC 인증 실패는 **코드로만** 판정된다. 서버가 붙이는 거부 사유는 서버가 정하는 문장이라
+  // (RFB 는 형식을 정하지 않았다) 문구 규칙으로 가를 수 없다 — vnc-core 가 프로토콜에서 읽어
+  // 코드로 올려 준다(services/vnc-core/src/failure.rs).
+  it('코어가 올린 인증 실패 코드로 문구를 고른다', () => {
+    expect(
+      getConnectFailureMessage('the server rejected the credentials', 'host', {
+        failure: 'auth-rejected',
+      }),
+    ).toBe('계정 또는 비밀번호를 확인하세요.');
+    // 8자 절단은 갈 길이 다르다 — 비밀번호를 줄여야 한다.
+    expect(
+      getConnectFailureMessage('…', 'host', { failure: 'password-truncated' }),
+    ).toContain('8자');
+    // 계정을 비우면 VNC 암호로 붙는다는 안내가 이 코드의 전부다.
+    expect(
+      getConnectFailureMessage('…', 'host', { failure: 'account-auth-rejected' }),
+    ).toContain('계정을 비워');
+    // 코드가 없으면 예전처럼 원문이 남는다.
+    expect(getConnectFailureMessage('the server rejected the credentials', 'host')).toBe(
+      'the server rejected the credentials',
+    );
+  });
 });

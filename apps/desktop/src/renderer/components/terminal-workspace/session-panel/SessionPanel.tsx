@@ -376,7 +376,12 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
               runtime={dockerRuntime}
             />
           ) : section === 'theme' ? (
-            <SessionPanelTheme hostId={targetTab?.hostId ?? null} />
+            <SessionPanelTheme
+              hostId={targetTab?.hostId ?? null}
+              // 호스트가 없는 세션도 종류가 다르다 — 로컬 셸은 자기 팔레트를 가질 수 있고
+              // 컨테이너·ECS 셸은 담을 곳이 없다.
+              source={targetTab?.source ?? null}
+            />
           ) : (
             // 선택·최근 출력 캡처는 stableId 로 살아 있는 런타임에서 읽는다(재연결로 sessionId 가
             // 바뀌어도 안정).

@@ -25,8 +25,11 @@
 // getConnectionFailureReason 에 적어 두었다.
 
 export type ConnectionFailureCode =
+  | "account-auth-rejected"
+  | "account-required"
   | "address-in-use"
   | "agent-unreachable"
+  | "auth-rejected"
   | "aws-auth"
   | "aws-permission"
   | "cancelled"
@@ -36,6 +39,8 @@ export type ConnectionFailureCode =
   | "host-key-declined"
   | "host-key-untrusted"
   | "no-route"
+  | "password-required"
+  | "password-truncated"
   | "refused"
   | "reset"
   | "tailnet-expired"
@@ -72,11 +77,24 @@ export interface ConnectionFailureSignals {
   failure?: string | null;
 }
 
-/** 코어가 소켓 계층에서 판정할 수 있는 코드. 그보다 구체적인 원인은 문구 규칙만이 안다. */
+/**
+ * 코어가 **스스로 판정해 실어 보내는** 코드. 여기 없는 값은 추측하지 않고 버린다.
+ *
+ * 두 계층이 섞여 있다:
+ *   - 소켓: errno 로 판정한다(services/ssh-core 의 internal/neterr, 두 Rust 코어의
+ *     core_framing::neterr).
+ *   - 인증: 프로토콜 자체가 알려 주는 실패다(services/vnc-core 의 src/failure.rs). 서버가 붙인
+ *     거부 사유는 서버가 정하는 문장이라 문구 규칙으로는 판정할 수 없다 — 코드만이 안다.
+ */
 const CORE_FAILURE_CODES = new Set<ConnectionFailureCode>([
+  "account-auth-rejected",
+  "account-required",
   "address-in-use",
+  "auth-rejected",
   "dns-unresolved",
   "no-route",
+  "password-required",
+  "password-truncated",
   "refused",
   "reset",
   "timeout",

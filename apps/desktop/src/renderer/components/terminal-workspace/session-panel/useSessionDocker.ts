@@ -644,6 +644,16 @@ export function useDockerLists(
     listCache.set(scope, state);
   }, [scope, state]);
   const [nonce, setNonce] = useState(0);
+  /** 새로고침을 눌러 다시 받는 중인가. 값이 아니라 **표시**다(위 refresh 주석 참고). */
+  const [refreshPending, setRefreshPending] = useState(false);
+  /**
+   * 이번 effect 는 받아 둔 값이 새것이어도 왕복을 해야 한다.
+   *
+   * 정적 탭은 15초 안이면 왕복을 생략하는데(탭을 즉시 여는 장치다) 그 판단이 새로고침까지
+   * 삼키면 누른 사람이 기다리는 응답이 아예 오지 않는다. 이 effect 를 다시 돌릴 것은 탭
+   * 전환뿐이라, 눌러 세운 스켈레톤이 그대로 남는다.
+   */
+  const forcePollRef = useRef(false);
   const stateRef = useRef(state);
   stateRef.current = state;
   /**
@@ -660,6 +670,24 @@ export function useDockerLists(
   const refresh = useCallback(() => {
     // 다음 지표 왕복이 검사를 전부 얹게 한다 — 누른 사람은 "지금 다 다시 본다" 를 기대한다.
     tickRef.current = 0;
+    /**
+     * **화면은 비우지만 값은 버리지 않는다.**
+     *
+     * 목록을 그대로 두고 새 값으로 덮으면, 값이 안 바뀐 호스트에서는 화면이 한 픽셀도 움직이지
+     * 않아 다시 받았는지 알 수 없다. 그래서 받아오는 동안은 스켈레톤을 보여 준다.
+     *
+     * 그렇다고 state 를 비우면 안 된다 — 받아오기가 실패했을 때 마지막 목록을 남겨 두는 것이
+     * 이 패널의 규칙이고(보조 채널이 끊긴 동안 아는 값이라도 보여야 한다), 비우면 실패가
+     * "컨테이너 없음" 으로 보인다. 그래서 표시만 세우고 값은 그대로 둔다.
+     */
+    setRefreshPending(true);
+    forcePollRef.current = true;
+    // 초당 I/O 는 연속 표본의 차이다. 남겨 두면 새 첫 표본과 옛 표본을 견주어 엉뚱한 값이 한 번
+    // 나온다(특히 컨테이너가 그 사이 재시작했을 때).
+    ioRatesRef.current = new Map();
+    // 지표를 못 받는다고 판단해 stats 를 빼 둔 호스트도 한 번 더 시험한다 — 도커를 다시 깔거나
+    // 버전을 올린 뒤 다시 보려면 이 버튼 말고는 길이 없다.
+    statsSupportedRef.current = true;
     setNonce((current) => current + 1);
   }, []);
 
@@ -675,6 +703,9 @@ export function useDockerLists(
   useEffect(() => {
     if (!enabled || !prefix || !sessionId) {
       publishDockerBusy(sessionId, false);
+      // 여기서 접으면 이번에는 아무도 폴링하지 않는다 — 표시를 내려 두지 않으면 스켈레톤이
+      // 남는다(도커를 못 찾은 세션에서 새로고침을 누른 경우).
+      setRefreshPending(false);
       return;
     }
     let cancelled = false;
@@ -709,6 +740,7 @@ export function useDockerLists(
           return;
         }
         publishDockerBusy(sessionId, false);
+        setRefreshPending(false);
         failures += 1;
         setState((current) => ({
           ...current,
@@ -722,6 +754,7 @@ export function useDockerLists(
       }
       failures = 0;
       publishDockerBusy(sessionId, false);
+      setRefreshPending(false);
       const elapsedMs = Date.now() - startedAtMs;
       setState((current) => ({ ...current, [tab]: applyOutput(tab, current[tab], stdout) }));
       // 컨테이너만 스스로 변한다 — 나머지는 탭을 열 때와 새로고침에서만 받는다.
@@ -738,11 +771,13 @@ export function useDockerLists(
 
     const cached = stateRef.current[tab];
     const fresh =
+      !forcePollRef.current &&
       tab !== 'containers' &&
       cached.updatedAtMs !== null &&
       Date.now() - cached.updatedAtMs < STATIC_TAB_TTL_MS;
     // 방금 받은 값이 있으면(컨테이너 말고) 탭을 왕복 없이 그대로 보여 준다.
     if (!fresh) {
+      forcePollRef.current = false;
       void poll();
     }
 
@@ -900,7 +935,8 @@ export function useDockerLists(
     images: state.images.images,
     volumes: state.volumes.volumes,
     networks: state.networks.networks,
-    loading: current.updatedAtMs === null && !current.failing,
+    // 새로고침을 누른 직후에도 스켈레톤을 낸다 — 값이 그대로여도 눌린 것이 보이게.
+    loading: refreshPending || (current.updatedAtMs === null && !current.failing),
     updatedAtMs: current.updatedAtMs,
     failing: current.failing,
     truncated: current.truncated,

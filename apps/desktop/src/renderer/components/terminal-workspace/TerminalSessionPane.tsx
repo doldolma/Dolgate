@@ -145,7 +145,10 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     sessionId,
     enabled:
       hostMetricsEnabled &&
-      tab?.source === 'host' &&
+      // **로컬 셸도 읽는다.** 지표는 보조 채널로 명령을 돌려 얻는데, 그 채널은 로컬에도
+      // 있다(코어가 /bin/sh 로 실행한다). 여기서 host 만 통과시키던 동안 로컬 터미널은
+      // 능력이 있는데도 자원·프로세스 섹션이 꺼져 있었다.
+      (tab?.source === 'host' || tab?.source === 'local') &&
       tab?.status === 'connected' &&
       !tab?.tmux,
     visible,

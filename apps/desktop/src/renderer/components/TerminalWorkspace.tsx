@@ -150,7 +150,10 @@ function resolveTerminalAppearanceForSession(
       ? hosts.find((record) => record.id === tab.hostId)
       : undefined;
   const resolvedThemeId = resolveTerminalThemeIdForSession(
-    host?.terminalThemeId,
+    // 로컬 셸에는 호스트 레코드가 없다 — 그 자리를 설정의 로컬 전용 팔레트가 대신한다.
+    tab.source === 'local'
+      ? settings.localTerminalThemeId
+      : host?.terminalThemeId,
     settings.globalTerminalThemeId,
     prefersDark,
   );
@@ -268,10 +271,16 @@ export function TerminalWorkspace({
       );
     }
     return next;
+    // **여기에는 resolveTerminalAppearanceForSession 이 읽는 설정이 다 있어야 한다.** 하나라도
+    // 빠지면 그 설정만 바꿔도 pane 이 캐시된 외형을 계속 쓴다 — 골라도 터미널이 그대로다.
+    // (로컬 팔레트가 이 목록에서 빠져 그랬다. 호스트 팔레트는 `hosts` 가 있어 살아 있었다.)
+    // `settings` 를 통째로 넣지 않는 이유는 설정 객체가 어떤 설정을 바꿔도 새로 만들어져,
+    // SFTP 열 너비를 끄는 동안에도 열린 터미널 전부가 외형을 다시 받게 되기 때문이다.
   }, [
     hosts,
     prefersDark,
     settings.globalTerminalThemeId,
+    settings.localTerminalThemeId,
     settings.terminalAltIsMeta,
     settings.terminalFontFamily,
     settings.terminalFontSize,

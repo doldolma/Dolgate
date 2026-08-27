@@ -9,6 +9,7 @@ mod auth;
 mod clipboard;
 mod cursor;
 mod decode;
+mod failure;
 mod output;
 mod protocol;
 mod rfb;

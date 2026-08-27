@@ -119,10 +119,18 @@ describe('자원 차트', () => {
 
   it('네 판이 같은 점에서 시작한다 — 차분이 없는 첫 표본은 그리지 않는다', () => {
     // RAM 은 그 순간 값이라 첫 표본부터 그릴 수 있지만 나머지 셋은 차분이라 한 틱 뒤부터다.
-    // 그대로 두면 RAM 곡선만 한 칸 먼저 나간다.
+    // 그대로 두면 RAM 곡선만 한 칸 먼저 나간다. 그래서 **첫 표본에는 차분으로 나오는 값이
+    // 하나도 없다** — 초당 값도, (리눅스라면) CPU 도 없다.
     recordHostMetricsSample(
       SESSION,
-      metrics({ cpuPercent: null, memUsedKb: 512 * 1024 }),
+      metrics({
+        cpuPercent: null,
+        rxBytesPerSec: null,
+        txBytesPerSec: null,
+        diskReadBytesPerSec: null,
+        diskWriteBytesPerSec: null,
+        memUsedKb: 512 * 1024,
+      }),
       NOW - 80_000,
     );
     const latest = seed();
@@ -135,6 +143,33 @@ describe('자원 차트', () => {
     // 두 곡선의 첫 x 가 같다 = 같은 점에서 시작한다.
     expect(mem.split(' ')[0].split(',')[0]).toBe(cpu.split(' ')[0].split(',')[0]);
     expect(cpu.startsWith('0,')).toBe(true);
+  });
+
+  it('macOS 처럼 CPU 가 첫 표본부터 있어도 같은 점에서 시작한다', () => {
+    // macOS 의 CPU 는 차분이 아니라 프로세스 %cpu 의 합이라 **첫 표본부터 값이 있다**. 시작점을
+    // CPU 로 재면 여기서 어긋난다 — 초당 값으로 재야 네 판이 함께 시작한다.
+    recordHostMetricsSample(
+      SESSION,
+      metrics({
+        cpuPercent: 40,
+        rxBytesPerSec: null,
+        txBytesPerSec: null,
+        diskReadBytesPerSec: null,
+        diskWriteBytesPerSec: null,
+        memUsedKb: 512 * 1024,
+      }),
+      NOW - 80_000,
+    );
+    const latest = seed();
+    const { container } = render(
+      <SessionPanelResourceCharts sessionId={SESSION} metrics={latest} />,
+    );
+    const [cpu, mem] = [...container.querySelectorAll('svg')].map(
+      (svg) => svg.querySelector('polyline')?.getAttribute('points') ?? '',
+    );
+    // 왼쪽 끝이 잘린 첫 점(40%)이 아니라 초당 값이 나오는 두 번째 표본(0% → y=100)이다.
+    expect(cpu.split(' ')[0]).toBe('0,100');
+    expect(mem.split(' ')[0].split(',')[0]).toBe('0');
   });
 
   it('이력이 한 점뿐이면 곡선 없이 최신 값만 보여 준다', () => {
