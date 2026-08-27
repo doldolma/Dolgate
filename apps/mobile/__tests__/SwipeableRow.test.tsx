@@ -80,6 +80,18 @@ describe("SwipeableRow", () => {
     expect(findSwipeable(tree).props.renderRightActions).toBeInstanceOf(Function);
   });
 
+  // 열리는 문턱은 라이브러리 기본값(액션 패널 폭의 절반)에 맡긴다 — 그것이 iOS 스와이프
+  // 액션과 같은 감각이다. 우리가 숫자를 주면 액션 수와 무관해져서, 액션 두 개인 목록에서는
+  // 기본값보다 두 배 쉽게 열렸다(세로로 넘기다 실수로 열린다).
+  it("열리는 문턱을 우리가 정하지 않는다", async () => {
+    const tree = await mount(
+      <SwipeableRow actions={actions(jest.fn(), jest.fn())}>
+        <Text>web-prod-01</Text>
+      </SwipeableRow>,
+    );
+    expect(findSwipeable(tree).props.rightThreshold).toBeUndefined();
+  });
+
   it("액션은 오른쪽 끝에서부터 놓이고, 삭제가 가장 바깥이다", async () => {
     const tree = await mount(
       <SwipeableRow actions={actions(jest.fn(), jest.fn())}>

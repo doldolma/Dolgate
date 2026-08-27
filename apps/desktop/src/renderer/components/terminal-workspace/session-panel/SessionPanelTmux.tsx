@@ -188,9 +188,14 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
               // 목록은 이벤트로 돌아오므로 "언제 끝났는지" 를 알 수 없다. 잠깐 도는 표시만
               // 준다 — 눌렀는지조차 알 수 없던 것이 이 버튼의 문제였다.
               setRefreshing(true);
-              void Promise.resolve(refreshTmuxSessions(sessionId)).finally(() => {
-                window.setTimeout(() => setRefreshing(false), 600);
-              });
+              // 실패는 삼킨다(저장소의 다른 IPC 호출과 같은 관례). 이 요청이 실패했다는 것은
+              // 목록이 갱신되지 않았다는 뜻뿐이고, 사용자가 할 일은 다시 누르는 것이다 —
+              // 잡지 않으면 렌더러에 처리되지 않은 rejection 으로 남는다(전역 핸들러가 없다).
+              void Promise.resolve(refreshTmuxSessions(sessionId))
+                .catch(() => undefined)
+                .finally(() => {
+                  window.setTimeout(() => setRefreshing(false), 600);
+                });
             }}
           >
             <RefreshCw

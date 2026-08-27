@@ -108,9 +108,12 @@ export function SwipeableRow({
         rowRef.current = row;
       }}
       renderRightActions={renderActions}
-      // 손을 떼는 지점이 이만큼 지나면 열린 채로 둔다. 기본값(40)은 목록을 세로로 넘기다
-      // 가로 성분이 조금만 섞여도 열려서 거슬린다.
-      rightThreshold={actionWidth * 0.5}
+      // **열리는 문턱은 기본값을 그대로 쓴다** — `rightThreshold` 를 주지 않는다.
+      //
+      // gesture-handler 의 기본값은 액션 패널 폭의 절반이고(2.31.1 의 Swipeable), 그것이 iOS 의
+      // 스와이프 액션과 같은 감각이다. 예전에는 `actionWidth * 0.5` 를 넣었는데 그건 액션이
+      // 두 개인 이 목록에서 패널의 4분의 1(37px)이라, 기본값보다 두 배 쉽게 열렸다 — 세로로
+      // 넘기다 실수로 열리는 것을 막으려던 주석과 반대로 동작했다.
       overshootRight={false}
       onSwipeableWillOpen={() => {
         if (openRow && openRow !== rowRef.current) {

@@ -139,11 +139,15 @@ func (w *ShellProbe) Observe(chunk []byte) {
 		return
 	}
 	w.buffer = append(w.buffer, chunk...)
-	if len(w.buffer) > shellProbeBufferLimit {
-		w.buffer = w.buffer[len(w.buffer)-shellProbeBufferLimit:]
-	}
+	// **자르기 전에 읽는다.** 상한을 먼저 적용하면 이미 도착한 답의 앞부분이 잘려 나가고, 그
+	// 접두사는 다음 청크에 다시 실려 오지 않으므로 그 답은 영원히 오지 않는다 — 서브셸에
+	// 들어가는 순간 배너·MOTD 가 4KB 를 넘겨 쏟아지는 호스트에서 그렇게 된다.
 	shell, _, ok := ParseShellProbeReply(w.buffer)
 	if !ok {
+		// 아직 답이 없다. 그때만 상한을 적용한다 — 답은 한 줄이라 뒤쪽만 남겨도 잃을 것이 없다.
+		if len(w.buffer) > shellProbeBufferLimit {
+			w.buffer = w.buffer[len(w.buffer)-shellProbeBufferLimit:]
+		}
 		w.mu.Unlock()
 		return
 	}

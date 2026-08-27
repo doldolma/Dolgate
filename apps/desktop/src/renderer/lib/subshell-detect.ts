@@ -92,8 +92,3 @@ export function detectsSubshellEntry(
   }
   return false;
 }
-
-// 셸 이름으로 볼 수 있는 것들. 통합 스크립트가 셸마다 다르므로(POSIX·fish·pwsh) 이름을 알면
-// 그 셸 것만 보낼 수 있다 — 모르면 bash·zsh 겸용을 보내는데, fish 에 그것을 보내면 문법 오류가
-// 화면에 뜬다(실제로 그렇게 동작하고 있었다).
-

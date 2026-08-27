@@ -222,6 +222,31 @@ describe('붙어 있는 상태', () => {
     expect(refreshTmuxSessions).toHaveBeenCalledWith('session-1');
   });
 
+  // 요청이 실패해도 처리되지 않은 rejection 을 남기지 않는다. 렌더러에는 전역
+  // `unhandledrejection` 핸들러가 없어서, 안 잡으면 콘솔에 그대로 올라온다.
+  it('새로고침이 실패해도 rejection 을 남기지 않고 표시를 되돌린다', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    // jsdom 은 window 로 `unhandledrejection` 을 던지지 않는다 — 노드가 판정하므로 process 에서
+    // 듣는다(그렇게 안 하면 이 시험은 잡지 않아도 통과한다).
+    process.on('unhandledRejection', onUnhandled);
+    refreshTmuxSessions.mockImplementationOnce(() =>
+      Promise.reject(new Error('IPC 실패')),
+    );
+    try {
+      render(<SessionPanelTmux sessionId="session-1" />);
+      const button = screen.getByRole('button', { name: '목록 새로고침' });
+      fireEvent.click(button);
+      // 노드는 마이크로태스크 큐가 빈 뒤에 판정한다 — 매크로태스크 한 번을 지나야 보인다.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   // 새로고침은 목록을 이벤트로 받으므로 "끝났다" 를 알 수 없다. 최소한 눌렀다는 표시는
   // 있어야 한다 — 예전에는 눌러도 아무 변화가 없어서 고장과 구분되지 않았다.
   it('새로고침을 누르면 도는 표시가 남는다', () => {
