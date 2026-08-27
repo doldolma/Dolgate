@@ -57,12 +57,19 @@ Linux `deb`와 ARM64 빌드는 [GitHub Releases](https://github.com/doldolma/dol
 - 명령 완료 OS 알림 — 오래 걸리거나 실패한 명령이 끝났을 때 (기준 시간·조건 설정)
 - 명령 블록 — 셸 통합 기반으로 명령 단위 상태 표시, hover 액션(출력/명령 복사·재실행·AI), 명령 팔레트(`Cmd/Ctrl+Shift+P`)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/terminal-workspace-dark.png">
+  <img alt="분할 세션과 세션 패널이 열린 Dolgate 터미널 워크스페이스" src="./docs/images/terminal-workspace.png">
+</picture>
+
 **원격 데스크톱 (데스크톱 앱)**
 
 - RDP·VNC 원격 화면을 SSH 세션과 같은 탭 워크스페이스에서 사용
 - RDP 다중 모니터 — 한 화면에 함께 표시하거나 로컬 모니터별 별도 창으로 펼치기
 - RDP 오디오·클립보드·로컬 폴더 공유, VNC 보기 전용·화질 설정·클립보드
 - Tailscale 직접 연결, RDP over SSM, VNC SSH 터널
+
+<img alt="한 RDP 탭에 나란히 놓인 원격 모니터 두 대" src="./docs/images/rdp-multimonitor.png">
 
 **AI 어시스턴트**
 

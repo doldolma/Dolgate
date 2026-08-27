@@ -1,4 +1,5 @@
 import type { RdpLocalMonitor } from "@shared";
+import { t } from "../../i18n";
 
 /** [MS-RDPEDISP] 2.2.2.2.1 이 허용하는 한 변의 최대 픽셀. 메인 프로세스의 상한과 같다. */
 const MAX_DESKTOP_SIDE = 8192;
@@ -68,12 +69,16 @@ export function describeSelectionProblem(
   monitors: readonly RdpLocalMonitor[],
 ): string | null {
   if (monitors.length === 0) {
-    return "모니터를 하나 이상 골라야 합니다.";
+    return t("rdpMonitors.needOne");
   }
 
   const box = selectionBounds(monitors);
   if (box.width > MAX_DESKTOP_SIDE || box.height > MAX_DESKTOP_SIDE) {
-    return `고른 화면을 감싸는 크기가 ${box.width}×${box.height}로 한계(${MAX_DESKTOP_SIDE})를 넘습니다. 멀리 떨어진 화면을 함께 고르면 사이의 빈 공간까지 포함됩니다.`;
+    return t("rdpMonitors.tooLarge", {
+      width: box.width,
+      height: box.height,
+      limit: MAX_DESKTOP_SIDE,
+    });
   }
 
   return null;

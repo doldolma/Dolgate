@@ -58,3 +58,6 @@ apps/desktop/build/icons/dolssh.iconset
 # react-native-remote-desktop Android native/Gradle build outputs.
 packages/react-native-remote-desktop/android/.cxx
 packages/react-native-remote-desktop/android/build
+
+# 기기별 권한 설정 — 개발자마다 다르다
+.claude/settings.local.json

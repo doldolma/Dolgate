@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { RdpLocalMonitor, RdpMonitorSelection } from "@shared";
 import { Button } from "../../ui";
 import { listRdpMonitors } from "../../services/desktop/rdp";
@@ -28,6 +29,7 @@ export function RdpMonitorPicker({
   onCancel,
   onApply,
 }: RdpMonitorPickerProps) {
+  const { t: translate } = useTranslation();
   const [monitors, setMonitors] = useState<RdpLocalMonitor[] | null>(null);
   const [chosen, setChosen] = useState<Set<number>>(new Set());
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -111,20 +113,19 @@ export function RdpMonitorPicker({
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[rgba(4,8,15,0.55)] p-6 [-webkit-app-region:no-drag]">
       <div className="w-full max-w-[38rem] rounded-[0.9rem] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[0_20px_46px_rgba(0,0,0,0.34)]">
         <h3 className="text-[1.02rem] font-semibold text-[var(--text)]">
-          사용할 모니터
+          {translate("rdpMonitors.title")}
         </h3>
         <p className="mt-1 text-[0.8rem] leading-[1.5] text-[var(--text-soft)]">
-          고른 화면을 합쳐 하나의 원격 데스크톱을 만듭니다. 선택은 이 호스트에 저장되고, 적용하면
-          다시 접속합니다 — 배치는 접속할 때 정해져서 붙어 있는 세션에는 바꿀 수 없습니다.
+          {translate("rdpMonitors.description")}
         </p>
 
         {loadError ? (
           <p className="mt-4 text-[0.82rem] text-[var(--danger,#ef4444)]">
-            디스플레이 목록을 읽지 못했습니다: {loadError}
+            {translate("rdpMonitors.loadFailed", { error: loadError })}
           </p>
         ) : monitors === null ? (
           <p className="mt-4 text-[0.82rem] text-[var(--text-soft)]">
-            디스플레이를 읽는 중…
+            {translate("rdpMonitors.loading")}
           </p>
         ) : (
           <>
@@ -165,7 +166,7 @@ export function RdpMonitorPicker({
                     </span>
                     {on && rect.id === primaryId ? (
                       <span className="rounded-full bg-[var(--accent-strong)] px-[0.35rem] text-[0.6rem] leading-[1.3] text-white">
-                        주 화면
+                        {translate("rdpMonitors.primary")}
                       </span>
                     ) : null}
                   </button>
@@ -178,10 +179,10 @@ export function RdpMonitorPicker({
                 <p className="text-[var(--danger,#ef4444)]">{problem}</p>
               ) : (
                 <p className="text-[var(--text-soft)]">
-                  원격 데스크톱 크기 {box.width}×{box.height}
-                  {gaps
-                    ? " — 화면 사이의 빈 공간도 데스크톱에 포함되어 검은 영역으로 남습니다."
-                    : ""}
+                  {translate(
+                    gaps ? "rdpMonitors.desktopSizeGaps" : "rdpMonitors.desktopSize",
+                    { width: box.width, height: box.height },
+                  )}
                 </p>
               )}
             </div>
@@ -190,7 +191,7 @@ export function RdpMonitorPicker({
 
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={onCancel}>
-            취소
+            {translate("common.cancel")}
           </Button>
           <Button
             variant="primary"
@@ -207,7 +208,7 @@ export function RdpMonitorPicker({
               )
             }
           >
-            적용하고 다시 접속
+            {translate("rdpMonitors.apply")}
           </Button>
         </div>
       </div>

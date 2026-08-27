@@ -3620,6 +3620,20 @@
     "tunnelGateway": "SSH tunnel via {{label}}",
     "tunnelOpen": "Tunnel to the VNC port"
   },
+  "rdpMonitors": {
+    "menuItem": "Monitors to use…",
+    "menuHint": "Saved on the host. Applying reconnects the session.",
+    "title": "Monitors to use",
+    "description": "The monitors you pick are combined into one remote desktop. The choice is saved on this host and applying reconnects — the layout is fixed when the session connects, so it cannot change on an attached session.",
+    "loadFailed": "Could not read the display list: {{error}}",
+    "loading": "Reading displays…",
+    "primary": "Primary",
+    "desktopSize": "Remote desktop size {{width}}×{{height}}",
+    "desktopSizeGaps": "Remote desktop size {{width}}×{{height}} — the gaps between monitors are part of the desktop and stay black.",
+    "apply": "Apply and reconnect",
+    "needOne": "Pick at least one monitor.",
+    "tooLarge": "The box around the monitors you picked is {{width}}×{{height}}, over the {{limit}} limit. Picking monitors that sit far apart includes the empty space between them."
+  },
   "rdp": {
     "overlay": {
       "connectingTitle": "Connecting",

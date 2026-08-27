@@ -212,8 +212,61 @@
       border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; background: var(--bg-soft);
     }
 
-    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; margin-top: 40px; }
-    .split .shot-frame { margin: 0; }
+
+    /* ── screens deck — 스크린샷을 겹쳐 놓고 좌우로 넘긴다 ── */
+    /* 카드 박스는 3:2 로 고정하고 그림을 contain 으로 앉힌다. 샷마다 비율이 달라서(전체 창
+       1.52, 자동완성 크롭 3.36) 카드가 그림 비율을 따라가면 이웃 카드 높이가 튄다. */
+    /* 뷰포트는 wrap 밖에서 섹션 폭을 다 쓴다 — 이웃 카드가 활성 카드 양옆으로 나올 자리다. */
+    #screens .deck-viewport {
+      margin-top: 40px; overflow: hidden; padding: 20px 0 8px;
+      mask-image: linear-gradient(to right, transparent 0, #000 11%, #000 89%, transparent 100%);
+    }
+    #screens .deck {
+      position: relative; width: calc(100% - 32px); max-width: 880px; margin: 0 auto;
+      aspect-ratio: 3 / 2;
+    }
+    #screens .deck-slide {
+      position: absolute; inset: 0; margin: 0; padding: 10px;
+      display: grid; place-items: center;
+      border: 1px solid var(--line); border-radius: 14px;
+      background: var(--panel); box-shadow: var(--shadow);
+      transition: transform .38s cubic-bezier(.22, .61, .36, 1), opacity .38s;
+    }
+    /* width/height 속성은 CSS width/height 로 들어간다 — auto 로 풀지 않으면 max-height 가
+       비율을 못 지키고 그림이 카드 밖으로 넘친다. */
+    #screens .deck-slide img {
+      width: auto; height: auto; max-width: 100%; max-height: 100%; border-radius: 8px;
+    }
+    #screens .deck-slide:not(.is-active) { cursor: pointer; }
+    #screens .deck-caps { position: relative; margin-top: 26px; min-height: 78px; }
+    #screens .deck-cap {
+      position: absolute; top: 0; left: 0; right: 0;
+      opacity: 0; pointer-events: none; transition: opacity .26s;
+    }
+    #screens .deck-cap.is-active { opacity: 1; }
+    #screens .deck-cap b { font-size: 1.03rem; }
+    #screens .deck-cap span {
+      display: block; margin-top: 6px; max-width: 620px;
+      color: var(--text-soft); font-size: .93rem;
+      word-break: keep-all; /* 히어로 문구와 같은 규칙 — 어절 중간에서 꺾이지 않게 */
+    }
+    #screens .deck-nav { display: flex; align-items: center; gap: 16px; }
+    #screens .deck-arrow {
+      width: 34px; height: 34px; flex: none; display: grid; place-items: center;
+      border: 1px solid var(--line); border-radius: 999px; background: var(--panel);
+      color: var(--text); font-size: 1.05rem; line-height: 1; cursor: pointer;
+    }
+    #screens .deck-arrow:hover { border-color: var(--line-strong); }
+    #screens .deck-dots { display: flex; align-items: center; gap: 8px; }
+    #screens .deck-dot {
+      width: 8px; height: 8px; padding: 0; border: 0; border-radius: 999px;
+      background: var(--line-strong); cursor: pointer; transition: width .2s, background .2s;
+    }
+    #screens .deck-dot.is-active { width: 22px; background: var(--accent); }
+    @media (max-width: 720px) { #screens .deck-caps { min-height: 104px; } }
+    @media (prefers-reduced-motion: reduce) {
+      #screens .deck-slide, #screens .deck-cap, #screens .deck-dot { transition: none; }
+    }
 
     /* ── security ── */
     .sec-list { margin-top: 34px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -266,7 +319,6 @@
     @media (max-width: 900px) {
       .grid { grid-template-columns: 1fr 1fr; }
       .dl-grid { grid-template-columns: 1fr 1fr; }
-      .split { grid-template-columns: 1fr; }
       .sec-list { grid-template-columns: 1fr; }
       .nav-links { display: none; }
     }
@@ -340,7 +392,7 @@
 
     <figure class="shot-frame">
       <picture class="theme-shot">
-        <source data-theme-image="dark" srcset="./assets/hosts-workspace-dark.png" media="(prefers-color-scheme: dark)" />
+          <source data-theme-image="dark" srcset="./assets/hosts-workspace-dark.png" media="(prefers-color-scheme: dark)" />
         <img src="./assets/hosts-workspace.png" data-i18n-alt="hero.shotAlt" alt="Dolgate 호스트/워크스페이스 화면" loading="eager" />
       </picture>
     </figure>
@@ -384,24 +436,134 @@
   </div>
 </section>
 
-<section>
-  <div class="wrap split">
-    <div>
-      <div class="sec-label">Network</div>
-      <h2 data-i18n="net.h2">포트 포워딩과 터널을 눈으로</h2>
-      <p class="sec-sub" data-i18n="net.sub">
-        Local / Remote / Dynamic 포워딩과 SSM 포워딩, 컨테이너 터널을 목록으로 관리합니다.
-        점프 호스트를 거치는 연결도 저장된 호스트를 ProxyJump로 지정하면 끝.
+<section id="screens">
+  <div class="wrap">
+    <div class="sec-label">Screens</div>
+    <h2 id="screens-h2" data-i18n="screens.h2">쓰는 모습 그대로</h2>
+    <p class="sec-sub" data-i18n="screens.sub">좌우로 넘기면 터미널부터 자동완성·SFTP·원격 데스크톱까지, 앱에서 실제로 보이는 화면입니다.</p>
+  </div>
+
+  <div class="deck-viewport" role="group" aria-roledescription="carousel"
+       aria-labelledby="screens-h2" tabindex="0">
+    <div class="deck">
+      <figure class="deck-slide">
+        <picture>
+          <source data-theme-image="dark" srcset="./assets/terminal-workspace-dark.webp"
+                  media="(prefers-color-scheme: dark)" />
+          <img src="./assets/terminal-workspace.webp" width="1600" height="1055" loading="lazy" decoding="async"
+               data-i18n-alt="screens.s1.t" alt="터미널 워크스페이스" />
+        </picture>
+      </figure>
+      <figure class="deck-slide">
+        <picture>
+          <source data-theme-image="dark" srcset="./assets/command-blocks-dark.webp"
+                  media="(prefers-color-scheme: dark)" />
+          <img src="./assets/command-blocks.webp" width="1056" height="584" loading="lazy" decoding="async"
+               data-i18n-alt="screens.s2.t" alt="명령 블록" />
+        </picture>
+      </figure>
+      <figure class="deck-slide">
+        <picture>
+          <source data-theme-image="dark" srcset="./assets/autocomplete-dark.webp"
+                  media="(prefers-color-scheme: dark)" />
+          <img src="./assets/autocomplete.webp" width="1600" height="476" loading="lazy" decoding="async"
+               data-i18n-alt="screens.s3.t" alt="명령어 자동완성" />
+        </picture>
+      </figure>
+      <figure class="deck-slide">
+        <picture>
+          <source data-theme-image="dark" srcset="./assets/tmux-control-mode-dark.webp"
+                  media="(prefers-color-scheme: dark)" />
+          <img src="./assets/tmux-control-mode.webp" width="1600" height="1055" loading="lazy" decoding="async"
+               data-i18n-alt="screens.s4.t" alt="tmux control mode" />
+        </picture>
+      </figure>
+      <figure class="deck-slide">
+        <picture>
+          <source data-theme-image="dark" srcset="./assets/ai-panel-dark.webp"
+                  media="(prefers-color-scheme: dark)" />
+          <img src="./assets/ai-panel.webp" width="1600" height="1055" loading="lazy" decoding="async"
+               data-i18n-alt="screens.s5.t" alt="AI 어시스턴트" />
+        </picture>
+      </figure>
+      <figure class="deck-slide">
+        <picture>
+          <source data-theme-image="dark" srcset="./assets/sftp-dark.webp"
+                  media="(prefers-color-scheme: dark)" />
+          <img src="./assets/sftp.webp" width="1600" height="1055" loading="lazy" decoding="async"
+               data-i18n-alt="screens.s6.t" alt="듀얼 패널 SFTP" />
+        </picture>
+      </figure>
+      <figure class="deck-slide">
+        <picture>
+          <source data-theme-image="dark" srcset="./assets/port-forwarding-dark.webp"
+                  media="(prefers-color-scheme: dark)" />
+          <img src="./assets/port-forwarding.webp" width="1600" height="1055" loading="lazy" decoding="async"
+               data-i18n-alt="screens.s7.t" alt="포트 포워딩과 터널" />
+        </picture>
+      </figure>
+      <figure class="deck-slide">
+        <picture>
+          <img src="./assets/rdp-multimonitor.webp" width="1600" height="598" loading="lazy" decoding="async"
+               data-i18n-alt="screens.s8.t" alt="RDP 멀티 모니터" />
+        </picture>
+      </figure>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="deck-caps">
+      <p class="deck-cap">
+        <b data-i18n="screens.s1.t">터미널 워크스페이스</b>
+        <span data-i18n="screens.s1.d">여러 SSH 세션을 탭과 분할로 한 창에 둡니다. 세션 패널에서 자원·프로세스·포트를 그 자리에서 봅니다.</span>
+      </p>
+      <p class="deck-cap">
+        <b data-i18n="screens.s2.t">명령 블록</b>
+        <span data-i18n="screens.s2.d">명령마다 종료 상태와 걸린 시간이 붙습니다. 출력만 복사하거나 다시 실행하고, 실패한 명령으로 바로 건너뜁니다.</span>
+      </p>
+      <p class="deck-cap">
+        <b data-i18n="screens.s3.t">명령어 자동완성</b>
+        <span data-i18n="screens.s3.d">원격 세션 안에서 하위 명령·옵션은 물론 원격 서버의 파일 경로와 스니펫까지 이어서 제안합니다.</span>
+      </p>
+      <p class="deck-cap">
+        <b data-i18n="screens.s4.t">tmux control mode</b>
+        <span data-i18n="screens.s4.d">원격 tmux 의 윈도우가 앱 탭이 되고 pane 이 분할이 됩니다. 나누기·닫기·크기 조절은 UI 로 할 수 있습니다.</span>
+      </p>
+      <p class="deck-cap">
+        <b data-i18n="screens.s5.t">AI 어시스턴트</b>
+        <span data-i18n="screens.s5.d">지금 세션의 호스트 정보와 터미널 출력을 근거로 답합니다. 조회는 자동, 변경은 승인한 뒤에 실행합니다.</span>
+      </p>
+      <p class="deck-cap">
+        <b data-i18n="screens.s6.t">듀얼 패널 SFTP</b>
+        <span data-i18n="screens.s6.d">왼쪽 로컬·오른쪽 원격을 나란히 두고 옮깁니다. 원격 파일은 내려받지 않고 그 자리에서 편집할 수 있습니다.</span>
+      </p>
+      <p class="deck-cap">
+        <b data-i18n="screens.s7.t">포트 포워딩과 터널</b>
+        <span data-i18n="screens.s7.d">Local · Remote · Dynamic 포워딩과 SSM 포워딩, 컨테이너 터널을 한 목록에서 관리합니다. 점프 호스트는 저장한 호스트를 ProxyJump 로 지정하면 끝입니다.</span>
+      </p>
+      <p class="deck-cap">
+        <b data-i18n="screens.s8.t">RDP 멀티 모니터</b>
+        <span data-i18n="screens.s8.d">원격 데스크톱의 모니터 여러 대를 한 탭에 나란히 두거나, 로컬 모니터에 하나씩 펼칠 수 있습니다.</span>
       </p>
     </div>
-    <figure class="shot-frame">
-      <picture class="theme-shot">
-        <source data-theme-image="dark" srcset="./assets/port-forwarding-dark.png" media="(prefers-color-scheme: dark)" />
-        <img src="./assets/port-forwarding.png" data-i18n-alt="net.shotAlt" alt="Dolgate 포트 포워딩 화면" loading="lazy" />
-      </picture>
-    </figure>
+
+    <div class="deck-nav">
+      <button class="deck-arrow" type="button" data-nav="prev" data-i18n-title="screens.prev" title="이전 화면">&lsaquo;</button>
+      <button class="deck-arrow" type="button" data-nav="next" data-i18n-title="screens.next" title="다음 화면">&rsaquo;</button>
+      <div class="deck-dots">
+        <button class="deck-dot" type="button"></button>
+        <button class="deck-dot" type="button"></button>
+        <button class="deck-dot" type="button"></button>
+        <button class="deck-dot" type="button"></button>
+        <button class="deck-dot" type="button"></button>
+        <button class="deck-dot" type="button"></button>
+        <button class="deck-dot" type="button"></button>
+        <button class="deck-dot" type="button"></button>
+      </div>
+    </div>
   </div>
 </section>
+
 
 <section id="security">
   <div class="wrap">
@@ -544,6 +706,109 @@
       apply(next);
     });
     apply(current());
+  })();
+</script>
+
+<script>
+  // 스크린샷 덱: 활성 장면이 앞에 서고 이웃은 뒤로 겹친다. 이웃 클릭·화살표·점·스와이프·좌우
+  // 키로 움직인다. 자동 재생은 없다 — 읽는 중에 바뀌면 방해가 된다.
+  (() => {
+    const section = document.getElementById("screens");
+    if (!section) return;
+    const viewport = section.querySelector(".deck-viewport");
+    const slides = [...section.querySelectorAll(".deck-slide")];
+    const caps = [...section.querySelectorAll(".deck-cap")];
+    const dots = [...section.querySelectorAll(".deck-dot")];
+    if (!slides.length) return;
+
+    let active = 0;
+
+    const layout = () => {
+      // 좁은 화면에서는 이웃이 화면 밖으로 크게 나가지 않도록 겹침을 줄인다.
+      const peek = window.innerWidth < 720 ? 12 : 24;
+      // 이동은 양끝에서 돌아가니(1번에서 왼쪽 = 마지막 장) 자리도 순환으로 잡는다. 안 그러면
+      // 첫 장·마지막 장에서 한쪽이 비어 덱이 끊긴 것처럼 보인다.
+      const half = Math.floor(slides.length / 2);
+      slides.forEach((slide, i) => {
+        const delta = ((i - active + half + slides.length) % slides.length) - half;
+        const depth = Math.abs(delta);
+        const shift = delta === 0 ? 0 : Math.sign(delta) * (peek + (depth - 1) * 10);
+        const scale = depth === 0 ? 1 : depth === 1 ? 0.9 : 0.83;
+        const opacity = depth === 0 ? 1 : depth === 1 ? 0.55 : depth === 2 ? 0.25 : 0;
+        slide.style.transform = `translateX(${shift}%) scale(${scale})`;
+        slide.style.opacity = String(opacity);
+        slide.style.zIndex = String(100 - depth);
+        // 활성 카드는 클릭 대상이 아니고(이동할 곳이 없다), 3장 뒤는 보이지 않으니 받지 않는다.
+        slide.style.pointerEvents = depth === 0 || depth > 2 ? "none" : "auto";
+        slide.classList.toggle("is-active", depth === 0);
+        slide.setAttribute("aria-hidden", depth === 0 ? "false" : "true");
+      });
+      caps.forEach((cap, i) => cap.classList.toggle("is-active", i === active));
+      dots.forEach((dot, i) => {
+        dot.classList.toggle("is-active", i === active);
+        dot.setAttribute("aria-current", i === active ? "true" : "false");
+      });
+    };
+
+    // 캡션은 서로 겹쳐 두므로 자리를 만들어 주는 건 가장 긴 것 하나다. 문구 길이는 언어와
+    // 화면 폭에 따라 달라지니 CSS 로 못 박지 않고 잰다.
+    const capsBox = section.querySelector(".deck-caps");
+    const sizeCaps = () => {
+      capsBox.style.minHeight = "0px";
+      capsBox.style.minHeight = `${Math.max(...caps.map((cap) => cap.scrollHeight))}px`;
+    };
+
+    const go = (next) => {
+      active = (next + slides.length) % slides.length;
+      layout();
+    };
+
+    // 화살표·점의 이름은 마크업의 title 과 캡션에서 가져온다 — 문구를 두 번 적지 않는다.
+    section.querySelectorAll(".deck-arrow").forEach((button) => {
+      button.setAttribute("aria-label", button.title);
+      button.addEventListener("click", () => go(active + (button.dataset.nav === "prev" ? -1 : 1)));
+    });
+    dots.forEach((dot, i) => {
+      const name = caps[i]?.querySelector("b")?.textContent?.trim();
+      if (name) dot.setAttribute("aria-label", name);
+      dot.addEventListener("click", () => go(i));
+    });
+    slides.forEach((slide, i) => {
+      slide.addEventListener("click", () => go(i));
+    });
+
+    viewport.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowLeft") { go(active - 1); event.preventDefault(); }
+      else if (event.key === "ArrowRight") { go(active + 1); event.preventDefault(); }
+    });
+
+    // 스와이프. 끌고 난 뒤의 click 은 삼킨다 — 이웃 카드에서 끌면 이동이 두 번 일어난다.
+    let startX = null;
+    let dragged = false;
+    viewport.addEventListener("pointerdown", (event) => {
+      startX = event.clientX;
+      dragged = false;
+    });
+    viewport.addEventListener("pointermove", (event) => {
+      if (startX === null) return;
+      if (Math.abs(event.clientX - startX) > 8) dragged = true;
+    });
+    viewport.addEventListener("pointerup", (event) => {
+      if (startX === null) return;
+      const moved = event.clientX - startX;
+      startX = null;
+      if (Math.abs(moved) > 40) go(active + (moved < 0 ? 1 : -1));
+    });
+    viewport.addEventListener("click", (event) => {
+      if (dragged) { event.stopPropagation(); dragged = false; }
+    }, true);
+
+    window.addEventListener("resize", () => {
+      sizeCaps();
+      layout();
+    });
+    sizeCaps();
+    layout();
   })();
 </script>
 

@@ -2538,9 +2538,9 @@ export function AppTitleBar({
                 setMonitorPicker(sessionId);
               }}
             >
-              사용할 모니터…
+              {translate("rdpMonitors.menuItem")}
               <span className="mt-[0.15rem] block text-[0.72rem] leading-[1.35] text-[var(--text-soft)]">
-                호스트에 저장됩니다. 적용하면 다시 접속합니다.
+                {translate("rdpMonitors.menuHint")}
               </span>
             </button>
           </div>

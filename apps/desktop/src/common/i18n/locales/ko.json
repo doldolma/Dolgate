@@ -3620,6 +3620,20 @@
     "tunnelGateway": "{{label}} 경유 SSH 터널",
     "tunnelOpen": "VNC 포트까지 통로 개설"
   },
+  "rdpMonitors": {
+    "menuItem": "사용할 모니터…",
+    "menuHint": "호스트에 저장됩니다. 적용하면 다시 접속합니다.",
+    "title": "사용할 모니터",
+    "description": "고른 화면을 합쳐 하나의 원격 데스크톱을 만듭니다. 선택은 이 호스트에 저장되고, 적용하면 다시 접속합니다 — 배치는 접속할 때 정해져서 붙어 있는 세션에는 바꿀 수 없습니다.",
+    "loadFailed": "디스플레이 목록을 읽지 못했습니다: {{error}}",
+    "loading": "디스플레이를 읽는 중…",
+    "primary": "주 화면",
+    "desktopSize": "원격 데스크톱 크기 {{width}}×{{height}}",
+    "desktopSizeGaps": "원격 데스크톱 크기 {{width}}×{{height}} — 화면 사이의 빈 공간도 데스크톱에 포함되어 검은 영역으로 남습니다.",
+    "apply": "적용하고 다시 접속",
+    "needOne": "모니터를 하나 이상 골라야 합니다.",
+    "tooLarge": "고른 화면을 감싸는 크기가 {{width}}×{{height}}로 한계({{limit}})를 넘습니다. 멀리 떨어진 화면을 함께 고르면 사이의 빈 공간까지 포함됩니다."
+  },
   "rdp": {
     "overlay": {
       "connectingTitle": "연결 중",

@@ -57,12 +57,19 @@ For development setup, running locally and release builds, see the [build and de
 - OS notification on command completion — for long-running or failed commands (threshold and conditions configurable)
 - Command blocks — per-command status via shell integration, hover actions (copy output/command, re-run, AI) and a command palette (`Cmd/Ctrl+Shift+P`)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/terminal-workspace-dark.png">
+  <img alt="Dolgate terminal workspace with split sessions and the session panel" src="./docs/images/terminal-workspace.png">
+</picture>
+
 **Remote desktops (desktop app)**
 
 - RDP and VNC remote desktops in the same tab workspace as SSH sessions
 - RDP multi-monitor — view monitors together or spread them across separate local displays
 - RDP audio, clipboard and local folder sharing; VNC view-only mode, image quality controls and clipboard
 - Direct Tailscale connections, RDP over SSM and VNC over an SSH tunnel
+
+<img alt="Two remote monitors side by side in one RDP tab" src="./docs/images/rdp-multimonitor.png">
 
 **AI assistant**
 
