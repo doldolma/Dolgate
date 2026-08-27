@@ -14,7 +14,12 @@ import {
   createDefaultSyncStatus,
 } from "../src/lib/mobile";
 import { applyMobileLanguage } from "../src/i18n";
+import { ActionSheet } from "../src/components/ActionSheet";
 import { GroupActionSheet } from "../src/components/GroupActionSheet";
+import {
+  SwipeableRow,
+  type SwipeableRowAction,
+} from "../src/components/SwipeableRow";
 import { GroupNamePromptModal } from "../src/components/GroupNamePromptModal";
 import { HomeScreen } from "../src/screens/HomeScreen";
 import { useMobileAppStore } from "../src/store/useMobileAppStore";
@@ -819,12 +824,18 @@ describe("HomeScreen group browsing", () => {
       hostCard.props.onLongPress();
     });
 
+    // **시트 안에서만 찾는다.** 호스트 카드에는 밀어서 나오는 수정·삭제도 있고, 그쪽은 같은
+    // 핸들러를 부르므로 전체에서 찾으면 시트를 안 눌러도 단언이 통과한다(가짜 초록).
     const findSheetAction = (label: string) =>
-      tree!.root.findAll(
-        (node) =>
-          node.props.accessibilityLabel === label &&
-          typeof node.props.onPress === "function",
-      )[0];
+      tree!.root
+        .findAllByType(ActionSheet)
+        .flatMap((sheet) =>
+          sheet.findAll(
+            (node) =>
+              node.props.accessibilityLabel === label &&
+              typeof node.props.onPress === "function",
+          ),
+        )[0];
 
     // 즐겨찾기가 아닌 호스트 → "추가".
     await act(async () => {
@@ -897,6 +908,47 @@ describe("HomeScreen group browsing", () => {
     });
   });
 
+  it("호스트 카드를 밀면 수정·삭제가 나오고 같은 경로로 이어진다", async () => {
+    const deleteHostMock = jest.fn(async () => undefined);
+    useMobileAppStore.setState({ deleteHost: deleteHostMock });
+    const alertSpy = jest
+      .spyOn(Alert, "alert")
+      .mockImplementation(() => undefined);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    // 호스트 카드를 감싼 줄을 찾는다. 그룹 카드에는 스와이프를 붙이지 않았다.
+    const rows = tree!.root.findAllByType(SwipeableRow);
+    expect(rows.length).toBeGreaterThan(0);
+
+    const rendered = rows[0].props.actions as SwipeableRowAction[];
+    expect(rendered.map(action => action.label)).toEqual(["수정", "삭제"]);
+    // 엄지가 먼저 닿는 자리가 수정이다. 빨강은 화면에 하나뿐이어야 눈에 먼저 들어온다.
+    expect(rendered[1].background).toBe("#FF453A");
+
+    await act(async () => {
+      rendered[0].onPress();
+    });
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "HostForm",
+      expect.objectContaining({ hostId: expect.any(String) }),
+    );
+
+    // 삭제는 길게 누르기와 같은 경로다 — 확인창을 한 번 더 받는다.
+    await act(async () => {
+      rendered[1].onPress();
+    });
+    expect(alertSpy).toHaveBeenCalled();
+    alertSpy.mockRestore();
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
   it("opens the long-press action sheet and routes edit, sftp and delete actions", async () => {
     const deleteHostMock = jest.fn(async () => undefined);
     const openSftpMock = jest.fn(async () => "sftp-1");
@@ -927,12 +979,18 @@ describe("HomeScreen group browsing", () => {
       hostCard.props.onLongPress();
     });
 
+    // **시트 안에서만 찾는다.** 호스트 카드에는 밀어서 나오는 수정·삭제도 있고, 그쪽은 같은
+    // 핸들러를 부르므로 전체에서 찾으면 시트를 안 눌러도 단언이 통과한다(가짜 초록).
     const findSheetAction = (label: string) =>
-      tree!.root.findAll(
-        (node) =>
-          node.props.accessibilityLabel === label &&
-          typeof node.props.onPress === "function",
-      )[0];
+      tree!.root
+        .findAllByType(ActionSheet)
+        .flatMap((sheet) =>
+          sheet.findAll(
+            (node) =>
+              node.props.accessibilityLabel === label &&
+              typeof node.props.onPress === "function",
+          ),
+        )[0];
 
     // 수정 → HostForm 으로 이동.
     await act(async () => {

@@ -36,6 +36,7 @@ import type { SettingsSectionKey } from "../navigation/RootNavigator";
 import { GroupActionSheet } from "../components/GroupActionSheet";
 import { GroupNamePromptModal } from "../components/GroupNamePromptModal";
 import { HostActionSheet } from "../components/HostActionSheet";
+import { closeOpenSwipeableRow, SwipeableRow } from "../components/SwipeableRow";
 import { IosEdgeSwipeBack } from "../components/IosEdgeSwipeBack";
 import { formatRelativeTime } from "../lib/mobile";
 import type {
@@ -116,6 +117,14 @@ function actionKey(action: HomeAction): string {
   }
   return "action:quick-connect";
 }
+
+/**
+ * 스와이프 액션의 삭제 배경.
+ *
+ * 팔레트의 `danger` 는 이 앱에서 **글자색**으로만 쓴다(연한 살구색이라 면으로 칠하면 물 빠져
+ * 보인다). 채운 판이 필요한 자리는 여기뿐이라 상수로 둔다 — iOS 다크 모드의 시스템 빨강이다.
+ */
+const DESTRUCTIVE_ACTION_BG = "#FF453A";
 
 export function HomeScreen(): React.JSX.Element {
   const { t: translate } = useTranslation();
@@ -281,6 +290,9 @@ export function HomeScreen(): React.JSX.Element {
       );
       return () => {
         subscription.remove();
+        // 밀어 둔 줄은 화면을 떠날 때 닫는다. 목록은 살아 있으므로 그냥 두면 다른 화면에
+        // 갔다 왔을 때 그 줄만 열린 채로 남는다.
+        closeOpenSwipeableRow();
       };
     }, [goBackInHome]),
   );
@@ -817,6 +829,9 @@ export function HomeScreen(): React.JSX.Element {
                     ? actionKey(item.action)
                     : `host:${item.host.id}`
           }
+          // 목록을 넘기기 시작하면 열린 줄을 닫는다. 스크롤 중에 열린 줄이 따라다니면 다른
+          // 호스트의 삭제를 누르게 된다.
+          onScrollBeginDrag={closeOpenSwipeableRow}
           initialNumToRender={12}
           maxToRenderPerBatch={12}
           windowSize={5}
@@ -1044,6 +1059,28 @@ export function HomeScreen(): React.JSX.Element {
             const compactMeta = getCompactHostMeta(item.host);
 
             return (
+              // 밀어서 수정·삭제. 길게 누르기(액션 시트)는 그대로 둔다 — 거기에는 연결·SFTP·
+              // 즐겨찾기까지 들어 있어서 스와이프가 대신할 수 없다.
+              <SwipeableRow
+                actions={[
+                  {
+                    key: "edit",
+                    label: translate("common.edit"),
+                    icon: "pencil-outline",
+                    background: palette.tabInactive,
+                    onPress: () => handleEditHost(item.host),
+                  },
+                  {
+                    key: "delete",
+                    label: translate("common.delete"),
+                    icon: "trash-outline",
+                    // 화면에 빨강은 이것 하나뿐이다. 수정까지 색을 주면 둘 다 "눌러 주세요" 로
+                    // 보여서, 지우려던 게 아닌데 빨강을 누를 확률이 올라간다.
+                    background: DESTRUCTIVE_ACTION_BG,
+                    onPress: () => handleDeleteHost(item.host),
+                  },
+                ]}
+              >
               <Pressable
                 accessibilityRole="button"
                 // 그룹 카드에는 라벨이 있는데 호스트 카드에는 없었다. 스크린리더가 카드 안의
@@ -1096,6 +1133,7 @@ export function HomeScreen(): React.JSX.Element {
                   {compactMeta}
                 </Text>
               </Pressable>
+              </SwipeableRow>
             );
           }}
         />
