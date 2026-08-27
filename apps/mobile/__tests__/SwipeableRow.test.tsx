@@ -35,37 +35,59 @@ function findSwipeable(tree: renderer.ReactTestRenderer) {
   return tree.root.findByType(Swipeable);
 }
 
+/** 이 파일이 띄운 트리들. 끝나면 내린다(아래 afterEach). */
+const mounted: renderer.ReactTestRenderer[] = [];
+
+async function mount(element: React.ReactElement) {
+  let tree: renderer.ReactTestRenderer;
+  await act(async () => {
+    tree = renderer.create(element);
+  });
+  mounted.push(tree!);
+  return tree!;
+}
+
+/**
+ * **트리를 남겨 두지 않는다.**
+ *
+ * 남겨 두면 예약돼 있던 렌더가 테스트가 끝난 뒤에 커밋되고, act 밖 갱신 경고가 teardown
+ * 이후에 찍힌다. jest 는 `--runInBand` 에서 그것을 실패로 세므로 — CI 가 그렇게 돈다 —
+ * 테스트는 전부 통과인데 종료 코드가 1이 됐다.
+ */
+afterEach(async () => {
+  await act(async () => {
+    for (const tree of mounted) {
+      tree.unmount();
+    }
+  });
+  mounted.length = 0;
+});
+
 describe("SwipeableRow", () => {
   it("줄 내용과 액션을 함께 들고 있다", async () => {
     // Swipeable 은 액션을 미리 그려 두고 화면 밖에 둔다(밀면 그 자리로 들어온다). 그래서
     // 트리에는 처음부터 있다 — 이 사실을 모르면 "전체에서 라벨로 찾기" 하는 테스트가 시트를
     // 안 눌러도 통과한다.
-    let tree: renderer.ReactTestRenderer;
-    await act(async () => {
-      tree = renderer.create(
-        <SwipeableRow actions={actions(jest.fn(), jest.fn())}>
-          <Text>web-prod-01</Text>
-        </SwipeableRow>,
-      );
-    });
+    const tree = await mount(
+      <SwipeableRow actions={actions(jest.fn(), jest.fn())}>
+        <Text>web-prod-01</Text>
+      </SwipeableRow>,
+    );
 
     expect(
-      tree!.root.findAllByType(Text).some(n => n.props.children === "web-prod-01"),
+      tree.root.findAllByType(Text).some(n => n.props.children === "web-prod-01"),
     ).toBe(true);
-    expect(findSwipeable(tree!).props.renderRightActions).toBeInstanceOf(Function);
+    expect(findSwipeable(tree).props.renderRightActions).toBeInstanceOf(Function);
   });
 
   it("액션은 오른쪽 끝에서부터 놓이고, 삭제가 가장 바깥이다", async () => {
-    let tree: renderer.ReactTestRenderer;
-    await act(async () => {
-      tree = renderer.create(
-        <SwipeableRow actions={actions(jest.fn(), jest.fn())}>
-          <Text>web-prod-01</Text>
-        </SwipeableRow>,
-      );
-    });
+    const tree = await mount(
+      <SwipeableRow actions={actions(jest.fn(), jest.fn())}>
+        <Text>web-prod-01</Text>
+      </SwipeableRow>,
+    );
 
-    const rendered = findSwipeable(tree!).props.renderRightActions();
+    const rendered = findSwipeable(tree).props.renderRightActions();
     const labels = (rendered.props.children as ActionElement[]).map(
       child => child.props.accessibilityLabel,
     );
@@ -76,16 +98,13 @@ describe("SwipeableRow", () => {
   it("액션을 누르면 줄을 닫고 나서 실행한다", async () => {
     const order: string[] = [];
     const onDelete = jest.fn(() => order.push("delete"));
-    let tree: renderer.ReactTestRenderer;
-    await act(async () => {
-      tree = renderer.create(
-        <SwipeableRow actions={actions(jest.fn(), onDelete)}>
-          <Text>web-prod-01</Text>
-        </SwipeableRow>,
-      );
-    });
+    const tree = await mount(
+      <SwipeableRow actions={actions(jest.fn(), onDelete)}>
+        <Text>web-prod-01</Text>
+      </SwipeableRow>,
+    );
 
-    const swipeable = findSwipeable(tree!);
+    const swipeable = findSwipeable(tree);
     const closeSpy = jest
       .spyOn(swipeable.instance as unknown as { close: () => void }, "close")
       .mockImplementation(() => order.push("close"));
@@ -106,23 +125,19 @@ describe("SwipeableRow", () => {
   });
 
   it("한 줄을 열면 앞서 열려 있던 줄이 닫힌다", async () => {
-    let first: renderer.ReactTestRenderer;
-    let second: renderer.ReactTestRenderer;
-    await act(async () => {
-      first = renderer.create(
-        <SwipeableRow actions={actions(jest.fn(), jest.fn())}>
-          <Text>first</Text>
-        </SwipeableRow>,
-      );
-      second = renderer.create(
-        <SwipeableRow actions={actions(jest.fn(), jest.fn())}>
-          <Text>second</Text>
-        </SwipeableRow>,
-      );
-    });
+    const first = await mount(
+      <SwipeableRow actions={actions(jest.fn(), jest.fn())}>
+        <Text>first</Text>
+      </SwipeableRow>,
+    );
+    const second = await mount(
+      <SwipeableRow actions={actions(jest.fn(), jest.fn())}>
+        <Text>second</Text>
+      </SwipeableRow>,
+    );
 
-    const firstRow = findSwipeable(first!);
-    const secondRow = findSwipeable(second!);
+    const firstRow = findSwipeable(first);
+    const secondRow = findSwipeable(second);
     const firstClose = jest
       .spyOn(firstRow.instance as unknown as { close: () => void }, "close")
       .mockImplementation(() => undefined);
@@ -144,20 +159,17 @@ describe("SwipeableRow", () => {
     // 지우려고 열어 둔 줄을 눌렀는데 그 호스트에 접속해 버리면 안 된다. 표준 동작은 그 탭이
     // 닫기만 하는 것이다.
     const onCardPress = jest.fn();
-    let tree: renderer.ReactTestRenderer;
-    await act(async () => {
-      tree = renderer.create(
-        <SwipeableRow actions={actions(jest.fn(), jest.fn())}>
-          <Pressable accessibilityLabel="카드" onPress={onCardPress}>
-            <Text>web-prod-01</Text>
-          </Pressable>
-        </SwipeableRow>,
-      );
-    });
+    const tree = await mount(
+      <SwipeableRow actions={actions(jest.fn(), jest.fn())}>
+        <Pressable accessibilityLabel="카드" onPress={onCardPress}>
+          <Text>web-prod-01</Text>
+        </Pressable>
+      </SwipeableRow>,
+    );
 
     // 덮개는 이름 없는 눌림 영역이다 — 스크린리더가 읽을 것이 없어야 하므로 그 표시로 찾는다.
     const overlays = () =>
-      tree!.root.findAll(
+      tree.root.findAll(
         node =>
           node.props.accessibilityElementsHidden === true &&
           typeof node.props.onPress === "function",
@@ -167,7 +179,7 @@ describe("SwipeableRow", () => {
     expect(overlays()).toHaveLength(0);
 
     await act(async () => {
-      findSwipeable(tree!).props.onSwipeableWillOpen();
+      findSwipeable(tree).props.onSwipeableWillOpen();
     });
 
     expect(overlays()).toHaveLength(1);
@@ -179,16 +191,13 @@ describe("SwipeableRow", () => {
 
   it("바깥에서도 열린 줄을 닫을 수 있다", async () => {
     // 목록 스크롤·화면 이동은 이 줄을 모른다. 그쪽에서 부를 수 있어야 한다.
-    let tree: renderer.ReactTestRenderer;
-    await act(async () => {
-      tree = renderer.create(
-        <SwipeableRow actions={actions(jest.fn(), jest.fn())}>
-          <Text>web-prod-01</Text>
-        </SwipeableRow>,
-      );
-    });
+    const tree = await mount(
+      <SwipeableRow actions={actions(jest.fn(), jest.fn())}>
+        <Text>web-prod-01</Text>
+      </SwipeableRow>,
+    );
 
-    const row = findSwipeable(tree!);
+    const row = findSwipeable(tree);
     const closeSpy = jest
       .spyOn(row.instance as unknown as { close: () => void }, "close")
       .mockImplementation(() => undefined);

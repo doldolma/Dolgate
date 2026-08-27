@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Swipeable } from "react-native-gesture-handler";
 import Ionicons from "react-native-vector-icons/Ionicons";
@@ -62,6 +62,23 @@ export function SwipeableRow({
   const close = (): void => {
     rowRef.current?.close();
   };
+
+  /**
+   * 내려갈 때 열린 줄 자리를 비운다.
+   *
+   * 안 비우면 이미 사라진 줄이 계속 "열려 있는 줄" 로 등록돼 있고, 다음에 열리는 줄이 그
+   * 죽은 인스턴스에 `close()` 를 부른다 — 화면을 떠날 때 열린 채로 두면 그렇게 된다.
+   * 닫힐 때 비우는 것(`onSwipeableClose`)과 같은 정리이고, 닫히지 않은 채 사라지는 길이
+   * 하나 더 있는 것이다.
+   */
+  useEffect(
+    () => () => {
+      if (openRow === rowRef.current) {
+        openRow = null;
+      }
+    },
+    [],
+  );
 
   const renderActions = (): React.ReactElement => (
     <View style={[styles.tray, { borderRadius }]}>

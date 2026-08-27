@@ -47,7 +47,12 @@ var terminalQueryAnswers = []struct{ query, answer string }{
 // noRcArgs 는 그 셸에서 rc 파일을 끄는 인자다. 모르는 셸이면 아무것도 주지 않는다.
 func noRcArgs(name string) []string {
 	switch name {
-	case "bash", "sh":
+	// **`sh` 는 여기 없다.** `/bin/sh` 가 무엇인지는 플랫폼마다 다르다 — macOS 는 bash,
+	// 데비안·우분투는 dash 다. dash 에 bash 전용 플래그를 주면 `sh: 0: Illegal option --` 로
+	// 그 자리에서 죽어, 프로브 답이 오지 않는 것으로 보인다(우분투 CI 만 깨진 이유가 이것이다).
+	// `sh` 의 rc 억제는 플래그가 아니라 환경이 한다 — 아래 cmd.Env 가 `ENV=` 를 비워 두는데,
+	// 그것이 dash·ash·POSIX 모드 bash 가 대화형에서 읽는 유일한 초기화 파일이다.
+	case "bash":
 		return []string{"--norc", "--noprofile"}
 	case "zsh":
 		return []string{"--no-rcs"}
