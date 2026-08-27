@@ -79,7 +79,17 @@ import type { SessionPanelSender } from './useSessionPanelTarget';
 import type { SessionContainerTunnel } from '../../../store/types';
 
 interface SessionPanelDockerProps {
+  /** 포커스된 세션. 터널의 주인이 되고, 화면에서 누른 것이 여기로 간다. */
   sessionId: string;
+  /**
+   * 원격에 물을 때 쓸 세션. tmux 창이면 그 창의 첫 pane 이라 pane 을 옮겨도 폴링이 이어진다.
+   * 우리 분할이면 sessionId 와 같다.
+   */
+  querySessionId: string;
+  /** 화면 상태(탭·검색어·펼친 행)를 담는 키. tmux 면 창 단위, 아니면 세션 단위. */
+  stateKey: string;
+  /** 이 창의 세션들. 열린 터널을 모아 보여 주는 데 쓴다(tmux 면 pane 여럿). */
+  windowSessionIds: readonly string[];
   hostId: string | null;
   sender: SessionPanelSender;
   runtime: DockerRuntime;
@@ -105,6 +115,9 @@ const EMPTY_TUNNELS: readonly SessionContainerTunnel[] = [];
 
 export function SessionPanelDocker({
   sessionId,
+  querySessionId,
+  stateKey,
+  windowSessionIds,
   hostId,
   sender,
   runtime,
@@ -113,27 +126,27 @@ export function SessionPanelDocker({
   const panelOpen = useAppStore((state) => state.sessionPanelOpen);
   // 보던 탭과 검색어는 세션마다 따로 기억한다 — 다른 서버로 옮기면 처음 상태로, 돌아오면
   // 보던 그대로.
-  const [tab, setTab] = useSessionScopedState<DockerTabId>(sessionId, 'docker.tab', 'containers');
-  const [query, setQuery] = useSessionScopedState(sessionId, 'docker.query', '');
+  const [tab, setTab] = useSessionScopedState<DockerTabId>(stateKey, 'docker.tab', 'containers');
+  const [query, setQuery] = useSessionScopedState(stateKey, 'docker.query', '');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   // 펼쳐 둔 행과 펼쳐 본 정지 그룹도 **세션마다** 기억한다. 다른 탭을 보다 돌아왔는데 보던 것이
   // 접혀 있으면 다시 찾아 눌러야 한다 — 검색어·탭을 기억하는 것과 같은 이유다.
   const [expandedId, setExpandedId] = useSessionScopedState<string | null>(
-    sessionId,
+    stateKey,
     'docker.expanded',
     null,
   );
   const [unfoldedStacks, setUnfoldedStacks] = useSessionScopedState<readonly string[]>(
-    sessionId,
+    stateKey,
     'docker.unfoldedStacks',
     [],
   );
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
   // 이력·접힘은 호스트 단위로 기억한다 — 같은 서버의 다른 탭에서도 같은 모양으로 보인다.
-  const collapseScope = hostId ?? `session:${sessionId}`;
+  const collapseScope = hostId ?? `session:${querySessionId}`;
   const lists = useDockerLists(
-    sessionId,
+    querySessionId,
     queryPrefixOf(runtime),
     runtime.elevate,
     tab,
@@ -160,7 +173,7 @@ export function SessionPanelDocker({
       try {
         return parseContainerNetworks(
           await queryTerminalCompletion(
-            sessionId,
+            querySessionId,
             buildContainerNetworksCommand(prefix, containerId),
             { background: true, elevate: runtime.elevate },
           ),
@@ -171,13 +184,19 @@ export function SessionPanelDocker({
         return [];
       }
     },
-    [lists.inspect, runtime, sessionId],
+    [lists.inspect, querySessionId, runtime],
   );
 
   // 이 세션이 연 컨테이너 터널. 주인이 세션이라 세션이 끝나면 메인이 회수한다(여기서 치우지 않는다).
-  const tunnels = useAppStore(
-    (state) => state.sessionContainerTunnels[sessionId] ?? EMPTY_TUNNELS,
-  );
+  // 이 창에서 열린 터널을 **모아** 보여 준다. tmux 는 pane 마다 sessionId 가 달라, 포커스를
+  // 옮겼다고 열어 둔 터널이 화면에서 사라지면 닫을 방법이 없어진다. 주인은 그대로 연 세션이다.
+  const tunnelsBySession = useAppStore((state) => state.sessionContainerTunnels);
+  const tunnels = useMemo(() => {
+    const collected = windowSessionIds.flatMap(
+      (id) => tunnelsBySession[id] ?? EMPTY_TUNNELS,
+    );
+    return collected.length > 0 ? collected : EMPTY_TUNNELS;
+  }, [tunnelsBySession, windowSessionIds]);
   const openTunnel = useAppStore((state) => state.openSessionContainerTunnel);
   const closeTunnel = useAppStore((state) => state.closeSessionContainerTunnel);
   const openExternalUrl = useAppStore((state) => state.openExternalUrl);
@@ -190,11 +209,11 @@ export function SessionPanelDocker({
    * 돌아가는 것이고, 함께 기억해 둔 검색어까지 지우면 "돌아오면 그대로" 가 깨진다. 대신 열려
    * 있던 메뉴는 직전 호스트의 컨테이너를 가리키므로 닫는다.
    */
-  const lastViewRef = useRef({ sessionId, tab });
+  const lastViewRef = useRef({ sessionId: stateKey, tab });
   useEffect(() => {
     const previous = lastViewRef.current;
-    lastViewRef.current = { sessionId, tab };
-    if (previous.sessionId !== sessionId) {
+    lastViewRef.current = { sessionId: stateKey, tab };
+    if (previous.sessionId !== stateKey) {
       setOpenMenu(null);
       return;
     }
@@ -203,7 +222,7 @@ export function SessionPanelDocker({
     }
     setQuery('');
     setOpenMenu(null);
-  }, [sessionId, tab, setQuery]);
+  }, [stateKey, tab, setQuery]);
 
   // 메뉴는 바깥을 누르면 닫힌다.
   useEffect(() => {

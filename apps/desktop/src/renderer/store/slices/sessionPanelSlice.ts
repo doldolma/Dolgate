@@ -2,6 +2,10 @@ import {
   resolveDefaultSessionPanelSection,
   type SessionPanelSectionId,
 } from "../../lib/session-panel";
+import {
+  resolveSessionPanelStateKey,
+  stateKeyForWorkspace,
+} from "../../lib/session-panel-scope";
 import type { SessionPanelSlice, SliceDeps } from "../types";
 
 // 패널 상태는 창 단위다(스토어가 창마다 하나) — 영속화하지 않는다. AI 패널 폭과 같은 결이다.
@@ -30,6 +34,13 @@ export function createSessionPanelSlice(deps: SliceDeps): SessionPanelSlice {
       return sections;
     }
     const live = new Set(tabs.map((tab) => tab.sessionId));
+    // tmux 창은 pane 이 아니라 창 자체가 키다 — 살아 있는 창의 키도 남긴다.
+    for (const workspace of get().workspaces ?? []) {
+      const key = stateKeyForWorkspace(workspace);
+      if (key) {
+        live.add(key);
+      }
+    }
     const entries = Object.entries(sections).filter(([sessionId]) =>
       live.has(sessionId),
     );
@@ -65,11 +76,14 @@ export function createSessionPanelSlice(deps: SliceDeps): SessionPanelSlice {
       if (!sessionId) {
         return;
       }
+      // **tmux 창 안에서는 pane 이 아니라 창이 단위다.** 부르는 쪽(레일·상태바·단축키·AI 열기)은
+      // 그대로 sessionId 를 넘기고, 정규화는 여기서 한 번만 한다.
+      const key = resolveSessionPanelStateKey(get().workspaces, sessionId);
       set((state) => ({
         sessionPanelOpen: true,
         sessionPanelSectionBySessionId: {
           ...pruneSections(state.sessionPanelSectionBySessionId),
-          [sessionId]: section,
+          [key]: section,
         },
       }));
     },
@@ -79,12 +93,13 @@ export function createSessionPanelSlice(deps: SliceDeps): SessionPanelSlice {
       if (!sessionId) {
         return;
       }
+      const key = resolveSessionPanelStateKey(get().workspaces, sessionId);
       set((state) => {
         // 기본값 판정은 패널과 **같은** 규칙을 써야 한다 — 갈리면 아직 아무것도 고르지 않은
         // 세션에서 ⌘I 가 보고 있는 섹션을 닫지 못하고 그 섹션을 다시 여는 것으로 끝난다.
         const showing =
           state.sessionPanelOpen &&
-          (state.sessionPanelSectionBySessionId[sessionId] ??
+          (state.sessionPanelSectionBySessionId[key] ??
             resolveDefaultSessionPanelSection(
               state.tabs?.find((tab) => tab.sessionId === sessionId)?.source,
             )) === section;
@@ -95,7 +110,7 @@ export function createSessionPanelSlice(deps: SliceDeps): SessionPanelSlice {
           sessionPanelOpen: true,
           sessionPanelSectionBySessionId: {
             ...pruneSections(state.sessionPanelSectionBySessionId),
-            [sessionId]: section,
+            [key]: section,
           },
         };
       });

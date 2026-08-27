@@ -1084,6 +1084,27 @@ describe('SessionScreen', () => {
     });
   });
 
+  // xterm 은 포커스가 없으면 커서를 1px 짜리 윤곽선으로 그린다(기본값 outline). 그런데 이
+  // 화면의 xterm 은 거의 항상 포커스가 없다 — 안드로이드는 소프트 키보드가 뜨는 순간 네이티브
+  // 입력 뷰가 포커스를 가져가고 돌려주지 않는다. 실기기에서 커서를 찾을 수 없던 이유다.
+  it('draws the cursor even while the terminal has no focus', async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+    });
+
+    expect(mockCapturedXtermProps?.xtermOptions).toMatchObject({
+      cursorInactiveStyle: 'block',
+    });
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
   // 패키지는 옵션 변경을 **얕은 비교**로 판단한다(dist 의 ee: 키 한 겹). theme 이 중첩 객체라
   // 인라인으로 넘기면 렌더마다 비교가 실패해 WebView 로 setOptions 가 다시 나가고, xterm 은
   // theme 을 다시 세울 때 값이 같아도 전체를 다시 그린다 — 실기기에서 주기적 깜빡임으로 보였다.

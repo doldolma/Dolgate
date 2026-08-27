@@ -81,6 +81,9 @@ function renderSection(options: {
   const view = render(
     <SessionPanelDocker
       sessionId="session-1"
+      querySessionId="session-1"
+      stateKey="session-1"
+      windowSessionIds={["session-1"]}
       hostId={options.hostId === undefined ? 'host-1' : options.hostId}
       sender={senderStub}
       runtime={{ availability: 'available', prefix: 'docker', elevate: false, compose: 'docker compose' }}
@@ -249,6 +252,9 @@ describe('컨테이너', () => {
     render(
       <SessionPanelDocker
         sessionId="session-1"
+      querySessionId="session-1"
+      stateKey="session-1"
+      windowSessionIds={["session-1"]}
         hostId="host-1"
         sender={sender()}
         runtime={{ availability: 'available', prefix: 'docker', elevate: false, compose: null }}
@@ -493,6 +499,9 @@ describe('sudo 까지 해 본 뒤에도 막힌 경우', () => {
     render(
       <SessionPanelDocker
         sessionId="session-1"
+      querySessionId="session-1"
+      stateKey="session-1"
+      windowSessionIds={["session-1"]}
         hostId="host-1"
         sender={sender()}
         runtime={{ availability: 'blocked', prefix: null, elevate: false, compose: null }}
@@ -695,6 +704,9 @@ describe('세션마다 보던 자리를 기억한다', () => {
     const view = render(
       <SessionPanelDocker
         sessionId="session-a"
+      querySessionId="session-a"
+      stateKey="session-a"
+      windowSessionIds={["session-a"]}
         hostId="host-a"
         sender={senderStub}
         runtime={{ availability: 'available', prefix: 'docker', elevate: false, compose: 'docker compose' }}
@@ -708,6 +720,9 @@ describe('세션마다 보던 자리를 기억한다', () => {
     view.rerender(
       <SessionPanelDocker
         sessionId="session-b"
+      querySessionId="session-b"
+      stateKey="session-b"
+      windowSessionIds={["session-b"]}
         hostId="host-b"
         sender={senderStub}
         runtime={{ availability: 'available', prefix: 'docker', elevate: false, compose: 'docker compose' }}
@@ -720,6 +735,9 @@ describe('세션마다 보던 자리를 기억한다', () => {
     view.rerender(
       <SessionPanelDocker
         sessionId="session-a"
+      querySessionId="session-a"
+      stateKey="session-a"
+      windowSessionIds={["session-a"]}
         hostId="host-a"
         sender={senderStub}
         runtime={{ availability: 'available', prefix: 'docker', elevate: false, compose: 'docker compose' }}
@@ -891,5 +909,53 @@ describe('새로 생긴 컨테이너', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('tmux 창 안에서 pane 을 옮길 때', () => {
+  it('보던 탭과 검색어가 그대로고, 목록을 다시 받아오지 않는다', async () => {
+    // 같은 창이면 호스트가 하나다 — 포커스가 옮겨졌다고 화면 상태를 버리거나 폴링을 처음부터
+    // 다시 돌릴 이유가 없다. 창 키(stateKey)와 질의 대상(querySessionId)이 그대로이기 때문이다.
+    query.mockImplementation((_sessionId: string, command: string) => {
+      if (command.includes('images --format')) {
+        return Promise.resolve('app\t1\tsha1\t412MB');
+      }
+      if (command.includes('ps -a --format')) {
+        return Promise.resolve(CONTAINERS);
+      }
+      return Promise.resolve('');
+    });
+    const senderStub = sender();
+    const props = {
+      querySessionId: 'tmux:ctl:%0',
+      stateKey: 'tmuxwin:ctl:@0',
+      windowSessionIds: ['tmux:ctl:%0', 'tmux:ctl:%1'],
+      hostId: 'host-tmux',
+      sender: senderStub,
+      runtime: {
+        availability: 'available' as const,
+        prefix: 'docker',
+        elevate: false,
+        compose: 'docker compose',
+      },
+    };
+    const view = render(<SessionPanelDocker sessionId="tmux:ctl:%0" {...props} />);
+    expect(await screen.findByText('gateway')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /이미지/ }));
+    expect(await screen.findByText('app')).toBeTruthy();
+    const listRoundTrips = () =>
+      query.mock.calls.filter((call) => String(call[1]).includes('ps -a --format')).length;
+    const listCalls = listRoundTrips();
+
+    // 옆 pane 으로 포커스를 옮긴다.
+    view.rerender(<SessionPanelDocker sessionId="tmux:ctl:%1" {...props} />);
+
+    // 보던 탭 그대로 — 이미지 목록이 계속 보이고, 컨테이너 목록으로 돌아가지 않았다.
+    expect(screen.getByText('app')).toBeTruthy();
+    expect(screen.queryByText('gateway')).toBeNull();
+    // 목록 왕복이 새로 나가지 않았다.
+    expect(listRoundTrips()).toBe(listCalls);
+
+    clearSessionScopedState('tmuxwin:ctl:@0');
   });
 });

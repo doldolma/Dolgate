@@ -108,9 +108,10 @@ const SHELL_NAMES = new Set([
   'powershell',
 ]);
 
-/** 인자에서 셸 이름을 뽑는다. 경로·확장자·로그인 대시를 걷어낸 뒤 판정한다. */
+/** 인자에서 셸 이름을 뽑는다. 따옴표·경로·확장자·로그인 대시를 걷어낸 뒤 판정한다. */
 function shellNameOf(token: string): string {
   const base = token
+    .replace(/^['"]+|['"]+$/g, '')
     .replace(/\\/g, '/')
     .split('/')
     .pop()
@@ -138,6 +139,16 @@ export function resolveSubshellShell(command: string): string {
   const direct = shellNameOf(tokens[0]);
   if (direct) {
     return direct;
+  }
+  // `sh -c '…'` 처럼 셸에게 명령을 넘기는 형태. 마지막 토큰은 그 명령의 끝(`… exec sh'`)이라
+  // 셸 이름이 아니다 — 도커 섹션의 셸 접속 버튼이 만드는 명령이 정확히 이 모양이고, 예전에는
+  // 여기서 "모름" 이 나와 코어가 bash·zsh 겸용 스크립트를 busybox sh 에 쏟아부었다.
+  const dashC = tokens.indexOf('-c');
+  if (dashC > 0) {
+    const shell = shellNameOf(tokens[dashC - 1]);
+    if (shell) {
+      return shell;
+    }
   }
   // `docker exec -it web bash`, `kubectl exec -it pod -- sh` 처럼 마지막이 셸인 경우.
   // 중간 인자(이미지·pod 이름)가 우연히 셸 이름과 같을 수 있으니 **마지막 토큰만** 본다.

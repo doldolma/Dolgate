@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useAppStore } from '../../../store/appStore';
-import { listWorkspaceSessionIds } from '../terminalWorkspaceLayout';
+import { resolveSessionPanelQuerySessionId } from '../../../lib/session-panel-scope';
 import { reinjectShellIntegrationIfSubshell } from '../../../lib/subshell-reinject';
 import {
   getCommandBlocks,
@@ -143,18 +143,10 @@ export function useSessionPanelTargetSessionId(
 export function useSessionPanelMetricsSessionId(sessionId: string): string {
   const workspaces = useAppStore((state) => state.workspaces);
 
-  return useMemo(() => {
-    if (!sessionId) {
-      return sessionId;
-    }
-    const workspace = workspaces.find((entry) =>
-      listWorkspaceSessionIds(entry.layout).includes(sessionId),
-    );
-    if (!workspace?.tmux) {
-      return sessionId;
-    }
-    return listWorkspaceSessionIds(workspace.layout)[0] ?? sessionId;
-  }, [sessionId, workspaces]);
+  return useMemo(
+    () => resolveSessionPanelQuerySessionId(workspaces, sessionId),
+    [sessionId, workspaces],
+  );
 }
 
 /**

@@ -728,6 +728,17 @@ export function SessionScreen(): React.JSX.Element {
     () => ({
       fontSize: terminalFontSize,
       scrollback: 2_000,
+      // **포커스가 없어도 커서가 보여야 한다.**
+      //
+      // xterm 은 포커스가 없으면 커서를 `cursorInactiveStyle` 로 그리는데 기본값이 1px 짜리
+      // `outline` 이다. 그런데 이 화면의 xterm 은 거의 항상 포커스가 없다 — 안드로이드는
+      // 소프트 키보드가 뜨는 순간 네이티브 입력 뷰가 포커스를 가져가고, `focusTerminal` 은
+      // 안드로이드에서 아무것도 하지 않아 되돌아오지 않는다.
+      //
+      // 그래서 실기기에서 커서를 찾을 수 없었다. 꾹 눌러 커서를 미는 제스처가 있는데 정작
+      // 어디에 있는지 안 보였다. 채워서 그리면 포커스 상태와 무관하게 보인다 — 포커스를
+      // 요청하지 않으므로 IME·입력 경로는 그대로다.
+      cursorInactiveStyle: 'block' as const,
       theme: terminalTheme,
     }),
     [terminalFontSize, terminalTheme],

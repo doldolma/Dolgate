@@ -531,60 +531,18 @@ func (m *Manager) RunCompletionCommand(
 	if err != nil {
 		return "", false, err
 	}
-	// 예산은 이 함수 전체에 하나다 — 아래 폴백까지 합쳐서 이 시간을 넘지 않는다. 단계마다 새
-	// 예산을 주면 합이 호출자(데스크톱)의 요청 타임아웃을 넘겨, 코어가 답을 못 보내게 된다.
-	budget := autocomplete.CompletionTimeoutFor(background)
-	startedAt := time.Now()
-
-	if elevate {
-		// 되물릴 비밀번호가 없거나 이미 한 번 거절당했으면 **원격을 건드리지 않는다.**
-		password := session.takeSudoPassword()
-		if password == "" {
-			return "", false, sshcmd.ErrSudoPasswordUnavailable
-		}
-		invocation, buildErr := sshcmd.BuildSudoCommand(command, password)
-		if buildErr != nil {
-			return "", false, buildErr
-		}
-		out, trunc, runErr := session.runCompletionWorker(invocation.Script, background)
-		if runErr != nil {
-			// 왕복 자체가 실패했다(차례를 못 얻었거나 시간이 초과됐다) — sudo 가 통했는지는
-			// 알 수 없다. 여기서 거절로 단정하면 멀쩡한 호스트를 영영 막는다.
-			return "", trunc, runErr
-		}
-		stripped, ok := sshcmd.StripSudoMarker(out, invocation.OKMarker)
-		if !ok {
-			// 표식이 없다 = sudo 가 명령을 시작하지도 못했다 = 비밀번호가 거절됐다. 이 세션에서는
-			// 다시 내밀지 않는다 — 틀린 시도를 반복하면 pam_faillock 이 계정을 잠근다.
-			//
-			// **출력이 비었다는 것만으로는 판정하지 않는다.** 컨테이너가 하나도 없는 호스트의
-			// `docker ps -a` 도 정상적으로 아무것도 찍지 않는다.
-			session.denySudo()
-			return "", false, sshcmd.ErrSudoRefused
-		}
-		return string(stripped), trunc, nil
-	}
-
-	stdout, truncated, err := session.runCompletionWorker(command, background)
-	if err == nil || len(stdout) > 0 {
-		return string(stdout), truncated, err
-	}
-	if !errors.Is(err, sshcmd.ErrCompletionWorkerUnavailable) {
-		return "", false, err
-	}
-
-	remaining := budget - time.Since(startedAt)
-	if remaining <= 0 {
-		return "", false, err
-	}
-	fallbackStdout, _, err := sshcmd.RunWithTimeout(session.client, command, remaining)
-	// A completion command exiting non-zero is not fatal — return whatever it
-	// printed (best-effort). Only surface an error when nothing was captured.
-	if err != nil && len(fallbackStdout) == 0 {
-		return "", false, err
-	}
-	out, truncated := autocomplete.CapOutput(fallbackStdout)
-	return out, truncated, nil
+	return autocomplete.RunCompletion(
+		autocomplete.PoolTarget(
+			session.getCompletionPool(),
+			session.client,
+			// 비밀번호로 붙은 연결만 되물릴 값을 갖는다. 한 번 거절당한 뒤에는 빈 값이 온다.
+			session.takeSudoPassword,
+			session.denySudo,
+		),
+		command,
+		background,
+		elevate,
+	)
 }
 
 // runHostCommandMaxBytes caps captured stdout/stderr per stream to protect the
@@ -641,20 +599,6 @@ func capRunCommandOutput(b []byte) (string, bool) {
 		return string(b), false
 	}
 	return string(b[:runHostCommandMaxBytes]), true
-}
-
-func (h *sessionHandle) runCompletionWorker(command string, background bool) ([]byte, bool, error) {
-	lane := sshcmd.LaneInteractive
-	if background {
-		lane = sshcmd.LaneBackground
-	}
-	pool := h.getCompletionPool()
-	return pool.Run(
-		lane,
-		command,
-		autocomplete.CompletionTimeoutFor(background),
-		autocomplete.MaxCompletionBytes,
-	)
 }
 
 func (h *sessionHandle) getCompletionPool() *sshcmd.WorkerPool {

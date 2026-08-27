@@ -185,7 +185,8 @@ describe('tmux 창의 지표', () => {
     // 폴링은 창당 한 번만 돌며 **첫 pane 키**로 발행한다(SessionShell). 패널이 포커스된 pane
     // 키로 읽으면 빈 서랍을 열게 되어 `읽는 중` 으로 남았다.
     setState({
-      sessionPanelSectionBySessionId: { 'tmux:ctl:1': 'resources' },
+      // 섹션은 pane 이 아니라 **창** 단위로 기억한다.
+      sessionPanelSectionBySessionId: { 'tmuxwin:ctl:@0': 'resources' },
       workspaces: [
         {
           id: 'ws-1',
@@ -231,6 +232,40 @@ describe('tmux 창의 지표', () => {
     // 관찰 요청도 발행 키에 걸려야 주기가 좁혀진다.
     expect(getHostMetricsWatch('tmux:ctl:0').boosted).toBe(true);
     clearHostMetrics('tmux:ctl:0');
+  });
+});
+
+describe('tmux 창 안에서 pane 을 옮길 때', () => {
+  it('보던 섹션이 그대로다', () => {
+    // 창 하나는 호스트 하나다. pane 마다 따로 기억하면 pane 을 옮길 때마다 패널이 통째로 바뀐다.
+    setState({
+      sessionPanelSectionBySessionId: { 'tmuxwin:ctl:@0': 'ports' },
+      workspaces: [
+        {
+          id: 'ws-1',
+          activeSessionId: 'tmux:ctl:%1',
+          tmux: { controlSessionId: 'ctl', windowId: '@0' },
+          layout: {
+            kind: 'split',
+            direction: 'row',
+            ratio: 0.5,
+            first: { kind: 'leaf', sessionId: 'tmux:ctl:%0' },
+            second: { kind: 'leaf', sessionId: 'tmux:ctl:%1' },
+          },
+        },
+      ],
+      tabs: [
+        { sessionId: 'tmux:ctl:%0', title: 'pane 0', paneKind: 'terminal', source: 'host' },
+        { sessionId: 'tmux:ctl:%1', title: 'pane 1', paneKind: 'terminal', source: 'host' },
+      ],
+    });
+
+    const view = render(<SessionPanel sessionId="tmux:ctl:%0" />);
+    expect(screen.getByText('포트 포워딩')).toBeTruthy();
+
+    // 옆 pane 으로 포커스를 옮긴다 — 같은 창이므로 보던 섹션 그대로여야 한다.
+    view.rerender(<SessionPanel sessionId="tmux:ctl:%1" />);
+    expect(screen.getByText('포트 포워딩')).toBeTruthy();
   });
 });
 

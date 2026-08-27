@@ -5,6 +5,10 @@ import type {
   WorkspaceSplitNode,
 } from '../../store/createAppStore';
 import type { Rect, SessionPlacement, SplitHandlePlacement } from './types';
+// 레이아웃 순회는 lib 에 있다 — 스토어와 세션 패널도 쓰는데, 그쪽이 컴포넌트를 import 하면
+// 방향이 거꾸로다. 여기서는 예전처럼 이 이름으로 쓸 수 있게 다시 내보낸다.
+export { listWorkspaceSessionIds } from '../../lib/workspace-layout';
+import { listWorkspaceSessionIds } from '../../lib/workspace-layout';
 
 /**
  * 지금 포커스된 pane 의 sessionId.
@@ -175,17 +179,6 @@ export function collectWorkspacePlacements(
     placements,
     handles,
   );
-}
-
-export function listWorkspaceSessionIds(node: WorkspaceLayoutNode): string[] {
-  if (node.kind === 'leaf') {
-    return [node.sessionId];
-  }
-
-  return [
-    ...listWorkspaceSessionIds(node.first),
-    ...listWorkspaceSessionIds(node.second),
-  ];
 }
 
 // splitId 로 split 노드를 찾는다(divider 드래그 → tmux resize-pane 매핑에 쓴다).

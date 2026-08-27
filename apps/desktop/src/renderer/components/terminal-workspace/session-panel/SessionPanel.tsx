@@ -11,9 +11,11 @@
 // 상태만 읽고, 하나는 세션별 라이브 레지스트리를 구독한다. 이 둘이 돌면 나머지 섹션은 얹는
 // 일이 된다.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../../lib/cn';
+import { resolveSessionPanelStateKey } from '../../../lib/session-panel-scope';
+import { listWorkspaceSessionIds } from '../../../lib/workspace-layout';
 import { useAppStore } from '../../../store/appStore';
 import {
   resolveDefaultSessionPanelSection,
@@ -107,6 +109,9 @@ const SECTION_TITLE_KEY: Record<SessionPanelSectionId, string> = {
 const HEADER_BUTTON_CLASS =
   'grid h-6 w-6 shrink-0 place-items-center rounded-[7px] text-[var(--text-soft)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--text)]';
 
+/** 셀렉터·useMemo 가 매번 새 배열을 만들지 않게. */
+const EMPTY_SESSION_IDS: readonly string[] = [];
+
 export function SessionPanel({ sessionId }: SessionPanelProps) {
   const { t: translate } = useTranslation();
   const togglePanel = useAppStore((state) => state.toggleSessionPanel);
@@ -171,6 +176,20 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
   }, [open]);
 
   const targetTab = tabs.find((tab) => tab.sessionId === sessionId);
+  // tmux 창 안에서는 pane 이 아니라 **창**이 단위다 — 화면 상태는 창 키로, 원격에 묻는 것은
+  // 그 창의 첫 pane 으로. 우리 분할은 지금처럼 pane 마다 따로 본다.
+  const workspaces = useAppStore((state) => state.workspaces);
+  const stateKey = resolveSessionPanelStateKey(workspaces, sessionId ?? '');
+  // 이 창의 세션들(tmux 면 pane 여럿). 열린 컨테이너 터널을 모아 보여 주는 데 쓴다.
+  const windowSessionIds = useMemo(() => {
+    if (!sessionId) {
+      return EMPTY_SESSION_IDS;
+    }
+    const workspace = workspaces.find((entry) =>
+      listWorkspaceSessionIds(entry.layout).includes(sessionId),
+    );
+    return workspace ? listWorkspaceSessionIds(workspace.layout) : [sessionId];
+  }, [sessionId, workspaces]);
   const blocks = useSessionCommandBlocks(sessionId ?? '');
   const shellHistory = useSessionShellHistory(sessionId ?? '');
   const sender = useSessionPanelSender(sessionId ?? '', blocks);
@@ -184,12 +203,12 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
       : null,
   );
   const section: SessionPanelSectionId = sessionId
-    ? (sectionBySessionId[sessionId] ?? defaultSection)
+    ? (sectionBySessionId[stateKey] ?? defaultSection)
     : defaultSection;
   // 도커를 부를 수 있는지는 **이 섹션을 열 때** 물어본다. 레일에 늘 있으니 미리 알 필요가 없고,
   // 다른 섹션을 보는 동안 왕복을 쓰지 않는다.
   const dockerRuntime = useDockerRuntime(
-    open && sessionId && section === 'docker' ? sessionId : null,
+    open && sessionId && section === 'docker' ? metricsSessionId : null,
     targetTab?.hostId ?? null,
   );
   const dockerBusy = useDockerBusy(sessionId);
@@ -349,6 +368,9 @@ export function SessionPanel({ sessionId }: SessionPanelProps) {
           ) : section === 'docker' ? (
             <SessionPanelDocker
               sessionId={sessionId}
+              querySessionId={metricsSessionId}
+              stateKey={stateKey}
+              windowSessionIds={windowSessionIds}
               hostId={targetTab?.hostId ?? null}
               sender={sender}
               runtime={dockerRuntime}

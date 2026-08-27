@@ -118,3 +118,24 @@ func TestDefaultControlCommandProbesBeforeControlModeAttach(t *testing.T) {
 		t.Fatalf("default command must create the dolgate session when none exists: %q", defaultControlCommand)
 	}
 }
+
+// tmux 도 SSH 세션과 같은 승격 경로를 탄다. 예전에는 이 매니저가 `if elevate { 실패 }` 로 막아
+// 두어, 같은 세션 패널이 SSH 탭에서는 도커를 읽고 tmux 탭에서는 못 읽었다.
+func TestControlHandleKeepsSudoPasswordOnlyForPasswordAuth(t *testing.T) {
+	handle := &controlHandle{}
+	handle.setSudoPassword("publickey", "irrelevant")
+	if got := handle.takeSudoPassword(); got != "" {
+		t.Fatalf("키로 붙은 연결은 되물릴 값이 없어야 한다: %q", got)
+	}
+
+	handle.setSudoPassword("password", "hunter2")
+	if got := handle.takeSudoPassword(); got != "hunter2" {
+		t.Fatalf("비밀번호로 붙었으면 되물릴 수 있어야 한다: %q", got)
+	}
+
+	// 한 번 거절당하면 이 연결에서는 다시 내밀지 않는다(pam_faillock).
+	handle.denySudo()
+	if got := handle.takeSudoPassword(); got != "" {
+		t.Fatalf("거절 뒤에는 빈 값이어야 한다: %q", got)
+	}
+}

@@ -1,7 +1,6 @@
 package tmuxsession
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -87,6 +86,41 @@ type controlHandle struct {
 
 	completionPoolMu sync.Mutex
 	completionPool   *sshcmd.WorkerPool
+
+	// sudo 는 세션 패널이 도커를 읽으려는데 소켓 권한이 없고 `sudo -n` 도 막혔을 때만 쓴다.
+	// sshsession 의 sessionHandle 과 같은 규칙이다 — 비밀번호로 붙은 연결에서만 채우고,
+	// stdin 으로만 흘리고(sshcmd.BuildSudoCommand), 한 번 거절당하면 이 연결에서는 다시
+	// 내밀지 않는다(틀린 sudo 시도는 pam_faillock 카운터를 올린다).
+	sudoMu       sync.Mutex
+	sudoPassword string
+	sudoDenied   bool
+}
+
+// setSudoPassword 는 비밀번호로 붙은 연결에만 되물릴 값을 남긴다.
+func (h *controlHandle) setSudoPassword(authType, password string) {
+	if authType != "password" || password == "" {
+		return
+	}
+	h.sudoMu.Lock()
+	defer h.sudoMu.Unlock()
+	h.sudoPassword = password
+}
+
+// takeSudoPassword 는 지금 되물릴 수 있는 비밀번호를 준다. 없거나 이미 거절당했으면 빈 값이다.
+func (h *controlHandle) takeSudoPassword() string {
+	h.sudoMu.Lock()
+	defer h.sudoMu.Unlock()
+	if h.sudoDenied {
+		return ""
+	}
+	return h.sudoPassword
+}
+
+// denySudo 는 되물린 비밀번호가 통하지 않았다고 표시한다.
+func (h *controlHandle) denySudo() {
+	h.sudoMu.Lock()
+	defer h.sudoMu.Unlock()
+	h.sudoDenied = true
 }
 
 // markIntegrated 는 pane 에 셸 통합 주입을 1회로 제한한다. 아직 주입 안 했으면
@@ -337,6 +371,8 @@ func (m *Manager) Connect(sessionID, requestID string, payload coretypes.Connect
 		closed:  make(chan struct{}),
 		version: ver,
 	}
+	// 도커 조회가 sudo 를 요구하는 호스트에서 되물릴 값. SSH 세션과 같은 조건으로만 남는다.
+	handle.setSudoPassword(payload.AuthType, payload.Password)
 	m.mu.Lock()
 	m.controls[sessionID] = handle
 	m.mu.Unlock()
@@ -1060,59 +1096,32 @@ func (m *Manager) FlushShellIntegration(sessionID string) {
 	}
 }
 
-// RunCompletionCommand 는 보조 exec 채널에서 짧은 read-only 완성 명령을 실행한다. 보조
-// 채널 기본 cwd(홈) 기준이라 pane 이 cd 한 실제 경로는 반영하지 못한다(MVP 한계).
-// background 는 사람이 결과를 기다리지 않는 폴링이라는 뜻이다(sshsession 쪽과 같은 규칙).
-// elevate(sudo 로 되물리기)는 지원하지 않는다 — control 세션은 sshsession 과 달리 접속에 쓴
-// 비밀번호를 들고 있지 않다. 도커 섹션은 tmux pane 에서도 뜨지만, 그 호스트의 소켓이 막혀
-// 있으면 평소처럼 "읽을 수 없다" 로 끝난다.
+// RunCompletionCommand 는 보조 exec 채널에서 짧은 read-only 완성 명령을 실행한다.
+//
+// 실행 경로는 SSH 세션과 **같은 함수**다(autocomplete.RunCompletion) — 예전에는 이 파일에 같은
+// 코드가 따로 있었고, 그러다 sudo 되물리기가 SSH 쪽에만 들어가 같은 세션 패널이 SSH 탭에서는
+// 도커를 읽고 tmux 탭에서는 못 읽었다.
+//
+// 보조 채널 기본 cwd(홈) 기준이라 pane 이 cd 한 실제 경로는 반영하지 못한다(MVP 한계).
 func (m *Manager) RunCompletionCommand(
 	sessionID, command string,
 	background, elevate bool,
 ) (string, bool, error) {
-	if elevate {
-		return "", false, sshcmd.ErrSudoPasswordUnavailable
-	}
 	handle, _, err := m.controlOf(sessionID)
 	if err != nil {
 		return "", false, err
 	}
-	// 예산은 폴백까지 합쳐 하나다(sshsession 쪽과 같은 규칙).
-	budget := autocomplete.CompletionTimeoutFor(background)
-	startedAt := time.Now()
-
-	stdout, truncated, err := handle.runCompletionWorker(command, background)
-	if err == nil || len(stdout) > 0 {
-		return string(stdout), truncated, err
-	}
-	if !errors.Is(err, sshcmd.ErrCompletionWorkerUnavailable) {
-		return "", false, err
-	}
-
-	remaining := budget - time.Since(startedAt)
-	if remaining <= 0 {
-		return "", false, err
-	}
-	fallbackStdout, _, err := sshcmd.RunWithTimeout(handle.client, command, remaining)
-	if err != nil && len(fallbackStdout) == 0 {
-		return "", false, err
-	}
-	out, truncated := autocomplete.CapOutput(fallbackStdout)
-	return out, truncated, nil
-}
-
-func (h *controlHandle) runCompletionWorker(command string, background bool) ([]byte, bool, error) {
-	lane := sshcmd.LaneInteractive
-	if background {
-		lane = sshcmd.LaneBackground
-	}
-	pool := h.getCompletionPool()
-	return pool.Run(
-		lane,
+	return autocomplete.RunCompletion(
+		autocomplete.PoolTarget(
+			handle.getCompletionPool(),
+			handle.client,
+			// 비밀번호로 붙은 연결만 되물릴 값을 갖는다. 한 번 거절당한 뒤에는 빈 값이 온다.
+			handle.takeSudoPassword,
+			handle.denySudo,
+		),
 		command,
-		// 사람이 안 기다리는 폴링은 예산이 더 크다(sshsession 쪽과 같은 규칙).
-		autocomplete.CompletionTimeoutFor(background),
-		autocomplete.MaxCompletionBytes,
+		background,
+		elevate,
 	)
 }
 

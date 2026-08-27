@@ -25,6 +25,10 @@ function harness() {
     setTabs: (tabs: Array<{ sessionId: string; source?: string }>) => {
       state = { ...state, tabs } as AppState;
     },
+    /** 워크스페이스(=창) 목록. tmux 창이면 섹션을 pane 이 아니라 창 단위로 기억한다. */
+    setWorkspaces: (workspaces: unknown[]) => {
+      state = { ...state, workspaces } as AppState;
+    },
   };
 }
 
@@ -123,5 +127,97 @@ describe('sessionPanelSlice', () => {
     get().toggleSessionPanelSection('', 'ai');
     expect(get().sessionPanelOpen).toBe(false);
     expect(get().sessionPanelSectionBySessionId['']).toBeUndefined();
+  });
+});
+
+describe('tmux 창', () => {
+  /** pane 둘짜리 tmux 창 하나. */
+  function tmuxWindow() {
+    return {
+      id: 'ws-1',
+      activeSessionId: 'tmux:ctl:%1',
+      tmux: { controlSessionId: 'ctl', windowId: '@0' },
+      layout: {
+        kind: 'split',
+        direction: 'row',
+        ratio: 0.5,
+        first: { kind: 'leaf', sessionId: 'tmux:ctl:%0' },
+        second: { kind: 'leaf', sessionId: 'tmux:ctl:%1' },
+      },
+    };
+  }
+
+  it('섹션은 pane 이 아니라 창에 기억한다', () => {
+    // tmux 창은 호스트 하나다. pane 마다 따로 기억하면 pane 을 옮길 때마다 보던 섹션이 바뀐다.
+    const { get, setTabs, setWorkspaces } = harness();
+    setTabs([
+      { sessionId: 'tmux:ctl:%0', source: 'host' },
+      { sessionId: 'tmux:ctl:%1', source: 'host' },
+    ]);
+    setWorkspaces([tmuxWindow()]);
+
+    get().selectSessionPanelSection('tmux:ctl:%1', 'docker');
+
+    expect(get().sessionPanelSectionBySessionId).toEqual({ 'tmuxwin:ctl:@0': 'docker' });
+  });
+
+  it('다른 pane 에서 토글해도 같은 자리를 본다', () => {
+    const { get, setTabs, setWorkspaces } = harness();
+    setTabs([
+      { sessionId: 'tmux:ctl:%0', source: 'host' },
+      { sessionId: 'tmux:ctl:%1', source: 'host' },
+    ]);
+    setWorkspaces([tmuxWindow()]);
+    get().selectSessionPanelSection('tmux:ctl:%1', 'docker');
+
+    // 다른 pane 에서 같은 섹션을 토글하면 "보고 있는 것" 이므로 닫힌다.
+    get().toggleSessionPanelSection('tmux:ctl:%0', 'docker');
+
+    expect(get().sessionPanelOpen).toBe(false);
+    expect(get().sessionPanelSectionBySessionId).toEqual({ 'tmuxwin:ctl:@0': 'docker' });
+  });
+
+  it('창 키는 정리에서 살아남는다', () => {
+    // 정리는 "살아 있는 세션 id 만" 남기던 규칙이라, 창 키가 통째로 지워지면 보던 섹션을 잃는다.
+    const { get, setTabs, setWorkspaces } = harness();
+    setTabs([
+      { sessionId: 'tmux:ctl:%0', source: 'host' },
+      { sessionId: 'tmux:ctl:%1', source: 'host' },
+    ]);
+    setWorkspaces([tmuxWindow()]);
+    get().selectSessionPanelSection('tmux:ctl:%1', 'docker');
+
+    get().selectSessionPanelSection('tmux:ctl:%0', 'resources');
+
+    expect(get().sessionPanelSectionBySessionId).toEqual({ 'tmuxwin:ctl:@0': 'resources' });
+  });
+
+  it('우리 분할은 pane 마다 따로 기억한다', () => {
+    const { get, setTabs, setWorkspaces } = harness();
+    setTabs([
+      { sessionId: 'session-a', source: 'host' },
+      { sessionId: 'session-b', source: 'host' },
+    ]);
+    setWorkspaces([
+      {
+        id: 'ws-2',
+        activeSessionId: 'session-b',
+        layout: {
+          kind: 'split',
+          direction: 'row',
+          ratio: 0.5,
+          first: { kind: 'leaf', sessionId: 'session-a' },
+          second: { kind: 'leaf', sessionId: 'session-b' },
+        },
+      },
+    ]);
+
+    get().selectSessionPanelSection('session-a', 'docker');
+    get().selectSessionPanelSection('session-b', 'resources');
+
+    expect(get().sessionPanelSectionBySessionId).toEqual({
+      'session-a': 'docker',
+      'session-b': 'resources',
+    });
   });
 });
