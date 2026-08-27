@@ -16,30 +16,30 @@ import (
 type stubSSHManager struct {
 	// RefreshTmuxDetection 이 어느 세션으로 불렸는지. 감지 경로로 갔는지 확인한다.
 	refreshedTmuxDetection string
-	cancelledInFlight     []string
-	hasSession            bool
-	writeSession          string
-	writeData             []byte
-	resizeSession         string
-	resizeCols            int
-	resizeRows            int
-	disconnectID          string
-	challengeID           string
-	responses             []string
-	storedPasswordIndexes []int
-	completionOut         string
-	completionTrun        bool
-	completionErr         error
-	installCount          int
-	reinjectCount         int
-	installErr            error
-	runCommand            string
-	runTimeoutMs          int
-	runOut                string
-	runStderr             string
-	runExit               int
-	runTrunc              bool
-	runErr                error
+	cancelledInFlight      []string
+	hasSession             bool
+	writeSession           string
+	writeData              []byte
+	resizeSession          string
+	resizeCols             int
+	resizeRows             int
+	disconnectID           string
+	challengeID            string
+	responses              []string
+	storedPasswordIndexes  []int
+	completionOut          string
+	completionTrun         bool
+	completionErr          error
+	installCount           int
+	reinjectCount          int
+	installErr             error
+	runCommand             string
+	runTimeoutMs           int
+	runOut                 string
+	runStderr              string
+	runExit                int
+	runTrunc               bool
+	runErr                 error
 }
 
 func (stub *stubSSHManager) Connect(sessionID, requestID string, payload coretypes.ConnectPayload) error {
@@ -182,11 +182,11 @@ type stubLocalManager struct {
 	// RunHostCommand 이 로컬로 라우팅됐는지(AI 조회 도구).
 	hostCommandSession string
 	hostCommandInput   string
-	hasSession        bool
-	writeSession      string
-	resizeID          string
-	disconnectID      string
-	installShellCount int
+	hasSession         bool
+	writeSession       string
+	resizeID           string
+	disconnectID       string
+	installShellCount  int
 }
 
 func (stub *stubLocalManager) Connect(sessionID, requestID string, payload coretypes.LocalConnectPayload) error {

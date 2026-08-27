@@ -540,6 +540,25 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
   );
 
   ipcMain.handle(
+    ipcChannels.ssh.hostMetrics,
+    async (
+      _event,
+      sessionId: string,
+      options?: { processLimit?: number; system?: boolean },
+    ): Promise<{ supported: boolean; sample: unknown | null; message?: string }> => {
+      // 완성 질의와 같은 이유로 여기서 reject 하지 않는다 — 폴링 하나가 늦었다고 Electron 이
+      // 메인 로그를 오류로 뒤덮으면 진짜 문제가 묻힌다. 결과에 담아 보낸다.
+      try {
+        return await ctx.coreManager.collectHostMetrics(sessionId, options);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[host-metrics] ${message} (session=${sessionId})`);
+        return { supported: false, sample: null, message };
+      }
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.ssh.respondKeyboardInteractive,
     async (_event, input: KeyboardInteractiveRespondInput) => {
       await ctx.coreManager.respondKeyboardInteractive(input);

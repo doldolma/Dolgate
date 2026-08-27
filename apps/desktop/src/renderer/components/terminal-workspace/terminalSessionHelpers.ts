@@ -97,6 +97,37 @@ export function canShareSessionTab(
   return tab?.source === 'host' && !tab.tmux;
 }
 
+/**
+ * 이 세션의 자원·프로세스를 읽어도 되는가.
+ *
+ * 지표는 대화형 PTY 가 아니라 **보조 채널**에서 읽는다. 그래서 답은 늘 "그 보조 채널이 사는
+ * 기계" 다 — 로컬 터미널에서 `ssh prod` 를 쳐도 패널은 계속 이 기계를 보여주는데, 그건 못
+ * 고치는 것이 아니라 그것이 맞는 답이다(사용자가 PTY 안에서 옮겨간 것이고, 앱은 그 탭을
+ * 여전히 로컬 터미널이라고 부르고 있다).
+ *
+ * **ECS exec 만 뺀다.** 그 탭은 `호스트 · 서비스 · 컨테이너` 라는 이름을 **앱이** 붙여 만든
+ * 것인데, 전송은 로컬(`aws ecs execute-command` 를 이 기계에서 띄운다)이라 보조 채널도 이
+ * 기계다. 사용자가 아무 데도 가지 않았는데 탭 이름과 자원 섹션이 서로 다른 기계를 가리키게
+ * 된다. 컨테이너의 진짜 지표를 보여줄 길은 없다 — PTY 가 하나뿐이라 보조 채널을 못 연다.
+ * 그래서 "이 세션에서는 지표를 읽지 않습니다" 로 둔다.
+ *
+ * tmux pane 은 control 세션이 따로 재고 있어 여기서 다시 재지 않는다.
+ */
+export function canReadHostMetrics(
+  tab:
+    | { source?: string | null; status?: string | null; shellKind?: string | null; tmux?: unknown }
+    | null
+    | undefined,
+): boolean {
+  if (!tab || tab.status !== 'connected' || tab.tmux) {
+    return false;
+  }
+  if (tab.source !== 'host' && tab.source !== 'local') {
+    return false;
+  }
+  return tab.shellKind !== 'aws-ecs-exec';
+}
+
 export function mergeSessionShareSnapshotKinds(
   currentKind: SessionShareSnapshotInput['kind'] | null,
   nextKind: SessionShareSnapshotInput['kind'],

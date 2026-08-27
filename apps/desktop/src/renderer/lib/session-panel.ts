@@ -286,10 +286,22 @@ export function isAtPrompt(blocks: readonly Pick<SessionPanelHistoryItem, 'state
 }
 
 /**
+ * Windows 실행 파일 경로. 드라이브 문자(`C:\…`)와 UNC(`\\서버\…`) 둘 다.
+ *
+ * 여기서 공백으로 자르면 안 된다 — `C:\Program Files\…` 가 흔해서, 첫 공백에서 자르면
+ * 프로그램이 `C:\Program` 이 되고 **정작 이름이 인자 칸으로 밀려난다.** 그 칸은 잘리는
+ * 자리라 목록이 `C:\Program Files\Google\Ch…` 로만 채워졌다. Windows 프로세스는 이미지
+ * 경로만 오고 인자가 붙지 않으므로(코어의 QueryFullProcessImageName), 통째로 경로로 본다.
+ */
+const WINDOWS_IMAGE_PATH = /^(?:[A-Za-z]:\\|\\\\)/;
+
+/**
  * `ps` 의 명령 문자열을 **프로그램**과 **인자**로 나눈다 — 목록에서 훑을 때 이름이 먼저 보이게.
  *
  * 절대 경로일 때만 마지막 조각을 취한다. 무조건 `/` 뒤를 취하면 커널 스레드(`[kworker/0:1]`)나
  * 인자에 경로가 섞인 이름이 엉뚱하게 잘린다.
+ *
+ * 전체 경로는 행의 tooltip 이 그대로 들고 있다 — 여기서 버리는 것이 아니라 자리를 옮기는 것이다.
  */
 export function splitProcessCommand(command: string): {
   program: string;
@@ -298,6 +310,11 @@ export function splitProcessCommand(command: string): {
   const trimmed = command.trim();
   if (!trimmed) {
     return { program: '', args: '' };
+  }
+  if (WINDOWS_IMAGE_PATH.test(trimmed)) {
+    const separator = Math.max(trimmed.lastIndexOf('\\'), trimmed.lastIndexOf('/'));
+    const base = trimmed.slice(separator + 1);
+    return { program: base || trimmed, args: '' };
   }
   const boundary = trimmed.search(/\s/);
   const head = boundary === -1 ? trimmed : trimmed.slice(0, boundary);

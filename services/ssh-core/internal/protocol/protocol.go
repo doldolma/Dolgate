@@ -73,6 +73,7 @@ const (
 	CommandTerminalAutocompleteRefresh = coretypes.CommandTerminalAutocompleteRefresh
 	CommandTerminalAutocompleteStop    = coretypes.CommandTerminalAutocompleteStop
 	CommandTerminalCompletionQuery     = coretypes.CommandTerminalCompletionQuery
+	CommandHostMetricsQuery            = coretypes.CommandHostMetricsQuery
 	CommandShellIntegrationInstall     = coretypes.CommandShellIntegrationInstall
 	CommandShellIntegrationReinject    = coretypes.CommandShellIntegrationReinject
 	CommandRunCommand                  = coretypes.CommandRunCommand
@@ -137,6 +138,7 @@ const (
 	EventTerminalAutocompleteSnapshot   = coretypes.EventTerminalAutocompleteSnapshot
 	EventTerminalAutocompleteShellState = coretypes.EventTerminalAutocompleteShellState
 	EventTerminalCompletionResult       = coretypes.EventTerminalCompletionResult
+	EventHostMetricsResult              = coretypes.EventHostMetricsResult
 	EventRunCommandResult               = coretypes.EventRunCommandResult
 	EventMoshState                      = coretypes.EventMoshState
 	EventAgentForwardingStatus          = coretypes.EventAgentForwardingStatus
@@ -178,6 +180,8 @@ type TerminalAutocompleteSnapshotPayload = coretypes.TerminalAutocompleteSnapsho
 type TerminalAutocompleteShellStatePayload = coretypes.TerminalAutocompleteShellStatePayload
 type TerminalCompletionQueryPayload = coretypes.TerminalCompletionQueryPayload
 type TerminalCompletionResultPayload = coretypes.TerminalCompletionResultPayload
+type HostMetricsQueryPayload = coretypes.HostMetricsQueryPayload
+type HostMetricsResultPayload = coretypes.HostMetricsResultPayload
 type RunCommandPayload = coretypes.RunCommandPayload
 type RunCommandResultPayload = coretypes.RunCommandResultPayload
 type TerminalAutocompleteExecutable = coretypes.TerminalAutocompleteExecutable

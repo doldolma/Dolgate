@@ -731,6 +731,170 @@ export function parseHostMetricsSample(output: string, atMs: number): HostMetric
   };
 }
 
+/** 코어가 네이티브로 읽어 보내는 문서의 표식. Go 쪽 hostmetrics.SampleKind 와 짝이다. */
+const NATIVE_SAMPLE_KIND = 'host-metrics-v1';
+
+/**
+ * 코어가 직접 읽어 온 지표를 샘플로 옮긴다.
+ *
+ * 로컬 세션에서만 온다 — 그 "호스트" 는 앱이 도는 바로 그 기계라 셸에 물어볼 것이 없고,
+ * Windows 에는 애초에 그 POSIX 스크립트를 돌릴 셸이 없다. 셸 출력을 파싱하는 위쪽 경로와
+ * 도착지가 같으므로(HostMetricsSample) 아래 계산·차트는 어느 쪽에서 왔는지 알 필요가 없다.
+ *
+ * **모양이 다르면 null 이다.** 코어가 낡았거나(구버전 바이너리) 문서가 바뀌었으면 조용히
+ * 셸 경로로 돌아가는 편이, 반쯤 읽은 값으로 그럴듯한 거짓 그래프를 그리는 것보다 낫다.
+ */
+export function readNativeHostMetricsSample(
+  document: unknown,
+  atMs: number,
+): HostMetricsSample | null {
+  if (!document || typeof document !== 'object') {
+    return null;
+  }
+  const raw = document as Record<string, unknown>;
+  if (raw.kind !== NATIVE_SAMPLE_KIND) {
+    return null;
+  }
+  const cpu = raw.cpu as { kind?: unknown; busy?: unknown; total?: unknown } | null;
+  return {
+    atMs,
+    cpu:
+      cpu && cpu.kind === 'ticks' && isFiniteNumber(cpu.busy) && isFiniteNumber(cpu.total)
+        ? { kind: 'ticks', busy: cpu.busy, total: cpu.total }
+        : null,
+    memTotalKb: toFiniteOrNull(raw.memTotalKb),
+    memAvailableKb: toFiniteOrNull(raw.memAvailableKb),
+    // 코어가 이미 걸러서 준다(루프백·NDIS 필터 모듈). 여기서 또 거르지 않는다 — 리눅스의
+    // netdev 판정에 해당하는 일을 그쪽에서 플래그로 하고 있다.
+    net: readCounterMap(raw.net, (counter) =>
+      isFiniteNumber(counter.rxBytes) && isFiniteNumber(counter.txBytes)
+        ? { rxBytes: counter.rxBytes, txBytes: counter.txBytes }
+        : null,
+    ),
+    diskIo: readCounterMap(raw.diskIo, (counter) =>
+      isFiniteNumber(counter.readBytes) && isFiniteNumber(counter.writeBytes)
+        ? { readBytes: counter.readBytes, writeBytes: counter.writeBytes }
+        : null,
+    ),
+    loadAvg1: toFiniteOrNull(raw.loadAvg1),
+    uptimeSeconds: toFiniteOrNull(raw.uptimeSeconds),
+    cpuCount: toFiniteOrNull(raw.cpuCount),
+    disks: readDiskUsage(raw.disks),
+  };
+}
+
+/** 네이티브 문서의 프로세스 목록. 요청하지 않은 왕복이면 null(빈 목록과 구분한다). */
+export function readNativeHostProcesses(document: unknown): HostProcess[] | null {
+  if (!document || typeof document !== 'object') {
+    return null;
+  }
+  const list = (document as Record<string, unknown>).processes;
+  if (!Array.isArray(list)) {
+    return null;
+  }
+  const processes: HostProcess[] = [];
+  for (const entry of list) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const raw = entry as Record<string, unknown>;
+    if (!isFiniteNumber(raw.pid)) {
+      continue;
+    }
+    processes.push({
+      pid: raw.pid,
+      user: typeof raw.user === 'string' ? raw.user : '',
+      cpuPercent: isFiniteNumber(raw.cpuPercent) ? raw.cpuPercent : 0,
+      memPercent: isFiniteNumber(raw.memPercent) ? raw.memPercent : 0,
+      rssKb: toFiniteOrNull(raw.rssKb),
+      command: typeof raw.command === 'string' ? raw.command : '',
+    });
+  }
+  return processes;
+}
+
+/** 네이티브 문서의 정적 정보. 요청하지 않은 왕복이면 null. */
+export function readNativeHostSystemInfo(document: unknown): HostSystemInfo | null {
+  if (!document || typeof document !== 'object') {
+    return null;
+  }
+  const system = (document as Record<string, unknown>).system;
+  if (!system || typeof system !== 'object') {
+    return null;
+  }
+  const raw = system as Record<string, unknown>;
+  const text = (value: unknown): string | null =>
+    typeof value === 'string' && value.trim() !== '' ? value : null;
+  return {
+    hostname: text(raw.hostname),
+    kernel: text(raw.kernel),
+    arch: text(raw.arch),
+    cpuModel: text(raw.cpuModel),
+  };
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function toFiniteOrNull(value: unknown): number | null {
+  return isFiniteNumber(value) ? value : null;
+}
+
+function readCounterMap<T>(
+  value: unknown,
+  read: (counter: Record<string, unknown>) => T | null,
+): Record<string, T> | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  // 프로토타입 없이 만드는 이유는 parseNet 과 같다 — 차분이 "이전 샘플에 없던 장치" 를
+  // undefined 로 판정하는데, 평범한 객체에는 constructor 같은 이름이 이미 있다.
+  const entries: Record<string, T> = Object.create(null);
+  let matched = false;
+  for (const [name, counter] of Object.entries(value as Record<string, unknown>)) {
+    if (!counter || typeof counter !== 'object') {
+      continue;
+    }
+    const parsed = read(counter as Record<string, unknown>);
+    if (parsed === null) {
+      continue;
+    }
+    entries[name] = parsed;
+    matched = true;
+  }
+  return matched ? entries : null;
+}
+
+function readDiskUsage(value: unknown): HostDiskUsage[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const disks: HostDiskUsage[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const raw = entry as Record<string, unknown>;
+    if (
+      typeof raw.mount !== 'string' ||
+      !isFiniteNumber(raw.totalKb) ||
+      !isFiniteNumber(raw.usedKb) ||
+      !isFiniteNumber(raw.availableKb)
+    ) {
+      continue;
+    }
+    disks.push({
+      mount: raw.mount,
+      usedKb: raw.usedKb,
+      totalKb: raw.totalKb,
+      availableKb: raw.availableKb,
+    });
+  }
+  // 셸 경로와 같이 큰 것부터 — 루트만 보면 정작 데이터 볼륨을 못 본다.
+  return disks.sort((left, right) => right.totalKb - left.totalKb);
+}
+
 /**
  * 업타임 초.
  *

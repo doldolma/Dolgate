@@ -10,9 +10,17 @@
 // 수집은 자동완성 generator 가 쓰는 보조 exec 채널을 그대로 쓴다. 그 채널이 없는 연결
 // (AWS SSM raw shell·mosh 등)에서는 첫 시도가 실패하고, 그때 조용히 비활성화한다 — 빈 바를
 // 계속 띄우면 고장으로 보이기 때문이다.
+//
+// **로컬 세션만 다른 길로 간다.** 그 "호스트" 는 앱이 도는 바로 그 기계라 셸에 물어볼 것이
+// 없고, Windows 에는 애초에 그 POSIX 스크립트를 돌릴 셸이 없어 자원 섹션이 통째로 비어
+// 있었다. 코어가 Win32 로 직접 읽어 주고(0.5ms), 그 길이 없는 플랫폼에서는 한 번 물어본 뒤
+// 위의 셸 경로로 돌아간다. 도착지는 양쪽 다 HostMetricsSample 이라 아래 계산은 그대로다.
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { queryTerminalCompletion } from '../services/desktop/terminal';
+import {
+  collectNativeHostMetrics,
+  queryTerminalCompletion,
+} from '../services/desktop/terminal';
 import {
   buildHostMetricsCommand,
   parseHostSystemInfoFromOutput,
@@ -21,6 +29,9 @@ import {
   hasAnyHostMetric,
   parseHostMetricsSample,
   parseHostProcessesFromOutput,
+  readNativeHostMetricsSample,
+  readNativeHostProcesses,
+  readNativeHostSystemInfo,
   type HostMetrics,
   type HostMetricsSample,
   type HostProcess,
@@ -72,12 +83,18 @@ interface Options {
   enabled: boolean;
   /** 이 탭이 화면에 보이는지. 보이지 않으면 폴링하지 않는다. */
   visible: boolean;
+  /**
+   * 이 세션이 로컬 셸인가. 그때는 코어가 이 기계를 직접 읽는다 — 원격처럼 셸에 물어볼
+   * 것이 없고, Windows 에는 그 POSIX 스크립트를 돌릴 셸이 아예 없다.
+   */
+  local?: boolean;
 }
 
 export function useHostMetrics({
   sessionId,
   enabled,
   visible,
+  local = false,
 }: Options): HostMetricsState {
   const [status, setStatus] = useState<HostMetricsStatus>('off');
   const [metrics, setMetrics] = useState<HostMetrics | null>(null);
@@ -122,6 +139,13 @@ export function useHostMetrics({
    * 그대로 실어 보내야 캐시가 유지된다(스냅샷은 매번 새로 만든다).
    */
   const systemRef = useRef<HostSystemInfo | null>(null);
+  /**
+   * 코어에 네이티브 수집을 물어봤다가 "안 한다" 를 받았는가.
+   *
+   * 답이 바뀔 일이 없는 판정(플랫폼·세션 유형)이라 한 번 받으면 그 세션에서는 다시 묻지
+   * 않는다. effect 지역 변수로 두면 주기가 바뀔 때마다(패널 열기) 되물어 왕복이 는다.
+   */
+  const nativeUnavailableRef = useRef(false);
   /** 위 ref 들이 **어느 세션의 것인지**. 세션이 바뀌면 여기서 갈라 낸다. */
   const refsSessionRef = useRef<string | null>(null);
 
@@ -133,6 +157,7 @@ export function useHostMetrics({
       previousSampleRef.current = null;
       processesRef.current = null;
       systemRef.current = null;
+      nativeUnavailableRef.current = false;
       refsSessionRef.current = sessionId ?? null;
       if (sessionId) {
         clearHostMetrics(sessionId);
@@ -150,6 +175,7 @@ export function useHostMetrics({
       previousSampleRef.current = null;
       processesRef.current = null;
       systemRef.current = null;
+      nativeUnavailableRef.current = false;
       refsSessionRef.current = sessionId;
     }
 
@@ -202,18 +228,64 @@ export function useHostMetrics({
       }, delayMs);
     };
 
+    /**
+     * 이번 왕복에서 읽어 온 것. 셸에서 왔든 코어가 직접 읽었든 도착지는 같다.
+     */
+    type Reading = {
+      sample: HostMetricsSample;
+      processes: HostProcess[] | null;
+      system: HostSystemInfo | null;
+    };
+
+    /**
+     * 로컬 세션은 코어가 이 기계를 직접 읽는다.
+     *
+     * 로컬 터미널의 "호스트" 는 앱이 도는 바로 그 기계라 셸에 물어볼 것이 없고, Windows 에는
+     * 애초에 그 POSIX 스크립트를 돌릴 셸이 없어 자원 섹션이 통째로 비어 있었다.
+     *
+     * 한 번 `supported: false` 를 받으면 **이 세션에서는 다시 묻지 않는다** — 답이 바뀔 일이
+     * 없는 판정(플랫폼·세션 유형)이라 폴링마다 되물으면 왕복만 두 배가 된다.
+     */
+    const readNatively = async (): Promise<Reading | null> => {
+      if (!local || nativeUnavailableRef.current) {
+        return null;
+      }
+      const native = await collectNativeHostMetrics(sessionId, {
+        processLimit,
+        system: wantsSystem,
+      });
+      const sample = native.supported
+        ? readNativeHostMetricsSample(native.sample, Date.now())
+        : null;
+      if (!sample) {
+        // 코어가 못 읽거나(유닉스) 문서 모양이 낯설면 셸 경로로 돌아간다. 반쯤 읽은 값으로
+        // 그럴듯한 거짓 그래프를 그리는 것보다 낫다.
+        nativeUnavailableRef.current = true;
+        return null;
+      }
+      return {
+        sample,
+        processes: processLimit > 0 ? readNativeHostProcesses(native.sample) : null,
+        system: wantsSystem ? readNativeHostSystemInfo(native.sample) : null,
+      };
+    };
+
     const poll = async (): Promise<void> => {
       if (cancelled) {
         return;
       }
+      let reading: Reading | null = null;
       let stdout: string;
       try {
-        stdout = await queryTerminalCompletion(
-          sessionId,
-          buildHostMetricsCommand({ processLimit, system: wantsSystem }),
-          // 스스로 도는 폴링이다 — 두 번째 보조 채널에서 돌려 자동완성을 막지 않는다.
-          { background: true },
-        );
+        reading = await readNatively();
+        stdout = reading
+          ? ''
+          : await queryTerminalCompletion(
+              sessionId,
+              buildHostMetricsCommand({ processLimit, system: wantsSystem }),
+              // 스스로 도는 폴링이다 — 두 번째 보조 채널에서 돌려 자동완성을 막지 않는다.
+              { background: true },
+            );
       } catch {
         if (cancelled) {
           return;
@@ -241,7 +313,7 @@ export function useHostMetrics({
         return;
       }
 
-      const sample = parseHostMetricsSample(stdout, Date.now());
+      const sample = reading?.sample ?? parseHostMetricsSample(stdout, Date.now());
       if (!hasAnyHostMetric(sample)) {
         // 명령은 돌았는데 읽어낼 게 없다 = 리눅스가 아니거나 /proc 이 없다.
         // 재시도해도 같으므로 이 세션에서는 끝낸다.
@@ -252,10 +324,18 @@ export function useHostMetrics({
 
       failures = 0;
       // 요청하지 않았으면 null 이 되어 UI 가 "요청 안 함" 과 "못 읽음" 을 구분할 수 있다.
-      processesRef.current = processLimit > 0 ? parseHostProcessesFromOutput(stdout) : null;
+      processesRef.current = reading
+        ? reading.processes
+        : processLimit > 0
+          ? parseHostProcessesFromOutput(stdout)
+          : null;
       // 정적 정보는 받은 것만 덮어쓴다 — 요청하지 않은 왕복에서 null 로 지우면 캐시가 날아가
       // 매번 다시 묻게 된다.
-      const system = wantsSystem ? parseHostSystemInfoFromOutput(stdout) : null;
+      const system = reading
+        ? reading.system
+        : wantsSystem
+          ? parseHostSystemInfoFromOutput(stdout)
+          : null;
       if (system) {
         systemRef.current = system;
       }

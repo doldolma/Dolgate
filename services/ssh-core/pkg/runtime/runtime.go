@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 	containersvc "dolssh/services/ssh-core/internal/containers"
 	"dolssh/services/ssh-core/internal/forwarding"
 	"dolssh/services/ssh-core/internal/hostkeytrust"
+	"dolssh/services/ssh-core/internal/hostmetrics"
 	"dolssh/services/ssh-core/internal/localsession"
 	"dolssh/services/ssh-core/internal/moshsession"
 	"dolssh/services/ssh-core/internal/serialsession"
@@ -621,6 +623,55 @@ func (runtime *Runtime) RunCompletionQuery(
 			Truncated: truncated,
 			Failed:    failed,
 		},
+	})
+	return nil
+}
+
+// CollectHostMetrics reads this machine's resource usage natively and emits the
+// result correlated by requestID.
+//
+// Only local sessions are answered. A local terminal's host is the machine the
+// app runs on, so the numbers are right here — the shell round trip that remote
+// sessions need buys nothing, and on Windows there is no shell that can run the
+// POSIX script at all. Every other session type gets Supported=false and keeps
+// using TerminalCompletionQuery.
+//
+// Like the completion query this is best-effort: a failure is reported inside
+// the payload and never as a session-scoped error event, which would tear the
+// terminal down over a metrics poll.
+func (runtime *Runtime) CollectHostMetrics(
+	sessionID, requestID string,
+	processLimit int,
+	system bool,
+) error {
+	payload := coretypes.HostMetricsResultPayload{}
+	switch {
+	case !runtime.local.HasSession(sessionID):
+		// 원격 세션이다. 여기서 읽으면 이 기계의 숫자를 저쪽 것이라고 말하게 된다.
+	case !hostmetrics.Supported():
+		// 유닉스 빌드다. 셸 경로가 그대로 산다.
+	default:
+		sample, err := hostmetrics.Collect(hostmetrics.Options{
+			ProcessLimit: processLimit,
+			System:       system,
+		})
+		if err != nil {
+			payload.Error = err.Error()
+			break
+		}
+		encoded, err := json.Marshal(sample)
+		if err != nil {
+			payload.Error = err.Error()
+			break
+		}
+		payload.Supported = true
+		payload.Sample = encoded
+	}
+	runtime.emitEvent(coretypes.Event{
+		Type:      coretypes.EventHostMetricsResult,
+		RequestID: requestID,
+		SessionID: sessionID,
+		Payload:   payload,
 	})
 	return nil
 }

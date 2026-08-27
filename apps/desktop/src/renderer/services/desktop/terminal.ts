@@ -70,6 +70,19 @@ export async function queryTerminalCompletion(
   return result.stdout;
 }
 
+/**
+ * 코어가 이 기계의 자원을 직접 읽어 돌려준다(로컬 세션 전용).
+ *
+ * `supported: false` 는 실패가 아니라 답이다 — 이 플랫폼이나 세션 유형에서는 네이티브로
+ * 읽지 않으니 셸 경로로 돌아가라는 뜻이다. 호출부가 그 판정을 세션 단위로 기억한다.
+ */
+export async function collectNativeHostMetrics(
+  sessionId: string,
+  options?: { processLimit?: number; system?: boolean },
+): Promise<{ supported: boolean; sample: unknown | null }> {
+  const result = await desktopApi.ssh.collectHostMetrics(sessionId, options);
+  return { supported: result.supported === true, sample: result.sample ?? null };
+}
 export function tmuxSplitPane(sessionId: string, direction: 'h' | 'v') {
   return desktopApi.ssh.tmuxSplitPane(sessionId, direction);
 }

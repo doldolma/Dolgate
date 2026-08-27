@@ -65,13 +65,33 @@ const SAFE_AREA_METRICS = {
   insets: { top: 47, left: 0, right: 0, bottom: 34 },
 };
 
+/**
+ * 이 파일이 띄운 트리들. **테스트마다 걷어내야 한다.**
+ *
+ * 남겨 두면 다음 테스트의 `useMobileAppStore.setState` 가 아직 붙어 있는 옛 트리까지 전부
+ * 다시 그리고, 그 렌더는 act() 밖이라 React 가 경고를 찍는다. 테스트는 통과하는데 로그만
+ * 2000줄 넘게 빨갛게 쌓여서 진짜 오류를 덮었다.
+ */
+const mountedTrees: renderer.ReactTestRenderer[] = [];
+
 function render(): renderer.ReactTestRenderer {
-  return renderer.create(
+  const tree = renderer.create(
     <SafeAreaProvider initialMetrics={SAFE_AREA_METRICS}>
       <HostFormScreen />
     </SafeAreaProvider>,
   );
+  mountedTrees.push(tree);
+  return tree;
 }
+
+// 걷어내는 것도 렌더라 act() 안에서 한다 — 밖에서 하면 그것이 또 경고가 된다.
+afterEach(() => {
+  act(() => {
+    while (mountedTrees.length > 0) {
+      mountedTrees.pop()?.unmount();
+    }
+  });
+});
 
 function resetStore(hosts: HostRecord[] = []): void {
   useMobileAppStore.setState({

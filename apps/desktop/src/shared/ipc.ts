@@ -269,6 +269,7 @@ export type CoreCommandType =
   | "terminalAutocompleteRefresh"
   | "terminalAutocompleteStop"
   | "terminalCompletionQuery"
+  | "hostMetricsQuery"
   | "terminalShellIntegrationInstall"
   | "terminalShellIntegrationReinject"
   | "runCommand"
@@ -535,6 +536,7 @@ export type CoreEventType =
   | "terminalAutocompleteSnapshot"
   | "terminalAutocompleteShellState"
   | "terminalCompletionResult"
+  | "hostMetricsResult"
   | "runCommandResult"
   | "moshState"
   | "agentForwardingStatus"
@@ -1620,6 +1622,19 @@ export interface DesktopApi {
       command: string,
       options?: { background?: boolean; elevate?: boolean },
     ) => Promise<{ stdout: string; failed?: boolean; message?: string }>;
+    /**
+     * 이 기계의 자원을 코어가 직접 읽어 온다(로컬 세션 전용).
+     *
+     * 로컬 터미널의 "호스트" 는 앱이 도는 바로 그 기계라 셸에 물어볼 것이 없고, Windows 에는
+     * 애초에 `queryCompletion` 이 돌릴 POSIX 셸이 없어 자원 섹션이 통째로 비어 있었다.
+     *
+     * `supported: false` 는 실패가 아니라 답이다 — 이 플랫폼(유닉스)이나 세션 유형에서는
+     * 네이티브로 읽지 않으니 셸 경로로 돌아가라는 뜻이다.
+     */
+    collectHostMetrics: (
+      sessionId: string,
+      options?: { processLimit?: number; system?: boolean },
+    ) => Promise<{ supported: boolean; sample: unknown | null; message?: string }>;
     respondKeyboardInteractive: (
       input: KeyboardInteractiveRespondInput,
     ) => Promise<void>;

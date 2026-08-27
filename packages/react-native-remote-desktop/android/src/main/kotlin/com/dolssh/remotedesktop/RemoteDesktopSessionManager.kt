@@ -819,7 +819,11 @@ object RemoteDesktopSessionManager {
         attachedTextureView(state)?.notifyFrameAvailable()
     }
 
-    private fun handleError(sessionId: String, message: String, failure: String?) {
+    // failure 는 **코어가 판정한 원인 코드**라 없을 수 있다 — 프레임버퍼 한도 초과나 커서 검증
+    // 실패처럼 이쪽에서 자체 판단한 오류에는 코드가 없다. 그래서 기본값을 둔다(handleClosed 와
+    // 같은 모양). null 이면 아래에서 필드를 붙이지 않으므로 payload 는 예전과 같고, iOS 도 코어의
+    // "error" 이벤트에서만 failure 를 싣는다.
+    private fun handleError(sessionId: String, message: String, failure: String? = null) {
         val state = sessions[sessionId]
         state?.lock?.lock()
         try {

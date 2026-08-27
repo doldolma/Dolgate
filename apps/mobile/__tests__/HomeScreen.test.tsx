@@ -113,6 +113,31 @@ function createAuthenticatedState(): AuthState {
   };
 }
 
+/**
+ * 이 파일이 띄운 트리들. **테스트마다 걷어내야 한다.**
+ *
+ * 남겨 두면 다음 테스트의 `useMobileAppStore.setState` 가 아직 붙어 있는 옛 트리까지 전부
+ * 다시 그리고, 그 렌더는 act() 밖이라 React 가 경고를 찍는다. 테스트는 통과하는데 로그만
+ * 빨갛게 쌓여서 진짜 오류를 덮었다. 개별 테스트의 unmount 에 맡기면 하나 빠뜨리는 순간
+ * 다시 그렇게 된다(실제로 21번 띄우고 19번만 걷어내고 있었다).
+ */
+const mountedTrees: renderer.ReactTestRenderer[] = [];
+
+function renderHome(): renderer.ReactTestRenderer {
+  const tree = renderer.create(<HomeScreen />);
+  mountedTrees.push(tree);
+  return tree;
+}
+
+// 걷어내는 것도 렌더라 act() 안에서 한다 — 밖에서 하면 그것이 또 경고가 된다.
+afterEach(() => {
+  act(() => {
+    while (mountedTrees.length > 0) {
+      mountedTrees.pop()?.unmount();
+    }
+  });
+});
+
 describe("HomeScreen group browsing", () => {
   const groups: GroupRecord[] = [
     {
@@ -280,7 +305,7 @@ describe("HomeScreen group browsing", () => {
     let tree: renderer.ReactTestRenderer;
 
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     const text = collectText(tree!.toJSON());
@@ -330,7 +355,7 @@ describe("HomeScreen group browsing", () => {
 
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     const text = collectText(tree!.toJSON());
@@ -372,7 +397,7 @@ describe("HomeScreen group browsing", () => {
 
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     const text = collectText(tree!.toJSON());
@@ -392,7 +417,7 @@ describe("HomeScreen group browsing", () => {
     let tree: renderer.ReactTestRenderer;
 
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     const text = collectText(tree!.toJSON()).join(" ");
@@ -422,7 +447,7 @@ describe("HomeScreen group browsing", () => {
 
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     // 루트: 즐겨찾기 카드가 첫 그룹보다 앞. 호스트 자체는 아직 목록에 없다.
@@ -467,7 +492,7 @@ describe("HomeScreen group browsing", () => {
     let tree: renderer.ReactTestRenderer;
 
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     const text = collectText(tree!.toJSON());
@@ -486,7 +511,7 @@ describe("HomeScreen group browsing", () => {
     let tree: renderer.ReactTestRenderer;
 
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     const serversButton = tree!.root.findByProps({
@@ -539,7 +564,7 @@ describe("HomeScreen group browsing", () => {
     let tree: renderer.ReactTestRenderer;
 
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     await act(async () => {
@@ -594,7 +619,7 @@ describe("HomeScreen group browsing", () => {
     let tree: renderer.ReactTestRenderer;
 
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     await act(async () => {
@@ -645,7 +670,7 @@ describe("HomeScreen group browsing", () => {
     let tree: renderer.ReactTestRenderer;
 
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     await act(async () => {
@@ -693,7 +718,7 @@ describe("HomeScreen group browsing", () => {
     let tree: renderer.ReactTestRenderer;
 
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     await act(async () => {
@@ -741,7 +766,7 @@ describe("HomeScreen group browsing", () => {
 
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     const text = tree!.root
@@ -764,7 +789,7 @@ describe("HomeScreen group browsing", () => {
   it("closes the group sheet before opening the rename prompt", async () => {
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     const groupCard = tree!.root.findAll(
@@ -809,7 +834,7 @@ describe("HomeScreen group browsing", () => {
 
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     // 루트에 호스트는 Root Host 하나뿐이다(나머지는 그룹 안).
@@ -865,7 +890,7 @@ describe("HomeScreen group browsing", () => {
   it("navigates to the host form from the add button", async () => {
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     const addButton = tree!.root.findAll(
@@ -917,7 +942,7 @@ describe("HomeScreen group browsing", () => {
 
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     // 호스트 카드를 감싼 줄을 찾는다. 그룹 카드에는 스와이프를 붙이지 않았다.
@@ -964,7 +989,7 @@ describe("HomeScreen group browsing", () => {
 
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     // 그룹 카드도 길게 누를 수 있으므로(그룹 편집) 라벨로 호스트를 집는다.
@@ -1046,7 +1071,7 @@ describe("HomeScreen group browsing", () => {
 
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     const searchInput = tree!.root.findByType(TextInput);
@@ -1090,7 +1115,7 @@ describe("HomeScreen group browsing", () => {
 
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     const searchInput = tree!.root.findByType(TextInput);
@@ -1132,7 +1157,7 @@ describe("HomeScreen group browsing", () => {
   it("jumps to a settings section from the search field", async () => {
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     const searchInput = tree!.root.findByType(TextInput);
@@ -1170,7 +1195,7 @@ describe("HomeScreen group browsing", () => {
   it("does not add per-host action rows next to the cards", async () => {
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HomeScreen />);
+      tree = renderHome();
     });
 
     const searchInput = tree!.root.findByType(TextInput);

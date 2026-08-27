@@ -53,6 +53,7 @@ type coreRuntime interface {
 	RefreshAutocomplete(sessionID, requestID string) error
 	StopAutocomplete(sessionID string)
 	RunCompletionQuery(sessionID, requestID, command string, background, elevate bool) error
+	CollectHostMetrics(sessionID, requestID string, processLimit int, system bool) error
 	RunCommand(sessionID, requestID, command string, timeoutMs int) error
 	InstallShellIntegration(sessionID string) error
 	ReinjectShellIntegration(sessionID string, shell string) error
@@ -460,6 +461,19 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 		go func() {
 			_ = core.RunCompletionQuery(
 				request.SessionID, request.ID, payload.Command, payload.Background, payload.Elevate,
+			)
+		}()
+		return nil
+	case protocol.CommandHostMetricsQuery:
+		var payload protocol.HostMetricsQueryPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		// 완성 질의와 같이 best-effort 다 — 지표 폴링 하나가 세션 오류를 올려 터미널을 내리는
+		// 일은 없어야 한다. CollectHostMetrics 가 언제나 자기 결과 이벤트를 낸다.
+		go func() {
+			_ = core.CollectHostMetrics(
+				request.SessionID, request.ID, payload.ProcessLimit, payload.System,
 			)
 		}()
 		return nil

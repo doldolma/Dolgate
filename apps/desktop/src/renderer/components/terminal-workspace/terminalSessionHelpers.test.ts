@@ -3,6 +3,7 @@ import type { TerminalTab } from "@shared";
 import { t } from "../../i18n";
 import { resolveConnectionFailurePresentation } from "../../store/utils";
 import {
+  canReadHostMetrics,
   resolveAwsFailureNotice,
   resolveConnectionOverlayMessage,
   resolveConnectionOverlayTitle,
@@ -249,5 +250,49 @@ describe("resolveAwsFailureNotice", () => {
       errorMessage: "[SSM 터널 열기] AccessDeniedException",
     });
     expect(notice?.action).toContain("ssm:StartSession");
+  });
+});
+
+/**
+ * 지표는 대화형 PTY 가 아니라 보조 채널에서 읽는다 — 답은 늘 "그 채널이 사는 기계" 다.
+ */
+describe("canReadHostMetrics", () => {
+  const connected = { source: "host", status: "connected" } as const;
+
+  it("붙어 있는 원격·로컬 세션은 읽는다", () => {
+    expect(canReadHostMetrics(connected)).toBe(true);
+    expect(canReadHostMetrics({ source: "local", status: "connected" })).toBe(true);
+  });
+
+  /**
+   * ECS exec 탭은 `호스트 · 서비스 · 컨테이너` 라는 이름을 **앱이** 붙여 만든 것인데,
+   * 전송은 로컬이라 보조 채널도 이 기계다. 사용자가 아무 데도 가지 않았는데 탭 이름과
+   * 자원 섹션이 서로 다른 기계를 가리키게 된다.
+   */
+  it("ECS exec 은 읽지 않는다 — 탭 이름이 가리키는 곳과 다른 기계가 나온다", () => {
+    expect(
+      canReadHostMetrics({
+        source: "local",
+        status: "connected",
+        shellKind: "aws-ecs-exec",
+      }),
+    ).toBe(false);
+  });
+
+  // 로컬 터미널에서 사용자가 직접 ssh 로 옮겨간 것은 다르다 — 앱은 그 탭을 여전히 로컬
+  // 터미널이라고 부르고 있고, 이 기계를 보여주는 것이 맞는 답이다.
+  it("로컬 셸은 셸 종류와 무관하게 읽는다", () => {
+    for (const shellKind of ["pwsh", "powershell", "cmd", "zsh", "shell"]) {
+      expect(canReadHostMetrics({ source: "local", status: "connected", shellKind })).toBe(
+        true,
+      );
+    }
+  });
+
+  it("붙지 않았거나 tmux pane 이면 읽지 않는다", () => {
+    expect(canReadHostMetrics({ ...connected, status: "connecting" })).toBe(false);
+    expect(canReadHostMetrics({ ...connected, tmux: { paneId: "%0" } })).toBe(false);
+    expect(canReadHostMetrics(null)).toBe(false);
+    expect(canReadHostMetrics({ source: "serial", status: "connected" })).toBe(false);
   });
 });

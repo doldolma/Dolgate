@@ -1807,3 +1807,76 @@ describe("CoreManager.queryCompletion", () => {
     await expect(pending).rejects.toThrow();
   });
 });
+
+/**
+ * 로컬 터미널의 "호스트" 는 앱이 도는 바로 그 기계다. 셸에 물어볼 것이 없고, Windows 에는
+ * 그 POSIX 스크립트를 돌릴 셸이 아예 없어 자원 섹션이 통째로 비어 있었다.
+ */
+describe("CoreManager.collectHostMetrics", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  async function startLocalSession() {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const manager = new CoreManager();
+    const window = createFakeWindow(101);
+    manager.registerWindow(window as never);
+    const { sessionId } = await manager.runWithSessionOwner(101, () =>
+      manager.connectLocalSession({ cols: 80, rows: 24, title: "Terminal" }),
+    );
+    return { manager, fakeProcess, sessionId };
+  }
+
+  it("요청 옵션을 그대로 넘기고 표본을 돌려준다", async () => {
+    const { manager, fakeProcess, sessionId } = await startLocalSession();
+    const before = fakeProcess.writes.length;
+    const pending = manager.collectHostMetrics(sessionId, {
+      processLimit: 12,
+      system: true,
+    });
+    await waitForWriteCount(fakeProcess.writes, before + 1);
+    const request = decodeControlFrame(fakeProcess.writes.at(-1)!);
+    expect(request.type).toBe("hostMetricsQuery");
+    expect(request.payload).toMatchObject({ processLimit: 12, system: true });
+
+    fakeProcess.emitControl({
+      type: "hostMetricsResult",
+      requestId: request.id,
+      sessionId,
+      payload: { supported: true, sample: { kind: "host-metrics-v1", cpuCount: 16 } },
+    } as never);
+    await expect(pending).resolves.toEqual({
+      supported: true,
+      sample: { kind: "host-metrics-v1", cpuCount: 16 },
+    });
+  });
+
+  // 유닉스 빌드가 이렇게 답한다. 실패가 아니라 "셸 경로로 돌아가라" 는 답이다.
+  it("코어가 안 한다고 하면 표본 없이 그렇게 알린다", async () => {
+    const { manager, fakeProcess, sessionId } = await startLocalSession();
+    const before = fakeProcess.writes.length;
+    const pending = manager.collectHostMetrics(sessionId);
+    await waitForWriteCount(fakeProcess.writes, before + 1);
+    const request = decodeControlFrame(fakeProcess.writes.at(-1)!);
+    fakeProcess.emitControl({
+      type: "hostMetricsResult",
+      requestId: request.id,
+      sessionId,
+      payload: { supported: false },
+    } as never);
+    await expect(pending).resolves.toEqual({ supported: false, sample: null });
+  });
+
+  // 원격 세션에 답하면 이 기계의 숫자를 저쪽 것이라고 말하게 된다. 코어를 건드리지도 않는다.
+  it("로컬 세션이 아니면 코어에 묻지 않는다", async () => {
+    const { manager, fakeProcess } = await startLocalSession();
+    const before = fakeProcess.writes.length;
+    await expect(manager.collectHostMetrics("session-ssh")).resolves.toEqual({
+      supported: false,
+      sample: null,
+    });
+    expect(fakeProcess.writes.length).toBe(before);
+  });
+});

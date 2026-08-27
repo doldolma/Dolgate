@@ -11,7 +11,8 @@
 //
 // 그리는 방식은 **표**다. 값이 여러 열이고 줄마다 같은 자리를 읽는 데이터라, 카드처럼 두 줄로
 // 쌓으면 숫자가 세로로 정렬되지 않아 훑기 어렵다(그렇게 두 줄로 뒀다가 되돌렸다). 사용자·메모리
-// 크기는 열로 두면 340px 에서 명령 이름이 먼저 잘리므로 행의 title 로 남긴다.
+// 크기는 열로 두면 340px 에서 명령 이름이 먼저 잘리므로, 전체 경로와 함께 이름 칸의 툴팁으로
+// 옮겼다 — 앱 Tooltip 이라 즉시 뜬다(네이티브 title 은 1초를 기다려야 했고 OS 가 그렸다).
 
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -20,7 +21,7 @@ import { useAppStore } from '../../../store/appStore';
 import { useSessionScopedState } from '../../../lib/session-scoped-state';
 import { filterByQuery, splitProcessCommand } from '../../../lib/session-panel';
 import { formatKibibytes, type HostProcess } from '../../../lib/host-metrics';
-import { Button } from '../../../ui';
+import { Button, Tooltip } from '../../../ui';
 import { SessionPanelEmpty } from './SessionPanelEmpty';
 import { SessionPanelSearch } from './SessionPanelSearch';
 import { useSessionHostMetrics } from './useSessionHostMetrics';
@@ -160,13 +161,16 @@ function cpuToneClass(percent: number): string {
 function ProcessRow({ process }: { process: HostProcess }) {
   const rss = process.rssKb === null ? null : formatKibibytes(process.rssKb);
   const { program, args } = splitProcessCommand(process.command);
+  // 이름 뒤로 감춘 것들. 전체 경로가 첫 줄이다 — 같은 이름의 프로세스를 가르는 것이 경로다.
+  const detail = [process.command, rss ? `${process.user} · ${rss}` : process.user]
+    .filter(Boolean)
+    .join('\n');
   // CPU 를 행 배경의 채움으로도 보여 준다 — 숫자만 있으면 "많이 쓰는 놈" 을 찾으려고 값을
   // 하나씩 읽어야 한다. 멀티코어에서 %CPU 는 100 을 넘을 수 있어 잘라 쓴다.
   const fill = Math.min(100, Math.max(0, process.cpuPercent));
   return (
     <tr
       className="group transition-colors hover:bg-[var(--surface-muted)]"
-      title={`${process.command}\n${rss ? `${process.user} · ${rss}` : process.user}`}
       style={{
         backgroundImage: `linear-gradient(to right, var(--selection-tint) ${fill}%, transparent ${fill}%)`,
       }}
@@ -177,13 +181,18 @@ function ProcessRow({ process }: { process: HostProcess }) {
       {/* max-w-0 이 있어야 표 안에서 truncate 가 듣는다(내용의 min-content 로 열이 벌어지지
           않게). 실제 폭은 나머지 열을 뺀 만큼 이 열이 받는다. */}
       <td className="max-w-0 px-1 py-1 align-baseline">
-        <span className="block truncate">
-          {/* 프로그램 이름과 인자를 색으로 가른다 — 목록에서 찾는 것은 늘 앞쪽이다. */}
-          <span className="font-mono font-medium text-[var(--text)]">{program}</span>
-          {args ? (
-            <span className="font-mono text-[var(--text-soft)]"> {args}</span>
-          ) : null}
-        </span>
+        {/* 전체 경로·사용자·메모리는 이 칸에 마우스를 올리면 나온다.
+            **네이티브 title 은 쓰지 않는다** — OS 가 그리는 것이라 1초 가까이 가만히 있어야
+            뜨고, 마우스가 조금만 움직여도 사라지며, 앱과 생김새가 따로 논다. */}
+        <Tooltip className="block w-full" multiline label={detail}>
+          <span className="block w-full truncate">
+            {/* 프로그램 이름과 인자를 색으로 가른다 — 목록에서 찾는 것은 늘 앞쪽이다. */}
+            <span className="font-mono font-medium text-[var(--text)]">{program}</span>
+            {args ? (
+              <span className="font-mono text-[var(--text-soft)]"> {args}</span>
+            ) : null}
+          </span>
+        </Tooltip>
       </td>
       <td
         className={cn(

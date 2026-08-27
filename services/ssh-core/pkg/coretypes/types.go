@@ -69,6 +69,7 @@ const (
 	CommandTerminalAutocompleteRefresh CommandType = "terminalAutocompleteRefresh"
 	CommandTerminalAutocompleteStop    CommandType = "terminalAutocompleteStop"
 	CommandTerminalCompletionQuery     CommandType = "terminalCompletionQuery"
+	CommandHostMetricsQuery            CommandType = "hostMetricsQuery"
 	CommandShellIntegrationInstall     CommandType = "terminalShellIntegrationInstall"
 	CommandShellIntegrationReinject    CommandType = "terminalShellIntegrationReinject"
 	CommandRunCommand                  CommandType = "runCommand"
@@ -144,6 +145,7 @@ const (
 	EventTerminalAutocompleteSnapshot   EventType = "terminalAutocompleteSnapshot"
 	EventTerminalAutocompleteShellState EventType = "terminalAutocompleteShellState"
 	EventTerminalCompletionResult       EventType = "terminalCompletionResult"
+	EventHostMetricsResult              EventType = "hostMetricsResult"
 	EventRunCommandResult               EventType = "runCommandResult"
 	EventMoshState                      EventType = "moshState"
 	EventAgentForwardingStatus          EventType = "agentForwardingStatus"
@@ -477,6 +479,40 @@ type TerminalCompletionResultPayload struct {
 	Stdout    string `json:"stdout"`
 	Truncated bool   `json:"truncated,omitempty"`
 	Failed    bool   `json:"failed,omitempty"`
+}
+
+// HostMetricsQueryPayload asks the core to read this machine's resource usage
+// directly, without going through a shell.
+//
+// Only local sessions answer it: a local terminal's "host" is the machine the
+// app itself runs on, so there is nothing to ask a shell about. Remote sessions
+// keep using TerminalCompletionQuery with the renderer-built POSIX script — the
+// numbers have to come from the far end there.
+//
+// This exists because Windows has no shell that can run that script. Reading the
+// same values through PowerShell works but costs a fresh process every poll
+// (measured at 2.4s on a developer machine, against a 3s poll interval); the
+// Win32 calls behind this payload take under a millisecond.
+type HostMetricsQueryPayload struct {
+	// ProcessLimit of 0 leaves the process list out. The session panel asks for
+	// it only while the processes section is on screen.
+	ProcessLimit int `json:"processLimit,omitempty"`
+	// System asks for the values that never change while the session lives
+	// (hostname, kernel, architecture, CPU model). The panel caches them.
+	System bool `json:"system,omitempty"`
+}
+
+// HostMetricsResultPayload carries one native reading.
+//
+// Supported=false means this platform does not collect natively (every unix
+// build) or the session is not local. It is an answer, not a failure: the caller
+// falls back to the shell path and should stop asking for this session.
+type HostMetricsResultPayload struct {
+	Supported bool `json:"supported"`
+	// Sample is a hostmetrics.Sample document. It is passed through as raw JSON
+	// so the shape stays owned by one package instead of being restated here.
+	Sample json.RawMessage `json:"sample,omitempty"`
+	Error  string          `json:"error,omitempty"`
 }
 
 // RunCommandPayload asks the host to run an arbitrary command on a separate exec

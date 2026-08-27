@@ -10,6 +10,9 @@ import {
   isHostMetricAlarming,
   parseHostMetricsSample,
   parseHostProcesses,
+  readNativeHostMetricsSample,
+  readNativeHostProcesses,
+  readNativeHostSystemInfo,
   parseHostProcessesFromOutput,
   parseHostSystemInfo,
   parseHostSystemInfoFromOutput,
@@ -592,3 +595,100 @@ describe('시스템 정보', () => {
     expect(parseHostSystemInfoFromOutput('@@dolgate:mem\nMemTotal: 1 kB\n')).toBeNull();
   });
 })
+
+/**
+ * 코어가 직접 읽어 보내는 문서(로컬 세션). 셸 출력을 파싱하는 경로와 도착지가 같아야
+ * 아래 계산·차트가 어디서 왔는지 몰라도 된다.
+ */
+describe('네이티브 지표 문서 읽기', () => {
+  const document = {
+    kind: 'host-metrics-v1',
+    cpu: { kind: 'ticks', busy: 17291562500, total: 124107968750 },
+    memTotalKb: 33150608,
+    memAvailableKb: 16651588,
+    net: { 이더넷: { rxBytes: 1640079393, txBytes: 64458674 } },
+    diskIo: { PhysicalDrive0: { readBytes: 24099587072, writeBytes: 10145604608 } },
+    loadAvg1: null,
+    uptimeSeconds: 1356.75,
+    cpuCount: 16,
+    disks: [{ mount: 'C:', usedKb: 643144848, totalKb: 975797244, availableKb: 332652396 }],
+    processes: [
+      {
+        pid: 20464,
+        user: 'Computer',
+        cpuPercent: 91.5,
+        memPercent: 10,
+        rssKb: 3315256,
+        command: 'C:/Program Files/idea64.exe',
+      },
+    ],
+    system: { hostname: 'DESKTOP-1', kernel: 'Windows 10.0.26200', arch: 'x86_64', cpuModel: 'AMD Ryzen 7' },
+  };
+
+  it('셸 경로와 같은 샘플로 옮긴다', () => {
+    const sample = readNativeHostMetricsSample(document, 1_000);
+    expect(sample).not.toBeNull();
+    expect(sample?.cpu).toEqual({ kind: 'ticks', busy: 17291562500, total: 124107968750 });
+    expect(sample?.memTotalKb).toBe(33150608);
+    expect(sample?.net?.이더넷).toEqual({ rxBytes: 1640079393, txBytes: 64458674 });
+    expect(sample?.diskIo?.PhysicalDrive0).toEqual({
+      readBytes: 24099587072,
+      writeBytes: 10145604608,
+    });
+    expect(sample?.uptimeSeconds).toBe(1356.75);
+    expect(sample?.disks).toHaveLength(1);
+    // Windows 에는 load average 가 없다 — 0 으로 채우면 "한가하다" 는 거짓말이 된다.
+    expect(sample?.loadAvg1).toBeNull();
+    expect(hasAnyHostMetric(sample!)).toBe(true);
+  });
+
+  // 차분이 "이전 샘플에 없던 장치" 를 undefined 로 판정한다. 평범한 객체에는 constructor
+  // 같은 이름이 이미 있어서, 그런 이름의 인터페이스가 오면 없는 값을 있다고 읽는다.
+  it('카운터 지도에 프로토타입을 달지 않는다', () => {
+    const sample = readNativeHostMetricsSample(document, 1_000);
+    expect(Object.getPrototypeOf(sample?.net as object)).toBeNull();
+    expect(Object.getPrototypeOf(sample?.diskIo as object)).toBeNull();
+  });
+
+  // 코어가 낡았거나 문서가 바뀌었으면 조용히 셸 경로로 돌아가야 한다 — 반쯤 읽은 값으로
+  // 그럴듯한 거짓 그래프를 그리는 것보다 낫다.
+  it('모양이 낯설면 null 이다', () => {
+    expect(readNativeHostMetricsSample(null, 1)).toBeNull();
+    expect(readNativeHostMetricsSample({ kind: 'something-else' }, 1)).toBeNull();
+    expect(readNativeHostMetricsSample('{}', 1)).toBeNull();
+  });
+
+  it('망가진 항목만 버리고 나머지는 싣는다', () => {
+    const sample = readNativeHostMetricsSample(
+      {
+        ...document,
+        cpu: { kind: 'ticks', busy: 'x', total: 1 },
+        net: { eth0: { rxBytes: 1 }, eth1: { rxBytes: 2, txBytes: 3 } },
+        disks: [{ mount: 'C:' }, document.disks[0]],
+      },
+      1_000,
+    );
+    expect(sample?.cpu).toBeNull();
+    expect(Object.keys(sample?.net ?? {})).toEqual(['eth1']);
+    expect(sample?.disks).toHaveLength(1);
+    expect(sample?.memTotalKb).toBe(33150608);
+  });
+
+  it('프로세스와 정적 정보를 읽는다', () => {
+    const processes = readNativeHostProcesses(document);
+    expect(processes).toHaveLength(1);
+    expect(processes?.[0]).toMatchObject({ pid: 20464, user: 'Computer', rssKb: 3315256 });
+    expect(readNativeHostSystemInfo(document)).toEqual({
+      hostname: 'DESKTOP-1',
+      kernel: 'Windows 10.0.26200',
+      arch: 'x86_64',
+      cpuModel: 'AMD Ryzen 7',
+    });
+  });
+
+  // 요청하지 않은 왕복과 "읽었는데 없다" 는 다르다. 캐시를 지우지 않으려면 null 이어야 한다.
+  it('싣지 않은 프로세스·정적 정보는 null 이다', () => {
+    expect(readNativeHostProcesses({ ...document, processes: null })).toBeNull();
+    expect(readNativeHostSystemInfo({ ...document, system: null })).toBeNull();
+  });
+});

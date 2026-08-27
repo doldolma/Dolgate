@@ -11,7 +11,11 @@ import {
 import { useHostMetrics } from './useHostMetrics';
 
 const queryTerminalCompletion = vi.hoisted(() => vi.fn());
-vi.mock('../services/desktop/terminal', () => ({ queryTerminalCompletion }));
+const collectNativeHostMetrics = vi.hoisted(() => vi.fn());
+vi.mock('../services/desktop/terminal', () => ({
+  queryTerminalCompletion,
+  collectNativeHostMetrics,
+}));
 
 const SESSION = 'poll-session';
 
@@ -50,6 +54,8 @@ function reply(callIndex: number): string {
 beforeEach(() => {
   vi.useFakeTimers();
   queryTerminalCompletion.mockReset();
+  collectNativeHostMetrics.mockReset();
+  collectNativeHostMetrics.mockResolvedValue({ supported: false, sample: null });
   queryTerminalCompletion.mockImplementation(() =>
     Promise.resolve(reply(queryTerminalCompletion.mock.calls.length - 1)),
   );
@@ -214,5 +220,76 @@ describe('세션이 바뀔 때', () => {
     expect(view.result.current.metrics?.rxBytesPerSec ?? null).toBeNull();
     // 정적 정보도 물려받지 않는다 — 새 세션의 화면에 옛 서버의 hostname 이 뜨지 않게.
     expect(getHostMetricsSnapshot(OTHER).system).toBeNull();
+  });
+});
+
+/**
+ * 로컬 터미널의 "호스트" 는 앱이 도는 바로 그 기계다. 셸에 물어볼 것이 없고, Windows 에는
+ * 그 POSIX 스크립트를 돌릴 셸이 아예 없어 자원 섹션이 통째로 비어 있었다.
+ */
+describe('로컬 세션의 네이티브 수집', () => {
+  function nativeSample(callIndex: number) {
+    return {
+      kind: 'host-metrics-v1',
+      cpu: { kind: 'ticks', busy: 1000 + callIndex * 25, total: 900000 + callIndex * 75 },
+      memTotalKb: 33150608,
+      memAvailableKb: 16651588,
+      net: { 이더넷: { rxBytes: 900000 + callIndex * 30000, txBytes: 500000 } },
+      diskIo: { PhysicalDrive0: { readBytes: 20000 + callIndex * 100, writeBytes: 8000 } },
+      loadAvg1: null,
+      uptimeSeconds: 776 + callIndex * 3,
+      cpuCount: 16,
+      disks: [{ mount: 'C:', usedKb: 643144848, totalKb: 975797244, availableKb: 332652396 }],
+      processes: null,
+      system: { hostname: 'DESKTOP-1', kernel: 'Windows 10.0.26200', arch: 'x86_64', cpuModel: 'AMD Ryzen' },
+    };
+  }
+
+  it('로컬이면 코어가 읽고 셸 명령은 나가지 않는다', async () => {
+    collectNativeHostMetrics.mockImplementation(() =>
+      Promise.resolve({
+        supported: true,
+        sample: nativeSample(collectNativeHostMetrics.mock.calls.length - 1),
+      }),
+    );
+    renderHook(() =>
+      useHostMetrics({ sessionId: SESSION, enabled: true, visible: true, local: true }),
+    );
+    await advance(0);
+    await advance(2_000);
+
+    expect(queryTerminalCompletion).not.toHaveBeenCalled();
+    expect(collectNativeHostMetrics).toHaveBeenCalledTimes(2);
+    const snapshot = getHostMetricsSnapshot(SESSION);
+    expect(snapshot.status).toBe('ready');
+    expect(snapshot.metrics?.memTotalKb).toBe(33150608);
+    // 두 표본을 차분해야 나오는 값이다 — 네이티브 문서도 같은 계산을 탄다.
+    expect(snapshot.metrics?.cpuPercent).toBeGreaterThan(0);
+    expect(snapshot.system?.hostname).toBe('DESKTOP-1');
+    // Windows 에는 load average 가 없다. 0 으로 채우면 "한가하다" 는 거짓말이 된다.
+    expect(snapshot.metrics?.loadAvg1 ?? null).toBeNull();
+  });
+
+  // 유닉스 로컬 세션이 여기로 온다 — 거기서는 지금 셸 경로가 잘 돌고 있다.
+  it('코어가 안 한다고 하면 셸로 넘어가고, 그 뒤로는 다시 묻지 않는다', async () => {
+    renderHook(() =>
+      useHostMetrics({ sessionId: SESSION, enabled: true, visible: true, local: true }),
+    );
+    await advance(0);
+    await advance(2_000);
+    await advance(10_000);
+
+    // 답이 바뀔 일이 없는 판정이라 한 번만 묻는다. 폴링마다 되물으면 왕복이 두 배가 된다.
+    expect(collectNativeHostMetrics).toHaveBeenCalledTimes(1);
+    expect(queryTerminalCompletion.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(getHostMetricsSnapshot(SESSION).status).toBe('ready');
+  });
+
+  it('원격 세션에는 묻지 않는다', async () => {
+    renderHook(() => useHostMetrics({ sessionId: SESSION, enabled: true, visible: true }));
+    await advance(0);
+
+    expect(collectNativeHostMetrics).not.toHaveBeenCalled();
+    expect(queryTerminalCompletion).toHaveBeenCalledTimes(1);
   });
 });

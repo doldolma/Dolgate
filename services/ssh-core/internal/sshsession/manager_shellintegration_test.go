@@ -52,6 +52,29 @@ func (f *fakeWriteCloser) setErr(err error) {
 	f.err = err
 }
 
+// streamRecorder 는 스트림으로 올라온 바이트를 모은다.
+//
+// **잠금이 있어야 한다.** 이미터는 프로브 고루틴에서 불리고(ShellProbe.Observe 가 띄운다) 테스트는
+// 자기 고루틴에서 폴링하며 읽는다. 지역 슬라이스에 그냥 append 하면 슬라이스 헤더와 백킹 배열이
+// 각각 레이스가 되어 `-race` 가 두 건을 잡는다 — 우분투 CI 의 "Stress ssh-core session races" 가
+// 그렇게 실패했다. macOS 가 통과한 것은 플랫폼 차이가 아니라 그 겹침이 관측되지 않은 것뿐이다.
+type streamRecorder struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+func (r *streamRecorder) append(data []byte) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.buf = append(r.buf, data...)
+}
+
+func (r *streamRecorder) text() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return string(r.buf)
+}
+
 // installShellIntegration는 여러 번 호출해도 정확히 1회만 주입하고 핸드셰이크를 arm 한다.
 // 서버측 Connect 주입과 renderer 경유 InstallShellIntegration이 같은 상태를 공유하므로 어느
 // 쪽이 먼저 와도 중복 주입/재-arm(=motd 유실)이 없어야 한다.
@@ -340,7 +363,7 @@ func TestProbeReplyTriggersTheShellSpecificInjection(t *testing.T) {
 // 안 닫으면 바깥 셸의 133;D 가 그 셸을 빠져나올 때까지 오지 않아, 컨테이너 안에서 친 모든 것이
 // 한 블록에 빨려 들어가고 상태 점이 계속 도는 것처럼 보인다.
 func TestUnsupportedSubshellClosesTheRunningCommandBlock(t *testing.T) {
-	var streamed []byte
+	streamed := &streamRecorder{}
 	w := &fakeWriteCloser{}
 	h := &sessionHandle{
 		stdin:        w,
@@ -350,7 +373,7 @@ func TestUnsupportedSubshellClosesTheRunningCommandBlock(t *testing.T) {
 	m := NewManager(
 		func(_ protocol.Event) {},
 		func(_ protocol.StreamFrame, data []byte) {
-			streamed = append(streamed, data...)
+			streamed.append(data)
 		},
 	)
 	m.mu.Lock()
@@ -373,11 +396,11 @@ func TestUnsupportedSubshellClosesTheRunningCommandBlock(t *testing.T) {
 	h.handshake.Filter(reply)
 
 	deadline = time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && !strings.Contains(string(streamed), autocomplete.CommandFinishedMarker) {
+	for time.Now().Before(deadline) && !strings.Contains(streamed.text(), autocomplete.CommandFinishedMarker) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !strings.Contains(string(streamed), autocomplete.CommandFinishedMarker) {
-		t.Fatalf("명령 블록을 닫지 않았다: %q", streamed)
+	if !strings.Contains(streamed.text(), autocomplete.CommandFinishedMarker) {
+		t.Fatalf("명령 블록을 닫지 않았다: %q", streamed.text())
 	}
 	if got := w.writeCount(); got != 1 {
 		t.Fatalf("통합을 넣을 수 없는 셸에 %d줄을 보냈다", got)
@@ -389,7 +412,7 @@ func TestUnsupportedSubshellClosesTheRunningCommandBlock(t *testing.T) {
 // 안 닫으면 아직 열려 있는 바깥 블록(`docker exec …`) 안에 안쪽 셸의 블록들이 들어앉아, 화면이
 // 블록 속 블록처럼 보인다. 통합이 실제로 붙기 시작하면서 드러난 상태다.
 func TestSupportedSubshellAlsoClosesTheOuterCommandBlock(t *testing.T) {
-	var streamed []byte
+	streamed := &streamRecorder{}
 	w := &fakeWriteCloser{}
 	h := &sessionHandle{
 		stdin:        w,
@@ -398,7 +421,7 @@ func TestSupportedSubshellAlsoClosesTheOuterCommandBlock(t *testing.T) {
 	}
 	m := NewManager(
 		func(_ protocol.Event) {},
-		func(_ protocol.StreamFrame, data []byte) { streamed = append(streamed, data...) },
+		func(_ protocol.StreamFrame, data []byte) { streamed.append(data) },
 	)
 	m.mu.Lock()
 	m.sessions["s1"] = h
@@ -422,8 +445,8 @@ func TestSupportedSubshellAlsoClosesTheOuterCommandBlock(t *testing.T) {
 	for time.Now().Before(deadline) && w.writeCount() < 2 {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !strings.Contains(string(streamed), autocomplete.CommandFinishedMarker) {
-		t.Fatalf("바깥 블록을 닫지 않았다: %q", streamed)
+	if !strings.Contains(streamed.text(), autocomplete.CommandFinishedMarker) {
+		t.Fatalf("바깥 블록을 닫지 않았다: %q", streamed.text())
 	}
 }
 

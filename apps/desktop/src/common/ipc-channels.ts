@@ -181,6 +181,7 @@ export const ipcChannels = {
     refreshAutocomplete: 'ssh:autocomplete-refresh',
     stopAutocomplete: 'ssh:autocomplete-stop',
     completionQuery: 'ssh:completion-query',
+    hostMetrics: 'ssh:host-metrics',
     respondKeyboardInteractive: 'ssh:respond-keyboard-interactive',
     respondHostKeyTrust: 'ssh:respond-host-key-trust',
     probeAgent: 'ssh:probe-agent',

@@ -40,6 +40,7 @@ import type { TerminalSessionPaneProps } from './types';
 import { Button, NoticeCard } from '../../ui';
 import { findHostKeyPromptForSession, resolveConnectionFailurePresentation } from '../../store/utils';
 import {
+  canReadHostMetrics,
   resolveAwsFailureNotice,
   resolveTailnetFailureGuidance,
   resolveTailnetLoginRejectedGuidance,
@@ -143,14 +144,11 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   // 바는 status 'off' 에서 null 을 반환하고, 호스트를 pane 수만큼 폴링하던 것도 없어진다.
   const hostMetrics = useHostMetrics({
     sessionId,
-    enabled:
-      hostMetricsEnabled &&
-      // **로컬 셸도 읽는다.** 지표는 보조 채널로 명령을 돌려 얻는데, 그 채널은 로컬에도
-      // 있다(코어가 /bin/sh 로 실행한다). 여기서 host 만 통과시키던 동안 로컬 터미널은
-      // 능력이 있는데도 자원·프로세스 섹션이 꺼져 있었다.
-      (tab?.source === 'host' || tab?.source === 'local') &&
-      tab?.status === 'connected' &&
-      !tab?.tmux,
+    // 어떤 세션을 읽는지는 canReadHostMetrics 가 정한다 — 규칙과 그 이유를 한 곳에 둔다.
+    enabled: hostMetricsEnabled && canReadHostMetrics(tab),
+    // 로컬 셸이면 코어가 이 기계를 직접 읽는다 — 셸에 물어볼 것이 없고, Windows 에는 그
+    // POSIX 스크립트를 돌릴 셸이 아예 없어 여기가 통째로 비어 있었다.
+    local: tab?.source === 'local',
     visible,
   });
   // 스티키 헤더가 떠 있고 hover 한 블록이 그 아래로 파고들면(=블록 상단이 화면 위로 잘린

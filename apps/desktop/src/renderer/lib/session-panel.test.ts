@@ -283,6 +283,31 @@ describe('splitProcessCommand', () => {
     });
   });
 
+  /**
+   * Windows 경로에는 공백이 흔하다(`C:\Program Files\…`). 첫 공백에서 자르면 프로그램이
+   * `C:\Program` 이 되고 **정작 이름이 인자 칸으로 밀려난다** — 그 칸은 잘리는 자리라
+   * 프로세스 목록이 `C:\Program Files\Google\Ch…` 로만 채워졌다.
+   */
+  it('Windows 경로는 공백으로 자르지 않고 실행 파일 이름만 남긴다', () => {
+    expect(
+      splitProcessCommand('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'),
+    ).toEqual({ program: 'chrome.exe', args: '' });
+    expect(
+      splitProcessCommand('C:\\Users\\me\\IdeaProjects\\Dolgate\\node_modules\\electron\\electron.exe'),
+    ).toEqual({ program: 'electron.exe', args: '' });
+  });
+
+  it('UNC 경로도 같다', () => {
+    expect(splitProcessCommand('\\\\build01\\tools\\agent host.exe')).toEqual({
+      program: 'agent host.exe',
+      args: '',
+    });
+  });
+
+  it('드라이브 루트만 있으면 그대로 둔다', () => {
+    expect(splitProcessCommand('C:\\')).toEqual({ program: 'C:\\', args: '' });
+  });
+
   it('빈 문자열도 던지지 않는다', () => {
     expect(splitProcessCommand('   ')).toEqual({ program: '', args: '' });
   });

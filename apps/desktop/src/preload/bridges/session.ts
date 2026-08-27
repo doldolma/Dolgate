@@ -56,6 +56,10 @@ export function buildSshBridge(ipcRenderer: IpcRenderer): DesktopApi["ssh"] {
         command,
         options,
       ),
+    collectHostMetrics: (
+      sessionId: string,
+      options?: { processLimit?: number; system?: boolean },
+    ) => ipcRenderer.invoke(ipcChannels.ssh.hostMetrics, sessionId, options),
     respondKeyboardInteractive: (input: KeyboardInteractiveRespondInput) =>
       ipcRenderer.invoke(ipcChannels.ssh.respondKeyboardInteractive, input),
     respondHostKeyTrust: (input: HostKeyTrustRespondInput) =>

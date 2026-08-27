@@ -4005,6 +4005,49 @@ export class CoreManager {
     return typeof response.stdout === "string" ? response.stdout : "";
   }
 
+  /**
+   * 이 기계의 자원을 코어가 직접 읽어 온다(로컬 세션 전용).
+   *
+   * 로컬 터미널의 "호스트" 는 앱이 도는 바로 그 기계라, 원격처럼 셸에 물어볼 것이 없다.
+   * Windows 에는 애초에 그 POSIX 스크립트를 돌릴 셸이 없어 자원 섹션이 통째로 비어 있었다.
+   *
+   * `supported: false` 는 실패가 아니라 답이다 — 이 플랫폼(유닉스)이나 이 세션 유형에서는
+   * 네이티브로 읽지 않는다는 뜻이고, 호출부는 셸 경로로 돌아가면 된다.
+   */
+  async collectHostMetrics(
+    sessionId: string,
+    options?: { processLimit?: number; system?: boolean },
+  ): Promise<{ supported: boolean; sample: unknown | null }> {
+    await this.start();
+    if (this.sessionTransportById.get(sessionId) !== "local-shell") {
+      return { supported: false, sample: null };
+    }
+    const response = await this.requestResponse<{
+      supported?: boolean;
+      sample?: unknown;
+      error?: string;
+    }>(
+      {
+        id: randomUUID(),
+        type: "hostMetricsQuery",
+        sessionId,
+        payload: {
+          processLimit: options?.processLimit ?? 0,
+          system: options?.system ?? false,
+        },
+      },
+      ["hostMetricsResult"],
+      { timeoutMs: TERMINAL_COMPLETION_BACKGROUND_TIMEOUT_MS },
+    );
+    if (response.error) {
+      throw new Error(response.error);
+    }
+    if (!response.supported || response.sample == null) {
+      return { supported: false, sample: null };
+    }
+    return { supported: true, sample: response.sample };
+  }
+
   // AI 어시스턴트의 run_command 도구용. 세션의 기존 ssh.Client에 별도 exec 채널을 열어(사용자 PTY와 분리)
   // 명령을 실행하고 stdout/stderr/exit 를 돌려준다. exec 자체가 불가한 세션/상황이면 throw(도구가 잡아
   // 모델에 isError 로 전달). Go 코어가 최종 capability 게이트(비-SSH 세션은 error 페이로드로 응답).

@@ -12,6 +12,9 @@ import (
 type stubCoreRuntime struct {
 	// tmuxRefreshSessions 가 어느 세션으로 들어왔는지. 프레임이 라우팅되는지 확인한다.
 	tmuxRefreshedSession string
+	// hostMetricsDone 은 지표 프레임이 코어까지 닿았다는 신호다(디스패치가 비동기라 채널로 받는다).
+	hostMetricsDone    chan struct{}
+	hostMetricsRequest protocol.HostMetricsQueryPayload
 	// 재주입 요청에 실려 온 셸 이름(렌더러가 알아낸 값). 힌트가 흘러오는지 확인한다.
 	reinjectShell       string
 	awsConnectSession   string
@@ -150,6 +153,13 @@ func (stub *stubCoreRuntime) ReinjectShellIntegration(sessionID string, shell st
 	return nil
 }
 func (stub *stubCoreRuntime) RunCompletionQuery(sessionID, requestID, command string, _, _ bool) error {
+	return nil
+}
+func (stub *stubCoreRuntime) CollectHostMetrics(sessionID, requestID string, processLimit int, system bool) error {
+	stub.hostMetricsRequest = protocol.HostMetricsQueryPayload{ProcessLimit: processLimit, System: system}
+	if stub.hostMetricsDone != nil {
+		close(stub.hostMetricsDone)
+	}
 	return nil
 }
 func (stub *stubCoreRuntime) RunCommand(sessionID, requestID, command string, timeoutMs int) error {
@@ -376,6 +386,34 @@ func TestDispatchFrameRoutesStreamInputThroughRuntime(t *testing.T) {
 
 	if core.inputSession != "session-1" || string(core.inputPayload) != "echo hello\r" {
 		t.Fatalf("unexpected stream routing result: %#v", core)
+	}
+}
+
+// 지표 질의는 완성 질의와 같이 best-effort 로 코어에 넘어가야 한다 — 렌더러가 실은 옵션이
+// 그대로 닿지 않으면 프로세스 목록이 통째로 빠지거나 매 왕복에 실려 나간다.
+func TestDispatchHostMetricsQueryUsesRuntimeFacade(t *testing.T) {
+	core := &stubCoreRuntime{hostMetricsDone: make(chan struct{})}
+	payload, err := json.Marshal(protocol.HostMetricsQueryPayload{ProcessLimit: 12, System: true})
+	if err != nil {
+		t.Fatalf("marshal host metrics payload: %v", err)
+	}
+
+	if err := dispatch(core, newEventWriter(), protocol.Request{
+		ID:        "req-1",
+		Type:      protocol.CommandHostMetricsQuery,
+		SessionID: "session-local-1",
+		Payload:   payload,
+	}); err != nil {
+		t.Fatalf("dispatch() error = %v", err)
+	}
+
+	select {
+	case <-core.hostMetricsDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the host metrics dispatch")
+	}
+	if core.hostMetricsRequest.ProcessLimit != 12 || !core.hostMetricsRequest.System {
+		t.Fatalf("options did not reach the runtime: %#v", core.hostMetricsRequest)
 	}
 }
 
