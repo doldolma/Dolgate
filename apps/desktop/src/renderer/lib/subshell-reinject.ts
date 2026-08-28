@@ -7,7 +7,7 @@
 
 import { appStore } from '../store/appStore';
 import { reinjectTerminalShellIntegration } from '../services/desktop/terminal';
-import { detectsSubshellEntry } from './subshell-detect';
+import { detectSubshellEntry } from './subshell-detect';
 
 /**
  * `command` 가 서브셸로 들어가는 것이면 통합을 다시 주입한다. 아니면 아무것도 하지 않는다.
@@ -23,14 +23,20 @@ export function reinjectShellIntegrationIfSubshell(
   if (settings?.subshellReinjectEnabled === false) {
     return;
   }
-  if (!detectsSubshellEntry(command, settings?.subshellReinjectPatterns ?? [])) {
+  const detection = detectSubshellEntry(
+    command,
+    settings?.subshellReinjectPatterns ?? [],
+  );
+  if (!detection) {
     return;
   }
-  // 어떤 셸로 들어가는지는 **짐작하지 않는다.**
+  // 일반적인 ssh/docker 명령에서 대상 셸은 **짐작하지 않는다.**
   //
-  // 예전에는 명령 문자열에서 셸 이름을 짚어 함께 보냈는데, 그 추측이 계속 틀렸다. 마지막이
+  // 예전에는 명령 문자열의 마지막 토큰에서 셸을 짚었는데, 그 추측이 계속 틀렸다. 마지막이
   // `sh -c '… exec bash || exec sh'` 인 도커 접속 명령을 "sh" 로 단정해, bash 컨테이너인데도
-  // 통합을 포기했다. 명령만 봐서는 어느 셸이 뜨는지 알 수 없다 — 도착한 셸에게 직접 묻는 것이
-  // 코어의 일이다(ShellProbeCommand).
-  void reinjectTerminalShellIntegration(sessionId).catch(() => undefined);
+  // 통합을 포기했다. 다만 `& "C:\...\bash.exe"`처럼 첫 실행 파일 자체가 지원 셸이면 대상이
+  // 확실하므로 힌트를 보낸다. 그 밖에는 도착한 셸에게 코어가 직접 묻는다(ShellProbeCommand).
+  void reinjectTerminalShellIntegration(sessionId, detection.shellHint).catch(
+    () => undefined,
+  );
 }

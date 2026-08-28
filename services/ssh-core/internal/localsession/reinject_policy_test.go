@@ -36,24 +36,29 @@ func TestShouldArmSubshellReinject(t *testing.T) {
 	}
 }
 
-// 프로브는 **우리가 띄운 셸**로 고른다. 사용자가 친 명령이 아니라 프로세스 이름이라 틀릴 수 없다.
-func TestProbeCommandFollowsTheLaunchedShell(t *testing.T) {
+// 프로브는 안착한 프롬프트가 분명하면 현재 전면 셸을 따르고, 모호할 때만 최초 러너로 물러난다.
+func TestProbeCommandFollowsTheSettledPromptBeforeTheLaunchedShell(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		shell string
+		tail  string
 		want  string
 		ok    bool
 	}{
 		{name: "bash", shell: "bash", want: autocomplete.ShellProbeCommand(), ok: true},
 		{name: "이름 없음", shell: "", want: autocomplete.ShellProbeCommand(), ok: true},
-		// PowerShell 에 printf 를 보내면 "인식할 수 없는 명령" 이 화면에 남는다.
+		// 프롬프트 정보가 없으면 최초 러너가 안전한 기본값이다.
 		{name: "pwsh", shell: "pwsh", want: autocomplete.PowerShellProbeCommand(), ok: true},
 		{name: "powershell.exe", shell: `C:\Windows\System32\powershell.exe`, want: autocomplete.PowerShellProbeCommand(), ok: true},
+		// 교차 셸에서는 최초 러너가 아니라 새로 안착한 프롬프트를 따른다.
+		{name: "PowerShell에서 Git Bash", shell: "powershell", tail: "Computer@host MINGW64 ~\r\n$ ", want: autocomplete.ShellProbeCommand(), ok: true},
+		{name: "bash에서 PowerShell", shell: "bash", tail: `PS C:\Users\Computer> `, want: autocomplete.PowerShellProbeCommand(), ok: true},
+		{name: "cmd에서 WSL", shell: "cmd", tail: "user@host:~$ ", want: autocomplete.ShellProbeCommand(), ok: true},
 		// cmd 는 물어볼 방법도 넣을 것도 없다.
 		{name: "cmd", shell: "cmd", ok: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := probeCommandFor(tc.shell)
+			got, ok := probeCommandFor(tc.shell, []byte(tc.tail))
 			if ok != tc.ok {
 				t.Fatalf("ok=%v, 기대 %v", ok, tc.ok)
 			}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectsSubshellEntry } from './subshell-detect';
+import { detectSubshellEntry, detectsSubshellEntry } from './subshell-detect';
 
 describe('detectsSubshellEntry', () => {
   it('detects shells and remote/exec entry commands', () => {
@@ -58,29 +58,57 @@ describe('detectsSubshellEntry', () => {
 });
 
 describe('윈도우 서브셸', () => {
-  it('wsl·pwsh·powershell 진입을 잡는다', () => {
+  it('wsl·pwsh·powershell과 exe 이름을 잡는다', () => {
     // 윈도우 터미널에서 들어가는 서브셸의 상당수가 리눅스 셸이다(`wsl`). 예전에는 이 셋이
     // 패턴에 없어 재주입이 아예 불리지 않았다.
-    for (const command of ['wsl', 'wsl -d Ubuntu', 'pwsh', 'powershell -NoLogo']) {
+    for (const command of [
+      'wsl',
+      'wsl.exe -d Ubuntu',
+      'pwsh',
+      'pwsh.exe',
+      'powershell -NoLogo',
+      'powershell.exe -NoLogo',
+    ]) {
       expect(detectsSubshellEntry(command)).toBe(true);
     }
   });
 
+  it('PowerShell 호출 연산자와 인용된 Git Bash 경로를 정규화한다', () => {
+    expect(
+      detectSubshellEntry('& "C:\\Program Files\\Git\\bin\\bash.exe"'),
+    ).toEqual({
+      shellHint: 'bash',
+    });
+    expect(
+      detectSubshellEntry("& 'C:\\Program Files\\Git\\usr\\bin\\zsh.exe' -l"),
+    ).toEqual({
+      shellHint: 'zsh',
+    });
+    expect(detectSubshellEntry('& C:\\Git\\bin\\fish.exe')).toEqual({
+      shellHint: 'fish',
+    });
+  });
+
+  it('직접 실행한 셸만 힌트로 돌려주고 중간 실행기는 추측하지 않는다', () => {
+    expect(detectSubshellEntry('/usr/bin/bash -l')).toEqual({
+      shellHint: 'bash',
+    });
+    expect(detectSubshellEntry('docker exec -it web bash')).toEqual({});
+    expect(detectSubshellEntry('wsl -d Ubuntu')).toEqual({});
+  });
+
   it('비슷한 이름은 잡지 않는다', () => {
-    for (const command of ['wslconfig', 'wsl.exe--help', 'powershellx']) {
+    for (const command of [
+      'wslconfig',
+      'wsl.exe--help',
+      'powershellx',
+      // PowerShell에서는 호출 연산자 없는 인용 경로가 실행이 아니라 문자열 표현식이다.
+      '"C:\\Program Files\\Git\\bin\\bash.exe"',
+    ]) {
       expect(detectsSubshellEntry(command)).toBe(false);
     }
   });
-
-  it('wsl 은 대상 셸을 모른다고 답한다 — 겸용 스크립트가 나가야 한다', () => {
-    // `wsl` 안이 bash 인지 zsh 인지는 명령에 적혀 있지 않다. 억지로 짚으면 틀린 문법을 보낸다.
-    // 셸까지 적어 준 경우에는 그 셸이다.
-  });
-
-  it('pwsh·powershell 은 그 셸로 짚는다', () => {
-  });
 });
-
 
 describe('sudo 로 감싼 명령', () => {
   it('`sudo docker exec` 도 서브셸로 본다 — 소켓 권한이 없는 호스트가 그렇게 나간다', () => {
@@ -99,6 +127,9 @@ describe('sudo 로 감싼 명령', () => {
     expect(detectsSubshellEntry('sudo docker ps')).toBe(false);
   });
 
-  it('sudo 뒤의 셸 이름도 짚는다', () => {
+  it('sudo 뒤의 직접 셸은 힌트를 유지한다', () => {
+    expect(detectSubshellEntry('sudo -u deploy /usr/bin/bash')).toEqual({
+      shellHint: 'bash',
+    });
   });
 });

@@ -355,7 +355,7 @@ func (m *Manager) performShellIntegrationReinject(
 		if session.shellIntegrationUnsupported.Load() {
 			return
 		}
-		m.probeShellThenReinject(sessionID, session)
+		m.probeShellThenReinject(sessionID, session, tail)
 		return
 	}
 	commands := autocomplete.ShellIntegrationInitLines(shell)

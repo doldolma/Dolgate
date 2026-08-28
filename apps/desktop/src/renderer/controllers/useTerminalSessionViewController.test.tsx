@@ -330,6 +330,27 @@ describe('useTerminalSessionViewController', () => {
     expect(mocks.reinjectShellIntegration).toHaveBeenCalledWith('session-1', undefined);
   });
 
+  it('PowerShell에서 전체 경로로 실행한 Git Bash에는 bash 힌트를 보낸다', async () => {
+    mocks.beginCommandBlock.mockReturnValue(
+      '& "C:\\Program Files\\Git\\bin\\bash.exe"',
+    );
+    renderController(createProps());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    const runtime = mocks.runtimeRecords[0];
+    mocks.reinjectShellIntegration.mockClear();
+
+    await act(async () => {
+      runtime.emitShellIntegration('C');
+    });
+
+    expect(mocks.reinjectShellIntegration).toHaveBeenCalledWith(
+      'session-1',
+      'bash',
+    );
+  });
+
   it('평범한 명령에는 재주입을 부르지 않는다', async () => {
     mocks.beginCommandBlock.mockReturnValue('ls -al');
     renderController(createProps());
