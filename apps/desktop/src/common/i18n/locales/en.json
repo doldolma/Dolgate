@@ -3796,7 +3796,7 @@
       "emptyTitle": "tmux is not available",
       "noHost": "This session has no host, so there is no tmux to manage.",
       "notDetected": "No tmux was found on this host.",
-      "noSessions": "There are no tmux sessions on the remote. Create one below.",
+      "noSessions": "There are no tmux sessions on the remote.",
       "windows": "{{count}} windows",
       "kill": "Kill session",
       "attachedElsewhere": "in use elsewhere",

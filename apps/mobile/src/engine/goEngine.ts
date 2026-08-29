@@ -6,6 +6,8 @@ import {
   HostKeyRejectedError,
   type ConnectOptions,
   type EngineArgon2idParams,
+  type EngineAutocompleteResult,
+  type EngineCompletionResult,
   type EngineDirectoryListing,
   type EngineSftpConnection,
   type EngineSftpEntry,
@@ -124,6 +126,9 @@ type GoSshEngineNativeModule = NativeModule & {
   ): Promise<{ forwardId: string; bindPort: number }>;
   stopSsmPortForward(forwardId: string): Promise<void>;
   sendData(shellId: string, dataBase64: string): Promise<void>;
+  prepareAutocomplete(shellId: string): Promise<string>;
+  runCompletion(shellId: string, command: string): Promise<string>;
+  reinjectShellIntegration(shellId: string, shellHint: string): Promise<void>;
   resize(shellId: string, rows: number, cols: number): Promise<void>;
   closeShell(shellId: string): Promise<void>;
   readBuffer(
@@ -798,6 +803,22 @@ class GoShell implements EngineShell {
       this.tokensByListenerId.delete(listenerId);
     }
     await requireNative().unfollowOutput(this.id, listenerId);
+  }
+
+  async prepareAutocomplete(): Promise<EngineAutocompleteResult> {
+    return JSON.parse(
+      await requireNative().prepareAutocomplete(this.id),
+    ) as EngineAutocompleteResult;
+  }
+
+  async runCompletion(command: string): Promise<EngineCompletionResult> {
+    return JSON.parse(
+      await requireNative().runCompletion(this.id, command),
+    ) as EngineCompletionResult;
+  }
+
+  async reinjectShellIntegration(shellHint = ''): Promise<void> {
+    await requireNative().reinjectShellIntegration(this.id, shellHint);
   }
 
   async close(): Promise<void> {

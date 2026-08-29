@@ -30,6 +30,7 @@ import {
   isAwsEc2HostRecord,
   isSshHostRecord,
   isVncHostRecord,
+  detectSubshellEntry,
   type MobileSessionRecord,
   type MobileRemoteDesktopSessionRecord,
   type MobileSftpSessionRecord,
@@ -53,6 +54,8 @@ import {
 import { RemoteFileEditorModal } from '../components/RemoteFileEditorModal';
 import { SftpBrowserView } from '../components/SftpBrowserView';
 import { RemoteDesktopSurface } from '../components/RemoteDesktopSurface';
+import { TerminalAutocompleteBar } from '../components/TerminalAutocompleteBar';
+import { useTerminalAutocomplete } from '../hooks/useTerminalAutocomplete';
 import { useScreenPadding } from '../lib/screen-layout';
 import {
   TERMINAL_PRIMARY_SHORTCUTS,
@@ -80,7 +83,10 @@ import {
 } from '../lib/terminal-gestures';
 import Clipboard from '@react-native-clipboard/clipboard';
 import type { MainTabParamList } from '../navigation/RootNavigator';
-import { useMobileAppStore } from '../store/useMobileAppStore';
+import {
+  reinjectSessionShellIntegration,
+  useMobileAppStore,
+} from '../store/useMobileAppStore';
 import { getLiveRemoteDesktopSessions } from '../store/remoteDesktopSlice';
 import { buildRecentConnections } from '../lib/recent-connections';
 import type { MobilePalette } from '../theme';
@@ -242,6 +248,16 @@ export function SessionScreen(): React.JSX.Element {
   });
   const sessions = useMobileAppStore(state => state.sessions);
   const hosts = useMobileAppStore(state => state.hosts);
+  const snippets = useMobileAppStore(state => state.snippets);
+  const terminalAutocompleteEnabled = useMobileAppStore(
+    state => state.settings.terminalAutocompleteEnabled !== false,
+  );
+  const subshellReinjectEnabled = useMobileAppStore(
+    state => state.settings.subshellReinjectEnabled !== false,
+  );
+  const subshellReinjectPatterns = useMobileAppStore(
+    state => state.settings.subshellReinjectPatterns,
+  );
   const sftpSessions = useMobileAppStore(state => state.sftpSessions);
   const sftpTransfers = useMobileAppStore(state => state.sftpTransfers);
   const remoteDesktopSessions = useMobileAppStore(
@@ -1223,6 +1239,18 @@ export function SessionScreen(): React.JSX.Element {
     void writeToSession(inputState.sessionId, value);
   };
 
+  const terminalAutocomplete = useTerminalAutocomplete({
+    sessionId: renderedTerminalSessionId,
+    enabled: terminalAutocompleteEnabled,
+    connected: renderedTerminalSessionStatus === 'connected',
+    snippets,
+    sendInput: sendSessionInput,
+  });
+
+  const syncNativeInputBuffer = (value: string | null) => {
+    if (value !== null) nativeTerminalInputRef.current?.setBuffer(value);
+  };
+
   const sendDirectTerminalInput = (value: string) => {
     const inputState = terminalInputStateRef.current;
     if (
@@ -1237,20 +1265,24 @@ export function SessionScreen(): React.JSX.Element {
     if (!sanitized) {
       return;
     }
-    sendSessionInput(sanitized);
+    terminalAutocomplete.send(sanitized);
   };
 
   const sendTranslatedInput = (event: NativeTerminalInputEvent) => {
     const payload = translateTerminalInputEventToSequence(event);
     if (!payload) {
-      return;
+      return null;
     }
-    sendSessionInput(payload);
+    return terminalAutocomplete.send(payload);
   };
 
   const sendShortcut = (event: NativeTerminalInputEvent) => {
-    sendTranslatedInput(event);
-    resetNativeInputBuffer();
+    const accepted = sendTranslatedInput(event);
+    if (accepted !== null) {
+      syncNativeInputBuffer(accepted);
+    } else {
+      resetNativeInputBuffer();
+    }
     focusRequestedTerminalInput(true);
   };
 
@@ -1725,6 +1757,30 @@ export function SessionScreen(): React.JSX.Element {
                         // 직접 옮겨 적을 수 있고, 여기서 오류창을 띄우면 화면을 가린다.
                       });
                     }}
+                    onShellIntegration={(marker, reportedCommand) => {
+                      const command =
+                        terminalAutocomplete.handleShellIntegration(
+                          marker,
+                          reportedCommand,
+                        );
+                      if (
+                        !command ||
+                        !renderedTerminalSessionId ||
+                        !subshellReinjectEnabled
+                      ) {
+                        return;
+                      }
+                      const detection = detectSubshellEntry(
+                        command,
+                        subshellReinjectPatterns ?? [],
+                      );
+                      if (!detection) return;
+                      void reinjectSessionShellIntegration(
+                        renderedTerminalSessionId,
+                        detection.shellHint,
+                      ).catch(() => undefined);
+                    }}
+                    onCwd={terminalAutocomplete.handleCwd}
                     onData={data => {
                       sendDirectTerminalInput(data);
                     }}
@@ -1772,9 +1828,15 @@ export function SessionScreen(): React.JSX.Element {
                           isAndroid ? keyboardRequestedVisible : undefined
                         }
                         onTerminalInput={event => {
-                          sendTranslatedInput(event.nativeEvent);
+                          const accepted = sendTranslatedInput(
+                            event.nativeEvent,
+                          );
                           if (event.nativeEvent.kind === 'special-key') {
-                            resetNativeInputBuffer();
+                            if (accepted !== null) {
+                              syncNativeInputBuffer(accepted);
+                            } else {
+                              resetNativeInputBuffer();
+                            }
                           }
                         }}
                         style={styles.nativeTerminalInput}
@@ -1905,6 +1967,24 @@ export function SessionScreen(): React.JSX.Element {
                 },
               ]}
             >
+              <TerminalAutocompleteBar
+                command={terminalAutocomplete.command}
+                suggestions={terminalAutocomplete.suggestions}
+                pendingSnippet={terminalAutocomplete.pendingSnippet}
+                onAccept={suggestion => {
+                  syncNativeInputBuffer(
+                    terminalAutocomplete.accept(suggestion),
+                  );
+                  focusRequestedTerminalInput(true);
+                }}
+                onConfirmSnippet={values => {
+                  syncNativeInputBuffer(
+                    terminalAutocomplete.confirmSnippet(values),
+                  );
+                  focusRequestedTerminalInput(true);
+                }}
+                onCancelSnippet={terminalAutocomplete.cancelSnippet}
+              />
               {showMoreShortcuts ? (
                 <View
                   style={[

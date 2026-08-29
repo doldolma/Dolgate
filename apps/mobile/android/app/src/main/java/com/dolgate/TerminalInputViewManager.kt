@@ -53,6 +53,7 @@ class TerminalInputViewManager : SimpleViewManager<TerminalInputEditText>() {
     mapOf(
       COMMAND_FOCUS to COMMAND_FOCUS_ID,
       COMMAND_BLUR to COMMAND_BLUR_ID,
+      COMMAND_SET_BUFFER to COMMAND_SET_BUFFER_ID,
     )
 
   override fun receiveCommand(
@@ -63,6 +64,7 @@ class TerminalInputViewManager : SimpleViewManager<TerminalInputEditText>() {
     when (commandId) {
       COMMAND_FOCUS_ID -> view.focusInput()
       COMMAND_BLUR_ID -> view.blurInput()
+      COMMAND_SET_BUFFER_ID -> view.setInputBuffer(args?.getString(0) ?: "")
     }
   }
 
@@ -74,8 +76,10 @@ class TerminalInputViewManager : SimpleViewManager<TerminalInputEditText>() {
   private companion object {
     const val COMMAND_FOCUS = "focus"
     const val COMMAND_BLUR = "blur"
+    const val COMMAND_SET_BUFFER = "setBuffer"
     const val COMMAND_FOCUS_ID = 1
     const val COMMAND_BLUR_ID = 2
+    const val COMMAND_SET_BUFFER_ID = 3
     const val EVENT_TERMINAL_INPUT = "onTerminalInput"
   }
 }
@@ -271,6 +275,15 @@ class TerminalInputEditText(
 
   fun blurInput() {
     isInputFocused = false
+    syncFocus(force = true)
+  }
+
+  fun setInputBuffer(value: String) {
+    previousValue = value
+    suppressWatcher = true
+    setText(value)
+    suppressWatcher = false
+    moveCaretToEnd()
     syncFocus(force = true)
   }
 

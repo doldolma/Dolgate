@@ -215,6 +215,8 @@ import {
   openRemoteDesktopTunnel,
   closeRemoteDesktopTunnel,
   type EngineConnection,
+  type EngineAutocompleteResult,
+  type EngineCompletionResult,
   type EngineSsmForward,
   type EngineCredential,
   type EngineInteractiveAnswer,
@@ -1070,6 +1072,53 @@ interface MobileAppState {
 const promptedSecretsByHostId = new Map<string, HostSecretInput>();
 
 const runtimeSessions = new Map<string, RuntimeSession>();
+
+function currentSshRuntime(sessionId: string): SshRuntimeSession {
+  const runtime = runtimeSessions.get(sessionId);
+  if (!runtime || runtime.kind !== 'ssh') {
+    throw new Error('The terminal session is not connected.');
+  }
+  return runtime;
+}
+
+/**
+ * 자동완성은 React 스토어 상태가 아니라 현재 네이티브 셸에 붙는다. 비동기 작업이 끝났을 때
+ * 같은 런타임인지 다시 확인해, 재연결 전 셸의 늦은 응답이 새 세션에 섞이지 않게 한다.
+ */
+export async function prepareSessionAutocomplete(
+  sessionId: string,
+): Promise<EngineAutocompleteResult> {
+  const runtime = currentSshRuntime(sessionId);
+  const result = await runtime.shell.prepareAutocomplete();
+  if (runtimeSessions.get(sessionId) !== runtime) {
+    throw new Error(
+      'The terminal session changed while autocomplete was preparing.',
+    );
+  }
+  return result;
+}
+
+export async function runSessionCompletion(
+  sessionId: string,
+  command: string,
+): Promise<EngineCompletionResult> {
+  const runtime = currentSshRuntime(sessionId);
+  const result = await runtime.shell.runCompletion(command);
+  if (runtimeSessions.get(sessionId) !== runtime) {
+    throw new Error(
+      'The terminal session changed while completion was running.',
+    );
+  }
+  return result;
+}
+
+export async function reinjectSessionShellIntegration(
+  sessionId: string,
+  shellHint?: string,
+): Promise<void> {
+  const runtime = currentSshRuntime(sessionId);
+  await runtime.shell.reinjectShellIntegration(shellHint);
+}
 /**
  * SSH over SSM 이 실패한 호스트의 기억. 앱이 도는 동안만 산다.
  *

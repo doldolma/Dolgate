@@ -3,11 +3,13 @@ package mobile
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
 	"time"
 
+	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/hostkeytrust"
 	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/internal/sshdial"
@@ -496,7 +498,7 @@ func (c *Conn) StartShell(optionsJSON string, onClosed ShellClosedCallback) (*Sh
 	if err != nil {
 		return nil, err
 	}
-	return &Shell{shell: shell, fan: newOutputFan(shell.Ring())}, nil
+	return &Shell{shell: shell, conn: c.conn, fan: newOutputFan(shell.Ring())}, nil
 }
 
 // StartSFTP opens a file-transfer session on the connection. A shell and an
@@ -670,6 +672,9 @@ func (e *Engine) DeriveArgon2idKey(
 type Shell struct {
 	// SSH 셸이면 채워진다. SSM 셸(rdpecam 아닌 AWS SSM 세션)에서는 nil 이다.
 	shell *session.Shell
+	// conn owns the auxiliary completion channel for an SSH shell. Direct SSM
+	// has no SSH connection and leaves this nil.
+	conn *session.Conn
 	// SSM 셸이면 채워진다.
 	ssm *ssmShell
 	// 출력 구독. 두 경우가 **같은 헬퍼**를 쓴다(outputfan.go 주석 참고).
@@ -712,6 +717,66 @@ func (s *Shell) SendData(data []byte) error {
 		return s.ssm.sendData(data)
 	}
 	return s.shell.SendData(data)
+}
+
+// PrepareAutocompleteJSON returns the capability and metadata snapshot used by
+// both mobile and desktop completion controllers.
+func (s *Shell) PrepareAutocompleteJSON() (string, error) {
+	var (
+		result autocomplete.Result
+		err    error
+	)
+	if s.ssm != nil {
+		revision := int(s.ssm.autocompleteRevision.Add(1))
+		result, err = s.ssm.manager.CollectAutocomplete(s.ssm.sessionID, revision)
+	} else if s.conn != nil {
+		result, err = s.conn.CollectAutocomplete()
+	} else {
+		result = autocomplete.Unsupported()
+	}
+	if err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(map[string]any{
+		"capability": result.Capability,
+		"snapshot":   result.Snapshot,
+	})
+	if err != nil {
+		return "", fmt.Errorf("encode autocomplete result: %w", err)
+	}
+	return string(encoded), nil
+}
+
+// RunCompletionJSON executes a short dynamic completion command on the SSH
+// connection's lazy auxiliary channel.
+func (s *Shell) RunCompletionJSON(command string) (string, error) {
+	if s.conn == nil {
+		return "", errors.New("dynamic completion is unavailable for direct SSM")
+	}
+	stdout, truncated, err := s.conn.RunCompletion(command)
+	if err != nil && stdout == "" {
+		return "", err
+	}
+	encoded, encodeErr := json.Marshal(map[string]any{
+		"stdout":    stdout,
+		"truncated": truncated,
+	})
+	if encodeErr != nil {
+		return "", fmt.Errorf("encode completion result: %w", encodeErr)
+	}
+	return string(encoded), nil
+}
+
+// ReinjectShellIntegration restores OSC hooks after entering a nested shell.
+func (s *Shell) ReinjectShellIntegration(shellHint string) error {
+	if s.ssm != nil {
+		return s.ssm.manager.ReinjectShellIntegration(s.ssm.sessionID, shellHint)
+	}
+	if s.shell == nil {
+		return errors.New("shell is closed")
+	}
+	s.shell.ReinjectShellIntegration(shellHint)
+	return nil
 }
 
 // Resize reports new terminal geometry to the remote side.

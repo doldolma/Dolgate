@@ -1102,18 +1102,22 @@ func (f *HandshakeFilter) Done() bool {
 // and acts as a pass-through until Arm is called. It must not be copied after
 // first use (embed it in a pointer-accessed session handle).
 type Handshake struct {
-	mu     sync.Mutex
-	filter *HandshakeFilter
+	mu         sync.Mutex
+	generation uint64
+	filter     *HandshakeFilter
 }
 
 // Arm starts suppressing output until the first prompt marker. Call it right
 // before writing the integration init command. preserveMotd keeps output before
 // the injected command's prompt line (e.g. SSH login motd) visible; pass false
 // for the legacy "drop everything before the marker" behavior.
-func (h *Handshake) Arm(preserveMotd bool) {
+func (h *Handshake) Arm(preserveMotd bool) uint64 {
 	h.mu.Lock()
+	h.generation++
 	h.filter = &HandshakeFilter{preserveMotd: preserveMotd}
+	generation := h.generation
 	h.mu.Unlock()
+	return generation
 }
 
 // ArmForCommand 는 Arm 과 같지만, 걷어낼 echo 를 **실제로 주입하는 명령**으로 지정한다.
@@ -1122,16 +1126,17 @@ func (h *Handshake) Arm(preserveMotd bool) {
 // Arm 은 bash/zsh 스크립트를 가정하므로, pwsh·fish 세션에서는 마커 뒤에 오는 프롬프트 재출력이
 // 걸러지지 않고 화면에 남는다.
 // ArmForShellProbe 는 셸 프로브 한 줄을 무장한다. 끝내는 신호는 마커가 아니라 프로브의 답이다.
-func (h *Handshake) ArmForShellProbe(preserveMotd bool, command string) {
-	h.ArmForCommand(preserveMotd, command)
+func (h *Handshake) ArmForShellProbe(preserveMotd bool, command string) uint64 {
+	generation := h.ArmForCommand(preserveMotd, command)
 	h.mu.Lock()
-	if h.filter != nil {
+	if h.filter != nil && h.generation == generation {
 		h.filter.probeReply = true
 	}
 	h.mu.Unlock()
+	return generation
 }
 
-func (h *Handshake) ArmForCommand(preserveMotd bool, commands ...string) {
+func (h *Handshake) ArmForCommand(preserveMotd bool, commands ...string) uint64 {
 	echoes := make([][]byte, 0, len(commands))
 	for _, command := range commands {
 		if echo := visibleInjectedEcho(command); len(echo) > 0 {
@@ -1139,11 +1144,14 @@ func (h *Handshake) ArmForCommand(preserveMotd bool, commands ...string) {
 		}
 	}
 	h.mu.Lock()
+	h.generation++
 	h.filter = &HandshakeFilter{
 		preserveMotd: preserveMotd,
 		echoes:       echoes,
 	}
+	generation := h.generation
 	h.mu.Unlock()
+	return generation
 }
 
 // Filter returns the bytes to forward to the renderer, suppressing the injected
@@ -1171,6 +1179,18 @@ func (h *Handshake) Flush() []byte {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.filter == nil || h.filter.Done() {
+		return nil
+	}
+	return h.filter.Flush()
+}
+
+// FlushAttempt releases buffered output only when generation is still the
+// active handshake. This prevents an old timeout from flushing a newer
+// injection attempt on the same shell.
+func (h *Handshake) FlushAttempt(generation uint64) []byte {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.generation != generation || h.filter == nil || h.filter.Done() {
 		return nil
 	}
 	return h.filter.Flush()

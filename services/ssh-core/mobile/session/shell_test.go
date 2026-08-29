@@ -402,6 +402,9 @@ func TestConnCloseEndsShellsAndIsIdempotent(t *testing.T) {
 	if _, err := conn.StartShell(ShellOptions{}); err != ErrConnClosed {
 		t.Errorf("StartShell after close returned %v, want ErrConnClosed", err)
 	}
+	if _, _, err := conn.RunCompletion("printf ignored"); err != ErrConnClosed {
+		t.Errorf("RunCompletion after close returned %v, want ErrConnClosed", err)
+	}
 }
 
 func TestDialRejectsUntrustedHostKey(t *testing.T) {

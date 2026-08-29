@@ -92,6 +92,9 @@ function SettingsContent({
   const updateSettings = useMobileAppStore((state) => state.updateSettings);
   // 생략된 설정은 켜짐이다(shared-core 의 MobileSettings 주석 참고).
   const keepScreenAwake = settings.keepScreenAwake ?? true;
+  const terminalAutocompleteEnabled =
+    settings.terminalAutocompleteEnabled !== false;
+  const subshellReinjectEnabled = settings.subshellReinjectEnabled !== false;
 
   const [serverUrlDraft, setServerUrlDraft] = useState(settings.serverUrl);
   const [savingServerUrl, setSavingServerUrl] = useState(false);
@@ -636,6 +639,30 @@ function SettingsContent({
             value: keepScreenAwake,
             onValueChange: (next) => {
               void updateSettings({ keepScreenAwake: next });
+            },
+          }}
+        />
+        <SettingsRow
+          accessibilityLabel={translate("settings.terminalAutocomplete.title")}
+          icon="flash-outline"
+          label={translate("settings.terminalAutocomplete.title")}
+          subtitle={translate("settings.terminalAutocomplete.description")}
+          toggle={{
+            value: terminalAutocompleteEnabled,
+            onValueChange: (next) => {
+              void updateSettings({ terminalAutocompleteEnabled: next });
+            },
+          }}
+        />
+        <SettingsRow
+          accessibilityLabel={translate("settings.subshellReinject.title")}
+          icon="git-branch-outline"
+          label={translate("settings.subshellReinject.title")}
+          subtitle={translate("settings.subshellReinject.description")}
+          toggle={{
+            value: subshellReinjectEnabled,
+            onValueChange: (next) => {
+              void updateSettings({ subshellReinjectEnabled: next });
             },
           }}
         />

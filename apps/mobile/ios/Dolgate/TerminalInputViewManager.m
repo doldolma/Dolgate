@@ -9,6 +9,7 @@ RCT_EXPORT_VIEW_PROPERTY(clearToken, NSNumber)
 RCT_EXPORT_VIEW_PROPERTY(onTerminalInput, RCTDirectEventBlock)
 RCT_EXTERN_METHOD(focus:(nonnull NSNumber *)reactTag)
 RCT_EXTERN_METHOD(blur:(nonnull NSNumber *)reactTag)
+RCT_EXTERN_METHOD(setBuffer:(nonnull NSNumber *)reactTag value:(NSString *)value)
 
 @end
 

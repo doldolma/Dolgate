@@ -119,10 +119,19 @@
     "keepScreenAwake": {
       "title": "화면 꺼짐 방지",
       "description": "세션을 보고 있는 동안 화면을 켜 둡니다."
+    },
+    "terminalAutocomplete": {
+      "title": "터미널 자동완성",
+      "description": "명령 기록, 실행 파일과 원격 경로를 제안합니다."
+    },
+    "subshellReinject": {
+      "title": "서브셸 통합 유지",
+      "description": "중첩 SSH, sudo와 컨테이너 셸에서도 명령 단위를 인식합니다."
     }
   },
   "common": {
     "cancel": "취소",
+    "confirm": "확인",
     "done": "완료",
     "close": "닫기",
     "delete": "삭제",
@@ -552,6 +561,17 @@
     "terminalCopy": "복사",
     "terminalPaste": "붙여넣기",
     "terminalSelectAll": "전체 선택",
+    "autocomplete": {
+      "snippetVariables": "스니펫 변수",
+      "sources": {
+        "history": "기록",
+        "path": "경로",
+        "snippet": "스니펫",
+        "spec": "옵션",
+        "value": "값",
+        "command": "명령"
+      }
+    },
     "remoteDesktopConnecting": "연결 준비 중…",
     "remoteDesktopConnected": "연결됨",
     "remoteDesktopDisconnecting": "연결 해제 중…",

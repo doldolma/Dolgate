@@ -1,4 +1,8 @@
 import { t } from '../i18n';
+import type {
+  TerminalAutocompleteCapability,
+  TerminalAutocompleteSnapshot,
+} from '@dolssh/shared-core';
 // The engine-neutral SSH surface the session flow talks to.
 //
 // One implementation backs it: the Go engine (gomobile bindings over
@@ -277,8 +281,25 @@ export interface EngineShell {
     options: EngineFollowOptions,
   ): Promise<number>;
   unfollow(listenerId: number): Promise<void>;
+  prepareAutocomplete(): Promise<EngineAutocompleteResult>;
+  runCompletion(command: string): Promise<EngineCompletionResult>;
+  reinjectShellIntegration(shellHint?: string): Promise<void>;
   close(): Promise<void>;
 }
+
+export type EngineAutocompleteResult = {
+  capability: Omit<TerminalAutocompleteCapability, 'sessionId'>;
+  snapshot:
+    | (Omit<TerminalAutocompleteSnapshot, 'sessionId'> & {
+        os?: { id: string; like?: string; prettyName?: string };
+      })
+    | null;
+};
+
+export type EngineCompletionResult = {
+  stdout: string;
+  truncated: boolean;
+};
 
 export interface EngineConnection {
   readonly id: string;

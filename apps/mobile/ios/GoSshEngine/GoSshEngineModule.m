@@ -123,6 +123,23 @@ RCT_EXTERN_METHOD(sendData
                   : (RCTPromiseResolveBlock)resolve reject
                   : (RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(prepareAutocomplete
+                  : (NSString *)shellId resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(runCompletion
+                  : (NSString *)shellId command
+                  : (NSString *)command resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(reinjectShellIntegration
+                  : (NSString *)shellId shellHint
+                  : (NSString *)shellHint resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(resize
                   : (NSString *)shellId rows
                   : (nonnull NSNumber *)rows cols

@@ -4,7 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
+	"dolssh/services/ssh-core/internal/autocomplete"
+	"dolssh/services/ssh-core/internal/shellintegration"
+	"dolssh/services/ssh-core/internal/sshcmd"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -39,6 +44,13 @@ type Conn struct {
 	// disconnectOnce keeps OnDisconnected to a single firing whether the drop
 	// was noticed by the transport watcher or caused by Close.
 	disconnectOnce sync.Once
+
+	completionMu   sync.Mutex
+	completionPool *sshcmd.WorkerPool
+	revision       atomic.Int64
+
+	shellDetectOnce sync.Once
+	remoteShell     string
 }
 
 // AdoptOptions describes a connection that has already been dialed.
@@ -105,6 +117,7 @@ func (c *Conn) notifyDisconnected(callback func()) {
 		for _, shell := range shells {
 			_ = shell.Close()
 		}
+		c.closeCompletionPool()
 		callback()
 	})
 }
@@ -114,6 +127,21 @@ func (c *Conn) Info() ConnInfo { return c.info }
 
 // StartShell opens a PTY-backed shell channel.
 func (c *Conn) StartShell(opts ShellOptions) (*Shell, error) {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil, ErrConnClosed
+	}
+	c.mu.Unlock()
+
+	// Detect before opening the PTY so servers with MaxSessions=1 still have a
+	// free exec channel for the query. Failure means "leave the PTY untouched",
+	// which is safe for network appliances and Windows OpenSSH alike.
+	c.shellDetectOnce.Do(func() {
+		c.remoteShell = shellintegration.DetectRemoteShell(c.client)
+	})
+	opts.IntegrationShell = c.remoteShell
+
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -146,6 +174,59 @@ func (c *Conn) StartShell(opts ShellOptions) (*Shell, error) {
 	c.mu.Unlock()
 
 	return shell, nil
+}
+
+// CollectAutocomplete reads the login shell's history, PATH executables, and
+// OS metadata over a short-lived exec channel. It never writes into the PTY.
+func (c *Conn) CollectAutocomplete() (autocomplete.Result, error) {
+	stdout, _, err := sshcmd.RunWithTimeout(c.client, autocomplete.RemoteSnapshotCommand(), 3*time.Second)
+	if err != nil {
+		return autocomplete.Degraded(c.remoteShell, "metadata-unavailable"), nil
+	}
+	revision := int(c.revision.Add(1))
+	return autocomplete.ParseSnapshot(stdout, revision), nil
+}
+
+// RunCompletion runs one read-only dynamic completion query on a lazily-created
+// auxiliary SSH channel. Failure is isolated from the interactive PTY.
+func (c *Conn) RunCompletion(command string) (string, bool, error) {
+	pool, err := c.getCompletionPool()
+	if err != nil {
+		return "", false, err
+	}
+	return autocomplete.RunCompletion(
+		autocomplete.PoolTarget(pool, c.client, nil, nil),
+		command,
+		false,
+		false,
+	)
+}
+
+func (c *Conn) getCompletionPool() (*sshcmd.WorkerPool, error) {
+	// Keep the connection alive until the pool is visible to Close. Otherwise a
+	// concurrent Close can drain nil, after which this method creates a worker
+	// that nobody owns and that still points at the closed SSH client.
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil, ErrConnClosed
+	}
+	c.completionMu.Lock()
+	defer c.completionMu.Unlock()
+	if c.completionPool == nil {
+		c.completionPool = sshcmd.NewWorkerPool(c.client)
+	}
+	return c.completionPool, nil
+}
+
+func (c *Conn) closeCompletionPool() {
+	c.completionMu.Lock()
+	pool := c.completionPool
+	c.completionPool = nil
+	c.completionMu.Unlock()
+	if pool != nil {
+		_ = pool.Close()
+	}
 }
 
 // Shell returns a live shell by handle.
@@ -187,6 +268,7 @@ func (c *Conn) Close() error {
 	for _, shell := range shells {
 		_ = shell.Close()
 	}
+	c.closeCompletionPool()
 
 	if err := c.client.Close(); err != nil && !isClosedErr(err) {
 		return fmt.Errorf("close connection: %w", err)

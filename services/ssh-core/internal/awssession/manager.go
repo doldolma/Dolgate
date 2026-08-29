@@ -12,6 +12,7 @@ import (
 
 	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/protocol"
+	"dolssh/services/ssh-core/internal/shellintegration"
 )
 
 type EventEmitter func(protocol.Event)
@@ -46,6 +47,9 @@ type sessionHandle struct {
 	shellKind string
 	// 셸을 모를 때 "누구냐" 를 묻고 답을 기다리는 곳.
 	shellProbe autocomplete.ShellProbe
+	// reinjectGate is separate from the connect-time state machine. A nested
+	// shell can be entered many times during one SSM session.
+	reinjectGate *autocomplete.PromptSettleGate
 }
 
 type autocompleteProbe struct {
@@ -123,6 +127,7 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.AWSConne
 		shellIntegrationReady:   make(chan struct{}),
 		shellIntegrationTypable: shellIntegrationTypable(payload.ShellKind),
 		shellKind:               strings.TrimSpace(payload.ShellKind),
+		reinjectGate:            autocomplete.NewPromptSettleGate(0, 0),
 	}
 	m.mu.Lock()
 	m.sessions[sessionID] = handle
@@ -175,6 +180,77 @@ func (m *Manager) WriteBytes(sessionID string, data []byte) error {
 		return err
 	}
 	return session.runner.Write(data)
+}
+
+// ReinjectShellIntegration restores OSC hooks after a command entered a nested
+// shell. SSM has no auxiliary exec channel, so an unknown shell is identified
+// with the same short in-band probe used by SSH/local reinjection.
+func (m *Manager) ReinjectShellIntegration(sessionID, shellHint string) error {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return err
+	}
+	session.reinjectGate.Arm(func(tail []byte) {
+		if autocomplete.PromptAlreadyIntegrated(tail) {
+			return
+		}
+		if shell := autocomplete.NormalizeShellIntegrationShell(shellHint); shell != "" {
+			_ = m.injectSubshellIntegration(sessionID, session, shell)
+			return
+		}
+		_ = shellintegration.ProbeShellThenInject(shellintegration.ProbeTarget{
+			Probe:        &session.shellProbe,
+			Handshake:    &session.handshake,
+			ProbeCommand: autocomplete.ShellProbeCommand(),
+			Write:        session.runner.Write,
+			BeforeWrite: func() {
+				m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, []byte("\r\x1b[2K"))
+			},
+			Emit: func(data []byte) {
+				m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, data)
+			},
+			OnUnsupported: func() {
+				m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, []byte(autocomplete.CommandFinishedMarker))
+			},
+			OnShell: func(shell string) {
+				_ = m.injectSubshellIntegration(sessionID, session, shell)
+			},
+			Done: session.done,
+		})
+	}, func() {})
+	return nil
+}
+
+func (m *Manager) injectSubshellIntegration(sessionID string, session *sessionHandle, shell string) error {
+	commands := autocomplete.ShellIntegrationInitLines(shell)
+	if len(commands) == 0 {
+		return nil
+	}
+	generation := session.handshake.ArmForCommand(false, commands...)
+	m.emitStream(
+		protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID},
+		[]byte(autocomplete.CommandFinishedMarker+"\r\x1b[2K"),
+	)
+	for _, command := range commands {
+		if err := session.runner.Write([]byte(command)); err != nil {
+			if flushed := session.handshake.FlushAttempt(generation); len(flushed) > 0 {
+				m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+			}
+			return err
+		}
+	}
+	go func() {
+		timer := time.NewTimer(shellintegration.DefaultHandshakeTimeout)
+		defer timer.Stop()
+		select {
+		case <-session.done:
+		case <-timer.C:
+			if flushed := session.handshake.FlushAttempt(generation); len(flushed) > 0 && m.HasSession(sessionID) {
+				m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+			}
+		}
+	}()
+	return nil
 }
 
 func (m *Manager) CollectAutocomplete(sessionID string, revision int) (autocomplete.Result, error) {
@@ -356,6 +432,7 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 			chunk := make([]byte, n)
 			copy(chunk, buffer[:n])
 			m.observeShellIntegrationOutput(sessionID, handle, chunk)
+			handle.reinjectGate.Observe(chunk)
 			// 셸을 모른 채 접속하는 리눅스 SSM 세션은 먼저 "누구냐" 를 묻는다. 그 답도 핸드셰이크
 			// 필터 전에 봐야 한다 — 필터는 이 답을 앵커로 삼아 버퍼를 버린다.
 			handle.shellProbe.Observe(chunk)
@@ -831,6 +908,7 @@ func (m *Manager) closeSession(sessionID string, message string) {
 	session.shellIntegrationMu.Lock()
 	session.stopShellIntegrationInstallTimersLocked()
 	session.shellIntegrationMu.Unlock()
+	session.reinjectGate.Disarm()
 
 	m.emit(protocol.Event{
 		Type:      protocol.EventClosed,

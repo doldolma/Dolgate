@@ -566,6 +566,46 @@ final class GoSshEngineModule: RCTEventEmitter {
     }
   }
 
+  @objc(prepareAutocomplete:resolve:reject:)
+  func prepareAutocomplete(
+    shellId: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      guard let self else { return nil }
+      let shell = try self.requireShell(shellId)
+      return try callReturningString { shell.prepareAutocompleteJSON($0) }
+    }
+  }
+
+  @objc(runCompletion:command:resolve:reject:)
+  func runCompletion(
+    shellId: String,
+    command: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      guard let self else { return nil }
+      let shell = try self.requireShell(shellId)
+      return try callReturningString { shell.runCompletionJSON(command, error: $0) }
+    }
+  }
+
+  @objc(reinjectShellIntegration:shellHint:resolve:reject:)
+  func reinjectShellIntegration(
+    shellId: String,
+    shellHint: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      try self?.requireShell(shellId).reinjectShellIntegration(shellHint)
+      return nil
+    }
+  }
+
   @objc(resize:rows:cols:resolve:reject:)
   func resize(
     shellId: String,

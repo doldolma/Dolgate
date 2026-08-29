@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"dolssh/services/ssh-core/internal/autocomplete"
+	"dolssh/services/ssh-core/internal/shellintegration"
 	"dolssh/services/ssh-core/mobile/ringbuf"
 )
 
@@ -39,6 +42,9 @@ type ShellOptions struct {
 	// values take the ringbuf defaults.
 	RingCapacityBytes int
 	MaxChunkBytes     int
+	// IntegrationShell is detected by Conn before this PTY channel opens. It is
+	// internal engine state, not part of the gomobile options JSON.
+	IntegrationShell string
 	// OnClosed fires once, after the channel has ended and all output has been
 	// stored. It runs on an internal goroutine.
 	OnClosed func(channelID uint32)
@@ -75,6 +81,13 @@ type Shell struct {
 	onClosed  func(channelID uint32)
 
 	detach func()
+
+	handshake                   autocomplete.Handshake
+	shellProbe                  autocomplete.ShellProbe
+	installGate                 *autocomplete.PromptSettleGate
+	reinjectGate                *autocomplete.PromptSettleGate
+	shellIntegrationUnsupported bool
+	integrationMu               sync.Mutex
 }
 
 // Info returns the shell's identity.
@@ -122,6 +135,9 @@ func (s *Shell) Resize(rows, cols uint32) error {
 func (s *Shell) Close() error {
 	var err error
 	s.closeOnce.Do(func() {
+		s.installGate.Disarm()
+		s.reinjectGate.Disarm()
+		s.shellProbe.Disarm()
 		// Closing the session ends the channel, which lands the output readers
 		// on EOF and lets the lifecycle goroutine finish normally.
 		if closeErr := s.session.Close(); closeErr != nil && !isClosedErr(closeErr) {
@@ -140,12 +156,106 @@ func (s *Shell) pump(reader io.Reader, stream ringbuf.StreamKind) {
 		n, err := reader.Read(buf)
 		if n > 0 {
 			// Append copies, so reusing buf across reads is safe.
-			s.ring.Append(stream, buf[:n])
+			chunk := append([]byte(nil), buf[:n]...)
+			chunk = s.filterShellIntegrationOutput(chunk)
+			if len(chunk) > 0 {
+				s.ring.Append(stream, chunk)
+			}
 		}
 		if err != nil {
 			return
 		}
 	}
+}
+
+func (s *Shell) filterShellIntegrationOutput(chunk []byte) []byte {
+	s.installGate.Observe(chunk)
+	s.reinjectGate.Observe(chunk)
+	s.shellProbe.Observe(chunk)
+	s.integrationMu.Lock()
+	if s.shellIntegrationUnsupported && bytes.Contains(chunk, []byte(autocomplete.PromptStartMarker)) {
+		s.shellIntegrationUnsupported = false
+	}
+	s.integrationMu.Unlock()
+	return s.handshake.Filter(chunk)
+}
+
+// ReinjectShellIntegration waits for the foreground subshell's prompt and then
+// installs the shared OSC 7/133 hooks. Empty shellHint uses the safe in-band
+// probe; a known direct shell skips that round trip.
+func (s *Shell) ReinjectShellIntegration(shellHint string) {
+	s.reinjectGate.Arm(func(tail []byte) {
+		if autocomplete.PromptAlreadyIntegrated(tail) {
+			return
+		}
+		shell := autocomplete.NormalizeShellIntegrationShell(shellHint)
+		if shell != "" {
+			_ = s.injectShellIntegration(shell, true)
+			return
+		}
+		s.integrationMu.Lock()
+		unsupported := s.shellIntegrationUnsupported
+		s.integrationMu.Unlock()
+		if unsupported {
+			return
+		}
+		command := autocomplete.ShellProbeCommand()
+		_ = shellintegration.ProbeShellThenInject(shellintegration.ProbeTarget{
+			Probe:        &s.shellProbe,
+			Handshake:    &s.handshake,
+			ProbeCommand: command,
+			Write:        s.SendData,
+			BeforeWrite: func() {
+				s.ring.Append(ringbuf.StreamStdout, []byte("\r\x1b[2K"))
+			},
+			Emit: func(data []byte) {
+				s.ring.Append(ringbuf.StreamStdout, data)
+			},
+			OnUnsupported: func() {
+				s.integrationMu.Lock()
+				s.shellIntegrationUnsupported = true
+				s.integrationMu.Unlock()
+				s.ring.Append(ringbuf.StreamStdout, []byte(autocomplete.CommandFinishedMarker))
+			},
+			OnShell: func(shell string) {
+				_ = s.injectShellIntegration(shell, true)
+			},
+			Done: s.done,
+		})
+	}, func() {})
+}
+
+func (s *Shell) injectShellIntegration(shell string, reinject bool) error {
+	commands := autocomplete.ShellIntegrationInitLines(shell)
+	if len(commands) == 0 {
+		return nil
+	}
+	generation := s.handshake.ArmForCommand(false, commands...)
+	prefix := "\r\x1b[2K"
+	if reinject {
+		prefix = autocomplete.CommandFinishedMarker + prefix
+	}
+	s.ring.Append(ringbuf.StreamStdout, []byte(prefix))
+	for _, command := range commands {
+		if err := s.SendData([]byte(command)); err != nil {
+			if flushed := s.handshake.FlushAttempt(generation); len(flushed) > 0 {
+				s.ring.Append(ringbuf.StreamStdout, flushed)
+			}
+			return err
+		}
+	}
+	go func() {
+		timer := time.NewTimer(shellintegration.DefaultHandshakeTimeout)
+		defer timer.Stop()
+		select {
+		case <-s.done:
+		case <-timer.C:
+			if flushed := s.handshake.FlushAttempt(generation); len(flushed) > 0 {
+				s.ring.Append(ringbuf.StreamStdout, flushed)
+			}
+		}
+	}()
+	return nil
 }
 
 // awaitEnd finishes the shell once its output is fully stored.
@@ -211,13 +321,22 @@ func startShell(client *ssh.Client, info ShellInfo, opts ShellOptions, detach fu
 	}
 
 	shell := &Shell{
-		info:     info,
-		ring:     ringbuf.New(opts.RingCapacityBytes, opts.MaxChunkBytes),
-		session:  sshSession,
-		stdin:    stdin,
-		done:     make(chan struct{}),
-		onClosed: opts.OnClosed,
-		detach:   detach,
+		info:         info,
+		ring:         ringbuf.New(opts.RingCapacityBytes, opts.MaxChunkBytes),
+		session:      sshSession,
+		stdin:        stdin,
+		done:         make(chan struct{}),
+		onClosed:     opts.OnClosed,
+		detach:       detach,
+		installGate:  autocomplete.NewPromptSettleGate(150*time.Millisecond, 3*time.Second),
+		reinjectGate: autocomplete.NewPromptSettleGate(0, 0),
+	}
+	if shellName := autocomplete.NormalizeShellIntegrationShell(opts.IntegrationShell); shellName != "" {
+		shell.installGate.Arm(func(tail []byte) {
+			if !autocomplete.PromptAlreadyIntegrated(tail) {
+				_ = shell.injectShellIntegration(shellName, false)
+			}
+		}, func() {})
 	}
 
 	// Start pumping before Shell() so nothing the remote side sends immediately

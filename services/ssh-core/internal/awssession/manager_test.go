@@ -519,6 +519,55 @@ func TestManagerRoutesWriteResizeAndOutputThroughRunner(t *testing.T) {
 	}
 }
 
+func TestManagerReinjectsShellIntegrationForNestedSsmShell(t *testing.T) {
+	events := make(chan protocol.Event, 16)
+	streams := make(chan []byte, 16)
+	runner := newStubRunner()
+	manager := NewManagerWithRunnerFactory(func(event protocol.Event) {
+		events <- event
+	}, func(_ protocol.StreamFrame, payload []byte) {
+		streams <- payload
+	}, func(protocol.AWSConnectPayload) (sessionRunner, error) {
+		return runner, nil
+	})
+
+	if err := manager.Connect("session-reinject", "req-reinject", protocol.AWSConnectPayload{
+		ShellKind: "bash",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitForEvent(t, events, protocol.EventConnected)
+	runner.emitOutput("ubuntu@host:~$ ")
+	writes := waitForWriteCount(t, runner, 1)
+	if got := string(writes[0]); got != autocomplete.BashShellIntegrationInitCommand() {
+		t.Fatalf("initial integration command = %q", got)
+	}
+	runner.emitOutput(autocomplete.PromptStartMarker + "ubuntu@host:~$ ")
+	_ = waitForStream(t, streams)
+
+	if err := manager.ReinjectShellIntegration("session-reinject", "bash"); err != nil {
+		t.Fatal(err)
+	}
+	runner.emitOutput("root@container:/# ")
+	writes = waitForWriteCount(t, runner, 2)
+	if got := string(writes[1]); got != autocomplete.BashShellIntegrationInitCommand() {
+		t.Fatalf("nested integration command = %q", got)
+	}
+	boundaryOutput := waitForStream(t, streams)
+	if !bytes.Contains(boundaryOutput, []byte(autocomplete.CommandFinishedMarker)) {
+		boundaryOutput = append(boundaryOutput, waitForStream(t, streams)...)
+	}
+	if !bytes.Contains(boundaryOutput, []byte(autocomplete.CommandFinishedMarker)) {
+		t.Fatalf("missing command-finished boundary before reinjection: %q", boundaryOutput)
+	}
+
+	runner.emitOutput(autocomplete.PromptStartMarker + "root@container:/# ")
+	if got := waitForStream(t, streams); !bytes.Contains(got, []byte(autocomplete.PromptStartMarker)) {
+		t.Fatalf("nested prompt marker was not forwarded: %q", got)
+	}
+	_ = manager.Disconnect("session-reinject")
+}
+
 func TestManagerEmitsErrorBeforeClosedOnAbnormalExit(t *testing.T) {
 	events := make(chan protocol.Event, 16)
 	runner := newStubRunner()

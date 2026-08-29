@@ -60,6 +60,23 @@ describe('resolveDynamicCompletion', () => {
     expect(resolveDynamicCompletion(null, 'git commit -m mess')).toBeNull();
   });
 
+  it('completes common filesystem commands without the bundled catalogue', () => {
+    expect(resolveDynamicCompletion(null, 'cd sr')).toEqual<PathCompletionRequest>({
+      kind: 'path',
+      before: 'cd ',
+      dir: '',
+      base: 'sr',
+      foldersOnly: true,
+    });
+    expect(resolveDynamicCompletion(null, 'ls pac')).toEqual<PathCompletionRequest>({
+      kind: 'path',
+      before: 'ls ',
+      dir: '',
+      base: 'pac',
+      foldersOnly: false,
+    });
+  });
+
   it('triggers via the filepaths template even without a slash', () => {
     const request = resolveDynamicCompletion(vim, 'vim REAaa');
     expect(request).toEqual<PathCompletionRequest>({

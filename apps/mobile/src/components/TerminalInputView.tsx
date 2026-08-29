@@ -23,6 +23,7 @@ type NativeTerminalInputViewProps = {
 export type TerminalInputViewHandle = {
   focus: () => void;
   blur: () => void;
+  setBuffer: (value: string) => void;
 };
 
 const NativeTerminalInputViewComponent =
@@ -60,6 +61,16 @@ export const TerminalInputView = React.forwardRef<
       },
       blur: () => {
         dispatchTerminalInputCommand(nativeRef, "blur");
+      },
+      setBuffer: (value: string) => {
+        const nativeHandle = findNodeHandle(nativeRef.current);
+        const command =
+          UIManager.getViewManagerConfig("TerminalInputView")?.Commands
+            ?.setBuffer;
+        if (!nativeHandle || command == null) {
+          return;
+        }
+        UIManager.dispatchViewManagerCommand(nativeHandle, command, [value]);
       },
     }),
     [],

@@ -8,6 +8,7 @@ jest.mock("react-native", () => {
     Commands: {
       focus: 1,
       blur: 2,
+      setBuffer: 3,
     },
   }));
   const mockFindNodeHandle = jest.fn(() => 4242);
@@ -72,10 +73,11 @@ describe("TerminalInputView", () => {
     });
   });
 
-  it("dispatches native focus and blur commands through the view manager", () => {
+  it("dispatches native focus, blur, and buffer commands through the view manager", () => {
     const ref = React.createRef<{
       focus: () => void;
       blur: () => void;
+      setBuffer: (value: string) => void;
     }>();
 
     let tree: renderer.ReactTestRenderer;
@@ -88,6 +90,7 @@ describe("TerminalInputView", () => {
     act(() => {
       ref.current!.focus();
       ref.current!.blur();
+      ref.current!.setBuffer("git status");
     });
 
     expect(ReactNative.__mockGetViewManagerConfig).toHaveBeenCalledWith(
@@ -105,6 +108,12 @@ describe("TerminalInputView", () => {
       4242,
       2,
       [],
+    );
+    expect(ReactNative.__mockDispatchViewManagerCommand).toHaveBeenNthCalledWith(
+      3,
+      4242,
+      3,
+      ["git status"],
     );
 
     act(() => {

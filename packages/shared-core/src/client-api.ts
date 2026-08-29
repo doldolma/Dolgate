@@ -63,6 +63,12 @@ export interface MobileSettings {
    * 자동 꺼짐 설정을 앱이 덮는 것이므로, 그것을 원하지 않는 사용자가 끌 수 있어야 한다.
    */
   keepScreenAwake?: boolean;
+  /** 셸 히스토리·실행 파일·현재 경로를 이용한 터미널 명령 자동완성. 생략 시 켜짐. */
+  terminalAutocompleteEnabled?: boolean;
+  /** 중첩 SSH·sudo·컨테이너 셸 진입 후 OSC 133/7 훅을 다시 설치한다. 생략 시 켜짐. */
+  subshellReinjectEnabled?: boolean;
+  /** 기본 서브셸 명령 패턴에 추가할 사용자 정의 정규식. */
+  subshellReinjectPatterns?: string[];
 }
 
 export interface MobileSessionRecord {

@@ -506,6 +506,13 @@ final class TerminalInputContainerView: UIView, UITextViewDelegate {
     syncFocus(force: true)
   }
 
+  fileprivate func setInputBuffer(_ value: String) {
+    previousValue = value
+    textView.text = value
+    moveCaretToEnd()
+    syncFocus(force: true)
+  }
+
   private func resetBuffer(keepFocus: Bool) {
     previousValue = ""
     if !textView.text.isEmpty {
@@ -580,6 +587,15 @@ final class TerminalInputViewManager: RCTViewManager {
         return
       }
       view.blurInput()
+    }
+  }
+
+  @objc func setBuffer(_ reactTag: NSNumber, value: String) {
+    bridge.uiManager.addUIBlock { _, viewRegistry in
+      guard let view = viewRegistry?[reactTag] as? TerminalInputContainerView else {
+        return
+      }
+      view.setInputBuffer(value)
     }
   }
 }

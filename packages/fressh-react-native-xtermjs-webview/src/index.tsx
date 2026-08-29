@@ -92,6 +92,8 @@ export type XtermJsWebViewProps = {
 	 * this unset makes links inert.
 	 */
 	onLinkActivated?: (uri: string) => void;
+	onShellIntegration?: (marker: string, command?: string) => void;
+	onCwd?: (value: string) => void;
 	logger?: {
 		debug?: (...args: unknown[]) => void;
 		log?: (...args: unknown[]) => void;
@@ -135,6 +137,8 @@ export const XtermJsWebView = React.forwardRef<
 		onInitialized,
 		onData,
 		onLinkActivated,
+		onShellIntegration,
+		onCwd,
 		coalescingThreshold = defaultCoalescingThreshold,
 		logger,
 		size,
@@ -312,6 +316,14 @@ export const XtermJsWebView = React.forwardRef<
 					onLinkActivated?.(msg.uri);
 					return;
 				}
+				if (msg.type === 'shellIntegration') {
+					onShellIntegration?.(msg.marker, msg.command);
+					return;
+				}
+				if (msg.type === 'cwd') {
+					onCwd?.(msg.value);
+					return;
+				}
 				if (msg.type === 'debug') {
 					logger?.log?.(`received debug msg from webview: `, msg.message);
 					return;
@@ -325,7 +337,16 @@ export const XtermJsWebView = React.forwardRef<
 				);
 			}
 		},
-		[logger, webViewOptions, onInitialized, autoFitFn, onData, onLinkActivated],
+		[
+			logger,
+			webViewOptions,
+			onInitialized,
+			autoFitFn,
+			onData,
+			onLinkActivated,
+			onShellIntegration,
+			onCwd,
+		],
 	);
 
 	const onContentProcessDidTerminate = useCallback<

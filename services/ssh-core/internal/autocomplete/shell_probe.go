@@ -106,21 +106,24 @@ func shellFromProbeFields(fields []string) string {
 // 답은 OSC 라 청크 경계에서 잘릴 수 있어 꼬리를 조금 들고 있는다. 한 번 답을 받으면 스스로
 // 무장을 푼다 — 늦게 온 같은 시퀀스로 두 번 주입하지 않기 위해서다.
 type ShellProbe struct {
-	mu       sync.Mutex
-	armed    bool
-	buffer   []byte
-	onResult func(shell string)
+	mu         sync.Mutex
+	armed      bool
+	generation uint64
+	buffer     []byte
+	onResult   func(shell string)
 }
 
 // 답을 찾기 위해 들고 있는 최대 꼬리. 답 시퀀스는 100바이트 남짓이라 넉넉하다.
 const shellProbeBufferLimit = 4096
 
-func (w *ShellProbe) Arm(onResult func(shell string)) {
+func (w *ShellProbe) Arm(onResult func(shell string)) uint64 {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.generation++
 	w.armed = true
 	w.buffer = nil
 	w.onResult = onResult
+	return w.generation
 }
 
 func (w *ShellProbe) Disarm() {
@@ -129,6 +132,21 @@ func (w *ShellProbe) Disarm() {
 	w.armed = false
 	w.buffer = nil
 	w.onResult = nil
+}
+
+// DisarmAttempt disarms only the probe generation returned by Arm. A timeout
+// from an older subshell attempt must not cancel a newer probe that reused the
+// same session state.
+func (w *ShellProbe) DisarmAttempt(generation uint64) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.armed || w.generation != generation {
+		return false
+	}
+	w.armed = false
+	w.buffer = nil
+	w.onResult = nil
+	return true
 }
 
 // Observe 는 raw 출력에서 답을 찾는다. 핸드셰이크 필터 **전에** 불러야 원본을 본다.

@@ -60,8 +60,9 @@ type ssmShell struct {
 	ring        *ringbuf.Ring
 	fan         *outputFan
 
-	closeOnce sync.Once
-	closed    atomic.Bool
+	closeOnce            sync.Once
+	closed               atomic.Bool
+	autocompleteRevision atomic.Int64
 }
 
 func (s *ssmShell) sendData(data []byte) error {

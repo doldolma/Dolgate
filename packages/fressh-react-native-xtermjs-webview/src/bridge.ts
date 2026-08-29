@@ -13,6 +13,8 @@ export type BridgeInboundMessage =
 	 * decides where a link opens.
 	 */
 	| { type: 'linkActivated'; uri: string }
+	| { type: 'shellIntegration'; marker: string; command?: string }
+	| { type: 'cwd'; value: string }
 	| { type: 'debug'; message: string };
 
 // Messages injected from React Native into the WebView (xterm page)

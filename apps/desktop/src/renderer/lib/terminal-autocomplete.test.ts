@@ -34,6 +34,27 @@ describe('terminal autocomplete', () => {
     expect(result.state.value).toBe('');
   });
 
+  it('tracks delete, home, and end without treating ANSI bytes as text', () => {
+    let state = applyTerminalInput(createEmptyCommandBuffer(), 'gti').state;
+    state = applyTerminalInput(state, '\x1b[D\x1b[3~').state;
+    expect(state).toEqual({ value: 'gt', cursor: 2, ambiguous: false });
+    state = applyTerminalInput(state, '\x1b[Hf\x1b[F status').state;
+    expect(state).toEqual({
+      value: 'fgt status',
+      cursor: 'fgt status'.length,
+      ambiguous: false,
+    });
+  });
+
+  it('marks shell-managed or unknown control input as ambiguous', () => {
+    const tab = applyTerminalInput(cmd('git'), '\t').state;
+    expect(tab.ambiguous).toBe(true);
+
+    const pageUp = applyTerminalInput(cmd('git'), '\x1b[5~').state;
+    expect(pageUp.value).toBe('git');
+    expect(pageUp.ambiguous).toBe(true);
+  });
+
   it('requires at least 2 characters before suggesting', () => {
     const s = snap(['git status'], [{ name: 'git' }]);
     expect(getTerminalAutocompleteSuggestions(s, cmd('g'))).toEqual([]);

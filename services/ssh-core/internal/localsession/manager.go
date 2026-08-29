@@ -37,6 +37,7 @@ type runnerFactory func(protocol.LocalConnectPayload) (sessionRunner, error)
 
 type sessionHandle struct {
 	runner              sessionRunner
+	closed              chan struct{}
 	streams             sync.WaitGroup
 	disconnectRequested bool
 	errorNotified       bool
@@ -86,6 +87,7 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.LocalCon
 
 	handle := &sessionHandle{
 		runner:       runner,
+		closed:       make(chan struct{}),
 		reinjectGate: autocomplete.NewPromptSettleGate(0, 0),
 		installGate: autocomplete.NewPromptSettleGate(
 			installPromptSettleQuiet,
@@ -519,6 +521,7 @@ func (m *Manager) closeSession(sessionID string, message string) {
 	// 몇 초 더 살아 있다.
 	session.installGate.Disarm()
 	session.reinjectGate.Disarm()
+	close(session.closed)
 
 	m.emit(protocol.Event{
 		Type:      protocol.EventClosed,

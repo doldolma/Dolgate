@@ -2,10 +2,10 @@ package localsession
 
 import (
 	"strings"
-	"time"
 
 	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/protocol"
+	"dolssh/services/ssh-core/internal/shellintegration"
 )
 
 // probeShellThenReinject 는 "누구냐" 한 줄을 보내고, 답이 오면 그 셸 전용 스크립트를 넣는다.
@@ -21,37 +21,34 @@ func (m *Manager) probeShellThenReinject(sessionID string, session *sessionHandl
 		session.shellIntegrationUnsupported.Store(true)
 		return
 	}
-	session.shellProbe.Arm(func(shell string) {
-		if shell == "" {
+	_ = shellintegration.ProbeShellThenInject(shellintegration.ProbeTarget{
+		Probe:        &session.shellProbe,
+		Handshake:    &session.handshake,
+		ProbeCommand: command,
+		Write:        session.runner.Write,
+		BeforeWrite: func() {
+			m.emitStream(
+				protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID},
+				[]byte("\r\x1b[2K"),
+			)
+		},
+		Emit: func(data []byte) {
+			m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, data)
+		},
+		OnUnsupported: func() {
 			// dash·busybox 등. 넣을 것이 없고, 이 세션에서는 다시 묻지도 않는다.
 			session.shellIntegrationUnsupported.Store(true)
-			m.FlushShellIntegration(sessionID)
 			// 실행 중으로 남을 명령 블록을 닫는다(CommandFinishedMarker 주석 참고).
 			m.emitStream(
 				protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID},
 				[]byte(autocomplete.CommandFinishedMarker),
 			)
-			return
-		}
-		m.performShellIntegrationReinject(sessionID, session, shell, nil)
-	})
-	session.handshake.ArmForShellProbe(false, command)
-	m.emitStream(
-		protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID},
-		[]byte("\r\x1b[2K"),
-	)
-	if err := session.runner.Write([]byte(command)); err != nil {
-		session.shellProbe.Disarm()
-		if flushed := session.handshake.Flush(); len(flushed) > 0 {
-			m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
-		}
-		return
-	}
-	// 답이 끝내 오지 않으면(셸이 아닌 것이 앞에 있거나 printf 가 없는 셸) 버퍼를 풀어 준다.
-	// 주입 경로와 같은 방식이다(time.AfterFunc).
-	time.AfterFunc(shellIntegrationHandshakeTimeout, func() {
-		session.shellProbe.Disarm()
-		m.FlushShellIntegration(sessionID)
+		},
+		OnShell: func(shell string) {
+			m.performShellIntegrationReinject(sessionID, session, shell, nil)
+		},
+		Done:    session.closed,
+		Timeout: shellIntegrationHandshakeTimeout,
 	})
 }
 

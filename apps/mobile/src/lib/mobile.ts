@@ -138,6 +138,9 @@ export function createDefaultMobileSettings(): MobileSettings {
     serverUrl: DEFAULT_SERVER_URL,
     theme: 'system',
     language: 'system',
+    terminalAutocompleteEnabled: true,
+    subshellReinjectEnabled: true,
+    subshellReinjectPatterns: [],
   };
 }
 

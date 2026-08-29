@@ -19,6 +19,10 @@ import type {
 	BridgeInboundMessage,
 	BridgeOutboundMessage,
 } from '../src/bridge';
+import {
+	readCommandFromTerminalBuffer,
+	unescapeReportedCommand,
+} from './shell-integration';
 
 declare global {
 	interface Window {
@@ -83,6 +87,52 @@ window.onload = () => {
 
 		terminal.onData((str) => {
 			postToHost({ type: 'input', str });
+		});
+
+		// Shell integration events stay inside xterm's parser so chunk boundaries
+		// and BEL/ST terminators are handled by the terminal implementation rather
+		// than re-parsed from React Native output chunks.
+		let promptLine: number | null = null;
+		let promptEndX = 0;
+		let reportedCommand: string | null = null;
+		const continuationEndX = new Map<number, number>();
+		const readCommand = (): string | undefined => {
+			if (reportedCommand) {
+				const command = reportedCommand;
+				reportedCommand = null;
+				return command;
+			}
+			if (promptLine == null) return undefined;
+			return readCommandFromTerminalBuffer(
+				terminal.buffer.active,
+				promptLine,
+				promptEndX,
+				continuationEndX,
+			);
+		};
+		terminal.parser.registerOscHandler(133, (marker) => {
+			const buffer = terminal.buffer.active;
+			if (marker === 'B') {
+				promptLine = buffer.baseY + buffer.cursorY;
+				promptEndX = buffer.cursorX;
+				reportedCommand = null;
+				continuationEndX.clear();
+			} else if (marker === 'B;2') {
+				continuationEndX.set(buffer.baseY + buffer.cursorY, buffer.cursorX);
+			} else if (marker.startsWith('E;')) {
+				reportedCommand = unescapeReportedCommand(marker.slice(2));
+			}
+			const command = marker === 'C' ? readCommand() : undefined;
+			postToHost(
+				command
+					? { type: 'shellIntegration', marker, command }
+					: { type: 'shellIntegration', marker },
+			);
+			return true;
+		});
+		terminal.parser.registerOscHandler(7, (value) => {
+			postToHost({ type: 'cwd', value });
+			return true;
 		});
 
 		if (window.__FRESSH_XTERM_MSG_HANDLER__) {

@@ -18,6 +18,7 @@ import (
 	"dolssh/services/ssh-core/internal/hostkeytrust"
 	"dolssh/services/ssh-core/internal/neterr"
 	"dolssh/services/ssh-core/internal/protocol"
+	"dolssh/services/ssh-core/internal/shellintegration"
 	"dolssh/services/ssh-core/internal/sshcmd"
 	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/internal/sshdial"
@@ -508,9 +509,6 @@ func (m *Manager) KillTmuxSession(sessionID, sessionName string) error {
 // control mode(tmuxsession)에서도 동일 명령으로 세션 목록을 라이브 조회한다.
 const TmuxDetectCommand = "command -v tmux >/dev/null 2>&1 && { tmux -V; tmux list-sessions -F '#{session_name}\t#{session_windows}\t#{?session_attached,1,0}' 2>/dev/null; }"
 
-const remoteShellProbeTimeout = 2 * time.Second
-const remoteShellProbeCommand = `test -n "$BASH_VERSION" && printf 'bash\n'; test -n "$ZSH_VERSION" && printf 'zsh\n'; test -n "$version" && printf 'fish\n'; printf '%s\n' "$SHELL"`
-
 // ParseTmuxDetect는 "tmux -V" 첫 줄 + "list-sessions -F" 탭 구분 줄들을 파싱한다.
 func ParseTmuxDetect(out string) protocol.TmuxAvailablePayload {
 	var payload protocol.TmuxAvailablePayload
@@ -773,23 +771,11 @@ func remoteShellSupportsIntegration(client *ssh.Client) bool {
 }
 
 func remoteShellIntegrationShell(client *ssh.Client) string {
-	if client == nil {
-		return ""
-	}
-	stdout, _, err := sshcmd.RunWithTimeout(client, remoteShellProbeCommand, remoteShellProbeTimeout)
-	if err != nil {
-		return ""
-	}
-	return normalizeRemoteShellProbeOutput(stdout)
+	return shellintegration.DetectRemoteShell(client)
 }
 
 func normalizeRemoteShellProbeOutput(stdout []byte) string {
-	for _, field := range strings.Fields(string(stdout)) {
-		if shell := autocomplete.NormalizeShellIntegrationShell(field); shell != "" {
-			return shell
-		}
-	}
-	return ""
+	return shellintegration.NormalizeRemoteShellProbeOutput(stdout)
 }
 
 func (h *sessionHandle) shellIntegrationStatus() shellIntegrationState {

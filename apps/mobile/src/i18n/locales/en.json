@@ -119,10 +119,19 @@
     "keepScreenAwake": {
       "title": "Keep the screen awake",
       "description": "Keeps the screen on while you are viewing a session."
+    },
+    "terminalAutocomplete": {
+      "title": "Terminal autocomplete",
+      "description": "Suggests command history, executables, and remote paths."
+    },
+    "subshellReinject": {
+      "title": "Keep subshell integration",
+      "description": "Tracks command boundaries inside nested SSH, sudo, and container shells."
     }
   },
   "common": {
     "cancel": "Cancel",
+    "confirm": "Confirm",
     "done": "Done",
     "close": "Close",
     "delete": "Delete",
@@ -552,6 +561,17 @@
     "terminalCopy": "Copy",
     "terminalPaste": "Paste",
     "terminalSelectAll": "Select All",
+    "autocomplete": {
+      "snippetVariables": "Snippet variables",
+      "sources": {
+        "history": "History",
+        "path": "Path",
+        "snippet": "Snippet",
+        "spec": "Option",
+        "value": "Value",
+        "command": "Command"
+      }
+    },
     "remoteDesktopConnecting": "Preparing connection…",
     "remoteDesktopConnected": "Connected",
     "remoteDesktopDisconnecting": "Disconnecting…",

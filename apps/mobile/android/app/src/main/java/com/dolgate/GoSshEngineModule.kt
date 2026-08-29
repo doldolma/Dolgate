@@ -441,6 +441,24 @@ class GoSshEngineModule(
   }
 
   @ReactMethod
+  fun prepareAutocomplete(shellId: String, promise: Promise) {
+    onWorker(promise) { requireShell(shellId).prepareAutocompleteJSON() }
+  }
+
+  @ReactMethod
+  fun runCompletion(shellId: String, command: String, promise: Promise) {
+    onWorker(promise) { requireShell(shellId).runCompletionJSON(command) }
+  }
+
+  @ReactMethod
+  fun reinjectShellIntegration(shellId: String, shellHint: String, promise: Promise) {
+    onWorker(promise) {
+      requireShell(shellId).reinjectShellIntegration(shellHint)
+      null
+    }
+  }
+
+  @ReactMethod
   fun resize(shellId: String, rows: Double, cols: Double, promise: Promise) {
     onWorker(promise) {
       requireShell(shellId).resize(rows.toLong(), cols.toLong())

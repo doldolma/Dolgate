@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dolssh/services/ssh-core/internal/autocomplete"
+	"dolssh/services/ssh-core/internal/shellintegration"
 	"dolssh/services/ssh-core/internal/sshcmd"
 	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/internal/sshdial"
@@ -156,21 +157,6 @@ func (h *controlHandle) armPaneHandshake(paneID string, commands []string) {
 	hs.ArmForCommand(false, commands...)
 }
 
-// armPaneShellProbe 는 "누구냐" 한 줄을 무장한다 — 끝내는 신호는 마커가 아니라 그 답이다.
-func (h *controlHandle) armPaneShellProbe(paneID string, command string) {
-	h.handshakesMu.Lock()
-	if h.handshakes == nil {
-		h.handshakes = make(map[string]*autocomplete.Handshake)
-	}
-	hs := h.handshakes[paneID]
-	if hs == nil {
-		hs = &autocomplete.Handshake{}
-		h.handshakes[paneID] = hs
-	}
-	h.handshakesMu.Unlock()
-	hs.ArmForShellProbe(false, command)
-}
-
 // filterPaneOutput 는 pane 출력에 핸드셰이크 필터를 적용한다(없으면 그대로 통과).
 func (h *controlHandle) filterPaneOutput(paneID string, data []byte) []byte {
 	h.handshakesMu.Lock()
@@ -233,6 +219,20 @@ func (h *controlHandle) paneHandshake(paneID string) *autocomplete.Handshake {
 	h.handshakesMu.Lock()
 	defer h.handshakesMu.Unlock()
 	return h.handshakes[paneID]
+}
+
+func (h *controlHandle) ensurePaneHandshake(paneID string) *autocomplete.Handshake {
+	h.handshakesMu.Lock()
+	defer h.handshakesMu.Unlock()
+	if h.handshakes == nil {
+		h.handshakes = make(map[string]*autocomplete.Handshake)
+	}
+	hs := h.handshakes[paneID]
+	if hs == nil {
+		hs = &autocomplete.Handshake{}
+		h.handshakes[paneID] = hs
+	}
+	return hs
 }
 
 // tmux -CC는 초기/단순 상태에서 %layout-change를 보내지 않으므로(window-add + output만),
@@ -1046,33 +1046,37 @@ func (m *Manager) probePaneShellThenInject(
 	paneID string,
 ) {
 	command := autocomplete.ShellProbeCommand()
-	handle.paneShellProbe(paneID).Arm(func(shell string) {
-		if shell == "" {
+	_ = shellintegration.ProbeShellThenInject(shellintegration.ProbeTarget{
+		Probe:        handle.paneShellProbe(paneID),
+		Handshake:    handle.ensurePaneHandshake(paneID),
+		ProbeCommand: command,
+		Write: func(data []byte) error {
+			for _, cmd := range encodeInput(paneID, data, handle.version) {
+				if err := handle.writeStdin(cmd); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+		Emit: func(data []byte) {
+			m.emitStream(coretypes.StreamFrame{
+				Type: coretypes.StreamTypeData, SessionID: sessionID,
+			}, data)
+		},
+		OnUnsupported: func() {
 			// dash·busybox 등. 넣을 것이 없다.
-			m.flushPaneShellIntegration(sessionID, handle, paneID)
 			// 실행 중으로 남을 명령 블록을 닫는다(CommandFinishedMarker 주석 참고).
 			m.emitStream(coretypes.StreamFrame{
 				Type:      coretypes.StreamTypeData,
 				SessionID: sessionID,
 			}, []byte(autocomplete.CommandFinishedMarker))
-			return
-		}
-		m.writePaneShellIntegration(sessionID, handle, paneID, autocomplete.ShellIntegrationInitLines(shell))
+		},
+		OnShell: func(shell string) {
+			m.writePaneShellIntegration(sessionID, handle, paneID, autocomplete.ShellIntegrationInitLines(shell))
+		},
+		Done:    handle.closed,
+		Timeout: shellIntegrationFlushDelay,
 	})
-	handle.armPaneShellProbe(paneID, command)
-	for _, cmd := range encodeInput(paneID, []byte(command), handle.version) {
-		if err := handle.writeStdin(cmd); err != nil {
-			handle.paneShellProbe(paneID).Disarm()
-			m.flushPaneShellIntegration(sessionID, handle, paneID)
-			return
-		}
-	}
-	// 답이 끝내 오지 않으면 붙잡고 있던 출력을 풀어 준다.
-	go func() {
-		time.Sleep(shellIntegrationFlushDelay)
-		handle.paneShellProbe(paneID).Disarm()
-		m.flushPaneShellIntegration(sessionID, handle, paneID)
-	}()
 }
 
 // writePaneShellIntegration 는 echo 억제를 무장하고 pane 에 주입 줄들을 보낸다.
