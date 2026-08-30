@@ -288,26 +288,30 @@ func TestReinjectStillRunsForAFreshSubshellPrompt(t *testing.T) {
 // 훅을 걸 수 없는 셸(dash·ksh)로 들어간 경우에는 아무것도 보내지 않는다 — 타이핑해 봐야
 // 화면만 더럽힌다.
 func TestReinjectSendsNothingForAnUnsupportedShellHint(t *testing.T) {
-	w := &fakeWriteCloser{}
-	h := &sessionHandle{
-		stdin:        w,
-		closed:       make(chan struct{}),
-		reinjectGate: autocomplete.NewPromptSettleGate(20*time.Millisecond, time.Second),
-	}
-	m := NewManager(func(_ protocol.Event) {}, func(_ protocol.StreamFrame, _ []byte) {})
-	m.mu.Lock()
-	m.sessions["s1"] = h
-	m.mu.Unlock()
-	defer close(h.closed)
+	for _, shell := range []string{"dash", "pwsh", "powershell.exe"} {
+		t.Run(shell, func(t *testing.T) {
+			w := &fakeWriteCloser{}
+			h := &sessionHandle{
+				stdin:        w,
+				closed:       make(chan struct{}),
+				reinjectGate: autocomplete.NewPromptSettleGate(20*time.Millisecond, time.Second),
+			}
+			m := NewManager(func(_ protocol.Event) {}, func(_ protocol.StreamFrame, _ []byte) {})
+			m.mu.Lock()
+			m.sessions["s1"] = h
+			m.mu.Unlock()
+			defer close(h.closed)
 
-	if err := m.ReinjectShellIntegration("s1", "dash"); err != nil {
-		t.Fatalf("arm reinject failed: %v", err)
-	}
-	h.reinjectGate.Observe([]byte("$ "))
+			if err := m.ReinjectShellIntegration("s1", shell); err != nil {
+				t.Fatalf("arm reinject failed: %v", err)
+			}
+			h.reinjectGate.Observe([]byte("$ "))
 
-	time.Sleep(200 * time.Millisecond)
-	if got := w.writeCount(); got != 0 {
-		t.Fatalf("지원하지 않는 셸에 %d번 썼다: %q", got, w.written())
+			time.Sleep(200 * time.Millisecond)
+			if got := w.writeCount(); got != 0 {
+				t.Fatalf("지원하지 않는 셸에 %d번 썼다: %q", got, w.written())
+			}
+		})
 	}
 }
 

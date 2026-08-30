@@ -670,6 +670,9 @@ func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error
 	if err != nil {
 		return err
 	}
+	if strings.TrimSpace(shell) != "" && shellintegration.NormalizeRemoteShell(shell) == "" {
+		return nil
+	}
 	session.reinjectGate.Arm(
 		func(tail []byte) { m.performShellIntegrationReinject(sessionID, session, shell, tail) },
 		// No prompt settled within the window (unusual prompt, non-shell
@@ -714,6 +717,10 @@ func (m *Manager) performShellIntegrationReinject(
 	// echo (and its prompt redraw) is hidden — the subshell's own login/motd and
 	// prompt were already shown to the user while the gate was waiting.
 	// 셸을 알면 그 셸 것 한 줄로 끝난다. 지원하지 않는 셸이면 아무것도 보내지 않는다.
+	shell = shellintegration.NormalizeRemoteShell(shell)
+	if shell == "" {
+		return
+	}
 	commands := autocomplete.ShellIntegrationInitLines(shell)
 	if len(commands) == 0 {
 		return
@@ -796,7 +803,7 @@ func (h *sessionHandle) markShellIntegrationUnsupported() {
 // stdin에 1회만 쓴다. write 성공 후에만 installed 상태가 되므로 실패 시 재시도 가능하다.
 func (m *Manager) installShellIntegration(sessionID string, session *sessionHandle, shell string) (bool, error) {
 	// 접속 때 원격 셸을 이미 물어봤다 — 그 셸 것 하나만 보낸다.
-	commands := autocomplete.ShellIntegrationInitLines(shell)
+	commands := autocomplete.ShellIntegrationInitLines(shellintegration.NormalizeRemoteShell(shell))
 	if len(commands) == 0 {
 		session.markShellIntegrationUnsupported()
 		return false, nil

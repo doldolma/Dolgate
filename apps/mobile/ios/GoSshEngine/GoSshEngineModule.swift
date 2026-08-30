@@ -601,7 +601,13 @@ final class GoSshEngineModule: RCTEventEmitter {
     reject: @escaping RCTPromiseRejectBlock
   ) {
     onWorker(resolve, reject) { [weak self] in
-      try self?.requireShell(shellId).reinjectShellIntegration(shellHint)
+      // The engine method is ObjC -[MobileShell reinjectShellIntegration:error:].
+      // Swift's importer applies the Swift 3 "drop the class name from the
+      // method name" rule because the selector embeds the class word "Shell",
+      // so it imports it as `reinjectIntegration(_:)` and rejects the old
+      // spelling with a hard obsoleted-3 error. Call the renamed name; do not
+      // "fix" it back to reinjectShellIntegration.
+      try self?.requireShell(shellId).reinjectIntegration(shellHint)
       return nil
     }
   }

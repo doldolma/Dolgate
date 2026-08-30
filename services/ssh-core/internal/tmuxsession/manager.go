@@ -1016,6 +1016,9 @@ func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error
 	// 셸을 모르면 프로브 한 줄로 먼저 묻는다. 예전에는 겸용 스크립트를 보냈고, 그것이 여러 줄이라
 	// dash·busybox pane 에서 화면에 그대로 남았다.
 	probing := strings.TrimSpace(shell) == ""
+	if !probing {
+		shell = shellintegration.NormalizeRemoteShell(shell)
+	}
 	commands := autocomplete.ShellIntegrationInitLines(shell)
 	if !probing && len(commands) == 0 {
 		// 훅을 걸 수 없는 셸이다(dash·ksh 등). 타이핑해 봐야 화면만 더럽힌다.
@@ -1072,7 +1075,15 @@ func (m *Manager) probePaneShellThenInject(
 			}, []byte(autocomplete.CommandFinishedMarker))
 		},
 		OnShell: func(shell string) {
-			m.writePaneShellIntegration(sessionID, handle, paneID, autocomplete.ShellIntegrationInitLines(shell))
+			normalized := shellintegration.NormalizeRemoteShell(shell)
+			if normalized == "" {
+				m.emitStream(coretypes.StreamFrame{
+					Type:      coretypes.StreamTypeData,
+					SessionID: sessionID,
+				}, []byte(autocomplete.CommandFinishedMarker))
+				return
+			}
+			m.writePaneShellIntegration(sessionID, handle, paneID, autocomplete.ShellIntegrationInitLines(normalized))
 		},
 		Done:    handle.closed,
 		Timeout: shellIntegrationFlushDelay,

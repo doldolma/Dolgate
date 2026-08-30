@@ -135,12 +135,14 @@ func (c *Conn) StartShell(opts ShellOptions) (*Shell, error) {
 	c.mu.Unlock()
 
 	// Detect before opening the PTY so servers with MaxSessions=1 still have a
-	// free exec channel for the query. Failure means "leave the PTY untouched",
-	// which is safe for network appliances and Windows OpenSSH alike.
+	// free exec channel for the query. This is only the fast path: if the server
+	// rejects exec, startShell safely probes the interactive PTY after its first
+	// prompt instead of silently losing mobile shell integration.
 	c.shellDetectOnce.Do(func() {
-		c.remoteShell = shellintegration.DetectRemoteShell(c.client)
+		c.rememberRemoteShell(shellintegration.DetectRemoteShell(c.client))
 	})
-	opts.IntegrationShell = c.remoteShell
+	opts.IntegrationShell = c.currentRemoteShell()
+	opts.OnIntegrationShellDetected = c.rememberRemoteShell
 
 	c.mu.Lock()
 	if c.closed {
@@ -181,10 +183,28 @@ func (c *Conn) StartShell(opts ShellOptions) (*Shell, error) {
 func (c *Conn) CollectAutocomplete() (autocomplete.Result, error) {
 	stdout, _, err := sshcmd.RunWithTimeout(c.client, autocomplete.RemoteSnapshotCommand(), 3*time.Second)
 	if err != nil {
-		return autocomplete.Degraded(c.remoteShell, "metadata-unavailable"), nil
+		return autocomplete.Degraded(c.currentRemoteShell(), "metadata-unavailable"), nil
 	}
 	revision := int(c.revision.Add(1))
 	return autocomplete.ParseSnapshot(stdout, revision), nil
+}
+
+func (c *Conn) rememberRemoteShell(shell string) {
+	normalized := shellintegration.NormalizeRemoteShell(shell)
+	if normalized == "" {
+		return
+	}
+	c.mu.Lock()
+	if c.remoteShell == "" {
+		c.remoteShell = normalized
+	}
+	c.mu.Unlock()
+}
+
+func (c *Conn) currentRemoteShell() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.remoteShell
 }
 
 // RunCompletion runs one read-only dynamic completion query on a lazily-created

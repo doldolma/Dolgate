@@ -25,6 +25,7 @@ import (
 	sftppkg "github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 
+	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/pkg/coretypes"
 )
@@ -57,6 +58,10 @@ type Options struct {
 	// AllowDirectTCPIP lets integration tests exercise SSH local forwarding.
 	// It is opt-in so ordinary shell/SFTP fixtures keep rejecting other channels.
 	AllowDirectTCPIP bool
+	// ShellIntegrationShell makes the interactive fixture behave like this
+	// supported login shell. The fixture still rejects exec requests, so tests
+	// exercise the mobile PTY fallback instead of DetectRemoteShell's fast path.
+	ShellIntegrationShell string
 }
 
 // StderrTrigger, written to the shell's stdin, makes the fake shell emit
@@ -102,9 +107,10 @@ type WindowChange struct {
 
 // Server is a running fixture. Close it when the test finishes.
 type Server struct {
-	listener         net.Listener
-	hostKeyBase64    string
-	allowDirectTCPIP bool
+	listener              net.Listener
+	hostKeyBase64         string
+	allowDirectTCPIP      bool
+	shellIntegrationShell string
 
 	mu       sync.Mutex
 	ptyReqs  []PtyRequest
@@ -188,9 +194,10 @@ func NewServerWithOptions(options Options) (*Server, error) {
 	}
 
 	server := &Server{
-		listener:         listener,
-		hostKeyBase64:    base64.StdEncoding.EncodeToString(hostSigner.PublicKey().Marshal()),
-		allowDirectTCPIP: options.AllowDirectTCPIP,
+		listener:              listener,
+		hostKeyBase64:         base64.StdEncoding.EncodeToString(hostSigner.PublicKey().Marshal()),
+		allowDirectTCPIP:      options.AllowDirectTCPIP,
+		shellIntegrationShell: options.ShellIntegrationShell,
 	}
 
 	go func() {
@@ -375,7 +382,11 @@ func (s *Server) serveSession(channel ssh.Channel, requests <-chan *ssh.Request)
 
 		case "shell":
 			_ = req.Reply(true, nil)
-			go runEchoShell(channel)
+			if s.shellIntegrationShell != "" {
+				go runShellIntegrationFixture(channel, s.shellIntegrationShell)
+			} else {
+				go runEchoShell(channel)
+			}
 
 		case "subsystem":
 			var payload struct{ Name string }
@@ -402,6 +413,60 @@ func (s *Server) serveSession(channel ssh.Channel, requests <-chan *ssh.Request)
 			_ = req.Reply(false, nil)
 		}
 	}
+}
+
+// runShellIntegrationFixture supplies a real-looking prompt and recognizes
+// the two hidden commands used by mobile shell integration. It intentionally
+// does not implement an exec request: that is the regression condition this
+// fixture exists to preserve.
+func runShellIntegrationFixture(channel ssh.Channel, shell string) {
+	defer channel.Close()
+	_, _ = channel.Write([]byte("fixture$ "))
+
+	buf := make([]byte, 4096)
+	pending := make([]byte, 0, 2048)
+	for {
+		n, err := channel.Read(buf)
+		if n > 0 {
+			pending = append(pending, buf[:n]...)
+			for {
+				idx := bytes.IndexAny(pending, "\r\n")
+				if idx < 0 {
+					break
+				}
+				line := append([]byte(nil), pending[:idx]...)
+				pending = pending[idx+1:]
+				if len(line) == 0 {
+					continue
+				}
+				visible := bytes.TrimPrefix(line, []byte(" "))
+				_, _ = channel.Write(append(append([]byte(nil), visible...), '\r', '\n'))
+				if bytes.Contains(line, []byte("dg-shell=")) {
+					_, _ = channel.Write([]byte(shellProbeReply(shell) + "fixture$ "))
+					continue
+				}
+				_, _ = channel.Write([]byte(
+					autocomplete.PromptStartMarker + "fixture$ " + autocomplete.PromptInputStartMarker,
+				))
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func shellProbeReply(shell string) string {
+	fields := "|||"
+	switch shell {
+	case "bash":
+		fields = "5.2|||"
+	case "zsh":
+		fields = "|5.9||"
+	case "fish":
+		fields = "||3.6|"
+	}
+	return autocomplete.ShellProbeReplyPrefix + fields + "\a"
 }
 
 // runEchoShell echoes complete lines back on stdout, except for the stderr

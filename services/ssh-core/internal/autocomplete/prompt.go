@@ -152,3 +152,32 @@ func LooksLikePowerShellPrompt(value string) bool {
 func PromptAlreadyIntegrated(tail []byte) bool {
 	return bytes.Contains(tail, []byte(PromptStartMarker))
 }
+
+// LooksLikeWindowsCommandLinePrompt 는 마지막 줄이 Windows cmd.exe 프롬프트(`C:\...>`)인지
+// 본다. PowerShell 은 LooksLikePowerShellPrompt 가 banner · `PS X:\` 모양으로 잡지만,
+// 커스텀 테마(PSReadLine · oh-my-posh)와 cmd.exe 는 그 모양이 아니다 — POSIX 프로브를
+// 이런 줄에 쓰면 `printf` 가 인식 안 돼서 에러가 화면에 남는다. POSIX 경로( `/` )에는
+// 드라이브 문자 + 백슬래시 접두가 없으므로 섞이지 않는다.
+func LooksLikeWindowsCommandLinePrompt(value string) bool {
+	trimmed := strings.TrimRight(StripTerminalControls(value), " \t\r\n")
+	if trimmed == "" {
+		return false
+	}
+	line := trimmed
+	if i := strings.LastIndexAny(line, "\r\n"); i >= 0 {
+		line = line[i+1:]
+	}
+	line = strings.TrimSpace(line)
+	return isDriveLinePrefix(line)
+}
+
+func isDriveLinePrefix(line string) bool {
+	if len(line) < 3 {
+		return false
+	}
+	c := line[0]
+	if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
+		return false
+	}
+	return line[1] == ':' && (line[2] == '\\' || line[2] == '/')
+}

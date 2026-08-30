@@ -545,6 +545,14 @@ func TestManagerReinjectsShellIntegrationForNestedSsmShell(t *testing.T) {
 	runner.emitOutput(autocomplete.PromptStartMarker + "ubuntu@host:~$ ")
 	_ = waitForStream(t, streams)
 
+	if err := manager.ReinjectShellIntegration("session-reinject", "pwsh"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := len(runner.writesSnapshot()); got != 1 {
+		t.Fatalf("PowerShell reinjection wrote %d commands, want 0", got-1)
+	}
+
 	if err := manager.ReinjectShellIntegration("session-reinject", "bash"); err != nil {
 		t.Fatal(err)
 	}

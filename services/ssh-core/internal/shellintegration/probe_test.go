@@ -13,6 +13,7 @@ func TestProbeShellThenInjectReportsSupportedShell(t *testing.T) {
 	var probe autocomplete.ShellProbe
 	var handshake autocomplete.Handshake
 	result := make(chan string, 1)
+	finished := make(chan struct{}, 1)
 	command := autocomplete.ShellProbeCommand()
 	err := ProbeShellThenInject(ProbeTarget{
 		Probe: &probe, Handshake: &handshake, ProbeCommand: command,
@@ -22,8 +23,9 @@ func TestProbeShellThenInjectReportsSupportedShell(t *testing.T) {
 			}
 			return nil
 		},
-		OnShell: func(shell string) { result <- shell },
-		Timeout: time.Second,
+		OnShell:    func(shell string) { result <- shell },
+		OnFinished: func() { finished <- struct{}{} },
+		Timeout:    time.Second,
 	})
 	if err != nil {
 		t.Fatalf("ProbeShellThenInject() error = %v", err)
@@ -36,6 +38,11 @@ func TestProbeShellThenInjectReportsSupportedShell(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("supported shell was not reported")
+	}
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("supported probe did not finish")
 	}
 }
 
@@ -106,11 +113,13 @@ func TestProbeShellThenInjectFlushesOnTimeout(t *testing.T) {
 	var probe autocomplete.ShellProbe
 	var handshake autocomplete.Handshake
 	emitted := make(chan string, 1)
+	finished := make(chan struct{}, 1)
 	if err := ProbeShellThenInject(ProbeTarget{
 		Probe: &probe, Handshake: &handshake,
 		ProbeCommand: autocomplete.ShellProbeCommand(),
 		Write:        func([]byte) error { return nil },
 		Emit:         func(data []byte) { emitted <- string(data) },
+		OnFinished:   func() { finished <- struct{}{} },
 		Timeout:      20 * time.Millisecond,
 	}); err != nil {
 		t.Fatal(err)
@@ -125,6 +134,11 @@ func TestProbeShellThenInjectFlushesOnTimeout(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out output was not flushed")
+	}
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("timed-out probe did not finish")
 	}
 }
 

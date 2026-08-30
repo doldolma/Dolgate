@@ -190,13 +190,20 @@ func (m *Manager) ReinjectShellIntegration(sessionID, shellHint string) error {
 	if err != nil {
 		return err
 	}
+	normalizedHint := shellintegration.NormalizeRemoteShell(shellHint)
+	if strings.TrimSpace(shellHint) != "" && normalizedHint == "" {
+		return nil
+	}
 	session.reinjectGate.Arm(func(tail []byte) {
 		if autocomplete.PromptAlreadyIntegrated(tail) {
 			return
 		}
-		if shell := autocomplete.NormalizeShellIntegrationShell(shellHint); shell != "" {
-			_ = m.injectSubshellIntegration(sessionID, session, shell)
+		if normalizedHint != "" {
+			_ = m.injectSubshellIntegration(sessionID, session, normalizedHint)
 			return
+		}
+		markUnsupported := func() {
+			m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, []byte(autocomplete.CommandFinishedMarker))
 		}
 		_ = shellintegration.ProbeShellThenInject(shellintegration.ProbeTarget{
 			Probe:        &session.shellProbe,
@@ -209,11 +216,14 @@ func (m *Manager) ReinjectShellIntegration(sessionID, shellHint string) error {
 			Emit: func(data []byte) {
 				m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, data)
 			},
-			OnUnsupported: func() {
-				m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, []byte(autocomplete.CommandFinishedMarker))
-			},
+			OnUnsupported: markUnsupported,
 			OnShell: func(shell string) {
-				_ = m.injectSubshellIntegration(sessionID, session, shell)
+				normalized := shellintegration.NormalizeRemoteShell(shell)
+				if normalized == "" {
+					markUnsupported()
+					return
+				}
+				_ = m.injectSubshellIntegration(sessionID, session, normalized)
 			},
 			Done: session.done,
 		})
@@ -222,7 +232,7 @@ func (m *Manager) ReinjectShellIntegration(sessionID, shellHint string) error {
 }
 
 func (m *Manager) injectSubshellIntegration(sessionID string, session *sessionHandle, shell string) error {
-	commands := autocomplete.ShellIntegrationInitLines(shell)
+	commands := autocomplete.ShellIntegrationInitLines(shellintegration.NormalizeRemoteShell(shell))
 	if len(commands) == 0 {
 		return nil
 	}
@@ -516,17 +526,12 @@ const (
 //
 // 이름을 알지만 지원하지 않는 셸(ksh·cmd)이면 보낼 것이 없다. 빈 값은 Linux/POSIX 로 본다.
 func shellIntegrationTypable(shellKind string) bool {
-	switch autocomplete.NormalizeShellIntegrationShell(shellKind) {
-	case "pwsh", "powershell":
-		return false
-	default:
-		// 빈 값(리눅스 SSM)은 먼저 프로브로 셸을 확인한다 — 겸용 스크립트를 던지던 길은
-		// 없앴다(dash·busybox 화면에 스크립트가 그대로 남았다).
-		if strings.TrimSpace(shellKind) == "" {
-			return true
-		}
-		return len(autocomplete.ShellIntegrationInitLines(shellKind)) > 0
+	// 빈 값(리눅스 SSM)은 먼저 프로브로 셸을 확인한다 — 겸용 스크립트를 던지던 길은
+	// 없앴다(dash·busybox 화면에 스크립트가 그대로 남았다).
+	if strings.TrimSpace(shellKind) == "" {
+		return true
 	}
+	return shellintegration.NormalizeRemoteShell(shellKind) != ""
 }
 
 func (h *sessionHandle) beginShellIntegration() bool {
@@ -548,15 +553,15 @@ func (h *sessionHandle) beginShellIntegration() bool {
 	return true
 }
 
-// Windows 면 데스크톱이 셸 종류를 실어 보낸다 — 그 셸 것 한 줄이면 된다. Linux 는 세션 문서가
-// 정하는 셸(계정마다 sh·bash 가 다르다)이라 물어볼 채널이 없어 bash·zsh 겸용을 여러 줄로 보낸다.
+// 셸을 알면 지원하는 원격 셸의 명령 한 줄만 보낸다. 모르면 먼저 짧은 프로브를 보내고,
+// bash·zsh·fish 로 확인된 경우에만 그 셸 전용 명령을 보낸다.
 func (h *sessionHandle) shellIntegrationCommands() []string {
 	if strings.TrimSpace(h.shellKind) == "" {
 		// 아직 누구인지 모른다. 이번에 나가는 것은 프로브 한 줄이고, 답을 받으면 shellKind 가
 		// 채워져 다음 호출에서 그 셸 전용 한 줄이 나간다.
 		return []string{autocomplete.ShellProbeCommand()}
 	}
-	return autocomplete.ShellIntegrationInitLines(h.shellKind)
+	return autocomplete.ShellIntegrationInitLines(shellintegration.NormalizeRemoteShell(h.shellKind))
 }
 
 func (m *Manager) writeShellIntegrationCommands(session *sessionHandle) error {
@@ -592,14 +597,15 @@ func (m *Manager) writeShellIntegrationCommand(sessionID string, session *sessio
 	if probing {
 		session.shellProbe.Arm(func(shell string) {
 			session.shellIntegrationMu.Lock()
-			if shell == "" {
+			normalized := shellintegration.NormalizeRemoteShell(shell)
+			if normalized == "" {
 				// dash·busybox 등. 이 셸에는 넣을 것이 없다 — 다시 묻지도 않는다.
 				session.shellIntegrationState = shellIntegrationUnsupported
 				session.shellIntegrationMu.Unlock()
 				m.FlushShellIntegration(sessionID)
 				return
 			}
-			session.shellKind = shell
+			session.shellKind = normalized
 			session.shellIntegrationState = shellIntegrationUnknown
 			session.shellIntegrationMu.Unlock()
 			_, _ = m.writeShellIntegrationCommand(sessionID, session)
@@ -665,8 +671,8 @@ func (m *Manager) observeShellIntegrationOutput(sessionID string, session *sessi
 	// 화면으로 PowerShell 임을 알아냈는데 **우리가 그것을 몰랐다면** 넣을 것이 없다. 붙잡고 있던
 	// 출력을 즉시 놓아준다 — 안 그러면 마커를 8초 기다리다 한꺼번에 쏟아진다.
 	//
-	// 데스크톱이 셸 종류를 알려 준 경우(Windows 인스턴스)는 여기서 멈추지 않는다. 그 셸에 맞는
-	// pwsh 스크립트를 보낼 수 있으므로 아래 프롬프트 안착 경로로 그대로 간다.
+	// 셸 종류가 PowerShell 로 이미 알려진 세션은 shellIntegrationTypable 에서 무장 자체를 하지
+	// 않는다. 여기서는 종류를 모른 채 시작한 세션의 화면이 PowerShell 로 판명된 경우만 다룬다.
 	//
 	// 아래 프롬프트 판정보다 **먼저** 봐야 한다. "PS C:\...>" 는 그쪽 검사도 통과한다(접미사가
 	// ">" 다).

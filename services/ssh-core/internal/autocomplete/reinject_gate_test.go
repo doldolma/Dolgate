@@ -71,6 +71,55 @@ func TestPromptSettleGateResetsQuietOnMoreOutput(t *testing.T) {
 	}
 }
 
+func TestPromptSettleGateCancelsPromptCandidateBeforeUserInputIsWritten(t *testing.T) {
+	gate := NewPromptSettleGate(40*time.Millisecond, time.Second)
+	var settled atomic.Int32
+	gate.Arm(func([]byte) { settled.Add(1) }, func() {})
+
+	gate.Observe([]byte("host$ "))
+	time.Sleep(10 * time.Millisecond)
+	gate.ObserveInput([]byte("echo >"))
+	// A delayed remote echo ending in a prompt-shaped glyph is still user input.
+	gate.Observe([]byte("echo >"))
+	time.Sleep(70 * time.Millisecond)
+	if got := settled.Load(); got != 0 {
+		t.Fatalf("settled fired %d times on a user's partial input", got)
+	}
+
+	// Enter is observed before it is written. The echoed line is discarded and
+	// only the fresh prompt after its line boundary may settle.
+	gate.ObserveInput([]byte("\r"))
+	gate.Observe([]byte("\r\ncommand output\r\nhost$ "))
+	time.Sleep(70 * time.Millisecond)
+	if got := settled.Load(); got != 1 {
+		t.Fatalf("settled fired %d times after the next fresh prompt, want 1", got)
+	}
+}
+
+func TestPromptSettleGateDoesNotReuseSubmittedLineEndingInPromptGlyph(t *testing.T) {
+	gate := NewPromptSettleGate(30*time.Millisecond, time.Second)
+	var settled atomic.Int32
+	gate.Arm(func([]byte) { settled.Add(1) }, func() {})
+
+	gate.Observe([]byte("host$ "))
+	gate.ObserveInput([]byte(">\r"))
+	gate.Observe([]byte(">"))
+	time.Sleep(50 * time.Millisecond)
+	if got := settled.Load(); got != 0 {
+		t.Fatalf("settled fired %d times before the submitted line ended", got)
+	}
+	gate.Observe([]byte("\r\n"))
+	time.Sleep(50 * time.Millisecond)
+	if got := settled.Load(); got != 0 {
+		t.Fatalf("settled fired %d times on the echoed submitted line", got)
+	}
+	gate.Observe([]byte("host$ "))
+	time.Sleep(50 * time.Millisecond)
+	if got := settled.Load(); got != 1 {
+		t.Fatalf("settled fired %d times after the real prompt, want 1", got)
+	}
+}
+
 func TestPromptSettleGateDisarm(t *testing.T) {
 	gate := NewPromptSettleGate(20*time.Millisecond, 40*time.Millisecond)
 	var settled, timedOut atomic.Int32

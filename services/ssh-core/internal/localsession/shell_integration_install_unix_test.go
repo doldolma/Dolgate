@@ -71,7 +71,21 @@ func TestInstallShellIntegrationWaitsForASlowStartingShell(t *testing.T) {
 	if erase < 0 {
 		t.Fatalf("프롬프트 줄을 지우지 않았다:\n%q", output)
 	}
-	if count := strings.Count(output[erase:], "ready$"); count != 1 {
+	// bash/readline may paint the prompt, clear to the right, then use a bare CR
+	// to repaint the same terminal row. Both copies exist in the byte stream,
+	// but the earlier one is overwritten on screen and is not a second prompt.
+	visibleTail := tailAfterLastBareCarriageReturn(output[erase:])
+	if count := strings.Count(visibleTail, "ready$"); count != 1 {
 		t.Fatalf("지운 뒤에도 프롬프트가 %d번 남았다:\n%q", count, output)
 	}
+}
+
+func tailAfterLastBareCarriageReturn(value string) string {
+	start := 0
+	for index := 0; index < len(value); index++ {
+		if value[index] == '\r' && (index+1 == len(value) || value[index+1] != '\n') {
+			start = index + 1
+		}
+	}
+	return value[start:]
 }

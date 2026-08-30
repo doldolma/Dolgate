@@ -10,10 +10,174 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/mobile/internal/sshtest"
 	"dolssh/services/ssh-core/mobile/ringbuf"
 )
+
+func TestShellDoesNotArmRemotePowerShellReinjection(t *testing.T) {
+	shell := &Shell{
+		reinjectGate: autocomplete.NewPromptSettleGate(time.Millisecond, time.Second),
+	}
+
+	shell.ReinjectShellIntegration("pwsh")
+
+	if shell.reinjectGate.Armed() {
+		t.Fatal("remote PowerShell reinjection must not type into the active PTY")
+	}
+}
+
+type recordingWriteCloser struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (w *recordingWriteCloser) Write(data []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(data)
+}
+
+func (w *recordingWriteCloser) Close() error { return nil }
+
+func (w *recordingWriteCloser) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+func TestShellOrdersUserInputAfterCommittedIntegrationWrite(t *testing.T) {
+	writer := &recordingWriteCloser{}
+	gate := autocomplete.NewPromptSettleGate(10*time.Millisecond, time.Second)
+	shell := &Shell{stdin: writer, installGate: gate}
+	settled := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	gate.ArmWithCommit(shell.beginIntegrationWrite, func([]byte) {
+		close(settled)
+		<-release
+		_ = shell.sendInternalData([]byte("integration\r"))
+		shell.finishIntegrationWrite()
+		close(done)
+	}, func() {})
+
+	gate.Observe([]byte("host$ "))
+	select {
+	case <-settled:
+	case <-time.After(time.Second):
+		t.Fatal("prompt did not settle")
+	}
+	if err := shell.SendData([]byte("user input")); err != nil {
+		t.Fatalf("queue user input: %v", err)
+	}
+	if got := writer.String(); got != "" {
+		t.Fatalf("user input reached PTY before integration write: %q", got)
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("integration write did not finish")
+	}
+	if got := writer.String(); got != "integration\ruser input" {
+		t.Fatalf("PTY write order = %q, want integration then user input", got)
+	}
+}
+
+// A keystroke during the login banner invalidates the prompt candidate on
+// purpose. What must not happen is that the session then loses shell
+// integration for good: the watch runs out, and without a way back nothing ever
+// installs the OSC 133 hooks again. Submitting a line is the moment the edited
+// line goes away and a fresh prompt is coming.
+func TestShellWatchesForThePromptAgainAfterTheUserSubmitsALine(t *testing.T) {
+	writer := &recordingWriteCloser{}
+	gate := autocomplete.NewPromptSettleGate(10*time.Millisecond, 40*time.Millisecond)
+	shell := &Shell{stdin: writer, installGate: gate, done: make(chan struct{})}
+	settled := make(chan []byte, 1)
+	shell.armInstallGate = func() {
+		gate.ArmWithCommit(shell.beginIntegrationWrite, func(tail []byte) {
+			shell.finishIntegrationWrite()
+			select {
+			case settled <- tail:
+			default:
+			}
+		}, func() {})
+	}
+	shell.armInstallGate()
+
+	// One character while the banner is still printing. There is no Enter, so the
+	// gate has no way to tell the echoed line apart from a prompt and gives up.
+	if err := shell.SendData([]byte("l")); err != nil {
+		t.Fatalf("send keystroke: %v", err)
+	}
+	gate.Observe([]byte("host$ "))
+	deadline := time.Now().Add(time.Second)
+	for gate.Armed() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if gate.Armed() {
+		t.Fatal("the watch never ran out; the scenario did not happen")
+	}
+	select {
+	case <-settled:
+		t.Fatal("integration was written onto a line the user had started editing")
+	default:
+	}
+
+	// The user finishes the line. A new prompt follows, and it must be picked up.
+	if err := shell.SendData([]byte("s\r")); err != nil {
+		t.Fatalf("submit line: %v", err)
+	}
+	gate.Observe([]byte("\r\nhost$ "))
+	select {
+	case <-settled:
+	case <-time.After(time.Second):
+		t.Fatal("no prompt watch after the user submitted a line")
+	}
+}
+
+func TestInitialShellIntegrationFallsBackToPTYProbeWhenExecIsRejected(t *testing.T) {
+	server, err := sshtest.NewServerWithOptions(sshtest.Options{
+		ShellIntegrationShell: "bash",
+	})
+	if err != nil {
+		t.Fatalf("start fixture: %v", err)
+	}
+	t.Cleanup(func() { _ = server.Close() })
+	conn := dialTestConn(t, server)
+
+	shell, err := conn.StartShell(ShellOptions{Term: TerminalXterm256})
+	if err != nil {
+		t.Fatalf("start shell: %v", err)
+	}
+	defer shell.Close()
+
+	// The fixture rejects every auxiliary exec request, which used to make the
+	// mobile engine silently skip integration forever.
+	waitForRing(t, shell, autocomplete.PromptInputStartMarker)
+	if got := conn.currentRemoteShell(); got != "bash" {
+		t.Fatalf("PTY probe shell = %q, want bash", got)
+	}
+	prepared, err := conn.CollectAutocomplete()
+	if err != nil {
+		t.Fatalf("collect degraded autocomplete: %v", err)
+	}
+	if prepared.Capability.Status != "degraded" || prepared.Capability.Shell != "bash" {
+		t.Fatalf("degraded capability = %#v, want degraded bash", prepared.Capability)
+	}
+	if prepared.Snapshot != nil {
+		t.Fatalf("exec-rejected metadata snapshot = %#v, want nil", prepared.Snapshot)
+	}
+
+	var visible []byte
+	for _, chunk := range shell.Ring().Read(ringbuf.HeadCursor(), 0).Chunks {
+		visible = append(visible, chunk.Bytes...)
+	}
+	if bytes.Contains(visible, []byte("dg-shell=")) {
+		t.Fatalf("shell probe leaked into terminal output: %q", visible)
+	}
+}
 
 func newTestServer(t *testing.T) *sshtest.Server {
 	t.Helper()

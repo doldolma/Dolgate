@@ -128,6 +128,11 @@ export function useTerminalAutocomplete({
     useState<PendingAutocompleteSnippet | null>(null);
 
   const generationRef = useRef(0);
+  // 마지막 프롬프트 경계 이후에 명령 완료(D) 마커가 있었는지. 진짜 새 프롬프트는 항상
+  // D(완료·Ctrl-C)로 끝나지만, SIGWINCH 재드로잉(모바일 키보드 개폐로 터미널이 리사이즈될 때)은
+  // D 없이 A·B 를 재발행한다 — 타이핑 중인 버퍼를 그 재드로잉이 지우지 않게 하기 위해
+  // D 로만 "진짜 경계" 를 판정한다.
+  const sawCompletionRef = useRef(false);
   const preparedRef = useRef(false);
   const preparingRef = useRef<Promise<void> | null>(null);
   const commandRef = useRef(command);
@@ -197,6 +202,7 @@ export function useTerminalAutocomplete({
     setIntegrationReady(false);
     setDynamicSuggestions([]);
     setPendingSnippet(null);
+    sawCompletionRef.current = false;
   }, [connected, sessionId]);
 
   useEffect(() => {
@@ -210,9 +216,11 @@ export function useTerminalAutocomplete({
       if (cached !== undefined) return Promise.resolve(cached);
       const inflight = inflightRef.current.get(hostCommand);
       if (inflight) return inflight;
+      const generation = generationRef.current;
       let query: Promise<string>;
       query = runSessionCompletion(sessionId, hostCommand)
         .then(result => {
+          if (generation !== generationRef.current) return result.stdout;
           const cache = cacheRef.current;
           cache.set(hostCommand, result.stdout);
           while (cache.size > DYNAMIC_CACHE_MAX) {
@@ -361,10 +369,19 @@ export function useTerminalAutocomplete({
         return null;
       }
       if (kind === 'A' || marker === 'B') {
+        // 프롬프트 마커. 다만 이 마커는 새 프롬프트뿐 아니라 프롬프트 **재드로잉**에도 온다 —
+        // 모바일은 키보드가 열려도 PTY 가 리사이즈되어 원격 셸이 SIGWINCH 로 프롬프트를 다시
+        // 그리며(재드로우 시 bash 는 PROMPT_COMMAND 의 A 를, zsh 는 PS1 끝에 붙인 B 를)
+        // 재발행한다. 그 순간을 무조건 초기화하면 키보드를 열기 시작할 때마다 타이핑 중인
+        // 버퍼가 지워져 추천이 0.5 초 만에 사라진다. 진짜 프롬프트 경계는 직전에 D 가 반드시
+        // 오므로(명령 완료·Ctrl-C) D 가 없으면 재드로잉으로 간주해 버퍼를 보존한다.
         setIntegrationReady(true);
-        const empty = createEmptyCommandBuffer();
-        commandRef.current = empty;
-        setCommand(empty);
+        if (sawCompletionRef.current) {
+          sawCompletionRef.current = false;
+          const empty = createEmptyCommandBuffer();
+          commandRef.current = empty;
+          setCommand(empty);
+        }
         return null;
       }
       if (kind === 'C') {
@@ -386,6 +403,7 @@ export function useTerminalAutocomplete({
         return executed || null;
       }
       if (kind === 'D') {
+        sawCompletionRef.current = true;
         const executed = pendingCommandRef.current;
         const current = executed ? statsRef.current.get(executed) : undefined;
         if (executed && current) {

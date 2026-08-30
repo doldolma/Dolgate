@@ -39,7 +39,16 @@ func (m *Manager) probeShellThenReinject(sessionID string, session *sessionHandl
 			)
 		},
 		OnShell: func(shell string) {
-			m.performShellIntegrationReinject(sessionID, session, shell, nil)
+			normalized := shellintegration.NormalizeRemoteShell(shell)
+			if normalized == "" {
+				session.shellIntegrationUnsupported.Store(true)
+				m.emitStream(
+					protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID},
+					[]byte(autocomplete.CommandFinishedMarker),
+				)
+				return
+			}
+			m.performShellIntegrationReinject(sessionID, session, normalized, nil)
 		},
 		Done:    session.closed,
 		Timeout: shellIntegrationHandshakeTimeout,

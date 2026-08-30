@@ -2,6 +2,7 @@ package shellintegration
 
 import (
 	"errors"
+	"sync"
 	"time"
 
 	"dolssh/services/ssh-core/internal/autocomplete"
@@ -22,25 +23,40 @@ type ProbeTarget struct {
 	Emit          func([]byte)
 	OnUnsupported func()
 	OnShell       func(shell string)
-	Done          <-chan struct{}
-	Timeout       time.Duration
+	// OnFinished runs once after OnShell/OnUnsupported has completed, the probe
+	// write failed, or the attempt ended/timed out. It lets transports release
+	// user input that was held only to preserve ordering with the internal write.
+	OnFinished func()
+	Done       <-chan struct{}
+	Timeout    time.Duration
 }
 
 // ProbeShellThenInject runs the shared in-band shell-identification sequence.
 // It deliberately knows nothing about SSH, local PTYs, tmux panes, command
 // blocks, or prompt clearing; those policies are supplied by ProbeTarget.
 func ProbeShellThenInject(target ProbeTarget) error {
+	var finishOnce sync.Once
+	finish := func() {
+		finishOnce.Do(func() {
+			if target.OnFinished != nil {
+				target.OnFinished()
+			}
+		})
+	}
 	if target.Probe == nil || target.Handshake == nil {
+		finish()
 		return errors.New("shell integration probe state is required")
 	}
 	if target.ProbeCommand == "" || target.Write == nil {
 		if target.OnUnsupported != nil {
 			target.OnUnsupported()
 		}
+		finish()
 		return nil
 	}
 
 	probeGeneration := target.Probe.Arm(func(shell string) {
+		defer finish()
 		if shell == "" {
 			if target.OnUnsupported != nil {
 				target.OnUnsupported()
@@ -58,6 +74,7 @@ func ProbeShellThenInject(target ProbeTarget) error {
 	if err := target.Write([]byte(target.ProbeCommand)); err != nil {
 		target.Probe.DisarmAttempt(probeGeneration)
 		emit(target, target.Handshake.FlushAttempt(handshakeGeneration))
+		finish()
 		return err
 	}
 
@@ -74,12 +91,14 @@ func ProbeShellThenInject(target ProbeTarget) error {
 			select {
 			case <-target.Done:
 				target.Probe.DisarmAttempt(probeGeneration)
+				finish()
 				return
 			case <-timer.C:
 			}
 		}
 		if target.Probe.DisarmAttempt(probeGeneration) {
 			emit(target, target.Handshake.FlushAttempt(handshakeGeneration))
+			finish()
 		}
 	}()
 	return nil

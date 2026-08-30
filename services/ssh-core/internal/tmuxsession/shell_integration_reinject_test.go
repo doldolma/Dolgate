@@ -144,6 +144,18 @@ func TestReinjectShellIntegrationHonoursTheShellHintInPanes(t *testing.T) {
 			t.Fatalf("훅을 걸 수 없는 셸에 보냈다: %q", got)
 		}
 	})
+
+	t.Run("PowerShell 재주입 안 함", func(t *testing.T) {
+		m, handle, recorder := newReinjectHarness(t)
+		if err := m.ReinjectShellIntegration(paneSessionID("ctl", "%0"), "pwsh"); err != nil {
+			t.Fatal(err)
+		}
+		handle.observePaneOutput("%0", []byte("PS C:\\> "))
+		time.Sleep(200 * time.Millisecond)
+		if got := recorder.snapshot(); got != "" {
+			t.Fatalf("PowerShell pane 에 재주입했다: %q", got)
+		}
+	})
 }
 
 // pane 세션이 아닌 id(=control 세션 자체)에는 할 일이 없다.

@@ -51,3 +51,29 @@ func TestStripTerminalControls(t *testing.T) {
 		})
 	}
 }
+
+func TestLooksLikeWindowsCommandLinePrompt(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{"cmd prompt", "C:\\Users\\me>", true},
+		{"cmd short prompt", "C:\\>", true},
+		{"cmd lowercase drive", "d:\\work>", true},
+		// "PS X:\" is caught earlier by LooksLikePowerShellPrompt; this function
+		// only needs the drive-prompt shapes that one misses.
+		{"powershell default", "PS C:\\Users\\me>", false},
+		{"posix home prompt", "user@host:~$", false},
+		{"posix path prompt", "user@host:/tmp/$", false},
+		{"bash version prompt", "bash-5.2$", false},
+		{"c drive mentioned mid-line", "echo C:\\temp", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := LooksLikeWindowsCommandLinePrompt(tc.value); got != tc.want {
+				t.Fatalf("LooksLikeWindowsCommandLinePrompt(%q) = %v, want %v", tc.value, got, tc.want)
+			}
+		})
+	}
+}
