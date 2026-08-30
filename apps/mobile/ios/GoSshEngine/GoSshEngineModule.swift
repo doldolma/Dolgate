@@ -106,6 +106,25 @@ final class GoSshEngineModule: RCTEventEmitter {
     onWorker(resolve, reject) { MobileVersion() }
   }
 
+  // 자동완성 명령 스펙. 엔진이 압축한 채로 들고 있다가 하나씩 푼다 — JS 번들에 넣으면
+  // 압축 전 20 MB 가 시작 비용이 된다(internal/commandspec).
+  @objc(getCommandSpec:resolve:reject:)
+  func getCommandSpec(
+    name: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { MobileCommandSpec(name) }
+  }
+
+  @objc(getCommandSpecNames:reject:)
+  func getCommandSpecNames(
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { MobileCommandSpecNames() }
+  }
+
   @objc(probeHostKey:resolve:reject:)
   func probeHostKey(
     requestJson: String,

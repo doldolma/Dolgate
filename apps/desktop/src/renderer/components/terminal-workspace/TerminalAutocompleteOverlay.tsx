@@ -89,10 +89,20 @@ export function TerminalAutocompleteOverlay({
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onAccept(suggestion)}
           >
-            <span className="min-w-0 flex-none truncate">
-              {isSnippet ? null : <span className="text-[var(--accent)]">{command}</span>}
-              <span>{suffix}</span>
-            </span>
+            {/* 넣는 값과 보여줄 이름이 다르면(제너레이터의 displayName) 그 이름을 그대로 그린다 —
+                친 부분을 강조하는 아래 갈래는 "보여줄 것이 곧 넣을 것" 일 때만 성립한다. */}
+            {suggestion.displayText ? (
+              <span className="min-w-0 flex-none truncate">
+                {suggestion.displayText}
+              </span>
+            ) : (
+              <span className="min-w-0 flex-none truncate">
+                {isSnippet ? null : (
+                  <span className="text-[var(--accent)]">{command}</span>
+                )}
+                <span>{suffix}</span>
+              </span>
+            )}
             {suggestion.description ? (
               <span className="min-w-0 flex-1 truncate text-[0.7rem] text-[var(--text-soft)]">
                 {suggestion.description}

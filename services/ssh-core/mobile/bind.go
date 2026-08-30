@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"dolssh/services/ssh-core/internal/autocomplete"
+	"dolssh/services/ssh-core/internal/commandspec"
 	"dolssh/services/ssh-core/internal/hostkeytrust"
 	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/internal/sshdial"
@@ -41,6 +42,18 @@ import (
 // Version identifies this engine build in app-side diagnostics. It exists so a
 // dark launch can confirm which engine actually served a session.
 func Version() string { return "go-engine/1" }
+
+// CommandSpec returns the terminal autocomplete spec for a command name, or ""
+// when the catalog has none.
+//
+// 데스크톱은 이 스펙을 자기 번들에서 지연 로딩하지만 Metro 에는 그런 길이 없어, JSON 을
+// `require` 하면 20 MB 가 JS 번들에 그대로 들어간다. 그래서 이미 두 플랫폼에 링크돼 있는 이
+// 엔진이 압축한 채로 들고 있다가 명령을 칠 때 하나씩 풀어 준다(internal/commandspec).
+func CommandSpec(name string) string { return commandspec.Lookup(name) }
+
+// CommandSpecNames lists the catalog as a JSON array. 클라이언트가 한 번 받아 두면 스펙이
+// 없는 명령(자기 스크립트·별칭)을 칠 때마다 다리를 건너지 않는다.
+func CommandSpecNames() string { return commandspec.Names() }
 
 // Cursor modes accepted by ReadBuffer and AddListener.
 const (
@@ -446,6 +459,10 @@ type shellOptionsWire struct {
 	Modes             []terminalModeWire `json:"modes,omitempty"`
 	RingCapacityBytes int                `json:"ringCapacityBytes,omitempty"`
 	MaxChunkBytes     int                `json:"maxChunkBytes,omitempty"`
+	// ShellIntegration is a pointer so that absent means on. Older clients send
+	// no such field and must keep the integration they have always had; only an
+	// explicit false turns it off.
+	ShellIntegration *bool `json:"shellIntegration,omitempty"`
 }
 
 type terminalModeWire struct {
@@ -480,6 +497,8 @@ func (c *Conn) StartShell(optionsJSON string, onClosed ShellClosedCallback) (*Sh
 		PixelHeight:       clampUint32(wire.PixelHeight),
 		RingCapacityBytes: wire.RingCapacityBytes,
 		MaxChunkBytes:     wire.MaxChunkBytes,
+
+		DisableShellIntegration: wire.ShellIntegration != nil && !*wire.ShellIntegration,
 	}
 	for _, mode := range wire.Modes {
 		if mode.Opcode < 0 || mode.Opcode > math.MaxUint8 {

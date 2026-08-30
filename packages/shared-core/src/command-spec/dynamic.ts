@@ -5,6 +5,7 @@
 
 import type { SpecCompletion } from './match';
 import type { ArgSpec, CommandSpec } from './types';
+import { AUX_PATH_ASSIGNMENT } from "../aux-path";
 
 export interface PathCompletionRequest {
   kind: 'path';
@@ -260,4 +261,23 @@ export function parsePathListing(
     out.push({ insertText });
   }
   return out;
+}
+
+/**
+ * Fig 제너레이터가 돌릴 명령을 셸 한 줄로 만든다(argv → 이스케이프된 문자열).
+ *
+ * 세션의 cwd 안에서 돌린다 — `git branch` 처럼 위치에 따라 답이 달라지는 명령이 있다. PATH 를
+ * 넓히는 이유는 aux-path 에 적혀 있다(보조 채널은 로그인 셸이 아니다).
+ *
+ * **데스크톱·모바일이 같은 줄을 만들어야 한다.** 한쪽만 PATH 나 cd 를 빠뜨리면 같은 명령에
+ * 다른 목록이 나온다.
+ */
+export function buildGeneratorShellLine(
+  command: string,
+  args: string[],
+  cwd: string | null,
+): string {
+  const line = [command, ...args].map(shellEscape).join(" ");
+  const cdPart = cwd ? `cd ${shellEscape(cwd)} 2>/dev/null; ` : "";
+  return `${cdPart}${AUX_PATH_ASSIGNMENT} ${line}`;
 }

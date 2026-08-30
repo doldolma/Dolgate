@@ -20,7 +20,6 @@ import {
   type SessionCommandStat,
   type TerminalAutocompleteSuggestion,
 } from '../lib/terminal-autocomplete';
-import { AUX_PATH_ASSIGNMENT } from '../lib/aux-path';
 import {
   parseSnippetVariables,
   resolveSnippetCommand,
@@ -35,10 +34,10 @@ import {
   loadCommandSpec,
 } from '../lib/command-spec/store';
 import {
+  buildGeneratorShellLine,
   buildListCommand,
   parsePathListing,
   resolveDynamicCompletion,
-  shellEscape,
 } from '../lib/command-spec/dynamic';
 import {
   figSuggestionsToCompletions,
@@ -93,22 +92,6 @@ export function parseCwdFromOsc7(data: string): string | null {
 // OSC 133 C/D boundaries so host-state changes refresh next prompt).
 const DYNAMIC_DEBOUNCE_MS = 120;
 const DYNAMIC_CACHE_MAX = 32;
-
-// 보조 채널은 로그인 셸이 아니라 PATH 가 최소한이다 — 왜 넓히는지는 lib/aux-path.ts 에 적혀
-// 있다(도커 섹션도 같은 상수를 쓴다).
-const GENERATOR_PATH_PREFIX = AUX_PATH_ASSIGNMENT;
-
-// Build the shell line for a Fig generator's command (argv → escaped string),
-// run inside the session cwd so cwd-sensitive commands (git branch) are correct.
-function buildGeneratorShellLine(
-  command: string,
-  args: string[],
-  cwd: string | null,
-): string {
-  const line = [command, ...args].map(shellEscape).join(' ');
-  const cdPart = cwd ? `cd ${shellEscape(cwd)} 2>/dev/null; ` : '';
-  return `${cdPart}${GENERATOR_PATH_PREFIX} ${line}`;
-}
 
 interface DynamicSuggestionState {
   value: string;
@@ -514,15 +497,12 @@ export function useTerminalAutocomplete({
           suggestions,
           request.before,
           request.base,
-        ).map((completion) =>
-          completion.description
-            ? {
-                insertText: completion.insertText,
-                source: 'generator',
-                description: completion.description,
-              }
-            : { insertText: completion.insertText, source: 'generator' },
-        );
+        ).map((completion) => ({
+          insertText: completion.insertText,
+          source: 'generator' as const,
+          ...(completion.displayText ? { displayText: completion.displayText } : {}),
+          ...(completion.description ? { description: completion.description } : {}),
+        }));
         setDynamicSuggestions({ value, items });
       })().catch(() => undefined);
     }, DYNAMIC_DEBOUNCE_MS);

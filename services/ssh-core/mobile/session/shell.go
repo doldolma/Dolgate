@@ -47,6 +47,11 @@ type ShellOptions struct {
 	// falls back to a safe in-band probe after the first prompt. It is internal
 	// engine state, not part of the gomobile options JSON.
 	IntegrationShell string
+	// DisableShellIntegration turns the integration off entirely — no probe, no
+	// injection, no OSC markers. The app offers this as its autocomplete switch,
+	// and "off" has to mean a plain PTY: the engine must not type anything into
+	// the user's shell, so the decision belongs here and not in the client.
+	DisableShellIntegration bool
 	// OnIntegrationShellDetected receives a supported shell found by the in-band
 	// PTY probe. Conn uses it to retain the shell identity when auxiliary exec
 	// channels are unavailable, so degraded autocomplete can still expose its
@@ -111,7 +116,10 @@ type Shell struct {
 	installGate                 *autocomplete.PromptSettleGate
 	reinjectGate                *autocomplete.PromptSettleGate
 	shellIntegrationUnsupported bool
-	integrationMu               sync.Mutex
+	// integrationDisabled is set once at construction and never written again,
+	// so it needs no lock.
+	integrationDisabled bool
+	integrationMu       sync.Mutex
 }
 
 // Info returns the shell's identity.
@@ -280,29 +288,25 @@ func (s *Shell) filterShellIntegrationOutput(chunk []byte) []byte {
 // installs the shared OSC 7/133 hooks. Empty shellHint uses the safe in-band
 // probe; a known direct shell skips that round trip.
 func (s *Shell) ReinjectShellIntegration(shellHint string) {
-	normalizedHint := shellintegration.NormalizeRemoteShell(shellHint)
-	if strings.TrimSpace(shellHint) != "" && normalizedHint == "" {
+	if s.integrationDisabled {
 		return
 	}
-	s.reinjectGate.ArmWithCommit(s.beginIntegrationWrite, func(tail []byte) {
-		if autocomplete.PromptAlreadyIntegrated(tail) {
+	shellintegration.ArmReinject(shellintegration.ReinjectTarget{
+		Gate:      s.reinjectGate,
+		ShellHint: shellHint,
+		Commit:    s.beginIntegrationWrite,
+		Finish:    s.finishIntegrationWrite,
+		Unsupported: func() bool {
+			s.integrationMu.Lock()
+			defer s.integrationMu.Unlock()
+			return s.shellIntegrationUnsupported
+		},
+		Inject: func(resolved string) {
+			_ = s.injectShellIntegration(resolved, true)
 			s.finishIntegrationWrite()
-			return
-		}
-		if normalizedHint != "" {
-			_ = s.injectShellIntegration(normalizedHint, true)
-			s.finishIntegrationWrite()
-			return
-		}
-		s.integrationMu.Lock()
-		unsupported := s.shellIntegrationUnsupported
-		s.integrationMu.Unlock()
-		if unsupported {
-			s.finishIntegrationWrite()
-			return
-		}
-		_ = s.probeAndInjectShellIntegration(true)
-	}, func() {})
+		},
+		Probe: func() { _ = s.probeAndInjectShellIntegration(true) },
+	})
 }
 
 // probeAndInjectShellIntegration identifies the foreground shell through the
@@ -456,6 +460,7 @@ func startShell(client *ssh.Client, info ShellInfo, opts ShellOptions, detach fu
 		installGate:                autocomplete.NewPromptSettleGate(150*time.Millisecond, 3*time.Second),
 		reinjectGate:               autocomplete.NewPromptSettleGate(0, 0),
 	}
+	shell.integrationDisabled = opts.DisableShellIntegration
 	shellName := shellintegration.NormalizeRemoteShell(opts.IntegrationShell)
 	// Always arm the first-prompt gate. IntegrationShell comes from a separate
 	// non-interactive exec channel and is only an optimization; a PTY-capable
@@ -499,10 +504,14 @@ func startShell(client *ssh.Client, info ShellInfo, opts ShellOptions, detach fu
 	}
 	// Kept as a field so a submitted line can start the watch again after it ran
 	// out — see rearmInstallGateOnSubmit.
-	shell.armInstallGate = func() {
-		shell.installGate.ArmWithCommit(shell.beginIntegrationWrite, installOnSettled, func() {})
+	// 통합을 끈 세션은 게이트를 무장하지 않는다. armInstallGate 가 nil 로 남으므로 사용자가
+	// 줄을 보내도 다시 무장하지 않는다(rearmInstallGateOnSubmit).
+	if !shell.integrationDisabled {
+		shell.armInstallGate = func() {
+			shell.installGate.ArmWithCommit(shell.beginIntegrationWrite, installOnSettled, func() {})
+		}
+		shell.armInstallGate()
 	}
-	shell.armInstallGate()
 
 	// Start pumping before Shell() so nothing the remote side sends immediately
 	// after the request is missed.

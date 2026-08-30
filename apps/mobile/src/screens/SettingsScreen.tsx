@@ -94,7 +94,6 @@ function SettingsContent({
   const keepScreenAwake = settings.keepScreenAwake ?? true;
   const terminalAutocompleteEnabled =
     settings.terminalAutocompleteEnabled !== false;
-  const subshellReinjectEnabled = settings.subshellReinjectEnabled !== false;
 
   const [serverUrlDraft, setServerUrlDraft] = useState(settings.serverUrl);
   const [savingServerUrl, setSavingServerUrl] = useState(false);
@@ -642,6 +641,10 @@ function SettingsContent({
             },
           }}
         />
+        {/* 이 스위치 하나가 셸 통합까지 정한다. 자동완성이 쓰는 재료(명령 단위·현재 경로)가
+            곧 통합이 만드는 것이라, 끄면 셸에 아무것도 넣지 않는 평범한 PTY 로 돌아간다.
+            서브셸 재주입도 여기에 딸린다 — 따로 스위치를 두면 "자동완성은 껐는데 셸에는
+            여전히 뭔가 들어간다"는, 설명하기 어려운 상태가 생긴다. */}
         <SettingsRow
           accessibilityLabel={translate("settings.terminalAutocomplete.title")}
           icon="flash-outline"
@@ -651,18 +654,6 @@ function SettingsContent({
             value: terminalAutocompleteEnabled,
             onValueChange: (next) => {
               void updateSettings({ terminalAutocompleteEnabled: next });
-            },
-          }}
-        />
-        <SettingsRow
-          accessibilityLabel={translate("settings.subshellReinject.title")}
-          icon="git-branch-outline"
-          label={translate("settings.subshellReinject.title")}
-          subtitle={translate("settings.subshellReinject.description")}
-          toggle={{
-            value: subshellReinjectEnabled,
-            onValueChange: (next) => {
-              void updateSettings({ subshellReinjectEnabled: next });
             },
           }}
         />

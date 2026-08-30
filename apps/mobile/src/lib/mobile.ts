@@ -139,7 +139,6 @@ export function createDefaultMobileSettings(): MobileSettings {
     theme: 'system',
     language: 'system',
     terminalAutocompleteEnabled: true,
-    subshellReinjectEnabled: true,
     subshellReinjectPatterns: [],
   };
 }

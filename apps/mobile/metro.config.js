@@ -11,6 +11,19 @@ const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, '../..');
 const projectNodeModules = path.resolve(projectRoot, 'node_modules');
 const rootNodeModules = path.resolve(workspaceRoot, 'node_modules');
+/**
+ * Fig 제너레이터 모듈이 있는 곳.
+ *
+ * **복사하지 않고 그 자리를 가리킨다.** 713개 11.3 MB 라 사본을 두면 저장소가 그만큼 또
+ * 불어나고, 스펙을 갱신할 때 둘이 어긋날 자리가 하나 더 생긴다. 생성기가 찍는 곳은 한
+ * 군데이고(apps/desktop/scripts/generate-command-specs.cjs) 데스크톱은 Vite 로, 모바일은 이
+ * 별칭으로 같은 파일을 읽는다.
+ */
+const commandSpecModules = path.resolve(
+  workspaceRoot,
+  'apps/desktop/src/renderer/generated/command-spec-modules',
+);
+
 const workspacePackages = [
   path.resolve(workspaceRoot, 'packages', 'shared-core'),
   path.resolve(workspaceRoot, 'packages', 'fressh-react-native-xtermjs-webview'),
@@ -23,7 +36,7 @@ const awsMainFields = ['react-native', 'browser', 'module', 'main'];
 const domFreeMainFields = ['module', 'main'];
 
 const config = {
-  watchFolders: [rootNodeModules, ...workspacePackages],
+  watchFolders: [rootNodeModules, ...workspacePackages, commandSpecModules],
   resolver: {
     unstable_enableSymlinks: true,
     nodeModulesPaths: [projectNodeModules, rootNodeModules],
@@ -35,6 +48,7 @@ const config = {
         'react/jsx-dev-runtime.js',
       ),
       'react-native': path.resolve(rootNodeModules, 'react-native'),
+      'command-spec-modules': commandSpecModules,
     },
     /**
      * AWS SDK 두 가지 우회. 둘 다 없으면 **번들이 아예 만들어지지 않거나**(개발·릴리즈 모두)

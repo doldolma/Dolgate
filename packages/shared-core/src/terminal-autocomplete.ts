@@ -5,6 +5,14 @@ import type { CommandSpec } from './command-spec/types';
 export interface TerminalAutocompleteSuggestion {
   insertText: string;
   source: 'history' | 'executable' | 'spec' | 'path' | 'generator' | 'snippet';
+  /**
+   * 화면에 보여줄 이름. 없으면 `insertText` 를 그대로 보여준다.
+   *
+   * **넣는 값과 보여줄 값이 다른 경우가 있다.** Fig 제너레이터는 `docker logs` 에 `gds2` 를
+   * 넣으면서 화면에는 `gds2 (nginx:latest)` 를, `ansible-lint` 에는 `--format` 을 넣으면서
+   * `Format` 을 보여주라고 알려 준다. 둘을 하나로 묶어 두면 그 이름이 갈 곳이 없어 버려진다.
+   */
+  displayText?: string;
   description?: string;
 }
 

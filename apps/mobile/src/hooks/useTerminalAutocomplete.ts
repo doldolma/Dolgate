@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   applyTerminalInput,
+  buildGeneratorShellLine,
   buildListCommand,
+  figSuggestionsToCompletions,
+  findArgGenerators,
+  runGenerators,
   createEmptyCommandBuffer,
   getTerminalAutocompleteSuggestions,
   parsePathListing,
   resolveDynamicCompletion,
   type CommandBufferState,
+  type CommandSpec,
   type SessionCommandStat,
   type SnippetRecord,
   type TerminalAutocompleteCapability,
@@ -18,12 +23,24 @@ import {
   runSessionCompletion,
 } from '../store/useMobileAppStore';
 import {
+  getCachedCommandSpec,
+  hasCommandGeneratorModule,
+  hasCommandSpec,
+  loadCommandGeneratorModule,
+  loadCommandSpec,
+  primeCommandSpecs,
+} from '../lib/command-spec';
+import {
   parseSnippetVariables,
   resolveSnippetCommand,
   type SnippetVariable,
 } from '../lib/snippet-variables';
 
 const EMPTY_SNIPPETS: readonly SnippetRecord[] = [];
+
+function leadingCommand(value: string): string {
+  return value.trimStart().split(/\s+/, 1)[0] ?? '';
+}
 const DYNAMIC_DEBOUNCE_MS = 140;
 const DYNAMIC_CACHE_MAX = 24;
 
@@ -121,13 +138,19 @@ export function useTerminalAutocomplete({
     createEmptyCommandBuffer,
   );
   const [integrationReady, setIntegrationReady] = useState(false);
-  const [dynamicSuggestions, setDynamicSuggestions] = useState<
-    TerminalAutocompleteSuggestion[]
-  >([]);
+  // **어느 입력의 결과인지 함께 담는다.** 목록만 들고 있으면 사용자가 계속 타이핑하는 동안
+  // 이전 입력의 경로 목록이 잠깐 그대로 보인다(데스크톱과 같은 규칙).
+  const [dynamicSuggestions, setDynamicSuggestions] = useState<{
+    value: string;
+    items: TerminalAutocompleteSuggestion[];
+  }>({ value: '', items: [] });
+  // 이 명령의 스펙(서브커맨드·옵션). 엔진에서 받아 오므로 비동기라, 오기 전에는 null 이다.
+  const [commandSpec, setCommandSpec] = useState<CommandSpec | null>(null);
   const [pendingSnippet, setPendingSnippet] =
     useState<PendingAutocompleteSnippet | null>(null);
 
   const generationRef = useRef(0);
+  const commandSpecNameRef = useRef<string | null>(null);
   // 마지막 프롬프트 경계 이후에 명령 완료(D) 마커가 있었는지. 진짜 새 프롬프트는 항상
   // D(완료·Ctrl-C)로 끝나지만, SIGWINCH 재드로잉(모바일 키보드 개폐로 터미널이 리사이즈될 때)은
   // D 없이 A·B 를 재발행한다 — 타이핑 중인 버퍼를 그 재드로잉이 지우지 않게 하기 위해
@@ -200,7 +223,7 @@ export function useTerminalAutocomplete({
     setSnapshot(null);
     setCommand(createEmptyCommandBuffer());
     setIntegrationReady(false);
-    setDynamicSuggestions([]);
+    setDynamicSuggestions({ value: '', items: [] });
     setPendingSnippet(null);
     sawCompletionRef.current = false;
   }, [connected, sessionId]);
@@ -208,6 +231,12 @@ export function useTerminalAutocomplete({
   useEffect(() => {
     if (integrationReady) void prepare();
   }, [integrationReady, prepare]);
+
+  // 스펙 목록을 미리 받아 둔다. 없는 이름을 칠 때마다 다리를 건너지 않기 위한 것이라, 첫
+  // 타이핑이 이 왕복을 기다리지 않게 세션이 준비될 때 한 번만 부른다.
+  useEffect(() => {
+    if (integrationReady) void primeCommandSpecs();
+  }, [integrationReady]);
 
   const runCompletion = useCallback(
     (hostCommand: string): Promise<string> => {
@@ -244,32 +273,90 @@ export function useTerminalAutocomplete({
 
   useEffect(() => {
     const value = command.value;
-    const request = resolveDynamicCompletion(null, value);
+    // **스펙을 넘긴다.** null 을 넘기던 동안 제너레이터 인자(docker logs 의 컨테이너 이름 등)가
+    // 아예 해석되지 않아, 모바일에는 경로 완성만 있었다.
+    const request = resolveDynamicCompletion(commandSpec, value);
     if (
       !enabled ||
       !integrationReady ||
       capability?.status === 'unsupported' ||
-      !request ||
-      request.kind !== 'path'
+      !request
     ) {
-      setDynamicSuggestions([]);
+      setDynamicSuggestions({ value, items: [] });
       return;
     }
+    const fresh = (generation: number) =>
+      generation === dynamicGenerationRef.current &&
+      commandRef.current.value === value;
+
+    if (request.kind === 'generator') {
+      // 데스크톱과 **같은 런타임·같은 모듈**을 쓴다(shared-core 의 fig-runtime). 모듈 본문은
+      // 여기서 처음 require 될 때 실행된다 — Metro 가 미리 묶어 두기만 한다.
+      if (!hasCommandGeneratorModule(request.command)) {
+        setDynamicSuggestions({ value, items: [] });
+        return;
+      }
+      const generation = (dynamicGenerationRef.current += 1);
+      const cwd = cwdRef.current;
+      const timer = setTimeout(() => {
+        void (async () => {
+          const spec = loadCommandGeneratorModule(request.command);
+          const generators = spec
+            ? findArgGenerators(spec, request.tokens)
+            : undefined;
+          if (!generators) {
+            if (fresh(generation)) {
+              setDynamicSuggestions({ value, items: [] });
+            }
+            return;
+          }
+          const found = await runGenerators(generators, {
+            tokens: request.tokens,
+            searchTerm: request.base,
+            cwd: cwd ?? '',
+            executeCommand: ({ command: cmd, args, cwd: generatorCwd }) =>
+              runCompletion(
+                buildGeneratorShellLine(cmd, args ?? [], generatorCwd ?? cwd),
+              ).then(stdout => ({ stdout, stderr: '', exitCode: 0 })),
+          });
+          if (!fresh(generation)) {
+            return;
+          }
+          setDynamicSuggestions({
+            value,
+            items: figSuggestionsToCompletions(
+              found,
+              request.before,
+              request.base,
+            ).map(completion => ({
+              insertText: completion.insertText,
+              source: 'generator' as const,
+              ...(completion.displayText
+                ? { displayText: completion.displayText }
+                : {}),
+              ...(completion.description
+                ? { description: completion.description }
+                : {}),
+            })),
+          });
+        })().catch(() => undefined);
+      }, DYNAMIC_DEBOUNCE_MS);
+      return () => clearTimeout(timer);
+    }
+
     const hostCommand = buildListCommand(request, cwdRef.current);
     const generation = (dynamicGenerationRef.current += 1);
     const apply = (stdout: string) => {
-      if (
-        generation !== dynamicGenerationRef.current ||
-        commandRef.current.value !== value
-      ) {
+      if (!fresh(generation)) {
         return;
       }
-      setDynamicSuggestions(
-        parsePathListing(stdout, request).map(item => ({
+      setDynamicSuggestions({
+        value,
+        items: parsePathListing(stdout, request).map(item => ({
           ...item,
           source: 'path' as const,
         })),
-      );
+      });
     };
     const cached = cacheRef.current.get(hostCommand);
     if (cached !== undefined) {
@@ -284,10 +371,53 @@ export function useTerminalAutocomplete({
   }, [
     capability?.status,
     command.value,
+    commandSpec,
     enabled,
     integrationReady,
     runCompletion,
   ]);
+
+  // 인자를 치기 시작하면 그 명령의 스펙을 받아 온다. 아직 안 써 본 옵션·서브커맨드를 추천할
+  // 수 있는 것은 이것뿐이다(히스토리에는 쳐 본 것만 있다).
+  //
+  // 데스크톱과 다른 점은 **비동기**라는 것뿐이다 — 엔진에서 받아 오므로 도착하면 다시 그린다.
+  useEffect(() => {
+    if (!enabled || !integrationReady || capability?.status === 'unsupported') {
+      if (commandSpecNameRef.current !== null) {
+        commandSpecNameRef.current = null;
+        setCommandSpec(null);
+      }
+      return;
+    }
+    const leading = command.value.includes(' ')
+      ? leadingCommand(command.value)
+      : '';
+    if (!leading || !hasCommandSpec(leading)) {
+      if (commandSpecNameRef.current !== null) {
+        commandSpecNameRef.current = null;
+        setCommandSpec(null);
+      }
+      return;
+    }
+    if (commandSpecNameRef.current === leading) {
+      return;
+    }
+    commandSpecNameRef.current = leading;
+    const cached = getCachedCommandSpec(leading);
+    if (cached) {
+      setCommandSpec(cached);
+      return;
+    }
+    let cancelled = false;
+    void loadCommandSpec(leading).then(spec => {
+      if (!cancelled && commandSpecNameRef.current === leading) {
+        setCommandSpec(spec);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [capability?.status, command.value, enabled, integrationReady]);
 
   const suggestions = useMemo(() => {
     if (!enabled || !integrationReady || capability?.status === 'unsupported') {
@@ -296,14 +426,24 @@ export function useTerminalAutocomplete({
     return getTerminalAutocompleteSuggestions(snapshot, command, {
       sessionStats: statsRef.current,
       currentCwd: cwdRef.current,
-      dynamicCompletions: dynamicSuggestions,
-      suppressHistory: dynamicSuggestions.length > 0,
+      commandSpec,
+      // 지금 입력의 결과일 때만 쓴다 — 아니면 이전 줄의 경로 목록이 섞인다.
+      dynamicCompletions:
+        dynamicSuggestions.value === command.value
+          ? dynamicSuggestions.items
+          : undefined,
+      // 경로 인자(cd·ls…)에서는 살아 있는 목록이 진실이라 오래된 히스토리 경로를 덮는다.
+      // 동적 결과가 있다고 무조건 덮으면 경로가 아닌 자리에서도 히스토리가 사라진다.
+      suppressHistory:
+        resolveDynamicCompletion(commandSpec, command.value)?.kind === 'path',
       snippets,
+      // 목록 길이는 데스크톱(20)과 다르게 둔다 — 화면이 좁아 그만큼 보여 줄 자리가 없다.
       limit: 12,
     });
   }, [
     capability?.status,
     command,
+    commandSpec,
     dynamicSuggestions,
     enabled,
     integrationReady,
@@ -399,7 +539,7 @@ export function useTerminalAutocomplete({
         }
         cacheRef.current.clear();
         dynamicGenerationRef.current += 1;
-        setDynamicSuggestions([]);
+        setDynamicSuggestions({ value: '', items: [] });
         return executed || null;
       }
       if (kind === 'D') {

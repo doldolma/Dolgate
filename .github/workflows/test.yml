@@ -581,6 +581,16 @@ jobs:
       - name: Check remote desktop FFI header copies
         run: npm run ffi:headers:check --workspace @dolssh/react-native-remote-desktop
 
+      # 생성 스펙의 파생물이 어긋나지 않았는지 본다. gz 사본과 모듈 지도는 커밋된 JSON 만으로
+      # 결정적으로 다시 만들어지므로 Fig 클론(네트워크)이 필요 없다 — 누가 스펙을 다시 만들고
+      # 셋 중 하나를 커밋에서 빠뜨리면 여기서 걸린다.
+      - name: Check the generated command specs are in sync
+        run: |
+          node apps/desktop/scripts/generate-command-specs.cjs --mirror-only
+          git diff --exit-code -- \
+            services/ssh-core/internal/commandspec/specs \
+            apps/mobile/src/generated/command-spec-modules.ts
+
       - name: Run mobile typecheck
         run: npm run typecheck:mobile
 

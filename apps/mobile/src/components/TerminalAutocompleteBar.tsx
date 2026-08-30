@@ -11,6 +11,7 @@ import {
 import type { TerminalAutocompleteSuggestion } from '@dolssh/shared-core';
 import { useTranslation } from 'react-i18next';
 import type { PendingAutocompleteSnippet } from '../hooks/useTerminalAutocomplete';
+import { completionLabel } from '../lib/completion-label';
 import { useMobilePalette } from '../theme';
 
 interface TerminalAutocompleteBarProps {
@@ -22,22 +23,6 @@ interface TerminalAutocompleteBarProps {
   onCancelSnippet: () => void;
 }
 
-function sourceKey(source: TerminalAutocompleteSuggestion['source']): string {
-  switch (source) {
-    case 'history':
-      return 'history';
-    case 'path':
-      return 'path';
-    case 'snippet':
-      return 'snippet';
-    case 'spec':
-      return 'spec';
-    case 'generator':
-      return 'value';
-    default:
-      return 'command';
-  }
-}
 
 export function TerminalAutocompleteBar({
   command,
@@ -84,10 +69,13 @@ export function TerminalAutocompleteBar({
           >
             {suggestions.map(suggestion => {
               const isSnippet = suggestion.source === 'snippet';
-              const label = isSnippet
-                ? suggestion.insertText
-                : suggestion.insertText.slice(command.length) ||
-                  suggestion.insertText;
+              // 넣는 값과 보여줄 이름이 다르면(제너레이터의 displayName) 그 이름을 쓴다 —
+              // `docker logs` 는 `gds2` 를 넣으면서 `gds2 (nginx:latest)` 를 보여준다.
+              const label =
+                suggestion.displayText ??
+                (isSnippet
+                  ? suggestion.insertText
+                  : completionLabel(command, suggestion.insertText));
               return (
                 <Pressable
                   key={`${suggestion.source}:${suggestion.insertText}`}
@@ -106,17 +94,26 @@ export function TerminalAutocompleteBar({
                     },
                   ]}
                 >
-                  <Text
-                    numberOfLines={1}
-                    style={[styles.command, { color: palette.text }]}
-                  >
-                    {label}
-                  </Text>
-                  <Text style={[styles.source, { color: palette.mutedText }]}>
-                    {t(
-                      `session.autocomplete.sources.${sourceKey(suggestion.source)}`,
-                    )}
-                  </Text>
+                  {/* 출처 라벨은 칩마다 적지 않는다. 한 묶음은 대체로 출처가 같아서 같은 말이
+                      대여섯 번 반복되고, 좁은 화면에서 그 자리가 제일 비싸다. 사용자는 자기가
+                      무엇을 치는 중인지 이미 안다. 그 자리에는 실제로 고르는 데 쓰이는 설명을
+                      넣는다(있을 때만). */}
+                  <View style={styles.itemText}>
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.command, { color: palette.text }]}
+                    >
+                      {label}
+                    </Text>
+                    {suggestion.description ? (
+                      <Text
+                        numberOfLines={1}
+                        style={[styles.detail, { color: palette.mutedText }]}
+                      >
+                        {suggestion.description}
+                      </Text>
+                    ) : null}
+                  </View>
                 </Pressable>
               );
             })}
@@ -212,19 +209,26 @@ const styles = StyleSheet.create({
   },
   item: {
     maxWidth: 280,
-    height: 32,
+    // 설명이 붙으면 두 줄이 되므로 높이를 고정하지 않는다. minHeight 로 한 줄짜리 칩이
+    // 예전과 같은 크기를 유지한다.
+    minHeight: 32,
     borderWidth: 1,
     borderRadius: 6,
     paddingHorizontal: 9,
+    paddingVertical: 3,
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  itemText: {
+    flexShrink: 1,
   },
   command: {
     maxWidth: 210,
     fontFamily: 'monospace',
     fontSize: 12,
   },
-  source: {
+  detail: {
+    maxWidth: 210,
     fontSize: 10,
   },
   backdrop: {

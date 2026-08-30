@@ -48,7 +48,7 @@ func (m *Manager) probeShellThenReinject(sessionID string, session *sessionHandl
 				)
 				return
 			}
-			m.performShellIntegrationReinject(sessionID, session, normalized, nil)
+			m.performShellIntegrationReinject(sessionID, session, normalized)
 		},
 		Done:    session.closed,
 		Timeout: shellIntegrationHandshakeTimeout,

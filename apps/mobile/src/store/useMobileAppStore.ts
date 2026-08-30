@@ -272,6 +272,19 @@ function assertVaultPassphrase(passphrase: string): void {
   }
 }
 
+/**
+ * 이 셸에 셸 통합을 넣을지.
+ *
+ * 자동완성 스위치 하나가 둘 다 정한다. 명령 단위·현재 경로·종료 코드를 알아내려면 사용자
+ * 셸에 OSC 133 훅을 걸어야 하는데, 그것이 곧 자동완성이 쓰는 재료다 — 자동완성을 끈 사람에게
+ * 훅만 남겨 둘 이유가 없다. 끄면 평범한 PTY 로 남는다.
+ *
+ * 세션이 열릴 때 정해지므로, 바꾼 값은 다음 연결부터 적용된다.
+ */
+function shellIntegrationEnabled(get: () => { settings: MobileSettings }): boolean {
+  return get().settings.terminalAutocompleteEnabled !== false;
+}
+
 const MAX_TERMINAL_SNAPSHOT_CHARS = 8_000;
 const MAX_PERSISTED_SESSIONS = 24;
 const SFTP_TRANSFER_CHUNK_SIZE = 256 * 1024;
@@ -3736,6 +3749,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               const shell = await connection.startShell({
                 term: 'xterm',
                 size: terminalSize,
+                shellIntegration: shellIntegrationEnabled(get),
                 onClosed: input.markClosed,
               });
 
@@ -6229,6 +6243,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             // requested; TERM changes what remote programs emit.
             term: 'xterm',
             size: terminalSize,
+            shellIntegration: shellIntegrationEnabled(get),
             onClosed: markClosed,
           });
           pendingShell = shell;

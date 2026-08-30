@@ -122,11 +122,7 @@
     },
     "terminalAutocomplete": {
       "title": "Terminal autocomplete",
-      "description": "Suggests command history, executables, and remote paths."
-    },
-    "subshellReinject": {
-      "title": "Keep subshell integration",
-      "description": "Tracks command boundaries inside nested SSH, sudo, and container shells."
+      "description": "Suggests command history, executables, and remote paths. Off leaves the shell untouched."
     }
   },
   "common": {
@@ -562,15 +558,7 @@
     "terminalPaste": "Paste",
     "terminalSelectAll": "Select All",
     "autocomplete": {
-      "snippetVariables": "Snippet variables",
-      "sources": {
-        "history": "History",
-        "path": "Path",
-        "snippet": "Snippet",
-        "spec": "Option",
-        "value": "Value",
-        "command": "Command"
-      }
+      "snippetVariables": "Snippet variables"
     },
     "remoteDesktopConnecting": "Preparing connection…",
     "remoteDesktopConnected": "Connected",

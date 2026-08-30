@@ -1,4 +1,5 @@
 export {
+  buildGeneratorShellLine,
   buildListCommand,
   parsePathListing,
   resolveDynamicCompletion,

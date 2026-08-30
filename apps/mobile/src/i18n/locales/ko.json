@@ -122,11 +122,7 @@
     },
     "terminalAutocomplete": {
       "title": "터미널 자동완성",
-      "description": "명령 기록, 실행 파일과 원격 경로를 제안합니다."
-    },
-    "subshellReinject": {
-      "title": "서브셸 통합 유지",
-      "description": "중첩 SSH, sudo와 컨테이너 셸에서도 명령 단위를 인식합니다."
+      "description": "명령 기록·실행 파일·원격 경로를 제안합니다. 끄면 셸에 아무것도 넣지 않습니다."
     }
   },
   "common": {
@@ -562,15 +558,7 @@
     "terminalPaste": "붙여넣기",
     "terminalSelectAll": "전체 선택",
     "autocomplete": {
-      "snippetVariables": "스니펫 변수",
-      "sources": {
-        "history": "기록",
-        "path": "경로",
-        "snippet": "스니펫",
-        "spec": "옵션",
-        "value": "값",
-        "command": "명령"
-      }
+      "snippetVariables": "스니펫 변수"
     },
     "remoteDesktopConnecting": "연결 준비 중…",
     "remoteDesktopConnected": "연결됨",

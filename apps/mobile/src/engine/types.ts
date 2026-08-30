@@ -89,6 +89,14 @@ export type StartShellOptions = {
   /** TERM name; defaults to xterm-256color. */
   term?: string;
   size?: EngineTerminalSize;
+  /**
+   * 셸 통합(OSC 133 훅)을 넣을지. 기본은 넣는다.
+   *
+   * 끄면 엔진이 이 셸에 아무것도 타이핑하지 않는다 — 프로브도, 주입도, 서브셸 재주입도.
+   * 자동완성 설정의 "끔"이 곧 이것이다: 명령 단위를 알아내려면 사용자 셸에 훅을 걸어야
+   * 하므로, 그 대가를 원하지 않는 사용자에게는 평범한 PTY 로 남아야 한다.
+   */
+  shellIntegration?: boolean;
   /** Fires once after the channel ends and all output has been retained. */
   onClosed?: () => void;
 };

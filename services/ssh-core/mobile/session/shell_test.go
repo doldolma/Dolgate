@@ -179,6 +179,55 @@ func TestInitialShellIntegrationFallsBackToPTYProbeWhenExecIsRejected(t *testing
 	}
 }
 
+// 자동완성을 끄면 "옛날처럼" 이어야 한다 — 통합 스크립트를 넣지 않는 정도가 아니라, 사용자
+// 셸에 아무것도 타이핑하지 않는 것이다.
+//
+// 그 증거로 픽스처의 셸 정체를 쓴다. 이 픽스처는 exec 요청을 거절하므로, 셸 이름을 알아낼
+// 길은 PTY 에 프로브를 쳐 넣는 것뿐이다(위 TestInitialShellIntegration… 이 그 경로다).
+// 그러니 이름이 끝까지 비어 있다는 것은 우리가 셸에 아무것도 치지 않았다는 뜻이다.
+func TestDisabledShellIntegrationNeverTypesIntoTheShell(t *testing.T) {
+	server, err := sshtest.NewServerWithOptions(sshtest.Options{
+		ShellIntegrationShell: "bash",
+	})
+	if err != nil {
+		t.Fatalf("start fixture: %v", err)
+	}
+	t.Cleanup(func() { _ = server.Close() })
+	conn := dialTestConn(t, server)
+
+	shell, err := conn.StartShell(ShellOptions{
+		Term:                    TerminalXterm256,
+		DisableShellIntegration: true,
+	})
+	if err != nil {
+		t.Fatalf("start shell: %v", err)
+	}
+	defer shell.Close()
+
+	// 켜져 있었다면 첫 프롬프트가 잦아든 뒤 프로브가 나간다(installGate 의 quiet 150ms).
+	waitForRing(t, shell, "fixture$ ")
+	time.Sleep(600 * time.Millisecond)
+	if got := conn.currentRemoteShell(); got != "" {
+		t.Fatalf("통합을 껐는데 셸을 알아냈다(= PTY 에 프로브를 쳤다): %q", got)
+	}
+
+	// 사용자가 줄을 보내도 다시 무장하지 않는다(rearmInstallGateOnSubmit).
+	if err := shell.SendData([]byte("echo hi\r")); err != nil {
+		t.Fatalf("send line: %v", err)
+	}
+	waitForRing(t, shell, "echo hi")
+	time.Sleep(600 * time.Millisecond)
+	if got := conn.currentRemoteShell(); got != "" {
+		t.Fatalf("줄을 보내자 프로브가 나갔다: %q", got)
+	}
+
+	// 서브셸 재주입도 같은 스위치를 따른다 — 앱이 불러도 아무것도 나가면 안 된다.
+	shell.ReinjectShellIntegration("bash")
+	if shell.reinjectGate.Armed() {
+		t.Fatal("통합을 껐는데 재주입이 무장했다")
+	}
+}
+
 func newTestServer(t *testing.T) *sshtest.Server {
 	t.Helper()
 	server, err := sshtest.NewServer()

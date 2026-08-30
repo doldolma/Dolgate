@@ -252,9 +252,6 @@ export function SessionScreen(): React.JSX.Element {
   const terminalAutocompleteEnabled = useMobileAppStore(
     state => state.settings.terminalAutocompleteEnabled !== false,
   );
-  const subshellReinjectEnabled = useMobileAppStore(
-    state => state.settings.subshellReinjectEnabled !== false,
-  );
   const subshellReinjectPatterns = useMobileAppStore(
     state => state.settings.subshellReinjectPatterns,
   );
@@ -1763,10 +1760,13 @@ export function SessionScreen(): React.JSX.Element {
                           marker,
                           reportedCommand,
                         );
+                      // 서브셸 재주입은 자동완성 스위치를 따른다 — 통합을 켠 세션에서만
+                      // 마커가 오므로 여기까지 오는 것도 그 세션뿐이지만, 재주입은 사용자
+                      // 셸에 타이핑하는 일이라 스위치를 다시 확인한다.
                       if (
                         !command ||
                         !renderedTerminalSessionId ||
-                        !subshellReinjectEnabled
+                        !terminalAutocompleteEnabled
                       ) {
                         return;
                       }

@@ -102,6 +102,18 @@ class GoSshEngineModule(
     onWorker(promise) { Mobile.version() }
   }
 
+  // 자동완성 명령 스펙. 엔진이 압축한 채로 들고 있다가 하나씩 푼다 — JS 번들에 넣으면
+  // 압축 전 20 MB 가 시작 비용이 된다(internal/commandspec).
+  @ReactMethod
+  fun getCommandSpec(name: String, promise: Promise) {
+    onWorker(promise) { Mobile.commandSpec(name) }
+  }
+
+  @ReactMethod
+  fun getCommandSpecNames(promise: Promise) {
+    onWorker(promise) { Mobile.commandSpecNames() }
+  }
+
   @ReactMethod
   fun probeHostKey(requestJson: String, promise: Promise) {
     onWorker(promise) { engine.probeHostKey(requestJson) }

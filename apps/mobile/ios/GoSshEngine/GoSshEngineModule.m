@@ -9,6 +9,15 @@ RCT_EXTERN_METHOD(getEngineVersion
                   : (RCTPromiseResolveBlock)resolve reject
                   : (RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(getCommandSpec
+                  : (NSString *)name resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(getCommandSpecNames
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(probeHostKey
                   : (NSString *)requestJson resolve
                   : (RCTPromiseResolveBlock)resolve reject

@@ -190,44 +190,40 @@ func (m *Manager) ReinjectShellIntegration(sessionID, shellHint string) error {
 	if err != nil {
 		return err
 	}
-	normalizedHint := shellintegration.NormalizeRemoteShell(shellHint)
-	if strings.TrimSpace(shellHint) != "" && normalizedHint == "" {
-		return nil
+	markUnsupported := func() {
+		m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, []byte(autocomplete.CommandFinishedMarker))
 	}
-	session.reinjectGate.Arm(func(tail []byte) {
-		if autocomplete.PromptAlreadyIntegrated(tail) {
-			return
-		}
-		if normalizedHint != "" {
-			_ = m.injectSubshellIntegration(sessionID, session, normalizedHint)
-			return
-		}
-		markUnsupported := func() {
-			m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, []byte(autocomplete.CommandFinishedMarker))
-		}
-		_ = shellintegration.ProbeShellThenInject(shellintegration.ProbeTarget{
-			Probe:        &session.shellProbe,
-			Handshake:    &session.handshake,
-			ProbeCommand: autocomplete.ShellProbeCommand(),
-			Write:        session.runner.Write,
-			BeforeWrite: func() {
-				m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, []byte("\r\x1b[2K"))
-			},
-			Emit: func(data []byte) {
-				m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, data)
-			},
-			OnUnsupported: markUnsupported,
-			OnShell: func(shell string) {
-				normalized := shellintegration.NormalizeRemoteShell(shell)
-				if normalized == "" {
-					markUnsupported()
-					return
-				}
-				_ = m.injectSubshellIntegration(sessionID, session, normalized)
-			},
-			Done: session.done,
-		})
-	}, func() {})
+	shellintegration.ArmReinject(shellintegration.ReinjectTarget{
+		Gate:      session.reinjectGate,
+		ShellHint: shellHint,
+		Inject: func(resolved string) {
+			_ = m.injectSubshellIntegration(sessionID, session, resolved)
+		},
+		Probe: func() {
+			_ = shellintegration.ProbeShellThenInject(shellintegration.ProbeTarget{
+				Probe:        &session.shellProbe,
+				Handshake:    &session.handshake,
+				ProbeCommand: autocomplete.ShellProbeCommand(),
+				Write:        session.runner.Write,
+				BeforeWrite: func() {
+					m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, []byte("\r\x1b[2K"))
+				},
+				Emit: func(data []byte) {
+					m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, data)
+				},
+				OnUnsupported: markUnsupported,
+				OnShell: func(shell string) {
+					normalized := shellintegration.NormalizeRemoteShell(shell)
+					if normalized == "" {
+						markUnsupported()
+						return
+					}
+					_ = m.injectSubshellIntegration(sessionID, session, normalized)
+				},
+				Done: session.done,
+			})
+		},
+	})
 	return nil
 }
 

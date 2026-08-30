@@ -1014,31 +1014,20 @@ func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error
 		return nil // pane 세션이 아니면 할 일 없음
 	}
 	// 셸을 모르면 프로브 한 줄로 먼저 묻는다. 예전에는 겸용 스크립트를 보냈고, 그것이 여러 줄이라
-	// dash·busybox pane 에서 화면에 그대로 남았다.
-	probing := strings.TrimSpace(shell) == ""
-	if !probing {
-		shell = shellintegration.NormalizeRemoteShell(shell)
-	}
-	commands := autocomplete.ShellIntegrationInitLines(shell)
-	if !probing && len(commands) == 0 {
-		// 훅을 걸 수 없는 셸이다(dash·ksh 등). 타이핑해 봐야 화면만 더럽힌다.
-		return nil
-	}
-	handle.paneReinjectGate(paneID).Arm(
-		func(tail []byte) {
-			// 서브셸이 뜨지 않았으면(진입 명령 실패 → 원래 셸이 새 프롬프트를 그림) 그
-			// 프롬프트에 이미 우리 마커가 있다. 보내 봐야 프롬프트만 한 번 더 남는다.
-			if autocomplete.PromptAlreadyIntegrated(tail) {
-				return
-			}
-			if probing {
-				m.probePaneShellThenInject(sessionID, handle, paneID)
-				return
-			}
-			m.writePaneShellIntegration(sessionID, handle, paneID, commands)
+	// dash·busybox pane 에서 화면에 그대로 남았다. 기다림·판정은 다른 전송과 같은 절차다.
+	shellintegration.ArmReinject(shellintegration.ReinjectTarget{
+		Gate:      handle.paneReinjectGate(paneID),
+		ShellHint: shell,
+		Inject: func(resolved string) {
+			m.writePaneShellIntegration(
+				sessionID,
+				handle,
+				paneID,
+				autocomplete.ShellIntegrationInitLines(resolved),
+			)
 		},
-		func() {},
-	)
+		Probe: func() { m.probePaneShellThenInject(sessionID, handle, paneID) },
+	})
 	return nil
 }
 

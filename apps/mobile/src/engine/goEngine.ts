@@ -101,6 +101,8 @@ type NativeStartShellResult = {
 /** The native module surface, implemented by Kotlin and Swift. */
 type GoSshEngineNativeModule = NativeModule & {
   getEngineVersion(): Promise<string>;
+  getCommandSpec(name: string): Promise<string>;
+  getCommandSpecNames(): Promise<string>;
   probeHostKey(requestJson: string): Promise<string>;
   inspectPrivateKey(privateKeyPem: string, passphrase: string): Promise<string>;
   inspectCertificate(certificateText: string): Promise<string>;
@@ -212,6 +214,23 @@ export function isGoEngineAvailable(): boolean {
 
 export function getGoEngineVersion(): Promise<string> {
   return requireNative().getEngineVersion();
+}
+
+/**
+ * 자동완성 명령 스펙(`git`·`docker`… 의 서브커맨드·옵션). 없으면 빈 문자열.
+ *
+ * **엔진이 들고 있는 이유**: 데스크톱은 스펙마다 청크를 만들어 그 명령을 칠 때만 불러오지만
+ * (Vite 의 import.meta.glob) Metro 에는 그런 길이 없어 `require` 한 JSON 이 번들에 그대로
+ * 인라인된다 — 카탈로그 전체가 압축 전 20 MB 라 시작 비용으로 낼 수 없다. 엔진은 이미 두
+ * 플랫폼에 링크돼 있고 압축한 채로 1.8 MB 만 더 든다.
+ */
+export function getCommandSpecJson(name: string): Promise<string> {
+  return requireNative().getCommandSpec(name);
+}
+
+/** 스펙이 있는 명령 이름 전부(JSON 배열). 한 번 받아 두고 없는 이름은 묻지 않는다. */
+export function getCommandSpecNamesJson(): Promise<string> {
+  return requireNative().getCommandSpecNames();
 }
 
 function requireNative(): GoSshEngineNativeModule {
@@ -840,6 +859,10 @@ class GoConnection implements EngineConnection {
       term: options.term ?? DEFAULT_TERM,
       rows: options.size?.rows ?? this.defaultSize?.rows ?? 0,
       cols: options.size?.cols ?? this.defaultSize?.cols ?? 0,
+      // 빼면 엔진이 켜진 것으로 본다(옛 클라이언트 호환). 끌 때만 실어 보낸다.
+      ...(options.shellIntegration === false
+        ? { shellIntegration: false }
+        : {}),
     });
 
     if (options.onClosed) {

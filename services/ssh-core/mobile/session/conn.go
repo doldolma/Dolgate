@@ -138,11 +138,15 @@ func (c *Conn) StartShell(opts ShellOptions) (*Shell, error) {
 	// free exec channel for the query. This is only the fast path: if the server
 	// rejects exec, startShell safely probes the interactive PTY after its first
 	// prompt instead of silently losing mobile shell integration.
-	c.shellDetectOnce.Do(func() {
-		c.rememberRemoteShell(shellintegration.DetectRemoteShell(c.client))
-	})
-	opts.IntegrationShell = c.currentRemoteShell()
-	opts.OnIntegrationShellDetected = c.rememberRemoteShell
+	// 통합을 끈 세션은 물어보지도 않는다 — 이 감지는 exec 채널을 하나 더 여는 일이라,
+	// 쓰지 않을 답을 받으려고 서버 자원을 쓸 이유가 없다.
+	if !opts.DisableShellIntegration {
+		c.shellDetectOnce.Do(func() {
+			c.rememberRemoteShell(shellintegration.DetectRemoteShell(c.client))
+		})
+		opts.IntegrationShell = c.currentRemoteShell()
+		opts.OnIntegrationShellDetected = c.rememberRemoteShell
+	}
 
 	c.mu.Lock()
 	if c.closed {

@@ -670,61 +670,37 @@ func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(shell) != "" && shellintegration.NormalizeRemoteShell(shell) == "" {
-		return nil
-	}
-	session.reinjectGate.Arm(
-		func(tail []byte) { m.performShellIntegrationReinject(sessionID, session, shell, tail) },
-		// No prompt settled within the window (unusual prompt, non-shell
-		// foreground, or still authenticating): leave the session untouched.
-		func() {},
-	)
+	shellintegration.ArmReinject(shellintegration.ReinjectTarget{
+		Gate:      session.reinjectGate,
+		ShellHint: shell,
+		Alive:     func() bool { return m.HasSession(sessionID) },
+		// 표시는 **그 셸에서 나오면 지워진다**(stream 이 바깥 프롬프트 마커를 보고 지운다).
+		// 세션에 영구히 걸어 두면 alpine 에 한 번 들어갔다 나온 뒤로는 bash 컨테이너에도
+		// 통합이 안 붙고, 바깥 블록을 닫아 주지도 못해 블록이 계속 열린 채로 남았다.
+		Unsupported: session.shellIntegrationUnsupported.Load,
+		Inject: func(resolved string) {
+			m.performShellIntegrationReinject(sessionID, session, resolved)
+		},
+		Probe: func() { m.probeShellThenReinject(sessionID, session) },
+	})
 	return nil
 }
 
+// performShellIntegrationReinject writes one shell's init line into a subshell
+// that is already showing a settled prompt. Deciding that this is the moment —
+// and that this shell can take it — happened in shellintegration.ArmReinject.
 func (m *Manager) performShellIntegrationReinject(
 	sessionID string,
 	session *sessionHandle,
 	shell string,
-	tail []byte,
 ) {
-	if !m.HasSession(sessionID) {
-		return
-	}
-	// 서브셸이 뜨지 않았으면(진입 명령 실패 → 원래 셸이 새 프롬프트를 그림) 그 프롬프트에 이미
-	// 우리 마커가 있다. 보내 봐야 프롬프트만 한 번 더 남는다.
-	if autocomplete.PromptAlreadyIntegrated(tail) {
-		return
-	}
-	// 셸을 모르면 **먼저 물어본다.**
-	//
-	// 예전에는 모를 때 bash·zsh 겸용 스크립트를 보냈는데, 그것이 여러 줄이라 dash·busybox 에서
-	// PS2 계속 프롬프트와 스크립트 전문이 화면에 남았다. 짧은 한 줄로 셸을 확인하고 그 셸 전용
-	// 한 줄만 보내면, 지원하지 않는 셸에는 애초에 아무것도 가지 않는다.
-	if strings.TrimSpace(shell) == "" {
-		if session.shellIntegrationUnsupported.Load() {
-			// 지금 앞에 있는 그 셸에는 이미 물어봤고 답이 "없다" 였다. 다시 묻지 않는다.
-			//
-			// 표시는 **그 셸에서 나오면 지워진다**(stream 이 바깥 프롬프트 마커를 보고 지운다).
-			// 세션에 영구히 걸어 두면 alpine 에 한 번 들어갔다 나온 뒤로는 bash 컨테이너에도
-			// 통합이 안 붙고, 바깥 블록을 닫아 주지도 못해 블록이 계속 열린 채로 남았다.
-			return
-		}
-		m.probeShellThenReinject(sessionID, session)
+	commands := autocomplete.ShellIntegrationInitLines(shell)
+	if len(commands) == 0 {
 		return
 	}
 	// Arm the handshake immediately before writing so only the injected command's
 	// echo (and its prompt redraw) is hidden — the subshell's own login/motd and
 	// prompt were already shown to the user while the gate was waiting.
-	// 셸을 알면 그 셸 것 한 줄로 끝난다. 지원하지 않는 셸이면 아무것도 보내지 않는다.
-	shell = shellintegration.NormalizeRemoteShell(shell)
-	if shell == "" {
-		return
-	}
-	commands := autocomplete.ShellIntegrationInitLines(shell)
-	if len(commands) == 0 {
-		return
-	}
 	// preserveMotd=false 인 이유는 프로브 쪽과 같다(shell_probe.go 주석).
 	session.handshake.ArmForCommand(false, commands...)
 	// 프롬프트를 보고 쓰므로 그 프롬프트가 이미 화면에 있다 — 그 줄을 지워 새 프롬프트가 같은
