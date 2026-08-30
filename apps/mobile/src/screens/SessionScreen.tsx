@@ -53,7 +53,10 @@ import {
 } from '../components/TerminalInputView';
 import { RemoteFileEditorModal } from '../components/RemoteFileEditorModal';
 import { SftpBrowserView } from '../components/SftpBrowserView';
-import { RemoteDesktopSurface } from '../components/RemoteDesktopSurface';
+import {
+  REMOTE_DESKTOP_SURFACE_BACKGROUND,
+  RemoteDesktopSurface,
+} from '../components/RemoteDesktopSurface';
 import { TerminalAutocompleteBar } from '../components/TerminalAutocompleteBar';
 import { useTerminalAutocomplete } from '../hooks/useTerminalAutocomplete';
 import { useScreenPadding } from '../lib/screen-layout';
@@ -1683,6 +1686,13 @@ export function SessionScreen(): React.JSX.Element {
                 keyboardDockInset: toolbarKeyboardInset,
                 safeAreaPaddingBottom: screenPadding.paddingBottom,
               }),
+              // 원격 데스크톱은 위 패딩만큼 화면 배경이 드러난다. 캔버스가 어두워서
+              // 라이트 테마에서는 그 띠가 캔버스와 탭 바 사이의 밝은 실선으로 보였다 —
+              // 띠를 캔버스와 같은 색으로 덮는다. 터미널·SFTP 는 배경이 화면과 같아
+              // 해당하지 않는다.
+              ...(activeTab.kind === 'rdp' || activeTab.kind === 'vnc'
+                ? { backgroundColor: REMOTE_DESKTOP_SURFACE_BACKGROUND }
+                : null),
             },
           ]}
         >

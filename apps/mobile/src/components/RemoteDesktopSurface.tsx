@@ -1082,10 +1082,19 @@ export function RemoteDesktopSurface({
   );
 }
 
+/**
+ * 원격 화면 캔버스의 바탕색.
+ *
+ * 내보내는 이유: 세션 화면이 캔버스 **아래쪽 패딩 띠**를 같은 색으로 덮어야 한다
+ * (SessionScreen 의 screenBody). 두 곳에 색을 따로 적으면 한쪽만 바뀌었을 때
+ * 라이트 테마에서 밝은 실선이 다시 생긴다.
+ */
+export const REMOTE_DESKTOP_SURFACE_BACKGROUND = '#1a1a2e';
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: REMOTE_DESKTOP_SURFACE_BACKGROUND,
     overflow: 'hidden',
   },
   viewport: {
