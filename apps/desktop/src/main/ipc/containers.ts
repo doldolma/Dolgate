@@ -228,6 +228,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
           ruleId,
           host: host as SftpCompatibleHostRecord,
           containerId: input.containerId,
+          containerName: input.containerName ?? null,
           networkName: input.networkName,
           targetPort: input.targetPort,
           bindAddress: input.bindAddress,

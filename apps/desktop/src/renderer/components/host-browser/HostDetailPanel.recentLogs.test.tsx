@@ -41,6 +41,17 @@ function makeLog(hostId: string, createdAt: string): ActivityLogRecord {
   } as unknown as ActivityLogRecord;
 }
 
+function makeTmuxLog(hostId: string, createdAt: string): ActivityLogRecord {
+  return {
+    id: `log-tmux-${hostId}`,
+    kind: 'session-lifecycle',
+    level: 'info',
+    message: 'session.connected',
+    metadata: { hostId, connectionKind: 'ssh', tmux: true },
+    createdAt,
+  } as unknown as ActivityLogRecord;
+}
+
 const activityLogs: ActivityLogRecord[] = [
   makeLog('h-fav', '2026-01-03T00:00:00.000Z'),
   makeLog('h-plain', '2026-01-02T00:00:00.000Z'),
@@ -66,6 +77,14 @@ function renderEmptyDetail(scope: Partial<HostBrowserModel>) {
 }
 
 describe('HostDetailPanel — 최근 로그 범위', () => {
+  it('최근 로그에서 tmux SSH 연결을 구분해 표시한다', () => {
+    renderEmptyDetail({
+      activityLogs: [makeTmuxLog('h-fav', '2026-01-03T00:00:00.000Z')],
+    });
+
+    expect(screen.getByText('SSH (tmux)')).toBeInTheDocument();
+  });
+
   it('범위가 없으면 모든 호스트의 로그를 보여준다', () => {
     renderEmptyDetail({});
 

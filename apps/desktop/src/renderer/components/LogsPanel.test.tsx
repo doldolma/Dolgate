@@ -316,6 +316,29 @@ describe('LogsPanel', () => {
     expect(screen.getByText('doldolma.com · 22 · doyoung')).toBeInTheDocument();
   });
 
+  it('labels tmux SSH lifecycle sessions in the connection badge', () => {
+    render(
+      <LogsPanel
+        logs={[
+          createLifecycleLog({
+            sessionId: 'tmux-session-1',
+            hostId: 'host-tmux',
+            hostLabel: 'tmux host',
+            title: 'tmux host',
+            connectionKind: 'ssh',
+            tmux: true,
+            connectedAt: '2026-03-29T00:00:00.000Z',
+            status: 'connected',
+          }),
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByText('SSH (tmux)')).toBeInTheDocument();
+  });
+
   it('renders disconnected lifecycle rows with duration and disconnect reason', () => {
     render(
       <LogsPanel

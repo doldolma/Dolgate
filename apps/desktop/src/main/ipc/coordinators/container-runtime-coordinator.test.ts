@@ -246,6 +246,50 @@ describe("container runtime coordinator", () => {
     );
   });
 
+  // 감사 로그는 첫 기록의 라벨을 잡는다. 런타임 점검에서 실패하면 그 뒤로 갱신할 기회가 없어,
+  // 라벨을 inspect 뒤로 미루면 실패한 터널이 ruleId(UUID)로 남는다 — 라벨을 넣은 이유가 그것을
+  // 없애는 것이었다.
+  it("런타임 점검에서 실패해도 컨테이너 이름을 라벨로 남긴다", async () => {
+    const { deps, coordinator, host } = createCoordinator({
+      coreManager: {
+        getContainersEndpointRuntime: vi.fn(() => null),
+        containersConnect: vi.fn().mockResolvedValue({
+          runtime: null,
+          runtimeCommand: null,
+          unsupportedReason: "runtime missing",
+        }),
+        setPortForwardRuntime: vi.fn(),
+        listPortForwardRuntimes: vi.fn(() => []),
+        containersDisconnect: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    await expect(
+      coordinator.startContainerTunnelRuntime({
+        ruleId: "rule-1",
+        host,
+        containerId: "container-1",
+        containerName: "gateway",
+        networkName: "bridge",
+        targetPort: 8080,
+        bindAddress: "127.0.0.1",
+        bindPort: 18080,
+      }),
+    ).rejects.toThrow("runtime missing");
+
+    // 첫 발행("starting")부터 라벨이 붙어야 로거가 UUID 로 시작하지 않는다.
+    const published = (
+      deps.coreManager.setPortForwardRuntime as unknown as {
+        mock: { calls: [{ label?: string; status: string }][] };
+      }
+    ).mock.calls.map(([runtime]) => runtime);
+    expect(published[0]).toMatchObject({ status: "starting", label: "gateway:8080" });
+    expect(published[published.length - 1]).toMatchObject({
+      status: "error",
+      label: "gateway:8080",
+    });
+  });
+
   it("retries AWS container runtime connect once after a transient SSH handshake failure", async () => {
     vi.useFakeTimers();
     const containersConnect = vi

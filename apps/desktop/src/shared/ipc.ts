@@ -1132,6 +1132,8 @@ export interface HostContainersSearchLogsInput {
 export interface HostContainersEphemeralTunnelInput {
   hostId: string;
   containerId: string;
+  /** 활동 로그 표시용 컨테이너 이름. 패널이 이미 읽은 값을 주면 코어가 다시 묻지 않는다. */
+  containerName?: string | null;
   networkName: string;
   targetPort: number;
   bindAddress: string;

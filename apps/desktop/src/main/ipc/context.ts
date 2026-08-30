@@ -205,6 +205,8 @@ export interface MainIpcContext {
     ruleId: string;
     host: SftpCompatibleHostRecord;
     containerId: string;
+    /** 활동 로그 표시용 컨테이너 이름(패널이 이미 읽은 값). */
+    containerName?: string | null;
     networkName: string;
     targetPort: number;
     bindAddress: string;

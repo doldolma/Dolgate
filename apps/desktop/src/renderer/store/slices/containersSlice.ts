@@ -373,6 +373,7 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
         const runtime = await api.containers.startTunnel({
           hostId,
           containerId,
+          containerName,
           networkName,
           targetPort,
           bindAddress: '127.0.0.1',

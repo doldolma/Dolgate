@@ -2125,6 +2125,7 @@ export function ContainersWorkspace({
       const runtime = await startContainerTunnel({
         hostId: host.id,
         containerId: currentContainer.id,
+        containerName: currentContainer.name,
         networkName: currentTunnelState.networkName,
         targetPort,
         bindAddress: "127.0.0.1",

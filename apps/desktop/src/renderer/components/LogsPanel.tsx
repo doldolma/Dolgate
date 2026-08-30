@@ -112,7 +112,8 @@ function isContainerActionMetadata(value: Record<string, unknown> | null): value
   );
 }
 
-function getConnectionKindLabel(kind: SessionConnectionKind): string {
+function getConnectionKindLabel(kind: SessionConnectionKind, tmux = false): string {
+  const suffix = tmux && kind === 'ssh' ? ' (tmux)' : '';
   if (kind === 'local') {
     return 'Local';
   }
@@ -136,7 +137,7 @@ function getConnectionKindLabel(kind: SessionConnectionKind): string {
   if (kind === 'vnc') {
     return 'VNC';
   }
-  return 'SSH';
+  return `SSH${suffix}`;
 }
 
 function getConnectionKindTone(kind: SessionConnectionKind): 'running' | 'starting' | 'paused' {
@@ -566,7 +567,10 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                     </div>
                     <div className="flex flex-wrap items-center gap-[0.55rem]">
                       <Badge tone={getConnectionKindTone(sessionLifecycleMetadata.connectionKind)}>
-                        {getConnectionKindLabel(sessionLifecycleMetadata.connectionKind)}
+                        {getConnectionKindLabel(
+                          sessionLifecycleMetadata.connectionKind,
+                          sessionLifecycleMetadata.tmux,
+                        )}
                       </Badge>
                       <Badge tone={getLifecycleStatusTone(sessionLifecycleMetadata.status)}>
                         {getLifecycleStatusLabel(sessionLifecycleMetadata.status)}

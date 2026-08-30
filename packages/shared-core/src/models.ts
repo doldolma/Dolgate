@@ -2568,6 +2568,11 @@ export interface PortForwardRuntimeRecord {
   bindPort: number;
   status: PortForwardStatus;
   message?: string;
+  /**
+   * 사용자 룰이 없는 일회성 터널(컨테이너 서비스 터널 등)의 표시용 라벨.
+   * 감사 로그가 ruleId(UUID) 대신 이 값으로 표시되도록 준다.
+   */
+  label?: string;
   updatedAt: string;
   startedAt?: string;
 }
@@ -2764,6 +2769,8 @@ export interface SessionLifecycleLogMetadata {
   title: string;
   connectionDetails?: string | null;
   connectionKind: SessionConnectionKind;
+  /** Whether this terminal was opened through tmux control mode. */
+  tmux?: boolean;
   connectedAt: string;
   disconnectedAt?: string | null;
   durationMs?: number | null;

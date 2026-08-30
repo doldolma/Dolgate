@@ -1407,6 +1407,7 @@ describe("ContainersWorkspace", () => {
       expect(containersApi.startTunnel).toHaveBeenCalledWith({
         hostId: "host-1",
         containerId: "container-1",
+        containerName: "emqx",
         networkName: "bridge",
         targetPort: 1883,
         bindAddress: "127.0.0.1",

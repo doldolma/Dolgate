@@ -121,6 +121,7 @@ interface SessionLifecycleState {
   title: string;
   connectionDetails: string | null;
   connectionKind: SessionConnectionKind;
+  tmux: boolean;
   connectedAt: string | null;
   disconnectedAt: string | null;
   disconnectReason: string | null;
@@ -1527,6 +1528,7 @@ export class CoreManager {
       title: lifecycle.title,
       connectionDetails: lifecycle.connectionDetails,
       connectionKind: lifecycle.connectionKind,
+      tmux: lifecycle.tmux,
       connectedAt: lifecycle.connectedAt,
       disconnectedAt: lifecycle.disconnectedAt,
       durationMs: lifecycle.connectedAt && lifecycle.disconnectedAt
@@ -1548,7 +1550,7 @@ export class CoreManager {
       category: "session",
       kind: "session-lifecycle",
       ...logMessage("core.sessionLog", {
-        kind: this.getConnectionKindLabel(lifecycle.connectionKind),
+        kind: this.getConnectionKindLabel(lifecycle.connectionKind, lifecycle.tmux),
       }),
       metadata: metadata as unknown as Record<string, unknown>,
       createdAt: lifecycle.connectedAt,
@@ -1805,6 +1807,7 @@ export class CoreManager {
       connectionDetails:
         payload.connectionDetails ??
         `${payload.host} · ${payload.port} · ${payload.username}`,
+      tmux: payload.tmux === true,
       connectionKind:
         payload.connectionKind ??
         (payload.useMosh
@@ -2492,6 +2495,7 @@ export class CoreManager {
         payload.connectionDetails ??
         `${payload.profileName} · ${payload.region} · ${payload.instanceId}`,
       connectionKind: payload.connectionKind ?? "aws-ssm",
+      tmux: false,
       connectedAt: null,
       disconnectedAt: null,
       disconnectReason: null,
@@ -2606,6 +2610,7 @@ export class CoreManager {
           title: payload.title,
           connectionDetails: `${payload.profileName} · ${payload.region} · ${payload.instanceId}`,
           connectionKind: "aws-ssm",
+          tmux: false,
           connectedAt: null,
           disconnectedAt: null,
           disconnectReason: null,
@@ -2910,6 +2915,7 @@ export class CoreManager {
         title: payload.title,
         connectionDetails: payload.lifecycle.connectionDetails ?? null,
         connectionKind: payload.lifecycle.connectionKind,
+        tmux: false,
         connectedAt: null,
         disconnectedAt: null,
         disconnectReason: null,
@@ -2969,6 +2975,7 @@ export class CoreManager {
       title: payload.title,
       connectionDetails: targetDescription,
       connectionKind: "serial",
+      tmux: false,
       connectedAt: null,
       disconnectedAt: null,
       disconnectReason: null,
@@ -5050,7 +5057,10 @@ export class CoreManager {
                 level: "error",
                 category: "session",
                 ...logMessage("core.sessionErrorLog", {
-                  kind: this.getConnectionKindLabel(sessionLifecycle.connectionKind),
+                  kind: this.getConnectionKindLabel(
+                    sessionLifecycle.connectionKind,
+                    sessionLifecycle.tmux,
+                  ),
                 }),
                 metadata: {
                   sessionId: event.sessionId,
@@ -5058,6 +5068,7 @@ export class CoreManager {
                   hostLabel: sessionLifecycle.hostLabel,
                   title: sessionLifecycle.title,
                   connectionKind: sessionLifecycle.connectionKind,
+                  tmux: sessionLifecycle.tmux,
                   message: event.payload.message ?? null,
                 },
               });
@@ -6397,34 +6408,30 @@ export class CoreManager {
     return `sftp:${endpointId}`;
   }
 
-  private getConnectionKindLabel(kind: SessionConnectionKind): string {
+  private getConnectionKindLabel(kind: SessionConnectionKind, tmux = false): string {
+    let label: string;
     if (kind === "local") {
-      return "Local";
+      label = "Local";
+    } else if (kind === "aws-ssm") {
+      label = "AWS SSM";
+    } else if (kind === "aws-ecs-exec") {
+      label = "AWS ECS Exec";
+    } else if (kind === "serial") {
+      label = "Serial";
+    } else if (kind === "warpgate") {
+      label = "Warpgate";
+    } else if (kind === "mosh") {
+      label = "Mosh";
+    } else if (kind === "rdp") {
+      // 원격 화면은 각자 매니저가 로그를 쓰지만(rdp-manager·vnc-manager), 표에서 종류를 읽는 곳은
+      // 여기 하나다. 빠뜨리면 VNC 세션이 로그에 "SSH" 로 남는다.
+      label = "RDP";
+    } else if (kind === "vnc") {
+      label = "VNC";
+    } else {
+      label = "SSH";
     }
-    if (kind === "aws-ssm") {
-      return "AWS SSM";
-    }
-    if (kind === "aws-ecs-exec") {
-      return "AWS ECS Exec";
-    }
-    if (kind === "serial") {
-      return "Serial";
-    }
-    if (kind === "warpgate") {
-      return "Warpgate";
-    }
-    if (kind === "mosh") {
-      return "Mosh";
-    }
-    // 원격 화면은 각자 매니저가 로그를 쓰지만(rdp-manager·vnc-manager), 표에서 종류를 읽는 곳은
-    // 여기 하나다. 빠뜨리면 VNC 세션이 로그에 "SSH" 로 남는다.
-    if (kind === "rdp") {
-      return "RDP";
-    }
-    if (kind === "vnc") {
-      return "VNC";
-    }
-    return "SSH";
+    return tmux ? `${label} (tmux)` : label;
   }
 
   private markSessionConnected(sessionId: string): void {
@@ -6446,6 +6453,7 @@ export class CoreManager {
       title: lifecycle.title,
       connectionDetails: lifecycle.connectionDetails,
       connectionKind: lifecycle.connectionKind,
+      tmux: lifecycle.tmux,
       connectedAt,
       disconnectedAt: null,
       durationMs: null,
@@ -6460,7 +6468,7 @@ export class CoreManager {
       category: "session",
       kind: "session-lifecycle",
       ...logMessage("core.sessionLog", {
-        kind: this.getConnectionKindLabel(lifecycle.connectionKind),
+        kind: this.getConnectionKindLabel(lifecycle.connectionKind, lifecycle.tmux),
       }),
       metadata: metadata as unknown as Record<string, unknown>,
       createdAt: connectedAt,
@@ -6506,6 +6514,7 @@ export class CoreManager {
       title: lifecycle.title,
       connectionDetails: lifecycle.connectionDetails,
       connectionKind: lifecycle.connectionKind,
+      tmux: lifecycle.tmux,
       connectedAt: referenceAt,
       disconnectedAt,
       durationMs,
@@ -6520,7 +6529,7 @@ export class CoreManager {
       category: "session",
       kind: "session-lifecycle",
       ...logMessage("core.sessionLog", {
-        kind: this.getConnectionKindLabel(lifecycle.connectionKind),
+        kind: this.getConnectionKindLabel(lifecycle.connectionKind, lifecycle.tmux),
       }),
       metadata: metadata as unknown as Record<string, unknown>,
       createdAt: referenceAt,

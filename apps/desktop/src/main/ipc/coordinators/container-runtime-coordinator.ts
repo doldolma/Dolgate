@@ -56,6 +56,8 @@ export interface ContainerRuntimeCoordinator {
     ruleId: string;
     host: SftpCompatibleHostRecord;
     containerId: string;
+    /** 활동 로그 표시용 컨테이너 이름(패널이 이미 읽은 값). */
+    containerName?: string | null;
     networkName: string;
     targetPort: number;
     bindAddress: string;
@@ -402,6 +404,7 @@ export function createContainerRuntimeCoordinator(deps: {
     ruleId: string;
     host: SftpCompatibleHostRecord;
     containerId: string;
+    containerName?: string | null;
     networkName: string;
     targetPort: number;
     bindAddress: string;
@@ -412,6 +415,7 @@ export function createContainerRuntimeCoordinator(deps: {
       ruleId,
       host,
       containerId,
+      containerName,
       networkName,
       targetPort,
       bindAddress,
@@ -419,6 +423,17 @@ export function createContainerRuntimeCoordinator(deps: {
       networks,
     } = input;
     const endpointId = buildContainerPortForwardEndpointId(host.id, ruleId);
+    // 감사 로그(Recent Activity)에 ruleId(UUID) 대신 보여 줄 라벨.
+    //
+    // **첫 발행 전에 세운다.** 아래 publishRuntime 은 이 변수를 클로저로 읽는데, inspect 뒤로
+    // 미루면 그 앞의 "starting" 과 런타임 점검 실패(도커가 없거나 sudo 가 필요한 호스트)가
+    // 라벨 없이 나가고, 그 실패 기록은 갱신될 기회가 없어 UUID 로 남는다 — 이 라벨이 없애려던
+    // 바로 그 화면이다. 패널이 이름을 줬으면 그것으로 시작하고, 못 줬으면 inspect 로 알아낸
+    // 이름과 실제 포트로 아래에서 다듬는다.
+    let tunnelContainerName = containerName?.trim() || undefined;
+    let tunnelLabel = tunnelContainerName
+      ? `${tunnelContainerName}:${targetPort}`
+      : undefined;
     const publishRuntime = (status: "starting" | "error", message?: string) =>
       coreManager.setPortForwardRuntime({
         ruleId,
@@ -430,6 +445,7 @@ export function createContainerRuntimeCoordinator(deps: {
         status,
         updatedAt: new Date().toISOString(),
         message,
+        label: tunnelLabel,
         startedAt:
           status === "starting"
             ? coreManager
@@ -480,7 +496,14 @@ export function createContainerRuntimeCoordinator(deps: {
         const target = resolveContainerTunnelTarget(details, networkName, targetPort);
         targetHost = target.host;
         resolvedTargetPort = target.port;
+        tunnelContainerName =
+          tunnelContainerName || details.name.trim() || undefined;
       }
+      // "이름:포트"라 같은 컨테이너의 여러 터널도 구분된다. 이름을 모르면 라벨을
+      // 두지 않아 로거가 종전 폴백(ruleId)을 따른다.
+      tunnelLabel = tunnelContainerName
+        ? `${tunnelContainerName}:${resolvedTargetPort}`
+        : undefined;
 
       if (host.kind === "aws-ec2") {
         tunnelRegistry.moveContainersTunnelRuntime(endpointId, ruleId);

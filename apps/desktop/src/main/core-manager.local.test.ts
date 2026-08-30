@@ -1577,6 +1577,60 @@ describe("CoreManager local shell sessions", () => {
     expect(metadata.durationMs).toBeTypeOf("number");
   });
 
+  it("labels tmux SSH sessions without changing their connection kind", async () => {
+    const logs: ActivityLogRecord[] = [];
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager(undefined, (record) => {
+      const currentIndex = logs.findIndex((entry) => entry.id === record.id);
+      if (currentIndex >= 0) {
+        logs[currentIndex] = record;
+        return;
+      }
+      logs.push(record);
+    });
+
+    const { sessionId } = await manager.connect({
+      host: "nas.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      password: "secret",
+      trustedHostKeyBase64: "trusted",
+      cols: 120,
+      rows: 32,
+      title: "NAS tmux",
+      hostId: "host-1",
+      hostLabel: "nas",
+      transport: "ssh",
+      tmux: true,
+    });
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: { status: "connected" },
+    });
+    fakeProcess.emitControl({
+      type: "closed",
+      sessionId,
+      payload: { message: "closed" },
+    });
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      message: "SSH (tmux) 세션",
+      messageKey: "core.sessionLog",
+      messageParams: { kind: "SSH (tmux)" },
+      metadata: {
+        connectionKind: "ssh",
+        tmux: true,
+        status: "closed",
+      },
+    });
+  });
+
   it("updates an existing remote lifecycle row when a replay recording is attached", async () => {
     const logs: ActivityLogRecord[] = [];
     const fakeProcess = createFakeChildProcess();

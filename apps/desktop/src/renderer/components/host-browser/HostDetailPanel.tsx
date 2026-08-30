@@ -136,12 +136,13 @@ function getLogStatusColor(level?: string): string {
 }
 
 /** connectionKind(세션 연결 타입) → 표시 라벨. */
-function getConnectionKindLabel(kind?: string): string {
+function getConnectionKindLabel(kind?: string, tmux = false): string {
+  const suffix = tmux && kind === 'ssh' ? ' (tmux)' : '';
   switch (kind) {
     case 'local':
       return 'Local';
     case 'ssh':
-      return 'SSH';
+      return `SSH${suffix}`;
     case 'mosh':
       return 'Mosh';
     case 'aws-ssm':
@@ -913,6 +914,7 @@ function EmptyDetail({
         label?: string;
         title?: string;
         connectionKind?: string;
+        tmux?: boolean;
       } | null;
       // 이름: 현재 호스트 목록 우선(최신 라벨), 없으면 로그 메타데이터(세션=hostLabel,
       // 감사 로그=label, 그 외=title) 순. UUID(hostId) 노출은 최후 수단.
@@ -924,7 +926,7 @@ function EmptyDetail({
         hostId;
       // 부제: 세션 로그는 연결 타입(SSH/AWS SSM 등), 그 외는 로그 메시지(무슨 일인지).
       const detail = metadata?.connectionKind
-        ? getConnectionKindLabel(metadata.connectionKind)
+        ? getConnectionKindLabel(metadata.connectionKind, metadata.tmux)
         : resolveLogMessage(log, translate);
       items.push({
         id: log.id,
@@ -1369,6 +1371,7 @@ function ActivityList({
           connectionKind?: string;
           status?: string;
           disconnectReason?: string;
+          tmux?: boolean;
         } | null;
         const isSession =
           log.kind === 'session-lifecycle' && Boolean(metadata?.connectionKind);
@@ -1378,9 +1381,9 @@ function ActivityList({
         const primary = isSession
           ? isError
             ? translate('hostDetail.activity.connectFailed', {
-                kind: getConnectionKindLabel(metadata?.connectionKind),
+                kind: getConnectionKindLabel(metadata?.connectionKind, metadata?.tmux),
               })
-            : getConnectionKindLabel(metadata?.connectionKind)
+            : getConnectionKindLabel(metadata?.connectionKind, metadata?.tmux)
           : resolveLogMessage(log, translate);
         // 실패 사유만 부제로 노출(정상 종료의 기술적 사유는 노이즈라 숨김).
         const secondary = isError ? metadata?.disconnectReason ?? null : null;

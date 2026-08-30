@@ -88,7 +88,7 @@ export class PortForwardLifecycleLogger {
     const attempt: ActivePortForwardLifecycleAttempt = {
       logId: `port-forward:${runtime.ruleId}:${randomUUID()}`,
       ruleId: runtime.ruleId,
-      ruleLabel: rule?.label ?? runtime.ruleId,
+      ruleLabel: rule?.label ?? runtime.label ?? runtime.ruleId,
       hostId: runtime.hostId,
       hostLabel: host?.label ?? runtime.hostId,
       transport: runtime.transport,
@@ -110,7 +110,7 @@ export class PortForwardLifecycleLogger {
     const host = this.hosts.getById(runtime.hostId);
     return {
       ...attempt,
-      ruleLabel: rule?.label ?? attempt.ruleLabel,
+      ruleLabel: rule?.label ?? runtime.label ?? attempt.ruleLabel,
       hostId: runtime.hostId,
       hostLabel: host?.label ?? attempt.hostLabel,
       transport: runtime.transport,

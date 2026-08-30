@@ -159,6 +159,45 @@ describe('PortForwardLifecycleLogger', () => {
     expect(lifecycleRecords[3]?.metadata).toMatchObject({ status: 'closed' });
   });
 
+  it('labels rule-less container tunnels with the runtime label, not the rule id', () => {
+    const upsert = vi
+      .fn<(record: ActivityLogRecord) => ActivityLogRecord>()
+      .mockImplementation((record) => record);
+    const logger = new PortForwardLifecycleLogger(
+      { upsert },
+      { getById: vi.fn() },
+      { getById: vi.fn(() => createHost({ label: 'docker-host' })) },
+      () => '2026-04-03T00:00:00.000Z',
+    );
+    const tunnelEvent = (
+      status: PortForwardRuntimeEvent['runtime']['status'],
+      overrides: Partial<PortForwardRuntimeEvent['runtime']> = {},
+    ) =>
+      createEvent(status, {
+        ruleId: 'container-service-tunnel:uuid-1',
+        transport: 'container',
+        bindPort: 18080,
+        ...overrides,
+      });
+
+    // 첫 "starting" 에는 아직 컨테이너 이름이 없고, 라벨은 뒤 이벤트로 도착한다.
+    logger.handleEvent(tunnelEvent('starting', { updatedAt: '2026-04-03T00:00:01.000Z' }));
+    logger.handleEvent(
+      tunnelEvent('running', {
+        label: 'web:8080',
+        updatedAt: '2026-04-03T00:00:02.000Z',
+      }),
+    );
+    logger.handleEvent(tunnelEvent('stopped', { updatedAt: '2026-04-03T00:00:03.000Z' }));
+
+    const records = upsert.mock.calls.map(([record]) => record);
+    expect(records).toHaveLength(2);
+    for (const record of records) {
+      expect(record.messageKey).toBe('misc.portForwardLog');
+      expect(record.messageParams).toMatchObject({ label: 'web:8080' });
+    }
+  });
+
   it('closes an existing lifecycle row when shutdown emits a synthetic stopped event', () => {
     const upsert = vi.fn<(record: ActivityLogRecord) => ActivityLogRecord>().mockImplementation((record) => record);
     const logger = new PortForwardLifecycleLogger(
