@@ -54,3 +54,15 @@ export function buildAwsWsProxyTarget(input: {
     startMessage: input.startMessage,
   };
 }
+
+/**
+ * 서버 프록시 웹소켓이 자격을 거절했는가.
+ *
+ * ssh-core 는 이 실패를 `dial: ... (http 401)` 로 올린다 — HTTP 응답이 아니라 다이얼 오류의
+ * 문구라, 보통의 401 판정기가 잡지 못한다. 별도로 판정하는 이유는 뒤처리가 다르기 때문이다:
+ * 인스턴스 쪽 문제는 기억해 두고 한동안 SSH 를 건너뛰지만, 만료된 토큰은 갱신하고 다시
+ * 시도해야 한다. 둘을 섞으면 다시 로그인한 뒤에도 한동안 약한 경로로만 붙는다.
+ */
+export function isServerProxyAuthRejection(message: string): boolean {
+  return /\(http (401|403)\)/.test(message);
+}

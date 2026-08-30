@@ -81,6 +81,7 @@ import {
   isAwsHostKeySecurityError,
   recordSshOverSsmFallback,
   buildAwsWsProxyTarget,
+  isServerProxyAuthRejection,
   shouldAttemptSshOverSsm,
   usesAwsServerProxy,
   type AwsSshOverSsmFallbackMemo,
@@ -286,7 +287,9 @@ function assertVaultPassphrase(passphrase: string): void {
  *
  * 세션이 열릴 때 정해지므로, 바꾼 값은 다음 연결부터 적용된다.
  */
-function shellIntegrationEnabled(get: () => { settings: MobileSettings }): boolean {
+function shellIntegrationEnabled(
+  get: () => { settings: MobileSettings },
+): boolean {
   return get().settings.terminalAutocompleteEnabled !== false;
 }
 
@@ -3363,7 +3366,9 @@ export const useMobileAppStore = create<MobileAppState>()(
        *
        * **던지지 않는다.** 오프라인·로그아웃·서버 오류면 큐를 그대로 두고 이유만 남긴다.
        */
-      const runSyncOutboxDrain = async (): Promise<'pushed' | 'skipped' | 'failed'> => {
+      const runSyncOutboxDrain = async (): Promise<
+        'pushed' | 'skipped' | 'failed'
+      > => {
         const queued = get().syncOutbox;
         if (queued.length === 0) {
           return 'skipped';
@@ -3730,105 +3735,133 @@ export const useMobileAppStore = create<MobileAppState>()(
           );
           return false;
         }
-        // 셸까지 열려야 런타임으로 등록한다. 그 전에 실패하면 dispose 가 책임질 것이 없으므로,
-        // 여기서 직접 닫아야 한다.
-        let connection: EngineConnection | null = null;
-        try {
-          const engine = getEngine();
-          // EIC 키는 60초만 유효하다. 세션마다 새로 만들고, 개인키는 기기에 남는다.
-          const key = await engine.generateEphemeralSshKey();
-          const wsProxy = buildAwsWsProxyTarget({
-            serverUrl: get().settings.serverUrl,
-            accessToken: input.accessToken,
-            startMessage: {
-              region: resolved.region,
+        const attempt = async (
+          accessToken: string,
+        ): Promise<'connected' | 'auth-rejected' | 'failed'> => {
+          // 셸까지 열려야 런타임으로 등록한다. 그 전에 실패하면 dispose 가 책임질 것이 없으므로,
+          // 여기서 직접 닫아야 한다.
+          let connection: EngineConnection | null = null;
+          try {
+            const engine = getEngine();
+            // EIC 키는 60초만 유효하다. 세션마다 새로 만들고, 개인키는 기기에 남는다.
+            const key = await engine.generateEphemeralSshKey();
+            const wsProxy = buildAwsWsProxyTarget({
+              serverUrl: get().settings.serverUrl,
+              accessToken,
+              startMessage: {
+                region: resolved.region,
+                profileName: resolved.profileName,
+                instanceId: host.awsInstanceId,
+                availabilityZone,
+                sshUsername,
+                sshPort,
+                publicKey: key.publicKey,
+                env: resolved.envSpec.env,
+                unsetEnv: resolved.envSpec.unsetEnv,
+              },
+            });
+            // **호스트 키 신뢰는 인스턴스 신원으로 기록한다.** 직접 경로와 같은 신원을 써야 한 번
+            // 신뢰한 키가 두 경로에서 함께 통한다.
+            const identity = buildAwsSsmKnownHostIdentity({
               profileName: resolved.profileName,
+              region: resolved.region,
               instanceId: host.awsInstanceId,
-              availabilityZone,
-              sshUsername,
-              sshPort,
-              publicKey: key.publicKey,
-              env: resolved.envSpec.env,
-              unsetEnv: resolved.envSpec.unsetEnv,
-            },
-          });
-          // **호스트 키 신뢰는 인스턴스 신원으로 기록한다.** 직접 경로와 같은 신원을 써야 한 번
-          // 신뢰한 키가 두 경로에서 함께 통한다.
-          const identity = buildAwsSsmKnownHostIdentity({
-            profileName: resolved.profileName,
-            region: resolved.region,
-            instanceId: host.awsInstanceId,
-          });
-          connection = await engine.connect({
-            connectionId: sessionRecordId,
-            // 서버가 이 이름으로 터널을 연다. 이 기기는 소켓을 열지 않는다.
-            host: host.awsInstanceId,
-            port: sshPort,
-            username: sshUsername,
-            credential: { type: 'key', privateKey: key.privateKeyPem },
-            size: terminalSize,
-            wsProxy,
-            trustedHostKeysBase64: trustedHostKeysFor(identity, sshPort),
-            onServerKey: async info =>
-              resolveKnownHostTrust(
-                host,
-                { ...info, host: identity, port: sshPort },
-                sessionRecordId,
-              ),
-            onDisconnected: input.markDropped,
-          });
-          const shell = await connection.startShell({
-            term: 'xterm',
-            size: terminalSize,
-            shellIntegration: shellIntegrationEnabled(get),
-            onClosed: input.markClosed,
-          });
-          runtimeSessions.set(sessionRecordId, {
-            kind: 'ssh',
-            recordId: sessionRecordId,
-            hostId: host.id,
-            connection,
-            shell,
-            backgroundListenerId: null,
-            ssmForward: null,
-          });
-          commitConnectionSecrets(host);
-          awsSshOverSsmFallbacks.delete(host.id);
-          console.info(
-            `[mobile-aws] proxy connected=ssh-over-ssm user=${sshUsername}`,
-          );
-          set(state => ({
-            sessions: patchSessionRecord(state.sessions, sessionRecordId, {
-              status: 'connected',
-              errorMessage: null,
-              connectionStatusMessage: t('store.ssmPathServerProxySsh'),
-              lastEventAt: new Date().toISOString(),
-              lastConnectedAt: new Date().toISOString(),
-              title: host.label,
-              connectionKind: 'aws-ssm',
-              connectionDetails: resolved.connectionDetails,
-            }),
-          }));
+            });
+            connection = await engine.connect({
+              connectionId: sessionRecordId,
+              // 서버가 이 이름으로 터널을 연다. 이 기기는 소켓을 열지 않는다.
+              host: host.awsInstanceId,
+              port: sshPort,
+              username: sshUsername,
+              credential: { type: 'key', privateKey: key.privateKeyPem },
+              size: terminalSize,
+              wsProxy,
+              trustedHostKeysBase64: trustedHostKeysFor(identity, sshPort),
+              onServerKey: async info =>
+                resolveKnownHostTrust(
+                  host,
+                  { ...info, host: identity, port: sshPort },
+                  sessionRecordId,
+                ),
+              onDisconnected: input.markDropped,
+            });
+            const shell = await connection.startShell({
+              term: 'xterm',
+              size: terminalSize,
+              shellIntegration: shellIntegrationEnabled(get),
+              onClosed: input.markClosed,
+            });
+            runtimeSessions.set(sessionRecordId, {
+              kind: 'ssh',
+              recordId: sessionRecordId,
+              hostId: host.id,
+              connection,
+              shell,
+              backgroundListenerId: null,
+              ssmForward: null,
+            });
+            commitConnectionSecrets(host);
+            awsSshOverSsmFallbacks.delete(host.id);
+            console.info(
+              `[mobile-aws] proxy connected=ssh-over-ssm user=${sshUsername}`,
+            );
+            set(state => ({
+              sessions: patchSessionRecord(state.sessions, sessionRecordId, {
+                status: 'connected',
+                errorMessage: null,
+                connectionStatusMessage: t('store.ssmPathServerProxySsh'),
+                lastEventAt: new Date().toISOString(),
+                lastConnectedAt: new Date().toISOString(),
+                title: host.label,
+                connectionKind: 'aws-ssm',
+                connectionDetails: resolved.connectionDetails,
+              }),
+            }));
+            return 'connected';
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            // **물러나기 전에 반드시 닫는다.** 직접 경로는 SSM 포워드를 멈추면 전송이 함께 죽지만,
+            // 여기서는 전송이 서버의 웹소켓이라 그냥 두면 서버 쪽 SSM 세션이 살아 있는 채로 남는다.
+            if (connection) {
+              await connection.disconnect().catch(() => undefined);
+            }
+            // 호스트 키 문제는 폴백하지 않는다 — 폴백해 버리면 사용자가 신뢰한 뒤 SSH 로 붙을
+            // 기회가 사라진다(직접 경로와 같은 판단).
+            if (isAwsHostKeySecurityError(message)) {
+              throw error;
+            }
+            if (isServerProxyAuthRejection(message)) {
+              console.info('[mobile-aws] proxy sshAuthRejected');
+              return 'auth-rejected';
+            }
+            console.info(`[mobile-aws] proxy sshFailed reason=${message}`);
+            return 'failed';
+          }
+        };
+
+        let outcome = await attempt(input.accessToken);
+        if (outcome === 'auth-rejected') {
+          // 토큰이 만료된 것뿐이다. 한 번 갱신하고 다시 시도한다 — 데스크톱의
+          // runWithAwsServerProxyAuthRetry 와 같은 처리다.
+          const refreshed = await refreshAuthForConnection().catch(() => null);
+          outcome = refreshed
+            ? await attempt(refreshed.tokens.accessToken)
+            : 'auth-rejected';
+        }
+        if (outcome === 'connected') {
           return true;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          // **물러나기 전에 반드시 닫는다.** 직접 경로는 SSM 포워드를 멈추면 전송이 함께 죽지만,
-          // 여기서는 전송이 서버의 웹소켓이라 그냥 두면 서버 쪽 SSM 세션이 살아 있는 채로 남는다.
-          if (connection) {
-            await connection.disconnect().catch(() => undefined);
-          }
-          // 호스트 키 문제는 폴백하지 않는다 — 폴백해 버리면 사용자가 신뢰한 뒤 SSH 로 붙을
-          // 기회가 사라진다(직접 경로와 같은 판단).
-          if (isAwsHostKeySecurityError(message)) {
-            throw error;
-          }
-          console.info(`[mobile-aws] proxy sshFailed reason=${message}`);
+        }
+        // **인증 실패는 기억하지 않는다.** 10분 기억은 "이 인스턴스가 SSH 를 받지 않더라" 는
+        // 뜻인데, 토큰이 만료된 것은 인스턴스와 상관이 없다. 그것까지 기억하면 다시 로그인한
+        // 뒤에도 10분 동안 SSH 를 건너뛰고 약한 경로로만 붙는다.
+        if (outcome === 'failed') {
           awsSshOverSsmFallbacks.set(
             host.id,
             recordSshOverSsmFallback({ host, nowMs: Date.now() }),
           );
-          return false;
         }
+        return false;
       };
 
       /**
@@ -8965,9 +8998,7 @@ export const useMobileAppStore = create<MobileAppState>()(
 
           await persistHostAndSecret(record, nextSecret);
         },
-        saveRemoteDesktopHost: async (
-          input: MobileRemoteDesktopDraftInput,
-        ) => {
+        saveRemoteDesktopHost: async (input: MobileRemoteDesktopDraftInput) => {
           if (!get().secureStateReady) {
             throw new Error(getSecureStateLoadingMessage());
           }
@@ -9010,7 +9041,8 @@ export const useMobileAppStore = create<MobileAppState>()(
               ? undefined
               : input.credentials.domain.trim() || null;
           const credentialMode =
-            input.credentialMode ?? (previous?.secretRef ? 'preserve' : 'replace');
+            input.credentialMode ??
+            (previous?.secretRef ? 'preserve' : 'replace');
           const previousSecret = previous?.secretRef
             ? get().secretsByRef[previous.secretRef]
             : undefined;
@@ -9082,13 +9114,18 @@ export const useMobileAppStore = create<MobileAppState>()(
                   // 그렇게 읽는다). 기본을 명시값으로 굳혀 두면 나중에 기본을 바꿀 여지가
                   // 사라지고 데스크톱이 쓰는 정규형과도 달라진다.
                   ...(input.adminSession !== undefined
-                    ? { adminSession: input.adminSession === true ? true : null }
+                    ? {
+                        adminSession: input.adminSession === true ? true : null,
+                      }
                     : {}),
                   ...(input.colorDepth !== undefined
                     ? { colorDepth: input.colorDepth === 16 ? 16 : null }
                     : {}),
                   ...(input.audioEnabled !== undefined
-                    ? { audioEnabled: input.audioEnabled === false ? false : null }
+                    ? {
+                        audioEnabled:
+                          input.audioEnabled === false ? false : null,
+                      }
                     : {}),
                   ...(input.clipboardEnabled !== undefined
                     ? {
@@ -9103,7 +9140,10 @@ export const useMobileAppStore = create<MobileAppState>()(
                       }
                     : {}),
                   ...(input.cameraEnabled !== undefined
-                    ? { cameraEnabled: input.cameraEnabled === true ? true : null }
+                    ? {
+                        cameraEnabled:
+                          input.cameraEnabled === true ? true : null,
+                      }
                     : {}),
                 } as HostRecord);
 
@@ -9113,7 +9153,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           const mergedUsername = username ?? previousSecret?.username;
           // 지움(null)은 옛 값으로 되돌리지 않는다 — 위 주석의 세 갈래를 그대로 따른다.
           const mergedDomain =
-            domain === undefined ? previousSecret?.domain : (domain ?? undefined);
+            domain === undefined
+              ? previousSecret?.domain
+              : (domain ?? undefined);
           const mergedPassword = password ?? previousSecret?.password;
           const nextSecret: LoadedManagedSecretPayload | null =
             credentialMode === 'replace' && secretRef && hasReplacement
@@ -9237,9 +9279,15 @@ export const useMobileAppStore = create<MobileAppState>()(
         renameGroup: async (path: string, name: string) => {
           const timestamp = new Date().toISOString();
           const before = get();
-          const result = renameGroupIn(before.groups, before.hosts, path, name, {
-            timestamp,
-          });
+          const result = renameGroupIn(
+            before.groups,
+            before.hosts,
+            path,
+            name,
+            {
+              timestamp,
+            },
+          );
 
           const survivingIds = new Set(result.groups.map(record => record.id));
           const removedGroupIds = before.groups
@@ -9249,12 +9297,19 @@ export const useMobileAppStore = create<MobileAppState>()(
           set({
             groups: sortGroups(result.groups),
             hosts: sortHosts(result.hosts),
-            secretMetadata: deriveSecretMetadata(result.hosts, get().secretsByRef),
+            secretMetadata: deriveSecretMetadata(
+              result.hosts,
+              get().secretsByRef,
+            ),
           });
           enqueueAndDrain([
             ...result.groups
               .filter(record => record.updatedAt === timestamp)
-              .map(record => ({ kind: 'groups' as const, id: record.id, op: 'upsert' as const })),
+              .map(record => ({
+                kind: 'groups' as const,
+                id: record.id,
+                op: 'upsert' as const,
+              })),
             ...removedGroupIds.map(id => ({
               kind: 'groups' as const,
               id,
@@ -9263,25 +9318,42 @@ export const useMobileAppStore = create<MobileAppState>()(
             })),
             ...result.hosts
               .filter(record => record.updatedAt === timestamp)
-              .map(record => ({ kind: 'hosts' as const, id: record.id, op: 'upsert' as const })),
+              .map(record => ({
+                kind: 'hosts' as const,
+                id: record.id,
+                op: 'upsert' as const,
+              })),
           ]);
         },
         removeGroup: async (path: string, mode: GroupRemoveMode) => {
           const timestamp = new Date().toISOString();
           const before = get();
-          const result = removeGroupFrom(before.groups, before.hosts, path, mode, {
-            timestamp,
-          });
+          const result = removeGroupFrom(
+            before.groups,
+            before.hosts,
+            path,
+            mode,
+            {
+              timestamp,
+            },
+          );
 
           set({
             groups: sortGroups(result.groups),
             hosts: sortHosts(result.hosts),
-            secretMetadata: deriveSecretMetadata(result.hosts, get().secretsByRef),
+            secretMetadata: deriveSecretMetadata(
+              result.hosts,
+              get().secretsByRef,
+            ),
           });
           enqueueAndDrain([
             ...result.groups
               .filter(record => record.updatedAt === timestamp)
-              .map(record => ({ kind: 'groups' as const, id: record.id, op: 'upsert' as const })),
+              .map(record => ({
+                kind: 'groups' as const,
+                id: record.id,
+                op: 'upsert' as const,
+              })),
             ...result.removedGroupIds.map(id => ({
               kind: 'groups' as const,
               id,
@@ -9290,7 +9362,11 @@ export const useMobileAppStore = create<MobileAppState>()(
             })),
             ...result.hosts
               .filter(record => record.updatedAt === timestamp)
-              .map(record => ({ kind: 'hosts' as const, id: record.id, op: 'upsert' as const })),
+              .map(record => ({
+                kind: 'hosts' as const,
+                id: record.id,
+                op: 'upsert' as const,
+              })),
             ...result.removedHostIds.map(id => ({
               kind: 'hosts' as const,
               id,
@@ -10741,9 +10817,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           const sftpSession = get().sftpSessions.find(
             item => item.id === pending.target.recordId,
           );
-          const sftpHost = get().hosts.find(
-            item => item.id === pending.hostId,
-          );
+          const sftpHost = get().hosts.find(item => item.id === pending.hostId);
           if (
             !sftpSession ||
             !sftpHost ||

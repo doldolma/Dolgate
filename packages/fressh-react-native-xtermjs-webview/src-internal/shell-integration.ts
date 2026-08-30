@@ -1,12 +1,14 @@
 interface BufferLineLike {
 	isWrapped: boolean;
-	translateToString(trimRight?: boolean): string;
-}
-
-interface BufferLike {
-	baseY: number;
-	cursorY: number;
-	getLine(line: number): BufferLineLike | undefined;
+	/**
+	 * `startColumn`·`endColumn` 은 **칸** 번호다(글자 수가 아니다). 넓은 글자(한글·CJK·
+	 * 이모지)는 2칸을 쓰지만 문자열에서는 1글자라, 칸 번호로 문자열을 자르면 어긋난다.
+	 */
+	translateToString(
+		trimRight?: boolean,
+		startColumn?: number,
+		endColumn?: number,
+	): string;
 }
 
 export function unescapeReportedCommand(value: string): string {
@@ -42,14 +44,16 @@ export function readCommandFromTerminalBuffer(
 	for (let line = promptLine; line <= lastLine; line += 1) {
 		const bufferLine = buffer.getLine(line);
 		if (!bufferLine) break;
-		const raw = bufferLine.translateToString(true);
 		if (line === promptLine) {
-			text = raw.slice(promptEndX);
+			// **열 번호로 문자열을 자르면 안 된다.** `~/문서$ ` 처럼 넓은 글자가 든 프롬프트에서는
+			// promptEndX(칸)가 글자 수보다 커서, 잘라낸 자리가 명령 안쪽으로 들어간다 — `docker ps`
+			// 가 `cker ps` 로 읽혔다. 자르는 일은 칸을 아는 xterm 에게 맡긴다.
+			text = bufferLine.translateToString(true, promptEndX);
 		} else if (bufferLine.isWrapped) {
-			text += raw;
+			text += bufferLine.translateToString(true);
 		} else {
 			const continuationX = continuationEndX.get(line);
-			text += '\n' + raw.slice(continuationX ?? 0);
+			text += '\n' + bufferLine.translateToString(true, continuationX ?? 0);
 		}
 	}
 	const command = text.trim();

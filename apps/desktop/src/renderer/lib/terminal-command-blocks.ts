@@ -292,12 +292,15 @@ type CommandTextLine = NonNullable<ReturnType<CommandTextBuffer['getLine']>>;
  * 명령 한가운데 생긴다. 사용자가 친 공백(코드 32)과 쓰인 적 없는 칸(코드 0)은 다르므로
  * 후자만 잘라낸다.
  */
-function readLineText(line: CommandTextLine): string {
+function readLineText(line: CommandTextLine, startColumn = 0): string {
   let end = line.length;
   while (end > 0 && (line.getCell(end - 1)?.getCode() ?? 0) === 0) {
     end -= 1;
   }
-  return line.translateToString(false, 0, end);
+  if (startColumn >= end) {
+    return '';
+  }
+  return line.translateToString(false, startColumn, end);
 }
 
 export interface CommandText {
@@ -342,7 +345,10 @@ export function readCommandTextFromBuffer(
     }
     const raw = readLineText(bufferLine);
     if (line === promptLine) {
-      text = raw.slice(promptEndX);
+      // **열 번호로 문자열을 자르면 안 된다.** 넓은 글자(한글·CJK·이모지)는 2칸을 쓰지만
+      // 문자열에서는 1글자라, 한글이 든 프롬프트에서는 두 값이 어긋난다 — `~/문서$ ` 프롬프트
+      // 뒤의 `docker ps` 가 `cker ps` 로 읽혔다. 자르는 일은 열을 아는 xterm 에게 맡긴다.
+      text = readLineText(bufferLine, promptEndX);
       continue;
     }
     if (bufferLine.isWrapped) {
@@ -357,7 +363,7 @@ export function readCommandTextFromBuffer(
     // 셸이 이 줄의 프롬프트 폭을 알려줬으면 그만큼 잘라낸다 — 오염이 없으니 믿을 수 있다.
     const continuationStart = continuationEndX?.get(line);
     if (continuationStart !== undefined) {
-      text += `\n${raw.slice(continuationStart)}`;
+      text += `\n${readLineText(bufferLine, continuationStart)}`;
       continue;
     }
     text += `\n${raw}`;
