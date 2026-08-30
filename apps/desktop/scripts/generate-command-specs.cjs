@@ -385,8 +385,13 @@ function mirrorForMobile(present) {
   let bytes = 0;
   for (const name of present) {
     const source = fs.readFileSync(path.join(outDir, `${name}.json`));
-    // level 9 로 굳힌다 — 커밋되는 파일이라 같은 입력이면 같은 바이트가 나와야 diff 가 조용하다.
+    // 커밋되는 파일이라 같은 입력이면 어디서 찍어도 같은 바이트가 나와야 한다. level 을
+    // 고정하면 압축 본문은 그렇게 되지만(확인함: 같은 zlib 이면 macOS·리눅스가 sha 까지
+    // 동일), 헤더 9번 바이트는 찍은 플랫폼을 담아 macOS 0x13 / 리눅스 0x03 으로 갈린다.
+    // 그러면 CI(리눅스)가 맥에서 커밋한 713개를 전부 "다르다" 고 본다. Go 의 gzip 라이터가
+    // 쓰는 값과 같은 0xff("알 수 없음")로 고정한다 — 읽는 쪽은 이 바이트를 보지 않는다.
     const packed = zlib.gzipSync(source, { level: 9 });
+    packed[9] = 0xff;
     fs.writeFileSync(path.join(goSpecsOutDir, `${name}.json.gz`), packed);
     bytes += packed.length;
   }
