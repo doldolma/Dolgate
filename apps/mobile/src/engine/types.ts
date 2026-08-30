@@ -2,6 +2,7 @@ import { t } from '../i18n';
 import type {
   TerminalAutocompleteCapability,
   TerminalAutocompleteSnapshot,
+  WsProxyTarget,
 } from '@dolssh/shared-core';
 // The engine-neutral SSH surface the session flow talks to.
 //
@@ -220,6 +221,14 @@ export type ConnectOptions = {
    * 여기서는 정해진 것을 그대로 나른다.
    */
   jump?: EngineJumpTarget;
+  /**
+   * 전송을 sync-api 웹소켓으로 태운다(서버 프록시). 없으면 대상에 직접 다이얼한다.
+   *
+   * **SSH 연결은 여전히 이 기기 안에 있다** — 서버는 SSM 터널을 대신 열고 바이트만 나른다.
+   * 그래서 보조 exec 채널이 살아 있고, 동적 완성·SFTP·포트포워딩이 직접 연결과 똑같이 된다.
+   * 서버가 SSM 셸을 열어 화면만 중계하는 모드와 혼동하지 말 것 — 그쪽은 PTY 하나가 전부다.
+   */
+  wsProxy?: WsProxyTarget;
   /** Initial PTY geometry, applied to shells that do not override it. */
   size?: EngineTerminalSize;
   /**

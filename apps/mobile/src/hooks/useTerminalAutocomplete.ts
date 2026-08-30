@@ -21,6 +21,7 @@ import {
 import {
   prepareSessionAutocomplete,
   runSessionCompletion,
+  sessionAutocompleteInstallsIntegration,
 } from '../store/useMobileAppStore';
 import {
   getCachedCommandSpec,
@@ -231,6 +232,14 @@ export function useTerminalAutocomplete({
   useEffect(() => {
     if (integrationReady) void prepare();
   }, [integrationReady, prepare]);
+
+  // 준비가 곧 통합 설치인 세션(서버 프록시)은 마커를 기다리지 않는다 — 기다리면 설치를 부를
+  // 사람이 없어 둘 다 영영 시작되지 않는다. 마커는 준비가 설치한 뒤에 흘러온다.
+  useEffect(() => {
+    if (!sessionId || !enabled || !connected) return;
+    if (!sessionAutocompleteInstallsIntegration(sessionId)) return;
+    void prepare();
+  }, [connected, enabled, prepare, sessionId]);
 
   // 스펙 목록을 미리 받아 둔다. 없는 이름을 칠 때마다 다리를 건너지 않기 위한 것이라, 첫
   // 타이핑이 이 왕복을 기다리지 않게 세션이 준비될 때 한 번만 부른다.

@@ -60,6 +60,10 @@ import {
 } from '../lib/sync-outbox';
 import { mergeSyncedState } from '../lib/sync-merge';
 import {
+  createProxyAutocompleteExchange,
+  type ProxyAutocompleteExchange,
+} from '../lib/proxy-autocomplete';
+import {
   buildAwsSsmKnownHostIdentity,
   computeVaultDekVerifier,
   createVaultDek,
@@ -76,6 +80,7 @@ import {
   isAwsEc2WindowsPlatform,
   isAwsHostKeySecurityError,
   recordSshOverSsmFallback,
+  buildAwsWsProxyTarget,
   shouldAttemptSshOverSsm,
   usesAwsServerProxy,
   type AwsSshOverSsmFallbackMemo,
@@ -560,6 +565,8 @@ interface AwsRuntimeSession {
   socket: WebSocket;
   replayChunks: Uint8Array[];
   subscribers: Map<string, SessionTerminalSubscription>;
+  /** 서버가 대신 돌려 주는 자동완성 프로브의 왕복(proxy-autocomplete.ts). */
+  autocomplete: ProxyAutocompleteExchange;
 }
 
 type RuntimeSession = SshRuntimeSession | AwsRuntimeSession;
@@ -1098,9 +1105,37 @@ function currentSshRuntime(sessionId: string): SshRuntimeSession {
  * 자동완성은 React 스토어 상태가 아니라 현재 네이티브 셸에 붙는다. 비동기 작업이 끝났을 때
  * 같은 런타임인지 다시 확인해, 재연결 전 셸의 늦은 응답이 새 세션에 섞이지 않게 한다.
  */
+/**
+ * 서버 프록시 세션의 자동완성 프로브가 답을 기다리는 시간.
+ *
+ * 코어는 최대 8초까지 셸의 답을 기다린다(sync-api 의 허브 주석). 그보다 짧게 끊으면 느린
+ * 인스턴스에서 늘 실패하고, 그보다 길게 잡으면 답이 영영 안 올 때 훅이 그만큼 묶인다.
+ */
+const PROXY_AUTOCOMPLETE_TIMEOUT_MS = 10_000;
+
+/**
+ * 이 세션은 **자동완성 준비가 곧 셸 통합 설치**인가.
+ *
+ * SSH 세션은 엔진이 셸 채널을 열 때 통합을 직접 넣는다. 그래서 마커가 먼저 흐르고, 그것을 보고
+ * 준비를 시작하면 된다. 서버 프록시 세션에는 이 기기에 그런 엔진이 없다 — 통합은 서버의
+ * CollectAutocomplete 이 **자기 안에서** 설치한다(awssession.Manager). 그래서 마커를 기다렸다가
+ * 준비하면 서로를 기다리다 아무것도 안 일어난다. 이 경우에는 붙자마자 준비를 시작해야 한다.
+ *
+ * 데스크톱은 모든 세션을 이렇게 다룬다(lazyPrepare: false).
+ */
+export function sessionAutocompleteInstallsIntegration(
+  sessionId: string,
+): boolean {
+  return runtimeSessions.get(sessionId)?.kind === 'aws-ssm';
+}
+
 export async function prepareSessionAutocomplete(
   sessionId: string,
 ): Promise<EngineAutocompleteResult> {
+  const proxy = runtimeSessions.get(sessionId);
+  if (proxy?.kind === 'aws-ssm') {
+    return proxy.autocomplete.request('autocompletePrepare');
+  }
   const runtime = currentSshRuntime(sessionId);
   const result = await runtime.shell.prepareAutocomplete();
   if (runtimeSessions.get(sessionId) !== runtime) {
@@ -1115,6 +1150,13 @@ export async function runSessionCompletion(
   sessionId: string,
   command: string,
 ): Promise<EngineCompletionResult> {
+  // 동적 완성(실제 경로 목록·제너레이터 출력)은 프록시 프로토콜에 없다 — 허브가 받는 메시지에
+  // 그런 것이 없고, 데스크톱도 이 경로에서는 못 한다. 빈 결과를 주면 훅은 기록·실행 파일·정적
+  // 스펙만으로 간다. 예외를 던지면 매 키 입력마다 실패가 쌓인다.
+  const proxy = runtimeSessions.get(sessionId);
+  if (proxy?.kind === 'aws-ssm') {
+    return { stdout: '', truncated: false };
+  }
   const runtime = currentSshRuntime(sessionId);
   const result = await runtime.shell.runCompletion(command);
   if (runtimeSessions.get(sessionId) !== runtime) {
@@ -1129,6 +1171,11 @@ export async function reinjectSessionShellIntegration(
   sessionId: string,
   shellHint?: string,
 ): Promise<void> {
+  // 서브셸 재주입도 프록시 프로토콜에 없다. 조용히 넘긴다 — 서브셸에 들어가도 명령 단위만
+  // 잃을 뿐, 그 앞까지 모은 재료는 그대로 쓴다.
+  if (runtimeSessions.get(sessionId)?.kind === 'aws-ssm') {
+    return;
+  }
   const runtime = currentSshRuntime(sessionId);
   await runtime.shell.reinjectShellIntegration(shellHint);
 }
@@ -2470,6 +2517,7 @@ function disconnectRuntimeSession(sessionId: string): void {
     } catch {}
     runtime.subscribers.clear();
     runtime.replayChunks.length = 0;
+    runtime.autocomplete.rejectAll('The AWS session was closed.');
   }
 
   runtimeSessions.delete(sessionId);
@@ -3639,6 +3687,148 @@ export const useMobileAppStore = create<MobileAppState>()(
           return t('store.ssmDirectFailed');
         }
         return getConnectFailureMessage(error.message, target);
+      };
+
+      /**
+       * 서버 프록시를 켠 EC2 인스턴스에 **SSH 로** 붙는다.
+       *
+       * 서버가 하는 일은 SSM 터널을 대신 열고 EIC 키를 대신 밀어 넣는 것까지다 — SSH 연결 자체는
+       * 이 기기의 엔진 안에 선다(wsProxy 는 전송만 웹소켓으로 갈아탄다). 그래서 보조 exec 채널이
+       * 살아 있고, 동적 완성·SFTP·포트포워딩이 직접 연결과 똑같이 된다.
+       *
+       * 이것이 데스크톱이 프록시를 켜고도 다 되는 이유다(aws-ec2-ssh-over-ssm.ts). 붙지 못하면
+       * false 를 돌려주고, 호출부가 서버가 여는 SSM 셸로 물러난다 — 거기서는 화면만 중계되므로
+       * 동적 완성이 없다.
+       */
+      const connectAwsEc2ThroughServerProxy = async (input: {
+        host: AwsEc2HostRecord;
+        sessionRecordId: string;
+        resolved: ResolvedAwsSessionResult;
+        terminalSize: { cols: number; rows: number };
+        accessToken: string;
+        markClosed: () => void;
+        markDropped: () => void;
+      }): Promise<boolean> => {
+        const { host, sessionRecordId, resolved, terminalSize } = input;
+        const sshPort = getAwsEc2HostSshPort(host);
+        if (
+          !shouldAttemptSshOverSsm({
+            host,
+            isWindowsInstance: isAwsEc2WindowsPlatform(host.awsPlatform),
+            memo: awsSshOverSsmFallbacks.get(host.id) ?? null,
+            nowMs: Date.now(),
+          })
+        ) {
+          return false;
+        }
+        const sshUsername = host.awsSshUsername?.trim();
+        const availabilityZone = host.awsAvailabilityZone?.trim();
+        if (!sshUsername || !availabilityZone) {
+          // 계정·AZ 는 인스턴스 메타데이터에서 온다. 없으면 서버도 EIC 키를 밀어 넣을 수 없다.
+          console.info(
+            `[mobile-aws] proxy sshSkipped reason=metadata user=${sshUsername ?? ''} az=${availabilityZone ?? ''}`,
+          );
+          return false;
+        }
+        // 셸까지 열려야 런타임으로 등록한다. 그 전에 실패하면 dispose 가 책임질 것이 없으므로,
+        // 여기서 직접 닫아야 한다.
+        let connection: EngineConnection | null = null;
+        try {
+          const engine = getEngine();
+          // EIC 키는 60초만 유효하다. 세션마다 새로 만들고, 개인키는 기기에 남는다.
+          const key = await engine.generateEphemeralSshKey();
+          const wsProxy = buildAwsWsProxyTarget({
+            serverUrl: get().settings.serverUrl,
+            accessToken: input.accessToken,
+            startMessage: {
+              region: resolved.region,
+              profileName: resolved.profileName,
+              instanceId: host.awsInstanceId,
+              availabilityZone,
+              sshUsername,
+              sshPort,
+              publicKey: key.publicKey,
+              env: resolved.envSpec.env,
+              unsetEnv: resolved.envSpec.unsetEnv,
+            },
+          });
+          // **호스트 키 신뢰는 인스턴스 신원으로 기록한다.** 직접 경로와 같은 신원을 써야 한 번
+          // 신뢰한 키가 두 경로에서 함께 통한다.
+          const identity = buildAwsSsmKnownHostIdentity({
+            profileName: resolved.profileName,
+            region: resolved.region,
+            instanceId: host.awsInstanceId,
+          });
+          connection = await engine.connect({
+            connectionId: sessionRecordId,
+            // 서버가 이 이름으로 터널을 연다. 이 기기는 소켓을 열지 않는다.
+            host: host.awsInstanceId,
+            port: sshPort,
+            username: sshUsername,
+            credential: { type: 'key', privateKey: key.privateKeyPem },
+            size: terminalSize,
+            wsProxy,
+            trustedHostKeysBase64: trustedHostKeysFor(identity, sshPort),
+            onServerKey: async info =>
+              resolveKnownHostTrust(
+                host,
+                { ...info, host: identity, port: sshPort },
+                sessionRecordId,
+              ),
+            onDisconnected: input.markDropped,
+          });
+          const shell = await connection.startShell({
+            term: 'xterm',
+            size: terminalSize,
+            shellIntegration: shellIntegrationEnabled(get),
+            onClosed: input.markClosed,
+          });
+          runtimeSessions.set(sessionRecordId, {
+            kind: 'ssh',
+            recordId: sessionRecordId,
+            hostId: host.id,
+            connection,
+            shell,
+            backgroundListenerId: null,
+            ssmForward: null,
+          });
+          commitConnectionSecrets(host);
+          awsSshOverSsmFallbacks.delete(host.id);
+          console.info(
+            `[mobile-aws] proxy connected=ssh-over-ssm user=${sshUsername}`,
+          );
+          set(state => ({
+            sessions: patchSessionRecord(state.sessions, sessionRecordId, {
+              status: 'connected',
+              errorMessage: null,
+              connectionStatusMessage: t('store.ssmPathServerProxySsh'),
+              lastEventAt: new Date().toISOString(),
+              lastConnectedAt: new Date().toISOString(),
+              title: host.label,
+              connectionKind: 'aws-ssm',
+              connectionDetails: resolved.connectionDetails,
+            }),
+          }));
+          return true;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          // **물러나기 전에 반드시 닫는다.** 직접 경로는 SSM 포워드를 멈추면 전송이 함께 죽지만,
+          // 여기서는 전송이 서버의 웹소켓이라 그냥 두면 서버 쪽 SSM 세션이 살아 있는 채로 남는다.
+          if (connection) {
+            await connection.disconnect().catch(() => undefined);
+          }
+          // 호스트 키 문제는 폴백하지 않는다 — 폴백해 버리면 사용자가 신뢰한 뒤 SSH 로 붙을
+          // 기회가 사라진다(직접 경로와 같은 판단).
+          if (isAwsHostKeySecurityError(message)) {
+            throw error;
+          }
+          console.info(`[mobile-aws] proxy sshFailed reason=${message}`);
+          awsSshOverSsmFallbacks.set(
+            host.id,
+            recordSshOverSsmFallback({ host, nowMs: Date.now() }),
+          );
+          return false;
+        }
       };
 
       /**
@@ -6555,6 +6745,36 @@ export const useMobileAppStore = create<MobileAppState>()(
           console.info(
             `[mobile-aws] path=server-proxy host=${host.id} instance=${host.awsInstanceId}`,
           );
+
+          // **먼저 SSH 를 시도한다.** 서버는 터널과 EIC 키만 맡고 SSH 연결은 이 기기에 서므로,
+          // 붙기만 하면 직접 연결과 똑같이 동작한다(동적 완성·SFTP·포트포워딩). 아래 SSM 셸
+          // 릴레이는 그것이 안 될 때의 길이다 — 화면만 중계되어 PTY 하나가 전부다.
+          if (
+            await connectAwsEc2ThroughServerProxy({
+              host,
+              sessionRecordId: sessionRecord.id,
+              resolved: resolvedSession,
+              terminalSize,
+              accessToken,
+              markClosed: () => {
+                void disposeRuntimeSession(sessionRecord.id);
+                markSessionState(sessionRecord.id, 'closed');
+              },
+              markDropped: () => {
+                void disposeRuntimeSession(sessionRecord.id);
+                markSessionState(
+                  sessionRecord.id,
+                  'error',
+                  t('store.sessionDropped'),
+                  'dropped',
+                );
+              },
+            })
+          ) {
+            pendingSessionConnections.delete(sessionRecord.id);
+            return;
+          }
+
           const wsUrl = new URL(
             '/api/aws-sessions/ws',
             get().settings.serverUrl,
@@ -6579,6 +6799,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             kind: 'aws-ssm',
             recordId: sessionRecord.id,
             hostId: host.id,
+            autocomplete: createProxyAutocompleteExchange({
+              send: payload => socket.send(JSON.stringify(payload)),
+              timeoutMs: PROXY_AUTOCOMPLETE_TIMEOUT_MS,
+            }),
             socket,
             replayChunks: [],
             subscribers: new Map<string, SessionTerminalSubscription>(),
@@ -6612,6 +6836,12 @@ export const useMobileAppStore = create<MobileAppState>()(
                 rows: terminalSize.rows,
                 env: resolvedSession.envSpec.env,
                 unsetEnv: resolvedSession.envSpec.unsetEnv,
+                // 이것을 빼면 서버가 POSIX 셸로 보고 통합 스크립트를 타이핑한다 — PowerShell
+                // 프롬프트에 "인식할 수 없는 명령" 이 그대로 남는다. Windows 인스턴스는 SSH 를
+                // 시도조차 하지 않으므로 늘 이 길로 온다.
+                shellKind: isAwsEc2WindowsPlatform(host.awsPlatform)
+                  ? 'powershell'
+                  : '',
               },
             };
             socket.send(JSON.stringify(message));
@@ -6655,6 +6885,12 @@ export const useMobileAppStore = create<MobileAppState>()(
               for (const subscriber of nextRuntime.subscribers.values()) {
                 subscriber.onData(chunk);
               }
+              return;
+            }
+
+            // 자동완성 왕복은 규칙이 따로 있다(proxy-autocomplete.ts). 이 왕복에 속한
+            // 메시지면 거기서 끝난다.
+            if (nextRuntime.autocomplete.accept(message)) {
               return;
             }
 

@@ -637,36 +637,14 @@ export interface ResolvedJumpHost {
 }
 
 // main 프로세스가 키체인과 DB를 합쳐 최종적으로 Go 코어에 보내는 payload다.
-/**
- * Opaque start blob ssh-core forwards verbatim to sync-api as the first WebSocket
- * frame. Its keys are the JSON the server's relay reads (region, instanceId, EIC
- * publicKey, resolved AWS credential env, ...). Mirrors awsSshTunnelStartMessage
- * on the Go side.
- */
-export interface AwsSshTunnelStartMessage {
-  region: string;
-  profileName: string;
-  instanceId: string;
-  availabilityZone: string;
-  sshUsername: string;
-  sshPort: number;
-  publicKey: string;
-  env: Record<string, string>;
-  unsetEnv?: string[];
-}
+// 서버 프록시 SSH 전송의 두 타입은 모바일도 쓴다 — 정의는 shared-core 에 두고 여기서는
+// 다시 내보내기만 한다(@shared 로 부르던 곳들이 그대로 동작한다).
+import type {
+  AwsSshTunnelStartMessage,
+  WsProxyTarget,
+} from "@dolssh/shared-core";
 
-/**
- * Routes the raw SSH transport through a WebSocket to sync-api instead of dialing
- * the target directly (server-proxy / bastion mode for IP-restricted VPCs). ssh-core
- * dials `url` with Bearer `authToken`, forwards `startMessage` verbatim, then speaks
- * plain SSH over the relayed bytes — so shell/tmux/sftp/forwarding work through the
- * server unchanged. Mirrors coretypes.WSProxyTarget on the Go side.
- */
-export interface WsProxyTarget {
-  url: string;
-  authToken?: string;
-  startMessage: AwsSshTunnelStartMessage;
-}
+export type { AwsSshTunnelStartMessage, WsProxyTarget };
 
 export interface ResolvedCoreConnectPayload {
   host: string;

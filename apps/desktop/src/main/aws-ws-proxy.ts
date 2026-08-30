@@ -1,27 +1,10 @@
-import type { AwsSshTunnelStartMessage, WsProxyTarget } from "@shared";
+import type { AwsSshTunnelStartMessage } from "@shared";
 
-/**
- * Builds the sync-api WebSocket URL for the server-proxy SSH transport relay.
- * ssh-core authenticates with a Bearer header (WsProxyTarget.authToken), so the
- * access token is intentionally NOT embedded in the URL.
- */
-export function buildAwsSshTunnelWsUrl(serverUrl: string): string {
-  const url = new URL("/api/aws-ssh-tunnel/ws", serverUrl);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  return url.toString();
-}
-
-export function buildAwsWsProxyTarget(input: {
-  serverUrl: string;
-  accessToken: string;
-  startMessage: AwsSshTunnelStartMessage;
-}): WsProxyTarget {
-  return {
-    url: buildAwsSshTunnelWsUrl(input.serverUrl),
-    authToken: input.accessToken,
-    startMessage: input.startMessage,
-  };
-}
+// URL 조립과 타깃 조립은 모바일도 같은 것을 써야 한다 — shared-core 에 두고 다시 내보낸다.
+export {
+  buildAwsSshTunnelWsUrl,
+  buildAwsWsProxyTarget,
+} from "@dolssh/shared-core";
 
 interface ServerProxyEnvResolver {
   buildServerProxySessionEnvSpec(

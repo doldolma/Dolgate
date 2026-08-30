@@ -318,6 +318,9 @@ function connectPayload(
     // when empty so the singular field stays in charge.
     ...(trustedHostKeysBase64?.length ? { trustedHostKeysBase64 } : {}),
     ...(options.jump ? { jump: jumpPayload(options.jump) } : {}),
+    // 코어의 ConnectPayload.wsProxy 와 같은 이름·모양이다(coretypes). 바인드가 이미 이 필드를
+    // sshdial 로 넘기고 있어 엔진 쪽에 손댈 것이 없다.
+    ...(options.wsProxy ? { wsProxy: options.wsProxy } : {}),
     rows: options.size?.rows ?? 0,
     cols: options.size?.cols ?? 0,
     ...credentialFields(options),

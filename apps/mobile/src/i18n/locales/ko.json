@@ -273,6 +273,7 @@
     "ssmPathDirectSsh": "SSH over SSM · 기기에서 직접",
     "ssmPathDirectShell": "SSM 셸 · 기기에서 직접",
     "ssmPathServerProxy": "SSM 셸 · 서버 경유",
+    "ssmPathServerProxySsh": "SSH over SSM · 서버 경유",
     "ssmBothFailed": "SSH: {{ssh}} · SSM 셸: {{shell}}"
   },
   "vaultGate": {

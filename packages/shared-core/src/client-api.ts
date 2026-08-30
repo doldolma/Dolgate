@@ -11,6 +11,8 @@ import type {
   SecretMetadataRecord,
   SshHostRecord,
   SyncStatus,
+  TerminalAutocompleteCapability,
+  TerminalAutocompleteSnapshot,
   TerminalTab,
 } from "./models";
 
@@ -313,6 +315,20 @@ export type AwsSsmSessionClientMessage =
       cols: number;
       rows: number;
     }
+  /**
+   * 자동완성 재료를 서버에게 모아 달라고 한다. 프록시 세션에는 클라이언트 쪽 SSH 연결이
+   * 없으므로(서버가 SSM 데이터채널을 쥐고 있다) 프로브도 서버가 대신 돌린다.
+   *
+   * `requestId` 로 왕복을 맞춘다 — 답이 여러 통으로 나뉘어 오고(capability·snapshot·
+   * shellState) 그중 **requestId 가 붙은 capability 한 통만이 "끝났다" 는 신호**다.
+   */
+  | {
+      type: "autocompletePrepare" | "autocompleteRefresh";
+      requestId: string;
+    }
+  | {
+      type: "autocompleteStop";
+    }
   | {
       type: "close";
     };
@@ -332,6 +348,32 @@ export type AwsSsmSessionServerMessage =
   | {
       type: "exit";
       message?: string | null;
+    }
+  /**
+   * 자동완성 응답. 코어가 한 번의 요청에 대해 정해진 순서로 보낸다:
+   *
+   * 1. `autocompleteCapability` — `status: "probing"`, **requestId 없음**
+   * 2. `autocompleteSnapshot` — 재료가 모였을 때만, **requestId 없음**
+   * 3. `autocompleteCapability` — **requestId 있음**. 이것이 최종 답이다.
+   * 4. `autocompleteShellState` — 셸을 알아냈을 때만, requestId 없음
+   *
+   * 그래서 받는 쪽은 스냅샷을 먼저 담아 두었다가 requestId 가 붙은 capability 에서 함께
+   * 매듭지으면 된다. requestId 로 거르지 않으면 1번의 "probing" 을 답으로 오해한다.
+   */
+  | {
+      type: "autocompleteCapability";
+      requestId?: string | null;
+      payload: Omit<TerminalAutocompleteCapability, "sessionId">;
+    }
+  | {
+      type: "autocompleteSnapshot";
+      requestId?: string | null;
+      payload: Omit<TerminalAutocompleteSnapshot, "sessionId">;
+    }
+  | {
+      type: "autocompleteShellState";
+      requestId?: string | null;
+      payload: { kind: string; shell?: string };
     };
 
 export interface ClientApi {

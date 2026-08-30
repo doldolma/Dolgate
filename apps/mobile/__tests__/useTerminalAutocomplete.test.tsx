@@ -99,6 +99,9 @@ const mockDockerModule = {
 };
 
 // 카탈로그는 Fig 상류를 그대로 따라오므로 적재에서 던지는 모듈이 언제든 들어올 수 있다.
+// 서버 프록시 세션인가. 기본은 아니다(SSH 세션은 엔진이 통합을 직접 넣는다).
+const mockInstallsIntegration = jest.fn((_sessionId: string) => false);
+
 const mockRequireCommandModule = jest.fn((name: string) => {
   if (name === 'docker') return mockDockerModule;
   if (name === 'broken') throw new Error('document is not defined');
@@ -120,6 +123,8 @@ jest.mock('../src/store/useMobileAppStore', () => ({
     mockPrepareSessionAutocomplete(sessionId),
   runSessionCompletion: (sessionId: string, command: string) =>
     mockRunSessionCompletion(sessionId, command),
+  sessionAutocompleteInstallsIntegration: (sessionId: string) =>
+    mockInstallsIntegration(sessionId),
 }));
 
 import { useTerminalAutocomplete } from '../src/hooks/useTerminalAutocomplete';
@@ -162,6 +167,49 @@ describe('useTerminalAutocomplete', () => {
       stdout: '',
       truncated: false,
     });
+    mockInstallsIntegration.mockReset();
+    mockInstallsIntegration.mockReturnValue(false);
+  });
+
+  // SSH 세션은 엔진이 셸 채널을 열 때 통합을 넣어 준다. 마커가 오기 전에 프로브를 보내면 셸이
+  // 아직 배너를 뱉는 중일 수 있어, 마커를 본 뒤에 시작한다.
+  it('마커가 오기 전에는 준비하지 않는다', async () => {
+    let current: HookResult | null = null;
+    await act(async () => {
+      renderer.create(
+        <Harness connected onResult={result => (current = result)} />,
+      );
+    });
+    expect(mockPrepareSessionAutocomplete).not.toHaveBeenCalled();
+    await act(async () => {
+      current!.handleShellIntegration('B');
+    });
+    expect(mockPrepareSessionAutocomplete).toHaveBeenCalledWith('session-1');
+  });
+
+  // 서버 프록시 세션에는 이 기기에 그런 엔진이 없다 — 통합은 준비 요청이 서버 쪽에서 설치한다.
+  // 마커를 기다리면 설치를 부를 사람이 없어 둘 다 영영 시작되지 않는다.
+  it('준비가 곧 설치인 세션은 마커를 기다리지 않는다', async () => {
+    mockInstallsIntegration.mockReturnValue(true);
+    let current: HookResult | null = null;
+    await act(async () => {
+      renderer.create(
+        <Harness connected onResult={result => (current = result)} />,
+      );
+    });
+    expect(mockPrepareSessionAutocomplete).toHaveBeenCalledWith('session-1');
+  });
+
+  it('붙기 전에는 준비하지 않는다', async () => {
+    mockInstallsIntegration.mockReturnValue(true);
+    let current: HookResult | null = null;
+    await act(async () => {
+      renderer.create(
+        <Harness connected={false} onResult={result => (current = result)} />,
+      );
+    });
+    expect(current).not.toBeNull();
+    expect(mockPrepareSessionAutocomplete).not.toHaveBeenCalled();
   });
 
   it('keeps the first line buffer when a continuation prompt starts', async () => {

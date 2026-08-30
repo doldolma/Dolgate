@@ -273,6 +273,7 @@
     "ssmPathDirectSsh": "SSH over SSM · direct from this device",
     "ssmPathDirectShell": "SSM shell · direct from this device",
     "ssmPathServerProxy": "SSM shell · through the server",
+    "ssmPathServerProxySsh": "SSH over SSM · through the server",
     "ssmBothFailed": "SSH: {{ssh}} · SSM shell: {{shell}}"
   },
   "vaultGate": {
