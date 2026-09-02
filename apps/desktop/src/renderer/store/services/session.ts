@@ -620,6 +620,12 @@ export function createSessionServices(deps: SliceDeps) {
             ...tab,
             status: "connecting",
             errorMessage: undefined,
+            // 연결은 됐지만 원래 가려던 길이 아니었다는 알림(EC2 가 SSM 셸로 물러난 경우).
+            // 매 연결마다 새로 정한다 — 지난 시도의 알림이 남으면 거짓말이 된다.
+            transportNotice:
+              'notice' in connection && typeof connection.notice === 'string'
+                ? connection.notice
+                : undefined,
             connectionProgress: resolveConnectingProgress(host),
             hasReceivedOutput: false,
             lastEventAt: new Date().toISOString(),

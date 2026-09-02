@@ -149,7 +149,7 @@ describe("registerSshIpcHandlers", () => {
         cols: 132,
         rows: 44,
       }),
-    ).resolves.toEqual({ sessionId: "local-session-1" });
+    ).resolves.toMatchObject({ sessionId: "local-session-1" });
 
     expect(ctx.coreManager.connectLocalSession).toHaveBeenCalledWith({
       cols: 132,
@@ -363,7 +363,7 @@ describe("registerSshIpcHandlers", () => {
         rows: 32,
         startupCommand: "sudo -i",
       }),
-    ).resolves.toEqual({ sessionId: "session-local-aws" });
+    ).resolves.toMatchObject({ sessionId: "session-local-aws" });
 
     expect(ctx.coreManager.connectAwsSession).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -413,7 +413,7 @@ describe("registerSshIpcHandlers", () => {
         cols: 120,
         rows: 32,
       }),
-    ).resolves.toEqual({ sessionId: "session-local-aws" });
+    ).resolves.toMatchObject({ sessionId: "session-local-aws" });
 
     expect(ctx.awsService.startSsmShellSession).toHaveBeenCalledWith(
       "managed-prod",
@@ -463,12 +463,138 @@ describe("registerSshIpcHandlers", () => {
 
     await expect(
       connectHandler?.(null, { hostId: "aws-host-win", cols: 120, rows: 32 }),
-    ).resolves.toEqual({ sessionId: "session-win" });
+    ).resolves.toMatchObject({ sessionId: "session-win" });
 
     expect(connectAwsEc2OverSsmMock).not.toHaveBeenCalled();
     expect(ctx.coreManager.connectAwsSession).toHaveBeenCalled();
     // 시도조차 안 했으니 "폴백했다"는 경고도 남기면 안 된다.
     expect(ctx.activityLogs.append).not.toHaveBeenCalled();
+  });
+
+  /**
+   * 폴백은 **오류가 아니다** — 연결은 됐다. 그래서 지금까지 활동 로그 한 줄이 전부였고, 사용자는
+   * 자기가 SSM 셸에 있다는 사실조차 몰랐다(자동완성도 도커 섹션도 없는 채로). 실제로 그 상태로
+   * 한참을 헤맸다. 연결 결과에 한 줄을 실어 화면이 말하게 한다.
+   */
+  it("tells the session it fell back to the SSM shell, and why", async () => {
+    const ctx = createContext();
+    ctx.hosts.getById.mockReturnValue({
+      id: "aws-host-fallback",
+      kind: "aws-ec2",
+      label: "AWS Linux",
+      awsProfileId: "profile-1",
+      awsProfileName: "default",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-fallback",
+      awsSshUsername: "ec2-user",
+      awsSsmServerProxyEnabled: false,
+    });
+    ctx.awsService.requireManagedProfileName.mockReturnValue("managed-prod");
+    ctx.awsService.buildManagedSessionEnvSpec.mockReturnValue({ env: {}, unsetEnv: [] });
+    ctx.awsService.shouldUseInProcessSsm.mockReturnValue(false);
+    connectAwsEc2OverSsmMock.mockRejectedValue(
+      new Error("ssh handshake failed: unable to authenticate"),
+    );
+    ctx.coreManager.connectAwsSession.mockResolvedValue({ sessionId: "session-fb" });
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+    const result = (await connectHandler?.(null, {
+      hostId: "aws-host-fallback",
+      cols: 120,
+      rows: 32,
+    })) as { sessionId: string; notice?: string };
+
+    expect(result.sessionId).toBe("session-fb");
+    expect(result.notice).toContain("SSM 셸");
+    // 이유는 원격이 낸 원문 그대로.
+    expect(result.notice).toContain("unable to authenticate");
+    // 사용자명 프로브가 막히지 않은 호스트라 그 얘기는 하지 않는다.
+    expect(result.notice).not.toContain("ec2-user");
+  });
+
+  /**
+   * 사용자명 프로브(`ssm:SendCommand`)가 막힌 호스트는 앱이 저장된 값을 그대로 쓴다 — 그 값이
+   * 기본 추정치일 수 있는데 그 사실이 어디에도 없었다. 없는 사용자에게 EIC 로 키를 밀면 AWS 는
+   * 성공을 주고 sshd 만 거부해서, 실패가 엉뚱한 모습으로 나타난다.
+   */
+  it("names the unverified username when the metadata probe was denied", async () => {
+    const ctx = createContext();
+    ctx.hosts.getById.mockReturnValue({
+      id: "aws-host-unverified",
+      kind: "aws-ec2",
+      label: "AWS Linux",
+      awsProfileId: "profile-1",
+      awsProfileName: "default",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-unverified",
+      awsSshUsername: "ec2-user",
+      awsSshMetadataError:
+        "[SSM 명령 전송] ... not authorized to perform: ssm:SendCommand ...",
+      awsSsmServerProxyEnabled: false,
+    });
+    ctx.awsService.requireManagedProfileName.mockReturnValue("managed-prod");
+    ctx.awsService.buildManagedSessionEnvSpec.mockReturnValue({ env: {}, unsetEnv: [] });
+    ctx.awsService.shouldUseInProcessSsm.mockReturnValue(false);
+    connectAwsEc2OverSsmMock.mockRejectedValue(
+      new Error("ssh handshake failed: unable to authenticate"),
+    );
+    ctx.coreManager.connectAwsSession.mockResolvedValue({ sessionId: "session-unv" });
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+    const result = (await connectHandler?.(null, {
+      hostId: "aws-host-unverified",
+      cols: 120,
+      rows: 32,
+    })) as { notice?: string };
+
+    expect(result.notice).toContain("ec2-user");
+  });
+
+  /**
+   * 기억으로 SSH 를 건너뛰는 접속은 이번에는 아무것도 실패하지 않는다 — 그래서 실패 경로가
+   * 만드는 알림이 없다. 사용자 입장에서는 제일 헷갈리는 자리다: 권한을 고쳤는데도 10분 동안
+   * SSM 셸로 붙는다. 그때도 왜 그런지, 처음 실패한 이유가 무엇이었는지 말해야 한다.
+   */
+  it("still tells the session why when the fallback memo skips SSH", async () => {
+    const ctx = createContext();
+    ctx.hosts.getById.mockReturnValue({
+      id: "aws-host-memo",
+      kind: "aws-ec2",
+      label: "AWS Linux",
+      awsProfileId: "profile-1",
+      awsProfileName: "default",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-memo",
+      awsSshUsername: "ubuntu",
+      awsSsmServerProxyEnabled: false,
+    });
+    ctx.awsService.requireManagedProfileName.mockReturnValue("managed-prod");
+    ctx.awsService.buildManagedSessionEnvSpec.mockReturnValue({ env: {}, unsetEnv: [] });
+    ctx.awsService.shouldUseInProcessSsm.mockReturnValue(false);
+    connectAwsEc2OverSsmMock.mockRejectedValue(new Error("sshd unreachable"));
+    ctx.coreManager.connectAwsSession.mockResolvedValue({ sessionId: "session-memo" });
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+    const connect = () =>
+      connectHandler?.(null, { hostId: "aws-host-memo", cols: 120, rows: 32 }) as Promise<{
+        notice?: string;
+      }>;
+
+    // 1차: SSH 실패 → 폴백 + 기억.
+    const first = await connect();
+    expect(first.notice).toContain("sshd unreachable");
+    expect(connectAwsEc2OverSsmMock).toHaveBeenCalledTimes(1);
+
+    // 2차(10분 안): SSH 를 시도조차 안 한다 — 그래도 알림은 있고, 처음 실패한 이유를 말한다.
+    const second = await connect();
+    expect(connectAwsEc2OverSsmMock).toHaveBeenCalledTimes(1);
+    expect(second.notice).toContain("SSM 셸");
+    expect(second.notice).toContain("sshd unreachable");
+    // 이번에는 실패한 것이 없으므로 "붙지 못해" 가 아니라 기억 때문임을 말한다.
+    expect(second.notice).toContain("최근 SSH 시도가 실패");
   });
 
   it("still attempts SSH-over-SSM for non-Windows instances", async () => {
@@ -499,7 +625,7 @@ describe("registerSshIpcHandlers", () => {
 
     await expect(
       connectHandler?.(null, { hostId: "aws-host-linux", cols: 120, rows: 32 }),
-    ).resolves.toEqual({ sessionId: "session-linux" });
+    ).resolves.toMatchObject({ sessionId: "session-linux" });
 
     expect(connectAwsEc2OverSsmMock).toHaveBeenCalled();
   });
@@ -591,7 +717,7 @@ describe("registerSshIpcHandlers", () => {
         title: "AWS Prod",
         startupCommand: "sudo -i",
       }),
-    ).resolves.toEqual({ sessionId: "session-server-proxy" });
+    ).resolves.toMatchObject({ sessionId: "session-server-proxy" });
 
     expect(ctx.awsService.buildServerProxySessionEnvSpec).toHaveBeenCalledWith(
       "managed-prod",
@@ -654,7 +780,7 @@ describe("registerSshIpcHandlers", () => {
         rows: 32,
         startupCommand: "sudo -i",
       }),
-    ).resolves.toEqual({ sessionId: "session-ssh" });
+    ).resolves.toMatchObject({ sessionId: "session-ssh" });
 
     expect(connectAwsEc2OverSsmMock).toHaveBeenCalledWith(
       ctx,
@@ -682,7 +808,7 @@ describe("registerSshIpcHandlers", () => {
 
     await expect(
       connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
-    ).resolves.toEqual({ sessionId: "session-ssh-proxy" });
+    ).resolves.toMatchObject({ sessionId: "session-ssh-proxy" });
 
     // 프록시 모드도 SSH-over-SSM이 성공하면 SSM 셸(프록시 세션)을 열지 않는다.
     expect(connectAwsEc2OverSsmMock).toHaveBeenCalledTimes(1);
@@ -718,7 +844,7 @@ describe("registerSshIpcHandlers", () => {
 
     await expect(
       connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
-    ).resolves.toEqual({ sessionId: "session-server-proxy-fallback" });
+    ).resolves.toMatchObject({ sessionId: "session-server-proxy-fallback" });
 
     expect(ctx.coreManager.connectAwsServerProxySession).toHaveBeenCalledTimes(1);
     expect(ctx.coreManager.connectAwsSession).not.toHaveBeenCalled();
@@ -739,7 +865,7 @@ describe("registerSshIpcHandlers", () => {
 
     await expect(
       connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
-    ).resolves.toEqual({ sessionId: "session-ssm-shell" });
+    ).resolves.toMatchObject({ sessionId: "session-ssm-shell" });
 
     expect(ctx.coreManager.connectAwsSession).toHaveBeenCalledTimes(1);
     expect(ctx.activityLogs.append).toHaveBeenCalledWith(
@@ -902,7 +1028,7 @@ describe("registerSshIpcHandlers", () => {
 
     await expect(
       connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
-    ).resolves.toEqual({ sessionId: "session-ssm-shell" });
+    ).resolves.toMatchObject({ sessionId: "session-ssm-shell" });
 
     expect(connectAwsEc2OverSsmMock).toHaveBeenCalledTimes(2);
     expect(ctx.activityLogs.append).toHaveBeenCalledTimes(1);

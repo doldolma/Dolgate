@@ -145,10 +145,50 @@ async function connectAwsServerProxySessionWithAuthRetry(
 
 export function registerSshIpcHandlers(ctx: MainIpcContext): void {
   // hostId → SSH-over-SSM 폴백 기억. register 클로저 안에 두어 앱 수명과 함께 산다.
+  // reason 은 그때 SSH 가 왜 실패했는지다 — 기억으로 SSH 를 건너뛰는 접속에서도 화면에 그
+  // 이유를 말해 줘야 한다(이번 접속에서는 아무것도 실패하지 않았으니 다른 근거가 없다).
   const awsSshOverSsmFallbacks = new Map<
     string,
-    { signature: string; retryAfter: number }
+    { signature: string; retryAfter: number; reason: string }
   >();
+
+  /**
+   * SSM 셸로 물러났을 때 세션 상단에 남길 한 줄.
+   *
+   * 연결은 됐으니 오류가 아니고, 그래서 지금까지 활동 로그 한 줄이 전부였다. 그런데 SSH-over-SSM
+   * 과 SSM 셸은 다른 물건이다 — 보조 채널이 없어 도커 섹션·자원 지표·동적 자동완성이 빠지고
+   * 사용자도 `ssm-user` 로 달라진다(정적 자동완성은 된다 — 빠지는 것만 정확히 적는다). 말하지
+   * 않으면 사용자는 자기가 어디에 있는지 모른 채 "왜 이게 안 되지" 를 헤맨다.
+   *
+   * 사용자명 프로브가 막힌 호스트면 그것도 함께 말한다. 프로브가 실패하면 앱은 저장된 값을
+   * 그대로 쓰는데(기본 추정치일 수 있다) 그 사실이 어디에도 없었다 — 없는 사용자에게 EIC 로
+   * 키를 밀면 AWS 는 성공을 주고 sshd 만 거부해서, 실패가 엉뚱한 모습으로 나타난다.
+   *
+   * 호스트 레코드는 **지금 값**을 다시 읽는다. preflight 가 이번 접속에서 프로브를 다시 돌려
+   * `awsSshMetadataError` 를 갱신하므로, 핸들러 진입 때의 스냅샷은 이미 낡았을 수 있다.
+   */
+  const buildSsmShellFallbackNotice = (
+    host: AwsEc2HostRecord,
+    reason: string,
+    remembered: boolean,
+  ): string => {
+    const current = ctx.hosts.getById(host.id);
+    const latest = current && isAwsEc2HostRecord(current) ? current : host;
+    const unverifiedUsername =
+      (latest.awsSshMetadataError ?? "").trim() !== ""
+        ? (latest.awsSshUsername ?? "").trim()
+        : "";
+    return [
+      t(remembered ? 'sshIpc.ssmShellFallbackRemembered' : 'sshIpc.ssmShellFallback'),
+      t('sshIpc.ssmShellFallbackLoses'),
+      unverifiedUsername
+        ? t('sshIpc.ssmShellFallbackUnverifiedUser', { username: unverifiedUsername })
+        : null,
+      t('sshIpc.ssmShellFallbackReason', { reason }),
+    ]
+      .filter((part): part is string => Boolean(part))
+      .join(' ');
+  };
 
   ipcMain.handle(
     ipcChannels.ssh.connect,
@@ -209,6 +249,8 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
               })();
 
         let connection: { sessionId: string } | undefined;
+        // 연결은 됐지만 원래 가려던 길이 아니었을 때 화면에 남길 한 줄.
+        let notice: string | undefined;
         if (input.tmux === true && isWindowsInstance) {
           // tmux 는 SSH 경로 전용인데 Windows 는 거기 못 간다. SSM 셸로 대체하면 tmux 없이
           // 붙어 놓고 성공한 것처럼 보이므로, 무엇이 안 되는지 그대로 알린다.
@@ -244,6 +286,12 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           });
           if (memo && attemptSsh) {
             awsSshOverSsmFallbacks.delete(host.id);
+          }
+          if (memo && !attemptSsh) {
+            // 기억으로 SSH 를 건너뛴다. 이번 접속에서는 아무것도 실패하지 않으므로 아래
+            // `failedSshOverSsm` 경로가 알림을 만들지 않는다 — 여기서 말해야 한다. 사용자
+            // 입장에서 제일 헷갈리는 자리다: 권한을 고쳤는데도 10분 동안 SSM 셸로 붙는다.
+            notice = buildSsmShellFallbackNotice(host, memo.reason, true);
           }
           if (attemptSsh) {
             try {
@@ -282,12 +330,15 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
             }
             if (failedSshOverSsm) {
               const reason = errorMessageOf(failedSshOverSsm.error);
+              // 물러났다는 사실을 세션에 말한다(사연은 buildSsmShellFallbackNotice 에).
+              notice = buildSsmShellFallbackNotice(host, reason, false);
               const recorded = recordSshOverSsmFallback({ host, nowMs: Date.now() });
               awsSshOverSsmFallbacks.set(host.id, {
                 // 지문은 실패 당시의 것을 쓴다 — 그 사이 사용자가 설정을 고쳤으면 다음 접속에서
                 // 다시 시도해야 한다.
                 signature: failedSshOverSsm.signature,
                 retryAfter: recorded.retryAfterMs,
+                reason,
               });
               ctx.activityLogs.append(
                 "warn",
@@ -303,7 +354,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           input.cols,
           input.rows,
         );
-        return connection;
+        return notice ? { ...connection, notice } : connection;
       }
 
       if (isWarpgateSshHostRecord(host)) {

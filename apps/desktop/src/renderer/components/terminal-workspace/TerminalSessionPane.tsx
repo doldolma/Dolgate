@@ -40,6 +40,7 @@ import type { TerminalSessionPaneProps } from './types';
 import { Button, NoticeCard } from '../../ui';
 import { findHostKeyPromptForSession, resolveConnectionFailurePresentation } from '../../store/utils';
 import {
+  shouldShowTransportNotice,
   canReadHostMetrics,
   resolveAwsFailureNotice,
   resolveTailnetFailureGuidance,
@@ -688,6 +689,18 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
               connectionFailurePresentation?.message ??
               tab.errorMessage)
           )}
+        </NoticeCard>
+      ) : null}
+      {/**
+        * 원래 가려던 길로 못 갔다는 알림. **오류가 아니라 경고다** — 연결은 됐다.
+        *
+        * 자동으로 사라지지 않는다(serialNotice 와 다른 점이다). 이 세션에서는 도커 섹션도
+        * 자원 지표도 없는데, 4초 뒤 사라지는 문구로는 그 사실이 전해지지 않는다. 대신 연결이
+        * 살아 있을 때만 그린다 — 판정은 shouldShowTransportNotice 한 곳이다.
+        */}
+      {shouldShowTransportNotice(tab) ? (
+        <NoticeCard tone="warning" className="mx-[0.55rem] mt-[0.55rem]" role="status">
+          {tab?.transportNotice}
         </NoticeCard>
       ) : null}
       {serialNotice ? (

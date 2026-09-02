@@ -41,6 +41,24 @@ export function resolveAwsFailureNotice(input: {
   };
 }
 
+/**
+ * 폴백 알림("SSM 셸로 연결했습니다")을 지금 그려야 하는가.
+ *
+ * 알림은 **살아 있는 연결**에 대한 사실이다. 세션이 오류로 끝나거나 닫히면 그 사실은 끝난
+ * 것인데, 탭을 error 로 만드는 자리가 스토어에 열여섯 곳이고 전부 탭을 펼쳐 쓴다 — 그 모두에
+ * "알림도 지워라" 를 심으면 하나만 빠져도 오류 카드 위에 연결된 것처럼 읽히는 문구가 남는다.
+ * 그래서 쓰는 쪽이 아니라 **그리는 쪽 한 곳**에서 가른다. 상태가 connecting·connected 일 때만
+ * 뜬다(알림은 연결 직후 connecting 단계에서 실린다).
+ */
+export function shouldShowTransportNotice(
+  tab: Pick<TerminalTab, 'status' | 'transportNotice'> | undefined,
+): boolean {
+  if (!tab?.transportNotice) {
+    return false;
+  }
+  return tab.status === 'connecting' || tab.status === 'connected';
+}
+
 export const SESSION_SHARE_CHAT_TOAST_LIMIT = 3;
 export const SESSION_SHARE_CHAT_TOAST_TTL_MS = 8000;
 

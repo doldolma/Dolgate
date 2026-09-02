@@ -1573,7 +1573,13 @@ export interface DesktopApi {
     ) => () => void;
   };
   ssh: {
-    connect: (input: DesktopConnectInput) => Promise<{ sessionId: string }>;
+    /**
+     * `notice` 는 **연결은 됐지만 원래 가려던 길이 아니었다**는 말이다(EC2 가 SSH-over-SSM 에
+     * 실패해 SSM 셸로 물러난 경우). 오류가 아니라서 지금까지 아무 데도 안 나왔다.
+     */
+    connect: (
+      input: DesktopConnectInput,
+    ) => Promise<{ sessionId: string; notice?: string }>;
     connectLocal: (
       input: DesktopLocalConnectInput,
     ) => Promise<{ sessionId: string }>;

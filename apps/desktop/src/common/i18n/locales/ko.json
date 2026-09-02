@@ -2921,7 +2921,12 @@
     "ecsUseContainers": "ECS 호스트는 세션 연결 대신 Containers 화면에서 엽니다.",
     "fallbackNotice": "SSH-over-SSM 연결에 실패해 SSM 셸로 폴백합니다.",
     "externalLinkScheme": "외부 링크는 http 또는 https만 열 수 있습니다.",
-    "windowsTmuxUnsupported": "Windows 인스턴스는 tmux 연결을 지원하지 않습니다. SSM 셸(PowerShell)로 연결하세요."
+    "windowsTmuxUnsupported": "Windows 인스턴스는 tmux 연결을 지원하지 않습니다. SSM 셸(PowerShell)로 연결하세요.",
+    "ssmShellFallback": "SSH 로 붙지 못해 SSM 셸로 연결했습니다.",
+    "ssmShellFallbackRemembered": "최근 SSH 시도가 실패해 이번에는 SSM 셸로 바로 연결했습니다(10분 뒤 다시 SSH 를 시도합니다).",
+    "ssmShellFallbackLoses": "보조 채널이 없어 이 세션에서는 도커 섹션·자원 지표·동적 자동완성이 빠집니다.",
+    "ssmShellFallbackUnverifiedUser": "이 호스트의 SSH 사용자명을 확인하지 못해 저장된 값 \"{{username}}\" 으로 시도했습니다 — 맞는지 확인해 주세요.",
+    "ssmShellFallbackReason": "이유: {{reason}}"
   },
   "rdpIpc": {
     "certificateTrustRevoked": "RDP 서버 인증서 신뢰를 해제했습니다."

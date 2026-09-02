@@ -11,6 +11,7 @@ import {
   resolveTailnetLoginRejectedGuidance,
   resolveTailnetPhaseMessage,
   shouldShowSessionOverlay,
+  shouldShowTransportNotice,
 } from "./terminalSessionHelpers";
 
 function createErrorTab(overrides: Partial<TerminalTab> = {}): TerminalTab {
@@ -294,5 +295,30 @@ describe("canReadHostMetrics", () => {
     expect(canReadHostMetrics({ ...connected, tmux: { paneId: "%0" } })).toBe(false);
     expect(canReadHostMetrics(null)).toBe(false);
     expect(canReadHostMetrics({ source: "serial", status: "connected" })).toBe(false);
+  });
+});
+
+/**
+ * 폴백 알림은 살아 있는 연결에 대한 사실이다. 탭을 error 로 만드는 자리가 스토어에 열여섯
+ * 곳이라 쓰는 쪽마다 지우게 하면 하나만 빠져도 오류 카드 위에 "SSM 셸로 연결했습니다" 가
+ * 남는다 — 그리는 쪽 한 곳에서 가른다.
+ */
+describe("shouldShowTransportNotice", () => {
+  const notice = "SSH 로 붙지 못해 SSM 셸로 연결했습니다.";
+
+  it("shows it while the connection is alive", () => {
+    expect(shouldShowTransportNotice({ status: "connecting", transportNotice: notice })).toBe(true);
+    expect(shouldShowTransportNotice({ status: "connected", transportNotice: notice })).toBe(true);
+  });
+
+  it("hides it once the session has errored or closed", () => {
+    expect(shouldShowTransportNotice({ status: "error", transportNotice: notice })).toBe(false);
+    expect(shouldShowTransportNotice({ status: "closed", transportNotice: notice })).toBe(false);
+    expect(shouldShowTransportNotice({ status: "disconnecting", transportNotice: notice })).toBe(false);
+  });
+
+  it("is quiet when there is nothing to say", () => {
+    expect(shouldShowTransportNotice({ status: "connected", transportNotice: undefined })).toBe(false);
+    expect(shouldShowTransportNotice(undefined)).toBe(false);
   });
 });

@@ -2921,7 +2921,12 @@
     "ecsUseContainers": "ECS hosts open from the Containers screen instead of a session connection.",
     "fallbackNotice": "The SSH-over-SSM connection failed, falling back to the SSM shell.",
     "externalLinkScheme": "External links can only be opened over http or https.",
-    "windowsTmuxUnsupported": "Windows instances do not support tmux connections. Connect with the SSM shell (PowerShell) instead."
+    "windowsTmuxUnsupported": "Windows instances do not support tmux connections. Connect with the SSM shell (PowerShell) instead.",
+    "ssmShellFallback": "Could not connect over SSH, so this session uses the SSM shell.",
+    "ssmShellFallbackRemembered": "A recent SSH attempt failed, so this session went straight to the SSM shell (SSH is retried after 10 minutes).",
+    "ssmShellFallbackLoses": "Without an auxiliary channel the Docker section, resource metrics and dynamic autocomplete are unavailable here.",
+    "ssmShellFallbackUnverifiedUser": "This host’s SSH username could not be verified, so the stored value \"{{username}}\" was used — check that it is right.",
+    "ssmShellFallbackReason": "Reason: {{reason}}"
   },
   "rdpIpc": {
     "certificateTrustRevoked": "Revoked trust for an RDP server certificate."
