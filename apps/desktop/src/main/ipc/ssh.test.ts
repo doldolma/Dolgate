@@ -503,14 +503,19 @@ describe("registerSshIpcHandlers", () => {
       hostId: "aws-host-fallback",
       cols: 120,
       rows: 32,
-    })) as { sessionId: string; notice?: string };
+    })) as {
+      sessionId: string;
+      awsTransport?: string;
+      awsFallback?: { reason: string; remembered: boolean; unverifiedUsername: string | null };
+    };
 
     expect(result.sessionId).toBe("session-fb");
-    expect(result.notice).toContain("SSM 셸");
-    // 이유는 원격이 낸 원문 그대로.
-    expect(result.notice).toContain("unable to authenticate");
+    expect(result.awsTransport).toBe("ssm-shell");
+    // 이유는 원격이 낸 원문 그대로 넘긴다 — 벗기는 것은 화면의 일이다.
+    expect(result.awsFallback?.reason).toContain("unable to authenticate");
+    expect(result.awsFallback?.remembered).toBe(false);
     // 사용자명 프로브가 막히지 않은 호스트라 그 얘기는 하지 않는다.
-    expect(result.notice).not.toContain("ec2-user");
+    expect(result.awsFallback?.unverifiedUsername).toBeNull();
   });
 
   /**
@@ -547,9 +552,9 @@ describe("registerSshIpcHandlers", () => {
       hostId: "aws-host-unverified",
       cols: 120,
       rows: 32,
-    })) as { notice?: string };
+    })) as { awsFallback?: { unverifiedUsername: string | null } };
 
-    expect(result.notice).toContain("ec2-user");
+    expect(result.awsFallback?.unverifiedUsername).toBe("ec2-user");
   });
 
   /**
@@ -580,21 +585,22 @@ describe("registerSshIpcHandlers", () => {
     const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
     const connect = () =>
       connectHandler?.(null, { hostId: "aws-host-memo", cols: 120, rows: 32 }) as Promise<{
-        notice?: string;
+        awsTransport?: string;
+        awsFallback?: { reason: string; remembered: boolean };
       }>;
 
     // 1차: SSH 실패 → 폴백 + 기억.
     const first = await connect();
-    expect(first.notice).toContain("sshd unreachable");
+    expect(first.awsTransport).toBe("ssm-shell");
+    expect(first.awsFallback).toMatchObject({ reason: "sshd unreachable", remembered: false });
     expect(connectAwsEc2OverSsmMock).toHaveBeenCalledTimes(1);
 
-    // 2차(10분 안): SSH 를 시도조차 안 한다 — 그래도 알림은 있고, 처음 실패한 이유를 말한다.
+    // 2차(10분 안): SSH 를 시도조차 안 한다 — 그래도 사연은 있고, 처음 실패한 이유를 말한다.
     const second = await connect();
     expect(connectAwsEc2OverSsmMock).toHaveBeenCalledTimes(1);
-    expect(second.notice).toContain("SSM 셸");
-    expect(second.notice).toContain("sshd unreachable");
-    // 이번에는 실패한 것이 없으므로 "붙지 못해" 가 아니라 기억 때문임을 말한다.
-    expect(second.notice).toContain("최근 SSH 시도가 실패");
+    expect(second.awsTransport).toBe("ssm-shell");
+    // 이번에는 실패한 것이 없으므로 "붙지 못해" 가 아니라 기억 때문임을 표시한다.
+    expect(second.awsFallback).toMatchObject({ reason: "sshd unreachable", remembered: true });
   });
 
   it("still attempts SSH-over-SSM for non-Windows instances", async () => {

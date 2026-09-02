@@ -1,3 +1,4 @@
+import type { AwsSessionFallback, AwsSessionTransport } from '@dolssh/shared-core';
 import { isAwsEc2WindowsPlatform, isRdpHostRecord, isVncHostRecord } from "@shared";
 import { markSessionConnected } from "../../lib/terminal-cwd-registry";
 import type {
@@ -605,6 +606,13 @@ export function createSessionServices(deps: SliceDeps) {
             tmuxCommand: attempt.tmuxCommand,
             tmuxVersion: attempt.tmuxVersion,
           });
+      // `in` 으로 좁히면 시리얼 쪽 타입이 섞여 unknown 이 된다 — 분기 조건을 그대로 다시 쓴다.
+      const ec2Connection = isSerialHostRecord(host)
+        ? undefined
+        : (connection as {
+            awsTransport?: AwsSessionTransport;
+            awsFallback?: AwsSessionFallback;
+          });
       const latestAttempt = findPendingConnectionAttempt(get(), sessionId);
       if (!latestAttempt) {
         await api.ssh.disconnect(connection.sessionId).catch(() => undefined);
@@ -620,12 +628,10 @@ export function createSessionServices(deps: SliceDeps) {
             ...tab,
             status: "connecting",
             errorMessage: undefined,
-            // 연결은 됐지만 원래 가려던 길이 아니었다는 알림(EC2 가 SSM 셸로 물러난 경우).
-            // 매 연결마다 새로 정한다 — 지난 시도의 알림이 남으면 거짓말이 된다.
-            transportNotice:
-              'notice' in connection && typeof connection.notice === 'string'
-                ? connection.notice
-                : undefined,
+            // EC2 가 실제로 탄 전송과, SSM 셸로 물러났을 때의 사연. 매 연결마다 새로 정한다 —
+            // 지난 시도의 값이 남으면 거짓말이 된다. 시리얼 연결에는 이 필드가 없다.
+            awsTransport: ec2Connection?.awsTransport,
+            awsFallback: ec2Connection?.awsFallback,
             connectionProgress: resolveConnectingProgress(host),
             hasReceivedOutput: false,
             lastEventAt: new Date().toISOString(),

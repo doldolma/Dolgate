@@ -640,6 +640,8 @@ export interface ResolvedJumpHost {
 // 서버 프록시 SSH 전송의 두 타입은 모바일도 쓴다 — 정의는 shared-core 에 두고 여기서는
 // 다시 내보내기만 한다(@shared 로 부르던 곳들이 그대로 동작한다).
 import type {
+  AwsSessionFallback,
+  AwsSessionTransport,
   AwsSshTunnelStartMessage,
   WsProxyTarget,
 } from "@dolssh/shared-core";
@@ -1574,12 +1576,15 @@ export interface DesktopApi {
   };
   ssh: {
     /**
-     * `notice` 는 **연결은 됐지만 원래 가려던 길이 아니었다**는 말이다(EC2 가 SSH-over-SSM 에
-     * 실패해 SSM 셸로 물러난 경우). 오류가 아니라서 지금까지 아무 데도 안 나왔다.
+     * EC2 호스트면 **실제로 탄 전송**(`awsTransport`)과, SSM 셸로 물러났을 때의 사연
+     * (`awsFallback`)이 함께 온다. 연결은 됐으니 오류가 아니라서 예전에는 아무 데도 안 나왔다.
+     * 문장이 아니라 구조로 넘긴다 — 화면이 토스트·툴팁으로 나눠 쓴다.
      */
-    connect: (
-      input: DesktopConnectInput,
-    ) => Promise<{ sessionId: string; notice?: string }>;
+    connect: (input: DesktopConnectInput) => Promise<{
+      sessionId: string;
+      awsTransport?: AwsSessionTransport;
+      awsFallback?: AwsSessionFallback;
+    }>;
     connectLocal: (
       input: DesktopLocalConnectInput,
     ) => Promise<{ sessionId: string }>;

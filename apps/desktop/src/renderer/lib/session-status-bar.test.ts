@@ -94,6 +94,14 @@ describe('연결종류 칩', () => {
     expect(chip?.kind).toBe('container');
   });
 
+  // SSH over SSM 과 SSM 셸은 다른 물건이다 — 이 칩이 그것을 상시로 말하는 유일한 자리다.
+  it('EC2 는 실제로 탄 전송으로 갈라 말하고, 모르면 SSM 으로만 그린다', () => {
+    const ec2 = sshHost({ kind: 'aws-ec2' } as Partial<HostRecord>);
+    expect(resolveSessionKindChip({ host: ec2, awsTransport: 'ssh-over-ssm' })?.kind).toBe('ssh-over-ssm');
+    expect(resolveSessionKindChip({ host: ec2, awsTransport: 'ssm-shell' })?.kind).toBe('ssm-shell');
+    expect(resolveSessionKindChip({ host: ec2 })?.kind).toBe('ssm');
+  });
+
   it('AWS·Warpgate·시리얼은 각자 종류가 된다', () => {
     expect(resolveSessionKindChip({ host: sshHost({ kind: 'aws-ec2' } as Partial<HostRecord>) })?.kind).toBe('ssm');
     expect(resolveSessionKindChip({ host: sshHost({ kind: 'aws-ecs' } as Partial<HostRecord>) })?.kind).toBe('ecs');

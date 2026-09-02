@@ -3590,6 +3590,17 @@ export interface TerminalConnectionHop {
   name?: string | null;
 }
 
+export type AwsSessionTransport = 'ssh-over-ssm' | 'ssm-shell';
+
+export interface AwsSessionFallback {
+  /** 그때 SSH 가 왜 실패했는지, 코어가 올린 원문. 보여 줄 때는 겹친 접두사를 벗긴다. */
+  reason: string;
+  /** 이번 접속에서 실패한 것이 아니라 최근 실패의 기억으로 SSH 를 건너뛴 경우. */
+  remembered: boolean;
+  /** 사용자명 프로브가 막혀 저장된 값을 그대로 썼을 때 그 값. 확인됐으면 null. */
+  unverifiedUsername: string | null;
+}
+
 export interface TerminalTab {
   id: string;
   /**
@@ -3614,15 +3625,20 @@ export interface TerminalTab {
    */
   errorMessage?: string;
   /**
-   * 이 세션이 **원래 가려던 길로 못 갔다**는 알림. 연결은 됐으니 오류가 아니고, 그래서
-   * 지금까지 아무 데도 안 나왔다 — 활동 로그 한 줄이 전부였다.
+   * EC2 세션이 **실제로 탄 전송.** SSH over SSM 이 기본이고 안 되면 SSM 셸로 물러난다.
    *
-   * EC2 호스트는 SSH-over-SSM 으로 붙는 것이 기본이고 안 되면 SSM 셸로 물러난다. 그런데 그
-   * 둘은 **다른 물건이다**: SSM 셸은 보조 채널이 없어 자동완성·도커 섹션이 빠지고 사용자도
-   * `ssm-user` 로 달라진다. 물러난 사실을 말하지 않으면 사용자는 자기가 어디에 있는지 모른
-   * 채로 "왜 이게 안 되지" 를 한참 헤맨다 — 실제로 그랬다.
+   * 둘은 다른 물건이다 — SSM 셸은 보조 채널이 없어 도커 섹션·자원 지표·동적 자동완성이 빠지고
+   * 사용자도 `ssm-user` 로 달라진다. 하단 칩이 이 값으로 둘을 갈라 말한다. 없으면(EC2 가
+   * 아니거나 아직 모름) 칩은 예전처럼 "SSM" 으로만 그린다.
    */
-  transportNotice?: string;
+  awsTransport?: AwsSessionTransport;
+  /**
+   * SSM 셸로 **물러난** 사연. 처음부터 SSM 셸인 경우(Windows)에는 없다.
+   *
+   * 화면은 이것을 한 번의 토스트와 칩 툴팁으로 쓴다 — 붙어 있는 내내 카드로 박아 두지 않는다.
+   * 문장은 렌더러가 만든다(메인이 문장을 넘기면 화면이 그것을 자르거나 나눌 수 없다).
+   */
+  awsFallback?: AwsSessionFallback;
   /**
    * 코어가 실패 이벤트에 실어 보낸 소켓 원인 코드(`ErrorPayload.failure`).
    *

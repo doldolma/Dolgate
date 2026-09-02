@@ -40,7 +40,7 @@ import type { TerminalSessionPaneProps } from './types';
 import { Button, NoticeCard } from '../../ui';
 import { findHostKeyPromptForSession, resolveConnectionFailurePresentation } from '../../store/utils';
 import {
-  shouldShowTransportNotice,
+  describeAwsTransport,
   canReadHostMetrics,
   resolveAwsFailureNotice,
   resolveTailnetFailureGuidance,
@@ -204,6 +204,28 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   );
 
   const [serialNotice, setSerialNotice] = useState<string | null>(null);
+
+  // EC2 전송 설명. 칩 툴팁(상시)과 폴백 토스트(한 번)에 나눠 쓴다.
+  const awsTransportText = useMemo(
+    () => describeAwsTransport(tab, translate),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 두 필드만 본다
+    [tab?.awsTransport, tab?.awsFallback, translate],
+  );
+  /**
+   * SSM 셸로 물러났다는 토스트. **한 번만, 잠시만.** 지속되어야 할 정보("지금 SSM 셸이다")는
+   * 하단 칩과 그 툴팁이 맡고, 여기서는 사건이 일어났다는 것만 알린다.
+   */
+  const [awsToast, setAwsToast] = useState<string | null>(null);
+  useEffect(() => {
+    setAwsToast(tab?.status === 'connected' ? awsTransportText.toast : null);
+  }, [awsTransportText.toast, tab?.status]);
+  useEffect(() => {
+    if (!awsToast) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => setAwsToast(null), 8000);
+    return () => window.clearTimeout(timeoutId);
+  }, [awsToast]);
 
   useEffect(() => {
     setSerialNotice(null);
@@ -634,6 +656,16 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           notifications={controller.visibleSessionShareChatNotifications}
         />
       ) : null}
+      {awsToast ? (
+        <div
+          className="pointer-events-none absolute bottom-[0.85rem] right-[0.85rem] z-[4] w-[min(100%,340px)]"
+          aria-live="polite"
+        >
+          <NoticeCard tone="warning" role="status" className="text-[0.82rem] leading-[1.45]">
+            {awsToast}
+          </NoticeCard>
+        </div>
+      ) : null}
 
       {showHeader ? (
         <TerminalPaneHeader
@@ -689,18 +721,6 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
               connectionFailurePresentation?.message ??
               tab.errorMessage)
           )}
-        </NoticeCard>
-      ) : null}
-      {/**
-        * 원래 가려던 길로 못 갔다는 알림. **오류가 아니라 경고다** — 연결은 됐다.
-        *
-        * 자동으로 사라지지 않는다(serialNotice 와 다른 점이다). 이 세션에서는 도커 섹션도
-        * 자원 지표도 없는데, 4초 뒤 사라지는 문구로는 그 사실이 전해지지 않는다. 대신 연결이
-        * 살아 있을 때만 그린다 — 판정은 shouldShowTransportNotice 한 곳이다.
-        */}
-      {shouldShowTransportNotice(tab) ? (
-        <NoticeCard tone="warning" className="mx-[0.55rem] mt-[0.55rem]" role="status">
-          {tab?.transportNotice}
         </NoticeCard>
       ) : null}
       {serialNotice ? (
@@ -971,8 +991,10 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
                       host: props.host,
                       shellKind: tab?.shellKind,
                       hops: tab?.connectionHops,
+                      awsTransport: tab?.awsTransport,
                     })
               }
+              kindDetail={showHeader ? null : awsTransportText.tooltip}
               hopRows={showHeader ? [] : buildHopRows(tab?.connectionHops)}
               // 감지만 된 상태에서는 버전을, 붙어 있으면 그룹 하단바가 세션명을 보여 준다.
               tmuxLabel={

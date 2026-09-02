@@ -42,21 +42,70 @@ export function resolveAwsFailureNotice(input: {
 }
 
 /**
- * 폴백 알림("SSM 셸로 연결했습니다")을 지금 그려야 하는가.
+ * 코어가 올린 SSH 실패 원문에서 겹친 접두사를 벗긴다.
  *
- * 알림은 **살아 있는 연결**에 대한 사실이다. 세션이 오류로 끝나거나 닫히면 그 사실은 끝난
- * 것인데, 탭을 error 로 만드는 자리가 스토어에 열여섯 곳이고 전부 탭을 펼쳐 쓴다 — 그 모두에
- * "알림도 지워라" 를 심으면 하나만 빠져도 오류 카드 위에 연결된 것처럼 읽히는 문구가 남는다.
- * 그래서 쓰는 쪽이 아니라 **그리는 쪽 한 곳**에서 가른다. 상태가 connecting·connected 일 때만
- * 뜬다(알림은 연결 직후 connecting 단계에서 실린다).
+ * x/crypto/ssh 가 `ssh: handshake failed:` 를 붙인 것을 코어가 `ssh handshake failed:` 로 한 번
+ * 더 감싼다 — 바깥 접두사는 데스크톱의 재연결 판정이 그 문구를 보기 때문에 **원문에서는** 두어야
+ * 하고(sshconn/banner.go), 그래서 보여 줄 때만 벗긴다. 남는 것은 사람이 읽을 조각이다:
+ * `unable to authenticate, attempted methods [none publickey]`.
  */
-export function shouldShowTransportNotice(
-  tab: Pick<TerminalTab, 'status' | 'transportNotice'> | undefined,
-): boolean {
-  if (!tab?.transportNotice) {
-    return false;
+export function cleanSshFailureReason(reason: string): string {
+  return reason.replace(/^(?:ssh:? handshake failed:\s*)+/i, '').trim() || reason.trim();
+}
+
+type Translate = (key: string, options?: Record<string, string>) => string;
+
+/**
+ * EC2 세션의 전송을 화면 두 자리에 맞게 문장으로 만든다.
+ *
+ * - `toast`: SSM 셸로 **물러났을 때** 한 번 띄우는 문장. 처음부터 SSM 셸인 경우(Windows)나
+ *   SSH 로 붙은 경우에는 없다 — 알릴 사건이 없다.
+ * - `tooltip`: 하단 전송 칩에 hover 하면 보이는 설명. 전송이 무엇이고 그래서 무엇이 되고
+ *   안 되는지, 물러났다면 왜인지. 이쪽이 **상시** 정보의 자리다.
+ *
+ * 예전에는 이 넷을 한 문장으로 이어 세션 상단에 카드로 박아 두었다 — 보기 흉했고, 닫을 수도
+ * 없었다. 지속되어야 할 정보는 "지금 SSM 셸이다" 하나뿐이고, 그건 칩의 일이다.
+ */
+export function describeAwsTransport(
+  tab: Pick<TerminalTab, 'awsTransport' | 'awsFallback'> | undefined,
+  translate: Translate,
+): { toast: string | null; tooltip: string | null } {
+  const transport = tab?.awsTransport;
+  if (!transport) {
+    return { toast: null, tooltip: null };
   }
-  return tab.status === 'connecting' || tab.status === 'connected';
+  const fallback = tab?.awsFallback;
+  const lines = [
+    translate(
+      transport === 'ssm-shell'
+        ? 'sessionPane.awsTransportSsmShell'
+        : 'sessionPane.awsTransportSshOverSsm',
+    ),
+  ];
+  if (fallback) {
+    lines.push(
+      translate('sessionPane.awsFallbackReason', {
+        reason: cleanSshFailureReason(fallback.reason),
+      }),
+    );
+    if (fallback.unverifiedUsername) {
+      lines.push(
+        translate('sessionPane.awsFallbackUnverifiedUser', {
+          username: fallback.unverifiedUsername,
+        }),
+      );
+    }
+  }
+  return {
+    toast: fallback
+      ? translate(
+          fallback.remembered
+            ? 'sessionPane.awsFallbackRememberedToast'
+            : 'sessionPane.awsFallbackToast',
+        )
+      : null,
+    tooltip: lines.join('\n'),
+  };
 }
 
 export const SESSION_SHARE_CHAT_TOAST_LIMIT = 3;

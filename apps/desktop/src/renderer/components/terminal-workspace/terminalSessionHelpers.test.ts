@@ -11,7 +11,8 @@ import {
   resolveTailnetLoginRejectedGuidance,
   resolveTailnetPhaseMessage,
   shouldShowSessionOverlay,
-  shouldShowTransportNotice,
+  cleanSshFailureReason,
+  describeAwsTransport,
 } from "./terminalSessionHelpers";
 
 function createErrorTab(overrides: Partial<TerminalTab> = {}): TerminalTab {
@@ -298,27 +299,82 @@ describe("canReadHostMetrics", () => {
   });
 });
 
-/**
- * 폴백 알림은 살아 있는 연결에 대한 사실이다. 탭을 error 로 만드는 자리가 스토어에 열여섯
- * 곳이라 쓰는 쪽마다 지우게 하면 하나만 빠져도 오류 카드 위에 "SSM 셸로 연결했습니다" 가
- * 남는다 — 그리는 쪽 한 곳에서 가른다.
- */
-describe("shouldShowTransportNotice", () => {
-  const notice = "SSH 로 붙지 못해 SSM 셸로 연결했습니다.";
-
-  it("shows it while the connection is alive", () => {
-    expect(shouldShowTransportNotice({ status: "connecting", transportNotice: notice })).toBe(true);
-    expect(shouldShowTransportNotice({ status: "connected", transportNotice: notice })).toBe(true);
+// 코어는 x/crypto/ssh 의 접두사 위에 자기 접두사를 한 번 더 얹는다. 원문은 재연결 판정이 보므로
+// 그대로 두고, 사람에게 보여 줄 때만 벗긴다.
+describe("cleanSshFailureReason", () => {
+  it("strips the doubled handshake prefixes and keeps the tail", () => {
+    expect(
+      cleanSshFailureReason(
+        "ssh handshake failed: ssh: handshake failed: ssh: unable to authenticate, attempted methods [none publickey], no supported methods remain",
+      ),
+    ).toBe("ssh: unable to authenticate, attempted methods [none publickey], no supported methods remain");
   });
 
-  it("hides it once the session has errored or closed", () => {
-    expect(shouldShowTransportNotice({ status: "error", transportNotice: notice })).toBe(false);
-    expect(shouldShowTransportNotice({ status: "closed", transportNotice: notice })).toBe(false);
-    expect(shouldShowTransportNotice({ status: "disconnecting", transportNotice: notice })).toBe(false);
-  });
-
-  it("is quiet when there is nothing to say", () => {
-    expect(shouldShowTransportNotice({ status: "connected", transportNotice: undefined })).toBe(false);
-    expect(shouldShowTransportNotice(undefined)).toBe(false);
+  it("returns the original when there is nothing to strip", () => {
+    expect(cleanSshFailureReason("sshd unreachable")).toBe("sshd unreachable");
+    // 접두사만 있고 뒤가 비면 원문을 그대로 준다 — 빈 이유를 보여 주는 것보다 낫다.
+    expect(cleanSshFailureReason("ssh handshake failed:")).toBe("ssh handshake failed:");
   });
 });
+
+// 전송 정보는 두 자리에 나눠 쓴다: 물러난 사건은 토스트 한 번, "지금 어느 길인가" 는 칩 툴팁.
+describe("describeAwsTransport", () => {
+  const translate = (key: string, options?: Record<string, string>) =>
+    options ? `${key}:${JSON.stringify(options)}` : key;
+
+  it("says nothing for sessions that are not EC2", () => {
+    expect(describeAwsTransport(undefined, translate)).toEqual({ toast: null, tooltip: null });
+    expect(describeAwsTransport({ awsTransport: undefined }, translate)).toEqual({
+      toast: null,
+      tooltip: null,
+    });
+  });
+
+  it("describes SSH over SSM in the tooltip only — nothing happened worth a toast", () => {
+    expect(describeAwsTransport({ awsTransport: "ssh-over-ssm" }, translate)).toEqual({
+      toast: null,
+      tooltip: "sessionPane.awsTransportSshOverSsm",
+    });
+  });
+
+  it("a Windows instance is an SSM shell from the start — no fallback toast", () => {
+    expect(describeAwsTransport({ awsTransport: "ssm-shell" }, translate)).toEqual({
+      toast: null,
+      tooltip: "sessionPane.awsTransportSsmShell",
+    });
+  });
+
+  it("a fallback gets one toast and a tooltip with the cleaned reason", () => {
+    const result = describeAwsTransport(
+      {
+        awsTransport: "ssm-shell",
+        awsFallback: {
+          reason: "ssh handshake failed: ssh: handshake failed: ssh: unable to authenticate",
+          remembered: false,
+          unverifiedUsername: null,
+        },
+      },
+      translate,
+    );
+    expect(result.toast).toBe("sessionPane.awsFallbackToast");
+    expect(result.tooltip).toBe(
+      [
+        "sessionPane.awsTransportSsmShell",
+        'sessionPane.awsFallbackReason:{"reason":"ssh: unable to authenticate"}',
+      ].join("\n"),
+    );
+  });
+
+  it("names the remembered skip and the unverified username when they apply", () => {
+    const result = describeAwsTransport(
+      {
+        awsTransport: "ssm-shell",
+        awsFallback: { reason: "sshd unreachable", remembered: true, unverifiedUsername: "ec2-user" },
+      },
+      translate,
+    );
+    expect(result.toast).toBe("sessionPane.awsFallbackRememberedToast");
+    expect(result.tooltip).toContain('sessionPane.awsFallbackUnverifiedUser:{"username":"ec2-user"}');
+  });
+});
+

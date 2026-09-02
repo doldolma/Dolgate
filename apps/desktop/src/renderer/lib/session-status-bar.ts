@@ -8,6 +8,7 @@ import type {
   HostRecord,
   TerminalConnectionHop,
 } from '@shared';
+import type { AwsSessionTransport } from '@dolssh/shared-core';
 import { isSshHostRecord } from '@shared';
 
 /**
@@ -53,6 +54,9 @@ export function resolveStatusBarFold(width: number): SessionStatusBarFold {
 /** 하단바 왼쪽 맨 앞 칩. 평범한 SSH 면 만들지 않는다(모든 세션에 붙는 라벨은 정보가 아니다). */
 export type SessionKindChipKind =
   | 'jump'
+  // EC2 는 실제로 탄 전송을 알면 둘 중 하나로, 모르면 'ssm' 으로 그린다.
+  | 'ssh-over-ssm'
+  | 'ssm-shell'
   | 'ssm'
   | 'ecs'
   | 'warpgate'
@@ -71,6 +75,8 @@ interface KindChipInput {
   host: HostRecord | null | undefined;
   shellKind?: string;
   hops?: readonly TerminalConnectionHop[] | null;
+  /** EC2 세션이 실제로 탄 전송. 있으면 칩이 SSH over SSM 과 SSM 셸을 갈라 말한다. */
+  awsTransport?: AwsSessionTransport;
 }
 
 /** 홉 목록의 마지막은 목적지다 — 경유한 곳만 세려면 하나를 뺀다. */
@@ -105,6 +111,7 @@ export function resolveSessionKindChip({
   host,
   shellKind,
   hops,
+  awsTransport,
 }: KindChipInput): SessionKindChip | null {
   const none = { hopCount: 0, hopName: null };
   // 컨테이너 exec 은 호스트 종류보다 먼저 본다 — 붙은 곳이 호스트가 아니라 그 안의 컨테이너다.
@@ -115,7 +122,9 @@ export function resolveSessionKindChip({
     return null;
   }
   if (host.kind === 'aws-ec2') {
-    return { kind: 'ssm', ...none };
+    // 둘은 다른 물건이다 — SSM 셸은 보조 채널이 없어 도커 섹션·자원 지표·동적 자동완성이 빠진다.
+    // 이 칩이 그 사실을 상시로 말하는 유일한 자리다(카드는 한 번 뜨고 사라진다).
+    return { kind: awsTransport ?? 'ssm', ...none };
   }
   if (host.kind === 'aws-ecs') {
     return { kind: 'ecs', ...none };

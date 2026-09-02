@@ -2542,7 +2542,13 @@
     "aiClose": "Close the AI assistant",
     "aiOpen": "Open the AI assistant",
     "dropHere": "Upload here → {{path}}",
-    "homeDirectory": "home directory"
+    "homeDirectory": "home directory",
+    "awsFallbackToast": "Could not connect over SSH, so this session uses the SSM shell. The Docker section, resource metrics and dynamic autocomplete are unavailable.",
+    "awsFallbackRememberedToast": "A recent SSH attempt failed, so this session went straight to the SSM shell. SSH is retried after 10 minutes.",
+    "awsTransportSshOverSsm": "SSH over SSM — shell integration, the Docker section and resource metrics all work.",
+    "awsTransportSsmShell": "SSM shell — no auxiliary channel, so the Docker section, resource metrics and dynamic autocomplete are unavailable.",
+    "awsFallbackReason": "SSH failed: {{reason}}",
+    "awsFallbackUnverifiedUser": "The SSH username could not be verified, so the stored value \"{{username}}\" was used."
   },
   "fileEditor": {
     "confirmClose": "You have unsaved changes. Close the editor?",
@@ -2805,7 +2811,9 @@
       "ecs": "ECS",
       "warpgate": "Warpgate",
       "serial": "Serial",
-      "container": "Container"
+      "container": "Container",
+      "ssh-over-ssm": "SSH over SSM",
+      "ssm-shell": "SSM shell"
     }
   },
   "sessionStore": {
@@ -2921,12 +2929,7 @@
     "ecsUseContainers": "ECS hosts open from the Containers screen instead of a session connection.",
     "fallbackNotice": "The SSH-over-SSM connection failed, falling back to the SSM shell.",
     "externalLinkScheme": "External links can only be opened over http or https.",
-    "windowsTmuxUnsupported": "Windows instances do not support tmux connections. Connect with the SSM shell (PowerShell) instead.",
-    "ssmShellFallback": "Could not connect over SSH, so this session uses the SSM shell.",
-    "ssmShellFallbackRemembered": "A recent SSH attempt failed, so this session went straight to the SSM shell (SSH is retried after 10 minutes).",
-    "ssmShellFallbackLoses": "Without an auxiliary channel the Docker section, resource metrics and dynamic autocomplete are unavailable here.",
-    "ssmShellFallbackUnverifiedUser": "This host’s SSH username could not be verified, so the stored value \"{{username}}\" was used — check that it is right.",
-    "ssmShellFallbackReason": "Reason: {{reason}}"
+    "windowsTmuxUnsupported": "Windows instances do not support tmux connections. Connect with the SSM shell (PowerShell) instead."
   },
   "rdpIpc": {
     "certificateTrustRevoked": "Revoked trust for an RDP server certificate."

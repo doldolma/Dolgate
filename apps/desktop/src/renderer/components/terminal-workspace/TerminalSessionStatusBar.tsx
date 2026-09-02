@@ -58,6 +58,11 @@ interface TerminalSessionStatusBarProps {
   rttMs: number | null;
   /** 평범한 SSH 면 null — 모든 세션에 붙는 라벨은 정보가 아니다. */
   kindChip: SessionKindChip | null;
+  /**
+   * 종류 칩 hover 에 뿌릴 설명(여러 줄). 없으면 라벨을 그대로 툴팁으로 쓴다.
+   * EC2 는 여기서 전송이 무엇이고 그래서 무엇이 빠지는지, 물러났다면 왜인지를 말한다.
+   */
+  kindDetail?: string | null;
   /** 종류 칩 hover 에 뿌릴 홉 목록(점프에서만 채워진다). */
   hopRows: SessionHopRow[];
   /** tmux 칩 라벨. 감지되지도, 붙어 있지도 않으면 null. */
@@ -104,6 +109,8 @@ const ZONE_CLASS = `${PRESSABLE_CLASS} min-w-0 flex-1 gap-[0.9rem]`;
 
 const KIND_ICON = {
   jump: Waypoints,
+  'ssh-over-ssm': Network,
+  'ssm-shell': Network,
   ssm: Network,
   ecs: Boxes,
   warpgate: Network,
@@ -195,6 +202,7 @@ export function TerminalSessionStatusBar({
   onRetry,
   rttMs,
   kindChip,
+  kindDetail = null,
   hopRows,
   tmuxLabel,
   historyKey,
@@ -252,7 +260,7 @@ export function TerminalSessionStatusBar({
               )}
             </span>
           ) : (
-            <Tooltip label={kindLabel}>
+            <Tooltip label={kindDetail ?? kindLabel} multiline={kindDetail !== null}>
               <span className="flex items-center gap-1.5" aria-label={kindLabel}>
                 <StatusBarIcon>
                   <KindIcon className={statusBarIconSize} />
