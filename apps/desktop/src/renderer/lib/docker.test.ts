@@ -8,6 +8,7 @@ import {
   buildDockerProbeCommand,
   buildImageListCommand,
   buildNetworkListCommand,
+  buildVolumeListCommand,
   collectUsedImages,
   dockerLogsCommand,
   dockerRemoveCommand,
@@ -36,8 +37,9 @@ import {
   type DockerInspectInfo,
 } from './docker';
 
+// id·이름·상태문장·이미지·포트·프로젝트·서비스·작업디렉터리 순서다(CONTAINER_FIELDS).
 function row(fields: Partial<Record<number, string>>): string {
-  const cells = Array.from({ length: 9 }, (_, index) => fields[index] ?? '');
+  const cells = Array.from({ length: 8 }, (_, index) => fields[index] ?? '');
   return cells.join('\t');
 }
 
@@ -82,6 +84,7 @@ describe('프로브', () => {
       compose: 'v2',
       installed: true,
       answered: true,
+      dialect: 'docker',
       reason: null,
     });
   });
@@ -107,12 +110,31 @@ describe('프로브', () => {
       compose: null,
       installed: false,
       answered: false,
+      dialect: 'docker',
       reason: null,
     });
     // 진짜 없는 호스트: 이유 줄이 온다.
     const absent = parseDockerProbe('why=sh: 1: docker: not found');
     expect(absent.answered).toBe(true);
     expect(absent.installed).toBe(false);
+  });
+
+  /**
+   * 이름으로 가르면 안 된다 — RHEL 계열의 `podman-docker` 가 `/usr/bin/docker` 를 포드맨
+   * 래퍼로 깐다. 스스로 밝힌 `--version` 을 믿는다.
+   */
+  it('방언은 --version 이 밝힌 이름으로 가른다', () => {
+    const command = buildDockerProbeCommand();
+    expect(command).toContain('kind=$($p --version');
+    // 데몬에 붙지 않는 명령이라 프로브가 느려지지 않는다.
+    expect(command).not.toContain('kind=$($p version');
+    expect(parseDockerProbe('prefix=docker\nkind=podman version 5.4.0\n').dialect).toBe('podman');
+    // 접두사가 podman 이어도 판단 근거는 이름이 아니라 이 줄이다.
+    expect(
+      parseDockerProbe('prefix=docker\nkind=Docker version 27.3.1, build abc\n').dialect,
+    ).toBe('docker');
+    // 못 물어봤으면 도커로 본다 — 대다수가 도커이고, 틀려도 지금까지의 동작 그대로다.
+    expect(parseDockerProbe('prefix=docker\n').dialect).toBe('docker');
   });
 
   it('compose 는 v2 가 있으면 v2, 없으면 v1 로 잡힌다', () => {
@@ -158,10 +180,31 @@ describe('컨테이너 목록', () => {
     expect(command).toContain('com.docker.compose.project');
   });
 
+  /**
+   * `{{.State}}` 는 20.10 에 생긴 필드이고, 도커는 모르는 필드를 만나면 그 칸만 비우는 게 아니라
+   * 템플릿을 통째로 접는다 — stdout 이 비고 사연은 stderr 로만 나가는데 보조 채널은 그것을
+   * 버린다. 19.03 호스트에서 컨테이너 탭이 오류 없이 "없습니다" 로 굳었던 것이 이 한 칸이었다.
+   */
+  it('20.10 이상에만 있는 칸을 넣지 않는다', () => {
+    expect(buildContainerListCommand('docker')).not.toContain('{{.State}}');
+  });
+
+  /**
+   * `docker ps … | head` 의 `$?` 는 **head 의 것**이다 — 도커가 죽어도 0 이 온다. 보조 채널은
+   * 그 코드로 "실패했다" 와 "찍을 것이 없었다" 를 가르므로, 파이프가 상태를 삼키면 실패가 다시
+   * "없습니다" 로 보인다. POSIX sh 에는 pipefail 이 없어 출력을 변수로 받아 되돌린다.
+   */
+  it('상한을 걸어도 원래 종료 코드가 남는다', () => {
+    const command = buildContainerListCommand('docker');
+    expect(command).toContain('out=$(');
+    expect(command).toContain('rc=$?');
+    expect(command.trimEnd().endsWith('exit $rc')).toBe(true);
+  });
+
   it('탭으로 갈라 읽고 라벨이 없으면 null 이 된다', () => {
     const stdout = [
-      row({ 0: 'a1', 1: 'gateway', 2: 'running', 3: 'Up 22 hours (healthy)', 4: 'app:1', 5: '0.0.0.0:5050->5050/tcp', 6: 'lime', 7: 'gateway', 8: '/srv/lime' }),
-      row({ 0: 'b2', 1: 'loose', 2: 'exited', 3: 'Exited (137) 3 days ago', 4: 'redis:7' }),
+      row({ 0: 'a1', 1: 'gateway', 2: 'Up 22 hours (healthy)', 3: 'app:1', 4: '0.0.0.0:5050->5050/tcp', 5: 'lime', 6: 'gateway', 7: '/srv/lime' }),
+      row({ 0: 'b2', 1: 'loose', 2: 'Exited (137) 3 days ago', 3: 'redis:7' }),
       'Cannot connect to the Docker daemon',
     ].join('\n');
     const { containers, truncated } = parseContainerList(stdout);
@@ -177,14 +220,26 @@ describe('컨테이너 목록', () => {
     expect(containers[1].project).toBeNull();
   });
 
-  it('State 를 주지 않는 옛 도커는 상태 문장으로 판단한다', () => {
-    const stdout = row({ 0: 'a1', 1: 'web', 3: 'Up 3 minutes' });
-    expect(parseContainerList(stdout).containers[0].state).toBe('running');
+  it('상태는 상태 문장에서 낸다', () => {
+    const states = [
+      ['Up 3 minutes', 'running'],
+      ['Up 5 hours (Paused)', 'paused'],
+      // 포드맨은 멈춤을 "Paused" 한 낱말로 낸다(도커처럼 "Up …" 에 달지 않는다).
+      ['Paused', 'paused'],
+      ['Restarting (1) 2 seconds ago', 'restarting'],
+      ['Created', 'created'],
+      ['Dead', 'dead'],
+      ['Exited (0) 6 minutes ago', 'exited'],
+    ] as const;
+    for (const [status, expected] of states) {
+      const stdout = row({ 0: 'a1', 1: 'web', 2: status });
+      expect(parseContainerList(stdout).containers[0].state).toBe(expected);
+    }
   });
 
   it('한계를 넘으면 잘렸다고 말한다', () => {
     const lines = Array.from({ length: 205 }, (_, index) =>
-      row({ 0: `id${index}`, 1: `c${index}`, 2: 'running', 3: 'Up 1 hour' }),
+      row({ 0: `id${index}`, 1: `c${index}`, 2: 'Up 1 hour' }),
     );
     const { containers, truncated } = parseContainerList(lines.join('\n'));
     expect(containers).toHaveLength(200);
@@ -270,6 +325,17 @@ describe('이미지', () => {
 });
 
 describe('볼륨 · 네트워크', () => {
+  /**
+   * 포드맨의 `ps` 에는 Mounts 를 꾸미는 메서드가 없어 `[]string` 이 Go 슬라이스 표기(`[a b]`)로
+   * 그대로 찍힌다. 쉼표로만 가르면 그 줄이 이름 하나가 되어 사용 수가 늘 0 이었다.
+   */
+  it('마운트가 슬라이스 표기로 와도 센다 — 포드맨', () => {
+    const stdout = ['pgdata\tlocal', 'logs\tlocal', '@@dolgate@@', '[pgdata logs]', '[pgdata]'].join('\n');
+    const { volumes } = parseVolumeList(stdout);
+    expect(volumes[0]).toMatchObject({ name: 'pgdata', usedBy: 2 });
+    expect(volumes[1]).toMatchObject({ name: 'logs', usedBy: 1 });
+  });
+
   it('볼륨을 붙인 컨테이너 수를 마운트에서 센다', () => {
     const stdout = ['pgdata\tlocal', 'orphan\tlocal', '@@dolgate@@', 'pgdata,logs', 'pgdata'].join('\n');
     const { volumes } = parseVolumeList(stdout);
@@ -295,7 +361,9 @@ describe('볼륨 · 네트워크', () => {
 
   // 네트워크가 하나도 없으면 `network inspect` 가 인자 없이 불려 실패한다.
   it('네트워크가 없으면 inspect 를 부르지 않는다', () => {
-    expect(buildNetworkListCommand('docker')).toContain('ids=$(docker network ls -q); [ -n "$ids" ]');
+    const command = buildNetworkListCommand('docker');
+    expect(command).toContain('ids=$(docker network ls -q)');
+    expect(command).toContain('[ -n "$ids" ]');
   });
 
   it('네트워크는 한 번의 inspect 로 서브넷까지 받는다', () => {
@@ -306,6 +374,66 @@ describe('볼륨 · 네트워크', () => {
       subnet: '172.19.0.0/16',
       containerCount: 6,
     });
+  });
+
+  /**
+   * 도커는 `IPAM.Config`·`Containers`, 포드맨은 `Subnets` 다. 한 형식만 보내면 다른 쪽에서
+   * 템플릿이 죽어 탭이 통째로 "없습니다" 가 된다 — 컨테이너의 `{{.State}}` 와 같은 결함이었다.
+   */
+  it('도커와 포드맨 형식을 둘 다 시도한다', () => {
+    const command = buildNetworkListCommand('podman');
+    expect(command).toContain('{{range .IPAM.Config}}');
+    expect(command).toContain('{{range .Subnets}}');
+    expect(command.indexOf('.IPAM.Config')).toBeLessThan(command.indexOf('.Subnets'));
+  });
+
+  /**
+   * 템플릿은 **줄 중간에** 죽는다(`podman<탭>bridge<탭>` 까지 찍고 오류). 두 시도를 그냥
+   * `||` 로 이으면 그 조각이 다음 시도의 첫 줄에 붙어, 첫 네트워크의 서브넷 칸이 드라이버
+   * 이름으로 채워진다. 변수로 받아 성공한 쪽만 흘려보내야 한다.
+   */
+  /** 둘 다 실패하면 우리가 모르는 런타임이다 — 그때 화면에 보여 줄 단서가 그 한 줄뿐이다. */
+  it('첫 시도의 오류만 버리고 두 번째 것은 남긴다', () => {
+    const command = buildNetworkListCommand('docker');
+    const first = command.indexOf('.IPAM.Config');
+    const second = command.indexOf('.Subnets');
+    // 첫 시도는 포드맨에서 실패하는 것이 정상이라 소음이다.
+    expect(command.slice(first, second)).toContain('2>/dev/null');
+    // 두 번째 시도 뒤에는 stderr 를 막는 자리가 없다.
+    expect(command.slice(second)).not.toContain('2>/dev/null');
+  });
+
+  it('실패한 시도의 출력은 버린다', () => {
+    const command = buildNetworkListCommand('docker');
+    expect(command).toContain('out=$(');
+    expect(command).toContain('printf \'%s\\n\' "$out"');
+  });
+
+  /**
+   * 네트워크가 하나도 없는 것은 **실패가 아니다.** `[ -n "$ids" ] &&` 로 끝내면 그런 호스트가
+   * 0 이 아닌 상태로 끝나, 정상적인 빈 목록이 "읽을 수 없다" 로 뒤집힌다 — 고치려던 결함의
+   * 거울상이다.
+   */
+  it('네트워크가 없어도 성공으로 끝난다', () => {
+    const command = buildNetworkListCommand('docker');
+    expect(command).toContain('if [ "$rc" -eq 0 ] && [ -n "$ids" ]; then');
+    expect(command.trimEnd().endsWith('exit $rc')).toBe(true);
+  });
+
+  it('볼륨은 두 조각 중 하나만 실패해도 실패로 끝난다', () => {
+    const command = buildVolumeListCommand('docker');
+    expect(command).toContain('list=$(');
+    expect(command).toContain('mounts=$(');
+    // 먼저 난 실패를 남긴다 — `[ ]` 의 상태가 $? 를 덮지 않게 미리 받아 둔다.
+    expect(command).toContain('mrc=$?');
+    expect(command).toContain('[ "$rc" -eq 0 ] && rc=$mrc');
+  });
+
+  it('컨테이너 수를 모르면 0 이 아니라 null 이다', () => {
+    // 포드맨은 붙은 컨테이너를 알려 주지 않아 그 칸이 빈 채로 온다.
+    expect(parseNetworkList('podman\tbridge\t10.88.0.0/16 \t').networks[0].containerCount).toBeNull();
+    // 진짜 0 은 0 으로 남는다 — 모르는 것과 없는 것은 다른 말이다.
+    expect(parseNetworkList('bridge\tbridge\t172.17.0.0/16 \t0').networks[0].containerCount).toBe(0);
   });
 });
 
@@ -511,6 +639,27 @@ describe('컨테이너 지표는 목록과 다른 왕복이다', () => {
     expect(command).toContain("inspect 'a1b2c3d4e5f6'");
   });
 
+  /**
+   * 포드맨은 `define.InspectContainerData` **구조체**를 그대로 템플릿에 넣는다(도커처럼 원본 JSON
+   * 맵으로 물러나지 않는다). 거기에 `index .` 을 쓰면 "can't index item of type …" 으로 죽어
+   * 검사 왕복이 통째로 빈다 — 헬스·재시작·OOM·노출 포트·컨테이너 IP 가 전부 사라진다.
+   */
+  it('포드맨에는 구조체용 형식을 보낸다', () => {
+    const command = buildContainerMetricsCommand('podman', {
+      stats: true,
+      inspectIds: ['a1b2c3d4e5f6'],
+      dialect: 'podman',
+    });
+    expect(command).not.toContain('index .');
+    expect(command).toContain('{{.RestartCount}}');
+    // 포인터 필드는 `with` 로 감싸야 한다 — 헬스체크가 없으면 State.Health 가 nil 이다.
+    expect(command).toContain('{{with .State}}{{with .Health}}{{.Status}}{{end}}{{end}}');
+    // 도커 쪽은 그대로다(맵 모드 전제).
+    expect(
+      buildContainerMetricsCommand('docker', { stats: true, inspectIds: ['a1'] }),
+    ).toContain('index . "RestartCount"');
+  });
+
   it('선택 키는 index 로 읽는다 — 없는 키 하나가 줄을 통째로 날린다', () => {
     // docker 는 `{{.Id}}`(구조체 필드명은 `ID`)를 만나면 원본 JSON 맵으로 렌더하고, 맵 모드는
     // `missingkey=error` 다. `.State.Health` 는 헬스체크가 없는 컨테이너에 아예 없는 키라
@@ -655,6 +804,15 @@ describe('컨테이너 네트워크', () => {
     expect(parseContainerNetworks('bridge=fd00::2;')).toEqual([
       { name: 'bridge', ipAddress: 'fd00::2' },
     ]);
+  });
+
+  /** 검사와 같은 조각을 쓴다 — 한쪽만 방언을 넣으면 포드맨에서 터널이 IP 를 못 찾는다. */
+  it('컨테이너 네트워크 조회도 방언을 따른다', () => {
+    expect(buildContainerNetworksCommand('docker', 'abc')).toContain('index $net "IPAddress"');
+    const podman = buildContainerNetworksCommand('podman', 'abc', 'podman');
+    expect(podman).not.toContain('index .');
+    expect(podman).toContain('{{with .NetworkSettings}}');
+    expect(podman).toContain('{{$net.IPAddress}}');
   });
 
   it('검사 왕복이 네트워크 칸까지 실어 온다', () => {

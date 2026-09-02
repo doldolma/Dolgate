@@ -15,6 +15,7 @@ import (
 
 	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/protocol"
+	"dolssh/services/ssh-core/internal/sshcmd"
 )
 
 // shellIntegrationHandshakeTimeout bounds how long the echo-suppression
@@ -154,25 +155,54 @@ func (m *Manager) RunCompletionCommand(
 	sessionID, command string,
 	_ bool,
 	_ bool,
-) (string, bool, error) {
+) (sshcmd.CompletionOutput, error) {
+	unknown := sshcmd.CompletionOutput{ExitCode: sshcmd.ExitCodeUnknown}
 	if _, err := m.getSession(sessionID); err != nil {
-		return "", false, err
+		return unknown, err
 	}
 	// Completion commands are POSIX shell (`ls -1Ap`, `git branch`, …) run via
 	// /bin/sh. A local Windows shell isn't POSIX, so dynamic completion isn't
 	// supported there — degrade to nothing instead of failing on a missing
 	// /bin/sh. (Remote SSH sessions still complete on the remote Unix host.)
 	if runtime.GOOS == "windows" {
-		return "", false, nil
+		return unknown, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), autocomplete.CompletionTimeout)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, "/bin/sh", "-c", command).Output()
-	if err != nil && len(output) == 0 {
-		return "", false, err
+	// 여기서는 종료 코드도 stderr 도 프로세스가 직접 준다 — 원격처럼 프레임에 실어 나를 것이
+	// 없다. 세션 패널은 로컬 셸에서도 실패와 부재를 갈라야 하므로 같은 모양으로 채운다.
+	//
+	// stderr 상한은 원격 워커와 **같은 것을 쓴다** — 같은 값을 담는데 한쪽만 무제한이면 그쪽이
+	// 사고 자리가 된다(말 많은 명령 하나가 예산이 끝날 때까지 메모리를 문다).
+	stderr := sshcmd.NewBoundedBuffer(sshcmd.CompletionStderrLimit)
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd.Stderr = stderr
+	output, err := cmd.Output()
+	exitCode := 0
+	if err != nil {
+		var exitError *exec.ExitError
+		switch {
+		// **신호로 죽은 것은 답이 아니다.** 예산이 다 되어 컨텍스트가 프로세스를 죽인 경우도
+		// `*exec.ExitError` 로 오는데, 그때 `ExitCode()` 는 -1 이다. 그것을 종료 코드로 받아
+		// 적고 오류를 삼키면, 시간이 초과된 질의가 "성공한 빈 결과" 로 올라가 화면이 다시
+		// "없습니다" 라고 말한다 — 이 작업이 없애려던 바로 그 모양이다.
+		case errors.As(err, &exitError) && exitError.ExitCode() >= 0:
+			// 명령이 돌고 0 이 아닌 코드로 끝났다 — 실행 실패가 아니라 그 명령의 답이다.
+			exitCode = exitError.ExitCode()
+		case len(output) == 0:
+			return unknown, err
+		default:
+			exitCode = sshcmd.ExitCodeUnknown
+		}
 	}
 	out, truncated := autocomplete.CapOutput(output)
-	return out, truncated, nil
+	stderrText, _ := autocomplete.CapOutput(stderr.Take())
+	return sshcmd.CompletionOutput{
+		Stdout:    []byte(out),
+		Stderr:    []byte(stderrText),
+		ExitCode:  exitCode,
+		Truncated: truncated,
+	}, nil
 }
 
 const (

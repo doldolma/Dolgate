@@ -21,6 +21,24 @@ import { resolveDesktopRepoRoot } from "./repo-root";
 import { t } from "./i18n";
 import { logMessage } from "./activity-log-message";
 
+/**
+ * 보조 채널 질의의 결과.
+ *
+ * 예전에는 stdout 문자열 하나였다. 그래서 **명령이 실패한 것과 찍을 것이 없던 것이 같은 값**
+ * 으로 도착했고, 세션 패널이 실패를 "없습니다" 로 그렸다(19.03 호스트의 컨테이너 탭). 종료
+ * 코드와 오류 문장을 함께 올려 호출부가 그 둘을 가른다.
+ */
+export interface CoreCompletionResult {
+  stdout: string;
+  /** 원격 명령의 종료 코드. 알아내지 못했으면 COMPLETION_EXIT_UNKNOWN. */
+  exitCode: number;
+  /** 그 명령이 낸 오류 문장(앞부분). **분류하지 않는다** — 화면은 원문 그대로 보여 준다. */
+  stderr: string;
+}
+
+/** 종료 코드를 알아내지 못했다는 뜻. **모르는 것은 실패가 아니다.** */
+export const COMPLETION_EXIT_UNKNOWN = -1;
+
 const TERMINAL_COMPLETION_QUERY_TIMEOUT_MS = 10_000;
 
 /**
@@ -3966,7 +3984,7 @@ export class CoreManager {
     sessionId: string,
     command: string,
     options?: { background?: boolean; elevate?: boolean },
-  ): Promise<string> {
+  ): Promise<CoreCompletionResult> {
     await this.start();
     // 동적 완성은 보조 채널이 있는 전송에서만 지원한다(SSH/local). SSM 계열은 단일 PTY라 미지원이며,
     // 호출되더라도 원격을 건드리지 않고 빈 결과로 조용히 degrade한다.
@@ -3977,13 +3995,15 @@ export class CoreManager {
     const isTmuxPane =
       sessionId.startsWith("tmux:") && this.isTmuxControlConnected(sessionId);
     if (transport !== "ssh" && transport !== "local-shell" && !isTmuxPane) {
-      return "";
+      return { stdout: "", exitCode: COMPLETION_EXIT_UNKNOWN, stderr: "" };
     }
     const background = options?.background ?? false;
     const response = await this.requestResponse<{
       stdout?: string;
       truncated?: boolean;
       failed?: boolean;
+      exitCode?: number;
+      stderr?: string;
     }>(
       {
         id: randomUUID(),
@@ -4009,7 +4029,16 @@ export class CoreManager {
         `보조 채널에서 명령을 끝내지 못했습니다(sessionId=${sessionId}).`,
       );
     }
-    return typeof response.stdout === "string" ? response.stdout : "";
+    return {
+      stdout: typeof response.stdout === "string" ? response.stdout : "",
+      // 코어가 상태를 못 실은 경로(옛 코어·폴백)는 "모름" 으로 둔다 — 성공으로도 실패로도
+      // 접지 않는다.
+      exitCode:
+        typeof response.exitCode === "number"
+          ? response.exitCode
+          : COMPLETION_EXIT_UNKNOWN,
+      stderr: typeof response.stderr === "string" ? response.stderr : "",
+    };
   }
 
   /**

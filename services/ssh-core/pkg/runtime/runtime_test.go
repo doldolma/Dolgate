@@ -9,6 +9,7 @@ import (
 
 	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/hostkeytrust"
+	"dolssh/services/ssh-core/internal/sshcmd"
 	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/pkg/coretypes"
 )
@@ -29,6 +30,7 @@ type stubSSHManager struct {
 	storedPasswordIndexes  []int
 	completionOut          string
 	completionTrun         bool
+	completionExit         int
 	completionErr          error
 	installCount           int
 	reinjectCount          int
@@ -83,8 +85,15 @@ func (stub *stubSSHManager) ReinjectShellIntegration(string, string) error {
 	return nil
 }
 func (stub *stubSSHManager) FlushShellIntegration(string) {}
-func (stub *stubSSHManager) RunCompletionCommand(_, _ string, _, _ bool) (string, bool, error) {
-	return stub.completionOut, stub.completionTrun, stub.completionErr
+func (stub *stubSSHManager) RunCompletionCommand(
+	_, _ string,
+	_, _ bool,
+) (sshcmd.CompletionOutput, error) {
+	return sshcmd.CompletionOutput{
+		Stdout:    []byte(stub.completionOut),
+		ExitCode:  stub.completionExit,
+		Truncated: stub.completionTrun,
+	}, stub.completionErr
 }
 func (stub *stubSSHManager) RunHostCommand(sessionID, command string, timeoutMs int) (string, string, int, bool, error) {
 	stub.runCommand = command
@@ -214,8 +223,11 @@ func (stub *stubLocalManager) InstallShellIntegration(string) error {
 }
 func (stub *stubLocalManager) ReinjectShellIntegration(string, string) error { return nil }
 func (stub *stubLocalManager) FlushShellIntegration(string)                  {}
-func (stub *stubLocalManager) RunCompletionCommand(_, _ string, _, _ bool) (string, bool, error) {
-	return "", false, nil
+func (stub *stubLocalManager) RunCompletionCommand(
+	_, _ string,
+	_, _ bool,
+) (sshcmd.CompletionOutput, error) {
+	return sshcmd.CompletionOutput{}, nil
 }
 
 func (stub *stubLocalManager) RunHostCommand(

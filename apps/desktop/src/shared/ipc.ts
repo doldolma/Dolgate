@@ -1596,12 +1596,24 @@ export interface DesktopApi {
      *
      * 실패는 **결과에 담아** 온다(`failed`). 거부로 보내면 렌더러가 정상적으로 물러나는 경우까지
      * Electron 메인 로그에 오류로 쌓인다 — 렌더러의 `queryTerminalCompletion` 이 예외로 바꾼다.
+     *
+     * `failed` 와 `exitCode` 는 **다른 말이다.** 앞은 왕복 자체가 없었다는 뜻이고(차례를 놓쳤다,
+     * 채널이 끊겼다), 뒤는 명령이 돌긴 돌았는데 어떻게 끝났느냐다. 뒤가 없어서 "명령이 실패했다"
+     * 와 "찍을 것이 없었다" 가 같은 빈 문자열로 도착했고, 세션 패널이 실패를 "없습니다" 로
+     * 그렸다. `stderr` 는 그때 보여 줄 원문이다 — 문구를 분류하지 않는다.
      */
     queryCompletion: (
       sessionId: string,
       command: string,
       options?: { background?: boolean; elevate?: boolean },
-    ) => Promise<{ stdout: string; failed?: boolean; message?: string }>;
+    ) => Promise<{
+      stdout: string;
+      /** 원격 명령의 종료 코드. 알아내지 못했으면 -1(모름) — 모르는 것은 실패가 아니다. */
+      exitCode: number;
+      stderr: string;
+      failed?: boolean;
+      message?: string;
+    }>;
     /**
      * 이 기계의 자원을 코어가 직접 읽어 온다(로컬 세션 전용).
      *

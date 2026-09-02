@@ -218,12 +218,15 @@ func (c *Conn) RunCompletion(command string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	return autocomplete.RunCompletion(
+	// 모바일의 이 경로는 자동완성 전용이라 종료 코드를 쓰지 않는다 — gomobile 바인딩이 굳어
+	// 있으니 여기서 예전 모양으로 줄인다(Kotlin·Swift 쪽을 건드리지 않는다).
+	out, err := autocomplete.RunCompletion(
 		autocomplete.PoolTarget(pool, c.client, nil, nil),
 		command,
 		false,
 		false,
 	)
+	return string(out.Stdout), out.Truncated, err
 }
 
 func (c *Conn) getCompletionPool() (*sshcmd.WorkerPool, error) {

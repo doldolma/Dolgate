@@ -1167,10 +1167,10 @@ func (m *Manager) FlushShellIntegration(sessionID string) {
 func (m *Manager) RunCompletionCommand(
 	sessionID, command string,
 	background, elevate bool,
-) (string, bool, error) {
+) (sshcmd.CompletionOutput, error) {
 	handle, _, err := m.controlOf(sessionID)
 	if err != nil {
-		return "", false, err
+		return sshcmd.CompletionOutput{ExitCode: sshcmd.ExitCodeUnknown}, err
 	}
 	return autocomplete.RunCompletion(
 		autocomplete.PoolTarget(

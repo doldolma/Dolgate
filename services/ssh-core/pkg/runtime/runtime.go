@@ -52,7 +52,7 @@ type sshSessionManager interface {
 	InstallShellIntegration(sessionID string) error
 	ReinjectShellIntegration(sessionID string, shell string) error
 	FlushShellIntegration(sessionID string)
-	RunCompletionCommand(sessionID, command string, background, elevate bool) (string, bool, error)
+	RunCompletionCommand(sessionID, command string, background, elevate bool) (sshcmd.CompletionOutput, error)
 	// RunHostCommand 은 보조 exec 채널에서 임의 명령을 실행하고 stdout/stderr/exit 를 돌려준다(AI run_command).
 	RunHostCommand(sessionID, command string, timeoutMs int) (string, string, int, bool, error)
 	// KillTmuxSession 은 감지 하단바에서 attach 없이 원격 tmux 세션을 종료한다(보조 exec).
@@ -95,7 +95,7 @@ type localSessionManager interface {
 	InstallShellIntegration(sessionID string) error
 	ReinjectShellIntegration(sessionID string, shell string) error
 	FlushShellIntegration(sessionID string)
-	RunCompletionCommand(sessionID, command string, background, elevate bool) (string, bool, error)
+	RunCompletionCommand(sessionID, command string, background, elevate bool) (sshcmd.CompletionOutput, error)
 	// RunHostCommand 은 보조 채널에서 임의 명령을 실행한다(AI run_command). SSH 쪽과 같은 규약.
 	RunHostCommand(sessionID, command string, timeoutMs int) (string, string, int, bool, error)
 }
@@ -588,19 +588,17 @@ func (runtime *Runtime) RunCompletionQuery(
 	sessionID, requestID, command string,
 	background, elevate bool,
 ) error {
-	var (
-		stdout    string
-		truncated bool
-		runErr    error
-	)
+	out := sshcmd.CompletionOutput{ExitCode: sshcmd.ExitCodeUnknown}
+	var runErr error
 	switch {
 	case runtime.tmux.HasSession(sessionID):
-		stdout, truncated, runErr = runtime.tmux.RunCompletionCommand(sessionID, command, background, elevate)
+		out, runErr = runtime.tmux.RunCompletionCommand(sessionID, command, background, elevate)
 	case runtime.ssh.HasSession(sessionID):
-		stdout, truncated, runErr = runtime.ssh.RunCompletionCommand(sessionID, command, background, elevate)
+		out, runErr = runtime.ssh.RunCompletionCommand(sessionID, command, background, elevate)
 	case runtime.local.HasSession(sessionID):
-		stdout, truncated, runErr = runtime.local.RunCompletionCommand(sessionID, command, background, elevate)
+		out, runErr = runtime.local.RunCompletionCommand(sessionID, command, background, elevate)
 	}
+	stdout := string(out.Stdout)
 	// Completion is strictly best-effort: a failure must never be emitted as a
 	// session-scoped error event (that would tear down the terminal). Always emit
 	// a result so the desktop request resolves promptly.
@@ -620,8 +618,11 @@ func (runtime *Runtime) RunCompletionQuery(
 		SessionID: sessionID,
 		Payload: coretypes.TerminalCompletionResultPayload{
 			Stdout:    stdout,
-			Truncated: truncated,
+			Truncated: out.Truncated,
 			Failed:    failed,
+			// 명령이 어떻게 끝났는지는 왕복이 실패했는지와 다른 말이다 — 둘 다 싣는다.
+			ExitCode: out.ExitCode,
+			Stderr:   string(out.Stderr),
 		},
 	})
 	return nil

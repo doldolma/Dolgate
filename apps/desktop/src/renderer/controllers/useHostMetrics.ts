@@ -280,12 +280,16 @@ export function useHostMetrics({
         reading = await readNatively();
         stdout = reading
           ? ''
-          : await queryTerminalCompletion(
-              sessionId,
-              buildHostMetricsCommand({ processLimit, system: wantsSystem }),
-              // 스스로 도는 폴링이다 — 두 번째 보조 채널에서 돌려 자동완성을 막지 않는다.
-              { background: true },
-            );
+          : (
+              await queryTerminalCompletion(
+                sessionId,
+                buildHostMetricsCommand({ processLimit, system: wantsSystem }),
+                // 스스로 도는 폴링이다 — 두 번째 보조 채널에서 돌려 자동완성을 막지 않는다.
+                { background: true },
+              )
+            ).stdout;
+        // 종료 코드는 보지 않는다. 이 명령은 섹션마다 `|| true` 로 갈라 놓아서, 한 조각이
+        // 실패해도 나머지가 오고 못 읽은 항목은 그 자리에서 "읽을 수 없다" 로 말한다.
       } catch {
         if (cancelled) {
           return;

@@ -20,6 +20,7 @@ import type { AwsEc2HostRecord, MainIpcContext, SshHostRecord } from "./context"
 import { probeLocalAgent, resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { connectAwsEc2OverSsm } from "./aws-ec2-ssh-over-ssm";
 import { runWithIpcSessionOwner } from "./session-owner";
+import { COMPLETION_EXIT_UNKNOWN } from "../core-manager";
 import { t } from '../i18n';
 import { logMessage } from "../activity-log-message";
 
@@ -518,14 +519,20 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
       sessionId: string,
       command: string,
       options?: { background?: boolean; elevate?: boolean },
-    ): Promise<{ stdout: string; failed?: boolean; message?: string }> => {
+    ): Promise<{
+      stdout: string;
+      exitCode: number;
+      stderr: string;
+      failed?: boolean;
+      message?: string;
+    }> => {
       // **완성 질의의 실패는 IPC 의 실패가 아니다.** 여기서 reject 하면 렌더러가 제대로 받아
       // 물러나는 경우까지 Electron 이 메인 로그에 "Error occurred in handler for ..." 로 찍는다.
       // 보조 채널은 세션 패널의 폴링들이 나눠 쓰므로 차례를 놓치는 일이 정상적으로 생기는데,
       // 그때마다 오류가 쌓이면 진짜 문제를 덮는다. 결과에 담아 보내고 렌더러 쪽 서비스가
       // 예외로 바꾼다(호출부의 try/catch 는 그대로다).
       try {
-        return { stdout: await ctx.coreManager.queryCompletion(sessionId, command, options) };
+        return await ctx.coreManager.queryCompletion(sessionId, command, options);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         // 한 줄만 남긴다. 화면은 조용히 물러나지만(패널이 마지막 값을 지킨다) 왜 못 받았는지는
@@ -534,7 +541,13 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         console.warn(
           `[completion] ${message} (session=${sessionId}, command=${command.slice(0, 80)})`,
         );
-        return { stdout: "", failed: true, message };
+        return {
+          stdout: "",
+          exitCode: COMPLETION_EXIT_UNKNOWN,
+          stderr: "",
+          failed: true,
+          message,
+        };
       }
     },
   );

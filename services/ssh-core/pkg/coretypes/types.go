@@ -479,6 +479,16 @@ type TerminalCompletionResultPayload struct {
 	Stdout    string `json:"stdout"`
 	Truncated bool   `json:"truncated,omitempty"`
 	Failed    bool   `json:"failed,omitempty"`
+	// ExitCode 는 원격 명령의 종료 코드다. **Failed 와 다른 말이다** — Failed 는 왕복 자체가
+	// 없었다는 뜻이고, 이쪽은 명령이 돌긴 돌았는데 어떻게 끝났느냐다.
+	//
+	// 이것이 없어서 "명령이 실패했다" 와 "찍을 것이 없었다" 가 같은 빈 문자열로 도착했다.
+	// 19.03 호스트에서 `docker ps` 가 템플릿 오류로 죽어도 세션 패널은 "컨테이너가 없습니다"
+	// 라고 말했다 — 그 둘을 가르는 값이다. 알아내지 못했으면 -1(모름).
+	ExitCode int `json:"exitCode"`
+	// Stderr 는 그 명령이 낸 오류 문장의 앞부분이다. **분류하지 않는다** — 화면은 원문 그대로
+	// 보여 준다. 문구로 의도를 추측하면 오안내가 된다.
+	Stderr string `json:"stderr,omitempty"`
 }
 
 // HostMetricsQueryPayload asks the core to read this machine's resource usage

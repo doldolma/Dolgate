@@ -14,6 +14,30 @@ export const DOCKER_PREFIX_CANDIDATES = ['docker', 'sudo -n docker', 'podman'] a
 /** 목록 한 번에 받는 최대 줄 수. 넘으면 잘렸다고 말하고 검색으로 좁히게 한다. */
 export const DOCKER_ROW_LIMIT = 200;
 
+/**
+ * 출력에 줄 수 상한을 걸되 **원래 명령의 종료 코드를 지킨다.**
+ *
+ * `docker ps … | head -n 201` 의 `$?` 는 **head 의 것**이다 — 도커가 템플릿 오류로 죽어도 0 이
+ * 온다. 보조 채널은 그 코드로 "실패했다" 와 "찍을 것이 없었다" 를 가르므로, 파이프가 상태를
+ * 삼키면 실패가 다시 "없습니다" 로 보인다(고치려던 그 결함이다). POSIX sh 에는 `pipefail` 이
+ * 없으니(dash·busybox ash) 출력을 변수로 받아 상태를 되돌린다.
+ *
+ * 마지막 `exit` 는 워커가 명령을 `( )` 로 감싸므로 그 서브셸만 빠져나온다.
+ *
+ * 대가는 있다: 파이프로 흘리던 것을 변수에 받으므로 원격 셸이 출력을 통째로 들고 있게 되고,
+ * `head` 가 파이프를 닫아 명령을 일찍 끊지도 못한다(컨테이너 수천 개인 호스트에서 메가바이트
+ * 단위다). 전선으로 나가는 양은 그대로다. **파이프로 되돌리지 말 것** — 그러면 상태가 다시
+ * 사라진다.
+ */
+function limitRows(command: string, rows: number = DOCKER_ROW_LIMIT + 1): string {
+  return `out=$(${command}); rc=$?; ${emitRows('out', rows)}; exit $rc`;
+}
+
+/** 받아 둔 변수를 상한까지만 흘려보낸다. 상태는 부르는 쪽이 `exit` 로 지킨다. */
+function emitRows(variable: string, rows: number = DOCKER_ROW_LIMIT + 1): string {
+  return `printf '%s\\n' "$${variable}" | head -n ${rows}`;
+}
+
 /** 셸에 넘기는 값을 감싼다 — 이름에 따옴표가 들어와도 인젝션이 되지 않게. */
 export function quoteShellArg(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
@@ -42,6 +66,10 @@ export function buildDockerProbeCommand(): string {
       'command -v docker-compose >/dev/null 2>&1 && echo compose=v1',
       'command -v docker >/dev/null 2>&1 && echo has=docker',
       'command -v podman >/dev/null 2>&1 && echo has=podman',
+      // 도커냐 포드맨이냐. **이름으로 가르면 안 된다** — RHEL 계열의 `podman-docker` 패키지가
+      // `/usr/bin/docker` 를 포드맨 래퍼로 깐다(그러면 접두사는 docker 인데 알맹이는 포드맨이다).
+      // `--version` 은 데몬에 접속하지 않아 즉답이고, 이미 도는 이 왕복 안에서 끝난다.
+      '[ -n "$p" ] && echo "kind=$($p --version 2>/dev/null | head -n 1)"',
       // 안 되면 이유까지 한 줄 받아 온다 — 권한이 없는 것과 데몬이 꺼진 것은 다른 말이고,
       // 우리가 대신 할 수 있는 일도 다르다.
       //
@@ -55,6 +83,15 @@ export function buildDockerProbeCommand(): string {
 
 export type DockerComposeKind = 'v2' | 'v1' | null;
 
+/**
+ * 어느 런타임인가. `inspect` 형식이 방언마다 달라서 꼭 알아야 한다 — 도커는 원본 JSON 맵으로,
+ * 포드맨은 구조체로 템플릿을 돌린다(INSPECT_FORMATS 주석 참고).
+ *
+ * 모르면 'docker' 다. 대다수가 도커이고, 틀렸을 때 잃는 것도 그쪽이 더 작다(포드맨에서 검사가
+ * 안 오는 것은 지금까지의 동작 그대로다).
+ */
+export type DockerDialect = 'docker' | 'podman';
+
 export interface DockerProbe {
   /** 쓸 수 있는 호출 방법. null 이면 목록을 받을 수 없다. */
   prefix: string | null;
@@ -65,6 +102,8 @@ export interface DockerProbe {
   compose: DockerComposeKind;
   /** 바이너리는 깔려 있는가(권한만 막힌 경우를 가른다). */
   installed: boolean;
+  /** 도커 방언인가 포드맨 방언인가. `--version` 이 스스로 밝힌 이름으로 가른다. */
+  dialect: DockerDialect;
   /**
    * 프로브가 **대답을 하기는 했는가.**
    *
@@ -82,6 +121,7 @@ export function parseDockerProbe(stdout: string): DockerProbe {
   let compose: DockerComposeKind = null;
   let installed = false;
   let answered = false;
+  let dialect: DockerDialect = 'docker';
   let why = '';
   for (const line of stdout.split('\n')) {
     const text = line.trim();
@@ -101,6 +141,10 @@ export function parseDockerProbe(stdout: string): DockerProbe {
     } else if (text.startsWith('has=')) {
       answered = true;
       installed = true;
+    } else if (text.startsWith('kind=')) {
+      answered = true;
+      // "podman version 5.4.0" · "Docker version 27.3.1, build ..." — 스스로 밝힌 이름을 믿는다.
+      dialect = /podman/i.test(text) ? 'podman' : 'docker';
     } else if (text.startsWith('why=')) {
       answered = true;
       why = text.slice('why='.length).trim();
@@ -111,6 +155,7 @@ export function parseDockerProbe(stdout: string): DockerProbe {
     compose,
     installed,
     answered,
+    dialect,
     reason: prefix || !installed ? null : classifyDockerFailure(why),
   };
 }
@@ -154,10 +199,19 @@ export interface DockerContainer {
   workingDir: string | null;
 }
 
+/**
+ * `ps` 한 줄에서 받아 오는 칸들.
+ *
+ * **`{{.State}}` 는 쓰지 않는다 — 20.10 이상에만 있는 필드다.** 도커는 모르는 필드를 만나면 그
+ * 칸만 비우는 게 아니라 템플릿 실행을 통째로 접는다: stdout 이 빈 채로 exit 1 이고 사연은
+ * stderr 로만 나가는데, 보조 채널은 stderr 를 버린다(completion_worker.go). 그래서 19.03 호스트
+ * 에서 컨테이너 탭이 오류 한 줄 없이 "없습니다" 로 굳었다 — 이미지·네트워크는 옛 필드만 써서
+ * 멀쩡했으니 도커가 안 읽히는 것처럼 보이지도 않았다. `.Status` 는 1.x 부터 있고 첫 낱말이
+ * 상태를 그대로 말해 주므로 그것 하나로 낸다(toContainerState).
+ */
 const CONTAINER_FIELDS = [
   '{{.ID}}',
   '{{.Names}}',
-  '{{.State}}',
   '{{.Status}}',
   '{{.Image}}',
   '{{.Ports}}',
@@ -171,25 +225,23 @@ const CONTAINER_FIELDS = [
  * 우리가 정하고(그룹 끝에 흐리게), 검색도 받아 온 목록을 앱에서 거른다. 왕복은 하나면 된다.
  */
 export function buildContainerListCommand(prefix: string): string {
-  return `${AUX_PATH_EXPORT}${prefix} ps -a --format '${CONTAINER_FIELDS}' | head -n ${DOCKER_ROW_LIMIT + 1}`;
+  return AUX_PATH_EXPORT + limitRows(`${prefix} ps -a --format '${CONTAINER_FIELDS}'`);
 }
 
-function toContainerState(state: string, status: string): DockerContainerState {
-  const normalized = state.trim().toLowerCase();
-  if (
-    normalized === 'running' ||
-    normalized === 'restarting' ||
-    normalized === 'paused' ||
-    normalized === 'exited' ||
-    normalized === 'created' ||
-    normalized === 'dead'
-  ) {
-    return normalized;
-  }
-  // 20.10 미만 도커는 `.State` 를 주지 않는다 — 상태 문장의 첫 낱말로 가른다.
+/**
+ * 상태 문장으로 상태를 가른다("Up 22 hours (healthy)" → running).
+ *
+ * 왜 `.State` 를 안 받는지는 CONTAINER_FIELDS 주석에 있다. 포드맨도 도커를 흉내 내 같은 문장을
+ * 내지만(`Up …`·`Exited (0) …`), **멈춤만 적는 자리가 다르다** — 도커는 "Up 5 minutes (Paused)"
+ * 로 달고 포드맨은 "Paused" 한 낱말로 낸다. 그래서 멈춤은 첫 낱말이 아니라 문장 전체에서 본다.
+ */
+function toContainerState(status: string): DockerContainerState {
   const text = status.trim().toLowerCase();
+  if (text.includes('paused')) {
+    return 'paused';
+  }
   if (text.startsWith('up')) {
-    return text.includes('paused') ? 'paused' : 'running';
+    return 'running';
   }
   if (text.startsWith('restarting')) {
     return 'restarting';
@@ -222,14 +274,14 @@ export function parseContainerList(stdout: string): DockerContainerList {
       continue;
     }
     const parts = line.split('\t');
-    const [id, name, state, status, image, ports, project, service, workingDir] = parts;
+    const [id, name, status, image, ports, project, service, workingDir] = parts;
     if (!id || !name) {
       continue;
     }
     containers.push({
       id: id.trim(),
       name: name.trim(),
-      state: toContainerState(state ?? '', status ?? ''),
+      state: toContainerState(status ?? ''),
       status: (status ?? '').trim(),
       image: (image ?? '').trim(),
       ports: (ports ?? '').trim(),
@@ -627,14 +679,45 @@ const STATS_FIELDS =
 // 마지막 칸은 컨테이너가 여는 포트다 — `ps` 는 **호스트에 공개된 것만** 준다. 공개되지 않은
 // 포트도 컨테이너 네트워크로는 열 수 있어야 하므로 여기서 함께 받는다(host 네트워킹 컨테이너는
 // `ps` 가 포트를 아예 주지 않아 이것이 유일한 출처다).
-const INSPECT_FIELDS =
-  '{{.Id}}\t{{index . "RestartCount"}}\t{{with index .State "Health"}}{{index . "Status"}}{{end}}' +
-  '\t{{index .State "OOMKilled"}}' +
-  '\t{{range $port, $unused := index .Config "ExposedPorts"}}{{$port}} {{end}}' +
-  // 네트워크도 여기서 함께 받는다 — 터널을 열 때 컨테이너 IP 를 다시 물으러 가지 않게.
-  // **`$net.IPAddress` 로 읽으면 안 된다**: 구조체 모드에서 host 네트워킹의 빈 IP 가
-  // `invalid IP` 라는 글자로 찍힌다(실제로 그렇게 나왔다). `index` 는 빈 문자열을 준다.
-  '\t{{range $name, $net := index .NetworkSettings "Networks"}}{{$name}}={{index $net "IPAddress"}};{{end}}';
+//
+// **포드맨에는 그 맵 모드가 없다.** 포드맨은 `define.InspectContainerData` **구조체**를 그대로
+// 템플릿에 넣으므로(`{{.Id}}` 도 `{{.ID}}` 로 고쳐 준다) `index .` 이 "can't index item of type
+// …" 로 죽는다 — 검사 왕복이 통째로 빈다. 그래서 방언마다 한 벌씩 둔다. 두 형식은 **같은 6칸**을
+// 내므로 파서는 하나로 충분하다.
+/**
+ * 네트워크 이름=IP 칸.
+ *
+ * 검사(INSPECT_FORMATS)와 "이 컨테이너의 네트워크만" 조회(buildContainerNetworksCommand)가 같은
+ * 조각을 쓴다 — 두 벌로 두었더니 방언을 한쪽에만 넣고 다른 쪽을 잊기 딱 좋았다.
+ */
+const NETWORK_FRAGMENTS: Record<DockerDialect, string> = {
+  // 도커: 맵 모드다. **`$net.IPAddress` 로 읽으면 안 된다** — 구조체 모드에서 host 네트워킹의
+  // 빈 IP 가 `invalid IP` 라는 글자로 찍힌다(실제로 그렇게 나왔다). `index` 는 빈 문자열을 준다.
+  docker:
+    '{{range $name, $net := index .NetworkSettings "Networks"}}{{$name}}={{index $net "IPAddress"}};{{end}}',
+  // 포드맨: 구조체다. `NetworkSettings` 가 포인터라 `with` 로 감싸지 않으면 nil 에서 죽는다.
+  // `IPAddress` 는 여기선 그냥 string 이라 도커에서 피했던 문제가 없다.
+  podman:
+    '{{with .NetworkSettings}}{{range $name, $net := .Networks}}{{$name}}={{$net.IPAddress}};{{end}}{{end}}',
+};
+
+const INSPECT_FORMATS: Record<DockerDialect, string> = {
+  docker:
+    '{{.Id}}\t{{index . "RestartCount"}}\t{{with index .State "Health"}}{{index . "Status"}}{{end}}' +
+    '\t{{index .State "OOMKilled"}}' +
+    '\t{{range $port, $unused := index .Config "ExposedPorts"}}{{$port}} {{end}}' +
+    // 네트워크도 여기서 함께 받는다 — 터널을 열 때 컨테이너 IP 를 다시 물으러 가지 않게.
+    '\t' + NETWORK_FRAGMENTS.docker,
+  // 포드맨은 구조체라 필드를 그대로 읽는다. **`with` 로 감싸는 것이 여기서는 통한다** — 맵 모드와
+  // 달리 필드는 늘 존재하고 값만 nil 이기 때문이다(`State`·`Config`·`NetworkSettings` 가 전부
+  // 포인터라 감싸지 않으면 nil 에서 죽는다). `IPAddress` 는 포드맨에서 그냥 string 이라 도커에서
+  // 피했던 `invalid IP` 문제가 없다.
+  podman:
+    '{{.ID}}\t{{.RestartCount}}\t{{with .State}}{{with .Health}}{{.Status}}{{end}}{{end}}' +
+    '\t{{with .State}}{{.OOMKilled}}{{end}}' +
+    '\t{{with .Config}}{{range $port, $unused := .ExposedPorts}}{{$port}} {{end}}{{end}}' +
+    '\t' + NETWORK_FRAGMENTS.podman,
+};
 
 /**
  * 지표(+ 검사)를 받는다. **목록과 다른 왕복이다.**
@@ -650,19 +733,25 @@ const INSPECT_FIELDS =
  */
 export function buildContainerMetricsCommand(
   prefix: string,
-  options: { stats: boolean; inspectIds: readonly string[] },
+  options: { stats: boolean; inspectIds: readonly string[]; dialect?: DockerDialect },
 ): string {
-  const parts: string[] = [];
+  const parts: string[] = ['rc=0'];
   if (options.stats) {
-    parts.push(`${prefix} stats --no-stream --format '${STATS_FIELDS}'`);
+    // 상태는 **stats 것만** 본다. 지표를 못 주는 호스트를 알아보는 신호가 그것이고, 아래 검사는
+    // 그 사이 지워진 컨테이너 하나로도 0 이 아닌 코드를 내기 때문이다(그건 실패가 아니다).
+    parts.push(`stats=$(${prefix} stats --no-stream --format '${STATS_FIELDS}'); rc=$?`);
+    parts.push(`printf '%s\\n' "$stats"`);
   }
   // 구분자는 stats 를 빼도 넣는다 — 파서가 늘 같은 자리에서 가른다.
   parts.push(`echo ${LIST_SEPARATOR}`);
   if (options.inspectIds.length > 0) {
     const ids = options.inspectIds.map(quoteShellArg).join(' ');
-    // 그 사이에 지워진 컨테이너가 있으면 그것만 stderr 로 빠지고 나머지는 그대로 온다.
-    parts.push(`${prefix} inspect ${ids} --format '${INSPECT_FIELDS}' 2>/dev/null`);
+    // 그 사이에 지워진 컨테이너가 있으면 그것만 stderr 로 빠지고 나머지는 그대로 온다. 그 한
+    // 줄 때문에 왕복 전체가 실패로 읽히지 않게 상태를 삼킨다(`|| :`).
+    const format = INSPECT_FORMATS[options.dialect ?? 'docker'];
+    parts.push(`${prefix} inspect ${ids} --format '${format}' 2>/dev/null || :`);
   }
+  parts.push('exit $rc');
   return AUX_PATH_EXPORT + parts.join('; ');
 }
 
@@ -777,9 +866,12 @@ export function parseContainerNetworks(text: string): DockerContainerNetwork[] {
  * 한 컨테이너의 네트워크만 묻는다. 검사 결과가 아직 없을 때(방금 만든 컨테이너의 공개 포트는
  * `ps` 가 먼저 준다) 터널을 열기 직전에 한 번 쓰는 길이다.
  */
-export function buildContainerNetworksCommand(prefix: string, containerId: string): string {
-  const format =
-    '{{range $name, $net := index .NetworkSettings "Networks"}}{{$name}}={{index $net "IPAddress"}};{{end}}';
+export function buildContainerNetworksCommand(
+  prefix: string,
+  containerId: string,
+  dialect: DockerDialect = 'docker',
+): string {
+  const format = NETWORK_FRAGMENTS[dialect];
   return (
     AUX_PATH_EXPORT +
     `${prefix} inspect ${quoteShellArg(containerId)} --format ${quoteShellArg(format)} 2>/dev/null`
@@ -902,7 +994,10 @@ const LIST_SEPARATOR = '@@dolgate@@';
  * 그건 이 한 줄로 충분하다. 볼륨 크기(`system df -v`)를 뺀 것도 같은 이유다.
  */
 export function buildImageListCommand(prefix: string): string {
-  return `${AUX_PATH_EXPORT}${prefix} images --format '{{.Repository}}\\t{{.Tag}}\\t{{.ID}}\\t{{.Size}}' | head -n ${DOCKER_ROW_LIMIT + 1}`;
+  return (
+    AUX_PATH_EXPORT +
+    limitRows(`${prefix} images --format '{{.Repository}}\\t{{.Tag}}\\t{{.ID}}\\t{{.Size}}'`)
+  );
 }
 
 const SIZE_UNITS: Record<string, number> = {
@@ -996,13 +1091,27 @@ export interface DockerVolume {
   anonymous: boolean;
 }
 
-/** 볼륨 목록과 "누가 쓰는지" 를 한 왕복에. 마운트는 컨테이너 쪽에서만 알 수 있다. */
+/**
+ * 볼륨 목록과 "누가 쓰는지" 를 한 왕복에. 마운트는 컨테이너 쪽에서만 알 수 있다.
+ *
+ * **두 조각 중 하나라도 실패하면 실패다.** 예전에는 마지막 명령의 상태만 남아, `volume ls` 가
+ * 죽어도 0 으로 끝나 빈 목록이 "볼륨이 없습니다" 로 보였다. 사용 수만 못 받은 경우도 마찬가지다
+ * — 0 개라고 적느니 못 읽었다고 말하는 편이 맞다.
+ */
 export function buildVolumeListCommand(prefix: string): string {
-  return AUX_PATH_EXPORT + [
-    `${prefix} volume ls --format '{{.Name}}\\t{{.Driver}}' | head -n ${DOCKER_ROW_LIMIT + 1}`,
-    `echo ${LIST_SEPARATOR}`,
-    `${prefix} ps -a --format '{{.Mounts}}'`,
-  ].join('; ');
+  return (
+    AUX_PATH_EXPORT +
+    [
+      `list=$(${prefix} volume ls --format '{{.Name}}\\t{{.Driver}}'); rc=$?`,
+      `mounts=$(${prefix} ps -a --format '{{.Mounts}}'); mrc=$?`,
+      // 먼저 난 실패를 남긴다 — `[ ]` 의 상태가 `$?` 를 덮지 않게 미리 받아 둔다.
+      '[ "$rc" -eq 0 ] && rc=$mrc',
+      emitRows('list'),
+      `echo ${LIST_SEPARATOR}`,
+      `printf '%s\\n' "$mounts"`,
+      'exit $rc',
+    ].join('; ')
+  );
 }
 
 const ANONYMOUS_VOLUME = /^[0-9a-f]{32,}$/;
@@ -1011,7 +1120,14 @@ export function parseVolumeList(stdout: string): { volumes: DockerVolume[]; trun
   const [listPart = '', mountsPart = ''] = stdout.split(LIST_SEPARATOR);
   const usage = new Map<string, number>();
   for (const line of mountsPart.split('\n')) {
-    for (const mount of line.split(',')) {
+    // 도커는 `a,b` 로 주는데 **포드맨은 `[a b]` 로 준다** — 포드맨의 `ps` 에는 Mounts 를 꾸미는
+    // 메서드가 없어서 `[]string` 필드가 Go 의 슬라이스 표기 그대로 찍힌다. 쉼표로만 가르면 그
+    // 줄이 통째로 이름 하나가 되어, 포드맨 호스트에서는 "이 볼륨을 쓰는 컨테이너" 가 늘 0 이었다.
+    //
+    // 대괄호를 벗기고 쉼표·공백 둘 다로 가른다. 볼륨 이름에는 공백이 못 들어가므로(도커·포드맨
+    // 모두 `[a-zA-Z0-9][a-zA-Z0-9_.-]*`) 안전하고, 슬라이스를 그대로 찍는 다른 런타임도 같이
+    // 살아난다. 섞여 오는 bind mount 경로는 지금처럼 무해하다 — 볼륨 이름과 맞지 않을 뿐이다.
+    for (const mount of line.replace(/^\s*\[|\]\s*$/g, '').split(/[,\s]+/)) {
       const name = mount.trim();
       if (name) {
         usage.set(name, (usage.get(name) ?? 0) + 1);
@@ -1047,7 +1163,8 @@ export interface DockerNetwork {
   name: string;
   driver: string;
   subnet: string | null;
-  containerCount: number;
+  /** 붙어 있는 컨테이너 수. **포드맨은 알려 주지 않으므로 null** — 0 으로 적으면 거짓말이 된다. */
+  containerCount: number | null;
 }
 
 /**
@@ -1063,13 +1180,44 @@ export interface DockerNetwork {
  *
  * 네트워크가 하나도 없으면 `network inspect` 는 인자 없이 불려 실패한다 — 먼저 id 를 세어 본다.
  */
+/**
+ * 도커와 포드맨은 `network inspect` 가 **서로 다른 타입**을 낸다 — 하나의 형식으로는 안 된다.
+ *
+ * 도커는 `types.NetworkResource`(`IPAM.Config`·`Containers`), 포드맨은 `types.Network`
+ * (`Subnets`, 붙은 컨테이너는 아예 없음)다. 도커 형식을 포드맨에 돌리면 템플릿이 죽어 stdout 이
+ * 비고, 그러면 네트워크 탭이 통째로 "없습니다" 가 된다(컨테이너 목록의 `{{.State}}` 와 같은
+ * 결함이었다).
+ *
+ * **되는 것을 위에서부터 고르되, 실패한 시도의 출력은 버린다.** 템플릿은 줄 중간에 죽으므로
+ * (`podman<TAB>bridge<TAB>` 까지 찍고 오류) 그대로 이으면 그 조각이 다음 시도의 첫 줄에 붙는다.
+ * 변수로 받아 **성공한 쪽만** 흘려보내는 이유다.
+ */
+const NETWORK_FORMATS = {
+  docker: '{{.Name}}\t{{.Driver}}\t{{range .IPAM.Config}}{{.Subnet}} {{end}}\t{{len .Containers}}',
+  // 칸 수는 맞춰야 한다 — 마지막 탭이 없으면 파서가 컨테이너 수 칸을 아예 못 본다.
+  podman: '{{.Name}}\t{{.Driver}}\t{{range .Subnets}}{{.Subnet}} {{end}}\t',
+} as const;
+
 export function buildNetworkListCommand(prefix: string): string {
-  const format =
-    '{{.Name}}\t{{.Driver}}\t{{range .IPAM.Config}}{{.Subnet}} {{end}}\t{{len .Containers}}';
+  // 첫 시도의 오류는 **버린다** — 포드맨에서 실패하는 것이 정상이라 그 문장은 사연이 아니라
+  // 소음이다. 두 번째 시도의 것은 남긴다: 둘 다 실패했다는 것은 우리가 모르는 런타임이라는
+  // 뜻이고, 그때 화면에 보여 줄 단서가 그 한 줄뿐이다(예전에는 그것도 버려서 이유 없는
+  // 실패가 됐다).
+  const attempt = (format: string, keepStderr = false) =>
+    `$(${prefix} network inspect $ids --format '${format}'${keepStderr ? '' : ' 2>/dev/null'})`;
   return (
     AUX_PATH_EXPORT +
-    `ids=$(${prefix} network ls -q); [ -n "$ids" ] && ` +
-    `${prefix} network inspect $ids --format '${format}' | head -n ${DOCKER_ROW_LIMIT + 1}`
+    [
+      `ids=$(${prefix} network ls -q); rc=$?`,
+      // **네트워크가 하나도 없는 것은 실패가 아니다.** `[ -n "$ids" ] &&` 로 끝내면 그런 호스트가
+      // 0 이 아닌 상태로 끝나, 정상적인 빈 목록이 "읽을 수 없다" 로 뒤집힌다 — 고치려던 결함의
+      // 거울상이다. 그래서 조회를 `if` 안에 두고 상태는 조회한 경우에만 갈아 끼운다.
+      'if [ "$rc" -eq 0 ] && [ -n "$ids" ]; then ' +
+        `out=${attempt(NETWORK_FORMATS.docker)} || out=${attempt(NETWORK_FORMATS.podman, true)}; rc=$?; ` +
+        `${emitRows('out')}; ` +
+        'fi',
+      'exit $rc',
+    ].join('; ')
   );
 }
 
@@ -1089,11 +1237,14 @@ export function parseNetworkList(stdout: string): { networks: DockerNetwork[]; t
       continue;
     }
     const subnet = (subnets ?? '').trim().split(/\s+/).filter(Boolean)[0] ?? null;
+    // 포드맨은 이 칸을 비워 보낸다(붙은 컨테이너를 알려 주지 않는다) — 0 과 구분해서 담는다.
+    const countText = (count ?? '').trim();
+    const parsedCount = Number(countText);
     networks.push({
       name: name.trim(),
       driver: (driver ?? '').trim(),
       subnet,
-      containerCount: Number((count ?? '').trim()) || 0,
+      containerCount: countText && Number.isFinite(parsedCount) ? parsedCount : null,
     });
   }
   return { networks, truncated: seen > DOCKER_ROW_LIMIT };

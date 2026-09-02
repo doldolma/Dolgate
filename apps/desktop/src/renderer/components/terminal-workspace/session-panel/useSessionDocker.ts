@@ -10,7 +10,11 @@
 // 작은 레지스트리로 주고받는다.
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { queryTerminalCompletion } from '../../../services/desktop/terminal';
+import {
+  completionFailed,
+  queryTerminalCompletion,
+  type TerminalCompletionResult,
+} from '../../../services/desktop/terminal';
 import {
   buildContainerListCommand,
   buildContainerMetricsCommand,
@@ -30,6 +34,7 @@ import {
   parseNetworkList,
   parseVolumeList,
   type DockerContainer,
+  type DockerDialect,
   type DockerImage,
   type DockerInspectInfo,
   type DockerIoRate,
@@ -62,6 +67,14 @@ export interface DockerRuntime {
    * "감싸 달라" 는 표시만 든다.
    */
   elevate: boolean;
+  /**
+   * 도커 방언인가 포드맨 방언인가.
+   *
+   * `inspect` 형식이 방언마다 다르다 — 도커는 원본 JSON 맵으로, 포드맨은 구조체로 템플릿을
+   * 돌린다. 프로브가 `--version` 한 줄로 알아내 여기 담아 두므로, 조회 명령은 **처음부터 맞는
+   * 형식**을 보낸다(실패하고 다시 묻는 왕복이 없다).
+   */
+  dialect: DockerDialect;
   /**
    * compose 를 부르는 방법 전체("sudo docker compose" · "docker-compose"). 없으면 null.
    *
@@ -111,6 +124,7 @@ const CHECKING: DockerRuntime = {
   availability: 'checking',
   prefix: null,
   elevate: false,
+  dialect: 'docker',
   compose: null,
 };
 
@@ -179,11 +193,14 @@ export function useDockerRuntime(
         compose: null,
         installed: false,
         answered: false,
+        dialect: 'docker',
         reason: null,
       };
       let failed = false;
       try {
-        const stdout = await queryTerminalCompletion(sessionId, buildDockerProbeCommand(), {
+        // 프로브는 늘 0 으로 끝난다(후보를 못 찾아도 이유 줄을 찍는다) — 종료 코드를 보지
+        // 않고 `answered` 로 판정한다.
+        const { stdout } = await queryTerminalCompletion(sessionId, buildDockerProbeCommand(), {
           background: true,
         });
         probe = parseDockerProbe(stdout);
@@ -219,6 +236,7 @@ export function useDockerRuntime(
           availability: 'absent',
           prefix: null,
           elevate: false,
+          dialect: 'docker',
           compose: null,
           atMs: Date.now(),
         });
@@ -232,7 +250,7 @@ export function useDockerRuntime(
       if (!probe.prefix && probe.installed && probe.reason === 'permission') {
         let elevated: DockerProbe | null = null;
         try {
-          const stdout = await queryTerminalCompletion(sessionId, buildDockerProbeCommand(), {
+          const { stdout } = await queryTerminalCompletion(sessionId, buildDockerProbeCommand(), {
             background: true,
             elevate: true,
           });
@@ -250,6 +268,8 @@ export function useDockerRuntime(
             // 터미널에 넣는 명령은 사람이 sudo 에 답할 수 있다.
             prefix: 'sudo docker',
             elevate: true,
+            // 되물린 프로브가 스스로 밝힌 이름을 쓴다 — 첫 프로브는 데몬에 못 붙어 못 물어봤다.
+            dialect: elevated.dialect,
             // compose 판정은 데몬과 무관하다 — 첫 프로브에서 이미 알아냈다.
             compose: composeCommandFor('sudo docker', probe.compose),
             atMs: Date.now(),
@@ -269,6 +289,7 @@ export function useDockerRuntime(
         prefix: probe.prefix,
         // 여기까지 왔으면 sudo 되물리기는 통하지 않았거나 시도할 값이 없었다.
         elevate: false,
+        dialect: probe.dialect,
         compose: composeCommandFor(probe.prefix, probe.compose),
         atMs: Date.now(),
       });
@@ -291,6 +312,7 @@ export function useDockerRuntime(
           availability: entry.availability,
           prefix: entry.prefix,
           elevate: entry.elevate,
+          dialect: entry.dialect,
           compose: entry.compose,
         }
       : CHECKING;
@@ -488,6 +510,9 @@ const METRICS_POLL_MAX_MS = 60_000;
 
 /** 걸린 시간의 이 배수를 주기로 삼는다(왕복이 채널을 절반 이상 물지 않게). */
 const POLL_DUTY_FACTOR = 3;
+
+/** 지표를 못 주는 호스트라고 접기까지 연달아 필요한 실패 횟수. 한 번은 삐끗한 것일 수 있다. */
+const STATS_GIVE_UP_STREAK = 2;
 const BACKOFF_MS = [5_000, 15_000, 60_000];
 
 /** 행 스파크라인이 보는 창(ms)과 표본 상한. 이력은 앱에 쌓아 원격 왕복을 늘리지 않는다. */
@@ -527,6 +552,24 @@ export interface DockerLists {
   updatedAtMs: number | null;
   /** 지금 받아오기가 실패해 물러나 있는 상태. 목록은 마지막 값이다. */
   failing: boolean;
+  /**
+   * 명령이 실패했을 때 원격이 낸 첫 줄. 성공했으면 null.
+   *
+   * **분류하지 않고 원문 그대로 나른다.** 문구로 의도를 추측하면 오안내가 된다(권한 문제인지
+   * 데몬이 죽었는지는 그 문장이 이미 말한다).
+   *
+   * 이유는 **부가 설명이지 판정 근거가 아니다.** 아래 `unreadable` 을 볼 것.
+   */
+  error: string | null;
+  /**
+   * 이 탭을 **읽지 못했는가.** 못 읽은 것과 정말 없는 것을 가르는 자리는 여기 하나다.
+   *
+   * 예전에는 화면이 이 판단을 다시 유도했다 — 그것도 종료 코드가 아니라 "stderr 에 글자가
+   * 있나" 로. 네트워크 명령은 두 방언 시도를 모두 `2>/dev/null` 로 막으므로 실패해도 이유가
+   * 비는데, 그러면 조건이 false 가 되어 "네트워크가 없습니다" 가 그대로 돌아왔다. 판정은 종료
+   * 코드가 하고(`failing`), 화면은 그리기만 한다.
+   */
+  unreadable: boolean;
   truncated: boolean;
 }
 
@@ -539,6 +582,7 @@ interface TabState {
   networks: DockerNetwork[];
   updatedAtMs: number | null;
   failing: boolean;
+  error: string | null;
   truncated: boolean;
 }
 
@@ -554,6 +598,7 @@ const EMPTY_TAB: TabState = {
   networks: [],
   updatedAtMs: null,
   failing: false,
+  error: null,
   truncated: false,
 };
 
@@ -589,8 +634,54 @@ function buildCommand(tab: DockerTabId, prefix: string): string {
   }
 }
 
-function applyOutput(tab: DockerTabId, previous: TabState, stdout: string): TabState {
-  const next: TabState = { ...previous, updatedAtMs: Date.now(), failing: false };
+/** 화면에 보여 줄 오류 한 줄. 원문의 첫 줄만 쓰고 길면 자른다 — 해석하지 않는다. */
+function firstErrorLine(stderr: string): string | null {
+  const line = stderr
+    .split('\n')
+    .map((text) => text.trim())
+    .find((text) => text.length > 0);
+  if (!line) {
+    return null;
+  }
+  return line.length > 300 ? `${line.slice(0, 300)}…` : line;
+}
+
+/** 이 탭에 보여 줄 줄이 몇인가. `unreadable` 판정이 쓴다. */
+function rowCountOf(tab: DockerTabId, state: TabState): number {
+  switch (tab) {
+    case 'images':
+      return state.images.length;
+    case 'volumes':
+      return state.volumes.length;
+    case 'networks':
+      return state.networks.length;
+    default:
+      return state.containers.length;
+  }
+}
+
+function applyOutput(
+  tab: DockerTabId,
+  previous: TabState,
+  result: TerminalCompletionResult,
+): TabState {
+  if (completionFailed(result)) {
+    /**
+     * 명령이 돌긴 돌았는데 0 이 아닌 코드로 끝났다.
+     *
+     * **목록을 비우지 않는다.** 비우면 실패가 "없습니다" 로 보인다 — 종료 코드를 나르지 않던
+     * 시절에 19.03 호스트의 컨테이너 탭이 딱 그렇게 굳었다. 마지막 값과 받은 시각을 지키고
+     * 이유만 붙여, 화면이 "읽을 수 없다" 고 말하게 한다.
+     */
+    return { ...previous, failing: true, error: firstErrorLine(result.stderr) };
+  }
+  const stdout = result.stdout;
+  const next: TabState = {
+    ...previous,
+    updatedAtMs: Date.now(),
+    failing: false,
+    error: null,
+  };
   if (tab === 'containers') {
     // 지표·검사는 이 왕복에 오지 않는다(따로 받는다) — 목록만 갈아 끼우고 나머지는 둔다.
     const parsed = parseContainerList(stdout);
@@ -624,6 +715,8 @@ export function useDockerLists(
   prefix: string | null,
   /** 조회 명령을 코어가 sudo 로 감싸야 하는가(useDockerRuntime 이 정한다). */
   elevate: boolean,
+  /** 검사 형식을 고르는 방언(useDockerRuntime 이 정한다). */
+  dialect: DockerDialect,
   tab: DockerTabId,
   enabled: boolean,
   /** 이력을 담는 단위(호스트, 없으면 세션). */
@@ -662,6 +755,8 @@ export function useDockerLists(
    * 차례에만 나가고 나머지 틱은 왕복 없이 넘어간다.
    */
   const statsSupportedRef = useRef(true);
+  /** 지표가 연달아 안 온 횟수. 한 번 삐끗한 것과 못 주는 호스트를 가른다. */
+  const statsFailureStreakRef = useRef(0);
   /** 초당 I/O. 표본마다 새로 계산해 담는다(렌더는 아래 setState 가 낸다). */
   const ioRatesRef = useRef<Map<string, DockerIoRate>>(new Map());
   /** 지표 루프의 틱. 이 횟수마다 검사(inspect)를 얹는다 — 목록 루프와는 무관하다. */
@@ -688,6 +783,7 @@ export function useDockerLists(
     // 지표를 못 받는다고 판단해 stats 를 빼 둔 호스트도 한 번 더 시험한다 — 도커를 다시 깔거나
     // 버전을 올린 뒤 다시 보려면 이 버튼 말고는 길이 없다.
     statsSupportedRef.current = true;
+    statsFailureStreakRef.current = 0;
     setNonce((current) => current + 1);
   }, []);
 
@@ -727,9 +823,9 @@ export function useDockerLists(
       }
       publishDockerBusy(sessionId, true);
       const startedAtMs = Date.now();
-      let stdout: string;
+      let result: TerminalCompletionResult;
       try {
-        stdout = await queryTerminalCompletion(
+        result = await queryTerminalCompletion(
           sessionId,
           buildCommand(tab, prefix),
           // 스스로 도는 폴링이다 — 두 번째 보조 채널에서 돌려 자동완성을 막지 않는다.
@@ -752,11 +848,22 @@ export function useDockerLists(
       if (cancelled) {
         return;
       }
-      failures = 0;
       publishDockerBusy(sessionId, false);
       setRefreshPending(false);
       const elapsedMs = Date.now() - startedAtMs;
-      setState((current) => ({ ...current, [tab]: applyOutput(tab, current[tab], stdout) }));
+      setState((current) => ({ ...current, [tab]: applyOutput(tab, current[tab], result) }));
+      /**
+       * **명령이 실패한 것도 실패다.** 왕복이 성공했다는 이유로 아래 성공 경로를 태우면 두 가지가
+       * 어긋난다: 정적 탭(이미지·볼륨·네트워크)은 여기서 다시 잡히지 않아 한 번의 실패가 새로
+       * 고침 전까지 굳고(그런데 배너는 "다시 받는 중" 이라고 돈다), 컨테이너 탭은 실패 횟수가
+       * 0 으로 되돌아가 늘 최소 주기로 다시 물어 본다 — 영영 실패하는 호스트를 5초마다 두드린다.
+       */
+      if (completionFailed(result)) {
+        failures += 1;
+        schedule(BACKOFF_MS[Math.min(failures - 1, BACKOFF_MS.length - 1)]);
+        return;
+      }
+      failures = 0;
       // 컨테이너만 스스로 변한다 — 나머지는 탭을 열 때와 새로고침에서만 받는다.
       if (tab === 'containers') {
         // 걸린 시간에 맞춰 물러난다(5~20초). 목록만 받으므로 대개 최소 주기에 머문다.
@@ -836,11 +943,11 @@ export function useDockerLists(
       }
       tickRef.current += 1;
       const startedAtMs = Date.now();
-      let stdout: string;
+      let result: TerminalCompletionResult;
       try {
-        stdout = await queryTerminalCompletion(
+        result = await queryTerminalCompletion(
           sessionId,
-          buildContainerMetricsCommand(prefix, { stats: wantsStats, inspectIds }),
+          buildContainerMetricsCommand(prefix, { stats: wantsStats, inspectIds, dialect }),
           // 이 기능에서 제일 오래 채널을 무는 왕복이다 — 반드시 백그라운드 레인으로.
           { background: true, elevate },
         );
@@ -857,20 +964,41 @@ export function useDockerLists(
       }
       failures = 0;
       const elapsedMs = Date.now() - startedAtMs;
+      /**
+       * **실패해도 파싱한다.** 이 명령의 종료 코드는 일부러 `stats` 것만인데(검사는 그 사이
+       * 지워진 컨테이너 하나로도 0 이 아닌 코드를 낸다), 같은 stdout 에 검사 결과가 통째로
+       * 들어 있다. 실패라고 버리면 지표를 못 주는 호스트에서 헬스·재시작·노출 포트·컨테이너
+       * IP 까지 함께 잃는다 — 예전에는 멀쩡히 오던 것들이다.
+       */
+      const stdout = result.stdout;
       const parsed = parseContainerMetrics(stdout);
-      if (
-        wantsStats &&
-        // **아무것도 안 온 것과 지표만 안 온 것은 다르다.** 왕복이 조용히 실패하면(코어의 완성
-        // 타임아웃은 오류가 아니라 빈 문자열로 돌아온다) stdout 이 통째로 비는데, 그것을 "이
-        // 호스트는 지표를 못 준다" 로 읽으면 한 번 늦은 것 때문에 CPU·MEM 이 영영 사라진다.
-        // 명령이 돌기만 했다면 구분자라도 찍혀 있다.
-        stdout.trim() !== '' &&
-        parsed.stats.size === 0 &&
-        listed.containers.some((container) => isRunningState(container))
-      ) {
-        // 돌고 있는 컨테이너가 있는데 지표가 한 줄도 없다 = 이 호스트에서는 못 쓴다.
-        // 다음 왕복부터 stats 를 빼면 이 루프가 검사만 싣고 훨씬 빨라진다.
-        statsSupportedRef.current = false;
+      if (wantsStats) {
+        /**
+         * 이 호스트가 지표를 못 주는가.
+         *
+         * **종료 코드가 있으면 그것이 답이다** — `stats` 가 0 이 아닌 코드로 끝났다는 것은
+         * 추측이 아니라 그 명령의 대답이다. 코드를 못 받은 경로(옛 코어·폴백)에서는 예전처럼
+         * 가른다: 왕복이 조용히 실패하면 stdout 이 통째로 비는데, 그것을 "지표를 못 준다" 로
+         * 읽으면 한 번 늦은 것 때문에 CPU·MEM 이 영영 사라진다. 명령이 돌기만 했다면 구분자라도
+         * 찍혀 있다.
+         *
+         * **한 번으로 접지 않는다.** 데몬이 잠깐 바빠 `stats` 가 한 번 죽는 일은 흔한데, 그걸로
+         * 접으면 CPU·MEM 이 새로고침 전까지 돌아오지 않는다 — 못 주는 호스트라면 다음 틱에도
+         * 똑같이 죽는다. 연달아 그럴 때만 접는다.
+         */
+        if (parsed.stats.size > 0) {
+          statsFailureStreakRef.current = 0;
+        } else if (
+          completionFailed(result) ||
+          (stdout.trim() !== '' &&
+            listed.containers.some((container) => isRunningState(container)))
+        ) {
+          statsFailureStreakRef.current += 1;
+          if (statsFailureStreakRef.current >= STATS_GIVE_UP_STREAK) {
+            // 다음 왕복부터 stats 를 빼면 이 루프가 검사만 싣고 훨씬 빨라진다.
+            statsSupportedRef.current = false;
+          }
+        }
       }
       if (parsed.stats.size > 0) {
         ioRatesRef.current = computeIoRates(scope, parsed.stats, Date.now());
@@ -935,6 +1063,9 @@ export function useDockerLists(
     images: state.images.images,
     volumes: state.volumes.volumes,
     networks: state.networks.networks,
+    error: current.error,
+    // 판정은 여기서 한 번만 한다 — 화면은 이 값을 그리기만 한다.
+    unreadable: current.failing && rowCountOf(tab, current) === 0,
     // 새로고침을 누른 직후에도 스켈레톤을 낸다 — 값이 그대로여도 눌린 것이 보이게.
     loading: refreshPending || (current.updatedAtMs === null && !current.failing),
     updatedAtMs: current.updatedAtMs,

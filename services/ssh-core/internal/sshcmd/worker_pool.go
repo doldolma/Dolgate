@@ -71,15 +71,15 @@ func (pool *WorkerPool) Run(
 	command string,
 	timeout time.Duration,
 	maxBytes int,
-) ([]byte, bool, error) {
+) (CompletionOutput, error) {
 	if lane == LaneBackground {
 		if worker := pool.backgroundWorker(); worker != nil {
-			output, truncated, err := worker.Run(command, timeout, maxBytes)
+			output, err := worker.Run(command, timeout, maxBytes)
 			// 채널을 못 연 것만 대화형으로 넘긴다. 명령이 실패했거나 시간이 초과된 것은
 			// 그 레인의 결과다 — 같은 명령을 대화형 채널에서 한 번 더 돌리면 사람이 기다리는
 			// 자동완성을 두 배로 막는다.
-			if err == nil || len(output) > 0 || !errors.Is(err, ErrCompletionWorkerUnavailable) {
-				return output, truncated, err
+			if err == nil || len(output.Stdout) > 0 || !errors.Is(err, ErrCompletionWorkerUnavailable) {
+				return output, err
 			}
 			pool.denyBackground()
 		}

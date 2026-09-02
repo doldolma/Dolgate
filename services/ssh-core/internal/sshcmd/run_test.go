@@ -68,11 +68,11 @@ func TestCompletionWorkerReusesShell(t *testing.T) {
 	worker, starts := newLocalCompletionWorker(t)
 	defer worker.Close()
 
-	first, truncated, err := worker.Run("printf 'one\\n'", time.Second, 1024)
+	first, truncated, err := runWorker(worker, "printf 'one\\n'", time.Second, 1024)
 	if err != nil || truncated || string(first) != "one\n" {
 		t.Fatalf("first Run() = %q truncated=%v err=%v", first, truncated, err)
 	}
-	second, truncated, err := worker.Run("printf 'two\\n'", time.Second, 1024)
+	second, truncated, err := runWorker(worker, "printf 'two\\n'", time.Second, 1024)
 	if err != nil || truncated || string(second) != "two\n" {
 		t.Fatalf("second Run() = %q truncated=%v err=%v", second, truncated, err)
 	}
@@ -85,7 +85,7 @@ func TestCompletionWorkerReturnsStdoutFromNonZeroCommand(t *testing.T) {
 	worker, _ := newLocalCompletionWorker(t)
 	defer worker.Close()
 
-	output, truncated, err := worker.Run("printf 'partial\\n'; false", time.Second, 1024)
+	output, truncated, err := runWorker(worker, "printf 'partial\\n'; false", time.Second, 1024)
 	if err != nil || truncated || string(output) != "partial\n" {
 		t.Fatalf("Run() = %q truncated=%v err=%v", output, truncated, err)
 	}
@@ -95,10 +95,10 @@ func TestCompletionWorkerTimeoutRestartsShell(t *testing.T) {
 	worker, starts := newLocalCompletionWorker(t)
 	defer worker.Close()
 
-	if _, _, err := worker.Run("sleep 1", 50*time.Millisecond, 1024); err == nil {
+	if _, _, err := runWorker(worker, "sleep 1", 50*time.Millisecond, 1024); err == nil {
 		t.Fatal("expected timeout")
 	}
-	output, truncated, err := worker.Run("printf ok", time.Second, 1024)
+	output, truncated, err := runWorker(worker, "printf ok", time.Second, 1024)
 	if err != nil || truncated || string(output) != "ok" {
 		t.Fatalf("retry Run() = %q truncated=%v err=%v", output, truncated, err)
 	}
@@ -112,7 +112,7 @@ func TestCompletionWorkerReportsUnavailableStartupFailure(t *testing.T) {
 		return nil, fmt.Errorf("%w: helper shell refused", ErrCompletionWorkerUnavailable)
 	})
 
-	if _, _, err := worker.Run("printf nope", time.Second, 1024); !errors.Is(err, ErrCompletionWorkerUnavailable) {
+	if _, _, err := runWorker(worker, "printf nope", time.Second, 1024); !errors.Is(err, ErrCompletionWorkerUnavailable) {
 		t.Fatalf("expected ErrCompletionWorkerUnavailable, got %v", err)
 	}
 }
@@ -121,7 +121,7 @@ func TestCompletionWorkerTruncatesAndDrainsToMarker(t *testing.T) {
 	worker, _ := newLocalCompletionWorker(t)
 	defer worker.Close()
 
-	output, truncated, err := worker.Run(
+	output, truncated, err := runWorker(worker, 
 		"i=0; while [ $i -lt 2048 ]; do printf x; i=$((i+1)); done",
 		time.Second,
 		32,
@@ -132,7 +132,7 @@ func TestCompletionWorkerTruncatesAndDrainsToMarker(t *testing.T) {
 	if !truncated || len(output) != 32 || !bytes.Equal(output, bytes.Repeat([]byte("x"), 32)) {
 		t.Fatalf("unexpected truncated output len=%d truncated=%v output=%q", len(output), truncated, output)
 	}
-	next, truncated, err := worker.Run("printf ok", time.Second, 1024)
+	next, truncated, err := runWorker(worker, "printf ok", time.Second, 1024)
 	if err != nil || truncated || string(next) != "ok" {
 		t.Fatalf("next Run() = %q truncated=%v err=%v", next, truncated, err)
 	}
@@ -179,7 +179,7 @@ func TestCompletionWorkerBoundsTheWaitForItsTurn(t *testing.T) {
 	blocked := make(chan struct{})
 	go func() {
 		defer close(blocked)
-		_, _, _ = worker.Run("sleep 3", 10*time.Second, 1024)
+		_, _, _ = runWorker(worker, "sleep 3", 10*time.Second, 1024)
 	}()
 	// 앞 명령이 채널을 잡을 때까지 기다린다(그래야 "물려 있는 동안" 을 만든다).
 	deadline := time.Now().Add(3 * time.Second)
@@ -188,7 +188,7 @@ func TestCompletionWorkerBoundsTheWaitForItsTurn(t *testing.T) {
 	}
 
 	startedAt := time.Now()
-	_, _, err := worker.Run("printf ok", 300*time.Millisecond, 1024)
+	_, _, err := runWorker(worker, "printf ok", 300*time.Millisecond, 1024)
 	elapsed := time.Since(startedAt)
 	if !errors.Is(err, ErrCompletionLaneBusy) {
 		t.Fatalf("expected ErrCompletionLaneBusy, got %v", err)
@@ -202,4 +202,17 @@ func TestCompletionWorkerBoundsTheWaitForItsTurn(t *testing.T) {
 		t.Fatalf("opened %d channels, want 1", got)
 	}
 	<-blocked
+}
+
+// runWorker 는 결과를 예전 모양(stdout·truncated·err)으로 줄인다. 이 파일의 검사들은 워커의
+// 프레임·재시작·상한을 보는 것이라 종료 코드를 쓰지 않는다 — 상태를 보는 검사는 따로 있다
+// (completion_status_test.go).
+func runWorker(
+	worker *CompletionWorker,
+	command string,
+	timeout time.Duration,
+	maxBytes int,
+) ([]byte, bool, error) {
+	out, err := worker.Run(command, timeout, maxBytes)
+	return out.Stdout, out.Truncated, err
 }

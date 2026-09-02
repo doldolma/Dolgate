@@ -22,12 +22,29 @@ vi.mock('../../../store/appStore', () => ({
 }));
 
 vi.mock('../../../services/desktop/terminal', () => ({
-  queryTerminalCompletion: (
+  completionFailed: (result: { exitCode: number }) => result.exitCode > 0,
+  queryTerminalCompletion: async (
     sessionId: string,
     command: string,
     options?: { background?: boolean },
-  ) => query(sessionId, command, options),
+  ) => asCompletionResult(await query(sessionId, command, options)),
 }));
+
+/**
+ * 픽스처는 지금까지처럼 **stdout 문자열**을 준다 — 목 경계에서 결과 객체로 감싼다. 실패를
+ * 시험하는 검사만 `{ stdout, exitCode, stderr }` 를 직접 돌려주면 된다.
+ */
+function asCompletionResult(answer: unknown) {
+  if (typeof answer === 'string') {
+    return { stdout: answer, exitCode: 0, stderr: '' };
+  }
+  // 목을 안 깐 명령은 undefined 로 온다 — 그대로 흘리면 훅이 구조분해에서 터져, 목이 빈 것이
+  // 엉뚱한 React 오류로 보인다. 빈 성공으로 채워 실패 지점을 읽히게 둔다.
+  return answer && typeof answer === 'object'
+    ? answer
+    : { stdout: '', exitCode: 0, stderr: '' };
+}
+
 
 /** 패널이 넘긴 "대상 알아내기" 함수를 꺼낸다. 스토어가 "여는 중" 을 찍은 뒤에 부르는 값이다. */
 function resolveNetworksOf(spy: ReturnType<typeof vi.fn>) {
@@ -37,14 +54,15 @@ function resolveNetworksOf(spy: ReturnType<typeof vi.fn>) {
   return input.resolveNetworks;
 }
 
+// id·이름·상태문장·이미지·포트·프로젝트·서비스·작업디렉터리 순서다(CONTAINER_FIELDS).
 function row(cells: string[]): string {
-  return [...cells, ...Array.from({ length: 9 - cells.length }, () => '')].join('\t');
+  return [...cells, ...Array.from({ length: 8 - cells.length }, () => '')].join('\t');
 }
 
 const CONTAINERS = [
-  row(['a1b2c3d4e5f6', 'lime-gateway', 'running', 'Up 22 hours (healthy)', 'app:1', '0.0.0.0:5050->5050/tcp', 'lime', 'gateway', '/srv/lime']),
-  row(['a2b3c4d5e6f7', 'lime-bid', 'running', 'Up 22 hours', 'app:1', '', 'lime', 'bid', '/srv/lime']),
-  row(['b1c2d3e4f506', 'loose', 'exited', 'Exited (137) 3 days ago', 'redis:7']),
+  row(['a1b2c3d4e5f6', 'lime-gateway', 'Up 22 hours (healthy)', 'app:1', '0.0.0.0:5050->5050/tcp', 'lime', 'gateway', '/srv/lime']),
+  row(['a2b3c4d5e6f7', 'lime-bid', 'Up 22 hours', 'app:1', '', 'lime', 'bid', '/srv/lime']),
+  row(['b1c2d3e4f506', 'loose', 'Exited (137) 3 days ago', 'redis:7']),
 ].join('\n');
 
 /**
@@ -86,7 +104,7 @@ function renderSection(options: {
       windowSessionIds={["session-1"]}
       hostId={options.hostId === undefined ? 'host-1' : options.hostId}
       sender={senderStub}
-      runtime={{ availability: 'available', prefix: 'docker', elevate: false, compose: 'docker compose' }}
+      runtime={{ availability: 'available', prefix: 'docker', elevate: false, dialect: 'docker', compose: 'docker compose' }}
     />,
   );
   return { ...view, sender: senderStub };
@@ -125,6 +143,66 @@ beforeEach(() => {
 });
 
 describe('컨테이너', () => {
+  /**
+   * 이 화면이 이번 일의 시작이었다. 19.03 호스트에서 `docker ps --format` 이 템플릿 오류로 죽어
+   * stdout 이 비었는데, 패널은 그것을 "컨테이너가 없습니다" 로 그렸다 — 오류 한 줄 없이.
+   *
+   * 이제 보조 채널이 종료 코드를 실어 오므로 그 둘을 가른다. 실패는 못 읽었다고 말하고, 이유는
+   * 원격이 낸 원문 그대로 붙인다(문구를 우리가 분류하면 틀린 안내가 된다).
+   */
+  it('명령이 실패하면 "없습니다" 가 아니라 "읽을 수 없습니다" 라고 말한다', async () => {
+    query.mockImplementation((_sessionId: string, command: string) =>
+      Promise.resolve(
+        command.includes('ps -a --format')
+          ? {
+              stdout: '',
+              exitCode: 1,
+              stderr:
+                'failed to execute template: can\'t evaluate field State in type *formatter.containerContext',
+            }
+          : { stdout: '', exitCode: 0, stderr: '' },
+      ),
+    );
+
+    renderSection();
+
+    expect(await screen.findByText('읽을 수 없습니다')).toBeTruthy();
+    expect(screen.queryByText('컨테이너가 없습니다')).toBeNull();
+    // 이유는 해석하지 않고 원문 그대로.
+    expect(screen.getByText(/can't evaluate field State/)).toBeTruthy();
+  });
+
+  /**
+   * **이유가 없어도 "못 읽었다" 는 말은 해야 한다.**
+   *
+   * 판정을 stderr 글자로 하던 시절, 이유를 못 받은 실패는 조건이 false 가 되어 그대로
+   * "없습니다" 로 돌아왔다 — 네트워크 명령은 두 방언 시도를 모두 `2>/dev/null` 로 막으니
+   * 정확히 그 상태가 된다. 판정은 종료 코드가 한다.
+   */
+  it('이유가 비어도 못 읽었다고 말한다', async () => {
+    query.mockImplementation((_sessionId: string, command: string) =>
+      Promise.resolve(
+        command.includes('ps -a --format')
+          ? { stdout: '', exitCode: 1, stderr: '' }
+          : { stdout: '', exitCode: 0, stderr: '' },
+      ),
+    );
+
+    renderSection({ hostId: 'host-no-stderr' });
+
+    expect(await screen.findByText('읽을 수 없습니다')).toBeTruthy();
+    expect(screen.queryByText('컨테이너가 없습니다')).toBeNull();
+  });
+
+  it('정말 없으면 없다고 말한다 — 성공한 빈 목록', async () => {
+    respond({});
+
+    renderSection();
+
+    expect(await screen.findByText('컨테이너가 없습니다')).toBeTruthy();
+    expect(screen.queryByText('읽을 수 없습니다')).toBeNull();
+  });
+
   it('스택 라벨로 묶어 그리고 서비스 이름을 보여 준다', async () => {
     renderSection();
     expect(await screen.findByText('lime')).toBeTruthy();
@@ -257,7 +335,7 @@ describe('컨테이너', () => {
       windowSessionIds={["session-1"]}
         hostId="host-1"
         sender={sender()}
-        runtime={{ availability: 'available', prefix: 'docker', elevate: false, compose: null }}
+        runtime={{ availability: 'available', prefix: 'docker', elevate: false, dialect: 'docker', compose: null }}
       />,
     );
     await screen.findByText('lime');
@@ -407,7 +485,7 @@ describe('보여 줄 것을 우리가 정한다', () => {
 
   it('길어지면 검색줄이 생기고 앱에서 거른다(왕복 없음)', async () => {
     const many = Array.from({ length: 14 }, (_, index) =>
-      row([`id${index}`, `web-${index}`, 'running', 'Up 1 hour', 'app:1']),
+      row([`id${index}`, `web-${index}`, 'Up 1 hour', 'app:1']),
     ).join('\n');
     respond({ 'ps -a --format': many });
     renderSection();
@@ -421,9 +499,9 @@ describe('보여 줄 것을 우리가 정한다', () => {
 
   it('정지된 것이 많으면 접어 둔다 — 토글이 아니라 그냥 접혀 있다', async () => {
     const rows = [
-      row(['r1', 'up-1', 'running', 'Up 1 hour', 'app:1', '', 'lime', 'up-1']),
+      row(['r1', 'up-1', 'Up 1 hour', 'app:1', '', 'lime', 'up-1']),
       ...Array.from({ length: 4 }, (_, index) =>
-        row([`s${index}`, `down-${index}`, 'exited', 'Exited (0) 2 days ago', 'app:1', '', 'lime', `down-${index}`]),
+        row([`s${index}`, `down-${index}`, 'Exited (0) 2 days ago', 'app:1', '', 'lime', `down-${index}`]),
       ),
     ].join('\n');
     respond({ 'ps -a --format': rows });
@@ -532,6 +610,170 @@ describe('알아서 다시 받는다', () => {
     expect(await screen.findByText('app')).toBeTruthy();
   });
 
+  /**
+   * 명령이 0 이 아닌 코드로 끝난 것도 실패다. 왕복이 성공했다는 이유로 성공 경로를 태우면 정적
+   * 탭(이미지·볼륨·네트워크)은 여기서 다시 잡히지 않는다 — 한 번의 실패가 새로고침 전까지
+   * 굳는데 배너는 "다시 받는 중" 이라고 돈다. 그 자리에서 제일 아팠던 증상이다.
+   */
+  it('정적 탭도 명령이 실패하면 스스로 다시 묻는다', async () => {
+    vi.useFakeTimers();
+    try {
+      let imageAttempts = 0;
+      query.mockImplementation((_sessionId: string, command: string) => {
+        if (command.includes('images --format')) {
+          imageAttempts += 1;
+          return Promise.resolve(
+            imageAttempts === 1
+              ? { stdout: '', exitCode: 1, stderr: 'permission denied' }
+              : { stdout: 'app\t1\tsha1\t412MB', exitCode: 0, stderr: '' },
+          );
+        }
+        if (command.includes('ps -a --format')) {
+          return Promise.resolve({ stdout: CONTAINERS, exitCode: 0, stderr: '' });
+        }
+        return Promise.resolve({ stdout: '', exitCode: 0, stderr: '' });
+      });
+
+      // 목록 캐시는 **호스트 단위**라 다른 테스트가 남긴 값이 "방금 받은 것" 으로 잡힌다
+      // (정적 탭은 15초 안이면 왕복을 생략한다) — 이 테스트만의 호스트를 쓴다.
+      renderSection({ hostId: 'host-static-retry' });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /이미지/ }));
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      expect(imageAttempts).toBe(1);
+      expect(screen.getByText('읽을 수 없습니다')).toBeTruthy();
+
+      // 예전에는 여기서 영영 멈춰 있었다 — 정적 탭은 성공 경로에서 다시 잡히지 않는다.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6_000);
+      });
+      expect(imageAttempts).toBe(2);
+      // 가짜 시계에서는 findBy* 가 실제 시계를 기다린다 — 위에서 이미 흘려보냈으니 동기로 읽는다.
+      expect(screen.getByText('app')).toBeTruthy();
+      expect(screen.queryByText('읽을 수 없습니다')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * 지표 왕복의 종료 코드는 일부러 **stats 것만**이다(검사는 그 사이 지워진 컨테이너 하나로도
+   * 0 이 아닌 코드를 낸다). 그래서 실패라고 통째로 버리면, 같은 stdout 에 멀쩡히 들어 있는 검사
+   * 결과 — 헬스·재시작·노출 포트·컨테이너 IP — 까지 함께 잃는다.
+   */
+  it('stats 가 실패해도 같은 왕복의 검사 결과는 쓴다', async () => {
+    const inspectOnly = [
+      '',
+      '@@dolgate@@',
+      `a1b2c3d4e5f6${'0'.repeat(52)}\t7\tunhealthy\tfalse\t\t`,
+    ].join('\n');
+    query.mockImplementation((_sessionId: string, command: string) => {
+      if (command.includes('stats --no-stream')) {
+        // stats 는 죽었지만 검사 절반은 그대로 찍혔다.
+        return Promise.resolve({ stdout: inspectOnly, exitCode: 1, stderr: 'unknown flag' });
+      }
+      if (command.includes('ps -a --format')) {
+        return Promise.resolve({ stdout: CONTAINERS, exitCode: 0, stderr: '' });
+      }
+      return Promise.resolve({ stdout: '', exitCode: 0, stderr: '' });
+    });
+
+    renderSection({ hostId: 'host-stats-broken' });
+
+    expect(await screen.findByText('gateway')).toBeTruthy();
+    // 검사에서 온 값(헬스)이 보인다 — 예전에는 실패라고 통째로 버려 아무것도 오지 않았다.
+    await waitFor(() => expect(screen.getByText('unhealthy')).toBeTruthy());
+  });
+
+  /**
+   * 데몬이 잠깐 바빠 `stats` 가 한 번 죽는 일은 흔하다. 그걸로 "이 호스트는 지표를 못 준다" 고
+   * 접으면 CPU·MEM 이 새로고침 전까지 돌아오지 않는다 — 정말 못 주는 호스트라면 다음 틱에도
+   * 똑같이 죽는다.
+   */
+  it('stats 가 한 번 죽었다고 접지 않는다', async () => {
+    vi.useFakeTimers();
+    try {
+      const metricsCommands: string[] = [];
+      query.mockImplementation((_sessionId: string, command: string) => {
+        if (command.includes('ps -a --format')) {
+          return Promise.resolve({ stdout: CONTAINERS, exitCode: 0, stderr: '' });
+        }
+        if (command.includes('inspect ')) {
+          metricsCommands.push(command);
+          return Promise.resolve({ stdout: '', exitCode: 1, stderr: 'stats unavailable' });
+        }
+        return Promise.resolve({ stdout: '', exitCode: 0, stderr: '' });
+      });
+
+      renderSection({ hostId: 'host-stats-streak' });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(metricsCommands).toHaveLength(1);
+      expect(metricsCommands[0]).toContain('stats --no-stream');
+
+      // 한 번 죽었을 뿐이다 — 다음 틱도 그대로 물어본다.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(16_000);
+      });
+      expect(metricsCommands).toHaveLength(2);
+      expect(metricsCommands[1]).toContain('stats --no-stream');
+
+      // 연달아 죽으면 그때 접는다 — 다음부터는 검사만 싣는다.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(16_000);
+      });
+      expect(metricsCommands).toHaveLength(3);
+      expect(metricsCommands[2]).not.toContain('stats --no-stream');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * 컨테이너 탭은 다시 묻기는 했지만 실패 횟수가 0 으로 되돌아가, 영영 실패하는 호스트를 늘
+   * 최소 주기(5초)로 두드렸다. 실패가 이어지면 물러나는 폭이 커져야 한다.
+   */
+  it('실패가 이어지면 물러나는 폭이 커진다', async () => {
+    vi.useFakeTimers();
+    try {
+      let attempts = 0;
+      query.mockImplementation((_sessionId: string, command: string) => {
+        if (!command.includes('ps -a --format')) {
+          return Promise.resolve({ stdout: '', exitCode: 0, stderr: '' });
+        }
+        attempts += 1;
+        return Promise.resolve({ stdout: '', exitCode: 1, stderr: 'boom' });
+      });
+
+      renderSection({ hostId: 'host-backoff' });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(attempts).toBe(1);
+      // 첫 백오프 5초.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6_000);
+      });
+      expect(attempts).toBe(2);
+      // 두 번째는 15초다 — 예전에는 여기서도 5초라 10초 만에 세 번째가 나갔다.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6_000);
+      });
+      expect(attempts).toBe(2);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(attempts).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('받아오기가 실패하면 마지막 목록을 남기고 물러난다 — 누를 것은 없다', async () => {
     renderSection();
     await screen.findByText('gateway');
@@ -554,7 +796,7 @@ describe('sudo 까지 해 본 뒤에도 막힌 경우', () => {
       windowSessionIds={["session-1"]}
         hostId="host-1"
         sender={sender()}
-        runtime={{ availability: 'blocked', prefix: null, elevate: false, compose: null }}
+        runtime={{ availability: 'blocked', prefix: null, elevate: false, dialect: 'docker', compose: null }}
       />,
     );
     expect(screen.getByText('도커를 읽을 수 없습니다')).toBeTruthy();
@@ -759,7 +1001,7 @@ describe('세션마다 보던 자리를 기억한다', () => {
       windowSessionIds={["session-a"]}
         hostId="host-a"
         sender={senderStub}
-        runtime={{ availability: 'available', prefix: 'docker', elevate: false, compose: 'docker compose' }}
+        runtime={{ availability: 'available', prefix: 'docker', elevate: false, dialect: 'docker', compose: 'docker compose' }}
       />,
     );
     await screen.findByText('gateway');
@@ -775,7 +1017,7 @@ describe('세션마다 보던 자리를 기억한다', () => {
       windowSessionIds={["session-b"]}
         hostId="host-b"
         sender={senderStub}
-        runtime={{ availability: 'available', prefix: 'docker', elevate: false, compose: 'docker compose' }}
+        runtime={{ availability: 'available', prefix: 'docker', elevate: false, dialect: 'docker', compose: 'docker compose' }}
       />,
     );
     expect(await screen.findByText('gateway')).toBeTruthy();
@@ -790,7 +1032,7 @@ describe('세션마다 보던 자리를 기억한다', () => {
       windowSessionIds={["session-a"]}
         hostId="host-a"
         sender={senderStub}
-        runtime={{ availability: 'available', prefix: 'docker', elevate: false, compose: 'docker compose' }}
+        runtime={{ availability: 'available', prefix: 'docker', elevate: false, dialect: 'docker', compose: 'docker compose' }}
       />,
     );
     expect(await screen.findByText('pgdata')).toBeTruthy();
@@ -842,7 +1084,7 @@ describe('컨테이너 포트 열기', () => {
       }
       if (command.includes('ps -a --format')) {
         return Promise.resolve(
-          row(['c1d2e3f40506', 'fresh', 'running', 'Up 3 seconds', 'nginx', '0.0.0.0:8080->80/tcp']),
+          row(['c1d2e3f40506', 'fresh', 'Up 3 seconds', 'nginx', '0.0.0.0:8080->80/tcp']),
         );
       }
       return Promise.resolve('');
@@ -942,7 +1184,7 @@ describe('새로 생긴 컨테이너', () => {
       // host 네트워킹 컨테이너를 하나 띄웠다 — `ps` 는 포트를 주지 않으므로 검사만이 출처다.
       listed = [
         CONTAINERS,
-        row(['c1d2e3f40506', 'hostnet-test', 'running', 'Up 5 seconds', 'nginx']),
+        row(['c1d2e3f40506', 'hostnet-test', 'Up 5 seconds', 'nginx']),
       ].join('\n');
       commands.length = 0;
       // 5초씩 나눠 흘린다 — 한 번에 30초를 흘리면 목록 왕복이 해소되기 전에 지표 틱이 먼저 돈다.
@@ -986,6 +1228,7 @@ describe('tmux 창 안에서 pane 을 옮길 때', () => {
         availability: 'available' as const,
         prefix: 'docker',
         elevate: false,
+        dialect: 'docker' as const,
         compose: 'docker compose',
       },
     };

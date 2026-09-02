@@ -3836,6 +3836,8 @@
       "emptyImages": "이미지가 없습니다",
       "emptyVolumes": "볼륨이 없습니다",
       "emptyNetworks": "네트워크가 없습니다",
+      "unreadableTitle": "읽을 수 없습니다",
+      "unreadableRetry": "알아서 다시 받는 중입니다.",
       "truncated": "목록이 잘렸습니다 — 검색으로 좁혀 주세요.",
       "staleSeconds": "{{count}}초 전 값 · 다시 받는 중",
       "staleMinutes": "{{count}}분 전 값 · 다시 받는 중",

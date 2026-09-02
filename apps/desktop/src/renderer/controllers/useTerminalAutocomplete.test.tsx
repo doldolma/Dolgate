@@ -13,7 +13,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../services/desktop/terminal', () => ({
   prepareTerminalAutocomplete: mocks.prepare,
   stopTerminalAutocomplete: mocks.stop,
-  queryTerminalCompletion: mocks.query,
+  // 픽스처는 stdout 문자열이다 — 결과 객체로 감싼다.
+  queryTerminalCompletion: async (sessionId: string, command: string) => {
+    const answer = await mocks.query(sessionId, command);
+    return typeof answer === 'string' ? { stdout: answer, exitCode: 0, stderr: '' } : answer;
+  },
   subscribeToTerminalEvents: vi.fn((listener: (event: CoreEvent) => void) => {
     mocks.listener = listener;
     return () => {

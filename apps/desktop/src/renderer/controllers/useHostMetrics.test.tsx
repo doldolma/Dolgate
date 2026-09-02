@@ -56,8 +56,13 @@ beforeEach(() => {
   queryTerminalCompletion.mockReset();
   collectNativeHostMetrics.mockReset();
   collectNativeHostMetrics.mockResolvedValue({ supported: false, sample: null });
+  // 픽스처는 stdout 문자열이다 — 결과 객체로 감싼다.
   queryTerminalCompletion.mockImplementation(() =>
-    Promise.resolve(reply(queryTerminalCompletion.mock.calls.length - 1)),
+    Promise.resolve({
+      stdout: reply(queryTerminalCompletion.mock.calls.length - 1),
+      exitCode: 0,
+      stderr: '',
+    }),
   );
 });
 
@@ -156,7 +161,7 @@ describe('useHostMetrics 왕복 실패', () => {
       if (attempts === 1) {
         return Promise.reject(new Error('completion lane busy'));
       }
-      return Promise.resolve(reply(attempts));
+      return Promise.resolve({ stdout: reply(attempts), exitCode: 0, stderr: '' });
     });
 
     const view = renderHook(() =>

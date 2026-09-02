@@ -384,8 +384,10 @@ export function useTerminalAutocomplete({
       if (inflight) {
         return inflight;
       }
+      // 자동완성은 종료 코드를 쓰지 않는다 — 실패한 generator 는 "제안 없음" 으로 끝나는 것이
+      // 맞다(사람이 치는 중에 오류를 띄울 자리가 없다).
       const promise = queryTerminalCompletion(sessionId, hostCommand)
-        .then((stdout) => {
+        .then(({ stdout }) => {
           const cache = completionCacheRef.current;
           cache.delete(hostCommand);
           cache.set(hostCommand, stdout);

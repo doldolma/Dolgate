@@ -1820,9 +1820,13 @@ describe("CoreManager.queryCompletion", () => {
       type: "terminalCompletionResult",
       requestId: request.id,
       sessionId,
-      payload: { stdout: "one\n" },
+      payload: { stdout: "one\n", exitCode: 0 },
     } as never);
-    await expect(pending).resolves.toBe("one\n");
+    await expect(pending).resolves.toEqual({
+      stdout: "one\n",
+      exitCode: 0,
+      stderr: "",
+    });
   });
 
   it("표시하지 않으면 대화형이다", async () => {
@@ -1835,10 +1839,29 @@ describe("CoreManager.queryCompletion", () => {
       type: "terminalCompletionResult",
       requestId: request.id,
       sessionId,
-      payload: { stdout: "" },
+      payload: { stdout: "", exitCode: 0 },
     } as never);
-    // 명령이 아무것도 안 찍은 것은 실패가 아니다 — 그대로 빈 문자열이다.
-    await expect(pending).resolves.toBe("");
+    // 명령이 아무것도 안 찍은 것은 실패가 아니다 — 빈 stdout 에 성공 코드다.
+    await expect(pending).resolves.toEqual({ stdout: "", exitCode: 0, stderr: "" });
+  });
+
+  // 상태를 싣지 않는 응답(옛 코어·폴백 경로)은 "모름" 이다 — 성공으로도 실패로도 접지 않는다.
+  it("종료 코드가 없으면 모름으로 둔다", async () => {
+    const { manager, fakeProcess, sessionId } = await startLocalSession();
+    const before = fakeProcess.writes.length;
+    const pending = manager.queryCompletion(sessionId, "docker ps -a");
+    const request = await takeQueryRequest(fakeProcess, before);
+    fakeProcess.emitControl({
+      type: "terminalCompletionResult",
+      requestId: request.id,
+      sessionId,
+      payload: { stdout: "x\n" },
+    } as never);
+    await expect(pending).resolves.toEqual({
+      stdout: "x\n",
+      exitCode: -1,
+      stderr: "",
+    });
   });
 
   /**

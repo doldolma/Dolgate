@@ -56,18 +56,44 @@ export function stopTerminalAutocomplete(sessionId: string) {
  * 두 번째 보조 채널에서 돌아, 몇 초씩 걸리는 왕복 뒤에 사용자가 치는 자동완성이 줄 서지 않는다.
  * 사람이 결과를 기다리는 질의(자동완성)는 그냥 부른다.
  */
+export interface TerminalCompletionResult {
+  stdout: string;
+  /**
+   * 원격 명령의 종료 코드. 모르면 `COMPLETION_EXIT_UNKNOWN`(-1).
+   *
+   * **이것이 "명령이 실패했다" 와 "찍을 것이 없었다" 를 가르는 유일한 근거다.** 둘 다 빈
+   * stdout 으로 오기 때문이다. 오류 문구를 패턴으로 분류하지 않는다 — 그러면 틀린다.
+   */
+  exitCode: number;
+  /** 그 명령이 낸 오류 문장(앞부분). 화면에 **원문 그대로** 보여 줄 값이다. */
+  stderr: string;
+}
+
+/** 종료 코드를 알아내지 못했다는 뜻. 모르는 것은 실패가 아니다. */
+export const COMPLETION_EXIT_UNKNOWN = -1;
+
+/** 이 왕복을 "명령이 제대로 돌지 않았다" 로 읽어야 하는가. 모르는 것은 실패가 아니다. */
+export function completionFailed(result: TerminalCompletionResult): boolean {
+  return result.exitCode > 0;
+}
+
 export async function queryTerminalCompletion(
   sessionId: string,
   command: string,
   options?: { background?: boolean; elevate?: boolean },
-): Promise<string> {
+): Promise<TerminalCompletionResult> {
   const result = await desktopApi.ssh.queryCompletion(sessionId, command, options);
   // 실패는 결과에 담겨 온다(IPC 거부로 보내면 메인 로그가 오류로 뒤덮인다) — 여기서 예외로
-  // 바꿔 호출부가 하던 대로 catch 하게 한다. 명령이 아무것도 안 찍은 것은 실패가 아니다.
+  // 바꿔 호출부가 하던 대로 catch 하게 한다. **왕복이 아예 없었던 것만 예외다** — 명령이
+  // 돌고 0 이 아닌 코드로 끝난 것은 답이지 사고가 아니라, 결과에 담아 호출부가 판단한다.
   if (result.failed) {
     throw new Error(result.message ?? '보조 채널에서 명령을 끝내지 못했습니다.');
   }
-  return result.stdout;
+  return {
+    stdout: result.stdout,
+    exitCode: typeof result.exitCode === 'number' ? result.exitCode : COMPLETION_EXIT_UNKNOWN,
+    stderr: result.stderr ?? '',
+  };
 }
 
 /**

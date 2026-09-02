@@ -18,15 +18,15 @@ var okMarkerPattern = regexp.MustCompile(`__DOLGATE_SUDO_OK_[0-9a-f]+__`)
 func TestRunCompletionWithoutPasswordNeverTouchesRemote(t *testing.T) {
 	calls := 0
 	target := CompletionTarget{
-		Run: func(string, bool) ([]byte, bool, error) {
+		Run: func(string, bool) (sshcmd.CompletionOutput, error) {
 			calls++
-			return nil, false, nil
+			return sshcmd.CompletionOutput{}, nil
 		},
 		// 키·에이전트로 붙은 연결이거나 이미 거절당한 뒤 — 되물릴 값이 없다.
 		SudoPassword: func() string { return "" },
 	}
 
-	_, _, err := RunCompletion(target, "docker ps -a", true, true)
+	_, err := RunCompletion(target, "docker ps -a", true, true)
 
 	if !errors.Is(err, sshcmd.ErrSudoPasswordUnavailable) {
 		t.Fatalf("되물릴 값이 없으면 그 자리에서 끝나야 한다: %v", err)
@@ -39,25 +39,25 @@ func TestRunCompletionWithoutPasswordNeverTouchesRemote(t *testing.T) {
 func TestRunCompletionElevatesAndStripsMarker(t *testing.T) {
 	var ran string
 	target := CompletionTarget{
-		Run: func(command string, _ bool) ([]byte, bool, error) {
+		Run: func(command string, _ bool) (sshcmd.CompletionOutput, error) {
 			ran = command
 			// sudo 가 명령을 시작하면 표식이 먼저 찍힌다.
 			marker := okMarkerPattern.FindString(command)
 			if marker == "" {
 				t.Fatalf("표식이 스크립트에 없다: %q", command)
 			}
-			return []byte(marker + "CONTAINER ID\n"), false, nil
+			return sshcmd.CompletionOutput{Stdout: []byte(marker + "CONTAINER ID\n")}, nil
 		},
 		SudoPassword: func() string { return "hunter2" },
 	}
 
-	out, _, err := RunCompletion(target, "docker ps -a", true, true)
+	out, err := RunCompletion(target, "docker ps -a", true, true)
 
 	if err != nil {
 		t.Fatalf("승격이 통해야 한다: %v", err)
 	}
-	if out != "CONTAINER ID\n" {
-		t.Fatalf("표식을 걷어낸 원문이어야 한다: %q", out)
+	if string(out.Stdout) != "CONTAINER ID\n" {
+		t.Fatalf("표식을 걷어낸 원문이어야 한다: %q", out.Stdout)
 	}
 	if !strings.Contains(ran, "sudo -S -p ''") {
 		t.Fatalf("sudo 로 감싸야 한다: %q", ran)
@@ -71,12 +71,12 @@ func TestRunCompletionDeniesOnceWhenSudoRefuses(t *testing.T) {
 	denied := 0
 	target := CompletionTarget{
 		// 표식이 없다 = sudo 가 명령을 시작하지도 못했다.
-		Run:          func(string, bool) ([]byte, bool, error) { return []byte(""), false, nil },
+		Run:          func(string, bool) (sshcmd.CompletionOutput, error) { return sshcmd.CompletionOutput{}, nil },
 		SudoPassword: func() string { return "wrong" },
 		DenySudo:     func() { denied++ },
 	}
 
-	_, _, err := RunCompletion(target, "docker ps -a", true, true)
+	_, err := RunCompletion(target, "docker ps -a", true, true)
 
 	if !errors.Is(err, sshcmd.ErrSudoRefused) {
 		t.Fatalf("거절로 판정해야 한다: %v", err)
@@ -91,12 +91,12 @@ func TestRunCompletionKeepsRoundTripFailureUndecided(t *testing.T) {
 	denied := 0
 	boom := errors.New("lane busy")
 	target := CompletionTarget{
-		Run:          func(string, bool) ([]byte, bool, error) { return nil, false, boom },
+		Run:          func(string, bool) (sshcmd.CompletionOutput, error) { return sshcmd.CompletionOutput{}, boom },
 		SudoPassword: func() string { return "hunter2" },
 		DenySudo:     func() { denied++ },
 	}
 
-	_, _, err := RunCompletion(target, "docker ps -a", true, true)
+	_, err := RunCompletion(target, "docker ps -a", true, true)
 
 	if !errors.Is(err, boom) {
 		t.Fatalf("왕복 오류를 그대로 올려야 한다: %v", err)
@@ -106,10 +106,33 @@ func TestRunCompletionKeepsRoundTripFailureUndecided(t *testing.T) {
 	}
 }
 
+// 왕복이 중간에 끊기면 표식을 아직 걷어내지 않은 stdout 이 남는다. 호출자는 오류가 나도 찍힌
+// 것이 있으면 그것을 쓰므로, 그대로 올리면 첫 줄에 표식이 붙은 채 파싱된다.
+func TestRunCompletionDropsUnstrippedOutputOnRoundTripFailure(t *testing.T) {
+	boom := errors.New("connection lost")
+	target := CompletionTarget{
+		Run: func(command string, _ bool) (sshcmd.CompletionOutput, error) {
+			marker := okMarkerPattern.FindString(command)
+			// sudo 가 표식을 찍고 명령도 일부 찍은 뒤 채널이 끊겼다.
+			return sshcmd.CompletionOutput{Stdout: []byte(marker + "a1\tweb\t")}, boom
+		},
+		SudoPassword: func() string { return "hunter2" },
+	}
+
+	out, err := RunCompletion(target, "docker ps -a", true, true)
+
+	if !errors.Is(err, boom) {
+		t.Fatalf("왕복 오류를 그대로 올려야 한다: %v", err)
+	}
+	if len(out.Stdout) != 0 {
+		t.Fatalf("표식이 붙은 출력을 올리면 안 된다: %q", out.Stdout)
+	}
+}
+
 func TestRunCompletionFallsBackWhenWorkerChannelIsUnavailable(t *testing.T) {
 	target := CompletionTarget{
-		Run: func(string, bool) ([]byte, bool, error) {
-			return nil, false, sshcmd.ErrCompletionWorkerUnavailable
+		Run: func(string, bool) (sshcmd.CompletionOutput, error) {
+			return sshcmd.CompletionOutput{}, sshcmd.ErrCompletionWorkerUnavailable
 		},
 		Fallback: func(command string, timeout time.Duration) ([]byte, error) {
 			if timeout <= 0 {
@@ -119,24 +142,24 @@ func TestRunCompletionFallsBackWhenWorkerChannelIsUnavailable(t *testing.T) {
 		},
 	}
 
-	out, _, err := RunCompletion(target, "ls -1Ap", false, false)
+	out, err := RunCompletion(target, "ls -1Ap", false, false)
 
-	if err != nil || out != "ok\n" {
-		t.Fatalf("폴백 결과를 줘야 한다: %q %v", out, err)
+	if err != nil || string(out.Stdout) != "ok\n" {
+		t.Fatalf("폴백 결과를 줘야 한다: %q %v", out.Stdout, err)
 	}
 }
 
 func TestRunCompletionKeepsOutputOverError(t *testing.T) {
 	// 완성 명령이 0 이 아닌 코드로 끝나도 찍은 것이 있으면 그것을 준다(best-effort).
 	target := CompletionTarget{
-		Run: func(string, bool) ([]byte, bool, error) {
-			return []byte("partial"), false, errors.New("exit status 1")
+		Run: func(string, bool) (sshcmd.CompletionOutput, error) {
+			return sshcmd.CompletionOutput{Stdout: []byte("partial"), Truncated: false}, errors.New("exit status 1")
 		},
 	}
 
-	out, _, _ := RunCompletion(target, "git branch", false, false)
+	out, _ := RunCompletion(target, "git branch", false, false)
 
-	if out != "partial" {
-		t.Fatalf("찍은 것을 그대로 줘야 한다: %q", out)
+	if string(out.Stdout) != "partial" {
+		t.Fatalf("찍은 것을 그대로 줘야 한다: %q", out.Stdout)
 	}
 }

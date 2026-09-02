@@ -66,8 +66,17 @@ const reinjectShellIntegration = vi.fn<(sessionId: string, shell?: string) => Pr
 // 도커 섹션의 프로브와 통합 재주입만 대신한다 — 나머지 서비스 함수는 실물을 그대로 쓴다.
 vi.mock('../../../services/desktop/terminal', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  queryTerminalCompletion: (sessionId: string, command: string) =>
-    dockerQuery(sessionId, command),
+  queryTerminalCompletion: async (sessionId: string, command: string) => {
+    const answer = await dockerQuery(sessionId, command);
+    // 픽스처는 stdout 문자열이다 — 결과 객체로 감싼다. 목을 안 깐 명령은 undefined 로 오는데,
+    // 그대로 흘리면 훅이 구조분해에서 터져 목 구멍이 엉뚱한 React 오류로 보인다.
+    if (typeof answer === 'string') {
+      return { stdout: answer, exitCode: 0, stderr: '' };
+    }
+    return answer && typeof answer === 'object'
+      ? answer
+      : { stdout: '', exitCode: 0, stderr: '' };
+  },
   reinjectTerminalShellIntegration: (sessionId: string, shell?: string) =>
     reinjectShellIntegration(sessionId, shell),
 }));

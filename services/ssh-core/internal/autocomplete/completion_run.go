@@ -20,7 +20,7 @@ import (
 // 되물릴 자격증명 자체가 없다.
 type CompletionTarget struct {
 	// Run 은 이 연결의 보조 채널에서 명령을 돌린다.
-	Run func(command string, background bool) ([]byte, bool, error)
+	Run func(command string, background bool) (sshcmd.CompletionOutput, error)
 	// Fallback 은 워커 채널 자체를 못 열었을 때 쓰는 경로(exec 채널 하나를 그냥 연다).
 	// nil 이면 폴백 없이 그 오류를 그대로 돌려준다.
 	Fallback func(command string, timeout time.Duration) ([]byte, error)
@@ -40,7 +40,7 @@ func PoolTarget(
 	denySudo func(),
 ) CompletionTarget {
 	return CompletionTarget{
-		Run: func(command string, background bool) ([]byte, bool, error) {
+		Run: func(command string, background bool) (sshcmd.CompletionOutput, error) {
 			lane := sshcmd.LaneInteractive
 			if background {
 				lane = sshcmd.LaneBackground
@@ -67,9 +67,10 @@ func RunCompletion(
 	target CompletionTarget,
 	command string,
 	background, elevate bool,
-) (string, bool, error) {
+) (sshcmd.CompletionOutput, error) {
+	unknown := sshcmd.CompletionOutput{ExitCode: sshcmd.ExitCodeUnknown}
 	if target.Run == nil {
-		return "", false, errors.New("completion target is not connected")
+		return unknown, errors.New("completion target is not connected")
 	}
 	// 예산은 이 함수 전체에 하나다 — 아래 폴백까지 합쳐서 이 시간을 넘지 않는다. 단계마다 새
 	// 예산을 주면 합이 호출자(데스크톱)의 요청 타임아웃을 넘겨, 코어가 답을 못 보내게 된다.
@@ -83,19 +84,24 @@ func RunCompletion(
 			password = target.SudoPassword()
 		}
 		if password == "" {
-			return "", false, sshcmd.ErrSudoPasswordUnavailable
+			return unknown, sshcmd.ErrSudoPasswordUnavailable
 		}
 		invocation, buildErr := sshcmd.BuildSudoCommand(command, password)
 		if buildErr != nil {
-			return "", false, buildErr
+			return unknown, buildErr
 		}
-		out, trunc, runErr := target.Run(invocation.Script, background)
+		out, runErr := target.Run(invocation.Script, background)
 		if runErr != nil {
 			// 왕복 자체가 실패했다(차례를 못 얻었거나 시간이 초과됐다) — sudo 가 통했는지는
 			// 알 수 없다. 여기서 거절로 단정하면 멀쩡한 호스트를 영영 막는다.
-			return "", trunc, runErr
+			//
+			// **stdout 은 버린다.** 표식을 아직 걷어내지 않았는데, 호출자는 오류가 나도 찍힌
+			// 것이 있으면 그것을 쓴다 — 그대로 올리면 첫 줄에 `__DOLGATE_SUDO_OK_…` 가 붙은
+			// 채로 파싱되어 엉뚱한 id 의 컨테이너가 그려진다.
+			out.Stdout = nil
+			return out, runErr
 		}
-		stripped, ok := sshcmd.StripSudoMarker(out, invocation.OKMarker)
+		stripped, ok := sshcmd.StripSudoMarker(out.Stdout, invocation.OKMarker)
 		if !ok {
 			// 표식이 없다 = sudo 가 명령을 시작하지도 못했다 = 비밀번호가 거절됐다.
 			//
@@ -104,29 +110,36 @@ func RunCompletion(
 			if target.DenySudo != nil {
 				target.DenySudo()
 			}
-			return "", false, sshcmd.ErrSudoRefused
+			return unknown, sshcmd.ErrSudoRefused
 		}
-		return string(stripped), trunc, nil
+		out.Stdout = stripped
+		return out, nil
 	}
 
-	stdout, truncated, err := target.Run(command, background)
-	if err == nil || len(stdout) > 0 {
-		return string(stdout), truncated, err
+	stdout, err := target.Run(command, background)
+	if err == nil || len(stdout.Stdout) > 0 {
+		return stdout, err
 	}
 	if !errors.Is(err, sshcmd.ErrCompletionWorkerUnavailable) || target.Fallback == nil {
-		return "", false, err
+		return unknown, err
 	}
 
 	remaining := budget - time.Since(startedAt)
 	if remaining <= 0 {
-		return "", false, err
+		return unknown, err
 	}
 	fallbackStdout, fallbackErr := target.Fallback(command, remaining)
 	// 완성 명령이 0 이 아닌 코드로 끝나는 것은 치명적이지 않다 — 찍은 것이 있으면 그것을 준다.
 	// 아무것도 못 받았을 때만 오류로 올린다.
 	if fallbackErr != nil && len(fallbackStdout) == 0 {
-		return "", false, fallbackErr
+		return unknown, fallbackErr
 	}
-	out, truncated := CapOutput(fallbackStdout)
-	return out, truncated, nil
+	capped, truncated := CapOutput(fallbackStdout)
+	// 폴백은 exec 채널 하나를 그냥 여는 경로라 프레임도 상태 줄도 없다 — 종료 코드는 모른다고
+	// 답한다. **모르는 것을 성공으로 접지 않는다**(호출자가 실패로 단정하지도 않는다).
+	return sshcmd.CompletionOutput{
+		Stdout:    []byte(capped),
+		ExitCode:  sshcmd.ExitCodeUnknown,
+		Truncated: truncated,
+	}, nil
 }

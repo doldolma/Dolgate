@@ -543,10 +543,10 @@ func ParseTmuxDetect(out string) protocol.TmuxAvailablePayload {
 func (m *Manager) RunCompletionCommand(
 	sessionID, command string,
 	background, elevate bool,
-) (string, bool, error) {
+) (sshcmd.CompletionOutput, error) {
 	session, err := m.getSession(sessionID)
 	if err != nil {
-		return "", false, err
+		return sshcmd.CompletionOutput{ExitCode: sshcmd.ExitCodeUnknown}, err
 	}
 	return autocomplete.RunCompletion(
 		autocomplete.PoolTarget(

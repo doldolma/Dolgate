@@ -988,13 +988,15 @@ describe("registerSshIpcHandlers", () => {
 describe("ssh:completion-query", () => {
   it("성공하면 stdout 을 담아 돌려준다", async () => {
     const ctx = createContext();
-    ctx.coreManager.queryCompletion = vi.fn().mockResolvedValue("one\ntwo\n");
+    ctx.coreManager.queryCompletion = vi
+      .fn()
+      .mockResolvedValue({ stdout: "one\ntwo\n", exitCode: 0, stderr: "" });
     registerSshIpcHandlers(ctx);
 
     const handler = ipcHandlers.get(ipcChannels.ssh.completionQuery);
     await expect(
       handler?.(null, "session-1", "docker ps -a", { background: true }),
-    ).resolves.toEqual({ stdout: "one\ntwo\n" });
+    ).resolves.toEqual({ stdout: "one\ntwo\n", exitCode: 0, stderr: "" });
     expect(ctx.coreManager.queryCompletion).toHaveBeenCalledWith(
       "session-1",
       "docker ps -a",

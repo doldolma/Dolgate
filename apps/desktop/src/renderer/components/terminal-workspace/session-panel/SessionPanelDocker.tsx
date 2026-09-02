@@ -15,7 +15,10 @@ import { cn } from '../../../lib/cn';
 import { useAppStore } from '../../../store/appStore';
 import { filterByQuery } from '../../../lib/session-panel';
 import { formatBytesPerSecond, formatKibibytes } from '../../../lib/host-metrics';
-import { queryTerminalCompletion } from '../../../services/desktop/terminal';
+import {
+  completionFailed,
+  queryTerminalCompletion,
+} from '../../../services/desktop/terminal';
 import {
   buildContainerNetworksCommand,
   collectUsedImages,
@@ -149,6 +152,7 @@ export function SessionPanelDocker({
     querySessionId,
     queryPrefixOf(runtime),
     runtime.elevate,
+    runtime.dialect,
     tab,
     panelOpen,
     collapseScope,
@@ -171,13 +175,17 @@ export function SessionPanelDocker({
         return [];
       }
       try {
-        return parseContainerNetworks(
-          await queryTerminalCompletion(
-            querySessionId,
-            buildContainerNetworksCommand(prefix, containerId),
-            { background: true, elevate: runtime.elevate },
-          ),
+        const result = await queryTerminalCompletion(
+          querySessionId,
+          buildContainerNetworksCommand(prefix, containerId, runtime.dialect),
+          { background: true, elevate: runtime.elevate },
         );
+        // 실패한 명령의 빈 출력을 "네트워크 없음" 으로 넘기지 않는다 — 아래 catch 와 같은
+        // 자리로 보내, 코어가 자기 방식으로 알아내게 한다.
+        if (completionFailed(result)) {
+          throw new Error(result.stderr || 'container networks command failed');
+        }
+        return parseContainerNetworks(result.stdout);
       } catch {
         // 못 물어봤다 — 빈 값으로 넘긴다. 코어가 자기 방식으로 알아내 보고, 그마저 안 되면
         // 그 줄에 실패가 남는다(조용히 사라지지 않는다).
@@ -378,7 +386,34 @@ export function SessionPanelDocker({
           lists.failing ? 'opacity-55' : null,
         )}
       >
-        {lists.loading ? (
+        {/**
+         * **못 읽은 것을 "없습니다" 로 말하지 않는다.**
+         *
+         * 이 자리가 이번 일의 시작이었다 — 19.03 호스트에서 `docker ps` 가 템플릿 오류로 죽는데
+         * 화면은 "컨테이너가 없습니다" 라고만 했다. 이제 보조 채널이 종료 코드를 실어 오므로
+         * 그 둘을 가를 수 있다. 이유는 원격이 낸 원문 그대로 붙인다 — 문구를 우리가 분류하면
+         * 틀린 안내가 된다.
+         *
+         * 스켈레톤보다 **먼저** 본다. 한 번도 성공한 적 없는 호스트는 받은 시각이 없어 영영
+         * "받는 중" 으로 남기 때문이다.
+         *
+         * 판정은 훅이 한다(`unreadable`) — 여기서 다시 유도하지 않는다. 예전에는 이 자리가
+         * "stderr 에 글자가 있나" 로 판단해서, 이유를 못 받은 실패(네트워크 명령은 두 시도를
+         * 모두 `2>/dev/null` 로 막는다)가 다시 "없습니다" 로 보였다. 이유는 있으면 덧붙이는
+         * 설명일 뿐이다.
+         */}
+        {lists.unreadable ? (
+          <SessionPanelEmpty
+            title={translate('sessionPanel.docker.unreadableTitle')}
+            description={translate('sessionPanel.docker.unreadableRetry')}
+          >
+            {lists.error ? (
+              <p className="mt-1 break-words font-mono text-[0.66rem] leading-[1.5] text-[var(--text-soft)]">
+                {lists.error}
+              </p>
+            ) : null}
+          </SessionPanelEmpty>
+        ) : lists.loading ? (
           <Skeleton />
         ) : tab === 'containers' ? (
           <ContainersView
@@ -1584,11 +1619,14 @@ function NetworksView({
                 <span className="min-w-0 flex-1 truncate font-mono text-[0.76rem] text-[var(--text)]">
                   {network.name}
                 </span>
-                <span className="shrink-0 text-[0.62rem] tabular-nums text-[var(--text-muted)]">
-                  {translate('sessionPanel.docker.volumes.usedBy', {
-                    count: network.containerCount,
-                  })}
-                </span>
+                {/* 포드맨은 붙은 컨테이너를 알려 주지 않는다 — 모르는 것을 "0개" 로 적지 않고 뺀다. */}
+                {network.containerCount === null ? null : (
+                  <span className="shrink-0 text-[0.62rem] tabular-nums text-[var(--text-muted)]">
+                    {translate('sessionPanel.docker.volumes.usedBy', {
+                      count: network.containerCount,
+                    })}
+                  </span>
+                )}
                 <MoreButton
                   label={`${translate('sessionPanel.docker.more')} ${network.name}`}
                   onClick={() => onToggleMenu(menuId)}

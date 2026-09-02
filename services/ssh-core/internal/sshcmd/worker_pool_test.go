@@ -2,7 +2,6 @@ package sshcmd
 
 import (
 	"fmt"
-	"io"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -25,7 +24,9 @@ func startLocalShell() (*completionWorkerProcess, error) {
 		_ = stdin.Close()
 		return nil, err
 	}
-	cmd.Stderr = io.Discard
+	// 진짜 워커와 같은 자리에 stderr 를 담는다 — 상태·오류 문장 검사가 이 픽스처를 쓴다.
+	stderr := NewBoundedBuffer(CompletionStderrLimit)
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
 		return nil, err
@@ -37,6 +38,7 @@ func startLocalShell() (*completionWorkerProcess, error) {
 	return &completionWorkerProcess{
 		stdin:  stdin,
 		stdout: stdout,
+		stderr: stderr,
 		close: func() error {
 			_ = stdin.Close()
 			if cmd.Process != nil {
@@ -117,7 +119,8 @@ func newLocalWorkerPool(t *testing.T, max int32, clock *fakeClock) (*WorkerPool,
 
 func runPool(t *testing.T, pool *WorkerPool, lane Lane, command string) string {
 	t.Helper()
-	output, _, err := pool.Run(lane, command, 5*time.Second, 4096)
+	result, err := pool.Run(lane, command, 5*time.Second, 4096)
+	output := result.Stdout
 	if err != nil {
 		t.Fatalf("Run(%v, %q) error = %v", lane, command, err)
 	}
@@ -133,7 +136,7 @@ func TestWorkerPoolInteractiveDoesNotWaitForBackground(t *testing.T) {
 	blocked := make(chan struct{})
 	go func() {
 		defer close(blocked)
-		_, _, _ = pool.Run(LaneBackground, "sleep 2", 10*time.Second, 4096)
+		_, _ = pool.Run(LaneBackground, "sleep 2", 10*time.Second, 4096)
 	}()
 
 	// 백그라운드 명령이 실제로 채널을 물 때까지 기다린다(레이스 없이 "물려 있는 동안" 을 만든다).
@@ -197,7 +200,7 @@ func TestWorkerPoolBackgroundTimeoutKeepsInteractiveChannel(t *testing.T) {
 	if got := runPool(t, pool, LaneInteractive, "printf warm"); got != "warm" {
 		t.Fatalf("interactive output = %q, want %q", got, "warm")
 	}
-	if _, _, err := pool.Run(LaneBackground, "sleep 5", 200*time.Millisecond, 4096); err == nil {
+	if _, err := pool.Run(LaneBackground, "sleep 5", 200*time.Millisecond, 4096); err == nil {
 		t.Fatal("expected the background query to time out")
 	}
 	if got := runPool(t, pool, LaneInteractive, "printf still-here"); got != "still-here" {

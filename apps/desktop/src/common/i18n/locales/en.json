@@ -3836,6 +3836,8 @@
       "emptyImages": "No images",
       "emptyVolumes": "No volumes",
       "emptyNetworks": "No networks",
+      "unreadableTitle": "Can't read this",
+      "unreadableRetry": "Retrying on its own.",
       "truncated": "The list was cut off — narrow it with search.",
       "staleSeconds": "{{count}}s old · retrying",
       "staleMinutes": "{{count}}m old · retrying",
