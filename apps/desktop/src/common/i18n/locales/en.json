@@ -3850,6 +3850,7 @@
       "retrying": "Retrying",
       "action": {
         "start": "Start",
+        "unpause": "Unpause",
         "stop": "Stop",
         "restart": "Restart",
         "remove": "Remove",
@@ -3899,6 +3900,9 @@
       },
       "summary": {
         "running": "{{running}}/{{total}} running"
+      },
+      "state": {
+        "paused": "paused"
       },
       "trouble": {
         "restarting": "restarting",

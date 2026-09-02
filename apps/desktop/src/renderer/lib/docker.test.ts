@@ -14,7 +14,10 @@ import {
   dockerRemoveCommand,
   dockerShellCommand,
   dockerStateCommand,
+  FIELD_SEPARATOR,
   groupContainersByStack,
+  isContainerActive,
+  isContainerRunning,
   isImageUsed,
   INSPECT_EVERY_TICKS,
   inspectTargets,
@@ -40,7 +43,7 @@ import {
 // id·이름·상태문장·이미지·포트·프로젝트·서비스·작업디렉터리 순서다(CONTAINER_FIELDS).
 function row(fields: Partial<Record<number, string>>): string {
   const cells = Array.from({ length: 8 }, (_, index) => fields[index] ?? '');
-  return cells.join('\t');
+  return cells.join('|@|');
 }
 
 function container(overrides: Partial<DockerContainer> = {}): DockerContainer {
@@ -190,6 +193,20 @@ describe('컨테이너 목록', () => {
   });
 
   /**
+   * 포드맨의 ps 리포터에는 `Label` 메서드가 없다 — 도커 템플릿을 그대로 보내면 `can't evaluate
+   * field Label in type containers.psReporter` 로 죽어, 컨테이너 탭이 "읽을 수 없습니다 · 다시
+   * 받는 중" 에서 영영 못 빠져나왔다. 포드맨은 `Labels` 맵을 `index` 로 읽는다.
+   */
+  it('포드맨에는 Label 메서드 대신 Labels 맵으로 라벨을 읽는다', () => {
+    const podman = buildContainerListCommand('podman', 'podman');
+    expect(podman).toContain('{{index .Labels "com.docker.compose.project"}}');
+    expect(podman).not.toContain('.Label "');
+    const docker = buildContainerListCommand('docker', 'docker');
+    expect(docker).toContain('{{.Label "com.docker.compose.project"}}');
+    expect(docker).not.toContain('index .Labels');
+  });
+
+  /**
    * `docker ps … | head` 의 `$?` 는 **head 의 것**이다 — 도커가 죽어도 0 이 온다. 보조 채널은
    * 그 코드로 "실패했다" 와 "찍을 것이 없었다" 를 가르므로, 파이프가 상태를 삼키면 실패가 다시
    * "없습니다" 로 보인다. POSIX sh 에는 pipefail 이 없어 출력을 변수로 받아 되돌린다.
@@ -258,6 +275,27 @@ describe('스택 묶기', () => {
     expect(stacks[1].containers).toHaveLength(1);
   });
 
+  // 일시정지(docker pause)는 프로세스가 살아 있다 — 정지된 것과 같은 자리에 두면 죽은 것처럼
+  // 보인다. 자리·밝기는 "살아 있는가" 로, 포워딩·로그 따라가기는 "응답하는가" 로 가른다.
+  it('일시정지는 살아 있지만 응답하지 않는 것으로 본다', () => {
+    const paused = container({ id: '1', state: 'paused', status: 'Up 5 minutes (Paused)' });
+    expect(isContainerActive(paused)).toBe(true);
+    expect(isContainerRunning(paused)).toBe(false);
+    const exited = container({ id: '2', state: 'exited', status: 'Exited (0)' });
+    expect(isContainerActive(exited)).toBe(false);
+    expect(isContainerRunning(exited)).toBe(false);
+  });
+
+  it('일시정지는 정지된 것보다 앞에 오고 살아 있는 수에 든다', () => {
+    const stacks = groupContainersByStack([
+      container({ id: '1', name: 'c', project: 'p', state: 'exited', status: 'Exited (0)' }),
+      container({ id: '2', name: 'b', project: 'p', state: 'paused', status: 'Up 1 hour (Paused)' }),
+      container({ id: '3', name: 'a', project: 'p' }),
+    ]);
+    expect(stacks[0].containers.map((entry) => entry.name)).toEqual(['a', 'b', 'c']);
+    expect(stacks[0].runningCount).toBe(2);
+  });
+
   it('스택 안에서는 돌고 있는 것이 먼저다', () => {
     const stacks = groupContainersByStack([
       container({ id: '1', name: 'b', project: 'p', state: 'exited', status: 'Exited (0)' }),
@@ -305,7 +343,7 @@ describe('이미지', () => {
 
   it('목록을 큰 것부터 놓는다', () => {
     const { images } = parseImageList(
-      ['app\t1.0\tsha1\t412MB', '<none>\t<none>\tsha2\t1.1GB'].join('\n'),
+      ['app|@|1.0|@|sha1|@|412MB', '<none>|@|<none>|@|sha2|@|1.1GB'].join('\n'),
     );
     expect(images[0].repository).toBe('<none>');
     expect(images[0].dangling).toBe(true);
@@ -313,7 +351,7 @@ describe('이미지', () => {
 
   it('컨테이너가 쓰는 이미지는 미사용으로 표시하지 않는다', () => {
     const used = collectUsedImages([container({ image: 'app:1.0' })]);
-    const { images } = parseImageList('app\t1.0\tsha1\t412MB\nold\t9\tsha2\t10MB');
+    const { images } = parseImageList('app|@|1.0|@|sha1|@|412MB\nold|@|9|@|sha2|@|10MB');
     expect(isImageUsed(images[0], used)).toBe(true);
     expect(isImageUsed(images[1], used)).toBe(false);
   });
@@ -330,33 +368,45 @@ describe('볼륨 · 네트워크', () => {
    * 그대로 찍힌다. 쉼표로만 가르면 그 줄이 이름 하나가 되어 사용 수가 늘 0 이었다.
    */
   it('마운트가 슬라이스 표기로 와도 센다 — 포드맨', () => {
-    const stdout = ['pgdata\tlocal', 'logs\tlocal', '@@dolgate@@', '[pgdata logs]', '[pgdata]'].join('\n');
+    const stdout = ['pgdata|@|local', 'logs|@|local', '@@dolgate@@', '[pgdata logs]', '[pgdata]'].join('\n');
     const { volumes } = parseVolumeList(stdout);
     expect(volumes[0]).toMatchObject({ name: 'pgdata', usedBy: 2 });
     expect(volumes[1]).toMatchObject({ name: 'logs', usedBy: 1 });
   });
 
   it('볼륨을 붙인 컨테이너 수를 마운트에서 센다', () => {
-    const stdout = ['pgdata\tlocal', 'orphan\tlocal', '@@dolgate@@', 'pgdata,logs', 'pgdata'].join('\n');
+    const stdout = ['pgdata|@|local', 'orphan|@|local', '@@dolgate@@', 'pgdata,logs', 'pgdata'].join('\n');
     const { volumes } = parseVolumeList(stdout);
     expect(volumes[0]).toMatchObject({ name: 'pgdata', usedBy: 2 });
     expect(volumes[1].usedBy).toBe(0);
   });
 
   it('익명 볼륨을 알아본다', () => {
-    const { volumes } = parseVolumeList(`${'b'.repeat(64)}\tlocal`);
+    const { volumes } = parseVolumeList(`${'b'.repeat(64)}|@|local`);
     expect(volumes[0].anonymous).toBe(true);
   });
 
   /**
-   * `inspect` 계열은 포맷 문자열의 `\t` 를 탭으로 바꿔 주지 않는다(목록 명령만 바꿔 준다).
-   * 백슬래시-t 두 글자를 넣으면 출력에 탭이 없고, 파서가 그 줄을 전부 버려 네트워크가 어느
-   * 호스트에서든 빈 목록으로 보였다.
+   * 구분자에 탭을 쓰면 안 된다. 포드맨은 `--format` 출력을 tabwriter 에 태워 탭을 공백 정렬로
+   * 바꿔 버리고(컨테이너 다섯 개가 도는 호스트가 "없습니다" 로 보였다), 도커는 명령마다 백슬래시-t
+   * 치환 여부가 달라 진짜 탭인지 백슬래시-t 인지를 따로 기억해야 했다. 어느 형식에도 탭이
+   * 들어가지 않는지 한 자리에서 잠근다 — 형식이 여섯 벌이라 하나만 되돌려도 그 탭만 조용히 깨진다.
    */
-  it('구분자가 진짜 탭이다 — inspect 는 백슬래시-t 를 바꿔 주지 않는다', () => {
-    const command = buildNetworkListCommand('docker');
-    expect(command).toContain('\t');
-    expect(command).not.toContain('\\t');
+  it('어느 --format 에도 탭이 없고 전부 같은 구분자를 쓴다', () => {
+    const commands = [
+      buildContainerListCommand('docker', 'docker'),
+      buildContainerListCommand('podman', 'podman'),
+      buildImageListCommand('docker'),
+      buildVolumeListCommand('docker'),
+      buildNetworkListCommand('docker'),
+      buildContainerMetricsCommand('docker', { stats: true, inspectIds: ['a1'], dialect: 'docker' }),
+      buildContainerMetricsCommand('podman', { stats: true, inspectIds: ['a1'], dialect: 'podman' }),
+    ];
+    for (const command of commands) {
+      expect(command).not.toContain('\t');
+      expect(command).not.toContain('\\t');
+      expect(command).toContain(FIELD_SEPARATOR);
+    }
   });
 
   // 네트워크가 하나도 없으면 `network inspect` 가 인자 없이 불려 실패한다.
@@ -368,7 +418,7 @@ describe('볼륨 · 네트워크', () => {
 
   it('네트워크는 한 번의 inspect 로 서브넷까지 받는다', () => {
     expect(buildNetworkListCommand('docker')).toContain('network inspect $ids');
-    const { networks } = parseNetworkList('lime_default\tbridge\t172.19.0.0/16 \t6');
+    const { networks } = parseNetworkList('lime_default|@|bridge|@|172.19.0.0/16 |@|6');
     expect(networks[0]).toMatchObject({
       name: 'lime_default',
       subnet: '172.19.0.0/16',
@@ -380,11 +430,25 @@ describe('볼륨 · 네트워크', () => {
    * 도커는 `IPAM.Config`·`Containers`, 포드맨은 `Subnets` 다. 한 형식만 보내면 다른 쪽에서
    * 템플릿이 죽어 탭이 통째로 "없습니다" 가 된다 — 컨테이너의 `{{.State}}` 와 같은 결함이었다.
    */
-  it('도커와 포드맨 형식을 둘 다 시도한다', () => {
+  it('도커·포드맨(netavark)·포드맨(CNI) 형식을 차례로 시도한다', () => {
     const command = buildNetworkListCommand('podman');
     expect(command).toContain('{{range .IPAM.Config}}');
     expect(command).toContain('{{range .Subnets}}');
+    // 포드맨 3.x 는 CNI 설정 맵을 그대로 준다 — 소문자 키.
+    expect(command).toContain('{{.name}}');
+    expect(command).toContain('index .plugins 0');
     expect(command.indexOf('.IPAM.Config')).toBeLessThan(command.indexOf('.Subnets'));
+    expect(command.indexOf('.Subnets')).toBeLessThan(command.indexOf('.plugins'));
+  });
+
+  /**
+   * 포드맨 3.x 는 netavark 형식을 받아도 죽지 않는다 — 맵에 없는 키라 `<no value>` 를 찍고 0 으로
+   * 끝난다. 종료 코드만 보면 그 답이 채택되어 "<no value>" 라는 네트워크가 화면에 그려졌다
+   * (실제 3.4.4 호스트에서). 답이 비었거나 `<no value>` 로 시작하면 다음 형식으로 넘어가야 한다.
+   */
+  it('`<no value>` 로 시작하는 답은 형식이 안 맞은 것으로 보고 다음으로 넘어간다', () => {
+    const command = buildNetworkListCommand('podman');
+    expect(command).toContain(`case "$out" in ''|'<no value>'*)`);
   });
 
   /**
@@ -393,14 +457,16 @@ describe('볼륨 · 네트워크', () => {
    * 이름으로 채워진다. 변수로 받아 성공한 쪽만 흘려보내야 한다.
    */
   /** 둘 다 실패하면 우리가 모르는 런타임이다 — 그때 화면에 보여 줄 단서가 그 한 줄뿐이다. */
-  it('첫 시도의 오류만 버리고 두 번째 것은 남긴다', () => {
+  it('앞선 시도의 오류만 버리고 마지막 것은 남긴다', () => {
     const command = buildNetworkListCommand('docker');
     const first = command.indexOf('.IPAM.Config');
     const second = command.indexOf('.Subnets');
-    // 첫 시도는 포드맨에서 실패하는 것이 정상이라 소음이다.
+    const third = command.indexOf('.plugins');
+    // 앞의 두 시도는 다른 런타임에서 실패하는 것이 정상이라 소음이다.
     expect(command.slice(first, second)).toContain('2>/dev/null');
-    // 두 번째 시도 뒤에는 stderr 를 막는 자리가 없다.
-    expect(command.slice(second)).not.toContain('2>/dev/null');
+    expect(command.slice(second, third)).toContain('2>/dev/null');
+    // 마지막 시도 뒤에는 stderr 를 막는 자리가 없다.
+    expect(command.slice(third)).not.toContain('2>/dev/null');
   });
 
   it('실패한 시도의 출력은 버린다', () => {
@@ -429,11 +495,18 @@ describe('볼륨 · 네트워크', () => {
     expect(command).toContain('[ "$rc" -eq 0 ] && rc=$mrc');
   });
 
+  // 맵에 없는 키를 읽은 흔적이 이름 칸에 오면 그 줄은 네트워크가 아니다.
+  it('`<no value>` 는 빈 칸이다 — 그런 이름의 네트워크를 만들지 않는다', () => {
+    expect(parseNetworkList('<no value>|@|<no value>|@||@|').networks).toEqual([]);
+    // 다른 칸의 <no value> 도 빈 값으로 본다.
+    expect(parseNetworkList('podman|@|<no value>|@|10.88.0.0/16 |@|').networks[0].driver).toBe('');
+  });
+
   it('컨테이너 수를 모르면 0 이 아니라 null 이다', () => {
     // 포드맨은 붙은 컨테이너를 알려 주지 않아 그 칸이 빈 채로 온다.
-    expect(parseNetworkList('podman\tbridge\t10.88.0.0/16 \t').networks[0].containerCount).toBeNull();
+    expect(parseNetworkList('podman|@|bridge|@|10.88.0.0/16 |@|').networks[0].containerCount).toBeNull();
     // 진짜 0 은 0 으로 남는다 — 모르는 것과 없는 것은 다른 말이다.
-    expect(parseNetworkList('bridge\tbridge\t172.17.0.0/16 \t0').networks[0].containerCount).toBe(0);
+    expect(parseNetworkList('bridge|@|bridge|@|172.17.0.0/16 |@|0').networks[0].containerCount).toBe(0);
   });
 });
 
@@ -592,6 +665,13 @@ describe('명령 만들기', () => {
     );
   });
 
+  // 일시정지는 start 로 깨우지 못한다 — 도커가 "try unpause instead" 로 거절한다.
+  it('일시정지를 푸는 말은 unpause 다', () => {
+    expect(dockerStateCommand('docker', 'unpause', [container({ name: 'a' })])).toBe(
+      "docker unpause 'a'",
+    );
+  });
+
   it('compose 는 프로젝트 디렉터리로 들어가서 부른다 — 그래야 설정 파일을 찾는다', () => {
     // `--project-directory` 는 파일을 찾아 주지 않는다(v1·v2 모두 cwd 나 -f 에서 찾는다).
     // 괄호로 감싸 사용자의 현재 위치는 그대로 둔다.
@@ -684,7 +764,7 @@ describe('컨테이너 지표는 목록과 다른 왕복이다', () => {
 
   it('stats 를 빼도 구분자 자리가 밀리지 않는다', () => {
     const parsed = parseContainerMetrics(
-      ['@@dolgate@@', `a1b2c3d4e5f6${'0'.repeat(52)}\t3\tunhealthy\ttrue`].join('\n'),
+      ['@@dolgate@@', `a1b2c3d4e5f6${'0'.repeat(52)}|@|3|@|unhealthy|@|true`].join('\n'),
     );
     expect(parsed.stats.size).toBe(0);
     expect(parsed.inspect.get('a1b2c3d4e5f6')).toEqual({
@@ -698,7 +778,7 @@ describe('컨테이너 지표는 목록과 다른 왕복이다', () => {
 
   it('NET·BLOCK 은 누적값이라 바이트로도 담는다 — 초당 값은 두 표본의 차로 낸다', () => {
     const parsed = parseContainerMetrics(
-      'a1b2c3d4e5f6\t12.40%\t412MiB / 15.6GiB\t2.58%\t632kB / 4.38MB\t22.6MB / 12.3kB\t11',
+      'a1b2c3d4e5f6|@|12.40%|@|412MiB / 15.6GiB|@|2.58%|@|632kB / 4.38MB|@|22.6MB / 12.3kB|@|11',
     );
     const stat = parsed.stats.get('a1b2c3d4e5f6');
     expect(stat?.netInBytes).toBe(632_000);
@@ -710,9 +790,9 @@ describe('컨테이너 지표는 목록과 다른 왕복이다', () => {
   it('지표와 검사를 한 왕복에서 갈라 읽는다', () => {
     const parsed = parseContainerMetrics(
       [
-        'a1b2c3d4e5f6\t12.40%\t412MiB / 15.6GiB\t2.58%\t1.2GB / 340MB\t0B / 4.1MB\t18',
+        'a1b2c3d4e5f6|@|12.40%|@|412MiB / 15.6GiB|@|2.58%|@|1.2GB / 340MB|@|0B / 4.1MB|@|18',
         '@@dolgate@@',
-        `a1b2c3d4e5f6${'0'.repeat(52)}\t0\thealthy\tfalse`,
+        `a1b2c3d4e5f6${'0'.repeat(52)}|@|0|@|healthy|@|false`,
       ].join('\n'),
     );
     expect(parsed.stats.get('a1b2c3d4e5f6')?.cpuPercent).toBe(12.4);
@@ -819,7 +899,7 @@ describe('컨테이너 네트워크', () => {
     const parsed = parseContainerMetrics(
       [
         '@@dolgate@@',
-        `a1b2c3d4e5f6${'0'.repeat(52)}\t0\thealthy\tfalse\t80/tcp \thost=;`,
+        `a1b2c3d4e5f6${'0'.repeat(52)}|@|0|@|healthy|@|false|@|80/tcp |@|host=;`,
       ].join('\n'),
     );
     expect(parsed.inspect.get('a1b2c3d4e5f6')?.networks).toEqual([

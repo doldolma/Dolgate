@@ -2,6 +2,7 @@
 // 어디로 무엇이 나가는가" 만 본다 — 읽기는 보조 채널, 셸·로그는 새 탭, 상태 변경은 지금
 // 터미널, 파괴적인 것은 넣기만.
 
+import { FIELD_SEPARATOR } from '../../../lib/docker';
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionPanelDocker } from './SessionPanelDocker';
@@ -56,7 +57,7 @@ function resolveNetworksOf(spy: ReturnType<typeof vi.fn>) {
 
 // id·이름·상태문장·이미지·포트·프로젝트·서비스·작업디렉터리 순서다(CONTAINER_FIELDS).
 function row(cells: string[]): string {
-  return [...cells, ...Array.from({ length: 8 - cells.length }, () => '')].join('\t');
+  return [...cells, ...Array.from({ length: 8 - cells.length }, () => '')].join(FIELD_SEPARATOR);
 }
 
 const CONTAINERS = [
@@ -70,13 +71,13 @@ const CONTAINERS = [
  * `stats --no-stream` 이 느려서 목록이 그 뒤에 서지 않게 갈라 놓았다.
  */
 const METRICS = [
-  ['a1b2c3d4e5f6\t12.40%\t412MiB / 15.6GiB\t2.58%\t1.2GB / 340MB\t0B / 4.1MB\t18',
-   'a2b3c4d5e6f7\t0.30%\t96MiB / 15.6GiB\t0.60%\t2MB / 1MB\t0B / 0B\t7'].join('\n'),
+  ['a1b2c3d4e5f6|@|12.40%|@|412MiB / 15.6GiB|@|2.58%|@|1.2GB / 340MB|@|0B / 4.1MB|@|18',
+   'a2b3c4d5e6f7|@|0.30%|@|96MiB / 15.6GiB|@|0.60%|@|2MB / 1MB|@|0B / 0B|@|7'].join('\n'),
   '@@dolgate@@',
   [
     // 마지막 칸은 컨테이너가 여는 포트다 — `ps` 는 공개된 것만 주므로 여기서 함께 받는다.
-    `a1b2c3d4e5f6${'0'.repeat(52)}\t0\thealthy\tfalse\t5050/tcp 9090/tcp \tbridge=172.17.0.5;`,
-    `a2b3c4d5e6f7${'0'.repeat(52)}\t14\t\tfalse\t\t`,
+    `a1b2c3d4e5f6${'0'.repeat(52)}|@|0|@|healthy|@|false|@|5050/tcp 9090/tcp |@|bridge=172.17.0.5;`,
+    `a2b3c4d5e6f7${'0'.repeat(52)}|@|14|@||@|false|@||@|`,
   ].join('\n'),
 ].join('\n');
 
@@ -441,7 +442,7 @@ describe('컨테이너', () => {
       if (command.includes('stats --no-stream')) {
         return Promise.resolve(
           [
-            `a1b2c3d4e5f6\t${cpu}\t412MiB / 15.6GiB\t2.58%\t1.2GB / 340MB\t0B / 4.1MB\t18`,
+            `a1b2c3d4e5f6|@|${cpu}|@|412MiB / 15.6GiB|@|2.58%|@|1.2GB / 340MB|@|0B / 4.1MB|@|18`,
             '@@dolgate@@',
           ].join('\n'),
         );
@@ -524,7 +525,7 @@ describe('다른 탭', () => {
   it('이미지 탭은 images 한 번으로 끝낸다', async () => {
     respond({
       'ps -a --format': CONTAINERS,
-      'images --format': ['app\t1\tsha1\t412MB', 'old\t2\tsha2\t1.1GB'].join('\n'),
+      'images --format': ['app|@|1|@|sha1|@|412MB', 'old|@|2|@|sha2|@|1.1GB'].join('\n'),
     });
     renderSection();
     await screen.findByText('gateway');
@@ -538,7 +539,7 @@ describe('다른 탭', () => {
   it('볼륨 탭은 volume ls 한 번으로 끝낸다', async () => {
     respond({
       // 볼륨 명령도 뒤에 ps 를 달고 있으므로 더 좁은 조각을 먼저 둔다.
-      'volume ls': ['pgdata\tlocal', '@@dolgate@@', 'pgdata'].join('\n'),
+      'volume ls': ['pgdata|@|local', '@@dolgate@@', 'pgdata'].join('\n'),
       'ps -a --format': CONTAINERS,
     });
     renderSection();
@@ -592,7 +593,7 @@ describe('알아서 다시 받는다', () => {
   it('정적 탭은 받아 둔 값이 새것이어도 새로고침에는 다시 받아온다', async () => {
     respond({
       'ps -a --format': CONTAINERS,
-      'images --format': 'app\t1\tsha1\t412MB',
+      'images --format': 'app|@|1|@|sha1|@|412MB',
     });
     renderSection();
     await screen.findByText('gateway');
@@ -625,7 +626,7 @@ describe('알아서 다시 받는다', () => {
           return Promise.resolve(
             imageAttempts === 1
               ? { stdout: '', exitCode: 1, stderr: 'permission denied' }
-              : { stdout: 'app\t1\tsha1\t412MB', exitCode: 0, stderr: '' },
+              : { stdout: 'app|@|1|@|sha1|@|412MB', exitCode: 0, stderr: '' },
           );
         }
         if (command.includes('ps -a --format')) {
@@ -669,7 +670,7 @@ describe('알아서 다시 받는다', () => {
     const inspectOnly = [
       '',
       '@@dolgate@@',
-      `a1b2c3d4e5f6${'0'.repeat(52)}\t7\tunhealthy\tfalse\t\t`,
+      `a1b2c3d4e5f6${'0'.repeat(52)}|@|7|@|unhealthy|@|false|@||@|`,
     ].join('\n');
     query.mockImplementation((_sessionId: string, command: string) => {
       if (command.includes('stats --no-stream')) {
@@ -965,7 +966,7 @@ describe('탭을 오가도 계속 받아온다', () => {
   it('볼륨에 들어갔다 돌아와도 컨테이너가 다시 받아진다', async () => {
     respond({
       // 볼륨 명령도 뒤에 `ps -a --format` 을 달고 있으므로 더 좁은 조각을 먼저 둔다.
-      'volume ls': ['pgdata\tlocal', '@@dolgate@@', 'pgdata'].join('\n'),
+      'volume ls': ['pgdata|@|local', '@@dolgate@@', 'pgdata'].join('\n'),
       'system df -v': 'Local Volumes space usage:',
       'stats --no-stream': METRICS,
       'ps -a --format': CONTAINERS,
@@ -988,7 +989,7 @@ describe('세션마다 보던 자리를 기억한다', () => {
    */
   it('보던 탭과 검색어가 세션별로 남는다', async () => {
     respond({
-      'volume ls': ['pgdata\tlocal', '@@dolgate@@', 'pgdata'].join('\n'),
+      'volume ls': ['pgdata|@|local', '@@dolgate@@', 'pgdata'].join('\n'),
       'stats --no-stream': METRICS,
       'ps -a --format': CONTAINERS,
     });
@@ -1210,7 +1211,7 @@ describe('tmux 창 안에서 pane 을 옮길 때', () => {
     // 다시 돌릴 이유가 없다. 창 키(stateKey)와 질의 대상(querySessionId)이 그대로이기 때문이다.
     query.mockImplementation((_sessionId: string, command: string) => {
       if (command.includes('images --format')) {
-        return Promise.resolve('app\t1\tsha1\t412MB');
+        return Promise.resolve('app|@|1|@|sha1|@|412MB');
       }
       if (command.includes('ps -a --format')) {
         return Promise.resolve(CONTAINERS);

@@ -15,6 +15,31 @@ export const DOCKER_PREFIX_CANDIDATES = ['docker', 'sudo -n docker', 'podman'] a
 export const DOCKER_ROW_LIMIT = 200;
 
 /**
+ * `--format` 출력에서 칸을 가르는 구분자. **탭이 아니다 — 절대 탭으로 되돌리지 말 것.**
+ *
+ * 탭은 두 런타임 모두에서 함정이었다.
+ * - 포드맨은 `--format` 출력을 통째로 tabwriter 에 태워 **탭을 공백 정렬로 바꿔 버린다**. 그래서
+ *   탭으로 가른 템플릿을 보내면 탭 없는 한 줄이 돌아오고, 파서가 줄을 전부 버려 컨테이너 탭이
+ *   "없습니다" 로 굳었다(실제로 그랬다 — 컨테이너가 다섯 개 도는 호스트에서).
+ * - 도커는 목록 명령(`ps`·`images`)만 포맷 문자열의 백슬래시-t 를 탭으로 바꿔 주고 `inspect`
+ *   계열은 바꿔 주지 않아, 명령마다 진짜 탭인지 백슬래시-t 인지를 따로 기억해야 했다.
+ *
+ * 템플릿에 없는 글자를 쓰면 두 문제가 함께 사라진다: 도커도 포드맨도 템플릿 바깥의 글자는
+ * 그대로 찍는다(tabwriter 는 탭만 만진다). 이 문자열은 어느 칸의 값에도 나올 수 없다 — 이름은
+ * `[a-zA-Z0-9_.-]`, 포트는 `0.0.0.0:80->80/tcp`, 이미지는 `repo:tag@sha256:…`, 크기·비율은
+ * 숫자와 단위다. 경로(compose 작업 디렉터리)에 `|@|` 가 들어갈 일은 없다고 본다.
+ */
+export const FIELD_SEPARATOR = '|@|';
+
+/** 한 줄을 칸으로 가른다. 값에 붙은 앞뒤 공백은 호출부가 trim 한다(포드맨은 정렬 공백을 남긴다). */
+function splitFields(line: string): string[] {
+  // `<no value>` 는 Go 템플릿이 **맵**에 없는 키를 읽었을 때 찍는 글자다(구조체면 오류로 죽는다).
+  // 어느 런타임의 어느 칸에도 그런 값은 없으므로 빈 칸으로 본다 — 포드맨 3.x 의 network
+  // inspect 가 이 글자를 이름 칸에 채워 "<no value>" 라는 네트워크가 화면에 그려졌다.
+  return line.split(FIELD_SEPARATOR).map((field) => (field === '<no value>' ? '' : field));
+}
+
+/**
  * 출력에 줄 수 상한을 걸되 **원래 명령의 종료 코드를 지킨다.**
  *
  * `docker ps … | head -n 201` 의 `$?` 는 **head 의 것**이다 — 도커가 템플릿 오류로 죽어도 0 이
@@ -209,23 +234,45 @@ export interface DockerContainer {
  * 멀쩡했으니 도커가 안 읽히는 것처럼 보이지도 않았다. `.Status` 는 1.x 부터 있고 첫 낱말이
  * 상태를 그대로 말해 주므로 그것 하나로 낸다(toContainerState).
  */
-const CONTAINER_FIELDS = [
-  '{{.ID}}',
-  '{{.Names}}',
-  '{{.Status}}',
-  '{{.Image}}',
-  '{{.Ports}}',
-  '{{.Label "com.docker.compose.project"}}',
-  '{{.Label "com.docker.compose.service"}}',
-  '{{.Label "com.docker.compose.project.working_dir"}}',
-].join('\\t');
+const CONTAINER_COMPOSE_LABELS = [
+  'com.docker.compose.project',
+  'com.docker.compose.service',
+  'com.docker.compose.project.working_dir',
+] as const;
+
+/**
+ * 라벨 한 칸을 읽는 템플릿. **방언마다 다르다.**
+ *
+ * 도커의 `ps` 리포터에는 `Label` 메서드가 있어 `{{.Label "k"}}` 로 읽는다. 포드맨의 리포터에는
+ * 그 메서드가 없고 `Labels` 맵만 있어서, 같은 템플릿을 보내면 `can't evaluate field Label in
+ * type containers.psReporter` 로 죽는다 — 포드맨 호스트의 컨테이너 탭이 "읽을 수 없습니다 ·
+ * 다시 받는 중" 에서 영영 빠져나오지 못한 이유다. 맵은 `index` 로 읽고, 없는 키는 빈 문자열로
+ * 온다(도커의 `.Label` 도 없는 키를 빈 문자열로 준다 — 파서는 하나로 충분하다).
+ */
+function containerLabelField(dialect: DockerDialect, key: string): string {
+  return dialect === 'podman' ? `{{index .Labels "${key}"}}` : `{{.Label "${key}"}}`;
+}
+
+function containerFields(dialect: DockerDialect): string {
+  return [
+    '{{.ID}}',
+    '{{.Names}}',
+    '{{.Status}}',
+    '{{.Image}}',
+    '{{.Ports}}',
+    ...CONTAINER_COMPOSE_LABELS.map((key) => containerLabelField(dialect, key)),
+  ].join(FIELD_SEPARATOR);
+}
 
 /**
  * 정지된 것까지 한 번에 받는다(`-a`). 정지 포함 토글을 두지 않기 때문이다 — 무엇을 보여 줄지는
  * 우리가 정하고(그룹 끝에 흐리게), 검색도 받아 온 목록을 앱에서 거른다. 왕복은 하나면 된다.
  */
-export function buildContainerListCommand(prefix: string): string {
-  return AUX_PATH_EXPORT + limitRows(`${prefix} ps -a --format '${CONTAINER_FIELDS}'`);
+export function buildContainerListCommand(
+  prefix: string,
+  dialect: DockerDialect = 'docker',
+): string {
+  return AUX_PATH_EXPORT + limitRows(`${prefix} ps -a --format '${containerFields(dialect)}'`);
 }
 
 /**
@@ -266,14 +313,14 @@ export function parseContainerList(stdout: string): DockerContainerList {
   let seen = 0;
   for (const line of stdout.split('\n')) {
     // 탭이 없는 줄은 우리 형식이 아니다(데몬 오류 문장 등) — 조용히 버린다.
-    if (!line.includes('\t')) {
+    if (!line.includes(FIELD_SEPARATOR)) {
       continue;
     }
     seen += 1;
     if (containers.length >= DOCKER_ROW_LIMIT) {
       continue;
     }
-    const parts = line.split('\t');
+    const parts = splitFields(line);
     const [id, name, status, image, ports, project, service, workingDir] = parts;
     if (!id || !name) {
       continue;
@@ -300,6 +347,19 @@ export function containerLabel(container: DockerContainer): string {
 
 export function isContainerRunning(container: DockerContainer): boolean {
   return container.state === 'running' || container.state === 'restarting';
+}
+
+/**
+ * 프로세스가 **살아 있는가.** 실행 중·재시작 중에 더해 일시정지(`docker pause`)를 포함한다.
+ *
+ * `isContainerRunning` 과 다른 질문이다. 일시정지된 컨테이너는 SIGSTOP 을 받은 채로 메모리에
+ * 그대로 있어 `unpause` 하면 바로 돌아온다 — 정지된 것과 같은 자리에 흐리게 그리면 죽은 것처럼
+ * 보여, 왜 응답이 없는지 찾는 사람을 잘못된 곳으로 보낸다. 그래서 **어디에 놓고 얼마나 흐리게
+ * 그릴지**는 이것으로 가르고, **포트를 포워딩할 수 있는지·로그를 따라갈지**처럼 실제로 응답이
+ * 필요한 판단은 여전히 isContainerRunning 이 한다(멈춘 프로세스는 답하지 않는다).
+ */
+export function isContainerActive(container: DockerContainer): boolean {
+  return isContainerRunning(container) || container.state === 'paused';
 }
 
 export interface DockerStack {
@@ -346,9 +406,9 @@ export function layoutContainers(
     }
   }
   loose.sort((left, right) => {
-    const leftRunning = isContainerRunning(left) ? 0 : 1;
-    const rightRunning = isContainerRunning(right) ? 0 : 1;
-    return leftRunning - rightRunning || left.name.localeCompare(right.name);
+    const leftActive = isContainerActive(left) ? 0 : 1;
+    const rightActive = isContainerActive(right) ? 0 : 1;
+    return leftActive - rightActive || left.name.localeCompare(right.name);
   });
   return { stacks, loose };
 }
@@ -380,17 +440,18 @@ export function groupContainersByStack(
     if (container.workingDir && !stack.workingDir) {
       stack.workingDir = container.workingDir;
     }
-    if (isContainerRunning(container)) {
+    // 일시정지도 센다 — 살아 있는 것의 수다(헤더의 "N/M 실행" 과 같은 기준).
+    if (isContainerActive(container)) {
       stack.runningCount += 1;
     }
   }
   const stacks = [...byProject.values()];
   for (const stack of stacks) {
     stack.containers.sort((left, right) => {
-      const leftRunning = isContainerRunning(left) ? 0 : 1;
-      const rightRunning = isContainerRunning(right) ? 0 : 1;
+      const leftActive = isContainerActive(left) ? 0 : 1;
+      const rightActive = isContainerActive(right) ? 0 : 1;
       return (
-        leftRunning - rightRunning ||
+        leftActive - rightActive ||
         containerLabel(left).localeCompare(containerLabel(right))
       );
     });
@@ -667,8 +728,15 @@ export interface DockerContainerNetwork {
   ipAddress: string;
 }
 
-const STATS_FIELDS =
-  '{{.ID}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}';
+const STATS_FIELDS = [
+  '{{.ID}}',
+  '{{.CPUPerc}}',
+  '{{.MemUsage}}',
+  '{{.MemPerc}}',
+  '{{.NetIO}}',
+  '{{.BlockIO}}',
+  '{{.PIDs}}',
+].join(FIELD_SEPARATOR);
 
 // **선택 키는 `index` 로 읽는다.** docker 는 `{{.Id}}`(구조체 필드명은 `ID` 다)를 만나면 구조체
 // 렌더링을 포기하고 원본 JSON 맵으로 물러나는데, 맵 모드는 `missingkey=error` 라서 없는 키를
@@ -702,21 +770,27 @@ const NETWORK_FRAGMENTS: Record<DockerDialect, string> = {
 };
 
 const INSPECT_FORMATS: Record<DockerDialect, string> = {
-  docker:
-    '{{.Id}}\t{{index . "RestartCount"}}\t{{with index .State "Health"}}{{index . "Status"}}{{end}}' +
-    '\t{{index .State "OOMKilled"}}' +
-    '\t{{range $port, $unused := index .Config "ExposedPorts"}}{{$port}} {{end}}' +
+  docker: [
+    '{{.Id}}',
+    '{{index . "RestartCount"}}',
+    '{{with index .State "Health"}}{{index . "Status"}}{{end}}',
+    '{{index .State "OOMKilled"}}',
+    '{{range $port, $unused := index .Config "ExposedPorts"}}{{$port}} {{end}}',
     // 네트워크도 여기서 함께 받는다 — 터널을 열 때 컨테이너 IP 를 다시 물으러 가지 않게.
-    '\t' + NETWORK_FRAGMENTS.docker,
+    NETWORK_FRAGMENTS.docker,
+  ].join(FIELD_SEPARATOR),
   // 포드맨은 구조체라 필드를 그대로 읽는다. **`with` 로 감싸는 것이 여기서는 통한다** — 맵 모드와
   // 달리 필드는 늘 존재하고 값만 nil 이기 때문이다(`State`·`Config`·`NetworkSettings` 가 전부
   // 포인터라 감싸지 않으면 nil 에서 죽는다). `IPAddress` 는 포드맨에서 그냥 string 이라 도커에서
   // 피했던 `invalid IP` 문제가 없다.
-  podman:
-    '{{.ID}}\t{{.RestartCount}}\t{{with .State}}{{with .Health}}{{.Status}}{{end}}{{end}}' +
-    '\t{{with .State}}{{.OOMKilled}}{{end}}' +
-    '\t{{with .Config}}{{range $port, $unused := .ExposedPorts}}{{$port}} {{end}}{{end}}' +
-    '\t' + NETWORK_FRAGMENTS.podman,
+  podman: [
+    '{{.ID}}',
+    '{{.RestartCount}}',
+    '{{with .State}}{{with .Health}}{{.Status}}{{end}}{{end}}',
+    '{{with .State}}{{.OOMKilled}}{{end}}',
+    '{{with .Config}}{{range $port, $unused := .ExposedPorts}}{{$port}} {{end}}{{end}}',
+    NETWORK_FRAGMENTS.podman,
+  ].join(FIELD_SEPARATOR),
 };
 
 /**
@@ -809,10 +883,10 @@ function splitPair(text: string): [string, string] {
 export function parseStats(stdout: string): Map<string, DockerStat> {
   const stats = new Map<string, DockerStat>();
   for (const line of stdout.split('\n')) {
-    if (!line.includes('\t')) {
+    if (!line.includes(FIELD_SEPARATOR)) {
       continue;
     }
-    const [id, cpu, mem, memPct, net, block, pids] = line.split('\t');
+    const [id, cpu, mem, memPct, net, block, pids] = splitFields(line);
     if (!id || id.trim() === 'CONTAINER ID') {
       continue;
     }
@@ -881,10 +955,10 @@ export function buildContainerNetworksCommand(
 export function parseInspect(stdout: string): Map<string, DockerInspectInfo> {
   const info = new Map<string, DockerInspectInfo>();
   for (const line of stdout.split('\n')) {
-    if (!line.includes('\t')) {
+    if (!line.includes(FIELD_SEPARATOR)) {
       continue;
     }
-    const [id, restarts, health, oom, exposed, networks] = line.split('\t');
+    const [id, restarts, health, oom, exposed, networks] = splitFields(line);
     if (!id) {
       continue;
     }
@@ -993,10 +1067,12 @@ const LIST_SEPARATOR = '@@dolgate@@';
  * 컨테이너 목록·지표까지 함께 멈춘다. 여기서 필요한 것은 "무엇이 있고 대략 얼마나 큰가" 이고,
  * 그건 이 한 줄로 충분하다. 볼륨 크기(`system df -v`)를 뺀 것도 같은 이유다.
  */
+const IMAGE_FIELDS = ['{{.Repository}}', '{{.Tag}}', '{{.ID}}', '{{.Size}}'].join(FIELD_SEPARATOR);
+
 export function buildImageListCommand(prefix: string): string {
   return (
     AUX_PATH_EXPORT +
-    limitRows(`${prefix} images --format '{{.Repository}}\\t{{.Tag}}\\t{{.ID}}\\t{{.Size}}'`)
+    limitRows(`${prefix} images --format '${IMAGE_FIELDS}'`)
   );
 }
 
@@ -1025,14 +1101,14 @@ export function parseImageList(stdout: string): DockerImageList {
   const images: DockerImage[] = [];
   let seen = 0;
   for (const line of stdout.split('\n')) {
-    if (!line.includes('\t')) {
+    if (!line.includes(FIELD_SEPARATOR)) {
       continue;
     }
     seen += 1;
     if (images.length >= DOCKER_ROW_LIMIT) {
       continue;
     }
-    const [repository, tag, id, size] = line.split('\t');
+    const [repository, tag, id, size] = splitFields(line);
     if (!repository || !id) {
       continue;
     }
@@ -1102,7 +1178,7 @@ export function buildVolumeListCommand(prefix: string): string {
   return (
     AUX_PATH_EXPORT +
     [
-      `list=$(${prefix} volume ls --format '{{.Name}}\\t{{.Driver}}'); rc=$?`,
+      `list=$(${prefix} volume ls --format '{{.Name}}${FIELD_SEPARATOR}{{.Driver}}'); rc=$?`,
       `mounts=$(${prefix} ps -a --format '{{.Mounts}}'); mrc=$?`,
       // 먼저 난 실패를 남긴다 — `[ ]` 의 상태가 `$?` 를 덮지 않게 미리 받아 둔다.
       '[ "$rc" -eq 0 ] && rc=$mrc',
@@ -1137,14 +1213,14 @@ export function parseVolumeList(stdout: string): { volumes: DockerVolume[]; trun
   const volumes: DockerVolume[] = [];
   let seen = 0;
   for (const line of listPart.split('\n')) {
-    if (!line.includes('\t')) {
+    if (!line.includes(FIELD_SEPARATOR)) {
       continue;
     }
     seen += 1;
     if (volumes.length >= DOCKER_ROW_LIMIT) {
       continue;
     }
-    const [name, driver] = line.split('\t');
+    const [name, driver] = splitFields(line);
     if (!name) {
       continue;
     }
@@ -1171,12 +1247,8 @@ export interface DockerNetwork {
  * 이름·드라이버·서브넷·붙은 컨테이너 수를 한 왕복에. `network ls` 만으로는 서브넷을 알 수 없어
  * `inspect` 를 쓰지만, 네트워크마다 부르면 왕복이 여러 번이 되므로 id 를 한꺼번에 넘긴다.
  *
- * **구분자는 진짜 탭이어야 한다(`\t`, 백슬래시-t 두 글자가 아니라).** docker 의 `--format` 은
- * 두 세계다 — `ps`·`images`·`volume ls` 같은 목록 명령은 CLI 가 포맷 문자열의 `\t` 를 탭으로
- * 치환해 주지만, `inspect` 계열은 Go 템플릿을 그대로 파싱해 아무것도 치환하지 않는다. 여기에
- * 백슬래시-t 를 넣으면 출력에 탭이 없고, 파서가 탭 없는 줄을 전부 버려 네트워크가 **어느
- * 호스트에서든** 빈 목록으로 보였다. 컨테이너 검사(INSPECT_FIELDS)가 멀쩡했던 것은 그쪽이
- * 처음부터 진짜 탭을 쓰고 있어서다.
+ * 구분자는 FIELD_SEPARATOR 다 — 탭이 아닌 이유는 그 상수의 주석에 있다(포드맨은 탭을 공백
+ * 정렬로 바꿔 버리고, 도커는 명령마다 백슬래시-t 치환 여부가 다르다).
  *
  * 네트워크가 하나도 없으면 `network inspect` 는 인자 없이 불려 실패한다 — 먼저 id 를 세어 본다.
  */
@@ -1193,18 +1265,39 @@ export interface DockerNetwork {
  * 변수로 받아 **성공한 쪽만** 흘려보내는 이유다.
  */
 const NETWORK_FORMATS = {
-  docker: '{{.Name}}\t{{.Driver}}\t{{range .IPAM.Config}}{{.Subnet}} {{end}}\t{{len .Containers}}',
-  // 칸 수는 맞춰야 한다 — 마지막 탭이 없으면 파서가 컨테이너 수 칸을 아예 못 본다.
-  podman: '{{.Name}}\t{{.Driver}}\t{{range .Subnets}}{{.Subnet}} {{end}}\t',
+  docker: [
+    '{{.Name}}',
+    '{{.Driver}}',
+    '{{range .IPAM.Config}}{{.Subnet}} {{end}}',
+    '{{len .Containers}}',
+  ].join(FIELD_SEPARATOR),
+  // 칸 수는 맞춰야 한다 — 마지막 구분자가 없으면 파서가 컨테이너 수 칸을 아예 못 본다.
+  podman: ['{{.Name}}', '{{.Driver}}', '{{range .Subnets}}{{.Subnet}} {{end}}', ''].join(
+    FIELD_SEPARATOR,
+  ),
+  // 포드맨 3.x(CNI 백엔드)는 inspect 가 **CNI 설정 JSON 을 그대로** 돌려준다 — 구조체가 아니라
+  // 맵이고 키가 전부 소문자다: `name`, `plugins[0].type`(드라이버), `plugins[0].ipam.ranges`
+  // (서브넷의 2중 배열). 위 netavark 형식을 여기에 돌리면 오류 없이 `<no value>` 만 찍혀 나온다.
+  // 실제 3.4.4 호스트의 출력에서 뽑은 모양이다.
+  podmanCni: [
+    '{{.name}}',
+    '{{with index .plugins 0}}{{.type}}{{end}}',
+    '{{with index .plugins 0}}{{with .ipam}}{{range .ranges}}{{range .}}{{.subnet}} {{end}}{{end}}{{end}}{{end}}',
+    '',
+  ].join(FIELD_SEPARATOR),
 } as const;
 
 export function buildNetworkListCommand(prefix: string): string {
-  // 첫 시도의 오류는 **버린다** — 포드맨에서 실패하는 것이 정상이라 그 문장은 사연이 아니라
-  // 소음이다. 두 번째 시도의 것은 남긴다: 둘 다 실패했다는 것은 우리가 모르는 런타임이라는
-  // 뜻이고, 그때 화면에 보여 줄 단서가 그 한 줄뿐이다(예전에는 그것도 버려서 이유 없는
-  // 실패가 됐다).
+  // 앞선 시도들의 오류는 **버린다** — 다른 런타임에서 실패하는 것이 정상이라 그 문장은 사연이
+  // 아니라 소음이다. 마지막 시도의 것은 남긴다: 전부 실패했다는 것은 우리가 모르는 런타임이라는
+  // 뜻이고, 그때 화면에 보여 줄 단서가 그 한 줄뿐이다.
+  //
+  // **종료 코드만 믿으면 안 된다.** 포드맨 3.x 는 netavark 형식을 받아도 죽지 않고 `<no value>`
+  // 를 찍으며 0 으로 끝난다 — 맵에 없는 키는 오류가 아니기 때문이다. 그래서 답이 비었거나
+  // `<no value>` 로 시작하면 "형식이 안 맞았다" 로 보고 다음 형식으로 넘어간다.
   const attempt = (format: string, keepStderr = false) =>
     `$(${prefix} network inspect $ids --format '${format}'${keepStderr ? '' : ' 2>/dev/null'})`;
+  const unmatched = `''|'<no value>'*`;
   return (
     AUX_PATH_EXPORT +
     [
@@ -1213,7 +1306,9 @@ export function buildNetworkListCommand(prefix: string): string {
       // 0 이 아닌 상태로 끝나, 정상적인 빈 목록이 "읽을 수 없다" 로 뒤집힌다 — 고치려던 결함의
       // 거울상이다. 그래서 조회를 `if` 안에 두고 상태는 조회한 경우에만 갈아 끼운다.
       'if [ "$rc" -eq 0 ] && [ -n "$ids" ]; then ' +
-        `out=${attempt(NETWORK_FORMATS.docker)} || out=${attempt(NETWORK_FORMATS.podman, true)}; rc=$?; ` +
+        `out=${attempt(NETWORK_FORMATS.docker)} || out=; ` +
+        `case "$out" in ${unmatched}) out=${attempt(NETWORK_FORMATS.podman)} || out=;; esac; ` +
+        `case "$out" in ${unmatched}) out=${attempt(NETWORK_FORMATS.podmanCni, true)}; rc=$?;; *) rc=0;; esac; ` +
         `${emitRows('out')}; ` +
         'fi',
       'exit $rc',
@@ -1225,14 +1320,14 @@ export function parseNetworkList(stdout: string): { networks: DockerNetwork[]; t
   const networks: DockerNetwork[] = [];
   let seen = 0;
   for (const line of stdout.split('\n')) {
-    if (!line.includes('\t')) {
+    if (!line.includes(FIELD_SEPARATOR)) {
       continue;
     }
     seen += 1;
     if (networks.length >= DOCKER_ROW_LIMIT) {
       continue;
     }
-    const [name, driver, subnets, count] = line.split('\t');
+    const [name, driver, subnets, count] = splitFields(line);
     if (!name) {
       continue;
     }
@@ -1269,9 +1364,18 @@ export function dockerLogsCommand(prefix: string, container: DockerContainer): s
   return `${prefix} logs ${follow}--tail 200 ${quoteShellArg(container.name)}`;
 }
 
+/**
+ * 컨테이너 상태를 바꾸는 동작.
+ *
+ * **일시정지된 컨테이너는 `start` 로 깨우지 못한다** — 도커가 "cannot start a paused container,
+ * try unpause instead" 로 거절한다. 프로세스가 죽은 것이 아니라 SIGSTOP 으로 멈춘 것이라 깨우는
+ * 말이 다르다. `stop`·`restart` 는 일시정지 상태에서도 그대로 통한다(도커가 먼저 풀고 처리한다).
+ */
+export type DockerStateAction = 'start' | 'stop' | 'restart' | 'unpause';
+
 export function dockerStateCommand(
   prefix: string,
-  action: 'start' | 'stop' | 'restart',
+  action: DockerStateAction,
   containers: readonly DockerContainer[],
 ): string {
   const names = containers.map((container) => quoteShellArg(container.name)).join(' ');

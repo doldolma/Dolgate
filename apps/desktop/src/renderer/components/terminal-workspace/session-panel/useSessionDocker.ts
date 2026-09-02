@@ -35,6 +35,7 @@ import {
   parseVolumeList,
   type DockerContainer,
   type DockerDialect,
+  isContainerActive,
   type DockerImage,
   type DockerInspectInfo,
   type DockerIoRate,
@@ -621,7 +622,7 @@ const EMPTY_TABS: Record<DockerTabId, TabState> = {
  */
 const listCache = new Map<string, Record<DockerTabId, TabState>>();
 
-function buildCommand(tab: DockerTabId, prefix: string): string {
+function buildCommand(tab: DockerTabId, prefix: string, dialect: DockerDialect): string {
   switch (tab) {
     case 'images':
       return buildImageListCommand(prefix);
@@ -630,7 +631,8 @@ function buildCommand(tab: DockerTabId, prefix: string): string {
     case 'networks':
       return buildNetworkListCommand(prefix);
     default:
-      return buildContainerListCommand(prefix);
+      // 컨테이너 목록의 라벨 칸은 방언마다 읽는 법이 다르다(containerLabelField).
+      return buildContainerListCommand(prefix, dialect);
   }
 }
 
@@ -827,7 +829,7 @@ export function useDockerLists(
       try {
         result = await queryTerminalCompletion(
           sessionId,
-          buildCommand(tab, prefix),
+          buildCommand(tab, prefix, dialect),
           // 스스로 도는 폴링이다 — 두 번째 보조 채널에서 돌려 자동완성을 막지 않는다.
           { background: true, elevate },
         );
@@ -895,7 +897,7 @@ export function useDockerLists(
       }
       publishDockerBusy(sessionId, false);
     };
-  }, [elevate, enabled, nonce, prefix, sessionId, tab]);
+  }, [dialect, elevate, enabled, nonce, prefix, sessionId, tab]);
 
   /**
    * CPU·MEM(+ 재시작 횟수·헬스)을 **목록과 따로** 받는다.
@@ -1046,7 +1048,8 @@ export function useDockerLists(
       memLimitBytes = Math.max(memLimitBytes, stat.memLimitBytes);
     }
     return {
-      running: containerState.containers.filter((container) => isRunningState(container)).length,
+      // 헤더의 "N/M 실행" — 일시정지도 살아 있는 것으로 센다(스택의 runningCount 와 같은 기준).
+      running: containerState.containers.filter((container) => isContainerActive(container)).length,
       total: containerState.containers.length,
       cpuPercent,
       memBytes,

@@ -29,8 +29,10 @@ import {
   dockerRemoveCommand,
   dockerShellCommand,
   dockerStateCommand,
+  type DockerStateAction,
   dockerVolumePruneCommand,
   dockerVolumeRemoveCommand,
+  isContainerActive,
   isContainerRunning,
   isImageUsed,
   layoutContainers,
@@ -651,10 +653,7 @@ interface ContainersViewProps {
   onUnfoldStack: (key: string) => void;
   onShell: (container: DockerContainer) => void;
   onLogs: (container: DockerContainer) => void;
-  onState: (
-    action: 'start' | 'stop' | 'restart',
-    containers: readonly DockerContainer[],
-  ) => void;
+  onState: (action: DockerStateAction, containers: readonly DockerContainer[]) => void;
   onRemove: (container: DockerContainer) => void;
   onCompose: (stack: DockerStack, args: string) => void;
   onStackLogs: (stack: DockerStack) => void;
@@ -714,8 +713,9 @@ function ContainersView(props: ContainersViewProps) {
       {layout.stacks.map((stack) => {
         const key = stack.project ?? '';
         const collapsed = props.collapsedStacks.has(key);
-        const running = stack.containers.filter(isContainerRunning);
-        const stopped = stack.containers.filter((container) => !isContainerRunning(container));
+        // 접을 때 남기는 것은 "살아 있는 것" 이다 — 일시정지는 정지가 아니다.
+        const running = stack.containers.filter(isContainerActive);
+        const stopped = stack.containers.filter((container) => !isContainerActive(container));
         const folded =
           stopped.length > STOPPED_FOLD_MIN && !props.unfoldedStacks.includes(key);
         const shown = folded ? running : stack.containers;
@@ -913,7 +913,7 @@ function ContainerRow({
   onToggleExpand: () => void;
   onShell: () => void;
   onLogs: () => void;
-  onState: (action: 'start' | 'stop' | 'restart') => void;
+  onState: (action: DockerStateAction) => void;
   onRemove: () => void;
   onCopy: (value: string) => void;
   onOpenPort: (port: DockerPortEntry) => void;
@@ -923,7 +923,11 @@ function ContainerRow({
   canForward: boolean;
 }) {
   const { t: translate } = useTranslation();
+  // running 은 "응답할 수 있는가"(포워딩·CPU), active 는 "살아 있는가"(자리·밝기). 일시정지는
+  // 살아 있지만 답하지 않는다 — 둘을 갈라야 흐리게 그리지도, 포워딩을 열어 주지도 않는다.
   const running = isContainerRunning(container);
+  const active = isContainerActive(container);
+  const paused = container.state === 'paused';
   const ports = resolveContainerPorts(container, info);
   const openTunnel = tunnels.find((tunnel) => tunnel.status === 'running') ?? null;
   const publishedPorts = ports.entries
@@ -933,14 +937,18 @@ function ContainerRow({
   const trouble = troubleOf(container, info);
   const flapping = (info?.restartCount ?? 0) >= RESTART_FLAP_MIN;
   const cpu = stat?.cpuPercent ?? null;
-  const dotColor = !running
+  // 회색(정지) · 호박색(일시정지) · 빨강(문제) · 초록(실행). 일시정지에 자기 색을 주는 이유는
+  // 위 active 주석과 같다 — 회색으로 그리면 죽은 것과 구분되지 않는다.
+  const dotColor = !active
     ? 'var(--text-muted)'
-    : trouble
-      ? 'var(--danger-text)'
-      : 'var(--success-text)';
+    : paused
+      ? 'var(--warning-text)'
+      : trouble
+        ? 'var(--danger-text)'
+        : 'var(--success-text)';
 
   return (
-    <div className={cn('group relative', running ? null : 'opacity-55')}>
+    <div className={cn('group relative', active ? null : 'opacity-55')}>
       <button
         type="button"
         aria-expanded={expanded}
@@ -959,7 +967,7 @@ function ContainerRow({
         <span
           className={cn(
             'min-w-0 flex-1 truncate font-mono text-[0.78rem]',
-            running ? 'text-[var(--text)]' : 'text-[var(--text-soft)]',
+            active ? 'text-[var(--text)]' : 'text-[var(--text-soft)]',
           )}
         >
           {label}
@@ -967,6 +975,11 @@ function ContainerRow({
         {trouble ? (
           <span className="shrink-0 rounded-[5px] bg-[color-mix(in_srgb,var(--danger-text)_14%,transparent)] px-[0.28rem] text-[0.58rem] font-medium text-[var(--danger-text)]">
             {translate(`sessionPanel.docker.trouble.${trouble}`)}
+          </span>
+        ) : paused ? (
+          // 펼치지 않아도 보이게. 상태 원문("Up 5 minutes (Paused)")은 펼친 뒤에나 읽힌다.
+          <span className="shrink-0 rounded-[5px] bg-[color-mix(in_srgb,var(--warning-text)_14%,transparent)] px-[0.28rem] text-[0.58rem] font-medium text-[var(--warning-text)]">
+            {translate('sessionPanel.docker.state.paused')}
           </span>
         ) : flapping ? (
           // 지금은 돌고 있어도 여러 번 죽었다 다시 떴다는 것은 봐야 하는 신호다.
@@ -1134,6 +1147,23 @@ function ContainerRow({
                   label={translate('sessionPanel.docker.action.restart')}
                   disabled={!atPrompt}
                   onClick={() => onState('restart')}
+                />
+                <DetailAction
+                  icon={<Square className="h-3.5 w-3.5" aria-hidden />}
+                  label={translate('sessionPanel.docker.action.stop')}
+                  disabled={!atPrompt}
+                  onClick={() => onState('stop')}
+                />
+              </>
+            ) : paused ? (
+              // 일시정지는 `start` 로 깨우지 못한다(도커가 거절한다) — 풀어 주는 말은 unpause 다.
+              // 멈춘 채로 끝내고 싶을 수도 있으니 정지도 남긴다(stop 은 풀고 나서 멈춘다).
+              <>
+                <DetailAction
+                  icon={<Play className="h-3.5 w-3.5" aria-hidden />}
+                  label={translate('sessionPanel.docker.action.unpause')}
+                  disabled={!atPrompt}
+                  onClick={() => onState('unpause')}
                 />
                 <DetailAction
                   icon={<Square className="h-3.5 w-3.5" aria-hidden />}

@@ -3850,6 +3850,7 @@
       "retrying": "다시 받는 중",
       "action": {
         "start": "시작",
+        "unpause": "재개",
         "stop": "정지",
         "restart": "재시작",
         "remove": "삭제",
@@ -3899,6 +3900,9 @@
       },
       "summary": {
         "running": "{{running}}/{{total}} 실행"
+      },
+      "state": {
+        "paused": "일시정지"
       },
       "trouble": {
         "restarting": "재시작 중",
