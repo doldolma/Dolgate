@@ -301,12 +301,14 @@ describe('terminal-command-blocks', () => {
     fake.buffer.cursorY = 1;
     beginCommandBlock(SESSION, fake.terminal, null);
 
-    // 출력이 5줄 나온 뒤 종료.
-    fake.buffer.cursorY = 6;
+    // 출력이 5줄(2~6행) 나온 뒤 종료. D 가 올 때 커서는 그 아래 새 행 첫 칸에 있다 — 셸이 거기에
+    // 다음 프롬프트를 그린다.
+    fake.buffer.cursorY = 7;
+    fake.buffer.cursorX = 0;
     finishCommandBlock(SESSION, fake.terminal, 0);
 
     const [block] = getCommandBlocks(SESSION);
-    // 후속 기능(출력 복사 등)을 위한 범위 정보는 남기되, 마커 자체는 1행이다.
+    // 범위는 마지막 출력 행까지다(다음 프롬프트 행은 아니다). 마커 자체는 1행이다.
     expect(block.endLine).toBe(6);
     expect(fake.decorations).toHaveLength(1);
     expect(fake.decorations[0].height).toBe(1);
@@ -443,11 +445,13 @@ describe('terminal-command-blocks', () => {
 
   it('행으로 블록을 찾고, 실행 중인 블록은 명령 줄 이후 전부를 소유한다', () => {
     const fake = createFakeTerminal([]);
-    // 블록 1: 명령 줄 0, 출력 끝 5 (완료)
+    // 블록 1: 명령 줄 0, 출력 끝 5 (완료). D 는 그 아래 6번 행 첫 칸에서 온다 — 셸이 거기에
+    // 둘째 프롬프트를 그린다.
     notePromptCommandStart(SESSION, fake.terminal);
     fake.buffer.cursorY = 1;
     beginCommandBlock(SESSION, fake.terminal, null);
-    fake.buffer.cursorY = 5;
+    fake.buffer.cursorY = 6;
+    fake.buffer.cursorX = 0;
     finishCommandBlock(SESSION, fake.terminal, 0);
     // 블록 2: 명령 줄 6 (아직 실행 중)
     fake.buffer.cursorY = 6;
@@ -466,6 +470,55 @@ describe('terminal-command-blocks', () => {
     expect(getCommandBlockAtLine(SESSION, -1)).toBeNull();
   });
 
+  // 블록의 끝은 다음 프롬프트 행이 아니라 마지막 출력 행이다. hover 영역이 다음 프롬프트까지
+  // 덮어 보이던 것이 이 한 행 차이였다.
+  it('D 가 새 행 첫 칸에서 오면 블록은 그 위 행에서 끝난다', () => {
+    const fake = createFakeTerminal(['$ pwd', '/home/ec2-user', '$ ']);
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    fake.buffer.cursorY = 1;
+    beginCommandBlock(SESSION, fake.terminal, null);
+    // 출력 한 줄 뒤 커서는 2번 행 첫 칸 — 셸이 거기에 프롬프트를 그린다.
+    fake.buffer.cursorY = 2;
+    fake.buffer.cursorX = 0;
+    finishCommandBlock(SESSION, fake.terminal, 0);
+
+    const [block] = getCommandBlocks(SESSION);
+    expect(block.endLine).toBe(1);
+    expect(getCommandBlockAtLine(SESSION, 1)?.id).toBe(block.id);
+    // 다음 프롬프트 행은 이 블록이 아니다.
+    expect(getCommandBlockAtLine(SESSION, 2)).toBeNull();
+  });
+
+  it('출력이 개행 없이 끝나면 커서가 있는 그 행까지가 출력이다', () => {
+    const fake = createFakeTerminal(['$ printf hi', 'hi$ ']);
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    fake.buffer.cursorY = 1;
+    beginCommandBlock(SESSION, fake.terminal, null);
+    // `hi` 뒤에 개행이 없어 커서는 1번 행 2열이다 — bash 는 그 자리에 바로 프롬프트를 이어 그린다.
+    fake.buffer.cursorY = 1;
+    fake.buffer.cursorX = 2;
+    finishCommandBlock(SESSION, fake.terminal, 0);
+
+    expect(getCommandBlocks(SESSION)[0].endLine).toBe(1);
+  });
+
+  it('출력이 없으면 명령 줄이 곧 끝이다 — 그 위로는 올라가지 않는다', () => {
+    const fake = createFakeTerminal(['$ ls', '$ ']);
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    fake.buffer.cursorY = 1;
+    beginCommandBlock(SESSION, fake.terminal, null);
+    fake.buffer.cursorY = 1;
+    fake.buffer.cursorX = 0;
+    finishCommandBlock(SESSION, fake.terminal, 0);
+
+    const [block] = getCommandBlocks(SESSION);
+    expect(block.endLine).toBe(0);
+    expect(block.endLine).toBe(block.marker.line);
+  });
+
   it('출력을 읽을 때 접힌 줄은 한 줄로 잇고 끝 빈 줄은 버린다', () => {
     // 3번 행은 2번 행이 화면 폭에 걸려 접힌 것 → 원래 한 줄.
     const fake = createFakeTerminal(
@@ -476,7 +529,9 @@ describe('terminal-command-blocks', () => {
     notePromptCommandStart(SESSION, fake.terminal);
     fake.buffer.cursorY = 1;
     beginCommandBlock(SESSION, fake.terminal, null);
+    // 마지막 출력(빈 줄 둘 포함)이 5번 행까지고, 커서는 그 아래 6번 행 첫 칸이다.
     fake.buffer.cursorY = 6;
+    fake.buffer.cursorX = 0;
     finishCommandBlock(SESSION, fake.terminal, 0);
 
     const [block] = getCommandBlocks(SESSION);

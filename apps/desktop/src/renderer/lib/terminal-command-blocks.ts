@@ -644,9 +644,14 @@ function closeRunningBlock(
     block.state = exitCode === null || exitCode === 0 ? 'ok' : 'failed';
     block.exitCode = exitCode;
     block.durationMs = Date.now() - block.startedAt;
-    // 출력 끝 행은 UI 로는 안 쓰지만(점은 명령 줄에만 찍는다) "출력 복사·블록 선택" 같은
-    // 후속 기능에 필요한 범위 정보라 기록해 둔다.
-    block.endLine = terminal.buffer.active.baseY + terminal.buffer.active.cursorY;
+    // endLine 은 **이 블록에 속하는 마지막 행**이다(포함). D 마커가 올 때 커서는 보통 출력 뒤의
+    // 새 행 첫 칸에 있고 셸은 바로 그 행에 다음 프롬프트를 그린다 — 그 행을 블록에 넣으면 hover
+    // 영역이 다음 프롬프트까지 덮는다(실제로 그렇게 보였다). 그래서 첫 칸이면 한 행 위에서 끝낸다.
+    // 출력이 개행 없이 끝나면(`printf hi`) 커서가 그 행 중간에 있고, 그 행은 출력이다.
+    // 출력이 하나도 없으면 명령 줄 자체가 끝이다(그 위로는 올라가지 않는다).
+    const buffer = terminal.buffer.active;
+    const cursorLine = buffer.baseY + buffer.cursorY;
+    block.endLine = Math.max(block.marker.line, buffer.cursorX === 0 ? cursorLine - 1 : cursorLine);
     if (block.decoration?.element) {
       applyDecorationStyle(block, block.decoration.element);
     }
@@ -661,8 +666,8 @@ export function getCommandBlocks(sessionId: string): readonly TerminalCommandBlo
 }
 
 /**
- * 블록이 차지하는 절대 버퍼 행 범위. 아직 실행 중이면 끝을 모르므로 endLine 은 null 이다.
- * 마커가 폐기됐으면 null.
+ * 블록이 차지하는 절대 버퍼 행 범위(둘 다 포함). 아직 실행 중이면 끝을 모르므로 endLine 은
+ * null 이다. 마커가 폐기됐으면 null.
  */
 export function getCommandBlockRange(
   block: TerminalCommandBlock,
@@ -719,9 +724,10 @@ export function readBlockOutput(
       return '';
     }
     const buffer = terminal.buffer.active;
+    // 실행 중이면 끝을 모른다 — 커서 행까지가 지금까지의 출력이다.
     const end = block.endLine ?? buffer.baseY + buffer.cursorY;
     const lines: string[] = [];
-    for (let line = start + 1; line < end; line += 1) {
+    for (let line = start + 1; line <= end; line += 1) {
       const bufferLine = buffer.getLine(line);
       if (!bufferLine) {
         break;

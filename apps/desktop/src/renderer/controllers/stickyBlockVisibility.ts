@@ -41,8 +41,8 @@ export function shouldShowStickyBlockHeader(
     // 블록이 화면 위에서 이미 끝났다. 지금 보이는 것은 이 블록의 출력이 아니다.
     return false;
   }
-  // 경계는 같은 줄까지 정상이다. 셸은 명령이 끝난 그 행에 다음 프롬프트를 그리므로 커서가
-  // blockEnd 와 같아진다(실측: cursorLine=15, blockEnd=15). 그보다 **위로** 올라갔을 때만
-  // 화면이 다시 쓰인 것이다(같은 실측에서 Ctrl+L 뒤 cursorLine=6, blockEnd=15).
+  // blockEnd 는 블록의 마지막 행(포함)이고, 셸은 그 **다음** 행에 프롬프트를 그리므로 정상이면
+  // 커서가 blockEnd 아래에 있다. 커서가 blockEnd 보다 **위로** 올라갔을 때만 화면이 다시 쓰인
+  // 것이다(Ctrl+L 뒤 프롬프트가 화면 위쪽에 다시 그려진 경우).
   return input.cursorLine >= input.blockEnd;
 }
