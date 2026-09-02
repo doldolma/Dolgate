@@ -191,10 +191,19 @@ export function resolveConnectionFailurePresentation(
     "aws-auth": () => t('connectFailure.awsAuthFailed'),
     // 권한 부족은 다시 로그인해도 풀리지 않는다 — 고칠 곳은 정책이다. 어느 액션이 거부됐는지
     // 분류기가 문장에서 뽑아 주므로, 있으면 그 이름을 그대로 말해 준다.
+    //
+    // **리소스까지 있으면 그것도 말한다.** 액션만으로는 "나는 그 권한 있는데?" 로 끝나는 일이
+    // 실제로 있었다 — CLI 로는 셸이 붙는데 앱만 막힌 호스트에서, 답은 거부된 리소스(포트포워딩
+    // 문서 ARN)에 이미 적혀 있었고 우리가 그 조각을 버렸다.
     "aws-permission": () =>
-      reason.awsAction
-        ? t('connectFailure.awsPermissionAction', { action: reason.awsAction })
-        : t('connectFailure.awsPermission'),
+      reason.awsAction && reason.awsResource
+        ? t('connectFailure.awsPermissionActionOn', {
+            action: reason.awsAction,
+            resource: reason.awsResource,
+          })
+        : reason.awsAction
+          ? t('connectFailure.awsPermissionAction', { action: reason.awsAction })
+          : t('connectFailure.awsPermission'),
     // 이름을 못 찾은 것은 경로가 없는 것과 할 일이 다르다 — 주소를 다시 보게 해야 한다.
     "dns-unresolved": () => t('connectFailure.dnsUnresolved', { target }),
     "no-route": () => t('connectFailure.noRoute', { target }),

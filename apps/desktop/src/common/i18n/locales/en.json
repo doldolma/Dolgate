@@ -2647,6 +2647,7 @@
     "awsAuthFailed": "Could not verify the AWS authentication. Sign in again.",
     "awsPermission": "AWS denied the request for lack of permission. Check this profile IAM user/role policy.",
     "awsPermissionAction": "AWS denied the {{action}} request. Check that this profile IAM user/role is allowed that action.",
+    "awsPermissionActionOn": "AWS denied {{action}} on {{resource}}. Check whether this profile’s IAM user/role is allowed that resource.",
     "noRoute": "Cannot reach {{target}}. There is no route to that host from the current network.",
     "dnsUnresolved": "Could not resolve {{target}}. Check the hostname and your DNS settings.",
     "refused": "{{target}} refused the connection.",

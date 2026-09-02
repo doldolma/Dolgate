@@ -63,6 +63,21 @@ export interface ConnectionFailureReason {
    * 어느 정책을 고쳐야 하는지 알 수 없고, 원문(영어 ARN 한 줄)을 그대로 보여주면 읽지 않는다.
    */
   awsAction?: string;
+  /**
+   * 거부된 리소스 ARN. aws-permission 이고 문장에 들어 있을 때만 채워진다.
+   *
+   * **액션만으로는 답이 안 나온다.** `ssm:StartSession` 이 거부됐다고만 말하면, 그 권한이
+   * 있는 사용자는 "나는 되는데?" 로 끝난다 — CLI 로 셸은 붙는데 앱만 막히는 일이 실제로
+   * 있었고, 원문에는 그 이유가 이미 적혀 있었다:
+   *
+   *     ... not authorized to perform: ssm:StartSession on resource:
+   *         arn:aws:ssm:ap-northeast-2::document/AWS-StartPortForwardingSession
+   *
+   * 앱은 포트포워딩 문서로 세션을 열고 CLI 기본 셸은 그 문서를 안 쓴다 — 즉 **리소스가
+   * 답이었다.** 우리가 액션만 남기고 버린 탓에 그 사실이 화면에서 사라졌다. 문장 전체를
+   * 쏟아 놓지는 않되(읽지 않는다) 결정적인 이 한 조각은 남긴다.
+   */
+  awsResource?: string;
 }
 
 /** 코어가 이벤트 payload 에 실어 보내는 것 중 이 판정에 쓰는 값. */
@@ -132,6 +147,21 @@ export function extractAwsIamAction(message: string): string | null {
     }
   }
   return null;
+}
+
+/**
+ * 거부된 리소스 ARN 을 뽑는다.
+ *
+ * AWS 는 `on resource: <arn>` 형태로 적는다(복수형 `on resources:` 도 있다). 뒤에 `because …`
+ * 가 붙으므로 ARN 이 끝나는 자리에서 자른다 — 공백·쉼표·마침표까지가 하나다.
+ */
+export function extractAwsIamResource(message: string): string | null {
+  const match = /\bon resources?:?\s+(arn:[^\s,]+)/i.exec(message);
+  if (!match?.[1]) {
+    return null;
+  }
+  // 문장 끝에 붙은 마침표는 ARN 이 아니다.
+  return match[1].replace(/[.]+$/, '') || null;
 }
 
 // 판정 순서가 의미를 갖는다 — 위쪽이 원인이 더 확실한 분류다. 예를 들어 tailnet 계층이
@@ -333,6 +363,10 @@ export function getConnectionFailureReason(
       const awsAction = extractAwsIamAction(normalized);
       if (awsAction) {
         reason.awsAction = awsAction;
+      }
+      const awsResource = extractAwsIamResource(normalized);
+      if (awsResource) {
+        reason.awsResource = awsResource;
       }
     }
     return reason;

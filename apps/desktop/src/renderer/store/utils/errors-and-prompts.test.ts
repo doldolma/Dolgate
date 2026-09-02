@@ -353,7 +353,7 @@ describe("resolveConnectionFailurePresentation", () => {
 
   // 권한 부족은 다시 로그인해도 풀리지 않는다 — 고칠 곳은 정책이다. 예전에는 이 실패가
   // 분류되지 않아 AWS 영어 원문(ARN 한 줄)이 그대로 화면에 떴다.
-  it("presents AWS permission denials with the denied IAM action", () => {
+  it("presents AWS permission denials with the denied IAM action and resource", () => {
     expect(
       resolveConnectionFailurePresentation(
         "User: arn:aws:sts::123456789012:assumed-role/DevRole/dolma is not authorized to perform: ssm:StartSession on resource: arn:aws:ec2:ap-northeast-2:123456789012:instance/i-0abc",
@@ -361,8 +361,25 @@ describe("resolveConnectionFailurePresentation", () => {
     ).toEqual({
       title: "AWS Permission Required",
       message:
-        "AWS가 ssm:StartSession 요청을 거부했습니다. 이 프로필의 IAM 사용자/역할에 그 권한이 있는지 확인해 주세요.",
+        "AWS가 ssm:StartSession 요청을 거부했습니다 — 대상: arn:aws:ec2:ap-northeast-2:123456789012:instance/i-0abc. 이 프로필의 IAM 사용자/역할에 그 리소스에 대한 권한이 있는지 확인해 주세요.",
     });
+  });
+
+  /**
+   * **액션만으로는 답이 안 나온다.** 이 문장이 실제로 있었던 일이다 — CLI 로는 셸이 붙는데
+   * 앱만 막혔고, 사용자는 "나는 ssm:StartSession 권한 있는데?" 에서 멈췄다. 답은 거부된
+   * 리소스에 이미 적혀 있었다: 앱은 포트포워딩 **문서**로 세션을 열고 CLI 기본 셸은 그 문서를
+   * 쓰지 않는다. 우리가 그 조각을 버려서 화면에서 사라졌던 것이다.
+   */
+  it("names the document that was denied, not just the action", () => {
+    const presentation = resolveConnectionFailurePresentation(
+      "User: arn:aws:sts::575220276254:assumed-role/AWSReservedSSO_developer-prod_5a9d6cefae463485/dolma@gridwiz.com is not authorized to perform: ssm:StartSession on resource: arn:aws:ssm:ap-northeast-2::document/AWS-StartPortForwardingSession because no identity-based policy allows the ssm:StartSession action",
+    );
+    expect(presentation.message).toContain(
+      "arn:aws:ssm:ap-northeast-2::document/AWS-StartPortForwardingSession",
+    );
+    // 뒤에 붙는 `because …` 는 ARN 이 아니다.
+    expect(presentation.message).not.toContain("because");
   });
 
   it("presents AWS permission denials without an action name as policy guidance", () => {
