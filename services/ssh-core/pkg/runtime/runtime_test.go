@@ -145,15 +145,18 @@ func (stub *stubMoshManager) RespondKeyboardInteractive(sessionID, challengeID s
 }
 
 type stubAWSManager struct {
-	hasSession   bool
-	writeSession string
-	writeData    []byte
-	resizeID     string
-	resizeCols   int
-	resizeRows   int
-	disconnectID string
-	signal       string
-	shutdownCall int
+	// 서브셸 재주입이 여기까지 왔는지. 예전에는 runtime 이 그냥 지나쳤다.
+	reinjectedShell string
+	reinjectCount   int
+	hasSession      bool
+	writeSession    string
+	writeData       []byte
+	resizeID        string
+	resizeCols      int
+	resizeRows      int
+	disconnectID    string
+	signal          string
+	shutdownCall    int
 }
 
 func (stub *stubAWSManager) Connect(sessionID, requestID string, payload coretypes.AWSConnectPayload) error {
@@ -186,6 +189,11 @@ func (stub *stubAWSManager) CollectAutocomplete(string, int) (autocomplete.Resul
 func (stub *stubAWSManager) StopAutocomplete(string)              {}
 func (stub *stubAWSManager) InstallShellIntegration(string) error { return nil }
 func (stub *stubAWSManager) FlushShellIntegration(string)         {}
+func (stub *stubAWSManager) ReinjectShellIntegration(_ string, shell string) error {
+	stub.reinjectedShell = shell
+	stub.reinjectCount++
+	return nil
+}
 
 type stubLocalManager struct {
 	// RunHostCommand 이 로컬로 라우팅됐는지(AI 조회 도구).

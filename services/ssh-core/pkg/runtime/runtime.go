@@ -82,6 +82,10 @@ type awsSessionManager interface {
 	CollectAutocomplete(sessionID string, revision int) (autocomplete.Result, error)
 	StopAutocomplete(sessionID string)
 	InstallShellIntegration(sessionID string) error
+	// SSM 셸도 서브셸(`bash`·`sudo su`·`docker exec`)에 들어가면 훅을 잃는다. 매니저에는
+	// 구현이 있는데 오래도록 이 인터페이스에 없어서 아래 디스패치가 그냥 지나쳤다 —
+	// 모바일은 같은 구현을 쓰고 있었고 데스크톱만 조용히 아무 일도 하지 않았다.
+	ReinjectShellIntegration(sessionID string, shell string) error
 	FlushShellIntegration(sessionID string)
 }
 
@@ -815,10 +819,10 @@ func (runtime *Runtime) InstallShellIntegration(sessionID string) error {
 
 // ReinjectShellIntegration re-installs the OSC 7/133 hooks into the shell that
 // is currently in the foreground after the user enters a subshell (nested ssh,
-// sudo su, docker exec). Only SSH and local sessions support it; other session
-// types are a no-op. Unlike installShellIntegration it is not guarded by the
-// once-per-session flag — re-injection is expected to run repeatedly as the
-// user moves in and out of subshells. The manager waits for the subshell prompt
+// sudo su, docker exec). SSH, local, tmux pane and AWS SSM shell sessions all
+// support it; other session types are a no-op. Unlike installShellIntegration
+// it is not guarded by the once-per-session flag — re-injection is expected to
+// run repeatedly as the user moves in and out of subshells. The manager waits for the subshell prompt
 // to settle before writing, so this returns immediately after arming.
 // shell 은 렌더러가 실행된 명령에서 알아낸 셸 이름이다(모르면 빈 문자열). 알면 그 셸 전용
 // 스크립트 한 줄로 끝나고, 모르면 bash·zsh 겸용을 여러 줄로 보낸다.
@@ -832,6 +836,10 @@ func (runtime *Runtime) ReinjectShellIntegration(sessionID string, shell string)
 		return runtime.ssh.ReinjectShellIntegration(sessionID, shell)
 	case runtime.local.HasSession(sessionID):
 		return runtime.local.ReinjectShellIntegration(sessionID, shell)
+	case runtime.aws.HasSession(sessionID):
+		// SSM 셸에는 보조 exec 채널이 없어 매니저가 인밴드 프로브로 셸을 알아낸다 — 부르기만
+		// 하면 나머지는 그쪽이 한다.
+		return runtime.aws.ReinjectShellIntegration(sessionID, shell)
 	default:
 		return nil
 	}
