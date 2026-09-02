@@ -121,7 +121,7 @@ func TestCompletionWorkerTruncatesAndDrainsToMarker(t *testing.T) {
 	worker, _ := newLocalCompletionWorker(t)
 	defer worker.Close()
 
-	output, truncated, err := runWorker(worker, 
+	output, truncated, err := runWorker(worker,
 		"i=0; while [ $i -lt 2048 ]; do printf x; i=$((i+1)); done",
 		time.Second,
 		32,
