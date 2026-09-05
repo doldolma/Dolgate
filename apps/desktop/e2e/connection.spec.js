@@ -247,8 +247,10 @@ test.describe("연결 화면", () => {
     await page.reload();
 
     await page.getByRole("button", { name: "Port Forwarding" }).click();
+    // 규칙 행의 동작 버튼은 번역된다(portForward.action.start = "시작"). 상태 배지(Running)는
+    // 짧은 상태 단어라 영어 그대로다(portForwardStatusLabel).
     await page
-      .getByRole("button", { name: "Start", exact: true })
+      .getByRole("button", { name: "시작", exact: true })
       .first()
       .click();
 

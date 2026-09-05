@@ -94,10 +94,13 @@ test.describe("desktop TUI regression", () => {
 
     await page.keyboard.type("__START_FAKE_TOP__");
     await page.keyboard.press("Enter");
+    // 프레임이 **끝까지** 왔는지는 마지막 줄(푸터)로 판단한다. 첫 줄(헤더)로 기다리면 프레임이
+    // 도착하기 시작한 순간에 풀려, 아직 오지 않은 꼬리를 단정하게 된다.
     const topState = await waitForSessionTerminalState(page, sessionId, {
-      includesText: "top - fake session",
+      includesText: "Press q to quit fake top",
       hasOutput: true,
     });
+    expect(topState.snapshot).toContain("top - fake session");
     expect(topState.snapshot).toContain("Press q to quit fake top");
 
     await app.evaluate(({ BrowserWindow }) => {
@@ -111,7 +114,7 @@ test.describe("desktop TUI regression", () => {
       page,
       sessionId,
       topState,
-      "top - fake session",
+      "Press q to quit fake top",
     );
     expect(
       resizedTopState.cols !== topState.cols ||

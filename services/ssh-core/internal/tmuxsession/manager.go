@@ -301,6 +301,19 @@ func (h *controlHandle) observePaneOutput(paneID string, data []byte) {
 	}
 }
 
+// stopPaneIdleFlush 는 pane 핸드셰이크들의 유휴 방출 타이머를 멈춘다(control 세션 종료).
+func (h *controlHandle) stopPaneIdleFlush() {
+	h.handshakesMu.Lock()
+	handshakes := make([]*autocomplete.Handshake, 0, len(h.handshakes))
+	for _, hs := range h.handshakes {
+		handshakes = append(handshakes, hs)
+	}
+	h.handshakesMu.Unlock()
+	for _, hs := range handshakes {
+		hs.StopIdleFlush()
+	}
+}
+
 // paneHandshake 는 pane 의 핸드셰이크를 반환한다(없으면 nil).
 func (h *controlHandle) paneHandshake(paneID string) *autocomplete.Handshake {
 	h.handshakesMu.Lock()
@@ -1078,6 +1091,7 @@ func (m *Manager) detachControl(controlID string) *controlHandle {
 	}
 	handle.closer.Do(func() {
 		close(handle.closed)
+		handle.stopPaneIdleFlush()
 		handle.closeCompletionWorker()
 		if handle.stdin != nil {
 			_ = handle.stdin.Close()
@@ -1335,6 +1349,20 @@ func (m *Manager) writePaneShellIntegration(
 	// 때(창 전환·재연결) 스크립트 전문이 화면에 나타난다. tmux 버퍼로 우회해 흔적을 한 줄로 줄인다.
 	commands = paneInjectCommands(handle, paneID, commands, viaTmuxBuffer, spot)
 	handle.armPaneHandshake(paneID, commands)
+	// 붙든 echo 꼬리는 출력이 멎으면 내보낸다(Handshake.SetIdleFlush 주석). 이게 없으면 한 프레임
+	// 그리고 멎는 TUI(vi·htop)에서 마지막 글자가 화면에 닿지 않는다.
+	if hs := handle.paneHandshake(paneID); hs != nil {
+		paneSession := paneSessionID(handle.id, paneID)
+		hs.SetIdleFlush(func(data []byte) {
+			if !handle.alive() {
+				return
+			}
+			m.emitStream(coretypes.StreamFrame{
+				Type:      coretypes.StreamTypeData,
+				SessionID: paneSession,
+			}, data)
+		})
+	}
 	// 표식은 이 pane 에서 **다음 133;A 가 오면** 남긴다(ControlOutput). 에코 숨김의 1.5초 flush
 	// 와는 별개다 — 느린 호스트에서 마커가 flush 뒤에 오면 예전 코드는 설치를 "미확인" 으로 두어
 	// 재연결마다 다시 심었다. 그것이 진짜 무한 반복이다.

@@ -1105,6 +1105,78 @@ type Handshake struct {
 	mu         sync.Mutex
 	generation uint64
 	filter     *HandshakeFilter
+	// 붙든 echo 꼬리를 출력이 멎었을 때 내보내는 자리(SetIdleFlush 주석).
+	idleDelay time.Duration
+	idleEmit  func([]byte)
+	idleTimer *time.Timer
+}
+
+// idleEchoFlushDelay 는 붙든 꼬리를 놓기까지 기다리는 시간이다.
+//
+// 갈린 echo 의 나머지는 원격이 한 번에 토해 낸 것이라 곧바로(수 ms 안에) 이어 온다. 그보다
+// 넉넉하되, 사람이 "마지막 글자가 늦게 뜬다" 고 느끼지 않을 만큼 짧게 잡는다.
+const idleEchoFlushDelay = 300 * time.Millisecond
+
+// SetIdleFlush 는 붙든 echo 꼬리를 **출력이 멎으면** 내보낼 방법을 알려 준다.
+//
+// 왜 필요한가. 스트리밍 echo 제거기는 청크 경계에서 갈린 주입 echo 를 잡으려고, 꼬리가 아직 못
+// 지운 echo 의 접두사가 될 수 있으면 그만큼 붙들어 둔다(stripInjectedEchoStreaming). 그런데 그
+// 꼬리가 사실은 **진짜 출력의 마지막 글자**일 수 있다 — 프로브 명령이 `printf` 로 시작하므로
+// 화면 끝의 `p` 한 글자가 그대로 걸린다. 다음 출력이 오면 함께 풀리지만, 한 프레임 그리고 멎는
+// TUI(top·vi·less)에서는 올 다음 출력이 없어 그 글자가 영영 화면에 닿지 않는다(실측: fake top 의
+// "Press q to quit fake top" 이 "…fake to" 로 남고, 창을 리사이즈해 새 출력을 만들어야 나왔다).
+//
+// 그래서 붙드는 쪽이 놓는 책임까지 진다: 꼬리를 든 채 출력이 잠잠해지면 타이머가 그것을 내보낸다.
+// emit 은 **다른 고루틴에서** 불리므로, 부르는 쪽은 세션이 아직 살아 있는지 확인해야 한다.
+func (h *Handshake) SetIdleFlush(emit func([]byte)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.idleEmit = emit
+	h.idleDelay = idleEchoFlushDelay
+}
+
+// StopIdleFlush 는 유휴 타이머를 멈춘다(세션 종료).
+func (h *Handshake) StopIdleFlush() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.idleEmit = nil
+	if h.idleTimer != nil {
+		h.idleTimer.Stop()
+		h.idleTimer = nil
+	}
+}
+
+// rescheduleIdleFlushLocked 는 꼬리를 들고 있으면 유휴 타이머를 다시 감고, 없으면 멈춘다.
+func (h *Handshake) rescheduleIdleFlushLocked() {
+	if h.idleEmit == nil || h.idleDelay <= 0 {
+		return
+	}
+	if h.filter == nil || len(h.filter.pendingEcho) == 0 {
+		if h.idleTimer != nil {
+			h.idleTimer.Stop()
+		}
+		return
+	}
+	if h.idleTimer == nil {
+		h.idleTimer = time.AfterFunc(h.idleDelay, h.flushIdleEcho)
+		return
+	}
+	h.idleTimer.Reset(h.idleDelay)
+}
+
+// flushIdleEcho 는 붙든 꼬리를 내보낸다. 그 사이 다음 청크가 와서 꼬리가 풀렸으면 아무 일도
+// 하지 않는다(drainPendingEcho 가 빈 값을 준다).
+func (h *Handshake) flushIdleEcho() {
+	h.mu.Lock()
+	var out []byte
+	if h.filter != nil {
+		out = h.filter.drainPendingEcho()
+	}
+	emit := h.idleEmit
+	h.mu.Unlock()
+	if len(out) > 0 && emit != nil {
+		emit(out)
+	}
 }
 
 // Arm starts suppressing output until the first prompt marker. Call it right
@@ -1170,6 +1242,8 @@ func (h *Handshake) FilterWithStatus(chunk []byte) ([]byte, bool) {
 		return chunk, false
 	}
 	forward, handshakeDone := h.filter.Filter(chunk)
+	// 이 청크로 꼬리를 새로 들었거나 풀었을 수 있다 — 유휴 방출 타이머를 그에 맞춘다.
+	h.rescheduleIdleFlushLocked()
 	return forward, handshakeDone
 }
 

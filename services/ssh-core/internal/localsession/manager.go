@@ -99,6 +99,15 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.LocalCon
 	m.sessions[sessionID] = handle
 	m.mu.Unlock()
 
+	// 붙든 echo 꼬리는 출력이 멎으면 내보낸다(Handshake.SetIdleFlush 주석). 다른 고루틴에서
+	// 불리므로 세션이 아직 살아 있을 때만 흘린다.
+	handle.handshake.SetIdleFlush(func(data []byte) {
+		if !m.HasSession(sessionID) {
+			return
+		}
+		m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, data)
+	})
+
 	m.emit(protocol.Event{
 		Type:      protocol.EventConnected,
 		RequestID: requestID,
@@ -551,6 +560,7 @@ func (m *Manager) closeSession(sessionID string, message string) {
 	// 몇 초 더 살아 있다.
 	session.installGate.Disarm()
 	session.reinjectGate.Disarm()
+	session.handshake.StopIdleFlush()
 	close(session.closed)
 
 	m.emit(protocol.Event{

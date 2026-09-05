@@ -145,6 +145,15 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.AWSConne
 		})
 	}
 
+	// 붙든 echo 꼬리는 출력이 멎으면 내보낸다(SetIdleFlush 주석). 다른 고루틴에서 불리므로
+	// 세션이 아직 살아 있을 때만 흘린다.
+	handle.handshake.SetIdleFlush(func(data []byte) {
+		if !m.HasSession(sessionID) {
+			return
+		}
+		m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, data)
+	})
+
 	if handle.beginShellIntegration() {
 		m.scheduleShellIntegrationInstall(sessionID, handle)
 	}
@@ -911,6 +920,7 @@ func (m *Manager) closeSession(sessionID string, message string) {
 	session.stopShellIntegrationInstallTimersLocked()
 	session.shellIntegrationMu.Unlock()
 	session.reinjectGate.Disarm()
+	session.handshake.StopIdleFlush()
 
 	m.emit(protocol.Event{
 		Type:      protocol.EventClosed,

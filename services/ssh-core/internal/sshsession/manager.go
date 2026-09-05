@@ -363,6 +363,15 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 	m.sessions[sessionID] = handle
 	m.mu.Unlock()
 
+	// 붙든 echo 꼬리는 출력이 멎으면 내보낸다(Handshake.SetIdleFlush 주석). 다른 고루틴에서
+	// 불리므로 세션이 아직 살아 있을 때만 흘린다.
+	handle.handshake.SetIdleFlush(func(data []byte) {
+		if !m.HasSession(sessionID) {
+			return
+		}
+		m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, data)
+	})
+
 	// bash/zsh 대화형 셸에는 OSC 133 통합 init을 서버측에서 즉시 주입한다. renderer 왕복
 	// (connected→IPC→main→Go→stdin) 없이 stream goroutine보다 확실히 앞서므로, handshake가
 	// 로그인 motd만 남기고 통합 전 첫 프롬프트와 명령 echo를 흡수해 "프롬프트 2개"를 막는다.
@@ -1026,6 +1035,8 @@ func (m *Manager) closeSession(sessionID string, message string, reason string) 
 	if !ok {
 		return
 	}
+
+	session.handshake.StopIdleFlush()
 
 	session.closer.Do(func() {
 		close(session.closed)
