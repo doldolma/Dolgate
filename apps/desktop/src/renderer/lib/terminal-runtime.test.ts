@@ -77,6 +77,86 @@ function createFakeTerminal(lineText = 'visit https://example.com/docs now') {
 }
 
 describe('terminal-runtime', () => {
+  // tmux pane 은 마운트 즉시 백로그(재연결 복원 바이트)가 재생되는데, 칸 수로 맞추는 resize 는
+  // 다음 프레임에 온다. 기본 80x24 로 만들면 그 사이 들어온 줄이 잘리고 되돌아오지 않는다.
+  // 그래서 만들 때부터 tmux 가 준 칸 수여야 한다(기억이 아니라 현재 레이아웃 값이다).
+  it('initialSize 가 있으면 그 격자로 만든다', () => {
+    const container = document.createElement('div');
+    const { terminal } = createFakeTerminal();
+    const createTerminal = vi.fn().mockReturnValue(terminal);
+    createTerminalRuntime({
+      container,
+      appearance: createAppearance(),
+      initialSize: { cols: 101, rows: 52 },
+      onData: vi.fn(),
+      onBinary: vi.fn(),
+      dependencies: {
+        createTerminal: createTerminal as never,
+        createFitAddon: (() => ({ fit: vi.fn(), activate: vi.fn(), dispose: vi.fn() })) as never,
+        createSearchAddon: (() => ({
+          activate: vi.fn(), dispose: vi.fn(), findNext: vi.fn(() => true),
+          findPrevious: vi.fn(() => true), clearDecorations: vi.fn(), clearActiveDecoration: vi.fn()
+        })) as never,
+        createUnicode11Addon: (() => ({ activate: vi.fn(), dispose: vi.fn() })) as never,
+        openExternal: vi.fn()
+      }
+    });
+    expect(createTerminal).toHaveBeenCalledWith(expect.objectContaining({ cols: 101, rows: 52 }));
+  });
+
+  it('initialSize 가 없으면 크기를 정하지 않는다(fit 이 맞춘다)', () => {
+    const container = document.createElement('div');
+    const { terminal } = createFakeTerminal();
+    const createTerminal = vi.fn().mockReturnValue(terminal);
+    createTerminalRuntime({
+      container,
+      appearance: createAppearance(),
+      onData: vi.fn(),
+      onBinary: vi.fn(),
+      dependencies: {
+        createTerminal: createTerminal as never,
+        createFitAddon: (() => ({ fit: vi.fn(), activate: vi.fn(), dispose: vi.fn() })) as never,
+        createSearchAddon: (() => ({
+          activate: vi.fn(), dispose: vi.fn(), findNext: vi.fn(() => true),
+          findPrevious: vi.fn(() => true), clearDecorations: vi.fn(), clearActiveDecoration: vi.fn()
+        })) as never,
+        createUnicode11Addon: (() => ({ activate: vi.fn(), dispose: vi.fn() })) as never,
+        openExternal: vi.fn()
+      }
+    });
+    const options = createTerminal.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(options).not.toHaveProperty('cols');
+    expect(options).not.toHaveProperty('rows');
+  });
+
+  // 실기기에서 두 번째 tmux 창이 깨진 원인. initialSize 로 만들어도 open() 직후 컨테이너에 fit 하면
+  // 격자가 컨테이너 픽셀(tmux 와 한두 칸 어긋남)로 바뀌고, 마운트 직후 재생되는 백로그(복원 바이트)가
+  // 그 격자에 쓰인다 — 뒤에 칸 수를 바로잡아도 감긴 줄은 되돌아오지 않는다.
+  it('initialSize 가 있으면 만들 때 컨테이너에 fit 하지 않는다', () => {
+    const container = document.createElement('div');
+    const { terminal } = createFakeTerminal();
+    const fitAddon = { fit: vi.fn(), activate: vi.fn(), dispose: vi.fn() };
+    createTerminalRuntime({
+      container,
+      appearance: createAppearance(),
+      initialSize: { cols: 100, rows: 50 },
+      onData: vi.fn(),
+      onBinary: vi.fn(),
+      dependencies: {
+        createTerminal: (() => terminal) as never,
+        createFitAddon: (() => fitAddon) as never,
+        createSearchAddon: (() => ({
+          activate: vi.fn(), dispose: vi.fn(), findNext: vi.fn(() => true),
+          findPrevious: vi.fn(() => true), clearDecorations: vi.fn(), clearActiveDecoration: vi.fn()
+        })) as never,
+        createUnicode11Addon: (() => ({ activate: vi.fn(), dispose: vi.fn() })) as never,
+        openExternal: vi.fn()
+      }
+    });
+    expect(terminal.open).toHaveBeenCalledWith(container);
+    expect(fitAddon.fit).not.toHaveBeenCalled();
+  });
+
   it('creates the terminal, opens it, fits immediately, and activates Unicode11', () => {
     const container = document.createElement('div');
     const { terminal } = createFakeTerminal();
@@ -726,6 +806,53 @@ describe('terminal-runtime', () => {
 
     expect(webglAddon.clearTextureAtlas).toHaveBeenCalledTimes(1);
     expect(fitAddon.fit).toHaveBeenCalledTimes(2);
+    expect(terminal.refresh).toHaveBeenCalledWith(0, 23);
+  });
+
+  // 고정 격자(tmux pane)는 배율이 바뀌어도 컨테이너에 맞추지 않는다 — 격자는 tmux 가 정한다.
+  it('initialSize 가 있으면 화면 배율이 바뀌어도 컨테이너에 fit 하지 않는다', async () => {
+    const { terminal } = createFakeTerminal();
+    const fitAddon = { fit: vi.fn(), activate: vi.fn(), dispose: vi.fn() };
+    const webglAddon = {
+      activate: vi.fn(),
+      dispose: vi.fn(),
+      clearTextureAtlas: vi.fn(),
+      onContextLoss: vi.fn(() => ({ dispose: vi.fn() }))
+    };
+    let devicePixelRatio = 1;
+
+    const runtime = createTerminalRuntime({
+      container: document.createElement('div'),
+      appearance: createAppearance(),
+      initialSize: { cols: 100, rows: 50 },
+      onData: vi.fn(),
+      onBinary: vi.fn(),
+      dependencies: {
+        createTerminal: (() => terminal) as never,
+        createFitAddon: (() => fitAddon) as never,
+        createSearchAddon: (() => ({
+          activate: vi.fn(),
+          dispose: vi.fn(),
+          findNext: vi.fn(() => true),
+          findPrevious: vi.fn(() => true),
+          clearDecorations: vi.fn(),
+          clearActiveDecoration: vi.fn()
+        })) as never,
+        createUnicode11Addon: (() => ({ activate: vi.fn(), dispose: vi.fn() })) as never,
+        loadWebglAddonModule: vi.fn().mockResolvedValue({
+          WebglAddon: vi.fn(() => webglAddon)
+        }),
+        readDevicePixelRatio: () => devicePixelRatio,
+        openExternal: vi.fn()
+      }
+    });
+
+    await runtime.setWebglEnabled(true);
+    devicePixelRatio = 2;
+    runtime.syncDisplayMetrics();
+
+    expect(webglAddon.clearTextureAtlas).toHaveBeenCalledTimes(1);
+    expect(fitAddon.fit).not.toHaveBeenCalled();
     expect(terminal.refresh).toHaveBeenCalledWith(0, 23);
   });
 });

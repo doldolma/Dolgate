@@ -83,6 +83,22 @@ interface CreateTerminalRuntimeDependencies {
 interface CreateTerminalRuntimeOptions {
   container: HTMLElement;
   appearance: TerminalRuntimeAppearance;
+  /**
+   * 처음부터 이 격자로 만든다. 주지 않으면 xterm 기본(80x24)으로 만들어지고 fit/resize 가 뒤에 온다.
+   *
+   * tmux pane 에 필요하다. 마운트되면 백로그(재연결 복원 바이트 포함)가 **같은 커밋에서 즉시**
+   * 재생되는데, tmux 칸 수로 맞추는 resize 는 다음 애니메이션 프레임에 온다. 그 사이 80칸
+   * xterm 에 들어온 줄은 잘리고, 나중에 101칸으로 늘어나도 잘린 칸은 돌아오지 않는다 — 사용자
+   * 화면에 `tmux delete-i` 로 끊긴 줄이 남은 것이 이것이다. 크기는 tmux 가 방금 보낸 레이아웃
+   * (%layout-change)에서 오며, 어디에도 기억해 두지 않는다.
+   */
+  /**
+   * 칸 수를 밖에서 정하는 터미널(tmux pane)의 격자. 주면 이 크기로 만들고 **컨테이너에 fit 하지
+   * 않는다** — 만들 때도, 화면 배율이 바뀔 때도. tmux pane 의 크기는 tmux 가 정하고 컨트롤러가
+   * `terminal.resize` 로 따라간다. 컨테이너 픽셀로 재면 한두 칸 어긋난 격자가 나오는데, 그 위에
+   * 쓰인 내용은 뒤에 칸 수를 바로잡아도 되돌아오지 않는다(줄이 감기고 밀린 채 다시 흐른다).
+   */
+  initialSize?: { cols: number; rows: number };
   onData: (data: string) => void;
   onBinary: (data: string) => void;
   /**
@@ -134,8 +150,14 @@ function defaultOpenExternal(url: string): void | Promise<void> {
   return openTerminalExternalUrl(url);
 }
 
-function buildTerminalOptions(appearance: TerminalRuntimeAppearance): ITerminalOptions {
+function buildTerminalOptions(
+  appearance: TerminalRuntimeAppearance,
+  initialSize?: { cols: number; rows: number },
+): ITerminalOptions {
   return {
+    ...(initialSize && initialSize.cols > 0 && initialSize.rows > 0
+      ? { cols: initialSize.cols, rows: initialSize.rows }
+      : {}),
     // 명령 블록 오버레이가 쓰는 marker/decoration 은 xterm 5.x 에서 proposed API 라
     // 이 옵션이 없으면 registerDecoration 이 예외를 던진다(OSC 핸들러 안이라 파싱 루프가
     // 끊겨 터미널이 그 자리에서 멈춘다). unicode11 addon 등록에도 필요하다.
@@ -303,9 +325,15 @@ export function createTerminalRuntime({
   onBinary,
   onShellIntegration,
   onCwd,
-  dependencies = {}
+  dependencies = {},
+  initialSize,
 }: CreateTerminalRuntimeOptions): TerminalRuntime {
-  const terminal = (dependencies.createTerminal ?? ((options) => new Terminal(options)))(buildTerminalOptions(appearance));
+  const terminal = (dependencies.createTerminal ?? ((options) => new Terminal(options)))(
+    buildTerminalOptions(appearance, initialSize),
+  );
+  // 격자가 밖에서 고정된 터미널인가(initialSize 주석). 이 값이 true 면 어디서도 컨테이너에 fit 하지
+  // 않는다.
+  const fixedGrid = Boolean(initialSize && initialSize.cols > 0 && initialSize.rows > 0);
   const fitAddon = (dependencies.createFitAddon ?? (() => new FitAddon()))();
   let searchAddon: SearchAddon | null = null;
   let serializeAddon: SerializeAddon | null = null;
@@ -369,7 +397,11 @@ export function createTerminalRuntime({
     safeWarn(logger, 'Image addon unavailable, continuing without inline image (sixel/iip) support.', error);
   }
   terminal.open(container);
-  fitAddon.fit();
+  // 고정 격자(tmux pane)는 만들 때 준 칸 수 그대로 둔다. 여기서 fit 하면 initialSize 를 준 뜻이
+  // 없어진다 — 마운트 직후 들어오는 백로그(재연결 복원)가 컨테이너 크기로 어긋난 격자에 쓰인다.
+  if (!fixedGrid) {
+    fitAddon.fit();
+  }
   // terminal.open() 뒤에 로드한다 — 애드온이 activate 에서 링크 프로바이더를 등록하려면
   // 터미널이 DOM 에 붙어 있어야 한다.
   let webLinksAddon: WebLinksAddon | null = null;
@@ -574,7 +606,10 @@ export function createTerminalRuntime({
     lastDevicePixelRatio = nextDevicePixelRatio;
     try {
       webglAddon.clearTextureAtlas?.();
-      fitAddon.fit();
+      // 배율이 바뀌어도 격자는 그대로다. 고정 격자는 컨테이너에 다시 맞추지 않는다(위 initialSize).
+      if (!fixedGrid) {
+        fitAddon.fit();
+      }
       if (terminal.rows > 0) {
         terminal.refresh(0, terminal.rows - 1);
       }

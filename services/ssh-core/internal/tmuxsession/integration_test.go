@@ -3,12 +3,14 @@
 package tmuxsession
 
 import (
+	"context"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"dolssh/services/ssh-core/internal/sshcmd"
 	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/pkg/coretypes"
 )
@@ -24,7 +26,9 @@ func TestVMControlMode(t *testing.T) {
 	}
 	user := envOr("TMUX_VM_USER", "ubuntu")
 
-	probe, err := sshconn.ProbeHostKey(host, 22, sshconn.JumpTargetFromCore(nil), nil, sshconn.DefaultConfig)
+	probe, err := sshconn.ProbeHostKey(
+		context.Background(), host, 22, sshconn.JumpTargetFromCore(nil), nil, sshconn.DefaultConfig,
+	)
 	if err != nil {
 		t.Fatalf("probe host key: %v", err)
 	}
@@ -59,12 +63,18 @@ func TestVMControlMode(t *testing.T) {
 		Rows:                 24,
 		// 기존 itest 세션이 남아 있으면 attach 되어 초기 pane 출력이 오지 않으므로(=control
 		// mode는 attach 시 새 출력만 보냄, 초기 화면은 capture-pane 후속 과제) 매번 새로 만든다.
-		Command: "/usr/local/bin/tmux kill-session -t itest 2>/dev/null; exec /usr/local/bin/tmux -CC new-session -s itest",
+		Command: envOr("TMUX_BIN", "/usr/bin/tmux") + " kill-session -t itest 2>/dev/null; exec " +
+			envOr("TMUX_BIN", "/usr/bin/tmux") + " -CC new-session -s itest",
 	})
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 	defer m.Disconnect("ctrl1")
+	defer func() {
+		if h := m.getControl("ctrl1"); h != nil && h.client != nil {
+			_, _, _ = sshcmd.RunWithTimeout(h.client, envOr("TMUX_BIN", "/usr/bin/tmux")+" kill-session -t itest 2>/dev/null; true", 5*time.Second)
+		}
+	}()
 
 	time.Sleep(2 * time.Second)
 
@@ -145,7 +155,9 @@ func TestVMReattach(t *testing.T) {
 		t.Skip("set TMUX_VM_HOST and TMUX_VM_PASS")
 	}
 	user := envOr("TMUX_VM_USER", "ubuntu")
-	probe, err := sshconn.ProbeHostKey(host, 22, sshconn.JumpTargetFromCore(nil), nil, sshconn.DefaultConfig)
+	probe, err := sshconn.ProbeHostKey(
+		context.Background(), host, 22, sshconn.JumpTargetFromCore(nil), nil, sshconn.DefaultConfig,
+	)
 	if err != nil {
 		t.Fatalf("probe: %v", err)
 	}
@@ -168,7 +180,7 @@ func TestVMReattach(t *testing.T) {
 		TrustedHostKeyBase64: probe.PublicKeyBase64, Cols: 80, Rows: 24,
 	}
 
-	bin := envOr("TMUX_BIN", "/usr/local/bin/tmux")
+	bin := envOr("TMUX_BIN", "/usr/bin/tmux")
 	// 1) 첫 연결: 깨끗한 새 세션
 	first := base
 	first.Command = bin + " kill-session -t reattach 2>/dev/null; exec " + bin + " -CC new-session -s reattach"
@@ -223,6 +235,10 @@ func TestVMReattach(t *testing.T) {
 		t.Errorf("reattach echo MISSING on %s: %q", pane2, tail(got2, 200))
 	} else {
 		t.Logf("reattach echo OK")
+	}
+	// VM 에 세션을 남기지 않는다 — 사용자가 이 세션에 붙어 테스트 pane 을 자기 것으로 본 적이 있다.
+	if h := m.getControl("c2"); h != nil && h.client != nil {
+		_, _, _ = sshcmd.RunWithTimeout(h.client, bin+" kill-session -t reattach 2>/dev/null; true", 5*time.Second)
 	}
 	m.Disconnect("c2")
 }

@@ -3809,6 +3809,8 @@
       "windows": "창 {{count}}개",
       "kill": "세션 종료",
       "attachedElsewhere": "다른 곳에서 사용 중",
+      "openInAnotherTab": "다른 탭에 열려 있음",
+      "goToTab": "{{name}} 탭으로 이동",
       "namePlaceholder": "새 세션 이름",
       "create": "만들기",
       "refresh": "목록 새로고침"

@@ -265,6 +265,9 @@ export function useTerminalSessionViewController({
   const liveTmuxCellRef = useRef<{ cols: number; rows: number } | null>(
     tmuxCell ?? null,
   );
+  // xterm 이 생기기 전에 도착한 출력. tmux pane 은 레이아웃을 알기 전엔 xterm 을 만들지 않는데,
+  // 백로그(재연결 복원 포함)는 구독 즉시 흘러오므로 그 사이 온 바이트를 여기 들고 있다.
+  const pendingWritesRef = useRef<Uint8Array[]>([]);
   const shareSnapshotDirtyRef = useRef(false);
   const pendingShareSnapshotKindRef =
     useRef<SessionShareSnapshotInput['kind'] | null>(null);
@@ -659,13 +662,35 @@ export function useTerminalSessionViewController({
     tmuxPrefixArmedRef.current = false;
   }, [tab?.tmux, tmuxPrefixKey, sessionId]);
 
-  // tmux 레이아웃 칸 수가 바뀌면(분할/리사이즈로 %layout-change) xterm 을 그 크기로
-  // 다시 고정한다. request() → fit(=tmux pane 이면 terminal.resize) → 보고는 억제됨.
+  // tmux 레이아웃 칸 수가 바뀌면(분할/리사이즈로 %layout-change) xterm 을 그 크기로 다시 고정한다.
+  //
+  // **스케줄러를 기다리지 않고 즉시 적용한다.** 원격 출력(%output)은 xterm 에 곧바로 쓰이는데 격자
+  // 변경만 스케줄러(rAF 두 번 + 드래그 중이면 100ms 정착)를 거치면, 그 사이에 도착한 재그리기가 옛
+  // 격자에 들어간다. **pane 을 넓힐 때** 그것이 치명적이다 — 새 폭으로 그려진 줄이 아직 좁은 격자에서
+  // 감기며 행이 늘어나 화면이 위로 밀리고, 뒤늦게 격자를 넓혀도 감긴 줄은 돌아오지 않는다(vi 는 스스로
+  // 다시 그리지 않는다). 실측: pane 을 44→52 로 넓히면 +50ms 시점에 tmux 는 52, xterm 은 아직 44 였고
+  // 첫 줄이 스크롤로 사라졌다. 줄일 때는 감김이 없어 무사해서 "특정 크기에서만" 깨지는 것처럼 보였다.
+  //
+  // 여기서 재는 것은 없다(칸 수는 tmux 가 준 값 그대로다). 그래서 컨테이너 fit 처럼 미룰 이유가 없다.
+  // 숨겨진 pane 은 건드리지 않는다 — 측정 불가 상태의 렌더러에 resize 를 강제하면 크래시한다(fit 주석).
   useEffect(() => {
     liveTmuxCellRef.current = tmuxCell ?? null;
-    if (tmuxCell) {
-      resizeSchedulerRef.current?.request();
+    if (!tmuxCell) {
+      return;
     }
+    const terminal = terminalRef.current;
+    const element = containerRef.current;
+    if (
+      terminal &&
+      element &&
+      element.clientWidth > 0 &&
+      element.clientHeight > 0 &&
+      (terminal.cols !== tmuxCell.cols || terminal.rows !== tmuxCell.rows)
+    ) {
+      terminal.resize(tmuxCell.cols, tmuxCell.rows);
+    }
+    // 스케줄러에도 알려 뒤따르는 뷰포트 갱신·공유 스냅샷 등이 돌게 한다(크기가 같으면 스스로 접는다).
+    resizeSchedulerRef.current?.request();
   }, [tmuxCell?.cols, tmuxCell?.rows]);
 
   // 세션이 붙었거나 세션 id 가 바뀌면 크기를 한 번 다시 보낸다.
@@ -942,16 +967,50 @@ export function useTerminalSessionViewController({
     [flushRequestedShareSnapshot],
   );
 
+  // tmux pane 은 tmux 가 레이아웃 칸 수를 알려주기 전에는 xterm 을 만들지 않는다.
+  //
+  // 새 attach 에서는 pane 이 %layout-change 보다 **먼저** 마운트된다. 그때 만들면 xterm.js 기본
+  // 80x24 이고, 재연결 복원 바이트(백로그)는 마운트 즉시 그 위에 재생된다 — 대체화면(vi·htop)은
+  // 스크롤백이 없어 24행을 넘은 줄이 영영 사라지고, 뒤에 셀 크기로 늘려도 돌아오지 않는다
+  // (실기기: vi 1행이 `~`, 위쪽 절반 소실). 칸 수를 알 때 만들면 처음부터 제 크기다. 이것은
+  // "기억"이 아니다 — 값은 지금 도착한 레이아웃이고 어디에도 저장하지 않는다.
+  //
+  // deps 에는 값이 아니라 **알게 됐다는 사실**(boolean)만 넣는다. 셀 값을 넣으면 이후 분할·리사이즈
+  // 때마다 effect 가 다시 돌아 xterm 을 지우고 새로 만든다(스크롤백 소실).
+  const tmuxCellKnown = !tab?.tmux || Boolean(tmuxCell);
+  // **한 번 알게 되면 되돌리지 않는다(latch).**
+  //
+  // tmuxCell 은 활성 창의 레이아웃에서만 온다(TerminalWorkspace 의 tmuxCellBySessionId). 그래서 창을
+  // 전환해 이 pane 이 숨는 순간 tmuxCell 이 undefined 가 되고, 위 boolean 을 그대로 아래 effect 의
+  // dep 으로 쓰면 그때 cleanup 이 돌아 **xterm 을 없앤다**. tmux pane 은 dispose 때 스크롤백을 저장
+  // 하지 않으므로(서버가 권위) 다시 그 창으로 돌아오면 새 xterm 이 빈 화면으로 만들어진다 — 복원은
+  // 연결당 1회라 다시 오지 않고, 대체화면(vi·htop)은 스크롤백조차 없어 되살릴 것이 없다. 실기기에서
+  // "먼저 뜨는 창은 멀쩡한데 눌러서 전환한 창은 개판" 이었던 것이 이것이다.
+  //
+  // 그래서 마운트 게이트는 **처음 알게 된 순간에만** 열고, 그 뒤로는 숨든 보이든 유지한다.
+  const [tmuxCellEverKnown, setTmuxCellEverKnown] = useState(tmuxCellKnown);
+  useEffect(() => {
+    if (tmuxCellKnown && !tmuxCellEverKnown) {
+      setTmuxCellEverKnown(true);
+    }
+  }, [tmuxCellEverKnown, tmuxCellKnown]);
   useEffect(() => {
     if (!containerRef.current || terminalRef.current) {
+      return;
+    }
+    if (!tmuxCellEverKnown) {
       return;
     }
 
     let runtime: TerminalRuntime;
     try {
+      // tmux pane 은 tmux 가 정한 칸 수 그대로 만든다(위 주석). 여기 오면 tmuxCellKnown 이라
+      // liveTmuxCellRef 는 채워져 있다(그 ref 를 세우는 effect 가 이 effect 보다 위에 있다).
+      const tmuxCellAtMount = liveIsTmuxPaneRef.current ? liveTmuxCellRef.current : null;
       runtime = createTerminalRuntime({
         container: containerRef.current,
         appearance,
+        initialSize: tmuxCellAtMount ?? undefined,
         onData: (data) => {
           const currentSessionId = liveSessionIdRef.current;
           const currentStatus = liveSessionStatusRef.current;
@@ -1122,15 +1181,41 @@ export function useTerminalSessionViewController({
     if (restoredSnapshot) {
       runtime.write(restoredSnapshot);
     }
+    // xterm 이 생기기 전에 도착해 들고 있던 바이트(백로그·복원)를 순서대로 쓴다. 버리면 재연결
+    // 직후 화면이 비고, 셀 크기 xterm 이 생긴 지금이 그것을 받을 유일하게 옳은 순간이다.
+    // 스냅샷 **뒤**에 쓴다 — 스냅샷은 이전 터미널이 남긴 과거이고 이 바이트는 그 뒤에 온 것이다.
+    // 순서를 바꾸면 방금 복원한 화면 위에 옛 화면이 덧그려진다.
+    if (pendingWritesRef.current.length > 0) {
+      const pending = pendingWritesRef.current;
+      pendingWritesRef.current = [];
+      for (const bytes of pending) {
+        runtime.write(bytes);
+      }
+      runtime.scheduleAfterWriteDrain(() => {
+        const buffer = runtimeRef.current?.terminal.buffer?.active;
+        if (buffer) {
+          setTerminalAlternateScreen(buffer.type === 'alternate');
+        }
+        if (e2eTerminalHookEnabledRef.current) {
+          publishCurrentTerminalE2EState();
+        }
+      });
+    }
     resizeSchedulerRef.current = createTerminalResizeScheduler({
       // 세션 패널이 여닫히는 0.15초 동안은 재지 않는다 — 프레임마다 격자가 바뀌면 PTY·tmux 로
       // 리사이즈가 쏟아진다. 전환이 끝나면 아래 구독이 한 번 요청한다.
       isHeld: isLayoutTransitionActive,
       fit: () => {
-        const cell = liveTmuxCellRef.current;
-        if (liveIsTmuxPaneRef.current && cell) {
+        if (liveIsTmuxPaneRef.current) {
           // tmux pane: 컨테이너에 fit 하지 않고 tmux 레이아웃 칸 수로 고정한다(셰이크 방지).
-          // 단, 숨겨진(display:none → clientWidth/Height 0) pane 에는 resize 하지 않는다.
+          // 칸 수를 모르는 동안(창이 숨어 있어 tmuxCell 이 없다)도 컨테이너에 맞추지 않는다 —
+          // 컨테이너 픽셀로 잰 격자는 tmux 와 한두 칸 어긋나고, 그 격자로 다시 흐른 내용은
+          // 칸 수가 돌아와도 되돌아오지 않는다. 보이게 되면 tmuxCell 이 와서 그때 맞춘다.
+          const cell = liveTmuxCellRef.current;
+          if (!cell) {
+            return;
+          }
+          // 숨겨진(display:none → clientWidth/Height 0) pane 에는 resize 하지 않는다.
           // 측정 불가 상태의 xterm 렌더러에 resize 를 강제하면 IdleTaskQueue 의
           // handleResize 가 undefined 렌더러를 건드려 크래시한다(fitAddon.fit 은 0 크기에서
           // 스스로 bail 하지만 terminal.resize 는 무조건 적용되므로 직접 가드한다). 다시
@@ -1234,6 +1319,9 @@ export function useTerminalSessionViewController({
     // sessionId가 아닌 stableId에 묶는다 — 재연결로 sessionId가 바뀌어도 터미널을
     // dispose/recreate 하지 않아 스크롤백이 보존된다.
     stableId,
+    // tmux pane 이 레이아웃을 알게 된 순간 한 번 다시 돈다. latch 라 false 로 돌아가지 않으므로
+    // 창 전환(숨김)에 xterm 이 dispose·재생성되지 않는다(위 주석).
+    tmuxCellEverKnown,
   ]);
 
   useEffect(() => {
@@ -1479,7 +1567,13 @@ export function useTerminalSessionViewController({
       ) {
         shareSnapshotDirtyRef.current = true;
       }
-      runtimeRef.current?.write(bytes);
+      if (!runtimeRef.current) {
+        // xterm 이 아직 없다(tmux pane 이 레이아웃을 기다리는 중). 버리지 말고 들고 있다가
+        // 마운트 effect 가 셀 크기 xterm 을 만든 직후 순서대로 쓴다.
+        pendingWritesRef.current.push(bytes);
+        return;
+      }
+      runtimeRef.current.write(bytes);
       runtimeRef.current?.scheduleAfterWriteDrain(() => {
         const terminal = runtimeRef.current?.terminal;
         if (!terminal) {

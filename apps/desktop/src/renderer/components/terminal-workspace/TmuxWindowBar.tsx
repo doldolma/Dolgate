@@ -111,9 +111,13 @@ export function TmuxWindowBar({
             title={translate('tmuxBar.windowTitle', { label })}
           >
             <span className="max-w-[12rem] truncate">{label}</span>
+            {/* 닫기(×)는 **늘 보인다.** 호버로만 나타나던 때는 있는 줄 모르고 탭을 누르다 오른쪽 끝을
+                짚어 창이 꺼지는 일이 있었다 — kill-window 는 그 창의 프로세스를 다 죽이고 되돌릴 수 없다.
+                opacity-0 도 자리는 차지하고 있었으므로 늘 보이게 해도 탭 너비는 그대로다(위치 흔들림 없음).
+                평소엔 muted 로 눈에 띄지 않게 두고, 호버에서만 danger 색으로 "지금 누르면 닫힌다"를 알린다. */}
             <button
               type="button"
-              className="rounded px-0.5 text-[var(--text-muted)] opacity-0 transition-opacity hover:text-[var(--danger-text)] group-hover:opacity-100"
+              className="rounded px-0.5 text-[var(--text-muted)] transition-colors hover:text-[var(--danger-text)]"
               title={translate('tmuxBar.closeWindow')}
               onClick={(event) => {
                 event.stopPropagation();

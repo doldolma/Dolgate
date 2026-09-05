@@ -9,6 +9,7 @@ const connectHost = vi.fn();
 const killTmuxSession = vi.fn();
 const detachTmuxWorkspace = vi.fn();
 const refreshTmuxSessions = vi.fn();
+const activateTmuxGroup = vi.fn();
 
 const storeState: Record<string, unknown> = {};
 
@@ -25,6 +26,7 @@ function setState(overrides: Record<string, unknown> = {}): void {
     connectHost,
     killTmuxSession,
     detachTmuxWorkspace,
+    activateTmuxGroup,
     tabs: [
       {
         sessionId: 'session-1',
@@ -49,6 +51,7 @@ beforeEach(() => {
   killTmuxSession.mockClear();
   detachTmuxWorkspace.mockClear();
   refreshTmuxSessions.mockClear();
+  activateTmuxGroup.mockClear();
   for (const key of Object.keys(storeState)) {
     delete storeState[key];
   }
@@ -289,5 +292,51 @@ describe('쓸 수 없을 때', () => {
     setState({ tabs: [{ sessionId: 'session-1', hostId: 'host-1' }] });
     render(<SessionPanelTmux sessionId="session-1" />);
     expect(screen.getByText('이 호스트에서 tmux 를 찾지 못했습니다.')).toBeTruthy();
+  });
+});
+
+// 같은 세션에 control 클라이언트를 둘 붙이면 두 탭이 같은 화면을 비춘다(=셸이 두 개 뜬 것처럼
+// 보인다). tmux 3.1 미만에서는 잊고 둔 탭이 창 크기까지 좁힌다. `attach -d` 로 남을 떼는 방법은
+// 쓰지 않는다 — 재연결이 같은 기본 명령을 다시 쓰므로 사용자의 다른 탭과 진짜 터미널의 tmux 를
+// 재연결마다 쫓아낸다.
+describe('이미 열어 둔 세션', () => {
+  const openGroup = {
+    id: 'grp-1',
+    controlSessionId: 'ctl-1',
+    sessionName: 'work',
+    hostId: 'host-1',
+    activeWorkspaceId: 'ws-1',
+  };
+
+  it('새로 붙지 않고 그 탭으로 간다', () => {
+    setState({ tmuxGroups: [openGroup] });
+    render(<SessionPanelTmux sessionId="session-1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'work 탭으로 이동' }));
+    expect(activateTmuxGroup).toHaveBeenCalledWith('grp-1');
+    expect(connectHost).not.toHaveBeenCalled();
+  });
+
+  it('행이 붙는다고 말하지 않는다', () => {
+    setState({ tmuxGroups: [openGroup] });
+    render(<SessionPanelTmux sessionId="session-1" />);
+    expect(screen.getByText('다른 탭에 열려 있음')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'work 세션으로' })).toBeNull();
+  });
+
+  it('다른 호스트에 같은 이름이 열려 있으면 그냥 붙는다', () => {
+    setState({ tmuxGroups: [{ ...openGroup, hostId: 'host-2' }] });
+    render(<SessionPanelTmux sessionId="session-1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'work 세션으로' }));
+    expect(activateTmuxGroup).not.toHaveBeenCalled();
+    expect(connectHost).toHaveBeenCalled();
+  });
+
+  // 우리 탭이 아닌 곳(사용자의 진짜 터미널)에서 붙어 있는 세션은 그대로 붙는다.
+  it('남이 붙어 있는 세션은 그대로 붙는다', () => {
+    render(<SessionPanelTmux sessionId="session-1" />);
+    expect(screen.getByText('다른 곳에서 사용 중')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'logs 세션으로' }));
+    expect(activateTmuxGroup).not.toHaveBeenCalled();
+    expect(connectHost).toHaveBeenCalled();
   });
 });

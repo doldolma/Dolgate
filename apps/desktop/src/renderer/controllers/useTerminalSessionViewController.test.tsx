@@ -9,6 +9,8 @@ import type { PendingSessionInteractiveAuth } from '../store/createAppStore';
 import type { TerminalSessionPaneProps } from '../components/terminal-workspace/types';
 import { terminalThemePresets } from '../lib/terminal-presets';
 import { useTerminalSessionViewController } from './useTerminalSessionViewController';
+import { createTerminalRuntime } from '../lib/terminal-runtime';
+import { saveScrollbackSnapshot } from '../lib/terminal-write-registry';
 
 const mocks = vi.hoisted(() => ({
   reinjectShellIntegration: vi.fn().mockResolvedValue(undefined),
@@ -52,6 +54,8 @@ vi.mock('../lib/terminal-runtime', () => ({
         cols: 80,
         refresh: vi.fn(),
         focus: vi.fn(),
+        // tmux pane 은 컨테이너에 fit 하지 않고 이 함수로 tmux 칸 수를 받는다.
+        resize: vi.fn(),
         // 명령 블록 점프(Cmd/Ctrl+↑↓)용 키 핸들러를 컨트롤러가 등록한다.
         attachCustomKeyEventHandler: vi.fn(),
         // 블록 오버레이가 스크롤/렌더에 맞춰 위치를 다시 계산하려고 구독한다.
@@ -579,5 +583,205 @@ describe('useTerminalSessionViewController', () => {
 
     expect(record.scheduler.reset.mock.calls.length).toBeGreaterThan(resetsBefore);
     expect(record.scheduler.request.mock.calls.length).toBeGreaterThan(requestsBefore);
+  });
+
+  // tmux pane 의 xterm 은 **tmux 가 방금 보낸 레이아웃 칸 수 그대로** 만들어져야 한다. 마운트되면
+  // 백로그(재연결 복원 바이트 포함)가 같은 커밋에서 즉시 재생되는데, 칸 수로 맞추는 resize 는
+  // 다음 애니메이션 프레임에 온다 — 기본 80x24 로 만들면 그 사이 들어온 줄이 80칸에서 잘리고,
+  // 나중에 101칸으로 늘어나도 잘린 칸은 돌아오지 않는다(실기기에서 `tmux delete-i` 로 끊긴 줄).
+  // 기억이 아니다: 값은 현재 레이아웃(%layout-change)에서 오고 어디에도 저장하지 않는다.
+  describe('tmux pane 의 xterm 초기 크기', () => {
+    const tmuxTab: TerminalTab = {
+      ...baseTab,
+      tmux: { controlSessionId: 'ctl-1', paneId: '%0', windowId: '@0' },
+    };
+
+    beforeEach(() => {
+      vi.mocked(createTerminalRuntime).mockClear();
+    });
+
+    it('tmux 레이아웃 칸 수로 만든다', async () => {
+      renderController(createProps({ tab: tmuxTab, tmuxCell: { cols: 101, rows: 52 } }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      const [options] = vi.mocked(createTerminalRuntime).mock.calls[0] ?? [];
+      expect(options?.initialSize).toEqual({ cols: 101, rows: 52 });
+    });
+
+    // 실기기에서 vi 가 깨진 순서 그대로: pane 이 **레이아웃보다 먼저** 마운트되고, 재연결 복원
+    // 바이트(백로그)가 들어온 뒤에야 %layout-change 로 tmuxCell 이 온다. 이때 xterm 이 80x24 로
+    // 이미 만들어져 있으면 그 위에 50행이 쓰여 26행이 밀려 사라진다(대체화면은 스크롤백이 없다).
+    // 옳은 동작: tmux pane 은 칸 수를 알기 전엔 xterm 을 만들지 않고, 그 사이 온 바이트는
+    // 버리지 않고 들고 있다가 셀 크기로 만든 xterm 에 그대로 쓴다.
+    it('레이아웃이 마운트보다 늦어도 xterm 은 셀 크기로 만들어지고 바이트는 안 잃는다', async () => {
+      const props = createProps({ tab: tmuxTab }); // tmuxCell 없음 = 레이아웃 아직 안 옴
+      const { rerenderWithProps } = renderController(props);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      // 아직 만들면 안 된다 — 만들면 80x24 다.
+      expect(vi.mocked(createTerminalRuntime)).not.toHaveBeenCalled();
+
+      // 복원 바이트가 레이아웃보다 먼저 도착한다(백로그).
+      const restore = new TextEncoder().encode('\x1b[?1049hHELLO-VI-LINE1\r\n~');
+      await act(async () => {
+        mocks.sessionDataListeners.get('session-1')?.(restore);
+      });
+
+      // 이제 레이아웃이 온다.
+      rerenderWithProps({ ...props, tmuxCell: { cols: 100, rows: 50 } });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+
+      const [options] = vi.mocked(createTerminalRuntime).mock.calls[0] ?? [];
+      expect(options?.initialSize).toEqual({ cols: 100, rows: 50 });
+      // 먼저 온 바이트가 셀 크기 xterm 에 그대로 쓰였다(버려지지 않았다).
+      const runtime = mocks.runtimeRecords[0];
+      const written = runtime.write.mock.calls.map(([b]: [Uint8Array]) => new TextDecoder().decode(b)).join('');
+      expect(written).toContain('HELLO-VI-LINE1');
+    });
+
+    // 실기기에서 두 번째 창으로 갔다가 돌아오면 전체화면(vi·htop)이 빈 화면이 된 원인. 창을 전환해 이
+    // pane 이 숨으면 활성 창 레이아웃에서 빠져 tmuxCell 이 undefined 가 되는데, 그것이 마운트 게이트를
+    // false 로 되돌리면 xterm 이 dispose 되고(tmux pane 은 스크롤백을 저장하지 않는다) 다시 켤 때 복원
+    // 없이 빈 화면이 된다(복원은 연결당 1회라 다시 오지 않는다). 숨겼다 다시 보여도 xterm 은 하나여야
+    // 하고, hide 에서 dispose 되면 안 된다.
+    it('창 전환으로 숨었다 다시 보여도 xterm 을 다시 만들지 않는다', async () => {
+      const props = createProps({ tab: tmuxTab, tmuxCell: { cols: 100, rows: 50 } });
+      const { rerenderWithProps } = renderController(props);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(vi.mocked(createTerminalRuntime)).toHaveBeenCalledTimes(1);
+      const runtime = mocks.runtimeRecords.at(-1);
+
+      // 다른 창으로 전환 → 이 pane 은 숨고 활성 레이아웃에서 빠져 tmuxCell 이 사라진다.
+      rerenderWithProps({ ...props, tmuxCell: undefined, visible: false });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(runtime.dispose, '숨겼다고 xterm 을 없애면 안 된다').not.toHaveBeenCalled();
+
+      // 다시 그 창으로 → tmuxCell 이 돌아온다. 새 xterm 을 만들면 이전 화면(대체화면=스크롤백 없음)을 잃는다.
+      rerenderWithProps({ ...props, tmuxCell: { cols: 100, rows: 50 }, visible: true });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(vi.mocked(createTerminalRuntime), '다시 보일 때 새 xterm 을 만들면 안 된다').toHaveBeenCalledTimes(1);
+    });
+
+    it('tmux pane 이 아니면 크기를 정하지 않는다(fit 이 맞춘다)', async () => {
+      renderController(createProps());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      const [options] = vi.mocked(createTerminalRuntime).mock.calls[0] ?? [];
+      expect(options?.initialSize).toBeUndefined();
+    });
+
+    // 실기기에서 두 번째 tmux 창으로 전환하면 vi·htop 이 깨진 순서. 숨은 창의 pane 은 활성 레이아웃에
+    // 없어 tmuxCell 이 비고, 그동안 fit 이 컨테이너에 맞추면 tmux 와 한두 칸 어긋난 격자로 내용이
+    // 다시 흐른다 — 창이 돌아와 칸 수를 되찾아도 감긴 줄은 되돌아오지 않는다. tmux pane 은 칸 수를
+    // 모르면 아무 것도 하지 않아야 한다.
+    it('tmux pane 은 칸 수를 모르는 동안 컨테이너에 fit 하지 않는다', async () => {
+      const props = createProps({ tab: tmuxTab, tmuxCell: { cols: 100, rows: 50 } });
+      const { rerenderWithProps } = renderController(props);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      const runtime = mocks.runtimeRecords.at(-1);
+      const { options } = mocks.schedulerRecords.at(-1)!;
+
+      // 창이 숨는다: 활성 레이아웃에서 빠져 tmuxCell 이 사라진다.
+      rerenderWithProps({ ...props, tmuxCell: undefined, visible: false });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      runtime.fitAddon.fit.mockClear();
+      runtime.terminal.resize.mockClear();
+
+      options.fit();
+
+      expect(runtime.fitAddon.fit).not.toHaveBeenCalled();
+      expect(runtime.terminal.resize).not.toHaveBeenCalled();
+    });
+
+    // 분할선을 끌어 pane 을 **넓힐 때** 실기기에서 vi 가 깨진 원인. 원격 출력은 xterm 에 즉시 쓰이는데
+    // 격자 변경만 스케줄러(rAF·정착)를 거치면, 새 폭으로 그려진 재그리기가 아직 좁은 격자에서 감기며
+    // 행이 늘어나 화면이 위로 밀린다 — 뒤늦게 넓혀도 감긴 줄은 돌아오지 않는다(vi 는 스스로 안 그린다).
+    // 그래서 칸 수가 오면 **그 자리에서** 격자를 맞춰야 한다.
+    it('tmux 칸 수가 바뀌면 스케줄러를 기다리지 않고 즉시 격자를 맞춘다', async () => {
+      const props = createProps({ tab: tmuxTab, tmuxCell: { cols: 44, rows: 59 } });
+      const { rerenderWithProps, getController } = renderController(props);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      const runtime = mocks.runtimeRecords.at(-1);
+      const container = getController().containerRef.current!;
+      Object.defineProperty(container, 'clientWidth', { value: 800, configurable: true });
+      Object.defineProperty(container, 'clientHeight', { value: 600, configurable: true });
+      runtime.terminal.cols = 44;
+      runtime.terminal.rows = 59;
+      runtime.terminal.resize.mockClear();
+
+      // pane 을 넓힌다. 타이머·프레임을 전혀 진행시키지 않는다 — 그래도 이미 맞춰져 있어야 한다.
+      await act(async () => {
+        rerenderWithProps({ ...props, tmuxCell: { cols: 52, rows: 59 } });
+      });
+
+      expect(
+        runtime.terminal.resize,
+        '늦게 적용하면 새 폭 화면이 좁은 격자에서 감겨 화면이 밀린다',
+      ).toHaveBeenCalledWith(52, 59);
+    });
+
+    it('tmux pane 은 칸 수를 알면 컨테이너가 아니라 그 칸 수로 맞춘다', async () => {
+      const props = createProps({ tab: tmuxTab, tmuxCell: { cols: 100, rows: 50 } });
+      const { getController } = renderController(props);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      const runtime = mocks.runtimeRecords.at(-1);
+      const { options } = mocks.schedulerRecords.at(-1)!;
+      // 보이는 pane(jsdom 은 크기가 0 이라 숨김으로 보이므로 직접 준다).
+      const container = getController().containerRef.current!;
+      Object.defineProperty(container, 'clientWidth', { value: 800, configurable: true });
+      Object.defineProperty(container, 'clientHeight', { value: 600, configurable: true });
+      runtime.fitAddon.fit.mockClear();
+      runtime.terminal.resize.mockClear();
+
+      options.fit();
+
+      expect(runtime.terminal.resize).toHaveBeenCalledWith(100, 50);
+      expect(runtime.fitAddon.fit).not.toHaveBeenCalled();
+    });
+
+    // 밀어둔 바이트는 이전 터미널의 스냅샷(과거) **뒤**에 와야 한다. 앞에 쓰면 방금 복원한 화면 위에
+    // 옛 화면이 덧그려진다.
+    it('xterm 이 늦게 만들어질 때 이전 스크롤백 스냅샷은 밀어둔 바이트보다 먼저 쓴다', async () => {
+      saveScrollbackSnapshot(tmuxTab.stableId, 'OLD-SCREEN');
+      const props = createProps({ tab: tmuxTab }); // 레이아웃 아직 안 옴
+      const { rerenderWithProps } = renderController(props);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      await act(async () => {
+        mocks.sessionDataListeners.get('session-1')?.(new TextEncoder().encode('RESTORE'));
+      });
+
+      rerenderWithProps({ ...props, tmuxCell: { cols: 100, rows: 50 } });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+
+      const runtime = mocks.runtimeRecords.at(-1);
+      const written = runtime.write.mock.calls.map(([value]: [Uint8Array | string]) =>
+        typeof value === 'string' ? value : new TextDecoder().decode(value),
+      );
+      expect(written.indexOf('OLD-SCREEN')).toBeGreaterThanOrEqual(0);
+      expect(written.indexOf('RESTORE')).toBeGreaterThan(written.indexOf('OLD-SCREEN'));
+    });
   });
 });

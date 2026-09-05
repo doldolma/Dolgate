@@ -3809,6 +3809,8 @@
       "windows": "{{count}} windows",
       "kill": "Kill session",
       "attachedElsewhere": "in use elsewhere",
+      "openInAnotherTab": "Open in another tab",
+      "goToTab": "Go to {{name}} tab",
       "namePlaceholder": "New session name",
       "create": "Create",
       "refresh": "Refresh list"

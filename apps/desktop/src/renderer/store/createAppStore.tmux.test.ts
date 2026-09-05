@@ -695,3 +695,47 @@ describe("createAppStore Home 탭 이동", () => {
     expect(store.getState().homeSection).toBe("hosts");
   });
 });
+
+// 실기기에서 전환한 창의 vi 만 깨진 문제의 스토어 계층 회귀.
+//
+// tmux 는 클라이언트 크기가 바뀌면 모든 창을 다시 재지만 `%layout-change` 는 활성 창에만 보낸다.
+// 그래서 코어가 리사이즈 정착 뒤 list-windows 로 **모든 창**의 레이아웃을 다시 물어 보내 준다.
+// 그 갱신이 **비활성 창**의 workspace.layout 에 반영돼야, 사용자가 그 창으로 전환하는 순간
+// 렌더러가 올바른 칸 수로 xterm 을 만든다(낡은 칸 수로 만들면 정착된 크기로 떠 온 복원 화면이
+// 어긋나고, vi 는 스스로 다시 그리지 않아 깨진 채 남는다).
+describe("비활성 창의 레이아웃 갱신", () => {
+  const CTL = "ctl-1";
+  const leafOf = (node: any): any =>
+    node.kind === "leaf" ? node : leafOf(node.first);
+
+  it("활성 창이 아닌 창에도 나중에 온 레이아웃이 반영된다", () => {
+    const store = createAppStore(createMockApi());
+    const api = store.getState();
+    api.activateSession(CTL);
+    // attach 직후 합성: 두 창 모두 세션 생성 크기(100x50). 창1 이 활성.
+    api.handleTmuxLayoutChange(CTL, "@0", "bd5e,100x50,0,0,0", { index: 0, active: false });
+    api.handleTmuxLayoutChange(CTL, "@1", "bd5e,100x50,0,0,1", { index: 1, active: true });
+
+    const before = store
+      .getState()
+      .workspaces.find((w) => w.tmux?.windowId === "@0");
+    expect(leafOf(before!.layout)).toMatchObject({ cols: 100, rows: 50 });
+
+    // 리사이즈 정착 뒤 코어가 보내는 재질의 결과(활성 창은 말하지 않는다 — active:false).
+    api.handleTmuxLayoutChange(CTL, "@0", "bd5e,87x59,0,0,0", { index: 0, active: false });
+    api.handleTmuxLayoutChange(CTL, "@1", "bd5e,87x59,0,0,1", { index: 1, active: false });
+
+    const after = store
+      .getState()
+      .workspaces.find((w) => w.tmux?.windowId === "@0");
+    expect(
+      leafOf(after!.layout),
+      "비활성 창의 칸 수가 갱신되지 않으면 전환할 때 낡은 크기로 xterm 이 만들어진다",
+    ).toMatchObject({ cols: 87, rows: 59 });
+
+    // 활성 창을 말하지 않는 갱신이 그룹의 활성 창을 바꾸면 안 된다(사용자 선택 되돌림 금지).
+    const group = store.getState().tmuxGroups.find((g) => g.controlSessionId === CTL);
+    const win1 = store.getState().workspaces.find((w) => w.tmux?.windowId === "@1");
+    expect(group!.activeWorkspaceId).toBe(win1!.id);
+  });
+});

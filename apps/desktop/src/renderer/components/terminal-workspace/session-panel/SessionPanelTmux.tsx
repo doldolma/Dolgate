@@ -11,6 +11,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../../../store/appStore';
 import { supportsTmuxControlMode } from '../../../lib/tmux-version';
+import { findOpenTmuxSession } from '../../../lib/tmux-open-session';
 import { refreshTmuxSessions } from '../../../services/desktop/terminal';
 import { cn } from '../../../lib/cn';
 import { Button, Input, Tooltip } from '../../../ui';
@@ -48,6 +49,7 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
   const workspaces = useAppStore((state) => state.workspaces);
   const connectHost = useAppStore((state) => state.connectHost);
   const killTmuxSession = useAppStore((state) => state.killTmuxSession);
+  const activateTmuxGroup = useAppStore((state) => state.activateTmuxGroup);
   const detachTmuxWorkspace = useAppStore((state) => state.detachTmuxWorkspace);
   const [newName, setNewName] = useState('');
 
@@ -113,10 +115,22 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
   }
 
   /**
-   * 세션에 붙는다. **늘 새 탭**으로 연다 — 지금 보고 있는 세션(SSH 든 다른 tmux 든)을 닫지
-   * 않는다. 탭 자리를 재사용하면 tmux 를 열어 보려다 원래 셸을 잃는다.
+   * 세션에 붙는다. 새로 붙을 때는 **늘 새 탭**이다 — 지금 보고 있는 세션(SSH 든 다른 tmux 든)을
+   * 닫지 않는다. 탭 자리를 재사용하면 tmux 를 열어 보려다 원래 셸을 잃는다.
+   *
+   * 이미 탭으로 열어 둔 세션이면 붙지 않고 그 탭으로 간다(아래 참고).
    */
   function attach(name: string): void {
+    // 같은 세션에 control 클라이언트를 둘 붙이면 두 탭이 같은 화면을 비추고(=셸이 두 개 뜬 것처럼
+    // 보인다), tmux 3.1 미만에서는 잊고 둔 탭이 보고 있는 창의 크기까지 좁힌다.
+    //
+    // `tmux attach -d` 로 남을 떼어내는 방법은 쓰지 않는다 — 자동 재연결이 같은 기본 명령을 다시
+    // 쓰기 때문에, 재연결마다 사용자의 다른 탭과 그 호스트의 진짜 터미널 tmux 까지 쫓아낸다.
+    const open = findOpenTmuxSession(tmuxGroups, hostId, name);
+    if (open) {
+      activateTmuxGroup(open.id);
+      return;
+    }
     openTmuxTab({ controlModeCommand: `tmux -CC attach -t ${quote(name)}` });
   }
 
@@ -258,9 +272,16 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
         ) : (
           sessions.map((session) => {
             const active = session.name === attachedName;
+            // 이 앱의 다른 탭에 열려 있으면 누르는 순간 그 탭으로 간다 — 붙는 것이 아니므로
+            // 행이 하는 말도 달라야 한다("다른 곳에서 사용 중" 은 남의 터미널을 가리킨다).
+            const openInApp = active
+              ? null
+              : findOpenTmuxSession(tmuxGroups, hostId, session.name);
             const label = active
               ? translate('sessionPanel.tmux.currentScreen')
-              : translate('sessionPanel.tmux.attachTo', { name: session.name });
+              : openInApp
+                ? translate('sessionPanel.tmux.goToTab', { name: session.name })
+                : translate('sessionPanel.tmux.attachTo', { name: session.name });
             return (
               // 행 전체가 "이 세션으로" 다 — 이 섹션에서 하는 일이 거의 그것뿐이라 버튼을 따로
               // 두지 않는다. 종료(×)만 안쪽 버튼으로 남고, 그 클릭은 행까지 번지지 않는다.
@@ -303,6 +324,10 @@ export function SessionPanelTmux({ sessionId }: SessionPanelTmuxProps) {
                   {active ? (
                     <span className="shrink-0 rounded-[5px] bg-[var(--surface)] px-[0.35rem] text-[0.66rem] font-medium text-[var(--accent-strong)]">
                       {translate('sessionPanel.tmux.currentScreen')}
+                    </span>
+                  ) : openInApp ? (
+                    <span className="shrink-0 text-[0.66rem] text-[var(--text-soft)]">
+                      {translate('sessionPanel.tmux.openInAnotherTab')}
                     </span>
                   ) : session.attached ? (
                     <span className="shrink-0 text-[0.66rem] text-[var(--text-soft)]">

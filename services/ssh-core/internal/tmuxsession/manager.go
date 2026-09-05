@@ -1,8 +1,10 @@
 package tmuxsession
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,8 +44,28 @@ type Manager struct {
 	// 배너·취소 가능한 ctx 도 함께 온다.
 	dialer *sshdial.Dialer
 
+	// paneRestoreStates·paneScreens 는 재연결 복원의 조회 자리다(테스트가 tmux 없이 갈아끼운다).
+	paneRestoreStates func(handle *controlHandle) []paneRestoreState
+	paneScreens       func(handle *controlHandle, state paneRestoreState) paneRestoreScreens
+	// restoreSettle 는 refresh-client 가 pane 크기에 반영될 때까지 두는 틈이다(0 이면 paneRestoreSettle).
+	// 복원과 레이아웃 재질의가 같은 틈을 쓴다. 테스트가 짧게 갈아끼운다.
+	restoreSettle time.Duration
+
+	// panePrompt 는 pane 앞에 무엇이 있는지 tmux 에게 묻는 함수다. nil 이면 실제 조회
+	// (queryPaneState)를 쓴다 — 테스트가 tmux 서버 없이 판정 분기를 돌리기 위한 자리다.
+	panePrompt func(client *ssh.Client, paneID string) paneState
+
 	mu       sync.RWMutex
 	controls map[string]*controlHandle // controlSessionID -> handle
+}
+
+// paneStateOf 는 pane 앞에 무엇이 있는지 묻는다(테스트가 갈아끼운 조회를 존중).
+func (m *Manager) paneStateOf(handle *controlHandle, paneID string) paneState {
+	query := m.panePrompt
+	if query == nil {
+		query = queryPaneState
+	}
+	return query(handle.client, paneID)
 }
 
 type controlHandle struct {
@@ -70,15 +92,22 @@ type controlHandle struct {
 	// 현재 attach 된 tmux 세션명(%session-changed 로 갱신). layout-change payload 에 실어
 	// renderer 가 세션 그룹 푸터를 호스트명 대신 세션명으로 그리게 한다(이벤트 순서 무관).
 	sessionName string
-	closed      chan struct{}
-	closer      sync.Once
+	// reattachRestore 는 재연결 복원을 연결당 1회로 묶는다(렌더러는 pane 마다 리사이즈를 보낸다).
+	reattachRestore sync.Once
+	// installPending 은 init 을 타이핑했고 133;A 로 확인을 기다리는 pane 들이다(handshakesMu).
+	installPending map[string]bool
+	closed         chan struct{}
+	closer         sync.Once
 	// pane(%N)별 OSC 133 핸드셰이크. 셸 통합 init 을 pane 에 주입할 때 그 에코를 마커
 	// 도착 전까지 숨긴다(sshsession 과 동일 패턴, pane 단위). nil/미armed 면 pass-through.
 	handshakes map[string]*autocomplete.Handshake
 	// pane(%N)별 셸 통합 주입 완료 플래그. renderer 는 윈도우 전환(=pane remount)마다
 	// InstallShellIntegration 을 다시 호출하므로, 이미 주입한 pane 은 건너뛰어 init
-	// 스크립트가 재주입되며 프롬프트가 중복 출력되는 것을 막는다. (reconnect 는 새
-	// controlHandle 이라 이 맵도 비어 있어 자동으로 재설치된다.)
+	// 스크립트가 재주입되며 프롬프트가 중복 출력되는 것을 막는다.
+	//
+	// reconnect 는 새 controlHandle 이라 이 맵도 비어 있어 다시 설치를 **시도**한다. 그
+	// 시도가 무조건 쓰기였던 동안, vi 로 편집하다 재연결하면 프로브가 편집 중인 파일에
+	// 들어갔다 — 지금은 InstallShellIntegration 이 tmux 에 pane 상태를 먼저 묻는다.
 	integrated map[string]bool
 	// pane(%N)별 서브셸 재주입 게이트. 사용자가 pane 안에서 서브셸(sudo su·docker exec …)로
 	// 들어가면 그 셸에는 훅이 없다 — 새 프롬프트가 안착하면 다시 심는다. nil/미armed 면 no-op.
@@ -125,6 +154,64 @@ func (h *controlHandle) denySudo() {
 	h.sudoDenied = true
 }
 
+// integrationDone 는 이 pane 에 이미 주입했는지만 읽는다(표시하지 않는다). 설치를 뒤로
+// 미룰 수 있게 된 뒤로는 "확인만" 과 "차지하기" 를 나눠야 한다 — 미루는 경로는 플래그를
+// 쓰지 않고 두어, 프롬프트가 끝내 안 와도 다음 호출(윈도우 전환 등)이 다시 시도한다.
+func (h *controlHandle) integrationDone(paneID string) bool {
+	h.handshakesMu.Lock()
+	defer h.handshakesMu.Unlock()
+	return h.integrated[paneID]
+}
+
+// setInstallPending 은 "이 pane 에 init 을 타이핑했다, 133;A 가 오면 표식을 남겨라" 를 켠다.
+func (h *controlHandle) setInstallPending(paneID string) {
+	h.handshakesMu.Lock()
+	defer h.handshakesMu.Unlock()
+	if h.installPending == nil {
+		h.installPending = make(map[string]bool)
+	}
+	h.installPending[paneID] = true
+}
+
+// takeInstallPending 은 대기 중인 pane 의 출력에 133;A 가 있으면 대기를 끄고 true 를 돌려준다.
+// 마커가 왔다는 것 자체가 "훅이 있다" 는 증명이라 언제 오든 상관없다.
+func (h *controlHandle) takeInstallPending(paneID string, data []byte) bool {
+	h.handshakesMu.Lock()
+	defer h.handshakesMu.Unlock()
+	if !h.installPending[paneID] || !bytes.Contains(data, []byte(autocomplete.PromptStartMarker)) {
+		return false
+	}
+	delete(h.installPending, paneID)
+	return true
+}
+
+// alive 는 control 채널이 아직 살아 있는지다. 게이트는 무장 후 수십 초 뒤에 터질 수 있어,
+// 그때 세션이 남아 있는지 확인할 수단이 필요하다.
+func (h *controlHandle) alive() bool {
+	select {
+	case <-h.closed:
+		return false
+	default:
+		return true
+	}
+}
+
+// setSessionName·currentSessionName 은 attach 된 tmux 세션명을 잠금으로 주고받는다.
+//
+// 이름은 stream 고루틴이 %session-changed 로 쓰는데 복원은 별 고루틴에서 읽는다(어느 세션의
+// pane 을 되돌릴지 정하려고). 잠금 없이는 데이터 경쟁이다.
+func (h *controlHandle) setSessionName(name string) {
+	h.handshakesMu.Lock()
+	h.sessionName = name
+	h.handshakesMu.Unlock()
+}
+
+func (h *controlHandle) currentSessionName() string {
+	h.handshakesMu.Lock()
+	defer h.handshakesMu.Unlock()
+	return h.sessionName
+}
+
 // markIntegrated 는 pane 에 셸 통합 주입을 1회로 제한한다. 아직 주입 안 했으면
 // 표시하고 true, 이미 했으면 false 를 돌려준다(재주입=프롬프트 중복 방지).
 func (h *controlHandle) markIntegrated(paneID string) bool {
@@ -157,15 +244,16 @@ func (h *controlHandle) armPaneHandshake(paneID string, commands []string) {
 	hs.ArmForCommand(false, commands...)
 }
 
-// filterPaneOutput 는 pane 출력에 핸드셰이크 필터를 적용한다(없으면 그대로 통과).
-func (h *controlHandle) filterPaneOutput(paneID string, data []byte) []byte {
+// filterPaneOutput 는 pane 출력에 핸드셰이크 필터를 적용한다(없으면 그대로 통과). 두 번째
+// 값은 이 조각으로 OSC 133;A 핸드셰이크가 **끝났는지**다 — 주입이 실제로 성공한 순간이다.
+func (h *controlHandle) filterPaneOutput(paneID string, data []byte) ([]byte, bool) {
 	h.handshakesMu.Lock()
 	hs := h.handshakes[paneID]
 	h.handshakesMu.Unlock()
 	if hs == nil {
-		return data
+		return data, false
 	}
-	return hs.Filter(data)
+	return hs.FilterWithStatus(data)
 }
 
 // paneReinjectGate 는 pane 의 재주입 게이트를 돌려준다(없으면 만든다).
@@ -241,6 +329,21 @@ func (h *controlHandle) ensurePaneHandshake(paneID string) *autocomplete.Handsha
 // 응답 파싱은 앞 3토큰(id/index/active)과 마지막 토큰(layout)을 고정으로 떼고
 // 가운데를 name 으로 본다(parseListWindowsLine).
 const listWindowsCommand = "list-windows -F \"#{window_id} #{window_index} #{window_active} #{window_name} #{window_visible_layout}\"\n"
+
+// listWindowsLayoutRefreshCommand 는 리사이즈 뒤 **모든 창의 레이아웃만** 다시 묻는다.
+//
+// tmux 는 클라이언트 크기가 바뀌면 세션의 모든 창을 다시 재지만 `%layout-change` 는 **활성 창에만**
+// 보낸다. 그래서 비활성 창의 칸 수는 attach 때 합성한 값(세션 생성 크기)으로 굳어 있고, 사용자가 그
+// 창으로 전환하는 순간 렌더러가 그 낡은 칸 수로 xterm 을 만들어, 정착된 크기로 떠 온 복원 바이트를
+// 어긋난 격자에 그린다. 실기기 증상: 처음 뜬 창은 멀쩡한데 전환한 창의 vi 만 깨지고(htop 은 스스로
+// 다시 그려 멀쩡), pane 크기를 건드리면 돌아온다(WINCH 로 vi 가 다시 그림). E2E 로 재현: 전환 직후
+// vi xterm 100x50 vs tmux pane 81x59.
+//
+// 활성 열은 `0` 으로 **고정**한다. 이 질의는 tmux 가 보내 주지 않는 `%layout-change` 의 대용이라 그것과
+// 같이 격자만 갱신하고 활성 창은 건드리지 않아야 한다 — tmux 값을 보내면, 사용자가 방금 고른 창을 tmux 가
+// 아직 반영하기 전에 떠 온 응답이 그 선택을 되돌려 놓는다. 활성 창 전환은 사용자 선택과 tmux 자체
+// 이벤트(창 추가 때의 list-windows 포함)가 맡는다.
+const listWindowsLayoutRefreshCommand = "list-windows -F \"#{window_id} #{window_index} 0 #{window_name} #{window_visible_layout}\"\n"
 const defaultControlCommand = "if tmux list-sessions >/dev/null 2>&1; then exec tmux -CC attach; else exec tmux -CC new-session -A -s dolgate; fi"
 
 // SetTailnetDial 은 tailnet 경로를 raw dialer 로 바꾸는 함수를 주입한다.
@@ -491,7 +594,18 @@ func (m *Manager) handleControlEvent(handle *controlHandle, ev ControlEvent) {
 		// 서브셸 재주입을 기다리는 pane 이면 원본 출력으로 프롬프트 안착을 본다(필터 전에).
 		handle.observePaneOutput(ev.PaneID, ev.Data)
 		// 셸 통합 주입 중이면 그 pane 의 에코를 마커 전까지 숨긴다(없으면 그대로 통과).
-		data := handle.filterPaneOutput(ev.PaneID, ev.Data)
+		// 설치를 기다리는 pane 에서 133;A 가 왔다 — 훅이 **실제로** 깔렸다. 이때만 서버에 표식을
+		// 남긴다. 핸드셰이크 필터의 완료 여부와 무관하게 본다(1.5초 flush 뒤에 와도 설치는 설치다).
+		if handle.takeInstallPending(ev.PaneID, ev.Data) {
+			m.markPaneIntegratedOnServer(handle, ev.PaneID)
+		}
+		data, installed := handle.filterPaneOutput(ev.PaneID, ev.Data)
+		if installed {
+			// 핸드셰이크는 마커 앞을 전부 버린다 — readline 이 Enter 에 낸 줄바꿈도 함께. 그러면
+			// 새 프롬프트가 옛 프롬프트 바로 뒤 같은 줄에 붙는다. tmux 버퍼 쪽은 스크립트가 자기
+			// 에코를 지우고 한 줄 내려가므로(echoEraseSequence), 렌더러도 같은 모양이 되게 한 줄 내린다.
+			data = append([]byte("\r\n"), data...)
+		}
 		if len(data) > 0 {
 			m.emitStream(coretypes.StreamFrame{
 				Type:      coretypes.StreamTypeData,
@@ -506,7 +620,7 @@ func (m *Manager) handleControlEvent(handle *controlHandle, ev ControlEvent) {
 				ControlSessionID: handle.id,
 				WindowID:         ev.WindowID,
 				Layout:           ev.Layout,
-				SessionName:      handle.sessionName,
+				SessionName:      handle.currentSessionName(),
 			},
 		})
 	case ControlWindowAdd:
@@ -520,7 +634,7 @@ func (m *Manager) handleControlEvent(handle *controlHandle, ev ControlEvent) {
 		// %session-changed $<id> <name>: attach 된 tmux 세션명을 handle 에 기록(이후
 		// layout-change payload 에 실린다)하고 renderer 로도 전달해, 세션 그룹 푸터가
 		// 호스트명 대신 실제 세션명을 보이게 한다.
-		handle.sessionName = ev.Name
+		handle.setSessionName(ev.Name)
 		m.emit(coretypes.Event{
 			Type:      coretypes.EventTmuxSessionChanged,
 			SessionID: handle.id,
@@ -533,7 +647,7 @@ func (m *Manager) handleControlEvent(handle *controlHandle, ev ControlEvent) {
 		// rename-session(Ctrl-b $) → 현재 세션 이름을 즉시 갱신(푸터 라벨)하고 세션 목록도
 		// 재조회한다. 이게 없으면 재연결 전까지 옛 이름이 남는다.
 		if ev.Name != "" {
-			handle.sessionName = ev.Name
+			handle.setSessionName(ev.Name)
 			m.emit(coretypes.Event{
 				Type:      coretypes.EventTmuxSessionChanged,
 				SessionID: handle.id,
@@ -800,7 +914,18 @@ func (m *Manager) Resize(sessionID string, cols, rows int) error {
 	if rows <= 0 {
 		rows = 32
 	}
-	return handle.writeStdin(refreshClientCommand(cols, rows))
+	if err := handle.writeStdin(refreshClientCommand(cols, rows)); err != nil {
+		return err
+	}
+	// 첫 리사이즈가 재연결 복원의 계기다. 렌더러가 실제 크기를 알려주는 첫 순간이고, 그
+	// 순서가 중요하다 — 렌더러는 자기 xterm 을 먼저 맞추고 나서 우리에게 알린다
+	// (terminal-resize.ts flush: fit → afterResize → sendResize). 그래서 이 시점 이후에
+	// 화면을 떠 오면 양쪽 폭이 같다.
+	m.restoreOnFirstResize(handle)
+	// 리사이즈마다 모든 창의 레이아웃을 다시 묻는다(첫 번째뿐 아니라). 앱 창을 나중에 키워도 비활성
+	// 창의 칸 수는 또 굳는다 — 그 창으로 돌아오면 같은 증상이다.
+	m.refreshWindowLayoutsAfterSettle(handle)
+	return nil
 }
 
 // refreshClientCommand 은 refresh-client -C 사이즈 명령을 만든다. 콤마 "W,H" 는 tmux
@@ -808,6 +933,108 @@ func (m *Manager) Resize(sessionID string, cols, rows int) error {
 // 콤마를 항상 쓴다 — 2.6 호환 + 기존(콤마) 동작 무회귀. 끝에 "\n" 포함.
 func refreshClientCommand(cols, rows int) string {
 	return fmt.Sprintf("refresh-client -C %d,%d\n", cols, rows)
+}
+
+// restoreOnFirstResize 는 재연결로 잃은 화면과 터미널 모드를 되돌린다(연결당 1회).
+//
+// 왜 리사이즈가 계기인가. attach 직후에는 렌더러의 xterm 이 아직 씨앗 크기(120x32)라, 그때
+// 화면을 넣으면 그 크기에 그려진 뒤 실제 크기로 늘어나 어긋난다. 렌더러는 tmux pane 의 xterm 을
+// **레이아웃 칸 수로 고정**하고(각 pane 의 실제 폭·높이) 그 뒤에 total 크기를 Resize 로 한 번
+// 보고한다(TerminalWorkspace). 그래서 그 Resize 가 도착했다 = pane 들의 xterm 이 제 크기다.
+//
+// 각 pane 의 크기는 tmux 에게 직접 묻는다(list-panes 의 pane_width/height) — 그 값이 렌더러가
+// xterm 을 고정한 값과 같다. refresh-client 로 보낸 total 이 pane 크기에 반영될 짧은 틈을 둔다.
+func (m *Manager) restoreOnFirstResize(handle *controlHandle) {
+	handle.reattachRestore.Do(func() {
+		go func() {
+			time.Sleep(m.settle())
+			if !handle.alive() {
+				return
+			}
+			m.restorePanes(handle, m.paneRestoreStatesOf(handle))
+		}()
+	})
+}
+
+// refreshWindowLayoutsAfterSettle 은 refresh-client 가 pane 크기에 반영된 뒤 **모든 창**의 레이아웃을
+// 다시 묻는다(listWindowsLayoutRefreshCommand 주석). 복원과 같은 틈을 두는 이유도 같다 — 그 전에 물으면
+// 옛 크기가 온다. 응답은 stream 고루틴이 다른 list-windows 와 똑같이 모아 layout 이벤트로 바꾼다.
+func (m *Manager) refreshWindowLayoutsAfterSettle(handle *controlHandle) {
+	go func() {
+		time.Sleep(m.settle())
+		if !handle.alive() {
+			return
+		}
+		_ = handle.writeStdin(listWindowsLayoutRefreshCommand)
+	}()
+}
+
+// paneRestoreSettle 은 refresh-client 로 보낸 크기가 tmux 의 pane 에 반영될 때까지 두는 틈이다.
+const paneRestoreSettle = 400 * time.Millisecond
+
+// settle 은 그 틈의 실제 값이다(테스트가 restoreSettle 로 줄인다).
+func (m *Manager) settle() time.Duration {
+	if m.restoreSettle > 0 {
+		return m.restoreSettle
+	}
+	return paneRestoreSettle
+}
+
+// restorePanes 는 이 control 세션이 붙은 tmux 세션의 모든 pane 을 되돌린다.
+func (m *Manager) restorePanes(handle *controlHandle, states []paneRestoreState) {
+	for _, state := range states {
+		if !handle.alive() {
+			return
+		}
+		screens := m.paneScreensOf(handle, state)
+		data := buildPaneRestore(state, screens)
+		debugTmux(
+			"tmux %s pane %s: 화면 복원 — 대체화면=%v 크기=%dx%d 현재격자=%d행 저장격자=%d행"+
+				" 커서=(%d,%d) 마우스=%v/%v/%v/%v %d바이트",
+			handle.id, state.paneID, state.alternate == flagOn, state.width, state.height,
+			len(screens.current), len(screens.saved),
+			state.cursorX, state.cursorY,
+			state.mouseStandard, state.mouseButton, state.mouseAll, state.mouseSGR, len(data),
+		)
+		if len(data) == 0 {
+			continue
+		}
+		m.emitStream(coretypes.StreamFrame{
+			Type:      coretypes.StreamTypeData,
+			SessionID: paneSessionID(handle.id, state.paneID),
+		}, data)
+	}
+}
+
+// paneRestoreStatesOf·paneScreensOf 는 조회를 한 자리로 모은다(테스트가 갈아끼운다).
+func (m *Manager) paneRestoreStatesOf(handle *controlHandle) []paneRestoreState {
+	if m.paneRestoreStates != nil {
+		return m.paneRestoreStates(handle)
+	}
+	return queryPaneRestoreStates(handle, handle.currentSessionName())
+}
+
+func (m *Manager) paneScreensOf(handle *controlHandle, state paneRestoreState) paneRestoreScreens {
+	if m.paneScreens != nil {
+		return m.paneScreens(handle, state)
+	}
+	return queryPaneScreens(handle, state)
+}
+
+// markPaneIntegratedOnServer 는 "이 pane 에 셸 통합을 심었다" 를 tmux 서버에 남긴다.
+//
+// 우리 맵(controlHandle.integrated)은 연결과 함께 사라지므로 재연결이면 다시 심으려 한다.
+// 그런데 pane 의 셸은 같은 프로세스라 훅이 그대로 있다 — 다시 심으면 그 init 의 에코가 화면에
+// 남는다(실제로 그렇게 화면을 더럽혔다). tmux 서버의 pane 옵션은 detach 를 넘어 살아남는다.
+func (m *Manager) markPaneIntegratedOnServer(handle *controlHandle, paneID string) {
+	if handle == nil || handle.client == nil || !isPaneID(paneID) {
+		return
+	}
+	go func() {
+		command := "command -v tmux >/dev/null 2>&1 && tmux set-option -p -t " +
+			sshcmd.QuotePosix(paneID) + " @dolgate_integrated " + paneIntegratedMarker
+		_, _, _ = sshcmd.RunWithTimeout(handle.client, command, paneStateTimeout)
+	}()
 }
 
 func (m *Manager) Disconnect(sessionID string) error {
@@ -1019,11 +1246,15 @@ func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error
 		Gate:      handle.paneReinjectGate(paneID),
 		ShellHint: shell,
 		Inject: func(resolved string) {
+			// viaTmuxBuffer=false: 서브셸은 중첩 ssh 로 다른 호스트일 수 있어, 그 셸의 `tmux`
+			// 는 우리 서버를 가리키지 않는다.
 			m.writePaneShellIntegration(
 				sessionID,
 				handle,
 				paneID,
 				autocomplete.ShellIntegrationInitLines(resolved),
+				false,
+				paneEchoSpot{},
 			)
 		},
 		Probe: func() { m.probePaneShellThenInject(sessionID, handle, paneID) },
@@ -1072,7 +1303,10 @@ func (m *Manager) probePaneShellThenInject(
 				}, []byte(autocomplete.CommandFinishedMarker))
 				return
 			}
-			m.writePaneShellIntegration(sessionID, handle, paneID, autocomplete.ShellIntegrationInitLines(normalized))
+			m.writePaneShellIntegration(
+				sessionID, handle, paneID,
+				autocomplete.ShellIntegrationInitLines(normalized), false, paneEchoSpot{},
+			)
 		},
 		Done:    handle.closed,
 		Timeout: shellIntegrationFlushDelay,
@@ -1090,8 +1324,17 @@ func (m *Manager) writePaneShellIntegration(
 	handle *controlHandle,
 	paneID string,
 	commands []string,
+	viaTmuxBuffer bool,
+	spot paneEchoSpot,
 ) {
+	// 본문을 그대로 타이핑하면 그 에코가 tmux 의 pane 버퍼에 남아, 나중에 그 버퍼를 다시 그릴
+	// 때(창 전환·재연결) 스크립트 전문이 화면에 나타난다. tmux 버퍼로 우회해 흔적을 한 줄로 줄인다.
+	commands = paneInjectCommands(handle, paneID, commands, viaTmuxBuffer, spot)
 	handle.armPaneHandshake(paneID, commands)
+	// 표식은 이 pane 에서 **다음 133;A 가 오면** 남긴다(ControlOutput). 에코 숨김의 1.5초 flush
+	// 와는 별개다 — 느린 호스트에서 마커가 flush 뒤에 오면 예전 코드는 설치를 "미확인" 으로 두어
+	// 재연결마다 다시 심었다. 그것이 진짜 무한 반복이다.
+	handle.setInstallPending(paneID)
 	for _, command := range commands {
 		for _, cmd := range encodeInput(paneID, []byte(command), handle.version) {
 			if err := handle.writeStdin(cmd); err != nil {
@@ -1100,6 +1343,7 @@ func (m *Manager) writePaneShellIntegration(
 			}
 		}
 	}
+	// 표식은 여기서 남기지 않는다 — 마커(133;A)가 실제로 도착한 곳(ControlOutput)에서 남긴다.
 	// 마커가 끝내 안 오면(느린/비호환 셸) 붙잡고 있던 출력을 놓아준다.
 	go func() {
 		time.Sleep(shellIntegrationFlushDelay)
@@ -1123,6 +1367,14 @@ func (m *Manager) flushPaneShellIntegration(sessionID string, handle *controlHan
 // InstallShellIntegration 는 pane 의 셸에 OSC 133/7 통합 스크립트를 send-keys 로 주입해
 // pane 안에서도 자동완성/프롬프트 인식이 동작하게 한다(control mode pane 은 가상 세션이라
 // 기존엔 no-op 이었다). 주입 명령의 에코는 pane 별 핸드셰이크로 마커 전까지 숨긴다.
+//
+// **쓰기 전에 pane 앞에 무엇이 있는지 tmux 에게 묻는다.** SSH·로컬 세션은 셸이 막 뜬 순간에
+// 설치하므로 "지금 프롬프트다" 가 공짜로 참이지만, pane 의 셸은 연결보다 오래 산다 — 재연결은
+// 하던 일 그대로인 옛 셸로 돌아온다. 묻지 않고 보내던 동안, vi 로 편집하다 재연결하면 프로브
+// 한 줄이 그대로 편집 중인 파일에 입력됐다.
+//
+// 셸이 아닌 것이 앞에 있으면(vi·htop·copy mode) 지금은 아무것도 쓰지 않고, 그 pane 의 프롬프트가
+// 돌아올 때까지 게이트로 기다린다. 프롬프트가 끝내 오지 않으면 아무 일도 일어나지 않는다.
 func (m *Manager) InstallShellIntegration(sessionID string) error {
 	handle, paneID, err := m.controlOf(sessionID)
 	if err != nil {
@@ -1133,13 +1385,63 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 	}
 	// 이미 이 pane 에 셸 통합을 주입했으면 재주입하지 않는다(윈도우 전환 시 renderer
 	// remount 가 매번 호출 → 재주입 시 init 스크립트가 다시 실행되며 프롬프트가 중복 출력).
-	if !handle.markIntegrated(paneID) {
+	if handle.integrationDone(paneID) {
 		return nil
 	}
-	// pane 의 셸은 알 수 없다(원격 호스트의 기본 셸을 tmux 가 띄운다) — 먼저 한 줄로 묻고,
-	// 답이 온 셸 것만 보낸다. 예전에는 bash·zsh 겸용을 여러 줄로 보냈고 dash pane 이 더러워졌다.
-	m.probePaneShellThenInject(sessionID, handle, paneID)
+	// 프롬프트에 있으면 pane_current_command 가 셸 이름 자체다 — 그러면 프로브를 타이핑할
+	// 이유가 없다. 예전에는 "pane 의 셸은 알 수 없다" 며 늘 한 줄을 써 넣어 물어봤다(보조 exec
+	// 채널로는 로그인 셸만 알 수 있고 pane 이 띄운 셸은 모른다). tmux 서버가 그 답을 갖고 있다.
+	state := m.paneStateOf(handle, paneID)
+	debugTmux(
+		"tmux %s pane %s: 셸 통합 설치 판정 — command=%q alternate=%v mode=%v 심어짐=%v 응답=%v",
+		handle.id, paneID, state.command, state.alternateOn, state.inMode,
+		state.integrated, state.known,
+	)
+	// 재연결이면 pane 의 셸에 훅이 이미 있다(같은 프로세스다). 다시 심으면 그 init 의 에코가
+	// 화면에 남는다 — tmux 서버에 남긴 표식으로 그걸 막는다.
+	if state.integrated {
+		handle.markIntegrated(paneID)
+		return nil
+	}
+	if shell := state.shellAtPrompt(); shell != "" {
+		if !handle.markIntegrated(paneID) {
+			return nil
+		}
+		m.writePaneShellIntegration(
+			sessionID,
+			handle,
+			paneID,
+			autocomplete.ShellIntegrationInitLines(shell),
+			true,
+			paneEchoSpot{cursorX: state.cursorX, cursorY: state.cursorY, width: state.width, height: state.height},
+		)
+		return nil
+	}
+	m.armPaneInstallOnPrompt(sessionID, handle, paneID)
 	return nil
+}
+
+// armPaneInstallOnPrompt 는 "지금은 셸이 아니다" 로 판정된 pane 의 설치를 프롬프트가 안착할
+// 때까지 미룬다.
+//
+// 서브셸 재주입과 **같은 게이트·같은 판정**을 쓴다. 그래서 재연결한 pane 의 bash 가 detach 를
+// 넘어 훅을 그대로 갖고 있으면(프롬프트에 우리 마커가 이미 있으면) ArmReinject 가 알아보고
+// 아무것도 쓰지 않는다 — 재연결의 정상 경로에서는 주입 자체가 사라진다.
+//
+// 미루는 경로는 integrated 플래그를 쓰지 않고 둔다. 게이트가 프롬프트를 못 보고 시간이
+// 지나가면(사용자가 vi 에 오래 머무름) 다음 호출(윈도우 전환 등)이 다시 시도할 수 있어야 한다.
+func (m *Manager) armPaneInstallOnPrompt(sessionID string, handle *controlHandle, paneID string) {
+	shellintegration.ArmReinject(shellintegration.ReinjectTarget{
+		Gate:  handle.paneReinjectGate(paneID),
+		Alive: handle.alive,
+		Probe: func() {
+			// 게이트가 터진 뒤에야 자리를 차지한다 — 그 사이 다른 호출이 먼저 설치했으면 멈춘다.
+			if !handle.markIntegrated(paneID) {
+				return
+			}
+			m.probePaneShellThenInject(sessionID, handle, paneID)
+		},
+	})
 }
 
 func (m *Manager) FlushShellIntegration(sessionID string) {
@@ -1231,11 +1533,28 @@ func (m *Manager) flushCollectedLayouts(handle *controlHandle) {
 		return
 	}
 	handle.collecting = false
+	rows := make([]listWindowsRow, 0, len(handle.collected))
 	for _, line := range handle.collected {
-		win, ok := parseListWindowsLine(line)
-		if !ok {
-			continue
+		if win, ok := parseListWindowsLine(line); ok {
+			rows = append(rows, win)
 		}
+	}
+	handle.collected = nil
+	// **활성 창을 먼저 내보낸다.**
+	//
+	// 렌더러는 이 그룹의 첫 layout 이벤트로 그룹을 만들면서 그 창을 활성 창으로 삼고, 뒤이어 오는
+	// `active` 창이 있으면 그때 옮긴다. 그래서 비활성 창이 먼저 오면 **그 찰나에 그 창이 활성**이 되고,
+	// 그 한 프레임 동안 그 창의 pane 들이 xterm 을 만들어 버린다 — 그것도 attach 시점의 낡은 칸 수로
+	// (아직 우리 크기를 tmux 에 알리기 전이라 세션 생성 크기다). 숨겨진 pane 은 리사이즈되지 않으므로
+	// (clientWidth 0 가드) 그 낡은 격자가 그대로 남고, 정착 뒤 떠 온 복원 화면이 거기 그려져 어긋난다.
+	// vi 는 스스로 다시 그리지 않아 깨진 채 남는다(htop 은 자가 치유). 실기기 증상이 이것이었고, E2E 로
+	// "전환 전 vi xterm 존재=true 격자=100x50 (tmux 는 81x59)" 로 확인했다.
+	//
+	// 활성 창을 먼저 보내면 그룹이 처음부터 옳은 창을 활성으로 잡아 그 찰나가 없어지고, 비활성 창의
+	// pane 은 사용자가 전환할 때 비로소 — 그때의 올바른 칸 수로 — 만들어진다(그 사이 복원 바이트는
+	// pendingWrites 에 쌓였다가 순서대로 재생된다).
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].active && !rows[j].active })
+	for _, win := range rows {
 		windowIndex := win.index // 포인터로 전달해 index 0 이 omitempty 로 누락되지 않게.
 		m.emit(coretypes.Event{
 			Type:      coretypes.EventTmuxLayoutChange,
@@ -1247,11 +1566,10 @@ func (m *Manager) flushCollectedLayouts(handle *controlHandle) {
 				Index:            &windowIndex,
 				Name:             win.name,
 				Active:           win.active,
-				SessionName:      handle.sessionName,
+				SessionName:      handle.currentSessionName(),
 			},
 		})
 	}
-	handle.collected = nil
 }
 
 type listWindowsRow struct {
