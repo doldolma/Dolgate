@@ -350,8 +350,15 @@ func TestVMReattachDoesNotReinstallShellIntegration(t *testing.T) {
 
 	var mu sync.Mutex
 	streams := map[string]*strings.Builder{}
+	var shellStates []coretypes.Event
 	m := NewManager(
-		func(coretypes.Event) {},
+		func(event coretypes.Event) {
+			if event.Type == coretypes.EventTerminalAutocompleteShellState {
+				mu.Lock()
+				shellStates = append(shellStates, event)
+				mu.Unlock()
+			}
+		},
 		func(f coretypes.StreamFrame, d []byte) {
 			mu.Lock()
 			if streams[f.SessionID] == nil {
@@ -518,8 +525,23 @@ func TestVMReattachDoesNotReinstallShellIntegration(t *testing.T) {
 	// 재연결은 pane 내용을 **전혀 바꾸지 않아야** 한다.
 	compareScreens(t, "재연결 전후 pane", normalizeScreen(splitTrimmed(afterCapture)), beforeCapture)
 
-	// **자동완성의 전제가 재연결을 넘어 살아 있는가.** 렌더러는 OSC 133;A 를 보고서야 자동완성을
-	// 켠다(useTerminalAutocomplete: setIntegrationReady). 재연결에서 설치를 건너뛰었으니 훅은
+	// Enter/명령 실행 전에 renderer 의 자동완성이 준비돼야 한다. capture-pane 에는
+	// 옛 OSC 마커가 없어, 아래의 "한 번 실행한 뒤" 검사만으로는 첫 프롬프트 버그를 놓친다.
+	mu.Lock()
+	ready := false
+	for _, event := range shellStates {
+		state, ok := event.Payload.(coretypes.TerminalAutocompleteShellStatePayload)
+		if event.SessionID == pane2 && ok && state.Kind == "integrationRestored" && state.Cwd != "" {
+			ready = true
+		}
+	}
+	mu.Unlock()
+	if !ready {
+		t.Error("[자동완성] 재연결 뒤 첫 입력 전에 통합 상태와 cwd 가 복원되지 않았다")
+	}
+
+	// **실제 훅도 재연결을 넘어 살아 있는가.** 첫 프롬프트는 위 상태 이벤트로 복원하지만,
+	// 이후에는 실제 OSC 133;A 가 계속 와야 한다. 재연결에서 설치를 건너뛰었으니 훅은
 	// 셸에 그대로 있어야 하고, 명령을 치면 마커가 와야 한다. 실기기에서 이것이 죽어 있었다 —
 	// 옛 표식이 깨진 설치에도 남아 재연결마다 건너뛰었기 때문이다.
 	reset(pane2)

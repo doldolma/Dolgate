@@ -1386,6 +1386,8 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 	// 이미 이 pane 에 셸 통합을 주입했으면 재주입하지 않는다(윈도우 전환 시 renderer
 	// remount 가 매번 호출 → 재주입 시 init 스크립트가 다시 실행되며 프롬프트가 중복 출력).
 	if handle.integrationDone(paneID) {
+		// 새 renderer(창 전환·자동완성 재활성화)도 준비 상태를 받아야 한다.
+		m.restorePaneAutocomplete(sessionID, m.paneStateOf(handle, paneID))
 		return nil
 	}
 	// 프롬프트에 있으면 pane_current_command 가 셸 이름 자체다 — 그러면 프로브를 타이핑할
@@ -1401,6 +1403,7 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 	// 화면에 남는다 — tmux 서버에 남긴 표식으로 그걸 막는다.
 	if state.integrated {
 		handle.markIntegrated(paneID)
+		m.restorePaneAutocomplete(sessionID, state)
 		return nil
 	}
 	if shell := state.shellAtPrompt(); shell != "" {
@@ -1419,6 +1422,23 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 	}
 	m.armPaneInstallOnPrompt(sessionID, handle, paneID)
 	return nil
+}
+
+// 재attach 는 화면만 복원하므로 옛 OSC 133;A 가 새 renderer 에 도착하지 않는다.
+// 훅이 확인된 셸 프롬프트라면 준비 상태를 별도로 복원한다. A 를 합성하면 이미 입력한
+// 명령 버퍼를 지우므로, 화면·입력에 손대지 않는 이벤트를 쓴다.
+func (m *Manager) restorePaneAutocomplete(sessionID string, state paneState) {
+	shell := state.shellAtPrompt()
+	if !state.integrated || shell == "" {
+		return
+	}
+	m.emit(coretypes.Event{
+		Type:      coretypes.EventTerminalAutocompleteShellState,
+		SessionID: sessionID,
+		Payload: coretypes.TerminalAutocompleteShellStatePayload{
+			Kind: "integrationRestored", Shell: shell, Cwd: state.cwd,
+		},
+	})
 }
 
 // armPaneInstallOnPrompt 는 "지금은 셸이 아니다" 로 판정된 pane 의 설치를 프롬프트가 안착할

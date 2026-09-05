@@ -147,6 +147,83 @@ describe('useTerminalAutocomplete', () => {
     );
   });
 
+  it.each(['before typing', 'after typing'])('restores tmux completion %s without Enter or clearing input', async (timing) => {
+    const sessionId = 'tmux:reattached:0';
+    const sendInput = vi.fn();
+    const { result } = renderHook(() =>
+      useTerminalAutocomplete({ sessionId, enabled: true, connected: true, lazyPrepare: false, sendInput }),
+    );
+    await waitFor(() => expect(mocks.prepare).toHaveBeenCalledWith(sessionId));
+    act(() => mocks.listener?.({
+      type: 'terminalAutocompleteSnapshot', sessionId,
+      payload: { shell: 'bash', revision: 1, history: ['git status'], executables: [], truncated: false },
+    }));
+    const restore = () => mocks.listener?.({
+      type: 'terminalAutocompleteShellState', sessionId,
+      payload: { kind: 'integrationRestored', shell: 'bash', cwd: '/srv/project' },
+    });
+    if (timing === 'before typing') act(restore);
+    act(() => result.current.handleInput('git'));
+    if (timing === 'after typing') {
+      expect(result.current.suggestions).toEqual([]);
+      act(restore);
+    }
+    expect(result.current.command.value).toBe('git');
+    await waitFor(() => expect(result.current.suggestions[0]?.insertText).toBe('git status'));
+    act(() => result.current.handleInput('\t'));
+    expect(sendInput.mock.calls).toEqual([['git'], [' status']]);
+  });
+
+  it('requires integration confirmation for the current session, including when accepting with Tab', async () => {
+    const sendInput = vi.fn();
+    const { result } = renderHook(() =>
+      useTerminalAutocomplete({ sessionId: 'tmux:reattached:0', enabled: true, connected: true, lazyPrepare: false, sendInput }),
+    );
+    await waitFor(() => expect(mocks.prepare).toHaveBeenCalled());
+    act(() => {
+      mocks.listener?.({
+        type: 'terminalAutocompleteSnapshot', sessionId: 'tmux:reattached:0',
+        payload: { shell: 'bash', revision: 1, history: ['git status'], executables: [], truncated: false },
+      });
+      mocks.listener?.({
+        type: 'terminalAutocompleteShellState', sessionId: 'tmux:reattached:0',
+        payload: { kind: 'shellReady', shell: 'bash' },
+      });
+      mocks.listener?.({
+        type: 'terminalAutocompleteShellState', sessionId: 'tmux:reattached:1',
+        payload: { kind: 'integrationRestored', shell: 'bash' },
+      });
+      result.current.handleInput('git');
+    });
+    expect(result.current.suggestions).toEqual([]);
+    act(() => result.current.handleInput('\t'));
+    expect(sendInput.mock.calls).toEqual([['git'], ['\t']]);
+  });
+
+  it.each([false, true])('uses the restored tmux cwd unless a live OSC 7 already supplied it (live=%s)', async (live) => {
+    const sessionId = 'tmux:reattached:0';
+    mocks.query.mockResolvedValue('hosts\n');
+    const { result } = renderHook(() =>
+      useTerminalAutocomplete({ sessionId, enabled: true, connected: true, lazyPrepare: false, sendInput: vi.fn() }),
+    );
+    await waitFor(() => expect(mocks.prepare).toHaveBeenCalled());
+    act(() => {
+      if (live) result.current.handleCwd('file:///srv/newer');
+      mocks.listener?.({
+        type: 'terminalAutocompleteSnapshot', sessionId,
+        payload: { shell: 'bash', revision: 1, history: [], executables: [], truncated: false },
+      });
+      mocks.listener?.({
+        type: 'terminalAutocompleteShellState', sessionId,
+        payload: { kind: 'integrationRestored', shell: 'bash', cwd: '/srv/my project' },
+      });
+      result.current.handleInput('cat ./hos');
+    });
+    await waitFor(() => expect(mocks.query).toHaveBeenCalled());
+    expect(mocks.query.mock.calls[0]?.[1]).toContain(live ? '/srv/newer' : '/srv/my project');
+    await waitFor(() => expect(result.current.suggestions.some((item) => item.insertText === 'cat ./hosts')).toBe(true));
+  });
+
   it('keeps autocomplete disabled for unsupported shells even after shell integration', async () => {
     const sendInput = vi.fn();
     const { result } = renderHook(() =>

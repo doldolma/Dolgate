@@ -26,6 +26,7 @@ const paneStateTimeout = 3 * time.Second
 //     타이핑한 줄의 에코가 어디에 남을지 계산하는 데 쓴다. 분할 직후의 bash 는 아직 프롬프트를
 //     안 그렸는데(커서 0,0) 그때 타이핑하면 tty 에코와 readline 재에코가 **둘 다** 화면에 남는다
 //     (실기기 %143: `eval …` 이 두 줄). 프롬프트가 있을 때만 바로 심고, 아니면 안착을 기다린다.
+//   - pane_current_path: 재연결 직후 상대 경로 자동완성이 사용할 pane 의 현재 디렉터리.
 //   - @dolgate_integrated: 우리가 이 pane 에 셸 통합을 심고 **마커까지 확인했다**는 표식. tmux **서버**에
 //     사는 pane 옵션이라 detach 를 넘어 살아남는다(실측: tmux 3.0 지원). 재연결에서 이것을
 //     보면 다시 심지 않는다 — pane 의 셸은 같은 프로세스라 훅이 그대로 있고, 다시 심으면 그
@@ -34,7 +35,7 @@ const paneStateTimeout = 3 * time.Second
 // 모르는 포맷은 tmux 가 빈 문자열로 확장하므로(에러가 아니다) 구버전에서도 "판정 불가" 로
 // 떨어져 안전한 쪽(주입하지 않음)으로 간다.
 const paneStateFormat = "#{pane_current_command}\t#{alternate_on}\t#{pane_in_mode}\t#{@dolgate_integrated}" +
-	"\t#{cursor_x}\t#{cursor_y}\t#{pane_width}\t#{pane_height}"
+	"\t#{cursor_x}\t#{cursor_y}\t#{pane_width}\t#{pane_height}\t#{pane_current_path}"
 
 // paneState 는 tmux 서버가 알려준 pane 의 현재 상태다.
 type paneState struct {
@@ -46,6 +47,7 @@ type paneState struct {
 	// 커서와 pane 크기(모르면 0). 프롬프트가 그려졌는지와 에코 자리 계산에 쓴다.
 	cursorX, cursorY int
 	width, height    int
+	cwd              string
 	// known 은 tmux 가 실제로 답했는지다(조회 실패·형식 불일치면 false).
 	known bool
 }
@@ -93,7 +95,7 @@ func parsePaneState(stdout []byte) paneState {
 	if len(fields) < 8 {
 		return paneState{}
 	}
-	return paneState{
+	state := paneState{
 		command:     strings.TrimSpace(fields[0]),
 		alternateOn: paneFlagSet(fields[1]),
 		inMode:      paneFlagSet(fields[2]),
@@ -104,6 +106,10 @@ func parsePaneState(stdout []byte) paneState {
 		height:      paneFlagInt(fields[7]),
 		known:       true,
 	}
+	if len(fields) > 8 {
+		state.cwd = strings.Join(fields[8:], "\t")
+	}
+	return state
 }
 
 // promptDrawn 은 셸이 프롬프트를 그려 놓고 기다리는 중인지다. 분할·새 창 직후의 bash 는 아직

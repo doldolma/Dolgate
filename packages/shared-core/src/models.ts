@@ -1789,7 +1789,7 @@ export interface TerminalAutocompleteSnapshot {
 
 export interface TerminalAutocompleteShellState {
   sessionId: string;
-  kind: 'shellReady' | 'promptStart' | 'commandStart' | 'commandEnd';
+  kind: 'shellReady' | 'integrationRestored' | 'promptStart' | 'commandStart' | 'commandEnd';
   shell?: TerminalAutocompleteShell;
   cwd?: string;
   command?: string;

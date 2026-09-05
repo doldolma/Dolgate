@@ -9,6 +9,11 @@ func TestParsePaneState(t *testing.T) {
 		want paneState
 	}{
 		{
+			name: "재연결한 pane 의 현재 디렉터리",
+			out:  "bash\t0\t0\t2\t17\t3\t101\t52\t/srv/my project\tdata\n",
+			want: paneState{command: "bash", integrated: true, cursorX: 17, cursorY: 3, width: 101, height: 52, cwd: "/srv/my project\tdata", known: true},
+		},
+		{
 			name: "프롬프트의 bash",
 			out:  "bash\t0\t0\t\t17\t3\t101\t52\n",
 			want: paneState{command: "bash", cursorX: 17, cursorY: 3, width: 101, height: 52, known: true},

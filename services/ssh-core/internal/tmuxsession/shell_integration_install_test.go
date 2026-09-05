@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"dolssh/services/ssh-core/internal/autocomplete"
+	"dolssh/services/ssh-core/pkg/coretypes"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -13,6 +14,71 @@ import (
 // stubPanePrompt 는 tmux 서버 대신 정해진 pane 상태를 돌려준다.
 func stubPanePrompt(state paneState) func(*ssh.Client, string) paneState {
 	return func(*ssh.Client, string) paneState { return state }
+}
+
+func TestInstallShellIntegrationRestoresAutocompleteBeforeInput(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh", "fish"} {
+		t.Run(shell, func(t *testing.T) {
+			m, _, recorder := newReinjectHarness(t)
+			m.panePrompt = stubPanePrompt(paneState{
+				command: shell, integrated: true, known: true, cursorX: 17, cwd: "/srv/my project",
+			})
+			var events []coretypes.Event
+			m.emit = func(event coretypes.Event) { events = append(events, event) }
+			m.emitStream = func(coretypes.StreamFrame, []byte) {
+				t.Error("복원 확인은 화면에 프롬프트를 합성하면 안 된다")
+			}
+			sessionID := paneSessionID("ctl", "%0")
+			// 재연결과 같은 연결의 renderer 재마운트 모두 첫 입력 전에 준비돼야 한다.
+			for i := 0; i < 2; i++ {
+				if err := m.InstallShellIntegration(sessionID); err != nil {
+					t.Fatal(err)
+				}
+				if len(events) != i+1 {
+					t.Fatalf("사용자 입력 전에 준비 상태가 와야 한다: %+v", events)
+				}
+				event := events[i]
+				want := coretypes.TerminalAutocompleteShellStatePayload{
+					Kind: "integrationRestored", Shell: shell, Cwd: "/srv/my project",
+				}
+				if event.Type != coretypes.EventTerminalAutocompleteShellState || event.SessionID != sessionID || event.Payload != want {
+					t.Fatalf("잘못된 준비 이벤트: %+v", event)
+				}
+			}
+			if got := recorder.snapshot(); got != "" {
+				t.Fatalf("복원 중 pane 에 입력했다: %q", got)
+			}
+		})
+	}
+}
+
+func TestInstallShellIntegrationDoesNotRestoreAutocompleteOutsideConfirmedShellPrompt(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state paneState
+	}{
+		{"vi", paneState{command: "vi", integrated: true, known: true, cursorX: 17}},
+		{"실행 중", paneState{command: "sleep", integrated: true, known: true, cursorX: 17}},
+		{"대체화면", paneState{command: "bash", integrated: true, known: true, cursorX: 17, alternateOn: true}},
+		{"copy mode", paneState{command: "bash", integrated: true, known: true, cursorX: 17, inMode: true}},
+		{"조회 실패", paneState{integrated: true}},
+		{"프롬프트 전", paneState{command: "bash", integrated: true, known: true}},
+		{"설치 확인 전", paneState{command: "bash", known: true, cursorX: 17}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, handle, recorder := newReinjectHarness(t)
+			m.panePrompt = stubPanePrompt(tc.state)
+			// 메모리의 주입 시도 플래그만으로 확인이 끝났다고 판단하면 안 된다.
+			handle.markIntegrated("%0")
+			m.emit = func(event coretypes.Event) { t.Errorf("준비로 오인했다: %+v", event) }
+			if err := m.InstallShellIntegration(paneSessionID("ctl", "%0")); err != nil {
+				t.Fatal(err)
+			}
+			if got := recorder.snapshot(); got != "" {
+				t.Fatalf("pane 에 입력했다: %q", got)
+			}
+		})
+	}
 }
 
 // pane 의 셸은 연결보다 오래 산다 — 재연결은 하던 일 그대로인 옛 셸로 돌아온다. 그래서 설치

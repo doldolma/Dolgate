@@ -256,7 +256,7 @@ export function useTerminalAutocomplete({
   // Tab/→ accepts). Arrow keys move it; typing resets it to the top.
   const [selectedIndex, setSelectedIndex] = useState(0);
   // Gated on the OSC 133 shell-integration handshake: suggestions only appear
-  // once the shell has emitted a prompt marker, confirming integration works.
+  // once a prompt marker confirms integration, or tmux restores that confirmation.
   const [integrationReady, setIntegrationReady] = useState(false);
   // Lazily-loaded Fig-derived spec for the leading command (for option/subcommand
   // discovery beyond what the user has typed).
@@ -703,6 +703,16 @@ export function useTerminalAutocomplete({
         }
         if (event.type === 'terminalAutocompleteCapability') {
           setCapability(normalizeCapability(sessionId, event.payload));
+        } else if (event.type === 'terminalAutocompleteShellState') {
+          // tmux keeps the shell hooks across detach, but capture-pane cannot replay
+          // their OSC markers. Restore readiness without clearing input as A does.
+          // shellReady only identifies the metadata shell; it does not confirm hooks.
+          if (event.payload.kind === 'integrationRestored') {
+            if (currentCwdRef.current === null && typeof event.payload.cwd === 'string') {
+              currentCwdRef.current = event.payload.cwd || null;
+            }
+            setIntegrationReady(true);
+          }
         } else if (event.type === 'terminalAutocompleteSnapshot') {
           // OS 는 스냅샷 정규화 **밖에서** 읽는다. 아래 normalizeSnapshot 은 bash·zsh 가 아니면
           // 전체를 버리는데, 아이콘은 셸과 상관이 없다 — ash 를 쓰는 NAS 도 잡혀야 한다.
@@ -777,6 +787,9 @@ export function useTerminalAutocomplete({
 
   // Accept the highlighted suggestion (the top one unless arrow keys moved it).
   const acceptSelectedSuggestion = useCallback(() => {
+    if (!integrationReady || autocompleteUnsupported) {
+      return false;
+    }
     const dynamic = dynamicSuggestionsRef.current;
     const list = getTerminalAutocompleteSuggestions(
       snapshotRef.current,
@@ -814,7 +827,7 @@ export function useTerminalAutocomplete({
     }
     applyAndSend(suffix);
     return true;
-  }, [acceptSnippet, applyAndSend]);
+  }, [acceptSnippet, applyAndSend, autocompleteUnsupported, integrationReady]);
 
   const handleInput = useCallback(
     (data: string) => {
