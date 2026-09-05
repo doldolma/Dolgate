@@ -1,6 +1,9 @@
 package tmuxsession
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParsePaneState(t *testing.T) {
 	cases := []struct {
@@ -141,5 +144,55 @@ func TestIsPaneID(t *testing.T) {
 		if isPaneID(id) {
 			t.Errorf("isPaneID(%q) = true, want false", id)
 		}
+	}
+}
+
+// tmux 3.0 이 pane 옵션(set-option -p)을 들여왔다. 그 아래에서는 표식을 남길 데가 없어 재연결마다
+// 이미 훅이 있는 셸에 다시 심었고, 그 주입 명령의 에코가 화면에 남았다(실기 2.5). 2.5 에서도 세션
+// 옵션은 되고 포맷으로도 읽히므로, 구버전은 pane 번호를 이름에 붙여 세션 옵션에 둔다.
+func TestPaneIntegratedOptionFallsBackToSessionScopeOnOldTmux(t *testing.T) {
+	cases := []struct {
+		name      string
+		version   tmuxVersion
+		wantScope string
+		wantName  string
+	}{
+		{"3.0a 는 pane 옵션", parseTmuxVersion("3.0a"), "-p", "@dolgate_integrated"},
+		{"3.5 도 pane 옵션", parseTmuxVersion("3.5"), "-p", "@dolgate_integrated"},
+		{"2.5 는 세션 옵션 + pane 번호", parseTmuxVersion("2.5"), "", "@dolgate_integrated_7"},
+		{"2.6 도 세션 옵션", parseTmuxVersion("2.6"), "", "@dolgate_integrated_7"},
+		// 버전 미상이면 최신 가정(atLeast) — 신버전 경로를 탄다.
+		{"버전 미상은 최신 가정", tmuxVersion{}, "-p", "@dolgate_integrated"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			scope, name := paneIntegratedOption("%7", tc.version)
+			if scope != tc.wantScope || name != tc.wantName {
+				t.Fatalf("scope=%q name=%q, want scope=%q name=%q", scope, name, tc.wantScope, tc.wantName)
+			}
+		})
+	}
+}
+
+// 구버전은 pane 마다 이름이 갈려야 한다 — 한 세션의 옵션 하나로 모든 pane 을 덮으면 한 pane 만
+// 심고도 나머지가 "이미 심어짐" 이 되어 자동완성이 영영 죽는다.
+func TestPaneIntegratedOptionSeparatesPanesOnOldTmux(t *testing.T) {
+	old := parseTmuxVersion("2.5")
+	_, first := paneIntegratedOption("%0", old)
+	_, second := paneIntegratedOption("%1", old)
+	if first == second {
+		t.Fatalf("pane 마다 이름이 달라야 한다: %q", first)
+	}
+}
+
+// 조회 포맷은 그 이름을 그대로 물어야 한다(이름만 바뀌고 나머지 열은 그대로).
+func TestPaneStateFormatUsesGivenOptionName(t *testing.T) {
+	format := paneStateFormat("@dolgate_integrated_7")
+	if !strings.Contains(format, "#{@dolgate_integrated_7}") {
+		t.Fatalf("포맷이 준 이름을 묻지 않는다: %q", format)
+	}
+	// 파싱이 기대하는 열 수(9)가 유지돼야 한다.
+	if got := strings.Count(format, "\t") + 1; got != 9 {
+		t.Fatalf("열 수가 %d 다(9 여야 파서가 받는다): %q", got, format)
 	}
 }

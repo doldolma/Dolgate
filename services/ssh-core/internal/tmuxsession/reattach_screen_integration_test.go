@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -55,6 +56,9 @@ type renderedScreen struct {
 	NormalRows        []string `json:"normalRows"`
 	MouseTrackingMode string   `json:"mouseTrackingMode"`
 }
+
+// promptLinePattern 은 `user@host:~$` 꼴 셸 프롬프트 한 줄이다(호스트명 무관).
+var promptLinePattern = regexp.MustCompile(`(?m)^\S+@\S+:~\$`)
 
 func TestVMReattachRestoresTheScreen(t *testing.T) {
 	host := os.Getenv("TMUX_VM_HOST")
@@ -200,10 +204,22 @@ func TestVMReattachRestoresTheScreen(t *testing.T) {
 	if got := itoa(screen.CursorX) + "," + itoa(screen.CursorY); got != tmuxCursor {
 		t.Errorf("[커서] xterm=(%s) tmux=(%s)", got, tmuxCursor)
 	}
-	for _, want := range []struct{ seq, what string }{
+	// SGR 마우스는 tmux 가 `mouse_sgr_flag` 로 알려 줄 때만 되살릴 수 있다. tmux 2.5 는 그 포맷이
+	// 아예 없어(실측: 빈 값) pane 이 SGR 를 켰는지 알 방법이 없다. 모르는 채로 켜면 앱이 요청하지도
+	// 않은 SGR 형식 보고를 받아 오히려 마우스가 깨지므로, 그때는 건드리지 않는 것이 옳다
+	// (구버전 한계 — 95열 넘는 클릭은 재연결 뒤 정확하지 않을 수 있다).
+	sgrKnown := strings.TrimSpace(ask("s2", bin+" display-message -p -t '%"+paneNum+"' '#{mouse_sgr_flag}'")) != ""
+	wants := []struct{ seq, what string }{
 		{"\x1b[?1000h", "마우스 보고(?1000h) — 없으면 htop 클릭이 죽는다"},
-		{"\x1b[?1006h", "SGR 마우스(?1006h) — 없으면 95열 넘는 클릭이 깨진다"},
-	} {
+	}
+	if sgrKnown {
+		wants = append(wants, struct{ seq, what string }{
+			"\x1b[?1006h", "SGR 마우스(?1006h) — 없으면 95열 넘는 클릭이 깨진다",
+		})
+	} else {
+		t.Logf("   [모드] 이 tmux 는 mouse_sgr_flag 를 제공하지 않는다 — SGR 복원은 건너뛴다(구버전 한계)")
+	}
+	for _, want := range wants {
 		if !strings.Contains(restored, want.seq) {
 			t.Errorf("[모드] %s 가 복원되지 않았다", want.what)
 		}
@@ -329,7 +345,7 @@ func itoa(n int) string {
 // 그 재주입의 init 이 셸에 타이핑되고 그 에코가 tmux 의 pane 버퍼에 남아, 화면 복원이 그것을
 // 그대로 떠서 영구히 굳혔다 — 사용자는 프롬프트 아래에 셸 스크립트 전문이 박힌 화면을 봤다.
 //
-// 지금은 심을 때 tmux 서버의 pane 옵션(@dolgate_integrated)에 표식을 남기고, 재연결에서
+// 지금은 심을 때 tmux 서버 옵션(@dolgate_integrated — 3.0+ 는 pane, 그 아래는 세션+pane번호)에 표식을 남기고, 재연결에서
 // 그것을 보면 다시 심지 않는다.
 func TestVMReattachDoesNotReinstallShellIntegration(t *testing.T) {
 	host := os.Getenv("TMUX_VM_HOST")
@@ -421,7 +437,9 @@ func TestVMReattachDoesNotReinstallShellIntegration(t *testing.T) {
 		t.Fatalf("install: %v", err)
 	}
 	time.Sleep(3 * time.Second)
-	marker := ask("t1", bin+" display-message -p -t '%"+paneNum+"' '[#{@dolgate_integrated}]'")
+	// 표식 옵션 이름은 tmux 버전에 따라 다르다(3.0+ pane 옵션 / 그 아래 세션 옵션 + pane 번호).
+	_, markerOption := paneIntegratedOption("%"+paneNum, m.getControl("t1").version)
+	marker := ask("t1", bin+" display-message -p -t '%"+paneNum+"' '[#{"+markerOption+"}]'")
 	t.Logf("① 첫 연결: 통합 심고 표식=%s", marker)
 	if marker != "["+paneIntegratedMarker+"]" {
 		t.Fatalf("tmux 서버에 표식이 남지 않았다(%s, 기대 [%s]) — 재연결이 다시 심게 된다", marker, paneIntegratedMarker)
@@ -457,7 +475,9 @@ func TestVMReattachDoesNotReinstallShellIntegration(t *testing.T) {
 			t.Errorf("[흔적] 설치 뒤 tmux 버퍼에 타이핑 흔적 %q 이 남았다:\n%s", trace, installed)
 		}
 	}
-	if n := strings.Count(installed, "ubuntu@ubuntu:~$"); n < 2 {
+	// 프롬프트 모양을 호스트명으로 하드코딩하지 않는다 — 같은 테스트를 다른 tmux(도커의 2.5 등)에서
+	// 돌리면 호스트명이 달라 0개로 세어진다. user@host:~$ 꼴을 정규식으로 센다.
+	if n := len(promptLinePattern.FindAllString(installed, -1)); n < 2 {
 		t.Errorf("[흔적] 옛 프롬프트 + 새 프롬프트 두 줄이어야 하는데 프롬프트가 %d개다:\n%s", n, installed)
 	}
 
@@ -554,7 +574,7 @@ func TestVMReattachDoesNotReinstallShellIntegration(t *testing.T) {
 	} else {
 		t.Logf("   재연결 뒤 OSC 133;A 도착 — 자동완성 전제 유지")
 	}
-	marker2 := ask("t2", bin+" display-message -p -t '%"+paneNum+"' '[#{@dolgate_integrated}]'")
+	marker2 := ask("t2", bin+" display-message -p -t '%"+paneNum+"' '[#{"+markerOption+"}]'")
 	if marker2 != "["+paneIntegratedMarker+"]" {
 		t.Errorf("[표식] 재연결 뒤 표식이 %s 다(기대 [%s])", marker2, paneIntegratedMarker)
 	}
@@ -622,7 +642,11 @@ func TestVMReattachHealsPanesWithStaleMarker(t *testing.T) {
 	}
 	paneNum := pane[strings.LastIndex(pane, ":")+1:]
 	// 옛 코드가 남긴 상태를 만든다: 훅은 없는데 표식은 1.
-	ask("v1", bin+" set-option -p -t '%"+paneNum+"' @dolgate_integrated 1")
+	staleScope, staleOption := paneIntegratedOption("%"+paneNum, m.getControl("v1").version)
+	if staleScope != "" {
+		staleScope += " "
+	}
+	ask("v1", bin+" set-option "+staleScope+"-t '%"+paneNum+"' "+staleOption+" 1")
 
 	if err := m.InstallShellIntegration(pane); err != nil {
 		t.Fatalf("install: %v", err)
@@ -637,7 +661,7 @@ func TestVMReattachHealsPanesWithStaleMarker(t *testing.T) {
 	if out := read(pane); !strings.Contains(out, "\x1b]133;A") {
 		t.Errorf("[치유] 옛 표식 1 인 pane 에 다시 심지 않았다 — 마커가 없다: %q", tail(out, 300))
 	}
-	if marker := ask("v1", bin+" display-message -p -t '%"+paneNum+"' '[#{@dolgate_integrated}]'"); marker != "["+paneIntegratedMarker+"]" {
+	if marker := ask("v1", bin+" display-message -p -t '%"+paneNum+"' '[#{"+staleOption+"}]'"); marker != "["+paneIntegratedMarker+"]" {
 		t.Errorf("[치유] 다시 심은 뒤 표식이 %s 다(기대 [%s])", marker, paneIntegratedMarker)
 	}
 }

@@ -61,11 +61,10 @@ type Manager struct {
 
 // paneStateOf 는 pane 앞에 무엇이 있는지 묻는다(테스트가 갈아끼운 조회를 존중).
 func (m *Manager) paneStateOf(handle *controlHandle, paneID string) paneState {
-	query := m.panePrompt
-	if query == nil {
-		query = queryPaneState
+	if m.panePrompt != nil {
+		return m.panePrompt(handle.client, paneID)
 	}
-	return query(handle.client, paneID)
+	return queryPaneState(handle.client, paneID, handle.version)
 }
 
 type controlHandle struct {
@@ -1030,9 +1029,14 @@ func (m *Manager) markPaneIntegratedOnServer(handle *controlHandle, paneID strin
 	if handle == nil || handle.client == nil || !isPaneID(paneID) {
 		return
 	}
+	// 구버전(< 3.0)은 pane 옵션이 없어 세션 옵션에 pane 번호를 붙여 둔다(paneIntegratedOption).
+	scope, name := paneIntegratedOption(paneID, handle.version)
+	if scope != "" {
+		scope += " "
+	}
 	go func() {
-		command := "command -v tmux >/dev/null 2>&1 && tmux set-option -p -t " +
-			sshcmd.QuotePosix(paneID) + " @dolgate_integrated " + paneIntegratedMarker
+		command := "command -v tmux >/dev/null 2>&1 && tmux set-option " + scope + "-t " +
+			sshcmd.QuotePosix(paneID) + " " + name + " " + paneIntegratedMarker
 		_, _, _ = sshcmd.RunWithTimeout(handle.client, command, paneStateTimeout)
 	}()
 }

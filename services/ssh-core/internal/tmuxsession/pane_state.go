@@ -34,8 +34,33 @@ const paneStateTimeout = 3 * time.Second
 //
 // 모르는 포맷은 tmux 가 빈 문자열로 확장하므로(에러가 아니다) 구버전에서도 "판정 불가" 로
 // 떨어져 안전한 쪽(주입하지 않음)으로 간다.
-const paneStateFormat = "#{pane_current_command}\t#{alternate_on}\t#{pane_in_mode}\t#{@dolgate_integrated}" +
-	"\t#{cursor_x}\t#{cursor_y}\t#{pane_width}\t#{pane_height}\t#{pane_current_path}"
+func paneStateFormat(integratedOption string) string {
+	return "#{pane_current_command}\t#{alternate_on}\t#{pane_in_mode}\t#{" + integratedOption + "}" +
+		"\t#{cursor_x}\t#{cursor_y}\t#{pane_width}\t#{pane_height}\t#{pane_current_path}"
+}
+
+// paneIntegratedOptionBase 는 표식 옵션의 기본 이름이다.
+const paneIntegratedOptionBase = "@dolgate_integrated"
+
+// paneIntegratedOption 은 표식을 **어느 범위에 어떤 이름으로** 둘지 정한다.
+//
+// pane 옵션(set-option -p)은 tmux 3.0 이 들여왔다. 그 아래(2.x)에서는 표식을 남길 데가 없어
+// 재연결마다 이미 훅이 살아 있는 셸에 다시 심었고, 그 주입 명령의 에코가 화면에 남았다
+// (실기 2.5 재현: `eval "$(tmux show-buffer -b 'dolgate-init-0')"; …` 가 프롬프트에 그대로).
+// 핸드셰이크 필터가 그 에코를 가리지만 1.5초 뒤 flush 하므로, 지연이 있는 원격에서는 새어 나온다.
+//
+// 2.5 에서도 **세션 옵션**은 되고 포맷으로도 읽힌다(실측: `set-option -t %N @k v` 뒤
+// `display-message -p -t %N '#{@k}'` 가 값을 돌려준다). 세션 옵션은 pane 마다 나뉘지 않으므로
+// pane 번호를 이름에 넣어 구분한다. pane id 는 서버 안에서 재사용되지 않아 충돌하지 않는다.
+//
+// 3.0 이상은 지금까지 쓰던 pane 옵션 그대로다 — 신버전 동작을 바꾸지 않는다.
+// 버전 미상이면 atLeast 가 true(최신 가정)라 pane 옵션 쪽으로 간다.
+func paneIntegratedOption(paneID string, ver tmuxVersion) (scope, name string) {
+	if ver.atLeast(3, 0) {
+		return "-p", paneIntegratedOptionBase
+	}
+	return "", paneIntegratedOptionBase + "_" + strings.TrimPrefix(paneID, "%")
+}
 
 // paneState 는 tmux 서버가 알려준 pane 의 현재 상태다.
 type paneState struct {
@@ -70,13 +95,14 @@ func (s paneState) shellAtPrompt() string {
 // (%begin~%end 사이)은 이스케이프되지 않은 원문이라, 답에 '%' 로 시작하는 줄이 섞이면
 // 파서가 그것을 notification 으로 먹는다. 게다가 지금 %begin 수집은 list-windows 전용
 // 단일 상태라 응답을 명령과 짝지을 수단도 없다.
-func queryPaneState(client *ssh.Client, paneID string) paneState {
+func queryPaneState(client *ssh.Client, paneID string, ver tmuxVersion) paneState {
 	if client == nil || !isPaneID(paneID) {
 		return paneState{}
 	}
+	_, option := paneIntegratedOption(paneID, ver)
 	command := fmt.Sprintf(
 		"command -v tmux >/dev/null 2>&1 && tmux display-message -p -t '%s' '%s'",
-		paneID, paneStateFormat,
+		paneID, paneStateFormat(option),
 	)
 	stdout, _, err := sshcmd.RunWithTimeout(client, command, paneStateTimeout)
 	if err != nil {
