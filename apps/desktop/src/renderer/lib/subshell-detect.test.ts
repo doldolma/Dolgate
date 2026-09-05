@@ -133,3 +133,40 @@ describe('sudo 로 감싼 명령', () => {
     });
   });
 });
+
+describe('exec 로 셸을 갈아타는 경우', () => {
+  // `exec bash` 는 지금 셸 프로세스를 새 bash 로 바꾼다 — 훅은 사라지는데 tmux 의 "이미 심어짐"
+  // 표식은 pane 에 남아, 재연결마다 다시 심지 않고 그 pane 의 통합이 영영 죽었다. exec 를 벗기고
+  // 나머지가 셸이면 서브셸 진입으로 본다(→ 재주입).
+  it('exec 뒤의 셸을 잡고 그 셸을 힌트로 준다', () => {
+    expect(detectSubshellEntry('exec bash')).toEqual({ shellHint: 'bash' });
+    expect(detectSubshellEntry('exec -l zsh')).toEqual({ shellHint: 'zsh' });
+    expect(detectSubshellEntry('exec fish')).toEqual({ shellHint: 'fish' });
+    // 로그인 셸 흉내(-a 로 argv[0] 을 "-bash" 로): -a 는 값을 가지는 옵션이라 그 값을 셸로 보면 안 된다.
+    expect(detectSubshellEntry('exec -a -bash bash')).toEqual({ shellHint: 'bash' });
+    expect(detectSubshellEntry('exec -cl /bin/zsh')).toEqual({ shellHint: 'zsh' });
+  });
+
+  it('exec 뒤가 원격·권한 진입이면 그것대로 잡는다(힌트는 추측하지 않음)', () => {
+    expect(detectSubshellEntry('exec ssh host')).toEqual({});
+    expect(detectSubshellEntry('exec sudo -i')).toEqual({});
+    expect(detectSubshellEntry('exec docker exec -it web bash')).toEqual({});
+  });
+
+  it('명령 없는 exec(리다이렉션 전용)와 셸이 아닌 exec 는 잡지 않는다', () => {
+    for (const cmd of [
+      'exec',
+      'exec 3>file',
+      'exec >log 2>&1',
+      'exec vim notes.txt',
+      'exec node server.js',
+      // -a 는 argv[0] 이름을 주는 값 옵션이다 — 그 값이 셸 이름이어도 실제 프로그램은 뒤의 것이다.
+      'exec -a bash vim',
+      // 비슷한 이름은 exec 가 아니다.
+      'execute bash',
+      'exec-helper bash',
+    ]) {
+      expect(detectsSubshellEntry(cmd), cmd).toBe(false);
+    }
+  });
+});

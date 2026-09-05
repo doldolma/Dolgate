@@ -90,6 +90,26 @@ const SUDO_VALUE_FLAGS = new Set([
   '--user',
 ]);
 
+// bash/zsh 의 `exec [-cl] [-a name] command …`. 값이 따라오는 옵션은 -a 하나다.
+const EXEC_VALUE_FLAGS = new Set(['-a']);
+
+// `exec <shell>` 은 지금 셸 프로세스를 그 셸로 **갈아탄다.** 훅은 프로세스와 함께 사라지는데
+// tmux 의 "이미 심어짐" 표식은 pane 에 붙어 있어 그대로 남으므로, 새 셸이 떠도 코어는 재연결마다
+// 이미 깔린 것으로 보고 다시 심지 않았다 — 통합이 그 pane 에서 영영 죽었다. 여기서 `exec` 와 그
+// 옵션을 벗겨 나머지를 원래 판정에 태우면, 셸이면 잡히고(→ 재주입) 아니면 안 잡힌다.
+// `exec 3>file` 처럼 명령 없는 리다이렉션 전용 exec 는 남는 것이 셸 이름이 아니라 자연히 걸러진다.
+function stripExecPrefix(command: string): string {
+  const tokens = command.trim().split(/\s+/).filter(Boolean);
+  if (tokens[0] !== 'exec') return command.trim();
+  let index = 1;
+  while (index < tokens.length && tokens[index].startsWith('-')) {
+    const flag = tokens[index];
+    index += 1;
+    if (EXEC_VALUE_FLAGS.has(flag) && index < tokens.length) index += 1;
+  }
+  return tokens.slice(index).join(' ');
+}
+
 function stripPrivilegePrefix(command: string): string {
   const tokens = command.trim().split(/\s+/).filter(Boolean);
   if (tokens[0] !== 'sudo' && tokens[0] !== 'doas') return command.trim();
@@ -108,9 +128,23 @@ export function detectSubshellEntry(
 ): SubshellEntryDetection | null {
   const trimmed = command.trim();
   if (!trimmed) return null;
-  const rawCandidates = [trimmed];
-  const stripped = stripPrivilegePrefix(trimmed);
-  if (stripped && stripped !== trimmed) rawCandidates.push(stripped);
+  // 앞머리(sudo/doas, exec)를 벗긴 형태들을 후보로 모은다. 두 종류가 어느 순서로 겹쳐도
+  // (`exec sudo -i`, `sudo … exec …`) 다 보이도록, 더 벗겨질 것이 없을 때까지 반복한다.
+  // 벗기면 문자열이 짧아지거나 그대로이므로(그대로면 중복으로 버림) 반드시 끝난다.
+  const rawCandidates: string[] = [];
+  const seen = new Set<string>();
+  const pushCandidate = (value: string) => {
+    const normalized = value.trim();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    rawCandidates.push(normalized);
+  };
+  pushCandidate(trimmed);
+  for (let index = 0; index < rawCandidates.length; index += 1) {
+    const candidate = rawCandidates[index];
+    pushCandidate(stripPrivilegePrefix(candidate));
+    pushCandidate(stripExecPrefix(candidate));
+  }
 
   const candidates: InvocationCandidate[] = [];
   for (const candidate of rawCandidates) {
