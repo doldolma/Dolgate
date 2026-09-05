@@ -82,6 +82,17 @@ type paneState struct {
 //
 // 빈 문자열의 뜻은 하나로 묶인다: **지금 이 pane 에 써 넣지 마라.** vi 가 떠 있어서든,
 // copy mode 여서든, tmux 가 답을 안 줘서든 결론은 같다.
+// screenTypable 는 pane 화면이 "프롬프트에서 입력을 기다리는 상태" 인지다. 재주입 가드가 쓴다.
+//
+// shellAtPrompt 와 달리 **앞에 있는 프로세스 이름은 보지 않는다.** 재주입은 서브셸에 들어간 뒤라
+// pane 앞에는 셸이 아니라 그 껍데기(ssh·docker·sudo)가 있다 — 이름으로 거르면 중첩 ssh 에는 영영
+// 못 심는다. 껍데기 너머에 vi·less·tmux 가 떠 있는지는 화면 상태(대체화면·copy-mode·커서가
+// 프롬프트 뒤에 있는지)로 안다. 대체화면을 안 쓰는 비-셸(REPL 등)은 이 방법으로 구분하지 못한다 —
+// 원격에 아무것도 심지 않는 대가이고, 그래서 감지 목록은 셸이 확실한 것만 담는다.
+func (s paneState) screenTypable() bool {
+	return s.promptDrawn() && !s.alternateOn && !s.inMode
+}
+
 func (s paneState) shellAtPrompt() string {
 	if !s.known || s.alternateOn || s.inMode || !s.promptDrawn() {
 		return ""

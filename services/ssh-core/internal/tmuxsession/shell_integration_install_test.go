@@ -2,6 +2,7 @@ package tmuxsession
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,28 @@ import (
 // stubPanePrompt 는 tmux 서버 대신 정해진 pane 상태를 돌려준다.
 func stubPanePrompt(state paneState) func(*ssh.Client, string) paneState {
 	return func(*ssh.Client, string) paneState { return state }
+}
+
+// mutablePaneState 는 테스트 중에 바뀌는 pane 상태다 — 셸이 뜨고, 프롬프트가 그려지고, vi 가 닫힌다.
+type mutablePaneState struct {
+	mu    sync.Mutex
+	state paneState
+}
+
+func newMutablePaneState(initial paneState) *mutablePaneState {
+	return &mutablePaneState{state: initial}
+}
+
+func (p *mutablePaneState) set(state paneState) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.state = state
+}
+
+func (p *mutablePaneState) query(*ssh.Client, string) paneState {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.state
 }
 
 func TestInstallShellIntegrationRestoresAutocompleteBeforeInput(t *testing.T) {
@@ -114,7 +137,8 @@ func TestInstallShellIntegrationDoesNotTypeIntoAForegroundProgram(t *testing.T) 
 // 프롬프트가 그려질 때까지 미루고, 그려지면 그때 심는다.
 func TestInstallShellIntegrationWaitsForTheFirstPrompt(t *testing.T) {
 	m, handle, recorder := newReinjectHarness(t)
-	m.panePrompt = stubPanePrompt(paneState{command: "bash", cursorX: 0, cursorY: 0, known: true})
+	pane := newMutablePaneState(paneState{command: "bash", cursorX: 0, cursorY: 0, known: true})
+	m.panePrompt = pane.query
 
 	if err := m.InstallShellIntegration(paneSessionID("ctl", "%0")); err != nil {
 		t.Fatalf("install: %v", err)
@@ -123,10 +147,88 @@ func TestInstallShellIntegrationWaitsForTheFirstPrompt(t *testing.T) {
 	if got := recorder.snapshot(); got != "" {
 		t.Fatalf("프롬프트도 안 그려졌는데 타이핑했다: %q", decodePaneStdin(got))
 	}
-	// bash 가 첫 프롬프트를 그린다.
+	// bash 가 첫 프롬프트를 그린다 — tmux 는 이제 커서가 프롬프트 뒤에 있다고 답한다.
+	pane.set(paneState{command: "bash", cursorX: 17, cursorY: 0, known: true})
 	handle.observePaneOutput("%0", []byte("ubuntu@box:~$ "))
-	if !waitForStdin(t, recorder, "dg-shell", 3*time.Second) {
+	// 프롬프트에 있으면 tmux 가 셸 이름을 알려 주므로 프로브 없이 그 셸 것을 바로 심는다.
+	if !waitForStdin(t, recorder, "BASH_VERSION", 3*time.Second) {
 		t.Fatalf("프롬프트가 그려졌는데 심지 않았다: %q", recorder.snapshot())
+	}
+}
+
+// 프롬프트를 **모양으로 알아보지 않는다.** zsh 의 RPROMPT 는 프롬프트 뒤에 시각·git 브랜치를 그려서
+// 출력 꼬리가 `$ # % >` 로 끝나지 않는다 — 그 모양만 보던 때는 새 창·분할 pane 에 영영 심지 못했다
+// (첫 pane 은 이미 그려진 뒤라 무사해서 "첫 pane 만 된다" 로 보였다). tmux 가 말해 주는 pane 상태가
+// 정답이다.
+func TestInstallShellIntegrationDoesNotJudgeThePromptByItsShape(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tail string
+	}{
+		{"zsh RPROMPT(시각)", "user@host ~ % [14:08]"},
+		{"λ 로 끝나는 프롬프트", "~ λ "},
+		{"두 줄 프롬프트, 둘째 줄이 화살표", "~/src (main)\r\n→ "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, handle, recorder := newReinjectHarness(t)
+			pane := newMutablePaneState(paneState{command: "zsh", cursorX: 0, cursorY: 0, known: true})
+			m.panePrompt = pane.query
+			if err := m.InstallShellIntegration(paneSessionID("ctl", "%0")); err != nil {
+				t.Fatalf("install: %v", err)
+			}
+			pane.set(paneState{command: "zsh", cursorX: 24, cursorY: 0, known: true})
+			handle.observePaneOutput("%0", []byte(tc.tail))
+			if !waitForStdin(t, recorder, "__ds_o", 3*time.Second) {
+				t.Fatalf("프롬프트가 그려졌는데(커서 24열) 꼬리 모양 때문에 심지 않았다: %q", recorder.snapshot())
+			}
+		})
+	}
+}
+
+// 잠잠해졌다고 곧 프롬프트인 것은 아니다 — vi 도 다 그리고 나면 조용하다. 그때는 심지 않고 다음에
+// 잠잠해질 때 다시 묻는다. 미룬 것이지 포기한 것이 아니다.
+func TestInstallShellIntegrationKeepsAskingWhileTheScreenIsNotAPrompt(t *testing.T) {
+	m, handle, recorder := newReinjectHarness(t)
+	pane := newMutablePaneState(paneState{command: "vi", alternateOn: true, cursorX: 5, known: true})
+	m.panePrompt = pane.query
+	if err := m.InstallShellIntegration(paneSessionID("ctl", "%0")); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		handle.observePaneOutput("%0", []byte("-- INSERT --"))
+		time.Sleep(600 * time.Millisecond)
+	}
+	if got := recorder.snapshot(); got != "" {
+		t.Fatalf("vi 가 조용해졌다고 타이핑했다: %q", decodePaneStdin(got))
+	}
+	// :q 로 나와 프롬프트가 그려진다.
+	pane.set(paneState{command: "bash", cursorX: 17, known: true})
+	handle.observePaneOutput("%0", []byte("ubuntu@box:~$ "))
+	if !waitForStdin(t, recorder, "BASH_VERSION", 3*time.Second) {
+		t.Fatalf("프롬프트가 돌아왔는데 다시 묻지 않았다(첫 정착에서 포기했다): %q", recorder.snapshot())
+	}
+}
+
+// 프롬프트가 그려진 뒤 출력이 더 없으면 잠잠해질 기회가 없다. 상한에 닿았을 때 마지막으로 한 번 본다.
+func TestInstallShellIntegrationTakesALastLookWhenTheWaitRunsOut(t *testing.T) {
+	m, handle, recorder := newReinjectHarness(t)
+	pane := newMutablePaneState(paneState{command: "bash", cursorX: 0, known: true})
+	m.panePrompt = pane.query
+	// 이 테스트는 상한을 짧게 둔 게이트로 pane 을 미리 채운다(기본 20초는 단위 테스트에 길다).
+	handle.handshakesMu.Lock()
+	if handle.reinjectGates == nil {
+		handle.reinjectGates = map[string]*autocomplete.PromptSettleGate{}
+	}
+	handle.reinjectGates["%0"] = autocomplete.NewPromptSettleGate(50*time.Millisecond, 400*time.Millisecond)
+	handle.handshakesMu.Unlock()
+
+	if err := m.InstallShellIntegration(paneSessionID("ctl", "%0")); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	// 프롬프트는 그려졌지만(커서 17열) 그 뒤로 pane 출력은 한 바이트도 오지 않는다.
+	pane.set(paneState{command: "bash", cursorX: 17, known: true})
+	if !waitForStdin(t, recorder, "BASH_VERSION", 3*time.Second) {
+		t.Fatalf("상한에 닿았는데 마지막으로 보지 않았다: %q", recorder.snapshot())
 	}
 }
 
@@ -146,9 +248,10 @@ func TestInstallShellIntegrationInstallsWhenThePanePromptReturns(t *testing.T) {
 		t.Fatalf("vi 화면을 프롬프트로 봤다: %q", decodePaneStdin(got))
 	}
 
-	// :q 로 빠져나와 셸 프롬프트가 안착한다.
+	// :q 로 빠져나와 셸 프롬프트가 안착한다 — tmux 가 이제 bash 가 프롬프트에 있다고 답한다.
+	m.panePrompt = stubPanePrompt(paneState{command: "bash", cursorX: 17, known: true})
 	handle.observePaneOutput("%0", []byte("ubuntu@box:~$ "))
-	if !waitForStdin(t, recorder, "dg-shell", 3*time.Second) {
+	if !waitForStdin(t, recorder, "BASH_VERSION", 3*time.Second) {
 		t.Fatalf("프롬프트가 돌아왔는데 설치하지 않았다: %q", recorder.snapshot())
 	}
 }
@@ -162,6 +265,8 @@ func TestInstallShellIntegrationSkipsAPaneThatStillHasTheHooks(t *testing.T) {
 	if err := m.InstallShellIntegration(paneSessionID("ctl", "%0")); err != nil {
 		t.Fatalf("install: %v", err)
 	}
+	// vi 를 닫고 돌아온 프롬프트에는 우리 마커가 있고, tmux 서버의 표식도 그대로다.
+	m.panePrompt = stubPanePrompt(paneState{command: "bash", cursorX: 17, integrated: true, known: true})
 	handle.observePaneOutput("%0", []byte(autocomplete.PromptStartMarker+"ubuntu@box:~$ "))
 	time.Sleep(700 * time.Millisecond)
 	if got := recorder.snapshot(); got != "" {

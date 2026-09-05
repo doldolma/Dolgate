@@ -169,3 +169,32 @@ func TestFreshSubshellPromptIsNotReportedAsIntegrated(t *testing.T) {
 		t.Fatal("게이트가 발화하지 않았다")
 	}
 }
+
+// ArmQuiet 는 꼬리 모양을 보지 않는다. RPROMPT 가 뒤에 그려진 zsh 프롬프트처럼 `$ # % >` 로 끝나지
+// 않는 출력도 잠잠해지면 정착이다 — Arm 은 그런 꼬리에서 절대 정착하지 않는다(대조).
+func TestPromptSettleGateArmQuietSettlesRegardlessOfTheTailShape(t *testing.T) {
+	tail := []byte("user@host ~ % [14:08]")
+
+	quiet := NewPromptSettleGate(30*time.Millisecond, time.Second)
+	settled := make(chan struct{}, 1)
+	quiet.ArmQuiet(func([]byte) { settled <- struct{}{} }, func() {})
+	quiet.Observe(tail)
+	select {
+	case <-settled:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("ArmQuiet 가 프롬프트 모양이 아닌 꼬리에서 정착하지 않았다")
+	}
+
+	shaped := NewPromptSettleGate(30*time.Millisecond, 200*time.Millisecond)
+	settledShaped := make(chan struct{}, 1)
+	timedOut := make(chan struct{}, 1)
+	shaped.Arm(func([]byte) { settledShaped <- struct{}{} }, func() { timedOut <- struct{}{} })
+	shaped.Observe(tail)
+	select {
+	case <-settledShaped:
+		t.Fatalf("Arm 이 프롬프트 모양이 아닌 꼬리에서 정착했다 — 대조군이 깨졌다")
+	case <-timedOut:
+	case <-time.After(time.Second):
+		t.Fatalf("Arm 이 타임아웃도 하지 않았다")
+	}
+}

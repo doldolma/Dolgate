@@ -53,6 +53,9 @@ type PromptSettleGate struct {
 	// fire and append an integration command to the user's half-typed line.
 	inputDirty     bool
 	inputSubmitted bool
+
+	// anyQuiet 는 프롬프트 모양을 보지 않고 출력이 잠잠해지면 정착으로 친다(ArmQuiet 주석).
+	anyQuiet bool
 }
 
 // NewPromptSettleGate builds a gate with the given quiet/maxWait windows. Zero
@@ -73,7 +76,16 @@ func NewPromptSettleGate(quiet, maxWait time.Duration) *PromptSettleGate {
 // 꼬리를 보고 "이 프롬프트에 이미 우리 마커가 있나"(=서브셸이 뜨지 않았고 원래 셸이 돌아왔다)
 // 를 판정한다 — PromptAlreadyIntegrated 참고.
 func (g *PromptSettleGate) Arm(onSettled func(tail []byte), onTimeout func()) {
-	g.arm(nil, onSettled, onTimeout)
+	g.arm(nil, onSettled, onTimeout, false)
+}
+
+// ArmQuiet 는 Arm 과 같되 **프롬프트 모양을 보지 않는다** — 출력이 잠잠해지면 그대로 onSettled 를
+// 부른다. 부르는 쪽에 프롬프트를 확인할 더 나은 수단이 있을 때 쓴다(tmux 는 pane 의 커서·대체화면·
+// 앞의 프로세스를 그대로 알려 준다). 꼬리가 `$ # % >` 로 끝나는지로 알아보면 zsh 의 RPROMPT(시각·git
+// 브랜치)가 뒤에 그려지는 프롬프트나 `λ` 로 끝나는 프롬프트는 영영 걸리지 않는다 — 그 호스트에서는
+// 새 창·분할 pane 에 통합이 깔리지 않았다.
+func (g *PromptSettleGate) ArmQuiet(onSettled func(tail []byte), onTimeout func()) {
+	g.arm(nil, onSettled, onTimeout, true)
 }
 
 // ArmWithCommit is Arm with a small synchronous hand-off that runs after the
@@ -82,13 +94,14 @@ func (g *PromptSettleGate) Arm(onSettled func(tail []byte), onTimeout func()) {
 // user writes into a short ordering queue while the internal probe/init write is
 // committed first.
 func (g *PromptSettleGate) ArmWithCommit(onCommit func(), onSettled func(tail []byte), onTimeout func()) {
-	g.arm(onCommit, onSettled, onTimeout)
+	g.arm(onCommit, onSettled, onTimeout, false)
 }
 
-func (g *PromptSettleGate) arm(onCommit func(), onSettled func(tail []byte), onTimeout func()) {
+func (g *PromptSettleGate) arm(onCommit func(), onSettled func(tail []byte), onTimeout func(), anyQuiet bool) {
 	g.mu.Lock()
 	g.stopTimersLocked()
 	g.armed = true
+	g.anyQuiet = anyQuiet
 	g.tail = g.tail[:0]
 	g.inputDirty = false
 	g.inputSubmitted = false
@@ -164,7 +177,7 @@ func (g *PromptSettleGate) Observe(chunk []byte) {
 			return
 		}
 	}
-	if LooksLikeShellPrompt(string(g.tail)) {
+	if g.anyQuiet || LooksLikeShellPrompt(string(g.tail)) {
 		if g.quietTimer == nil {
 			g.quietTimer = time.AfterFunc(g.quiet, g.fireSettled)
 		} else {

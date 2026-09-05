@@ -1258,12 +1258,33 @@ func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error
 	if paneID == "" {
 		return nil // pane 세션이 아니면 할 일 없음
 	}
+	// 정착(출력이 잠잠해짐)은 "프롬프트가 떴다" 가 아니다 — 서브셸이 아니라 vi 가 떠서 조용해진
+	// 것일 수도 있다(원격 rc 가 tmux·vim 을 띄우는 호스트가 실제로 있다). 설치 경로는 타이핑 전에
+	// pane 상태를 보는데 이 경로만 정착만 믿고 타이핑했다. **타이핑 직전에 화면을 묻고, 프롬프트에서
+	// 기다리는 상태가 아니면 아무것도 보내지 않는다** — 원격에 이상한 것이 입력되는 것보다 깔끔히
+	// 포기하는 편이 낫다. 그때 실행 중으로 남을 명령 블록은 닫아 준다(CommandFinishedMarker 주석).
+	//
+	// 무장 시점이 아니라 **정착 시점**에 묻는다. 그 사이 화면이 바뀌는 것이 바로 이 가드가 잡는 상황이다.
+	typable := func() bool {
+		if m.paneStateOf(handle, paneID).screenTypable() {
+			return true
+		}
+		m.emitStream(
+			coretypes.StreamFrame{Type: coretypes.StreamTypeData, SessionID: sessionID},
+			[]byte(autocomplete.CommandFinishedMarker),
+		)
+		return false
+	}
 	// 셸을 모르면 프로브 한 줄로 먼저 묻는다. 예전에는 겸용 스크립트를 보냈고, 그것이 여러 줄이라
 	// dash·busybox pane 에서 화면에 그대로 남았다. 기다림·판정은 다른 전송과 같은 절차다.
 	shellintegration.ArmReinject(shellintegration.ReinjectTarget{
 		Gate:      handle.paneReinjectGate(paneID),
 		ShellHint: shell,
+		Alive:     handle.alive,
 		Inject: func(resolved string) {
+			if !typable() {
+				return
+			}
 			// viaTmuxBuffer=false: 서브셸은 중첩 ssh 로 다른 호스트일 수 있어, 그 셸의 `tmux`
 			// 는 우리 서버를 가리키지 않는다.
 			m.writePaneShellIntegration(
@@ -1275,7 +1296,12 @@ func (m *Manager) ReinjectShellIntegration(sessionID string, shell string) error
 				paneEchoSpot{},
 			)
 		},
-		Probe: func() { m.probePaneShellThenInject(sessionID, handle, paneID) },
+		Probe: func() {
+			if !typable() {
+				return
+			}
+			m.probePaneShellThenInject(sessionID, handle, paneID)
+		},
 	})
 	return nil
 }
@@ -1482,18 +1508,66 @@ func (m *Manager) restorePaneAutocomplete(sessionID string, state paneState) {
 //
 // 미루는 경로는 integrated 플래그를 쓰지 않고 둔다. 게이트가 프롬프트를 못 보고 시간이
 // 지나가면(사용자가 vi 에 오래 머무름) 다음 호출(윈도우 전환 등)이 다시 시도할 수 있어야 한다.
+// armPaneInstallOnPrompt 는 pane 의 셸이 프롬프트에 올 때까지 기다렸다가 심는다.
+//
+// 프롬프트를 **출력 모양으로 알아보지 않는다.** 예전에는 꼬리가 `$ # % >` 로 끝나야 프롬프트로 봤는데,
+// zsh 의 RPROMPT(시각·git 브랜치)가 그 뒤에 그려지거나 `λ` 처럼 다른 글자로 끝나는 프롬프트는 영영
+// 걸리지 않았다. 새 창·분할 pane 은 렌더러가 탭이 생기는 즉시 — 셸이 프롬프트를 그리기 전에 — 설치를
+// 요청하므로 늘 이 길로 오고, 그런 프롬프트를 쓰는 호스트에서는 첫 pane 만 통합이 되고 그 뒤의 pane 은
+// 전부 빠졌다(첫 pane 은 이미 그려진 뒤라 직접 경로로 갔다).
+//
+// tmux 에는 정답이 있다. 출력이 잠잠해질 때마다 pane 상태를 물어 셸이 프롬프트에 있으면 심고, 아니면
+// (아직 기동 중, vi 가 떠 있음) 다음에 잠잠해질 때 다시 묻는다. 기다림의 상한은 그대로다 — 상한에
+// 닿으면 마지막으로 한 번 더 보고 끝낸다(프롬프트가 그려진 뒤 출력이 없어 잠잠해질 기회가 없던 경우).
 func (m *Manager) armPaneInstallOnPrompt(sessionID string, handle *controlHandle, paneID string) {
-	shellintegration.ArmReinject(shellintegration.ReinjectTarget{
-		Gate:  handle.paneReinjectGate(paneID),
-		Alive: handle.alive,
-		Probe: func() {
-			// 게이트가 터진 뒤에야 자리를 차지한다 — 그 사이 다른 호출이 먼저 설치했으면 멈춘다.
-			if !handle.markIntegrated(paneID) {
-				return
-			}
-			m.probePaneShellThenInject(sessionID, handle, paneID)
-		},
-	})
+	gate := handle.paneReinjectGate(paneID)
+	deadline := time.Now().Add(autocomplete.PromptSettleMaxWait)
+	// tryInstall 은 "이 시도로 끝났다" 를 돌려준다 — 심었거나, 심을 필요가 없거나, 세션이 없다.
+	tryInstall := func() bool {
+		if !handle.alive() {
+			return true
+		}
+		state := m.paneStateOf(handle, paneID)
+		debugTmux(
+			"tmux %s pane %s: 미룬 설치 재판정 — command=%q cursor=(%d,%d) alternate=%v mode=%v 응답=%v",
+			handle.id, paneID, state.command, state.cursorX, state.cursorY,
+			state.alternateOn, state.inMode, state.known,
+		)
+		if state.integrated {
+			handle.markIntegrated(paneID)
+			m.restorePaneAutocomplete(sessionID, state)
+			return true
+		}
+		shell := state.shellAtPrompt()
+		if shell == "" {
+			return false
+		}
+		// 게이트가 터진 뒤에야 자리를 차지한다 — 그 사이 다른 호출이 먼저 설치했으면 멈춘다.
+		if !handle.markIntegrated(paneID) {
+			return true
+		}
+		m.writePaneShellIntegration(
+			sessionID, handle, paneID,
+			autocomplete.ShellIntegrationInitLines(shell), true,
+			paneEchoSpot{cursorX: state.cursorX, cursorY: state.cursorY, width: state.width, height: state.height},
+		)
+		return true
+	}
+	var arm func()
+	arm = func() {
+		if time.Now().After(deadline) {
+			return
+		}
+		gate.ArmQuiet(
+			func([]byte) {
+				if !tryInstall() {
+					arm()
+				}
+			},
+			func() { tryInstall() },
+		)
+	}
+	arm()
 }
 
 func (m *Manager) FlushShellIntegration(sessionID string) {
