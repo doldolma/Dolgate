@@ -154,7 +154,7 @@ curl http://127.0.0.1:8080/healthz
 EC2 터미널은 SSH-over-SSM을 먼저 시도합니다. 공개키 주입이나 SSH 준비 단계에서 일반 SSH 연결을 열 수 없으면 SSM shell로 fallback할 수 있고, AWS SFTP · SSM 포트 포워딩 · ECS Exec/터널링은 내장 SSM 데이터 채널로 동작합니다. 프로필 인증(SSO 브라우저 로그인, 자격 증명 검증, AssumeRole)은 AWS SDK로 처리하며, 기존 로컬 `~/.aws` 프로필은 가져오기로 그대로 사용할 수 있습니다.
 
 대상 EC2는 **SSM managed instance** 상태여야 하고, AWS Import는 Linux/UNIX 인스턴스를 기준으로 동작합니다.
-SSH-over-SSM과 AWS SFTP에는 EC2 Instance Connect 공개키 주입 권한이 필요합니다. 필요한 IAM 권한(사용자/역할 · EC2 인스턴스 프로파일 · ECS task role)과 정책 JSON 예시는 [AWS / SSM 설정 가이드](./docs/aws.md)를 참고하세요.
+SSH-over-SSM과 AWS SFTP에는 EC2 Instance Connect 공개키 주입 권한이 필요합니다. 필요한 IAM 권한(사용자/역할 · EC2 인스턴스 프로파일 · ECS task role)과 정책 JSON 예시는 [AWS / SSM 설정 가이드](./docs/aws.ko.md)를 참고하세요.
 
 ### 그 외
 
@@ -168,7 +168,7 @@ SSH-over-SSM과 AWS SFTP에는 EC2 Instance Connect 공개키 주입 권한이 �
 - [Desktop 문서](./docs/desktop.md)
 - [Tailscale / Headscale 가이드](./docs/tailscale.md)
 - [AI 어시스턴트](./docs/ai-assistant-design.md)
-- [AWS / SSM 설정 가이드](./docs/aws.md)
+- [AWS / SSM 설정 가이드](./docs/aws.ko.md)
 - [아키텍처](./docs/architecture.md)
 - [데이터 보호 (E2EE)](./docs/data-protection.md)
 - [빌드 및 배포](./docs/build-and-deploy.md)
