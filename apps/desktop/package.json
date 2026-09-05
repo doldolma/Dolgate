@@ -1,6 +1,6 @@
 {
   "name": "@dolssh/desktop",
-  "version": "1.9.9",
+  "version": "1.9.10",
   "private": true,
   "description": "Dolgate desktop client",
   "desktopName": "dolgate.desktop",
