@@ -67,7 +67,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.110.0",
+    "@anthropic-ai/sdk": "^0.124.0",
     "@aws-sdk/client-cloudwatch": "^3.1028.0",
     "@aws-sdk/client-cloudwatch-logs": "^3.1028.0",
     "@aws-sdk/client-ec2": "^3.1028.0",
@@ -96,7 +96,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@noble/ciphers": "^2.2.0",
     "@noble/hashes": "^2.2.0",
-    "@openai/codex-sdk": "^0.146.0",
+    "@openai/codex-sdk": "^0.153.4",
     "@uiw/codemirror-theme-vscode": "^4.25.10",
     "@uiw/react-codemirror": "^4.25.10",
     "@vscode/sudo-prompt": "^9.3.2",
