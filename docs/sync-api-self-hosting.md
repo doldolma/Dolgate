@@ -55,6 +55,8 @@ Examples:
 
 - The examples use `latest` for a quick start.
 - For production, pin a version tag.
+- Images support both `linux/amd64` and `linux/arm64`; Docker selects the matching architecture.
+- Versioned images are published with Dolgate releases. A push to `main` alone does not update the production image.
 
 Example:
 
@@ -299,7 +301,17 @@ Supported methods:
 - `AUTH_SIGNING_PRIVATE_KEY_PEM`
 - `AUTH_SIGNING_PRIVATE_KEY_PATH`
 
+## Deployment examples
+
+The repository includes ready-to-edit Compose configurations:
+
+- [SQLite](../services/sync-api/deploy/docker-compose.example.yml)
+- [MySQL](../services/sync-api/deploy/docker-compose.mysql.example.yml)
+- [OIDC with MySQL](../services/sync-api/deploy/docker-compose.oidc-mysql.example.yml)
+
+For a custom container image, use the included [Dockerfile](../services/sync-api/Dockerfile). To build the server binary directly, see [building the sync server](./build-from-source.md#build-the-sync-server).
+
 ## Related documents
 
-- [Build and deploy](./build-and-deploy.md)
-- [Architecture](./architecture.md)
+- [Desktop guide](./desktop.md)
+- [Data protection (E2EE sync)](./data-protection.md)

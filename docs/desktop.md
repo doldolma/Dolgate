@@ -192,6 +192,12 @@ A tailnet node lives inside the app, so you can reach hosts inside a tailnet **w
 
 The full guide — registration, connection states, security rules — is in the [Tailscale / Headscale guide](./tailscale.md).
 
+## Login and offline use
+
+Sign in through the browser opened by Dolgate, then return to the app. To use your own login and sync server, change **Login Server** through the gear icon on the login screen; see the [self-hosting guide](./sync-api-self-hosting.md#connecting-the-desktop-app).
+
+If the login server is unavailable, a previously signed-in app can continue using its saved hosts and settings while its offline authorization remains valid. Sync retries in the background when the server becomes reachable. If the offline authorization has expired, sign in again with the server available. Connecting to a host still requires a working network route to that host.
+
 ## Passkey (WebAuthn) login
 
 Sign in with biometrics or a security key instead of a password. It appears **only when the sync server has it enabled** (for self-hosting see the [setup guide](./sync-api-self-hosting.md#passkey-webauthn-login)) and coexists with password and OIDC login.
@@ -207,6 +213,20 @@ Right-click a host or group in the host list and choose **Export...** to save it
 - **Formats**: **Dolgate file (`.dolgate`)** — contains credentials and related settings, including RDP/VNC credentials and the SSH host needed by a VNC tunnel, fully encrypted with an export passphrase (4+ characters; Argon2id + AES-256-GCM). **The passphrase is unrecoverable.** / **OpenSSH config** — plaintext, credentials excluded; hosts that cannot be expressed (including RDP/VNC) are counted and skipped.
 - **Importing a Dolgate file**: pick the file and enter the passphrase to preview what will come in; the import is applied only when you confirm. Existing items are skipped; items with name collisions are imported under a new name and reported.
 - **Importing from other apps**: the host list's import menu also reads **OpenSSH · Termius · Xshell (Windows only) · Warpgate · AWS SSM · serial**.
+
+### AWS EC2 import and SFTP
+
+1. Open AWS import and choose an AWS profile. Complete browser login if the profile requires it.
+2. If the profile has a default region, Dolgate selects it and loads the instance list. Otherwise, choose a region to load its instances.
+3. Select a Linux instance. **Check SSH info** can suggest the SSH username and port; you can edit the values or enter them manually. You can also save the host and fill in the SSH details later.
+
+AWS SFTP needs a Linux instance managed by SSM, a working SSH/SFTP server, and EC2 Instance Connect. The connection screen shows progress through AWS authentication, instance checks, host-key verification, and SSH setup. If the suggested SSH username or port is wrong, edit it and retry.
+
+See the [AWS / SSM setup guide](./aws.md) ([한국어](./aws.ko.md)) for instance setup and permissions, including the optional permissions used by **Check SSH info**.
+
+### Warpgate import
+
+Choose Warpgate in the host import menu, enter its URL, and sign in through the authentication window. After login, Dolgate loads the available targets for import. If you cancel login, the import dialog stays open so you can edit the URL or try again.
 
 ## Command snippets
 
@@ -268,8 +288,19 @@ When a terminal session ends, its I/O and screen size changes are kept as local 
 - **Timeline ticks**: command positions are marked on the scrubber, with failed commands distinguished by color and length — you can see roughly where things happened before scrubbing. Hovering a tick shows the command at that point.
 - **Use cases**: incident investigation, reviewing your own work, and checking the screen flow before handing it to someone else. For live sharing, use Session Share.
 
-## Build · run · AWS
+## Session Share
 
-- For local development runs and release builds (`release:dist:*` / `release:publish:*`), see [build-and-deploy](./build-and-deploy.md).
+Start a share from a terminal session to create a viewer link. Send that link to participants so they can join from a browser.
+
+- **Access**: choose read-only mode or allow viewers to send terminal input.
+- **Viewer chat**: the browser viewer includes a chat panel, initially collapsed. Open it to chat with the session owner and other participants.
+- **Owner chat**: incoming messages appear as notifications at the bottom right. Use **Chat history** to open the conversation in a separate window.
+- **Ending the session**: viewer connections close and the share's chat history is cleared when the shared session ends.
+
+For recordings you can revisit later, see [session recording and replay](#session-recording-and-replay).
+
+## Related guides
+
+- To run the app locally or create your own build, see [building from source](./build-from-source.md).
 - AWS/SSM operational prerequisites and example IAM permissions are in the [AWS / SSM setup guide](./aws.md).
-- The desktop runtime boundaries (lazy `ssh-core`, `rdp-core`, and `vnc-core` startup; stdio framed IPC; sync-api's role; GitHub Releases auto-update) are covered in [architecture](./architecture.md).
+- To run your own login and sync server, see the [self-hosting guide](./sync-api-self-hosting.md).

@@ -42,7 +42,7 @@ Linux `deb` and ARM64 builds are on [GitHub Releases](https://github.com/doldolm
 
 The desktop app supports auto-update. Once installed, new versions can be applied from inside the app.
 
-For development setup, running locally and release builds, see the [build and deployment guide](./docs/build-and-deploy.md).
+To run or build the app yourself, see the [building from source guide](./docs/build-from-source.md).
 
 ## All features
 
@@ -169,11 +169,9 @@ SSH-over-SSM and AWS SFTP require EC2 Instance Connect public key injection perm
 - [Tailscale / Headscale guide](./docs/tailscale.md)
 - [AI assistant](./docs/ai-assistant-design.md)
 - [AWS / SSM setup guide](./docs/aws.md)
-- [Architecture](./docs/architecture.md)
 - [Data protection (E2EE)](./docs/data-protection.md)
-- [Build and deployment](./docs/build-and-deploy.md)
+- [Building from source](./docs/build-from-source.md)
 - [sync-api self-hosting guide](./docs/sync-api-self-hosting.md)
-- [ssh-core IPC protocol](./docs/ipc-protocol.md)
 
 ## License
 

@@ -42,7 +42,7 @@ Linux `deb`와 ARM64 빌드는 [GitHub Releases](https://github.com/doldolma/dol
 
 데스크톱 앱은 자동 업데이트를 지원합니다. 한 번 설치하면 새 버전이 나올 때 앱 안에서 바로 업데이트할 수 있습니다.
 
-개발 환경 구성, 로컬 실행, 릴리즈 빌드는 [빌드 및 배포 문서](./docs/build-and-deploy.md)를 참고해 주세요.
+앱을 직접 실행하거나 빌드하려면 [소스에서 빌드하기](./docs/build-from-source.md)를 참고해 주세요.
 
 ## 기능 전체
 
@@ -169,11 +169,9 @@ SSH-over-SSM과 AWS SFTP에는 EC2 Instance Connect 공개키 주입 권한이 �
 - [Tailscale / Headscale 가이드](./docs/tailscale.md)
 - [AI 어시스턴트](./docs/ai-assistant-design.md)
 - [AWS / SSM 설정 가이드](./docs/aws.ko.md)
-- [아키텍처](./docs/architecture.md)
 - [데이터 보호 (E2EE)](./docs/data-protection.md)
-- [빌드 및 배포](./docs/build-and-deploy.md)
+- [소스에서 빌드하기](./docs/build-from-source.md)
 - [sync-api 자체 호스팅 가이드](./docs/sync-api-self-hosting.md)
-- [ssh-core IPC 프로토콜](./docs/ipc-protocol.md)
 
 ## 라이선스
 
