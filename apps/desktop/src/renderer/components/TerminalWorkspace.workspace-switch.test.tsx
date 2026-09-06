@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSettings, HostRecord, TerminalTab } from '@shared';
-import type { WorkspaceTab } from '../store/createAppStore';
+import type { DynamicTabStripItem, WorkspaceTab } from '../store/createAppStore';
+import { resolveWorkspaceSplitTarget } from '../lib/workspace-split-target';
+import { listWorkspaceSessionIds } from '../lib/workspace-layout';
 import { SESSION_SHARE_CHAT_TOAST_TTL_MS, TerminalWorkspace } from './TerminalWorkspace';
 import { getTerminalThemePreset } from '../lib/terminal-presets';
 
@@ -325,6 +327,20 @@ function dispatchDragEvent(
   fireEvent(target, event);
 }
 
+function dragTabs(count: number): TerminalTab[] {
+  return Array.from({ length: count }, (_, index) => ({
+    ...tabs[0], id: `tab-${index + 1}`, stableId: `tab-${index + 1}`,
+    sessionId: `session-${index + 1}`, title: `Session ${index + 1}`,
+  }));
+}
+
+function setDragBounds(element: HTMLElement) {
+  element.getBoundingClientRect = () => ({
+    left: 0, top: 0, right: 100, bottom: 100, width: 100, height: 100,
+    x: 0, y: 0, toJSON: () => ({}),
+  });
+}
+
 function renderWorkspace(input: {
   activeWorkspace: WorkspaceTab | null;
   activeSessionId?: string | null;
@@ -332,7 +348,8 @@ function renderWorkspace(input: {
   tabs?: TerminalTab[];
   hosts?: HostRecord[];
   draggedSession?: { sessionId: string; source: 'standalone-tab' | 'workspace-pane'; workspaceId?: string } | null;
-  canDropDraggedSession?: boolean;
+  tabStrip?: DynamicTabStripItem[];
+  workspaces?: WorkspaceTab[];
   onSplitSessionDrop?: (sessionId: string, direction: any, targetSessionId?: string) => boolean;
   onMoveWorkspaceSession?: (workspaceId: string, sessionId: string, direction: any, targetSessionId: string) => boolean;
   onFocusWorkspaceSession?: (workspaceId: string, sessionId: string) => void;
@@ -355,6 +372,12 @@ function renderWorkspace(input: {
 function workspaceElement(input: Parameters<typeof renderWorkspace>[0]) {
   const renderTabs = input.tabs ?? tabs;
   const renderHosts = input.hosts ?? [];
+  const workspaces = input.workspaces ?? (input.activeWorkspace ? [input.activeWorkspace] : []);
+  const workspaceSessionIds = new Set(workspaces.flatMap((workspace) => listWorkspaceSessionIds(workspace.layout)));
+  const tabStrip: DynamicTabStripItem[] = input.tabStrip ?? [
+    ...workspaces.map((workspace) => ({ kind: 'workspace' as const, workspaceId: workspace.id })),
+    ...renderTabs.filter((tab) => !workspaceSessionIds.has(tab.sessionId)).map((tab) => ({ kind: 'session' as const, sessionId: tab.sessionId })),
+  ];
   return (
     <TerminalWorkspace
       tabs={renderTabs}
@@ -365,7 +388,9 @@ function workspaceElement(input: Parameters<typeof renderWorkspace>[0]) {
       activeWorkspace={input.activeWorkspace}
       viewActivationKey={input.viewActivationKey}
       draggedSession={input.draggedSession ?? null}
-      canDropDraggedSession={input.canDropDraggedSession ?? false}
+      resolveSplitTarget={(targetSessionId) => input.draggedSession?.source === 'standalone-tab'
+        ? resolveWorkspaceSplitTarget({ tabs: renderTabs, tabStrip, workspaces }, input.draggedSession.sessionId, targetSessionId)
+        : null}
       onCloseSession={vi.fn().mockResolvedValue(undefined)}
       onRetryConnection={vi.fn().mockResolvedValue(undefined)}
       onCancelReconnect={vi.fn()}
@@ -475,7 +500,7 @@ describe('TerminalWorkspace workspace switching', () => {
         activeWorkspace={workspaceB}
         viewActivationKey="workspace:workspace-b"
         draggedSession={null}
-        canDropDraggedSession={false}
+        resolveSplitTarget={() => null}
         onCloseSession={vi.fn().mockResolvedValue(undefined)}
         onRetryConnection={vi.fn().mockResolvedValue(undefined)}
         onCancelReconnect={vi.fn()}
@@ -524,7 +549,7 @@ describe('TerminalWorkspace workspace switching', () => {
         activeWorkspace={sharedSessionWorkspaceB}
         viewActivationKey="workspace:workspace-b"
         draggedSession={null}
-        canDropDraggedSession={false}
+        resolveSplitTarget={() => null}
         onCloseSession={vi.fn().mockResolvedValue(undefined)}
         onRetryConnection={vi.fn().mockResolvedValue(undefined)}
         onCancelReconnect={vi.fn()}
@@ -594,7 +619,7 @@ describe('TerminalWorkspace workspace switching', () => {
     expect(onSplitSessionDrop).not.toHaveBeenCalled();
   });
 
-  it('keeps standalone-tab drops on the existing splitSessionDrop path', async () => {
+  it('targets the hovered pane of a nonadjacent workspace', async () => {
     const onMoveWorkspaceSession = vi.fn(() => false);
     const onSplitSessionDrop = vi.fn(() => true);
     const { container } = renderWorkspace({
@@ -604,7 +629,16 @@ describe('TerminalWorkspace workspace switching', () => {
         sessionId: 'session-3',
         source: 'standalone-tab'
       },
-      canDropDraggedSession: true,
+      tabs: dragTabs(4),
+      workspaces: [
+        { ...workspaceA, id: 'other', layout: { kind: 'leaf', id: 'leaf-other', sessionId: 'session-4' }, activeSessionId: 'session-4' },
+        splitWorkspace,
+      ],
+      tabStrip: [
+        { kind: 'session', sessionId: 'session-3' },
+        { kind: 'workspace', workspaceId: 'other' },
+        { kind: 'workspace', workspaceId: splitWorkspace.id },
+      ],
       onMoveWorkspaceSession,
       onSplitSessionDrop
     });
@@ -632,6 +666,90 @@ describe('TerminalWorkspace workspace switching', () => {
 
     expect(onSplitSessionDrop).toHaveBeenCalledWith('session-3', 'right', 'session-2');
     expect(onMoveWorkspaceSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { direction: 'left', point: { clientX: 1, clientY: 50 }, style: { left: '0%', top: '0%', width: '50%', height: '100%' } },
+    { direction: 'right', point: { clientX: 99, clientY: 50 }, style: { left: '50%', top: '0%', width: '50%', height: '100%' } },
+    { direction: 'top', point: { clientX: 50, clientY: 1 }, style: { left: '0%', top: '0%', width: '100%', height: '50%' } },
+    { direction: 'bottom', point: { clientX: 50, clientY: 99 }, style: { left: '0%', top: '50%', width: '100%', height: '50%' } },
+  ])('passes the visible standalone target and the previewed $direction direction', ({ direction, point, style }) => {
+    const onSplitSessionDrop = vi.fn(() => true);
+    const { container } = renderWorkspace({
+      tabs: dragTabs(3), activeWorkspace: null, activeSessionId: 'session-3',
+      viewActivationKey: 'session:session-3',
+      draggedSession: { source: 'standalone-tab', sessionId: 'session-1' }, onSplitSessionDrop,
+    });
+    const surface = container.firstElementChild as HTMLElement;
+    setDragBounds(surface);
+    dispatchDragEvent(surface, 'dragover', point);
+    const preview = container.querySelector('[data-workspace-drop-preview="true"]') as HTMLElement;
+    expect(preview).not.toBeNull();
+    for (const [key, value] of Object.entries(style)) {
+      expect(preview.style[key as 'left' | 'top' | 'width' | 'height']).toBe(value);
+    }
+    dispatchDragEvent(surface, 'drop', point);
+    expect(onSplitSessionDrop).toHaveBeenCalledExactlyOnceWith('session-1', direction, 'session-3');
+    expect(container.querySelector('[data-workspace-drop-preview="true"]')).toBeNull();
+  });
+
+  it.each(['session-1', 'session-3'])('passes the actual neighbor for a self-drop of %s', (sessionId) => {
+    const onSplitSessionDrop = vi.fn(() => true);
+    const { container } = renderWorkspace({
+      tabs: dragTabs(3), activeWorkspace: null, activeSessionId: sessionId, viewActivationKey: `session:${sessionId}`,
+      draggedSession: { source: 'standalone-tab', sessionId }, onSplitSessionDrop,
+    });
+    const surface = container.firstElementChild as HTMLElement;
+    setDragBounds(surface);
+    dispatchDragEvent(surface, 'dragover', { clientX: 99, clientY: 50 });
+    dispatchDragEvent(surface, 'drop', { clientX: 99, clientY: 50 });
+    expect(onSplitSessionDrop).toHaveBeenCalledExactlyOnceWith(sessionId, 'right', 'session-2');
+  });
+
+  it.each(['view-changed', 'target-closed', 'neighbor-closed'] as const)('cancels the preview after %s without picking another tab', (change) => {
+    const onSplitSessionDrop = vi.fn(() => true);
+    const input = {
+      tabs: dragTabs(3), activeWorkspace: null, activeSessionId: 'session-1', viewActivationKey: 'session:session-1',
+      draggedSession: { source: 'standalone-tab' as const, sessionId: change === 'neighbor-closed' ? 'session-1' : 'session-3' },
+      onSplitSessionDrop,
+    };
+    const { container, rerender } = renderWorkspace(input);
+    const surface = container.firstElementChild as HTMLElement;
+    setDragBounds(surface);
+    dispatchDragEvent(surface, 'dragover', { clientX: 99, clientY: 50 });
+    expect(container.querySelector('[data-workspace-drop-preview="true"]')).not.toBeNull();
+    rerender(workspaceElement({
+      ...input,
+      ...(change === 'view-changed'
+        ? { activeSessionId: 'session-2', viewActivationKey: 'session:session-2' }
+        : { tabs: input.tabs.filter((tab) => tab.sessionId !== (change === 'target-closed' ? 'session-1' : 'session-2')) }),
+    }));
+    expect(container.querySelector('[data-workspace-drop-preview="true"]')).toBeNull();
+    dispatchDragEvent(surface, 'drop', { clientX: 99, clientY: 50 });
+    expect(onSplitSessionDrop).not.toHaveBeenCalled();
+  });
+
+  it.each(['full', 'tmux'] as const)('hides the preview for a %s workspace even with a usable neighboring tab', (kind) => {
+    const onSplitSessionDrop = vi.fn(() => true);
+    const activeWorkspace: WorkspaceTab = kind === 'tmux'
+      ? { ...splitWorkspace, tmux: { controlSessionId: 'control', windowId: '@1' } }
+      : { ...splitWorkspace, layout: {
+        kind: 'split', id: 'full', axis: 'horizontal', ratio: 0.5, first: splitWorkspace.layout,
+        second: { kind: 'split', id: 'added', axis: 'horizontal', ratio: 0.5,
+          first: { kind: 'leaf', id: 'leaf-3', sessionId: 'session-3' },
+          second: { kind: 'leaf', id: 'leaf-4', sessionId: 'session-4' },
+        },
+      } };
+    const { container } = renderWorkspace({
+      tabs: dragTabs(6), activeWorkspace, viewActivationKey: `workspace:${activeWorkspace.id}`,
+      draggedSession: { source: 'standalone-tab', sessionId: 'session-5' }, onSplitSessionDrop,
+    });
+    const pane = container.querySelector('[data-terminal-pane-slot="true"]') as HTMLElement;
+    setDragBounds(pane);
+    dispatchDragEvent(pane, 'dragover', { clientX: 99, clientY: 50 });
+    expect(container.querySelector('[data-workspace-drop-preview="true"]')).toBeNull();
+    dispatchDragEvent(pane, 'drop', { clientX: 99, clientY: 50 });
+    expect(onSplitSessionDrop).not.toHaveBeenCalled();
   });
 
   it('ignores self-drops for workspace pane reordering', async () => {
@@ -765,7 +883,7 @@ describe('TerminalWorkspace workspace switching', () => {
         activeWorkspace={{ ...splitWorkspace, broadcastEnabled: true }}
         viewActivationKey="workspace:workspace-split"
         draggedSession={null}
-        canDropDraggedSession={false}
+        resolveSplitTarget={() => null}
         onCloseSession={vi.fn().mockResolvedValue(undefined)}
         onRetryConnection={vi.fn().mockResolvedValue(undefined)}
         onCancelReconnect={vi.fn()}
@@ -1065,7 +1183,7 @@ describe('TerminalWorkspace workspace switching', () => {
         activeWorkspace={{ ...splitWorkspace, broadcastEnabled: true }}
         viewActivationKey="workspace:workspace-split"
         draggedSession={null}
-        canDropDraggedSession={false}
+        resolveSplitTarget={() => null}
         onCloseSession={vi.fn().mockResolvedValue(undefined)}
         onRetryConnection={vi.fn().mockResolvedValue(undefined)}
         onCancelReconnect={vi.fn()}
@@ -1326,7 +1444,7 @@ describe('TerminalWorkspace workspace switching', () => {
           activeWorkspace={null}
           viewActivationKey="session:session-1"
           draggedSession={null}
-          canDropDraggedSession={false}
+          resolveSplitTarget={() => null}
           onCloseSession={vi.fn().mockResolvedValue(undefined)}
           onRetryConnection={vi.fn().mockResolvedValue(undefined)}
           onCancelReconnect={vi.fn()}
@@ -1418,7 +1536,7 @@ describe('TerminalWorkspace workspace switching', () => {
         activeWorkspace={sharePaneWorkspace}
         viewActivationKey="workspace:workspace-share"
         draggedSession={null}
-        canDropDraggedSession={false}
+        resolveSplitTarget={() => null}
         onCloseSession={vi.fn().mockResolvedValue(undefined)}
         onRetryConnection={vi.fn().mockResolvedValue(undefined)}
         onCancelReconnect={vi.fn()}
@@ -1499,7 +1617,7 @@ describe('TerminalWorkspace workspace switching', () => {
         activeWorkspace={sharePaneWorkspace}
         viewActivationKey="workspace:workspace-share"
         draggedSession={null}
-        canDropDraggedSession={false}
+        resolveSplitTarget={() => null}
         onCloseSession={vi.fn().mockResolvedValue(undefined)}
         onRetryConnection={vi.fn().mockResolvedValue(undefined)}
         onCancelReconnect={vi.fn()}
@@ -1583,7 +1701,7 @@ describe('TerminalWorkspace workspace switching', () => {
           activeWorkspace={null}
           viewActivationKey="session:session-1"
           draggedSession={null}
-          canDropDraggedSession={false}
+          resolveSplitTarget={() => null}
           onCloseSession={vi.fn().mockResolvedValue(undefined)}
           onRetryConnection={vi.fn().mockResolvedValue(undefined)}
           onCancelReconnect={vi.fn()}

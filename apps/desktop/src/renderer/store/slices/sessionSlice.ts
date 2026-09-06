@@ -1,3 +1,4 @@
+import { resolveWorkspaceSplitTarget } from '../../lib/workspace-split-target';
 import { isSplittablePaneKind } from "@shared";
 import type { TabCommandPayload, TerminalTab } from "@shared";
 import type { SliceDeps } from "../services/context";
@@ -85,7 +86,6 @@ import {
   createWorkspaceSplit,
   listWorkspaceSessionIds,
   parseTmuxLayout,
-  countWorkspaceSessions,
   findFirstWorkspaceSessionId,
   insertSessionIntoWorkspaceLayout,
   removeSessionFromWorkspaceLayout,
@@ -113,7 +113,6 @@ import {
   activateSessionContextInState,
   buildWorkspaceTitle,
   resolveNextVisibleTab,
-  resolveAdjacentTarget,
   dynamicTabMatches,
   findContainersTab,
   parentPath,
@@ -1419,35 +1418,20 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               return false;
             }
             const state = get();
-            // 원격 화면(RDP·VNC)은 분할에 넣지 않는다. UI 도 안내선을 막지만(SessionShell) 그것만
-            // 믿을 수는 없다 — 이 액션은 단축키·다른 드롭 경로에서도 불린다.
-            if (!isSplittableSession(state.tabs, sessionId)) {
+            const target = resolveWorkspaceSplitTarget(state, sessionId, targetSessionId);
+            if (!target) {
               return false;
             }
-            const adjacent = resolveAdjacentTarget(
-              state.tabStrip,
-              state.workspaces,
-              sessionId,
-            );
-            if (!adjacent) {
-              return false;
-            }
-            if (
-              adjacent.kind === "session" &&
-              !isSplittableSession(state.tabs, adjacent.sessionId)
-            ) {
-              return false;
-            }
-    
-            if (adjacent.kind === "session") {
+
+            if (target.workspaceId === null) {
               const currentIndex = state.tabStrip.findIndex(
                 (item) => item.kind === "session" && item.sessionId === sessionId,
               );
-              const adjacentIndex = state.tabStrip.findIndex(
+              const targetIndex = state.tabStrip.findIndex(
                 (item) =>
-                  item.kind === "session" && item.sessionId === adjacent.sessionId,
+                  item.kind === "session" && item.sessionId === target.sessionId,
               );
-              if (currentIndex < 0 || adjacentIndex < 0) {
+              if (currentIndex < 0 || targetIndex < 0) {
                 return false;
               }
     
@@ -1456,7 +1440,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                 id: workspaceId,
                 title: buildWorkspaceTitle(state.workspaces),
                 layout: createWorkspaceSplit(
-                  adjacent.sessionId,
+                  target.sessionId,
                   sessionId,
                   direction,
                 ),
@@ -1468,10 +1452,10 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                   !(
                     item.kind === "session" &&
                     (item.sessionId === sessionId ||
-                      item.sessionId === adjacent.sessionId)
+                      item.sessionId === target.sessionId)
                   ),
               );
-              const insertIndex = Math.min(currentIndex, adjacentIndex);
+              const insertIndex = Math.min(currentIndex, targetIndex);
               nextTabStrip.splice(insertIndex, 0, {
                 kind: "workspace",
                 workspaceId,
@@ -1485,29 +1469,16 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               return true;
             }
     
-            if (adjacent.kind !== "workspace") {
-              return false;
-            }
-    
             const workspace = state.workspaces.find(
-              (item) => item.id === adjacent.workspaceId,
+              (item) => item.id === target.workspaceId,
             );
-            if (!workspace || countWorkspaceSessions(workspace.layout) >= 4) {
+            if (!workspace) {
               return false;
             }
-    
-            const resolvedTargetSessionId =
-              targetSessionId &&
-              listWorkspaceSessionIds(workspace.layout).includes(targetSessionId)
-                ? targetSessionId
-                : listWorkspaceSessionIds(workspace.layout).includes(
-                      workspace.activeSessionId,
-                    )
-                  ? workspace.activeSessionId
-                  : findFirstWorkspaceSessionId(workspace.layout);
+
             const nextLayout = insertSessionIntoWorkspaceLayout(
               workspace.layout,
-              resolvedTargetSessionId,
+              target.sessionId,
               sessionId,
               direction,
             );
@@ -1521,6 +1492,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                   ? {
                       ...item,
                       layout: nextLayout.layout,
+                      zoomedSessionId: null,
                       activeSessionId: sessionId,
                     }
                   : item,

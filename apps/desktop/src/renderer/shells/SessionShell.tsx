@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { isSplittablePaneKind, type AuthState } from '@shared';
+import { useCallback } from 'react';
+import type { AuthState } from '@shared';
 import { TerminalWorkspace } from '../components/TerminalWorkspace';
 import { cn } from '../lib/cn';
 import { TmuxWindowBar } from '../components/terminal-workspace/TmuxWindowBar';
@@ -24,10 +24,8 @@ import type {
   useHomeViewModel,
   useSessionWorkspaceViewModel,
 } from '../view-models/appViewModels';
-import {
-  resolveAdjacentTabCandidate,
-  type DraggedSessionPayload,
-} from './appShellUtils';
+import type { DraggedSessionPayload } from './appShellUtils';
+import { resolveWorkspaceSplitTarget } from '../lib/workspace-split-target';
 import { OfflineModeBanner } from './OfflineModeBanner';
 
 interface SessionShellProps {
@@ -136,35 +134,15 @@ export function SessionShell({
     homeViewModel.activeWorkspaceTab === 'containers'
       ? null
       : homeViewModel.activeWorkspaceTab;
-  const canDropDraggedSession = useMemo(() => {
+  const resolveSplitTarget = useCallback((targetSessionId: string) => {
     if (draggedSession?.source !== 'standalone-tab') {
-      return false;
+      return null;
     }
-    // 원격 화면(RDP·VNC)은 분할에 참여하지 않는다. **끌고 있는 쪽에서 먼저 막는다** — 여기서
-    // 걸러야 드롭 안내선이 아예 뜨지 않는다(안내선을 보여주고 아무 일도 안 하면 고장으로 보인다).
-    const dragged = sessionViewModel.tabs.find(
-      (tab) => tab.sessionId === draggedSession.sessionId,
-    );
-    if (!isSplittablePaneKind(dragged?.paneKind)) {
-      return false;
-    }
-
-    const candidate = resolveAdjacentTabCandidate(
-      sessionViewModel.tabStrip,
-      sessionViewModel.workspaces,
+    return resolveWorkspaceSplitTarget(
+      sessionViewModel,
       draggedSession.sessionId,
+      targetSessionId,
     );
-    if (!candidate) {
-      return false;
-    }
-    // 받는 쪽도 본다. SSH 탭을 VNC 탭 위로 끌면 그 분할 안에 원격 화면이 들어간다.
-    if (candidate.kind === 'session') {
-      const target = sessionViewModel.tabs.find(
-        (tab) => tab.sessionId === candidate.sessionId,
-      );
-      return isSplittablePaneKind(target?.paneKind);
-    }
-    return true;
   }, [
     draggedSession,
     sessionViewModel.tabs,
@@ -188,7 +166,7 @@ export function SessionShell({
       activeWorkspace={activeWorkspace}
       viewActivationKey={sessionViewActivationKey}
       draggedSession={draggedSession}
-      canDropDraggedSession={canDropDraggedSession}
+      resolveSplitTarget={resolveSplitTarget}
       onCloseSession={sessionViewModel.disconnectTab}
       onRetryConnection={sessionViewModel.retrySessionConnection}
       onCancelReconnect={sessionViewModel.cancelSessionReconnect}

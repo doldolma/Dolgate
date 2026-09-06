@@ -31,6 +31,7 @@ import { resizeTerminal, tmuxCommand } from '../services/desktop/terminal';
 import { getTerminalCellSize } from '../lib/terminal-write-registry';
 import { SectionLabel } from '../ui';
 import { cn } from '../lib/cn';
+import type { WorkspaceSplitTarget } from '../lib/workspace-split-target';
 import {
   collectWorkspacePlacements,
   directionPreviewRect,
@@ -71,7 +72,7 @@ interface TerminalWorkspaceProps {
   activeWorkspace: WorkspaceTab | null;
   viewActivationKey: string | null;
   draggedSession: DraggedSessionPayload | null;
-  canDropDraggedSession: boolean;
+  resolveSplitTarget: (targetSessionId: string) => WorkspaceSplitTarget | null;
   onCloseSession: (sessionId: string) => Promise<void>;
   onRetryConnection: (sessionId: string) => Promise<void>;
   onCancelReconnect: (sessionId: string) => void;
@@ -173,6 +174,13 @@ function resolveTerminalAppearanceForSession(
 
 const EMPTY_SESSION_IDS: string[] = [];
 
+interface SessionDropPreview extends DropPreview {
+  sourceSessionId: string;
+  hoveredSessionId: string;
+  viewActivationKey: string | null;
+  splitTarget?: WorkspaceSplitTarget;
+}
+
 export function TerminalWorkspace({
   tabs,
   hosts,
@@ -183,7 +191,7 @@ export function TerminalWorkspace({
   activeWorkspace,
   viewActivationKey,
   draggedSession,
-  canDropDraggedSession,
+  resolveSplitTarget,
   onCloseSession,
   onRetryConnection,
   onCancelReconnect,
@@ -204,7 +212,7 @@ export function TerminalWorkspace({
 }: TerminalWorkspaceProps) {
   const { t: translate } = useTranslation();
   const workspaceRef = useRef<HTMLDivElement | null>(null);
-  const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
+  const [dropPreview, setDropPreview] = useState<SessionDropPreview | null>(null);
   const [resizingHandle, setResizingHandle] =
     useState<SplitHandlePlacement | null>(null);
   // tmux pane 리사이즈 드래그 중 마지막으로 보낸 target 칸 수(중복 resize-pane 전송 억제).
@@ -417,11 +425,42 @@ export function TerminalWorkspace({
   const isBroadcastToggleDisabled =
     !isWorkspaceBroadcastEnabled && connectedWorkspaceHostSessionIds.length < 2;
 
+  const canRearrangeActiveWorkspace =
+    draggedSession?.source === 'workspace-pane' &&
+    Boolean(activeWorkspace) &&
+    draggedSession.workspaceId === activeWorkspace?.id;
+  const visibleTargetSessionId = activeWorkspace
+    ? activeWorkspace.zoomedSessionId ?? activeWorkspace.activeSessionId
+    : activeSessionId;
+  const canDropDraggedSession = Boolean(
+    visibleTargetSessionId && resolveSplitTarget(visibleTargetSessionId),
+  );
+  const currentPreviewTarget = dropPreview?.splitTarget
+    ? resolveSplitTarget(dropPreview.hoveredSessionId)
+    : null;
+  // 효과가 미리보기를 지우기 전의 렌더에서도 이전 화면/종료된 대상에 드롭하지 않는다.
+  // 자기 탭 드래그 중 이웃이 바뀌어도, 이미 보여 준 대상을 다른 탭으로 바꾸지 않는다.
+  const validDropPreview = dropPreview &&
+    draggedSession?.sessionId === dropPreview.sourceSessionId &&
+    viewActivationKey === dropPreview.viewActivationKey &&
+    (activeWorkspace
+      ? workspaceLayout?.placements.some((pane) => pane.sessionId === dropPreview.hoveredSessionId)
+      : activeSessionId === dropPreview.hoveredSessionId) &&
+    (draggedSession.source === 'standalone-tab'
+      ? currentPreviewTarget &&
+        currentPreviewTarget.sessionId === dropPreview.splitTarget?.sessionId &&
+        currentPreviewTarget.workspaceId === dropPreview.splitTarget?.workspaceId
+      : canRearrangeActiveWorkspace &&
+        activeWorkspaceSessionIds.includes(draggedSession.sessionId) &&
+        draggedSession.sessionId !== dropPreview.hoveredSessionId)
+    ? dropPreview
+    : null;
+
   useEffect(() => {
-    if (draggedSession?.source !== 'standalone-tab' || !canDropDraggedSession) {
+    if (dropPreview && !validDropPreview) {
       setDropPreview(null);
     }
-  }, [canDropDraggedSession, draggedSession]);
+  }, [dropPreview, validDropPreview]);
 
   useEffect(() => {
     setDropPreview(null);
@@ -552,6 +591,11 @@ export function TerminalWorkspace({
     ) {
       return;
     }
+    const splitTarget = resolveSplitTarget(activeSessionId);
+    if (!splitTarget) {
+      setDropPreview(null);
+      return;
+    }
 
     event.preventDefault();
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -559,15 +603,14 @@ export function TerminalWorkspace({
     const rootRect = { x: 0, y: 0, width: 1, height: 1 };
     setDropPreview({
       direction,
-      targetSessionId: activeSessionId,
+      targetSessionId: splitTarget.sessionId,
+      sourceSessionId: draggedSession.sessionId,
+      hoveredSessionId: activeSessionId,
+      viewActivationKey,
+      splitTarget,
       rect: directionPreviewRect(rootRect, direction),
     });
   };
-
-  const canRearrangeActiveWorkspace =
-    draggedSession?.source === 'workspace-pane' &&
-    Boolean(activeWorkspace) &&
-    draggedSession.workspaceId === activeWorkspace?.id;
 
   // 보이는 pane 이 모두 원격 화면(RDP·VNC)인가.
   //
@@ -646,6 +689,9 @@ export function TerminalWorkspace({
             if (!placement) {
               return;
             }
+            const splitTarget = draggedSession?.source === 'standalone-tab'
+              ? resolveSplitTarget(tab.sessionId)
+              : null;
             if (draggedSession?.source === 'workspace-pane') {
               if (
                 !canRearrangeActiveWorkspace ||
@@ -655,8 +701,9 @@ export function TerminalWorkspace({
               }
             } else if (
               draggedSession?.source !== 'standalone-tab' ||
-              !canDropDraggedSession
+              !splitTarget
             ) {
+              setDropPreview(null);
               return;
             }
             event.preventDefault();
@@ -668,14 +715,19 @@ export function TerminalWorkspace({
             );
             setDropPreview({
               direction,
-              targetSessionId: tab.sessionId,
+              targetSessionId: splitTarget?.sessionId ?? tab.sessionId,
+              sourceSessionId: draggedSession.sessionId,
+              hoveredSessionId: tab.sessionId,
+              viewActivationKey,
+              splitTarget: splitTarget ?? undefined,
               rect: directionPreviewRect(placement.rect, direction),
             });
           }
         : undefined,
       onDrop: isWorkspacePane
         ? (event) => {
-            if (!dropPreview || !activeWorkspace) {
+            if (!validDropPreview || !activeWorkspace || validDropPreview.hoveredSessionId !== tab.sessionId) {
+              setDropPreview(null);
               return;
             }
             if (
@@ -696,14 +748,14 @@ export function TerminalWorkspace({
               onMoveWorkspaceSession(
                 activeWorkspace.id,
                 draggedSession.sessionId,
-                dropPreview.direction,
+                validDropPreview.direction,
                 tab.sessionId,
               );
             } else {
               onSplitSessionDrop(
                 draggedSession.sessionId,
-                dropPreview.direction,
-                tab.sessionId,
+                validDropPreview.direction,
+                validDropPreview.targetSessionId,
               );
             }
             setDropPreview(null);
@@ -886,11 +938,15 @@ export function TerminalWorkspace({
       onDrop={
         !activeWorkspace
           ? (event: DragEvent<HTMLDivElement>) => {
-              if (draggedSession?.source !== 'standalone-tab' || !dropPreview) {
+              if (draggedSession?.source !== 'standalone-tab' || !validDropPreview) {
                 return;
               }
               event.preventDefault();
-              onSplitSessionDrop(draggedSession.sessionId, dropPreview.direction);
+              onSplitSessionDrop(
+                draggedSession.sessionId,
+                validDropPreview.direction,
+                validDropPreview.targetSessionId,
+              );
               setDropPreview(null);
               onEndSessionDrag();
             }
@@ -923,7 +979,7 @@ export function TerminalWorkspace({
         }
         setResizingHandle(handle);
       }}
-      dropPreview={dropPreview}
+      dropPreview={validDropPreview}
     />
   );
 }

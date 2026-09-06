@@ -864,44 +864,7 @@ export function resolveNextVisibleTab(
   return "home";
 }
 
-export function resolveAdjacentTarget(
-  tabStrip: DynamicTabStripItem[],
-  workspaces: WorkspaceTab[],
-  sessionId: string,
-): DynamicTabStripItem | null {
-  const currentIndex = tabStrip.findIndex(
-    (item) => item.kind === "session" && item.sessionId === sessionId,
-  );
-  if (currentIndex < 0) {
-    return null;
-  }
-
-  const candidateIndexes = [currentIndex + 1, currentIndex - 1];
-  for (const index of candidateIndexes) {
-    const candidate = tabStrip[index];
-    if (!candidate) {
-      continue;
-    }
-    // tmux 세션 그룹 탭은 일반 드래그-분할 워크스페이스에 참여하지 않는다.
-    if (candidate.kind === "tmux") {
-      continue;
-    }
-    if (candidate.kind === "workspace") {
-      const workspace = workspaces.find(
-        (item) => item.id === candidate.workspaceId,
-      );
-      if (!workspace) {
-        continue;
-      }
-      if (countWorkspaceSessions(workspace.layout) >= 4) {
-        continue;
-      }
-    }
-    return candidate;
-  }
-
-  return null;
-}
+export { resolveAdjacentTarget } from '../../lib/workspace-split-target';
 
 export function dynamicTabMatches(
   left: DynamicTabStripItem,
