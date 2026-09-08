@@ -989,7 +989,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
                   ? null
                   : resolveSessionKindChip({
                       host: props.host,
-                      shellKind: tab?.shellKind,
+                      containerSession: Boolean(tab?.containerId),
                       hops: tab?.connectionHops,
                       awsTransport: tab?.awsTransport,
                     })

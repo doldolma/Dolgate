@@ -27,6 +27,16 @@ export interface GroupMutationOptions {
    * 여기로 가져오면 순수 함수가 데스크톱 저장 규칙에 묶인다.
    */
   normalizeHost?: (host: HostRecord) => HostRecord;
+  /**
+   * 이 경로가 groups/hosts **밖의 것**으로도 점유돼 있는가.
+   *
+   * 이 모듈은 groups 와 hosts 만 안다. 그런데 데스크톱에는 그룹에 소속된 저장된 Workspace 가
+   * 있고, 레코드 없는 그룹(임포트가 host.groupName 만 남긴 경우)에서 마지막 호스트가 사라지면
+   * 여기서는 "없는 그룹" 으로 보여 던졌다 — 사이드바에는 Workspace 를 든 행이 그대로 보이는데
+   * 삭제·이름변경·이동이 모두 "Group not found" 로 거부되는, 빠져나올 수 없는 상태였다.
+   * 호출자가 아는 점유를 알려 주면 그 경로도 다룰 수 있다.
+   */
+  pathAlsoOccupied?: boolean;
 }
 
 export interface GroupPathMutation {
@@ -92,7 +102,11 @@ export function mutateGroupPathIn(
 
   // 그룹 레코드가 없어도 호스트만으로 존재하는 그룹이 흔하다(호스트의 groupName 이 경로다).
   // 그래서 둘 중 하나라도 있으면 진행한다.
-  if (affectedGroups.length === 0 && affectedHosts.length === 0) {
+  if (
+    affectedGroups.length === 0 &&
+    affectedHosts.length === 0 &&
+    !options.pathAlsoOccupied
+  ) {
     throw new Error('Group not found');
   }
 
@@ -233,7 +247,11 @@ export function removeGroupFrom(
     isGroupWithinPath(normalizeGroupPath(record.groupName), normalizedTargetPath)
   );
 
-  if (affectedGroups.length === 0 && affectedHosts.length === 0) {
+  if (
+    affectedGroups.length === 0 &&
+    affectedHosts.length === 0 &&
+    !options.pathAlsoOccupied
+  ) {
     throw new Error('Group not found');
   }
 

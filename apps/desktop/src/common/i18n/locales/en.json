@@ -21,7 +21,83 @@
     "cancel": "Cancel",
     "close": "Close",
     "delete": "Delete",
+    "rename": "Rename",
+    "duplicate": "Duplicate",
     "apply": "Apply"
+  },
+  "savedWorkspace": {
+    "section": "Workspaces",
+    "count": "{{count}} saved",
+    "panes": "{{count}} panes",
+    "panesHeading": "Pane layout",
+    "open": "Open Workspace",
+    "favorite": "Favorite Workspace",
+    "unfavorite": "Remove from favorites",
+    "moreActions": "More actions for {{name}}",
+    "created": "Created {{date}}",
+    "local": "Local",
+    "missing": "Missing host",
+    "ready": "Ready",
+    "recentActivity": "Recent activity",
+    "noRecentActivity": "No recent host activity for this Workspace.",
+    "quickSubtitle": "{{count}} panes · {{targets}}",
+    "cardType": "Workspace",
+    "cardMeta": "Workspace · {{count}} panes",
+    "ungrouped": "Ungrouped",
+    "hostCount": "{{count}} hosts",
+    "localCount": "{{count}} local",
+    "missingCount": "{{count}} missing",
+    "lastOpened": "Last opened {{date}}",
+    "assetCount": "{{count}} items",
+    "emptyAssetsTitle": "No hosts or Workspaces yet",
+    "emptyAssetsDescription": "Add a host or save a split tab as a Workspace.",
+    "noMatchingAssets": "Try another search, filter, or Home scope.",
+    "saveMenu": "Save as Workspace…",
+    "saveTitle": "Save as Workspace",
+    "saveDescription": "Creates a new saved Workspace from this split layout.",
+    "saveAction": "Save Workspace",
+    "saveFailed": "Could not save the Workspace.",
+    "renameTitle": "Rename Workspace",
+    "renameDescription": "Choose a name that makes this layout easy to recognize.",
+    "renameFailed": "Could not rename the Workspace.",
+    "nameLabel": "Workspace name",
+    "deleteTitle": "Delete Workspace?",
+    "deleteDescription": "Delete “{{name}}”? Running sessions and hosts are not affected.",
+    "deleteFailed": "Could not delete the Workspace.",
+    "unsupported": "This tab cannot be saved as a Workspace.",
+    "notFound": "The saved Workspace could not be found.",
+    "copyName": "{{name}} copy",
+    "invalid": "This saved Workspace layout is invalid.",
+    "hostMissing": "{{label}} is no longer in your hosts. Add it again, then retry this pane.",
+    "hostUnsupported": "{{label}} cannot be restored in a split Workspace.",
+    "empty": {
+      "title": "No saved Workspaces yet",
+      "description": "Split a tab into two or more panes, then right-click its tab and choose Save as Workspace."
+    },
+    "detail": {
+      "title": "Workspace details",
+      "placeholder": "Select a Workspace to inspect its layout and panes."
+    },
+    "hostMissingUsername": "{{label}} has no username. Set one on the host, then retry this pane."
+  },
+  "homeAssets": {
+    "menu": {
+      "openMany": "Open ({{count}})",
+      "connectNewWindowMany": "Connect in new windows ({{count}} hosts)",
+      "connectNewWindowHostSubset": "Connect in new window (Hosts: {{count}})",
+      "sftpHostSubset": "Connect over SFTP (Hosts: {{count}})",
+      "sftpSelectOne": "Connect over SFTP (select 1 of {{count}} hosts)",
+      "tmuxHostSubset": "Connect with tmux (Hosts: {{count}})",
+      "containersHostSubset": "Containers (Hosts: {{count}})",
+      "editHostSubset": "Edit Host ({{count}})",
+      "renameWorkspace": "Rename Workspace",
+      "renameWorkspaceSubset": "Rename Workspace ({{count}})",
+      "deleteMany": "Delete ({{count}})"
+    },
+    "delete": {
+      "title": "Delete {{count}} items? ({{hosts}} hosts · {{workspaces}} Workspaces)",
+      "failed": "Could not delete {{count}} items. You can retry the remaining items."
+    }
   },
   "login": {
     "openBrowser": "Sign in with Browser",
@@ -826,7 +902,7 @@
       "selectSession": "Go to the {{title}} session"
     },
     "newTab": "New tab",
-    "newTabSearch": "Search hosts"
+    "newTabSearch": "Search Workspaces and hosts"
   },
   "aws": {
     "ssm": {
@@ -993,8 +1069,11 @@
       "snippetUpdatedAt": "snippet update time",
       "selectedHostId": "selected host ID",
       "selectedHosts": "selected hosts",
+      "selectedWorkspaceId": "selected Workspace ID",
+      "selectedWorkspaces": "selected Workspaces",
       "groups": "groups",
       "hosts": "hosts",
+      "workspaces": "Workspaces",
       "secrets": "credentials",
       "portForwards": "port forwards",
       "awsProfiles": "AWS profiles",
@@ -1012,6 +1091,7 @@
       "invalidGroup": "The group data in the Dolgate file is not valid.",
       "invalidGroupPath": "The group path in the Dolgate file is not valid.",
       "invalidHost": "The host data in the Dolgate file is not valid.",
+      "invalidWorkspace": "The Workspace data in the Dolgate file is not valid.",
       "invalidTailnet": "The tailnet data in the Dolgate file is not valid.",
       "tailnetMissing": "{{label}}: the tailnet this host uses is not in the file. Add the tailnet to connect.",
       "unknownHostKindSkipped": "Skipped {{count}} host(s) of a kind this version does not recognize. Update the app to import them.",
@@ -1031,7 +1111,9 @@
       "invalidDnsOverride": "The DNS override data in the Dolgate file is not valid.",
       "tooManyItems": "The Dolgate file has too many items.",
       "duplicateSelectedHostId": "The Dolgate file has duplicate selected host IDs.",
+      "duplicateSelectedWorkspaceId": "The Dolgate file has duplicate selected Workspace IDs.",
       "invalidSelectedHostRef": "The selected host reference in the Dolgate file is not valid.",
+      "invalidSelectedWorkspaceRef": "The selected Workspace reference in the Dolgate file is not valid.",
       "missingSecret": "{{label}}: the linked credential is not in the file.",
       "missingJumpHost": "{{label}}: the linked jump host is not in the file.",
       "missingAwsProfile": "{{label}}: the linked AWS profile is not in the file.",
@@ -1043,7 +1125,9 @@
       "secureValueUnreadable": "The secure stored value for {{label}} could not be read.",
       "secureValueCorrupt": "The stored value for {{label}} is corrupted.",
       "selectHostRequired": "Choose the hosts to export.",
+      "selectAssetRequired": "Choose at least one host or Workspace to export.",
       "selectedHostMissing": "The selected host could not be found. Refresh the list.",
+      "selectedWorkspaceMissing": "The selected Workspace could not be found. Refresh the list.",
       "jumpHostCycle": "{{label}}: the jump host chain has a circular reference.",
       "awsRoleCycle": "The AWS role profile chain has a circular reference.",
       "secretIdMismatch": "The credential ID does not match the stored value.",
@@ -1665,6 +1749,7 @@
     "kind": {
       "tailnets": "tailnets",
       "hosts": "hosts",
+      "workspaces": "Workspaces",
       "groups": "groups",
       "secrets": "credentials",
       "awsProfiles": "AWS profiles",
@@ -1672,7 +1757,7 @@
     },
     "counts": "{{count}} {{label}}",
     "export": {
-      "title": "Export selected hosts",
+      "title": "Export selected items",
       "close": "Close export",
       "loading": "Checking the linked items.",
       "previewFailed": "Could not check the items to export.",
@@ -1682,11 +1767,13 @@
       "confirmMismatch": "The passphrase and its confirmation do not match.",
       "passphraseMatch": "The passphrases match.",
       "dolgateTitle": "Dolgate file",
-      "dolgateDescription": "Encrypts and saves the selected hosts along with the credentials and settings they need.",
+      "dolgateDescription": "Encrypts and saves the selected hosts and Workspaces with the credentials and settings they need.",
       "dolgateHostCount": " {{count}} hosts are included.",
+      "dolgateAssetCount": " {{hosts}} hosts and {{workspaces}} Workspaces are included.",
       "opensshNoSecrets": "Credentials are excluded.",
       "opensshCount": " {{count}} hosts{{jump}} can be exported.",
       "opensshJump": " and {{count}} jump hosts",
+      "opensshWorkspaceExcluded": " Workspace layouts ({{count}}) are excluded; compatible referenced hosts are included.",
       "passphraseLabel": "Passphrase",
       "confirmLabel": "Confirm passphrase",
       "passphraseWarning": "This passphrase cannot be recovered, and the same one is required to import.",
@@ -1730,7 +1817,7 @@
       "exportMany": "Export… ({{count}})",
       "newSubgroup": "New subgroup",
       "rename": "Rename",
-      "exportGroup": "Export… ({{count}} hosts)"
+      "exportGroup": "Export… ({{count}} items)"
     },
     "error": {
       "groupCreateFailed": "Could not create the group.",
@@ -1744,7 +1831,7 @@
       "hostMany": "Delete {{count}} selected hosts?",
       "groupSingle": "Delete group {{title}}?",
       "groupMany": "Delete {{count}} selected groups?",
-      "groupImpact": "{{groups}} subgroups and {{hosts}} hosts are affected as well.",
+      "groupImpact": "{{groups}} subgroups, {{hosts}} hosts, and {{workspaces}} Workspaces are affected as well.",
       "groupEmpty": "This group is empty. Deleting it removes it immediately.",
       "keepChildren": "Keep contents",
       "deleteChildren": "Delete contents too"
@@ -1882,8 +1969,8 @@
       "show": "Show values"
     },
     "empty": {
-      "title": "Select a host",
-      "description": "Choose a host card or group on the left to see its details.",
+      "title": "Select a host or Workspace",
+      "description": "Choose a Host or Workspace card, or a group on the left, to see its details.",
       "quickStart": "Quick start",
       "newHost": "New host",
       "import": "Import",
@@ -1945,6 +2032,7 @@
       "navigation": "Navigate",
       "settings": "Settings",
       "host": "Hosts",
+      "workspace": "Workspaces",
       "quickConnect": "Quick connect",
       "localTerminal": "Terminal"
     },
@@ -1989,6 +2077,7 @@
     "opensshNoExportable": "None of the selected hosts can be exported in OpenSSH format.",
     "opensshExportTitle": "Export OpenSSH config",
     "opensshExported": "Exported the selected hosts to an OpenSSH config.",
+    "opensshWorkspaceLayoutsExcluded": "Workspace layouts are not part of OpenSSH config ({{count}} excluded); compatible referenced hosts were included.",
     "dolgateImportTitle": "Import a Dolgate host file",
     "importRequestInvalid": "The import request is not valid.",
     "fileTooLarge": "The Dolgate file is too large or not a valid file.",
@@ -2152,7 +2241,10 @@
     "transfer": {
       "exported": "Exported {{count}} hosts.",
       "exportSkipped": " {{count}} were excluded.",
+      "assetsExported": "Exported {{hosts}} hosts and {{workspaces}} Workspaces.",
+      "assetsSkipped": " Excluded {{hosts}} hosts and {{workspaces}} Workspace layouts.",
       "dolgateImported": "Imported {{count}} hosts from the Dolgate file.",
+      "dolgateAssetsImported": "Imported {{hosts}} hosts and {{workspaces}} Workspaces from the Dolgate file.",
       "dolgateSkipped": " {{count}} already-present items were skipped.",
       "termiusImported": "Imported {{hosts}} hosts, {{groups}} groups, and {{secrets}} secrets from Termius.",
       "termiusSkipped": " {{count}} incomplete hosts were skipped.",
@@ -2336,7 +2428,7 @@
       "newWindow": "New window",
       "searchHosts": "Search hosts",
       "find": "Search / find",
-      "newTab": "New tab (search hosts)",
+      "newTab": "New tab (search Workspaces and hosts)",
       "nextTab": "Next tab",
       "prevTab": "Previous tab",
       "tab1to8": "Tabs 1–8",
@@ -3683,7 +3775,8 @@
     "message": "Something failed while drawing this window. If retrying does not help, send us the message below.",
     "retry": "Retry",
     "reload": "Reload",
-    "hostRow": "Can't show this host — {{label}}"
+    "hostRow": "Can't show this host — {{label}}",
+    "workspaceDetail": "Can't show this Workspace — {{label}}"
   },
   "hostDrawer": {
     "kindNeedsServerUpdate": "Your sync server does not support {{kind}} hosts yet. Update the server to enable it."

@@ -36,12 +36,14 @@ import { t } from "../i18n";
 interface HostExportDialogProps {
   open: boolean;
   hostIds: string[];
+  workspaceIds: string[];
   onClose: () => void;
   onExported: (result: HostExportResult) => void | Promise<void>;
 }
 
 const importCountLabels = {
   hosts: 'hostTransfer.kind.hosts',
+  workspaces: 'hostTransfer.kind.workspaces',
   groups: 'hostTransfer.kind.groups',
   secrets: 'hostTransfer.kind.secrets',
   awsProfiles: 'hostTransfer.kind.awsProfiles',
@@ -64,6 +66,7 @@ function formatImportCounts(
 function getReadyImportCounts(preview: DolgateImportPreview) {
   return {
     hosts: preview.hostCount,
+    workspaces: preview.workspaceCount,
     groups: preview.groupCount,
     secrets: preview.secretCount,
     awsProfiles: preview.awsProfileCount,
@@ -78,6 +81,7 @@ function getReadyImportCounts(preview: DolgateImportPreview) {
 export function HostExportDialog({
   open,
   hostIds,
+  workspaceIds,
   onClose,
   onExported,
 }: HostExportDialogProps) {
@@ -90,20 +94,33 @@ export function HostExportDialog({
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 대화상자가 열리고 닫힐 때만 형식과 암호를 초기화한다.
+  //
+  // 예전에는 아래 미리보기 효과가 이 초기화를 함께 했고, 그 효과는 hostIds/workspaceIds 배열의
+  // **동일성**에 걸려 있었다. 부모(HomeShell)가 그 배열을 렌더마다 새로 만들어 넘기므로 활동 로그가
+  // 하나 도착하거나 30초 동기화 폴링이 돌 때마다 효과가 다시 실행돼 **사용자가 입력 중인 내보내기
+  // 암호가 지워졌다.** 선택은 대화상자가 열려 있는 동안 바뀔 수 없으니, 초기화의 기준은 열림뿐이다.
   useEffect(() => {
-    if (!open) {
-      setPassword('');
-      setPasswordConfirm('');
-      return;
-    }
-    let cancelled = false;
     setFormat('dolgate');
     setPassword('');
     setPasswordConfirm('');
+  }, [open]);
+
+  // 미리보기는 **선택 내용**이 바뀔 때만 다시 받는다. 배열 동일성이 아니라 담긴 id 로 판정한다.
+  const hostIdsKey = hostIds.join('\u0000');
+  const workspaceIdsKey = workspaceIds.join('\u0000');
+
+  useEffect(() => {
+    if (!open) {
+      setPreview(null);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
     setPreview(null);
     setError(null);
     setIsLoading(true);
-    void previewHostExport(hostIds)
+    void previewHostExport({ hostIds, workspaceIds })
       .then((result) => {
         if (!cancelled) {
           setPreview(result);
@@ -122,7 +139,9 @@ export function HostExportDialog({
     return () => {
       cancelled = true;
     };
-  }, [hostIds, open]);
+    // hostIds/workspaceIds 는 위 두 key 로 대표한다(배열 동일성은 매 렌더 바뀐다).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hostIdsKey, open, workspaceIdsKey]);
 
   if (!open) {
     return null;
@@ -184,8 +203,9 @@ export function HostExportDialog({
                 <span className="mt-1 block text-[0.82rem] leading-5 text-[var(--text-soft)]">
                   {translate('hostTransfer.export.dolgateDescription')}
                   {preview
-                    ? translate('hostTransfer.export.dolgateHostCount', {
-                        count: preview.dolgateHostCount,
+                    ? translate('hostTransfer.export.dolgateAssetCount', {
+                        hosts: preview.dolgateHostCount,
+                        workspaces: preview.dolgateWorkspaceCount,
                       })
                     : ''}
                 </span>
@@ -213,6 +233,11 @@ export function HostExportDialog({
                                 count: preview.opensshDependencyCount,
                               })
                             : '',
+                      })
+                    : ''}
+                  {preview && preview.opensshWorkspaceSkippedCount > 0
+                    ? translate('hostTransfer.export.opensshWorkspaceExcluded', {
+                        count: preview.opensshWorkspaceSkippedCount,
                       })
                     : ''}
                 </span>
@@ -284,6 +309,7 @@ export function HostExportDialog({
               try {
                 const result = await exportHostSelection({
                   hostIds,
+                  workspaceIds,
                   format,
                   password: format === 'dolgate' ? password : undefined,
                 });

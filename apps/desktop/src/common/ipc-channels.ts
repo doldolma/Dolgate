@@ -313,6 +313,15 @@ export const ipcChannels = {
     update: 'snippets:update',
     remove: 'snippets:remove'
   },
+  savedWorkspaces: {
+    list: 'saved-workspaces:list',
+    create: 'saved-workspaces:create',
+    rename: 'saved-workspaces:rename',
+    moveToGroup: 'saved-workspaces:move-to-group',
+    setFavorite: 'saved-workspaces:set-favorite',
+    touchOpened: 'saved-workspaces:touch-opened',
+    remove: 'saved-workspaces:remove'
+  },
   tailnet: {
     list: 'tailnet:list',
     save: 'tailnet:save',

@@ -10,6 +10,7 @@ import type {
   PortForwardRuleRecord,
   SecretMetadataRecord,
   ServerInfoResponse,
+  SavedWorkspaceRecord,
   SnippetRecord,
   SyncPayloadV2,
   SyncRecord,
@@ -20,6 +21,11 @@ import type {
 import {
   formatSyncRevisionEtag,
   isKnownHostKind,
+  collectGroupPaths,
+  isGroupWithinPath,
+  normalizeGroupPath,
+  normalizeSavedWorkspaceRecord,
+  rebaseGroupPath,
   projectSecretMetadata,
   isVaultEpochRejectionCode,
   parseSyncRevisionEtag,
@@ -35,6 +41,7 @@ import {
   DnsOverrideRepository,
   PortForwardRepository,
   SnippetRepository,
+  SavedWorkspaceRepository,
   TailnetRepository,
   SecretMetadataRepository,
   AwsProfileRepository,
@@ -101,6 +108,84 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+interface GroupPathRename {
+  from: string;
+  to: string;
+}
+
+/**
+ * pull 로 들어온 그룹 목록에서 **경로가 바뀐 것**을 골라낸다.
+ *
+ * 그룹 레코드는 id 가 안정적이므로 같은 id 의 path 를 대조하면 rename 매핑이 정확히 나온다 —
+ * 스냅샷만 보고 추측하는 것이 아니다. 삭제(레코드가 사라진 것)는 여기서 다루지 않는다:
+ * delete-subtree 였는지 reparent 였는지 스냅샷으로는 복원할 수 없고, pull 이 사용자 데이터를
+ * 지우거나 말없이 옮기는 것보다 눈에 보이는 채로 두는 편이 안전하다.
+ */
+function collectRenamedGroupPaths(
+  previousGroups: readonly GroupRecord[],
+  nextGroups: readonly GroupRecord[]
+): GroupPathRename[] {
+  const previousPathById = new Map(previousGroups.map((record) => [record.id, record.path]));
+  const renames: GroupPathRename[] = [];
+  for (const record of nextGroups) {
+    const from = previousPathById.get(record.id);
+    // record.path 가 비어 있으면 rename 이 아니다. 그것을 to 로 쓰면 rebaseGroupPath 가 null 로
+    // 정규화해 그 하위 Workspace 를 전부 "그룹 없음" 으로 만들고, 그 손실이 push 된다. 다른
+    // 곳에서는 경로 없는 그룹 레코드가 그냥 안 보일 뿐이다 — 여기서만 데이터가 사라졌다.
+    if (from && record.path && from !== record.path) {
+      renames.push({ from, to: record.path });
+    }
+  }
+  // 가장 구체적인(긴) from 을 먼저 둔다 — 적용은 하나만 한다(rebaseSavedWorkspaceGroups).
+  return renames.sort((left, right) => right.from.length - left.from.length);
+}
+
+/**
+ * 이름이 바뀐 그룹에 소속된 저장된 Workspace 의 groupName 을 따라 옮긴다.
+ *
+ * 로컬에서 이름을 바꾸면 GroupRepository.applyPathMutation 이 이 일을 한다. 그런데 이름 변경이
+ * **동기화로 들어오면** 그 래퍼를 지나지 않아 아무도 rebase 하지 않았고, 데스크톱 사이드바에는
+ * 옛 경로를 든 유령 그룹이 워크스페이스를 안고 남았다(groups/hosts 는 서버 값으로 맞춰지는데
+ * workspaces 의 groupName 만 옛 경로를 가리켰다).
+ *
+ * updatedAt 을 올리고, 호출부가 pendingPush 를 세워 push 를 예약한다 — 그러지 않으면 다음 pull 이
+ * 옛 경로를 다시 설치하는데 그때는 rename diff 가 이미 사라져 되돌릴 방법이 없다(pull 이 로컬을
+ * 고쳤으니 되올려야 한다는 점에서 AWS 프로필 이름 충돌 해소와 같은 처리다).
+ */
+function rebaseSavedWorkspaceGroups(
+  workspaces: readonly SavedWorkspaceRecord[],
+  renames: readonly GroupPathRename[],
+  survivingGroupPaths: ReadonlySet<string>,
+  timestamp: string
+): SavedWorkspaceRecord[] {
+  return workspaces.map((workspace) => {
+    const currentGroupName = normalizeGroupPath(workspace.groupName);
+    if (!currentGroupName) {
+      return workspace;
+    }
+    // **아직 있는 경로는 건드리지 않는다.** 이름을 바꾼 기기가 Workspace 도 아는 기기였다면
+    // 이미 rebase 해서 올렸으므로 pull 로 온 값이 정답이다. 그 값에 rename 을 적용하면
+    // 정답을 망친다 — 두 그룹이 경로를 맞바꾼 경우(a→b, b→a)나, 한 리비전에 prod→prod-2024 와
+    // staging→prod 가 함께 온 경우가 그렇다(비워진 경로를 다른 그룹이 물려받는다).
+    // rebase 가 필요한 것은 그 경로가 **사라진** 경우뿐이다.
+    if (survivingGroupPaths.has(currentGroupName)) {
+      return workspace;
+    }
+    // 적용은 가장 구체적인 rename 하나만 한다. 차례로 여러 번 고치면 앞 rename 이 만들어 낸
+    // 값을 뒤 rename 이 또 고친다.
+    const match = renames.find((rename) =>
+      isGroupWithinPath(currentGroupName, rename.from)
+    );
+    if (!match) {
+      return workspace;
+    }
+    const groupName = rebaseGroupPath(currentGroupName, match.from, match.to);
+    return groupName === currentGroupName
+      ? workspace
+      : { ...workspace, groupName, updatedAt: timestamp };
+  });
+}
+
 function defaultSyncStatus(): SyncStatus {
   return {
     status: 'idle',
@@ -124,6 +209,7 @@ function totalRecordCount(payload: SyncPayloadV2): number {
     payload.portForwards.length +
     payload.dnsOverrides.length +
     payload.snippets.length +
+    payload.workspaces.length +
     payload.tailnets.length +
     payload.preferences.length +
     payload.awsProfiles.length
@@ -143,6 +229,7 @@ function normalizeSyncPayload(
     portForwards: Array.isArray(payload?.portForwards) ? payload.portForwards : [],
     dnsOverrides: Array.isArray(payload?.dnsOverrides) ? payload.dnsOverrides : [],
     snippets: Array.isArray(payload?.snippets) ? payload.snippets : [],
+    workspaces: Array.isArray(payload?.workspaces) ? payload.workspaces : [],
     tailnets: Array.isArray(payload?.tailnets) ? payload.tailnets : [],
     preferences: Array.isArray(payload?.preferences) ? payload.preferences : [],
     awsProfiles:
@@ -372,7 +459,8 @@ export class SyncService {
     private readonly secretStore: SecretStore,
     private readonly outbox: SyncOutboxRepository,
     // 새 인자는 끝에 붙인다. 중간에 끼우면 나머지 호출 인자가 조용히 한 칸씩 밀린다.
-    private readonly tailnets: TailnetRepository
+    private readonly tailnets: TailnetRepository,
+    private readonly savedWorkspaces: SavedWorkspaceRepository
   ) {
     this.state = this.loadPersistedState();
   }
@@ -561,7 +649,9 @@ export class SyncService {
 
       // payload === null 은 304(마지막 동기화 이후 서버 변경 없음) — 적용을 건너뛴다.
       const applied = remote.payload !== null;
-      const hadAwsProfileConflicts = applied
+      // pull 이 로컬 데이터를 고쳤는가(AWS 프로필 이름 충돌 해소, 그룹 rename 에 따른 Workspace
+      // 경로 이동). 고쳤으면 그 결과를 서버로 되올려야 한다.
+      const pullChangedLocalData = applied
         ? await this.applyRemoteSnapshotAtomically(
             remote.payload as SyncPayloadV2,
             awsProfilesServerSupport,
@@ -585,10 +675,10 @@ export class SyncService {
         lastDataChangeAt: applied
           ? new Date().toISOString()
           : this.state.lastDataChangeAt ?? null,
-        pendingPush: hadAwsProfileConflicts,
+        pendingPush: pullChangedLocalData,
         errorMessage: null
       });
-      if (hadAwsProfileConflicts) {
+      if (pullChangedLocalData) {
         this.scheduleRetry();
       }
     } catch (error) {
@@ -785,6 +875,7 @@ export class SyncService {
     this.portForwards.replaceAll([]);
     this.dnsOverrides.replaceAll([]);
     this.snippets.replaceAll([]);
+    this.savedWorkspaces.replaceAll([]);
     this.tailnets.replaceAll([]);
     this.awsProfiles.replaceAll([]);
     this.settings.clearSyncedTerminalPreferences();
@@ -1000,6 +1091,9 @@ export class SyncService {
     const portForwards = this.portForwards.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const dnsOverrides = this.dnsOverrides.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const snippets = this.snippets.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
+    const workspaces = this.savedWorkspaces
+      .list()
+      .map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     // auth key 를 포함한 페이로드를 올린다. 서버는 암호문만 보므로(E2EE) 키가 실려도 안전하다.
     const tailnets = this.tailnets
       .listPayloads()
@@ -1035,6 +1129,7 @@ export class SyncService {
           portForwards,
           dnsOverrides,
           snippets,
+          workspaces,
           preferences,
           awsProfiles,
           tailnets
@@ -1073,6 +1168,9 @@ export class SyncService {
         case 'snippets':
           snippets.push(record);
           break;
+        case 'workspaces':
+          workspaces.push(record);
+          break;
         case 'preferences':
           preferences.push(record);
           break;
@@ -1094,6 +1192,7 @@ export class SyncService {
         portForwards,
         dnsOverrides,
         snippets,
+        workspaces,
         preferences,
         awsProfiles,
         tailnets
@@ -1153,6 +1252,11 @@ export class SyncService {
     const snippets = payload.snippets
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<SnippetRecord>(record.encrypted_payload, vaultKeyBase64));
+    const workspaces = payload.workspaces
+      .filter((record) => !record.deleted_at)
+      .map((record) => decodeEncryptedPayload<SavedWorkspaceRecord>(record.encrypted_payload, vaultKeyBase64))
+      .map(normalizeSavedWorkspaceRecord)
+      .filter((record): record is SavedWorkspaceRecord => record !== null);
     const tailnets = payload.tailnets
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<TailnetPayload>(record.encrypted_payload, vaultKeyBase64));
@@ -1186,16 +1290,35 @@ export class SyncService {
       ])
     );
 
+    // pull 이 로컬 데이터를 고쳤으면(그룹 rename 을 따라 Workspace 경로를 옮겼으면) 그것을
+    // 서버로 되올려야 한다 — 아래 updateState 안에서 세운다.
+    let rebasedWorkspaceGroups = false;
+
     // updateState는 동기식 단일 커밋이다. 그 직전에 lease를 확인해 reset/setup 뒤의
     // 늦은 pull이 새 세대의 로컬 상태를 덮어쓰지 못하게 한다.
     this.assertSyncLeaseActive(lease);
     this.stateStorage.updateState((state) => {
+      // groups 를 덮기 전에 경로 rename 을 구한다(collectRenamedGroupPaths 주석 참고).
+      const renamedGroupPaths = collectRenamedGroupPaths(state.data.groups, groups);
       state.data.groups = groups;
       state.data.hosts = hosts;
       state.data.knownHosts = knownHosts;
       state.data.portForwards = portForwards;
       state.data.dnsOverrides = dnsOverrides;
       state.data.snippets = snippets;
+      const nextSavedWorkspaces =
+        renamedGroupPaths.length > 0
+          ? rebaseSavedWorkspaceGroups(
+              workspaces,
+              renamedGroupPaths,
+              new Set(collectGroupPaths(groups, hosts)),
+              nowIso()
+            )
+          : workspaces;
+      rebasedWorkspaceGroups = nextSavedWorkspaces.some(
+        (record, index) => record !== workspaces[index]
+      );
+      state.data.savedWorkspaces = nextSavedWorkspaces;
       // 레코드와 auth key 를 한 커밋에서 같이 쓴다. 나눠 쓰면 그 사이에 ephemeral 판정이
       // hasAuthKey 를 잘못 보게 된다.
       state.data.tailnets = tailnets.map(normalizeTailnetPayloadForStorage);
@@ -1235,7 +1358,8 @@ export class SyncService {
     });
     await this.onAppliedSnapshot?.();
     this.assertSyncLeaseActive(lease);
-    return hadAwsProfileConflicts;
+    // 둘 다 "pull 이 로컬을 고쳤으니 되올려야 한다" 는 같은 뜻이라 한 신호로 합친다.
+    return hadAwsProfileConflicts || rebasedWorkspaceGroups;
   }
 
   private scheduleRetry(): void {
@@ -1365,6 +1489,7 @@ type SyncRecordKind =
   | 'portForwards'
   | 'dnsOverrides'
   | 'snippets'
+  | 'workspaces'
   | 'preferences'
   | 'awsProfiles'
   | 'tailnets';

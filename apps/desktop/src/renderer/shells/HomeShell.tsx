@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { listTailnets } from '../services/desktop/tailnet';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listTailnets } from "../services/desktop/tailnet";
 import {
   buildGroupOptions,
   getGroupLabel,
@@ -16,49 +16,56 @@ import {
   type HostDraft,
   type HomeHostViewMode,
   type SshKeyGenerateInput,
-} from '@shared';
-import { AwsImportDialog } from '../components/AwsImportDialog';
-import { HostBrowser } from '../components/HostBrowser';
-import { HostDrawer, type HostDrawerHandle } from '../components/HostDrawer';
-import { HostEditSwitchConfirmDialog } from '../components/HostEditSwitchConfirmDialog';
-import { LogoutConfirmDialog } from '../components/LogoutConfirmDialog';
-import { isLocalOnlyAuthState } from '../lib/local-only';
-import { DolgateImportDialog, HostExportDialog } from '../components/HostTransferDialogs';
-import { changeVaultPassphrase, resetVault } from '../services/desktop/auth-window-updater';
-import { getJumpHostCandidates } from '../components/HostForm';
-import { LogsPanel } from '../components/LogsPanel';
-import { OpenSshImportDialog } from '../components/OpenSshImportDialog';
-import { PortForwardingPanel } from '../components/PortForwardingPanel';
-import { SnippetsPanel } from '../components/SnippetsPanel';
-import type { SecretEditDialogRequest } from '../components/SecretEditDialog';
-import { SettingsPanel } from '../components/SettingsPanel';
-import { BOOTSTRAP_TERMINAL_SIZE } from '../components/terminal-resize';
-import { TermiusImportDialog } from '../components/TermiusImportDialog';
-import { WarpgateImportDialog } from '../components/WarpgateImportDialog';
-import { XshellImportDialog } from '../components/XshellImportDialog';
-import { cn } from '../lib/cn';
-import { countActivePortForwardEntries } from '../lib/port-forward-status';
+} from "@shared";
+import { AwsImportDialog } from "../components/AwsImportDialog";
+import { HostBrowser } from "../components/HostBrowser";
+import type { HomeAssetRef } from "../components/host-browser/homeAssets";
+import { HostDrawer, type HostDrawerHandle } from "../components/HostDrawer";
+import { HostEditSwitchConfirmDialog } from "../components/HostEditSwitchConfirmDialog";
+import { LogoutConfirmDialog } from "../components/LogoutConfirmDialog";
+import { isLocalOnlyAuthState } from "../lib/local-only";
+import {
+  DolgateImportDialog,
+  HostExportDialog,
+} from "../components/HostTransferDialogs";
+import {
+  changeVaultPassphrase,
+  resetVault,
+} from "../services/desktop/auth-window-updater";
+import { getJumpHostCandidates } from "../components/HostForm";
+import { LogsPanel } from "../components/LogsPanel";
+import { OpenSshImportDialog } from "../components/OpenSshImportDialog";
+import { PortForwardingPanel } from "../components/PortForwardingPanel";
+import { SnippetsPanel } from "../components/SnippetsPanel";
+import type { SecretEditDialogRequest } from "../components/SecretEditDialog";
+import { SettingsPanel } from "../components/SettingsPanel";
+import { BOOTSTRAP_TERMINAL_SIZE } from "../components/terminal-resize";
+import { TermiusImportDialog } from "../components/TermiusImportDialog";
+import { WarpgateImportDialog } from "../components/WarpgateImportDialog";
+import { XshellImportDialog } from "../components/XshellImportDialog";
+import { cn } from "../lib/cn";
+import { countActivePortForwardEntries } from "../lib/port-forward-status";
 import {
   buildQuickSshHostLabel,
   findExistingQuickSshHost,
   type ParsedQuickSshCommand,
-} from '@shared';
-import { ArrowLeft } from '../ui/icons';
-import type { useLoginController } from '../controllers/useLoginController';
-import { useSettingsViewModel } from '../view-models/appViewModels';
-import { openSessionReplay } from '../services/desktop/session-replays';
+} from "@shared";
+import { ArrowLeft } from "../ui/icons";
+import type { useLoginController } from "../controllers/useLoginController";
+import { useSettingsViewModel } from "../view-models/appViewModels";
+import { openSessionReplay } from "../services/desktop/session-replays";
 import type {
   useAppModalViewModel,
   useContainersViewModel,
   useHomeViewModel,
-} from '../view-models/appViewModels';
+} from "../view-models/appViewModels";
 import {
   buildXshellImportStatusMessage,
   findHost,
   toLinkedHostSummary,
-} from './appShellUtils';
-import { OfflineModeBanner } from './OfflineModeBanner';
-import { useTranslation } from 'react-i18next';
+} from "./appShellUtils";
+import { OfflineModeBanner } from "./OfflineModeBanner";
+import { useTranslation } from "react-i18next";
 
 interface HomeShellProps {
   active: boolean;
@@ -68,7 +75,7 @@ interface HomeShellProps {
    */
   authState: AuthState;
   offlineLeaseExpiryLabel: string | null;
-  desktopPlatform: 'darwin' | 'win32' | 'linux' | 'unknown';
+  desktopPlatform: "darwin" | "win32" | "linux" | "unknown";
   homeViewModel: ReturnType<typeof useHomeViewModel>;
   containersViewModel: ReturnType<typeof useContainersViewModel>;
   modalViewModel: ReturnType<typeof useAppModalViewModel>;
@@ -93,16 +100,37 @@ export function HomeShell({
   const { t: translate } = useTranslation();
   const settingsViewModel = useSettingsViewModel();
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
-  const [detailTab, setDetailTab] = useState<'overview' | 'connection'>('overview');
+  const [detailTab, setDetailTab] = useState<"overview" | "connection">(
+    "overview",
+  );
   const [isAwsImportOpen, setIsAwsImportOpen] = useState(false);
   const [isDolgateImportOpen, setIsDolgateImportOpen] = useState(false);
-  const [exportHostIds, setExportHostIds] = useState<string[] | null>(null);
+  const [exportAssets, setExportAssets] = useState<HomeAssetRef[] | null>(null);
+  // 내보내기 대화상자에 넘기는 id 배열은 **동일성이 안정해야 한다.** 렌더마다 새로 만들면
+  // 대화상자의 미리보기 효과가 매번 다시 돌아 IPC(전체 state 복제 + 번들 빌드)를 반복하고,
+  // 입력 중인 암호까지 지워졌다(HostExportDialog 의 초기화 효과 주석 참고).
+  const exportHostIds = useMemo(
+    () =>
+      exportAssets
+        ?.filter((asset) => asset.kind === "host")
+        .map((asset) => asset.id) ?? [],
+    [exportAssets],
+  );
+  const exportWorkspaceIds = useMemo(
+    () =>
+      exportAssets
+        ?.filter((asset) => asset.kind === "workspace")
+        .map((asset) => asset.id) ?? [],
+    [exportAssets],
+  );
   const [isOpenSshImportOpen, setIsOpenSshImportOpen] = useState(false);
   const [isXshellImportOpen, setIsXshellImportOpen] = useState(false);
   const [isTermiusImportOpen, setIsTermiusImportOpen] = useState(false);
   const [isWarpgateImportOpen, setIsWarpgateImportOpen] = useState(false);
   const [hostBrowserError, setHostBrowserError] = useState<string | null>(null);
-  const [hostBrowserStatus, setHostBrowserStatus] = useState<string | null>(null);
+  const [hostBrowserStatus, setHostBrowserStatus] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     if (
@@ -115,12 +143,15 @@ export function HomeShell({
 
   // ⌘K / Ctrl+K로 호스트 검색에 포커스. 홈의 hosts 화면이 활성일 때만 동작(터미널 등과 충돌 방지).
   useEffect(() => {
-    if (!active || homeViewModel.homeSection !== 'hosts') {
+    if (!active || homeViewModel.homeSection !== "hosts") {
       return;
     }
     function handleSearchShortcut(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && (event.key === 'k' || event.key === 'K')) {
-        const input = document.getElementById('host-search');
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        (event.key === "k" || event.key === "K")
+      ) {
+        const input = document.getElementById("host-search");
         if (input instanceof HTMLInputElement) {
           event.preventDefault();
           input.focus();
@@ -128,12 +159,12 @@ export function HomeShell({
         }
       }
     }
-    window.addEventListener('keydown', handleSearchShortcut);
-    return () => window.removeEventListener('keydown', handleSearchShortcut);
+    window.addEventListener("keydown", handleSearchShortcut);
+    return () => window.removeEventListener("keydown", handleSearchShortcut);
   }, [active, homeViewModel.homeSection]);
 
   const editingHostId =
-    homeViewModel.hostDrawer.mode === 'edit'
+    homeViewModel.hostDrawer.mode === "edit"
       ? homeViewModel.hostDrawer.hostId
       : null;
   const editedHost = findHost(homeViewModel.hosts, editingHostId);
@@ -164,16 +195,16 @@ export function HomeShell({
    * 떠나는 경로는 하나가 아니다 — 다른 호스트 선택, 그룹 이동, All Hosts 복귀, 섹션 이동. 각
    * 경로마다 따로 막으면 하나를 빠뜨리고, 빠뜨린 곳에서 편집 내용이 조용히 사라진다.
    */
-  const [pendingEditorExit, setPendingEditorExit] = useState<{ run: () => void } | null>(
-    null,
-  );
+  const [pendingEditorExit, setPendingEditorExit] = useState<{
+    run: () => void;
+  } | null>(null);
   const [isEditorExitSaving, setIsEditorExitSaving] = useState(false);
   const [editorExitError, setEditorExitError] = useState<string | null>(null);
   const groupOptions = useMemo(
     () =>
       buildGroupOptions(homeViewModel.groups, homeViewModel.hosts, [
         currentHost?.groupName,
-        homeViewModel.hostDrawer.mode === 'create'
+        homeViewModel.hostDrawer.mode === "create"
           ? homeViewModel.hostDrawer.defaultGroupPath
           : homeViewModel.currentGroupPath,
       ]),
@@ -191,8 +222,8 @@ export function HomeShell({
   );
   const isDrawerOpen =
     active &&
-    homeViewModel.homeSection === 'hosts' &&
-    homeViewModel.hostDrawer.mode !== 'closed';
+    homeViewModel.homeSection === "hosts" &&
+    homeViewModel.hostDrawer.mode !== "closed";
 
   // 호스트 편집에서 경유할 tailnet 을 고르려면 등록된 목록이 필요하다.
   //
@@ -206,7 +237,7 @@ export function HomeShell({
   const jumpHostTailnetNames = useMemo(() => {
     const names: Record<string, string> = {};
     for (const host of homeViewModel.hosts) {
-      const tailnetId = 'tailnetId' in host ? host.tailnetId?.trim() : '';
+      const tailnetId = "tailnetId" in host ? host.tailnetId?.trim() : "";
       if (!tailnetId) {
         continue;
       }
@@ -221,24 +252,27 @@ export function HomeShell({
   // 마운트에 한 번만 읽으면 안 되는 이유는 아래 useEffect 주석에 있고, **드로어 열림에만
   // 걸어도 부족하다** — 팝업은 드로어가 이미 열린 상태에서 뜨므로 그 조건이 다시 참이 되지
   // 않는다. 추가한 tailnet 이 목록에 없으면 폼이 "이 기기에 없는 tailnet" 으로 표시한다.
-  const refreshTailnetOptions = useCallback(async (isCancelled?: () => boolean) => {
-    // Promise 로 감싸는 이유: 브리지가 없으면 listTailnets 가 동기적으로 던지고, 그러면
-    // .catch 가 잡지 못해 셸 전체가 죽는다. tailnet 을 못 읽는 것이 호스트 편집을 막을
-    // 이유는 없다.
-    await Promise.resolve()
-      .then(listTailnets)
-      .then((records) => {
-        if (isCancelled?.()) {
-          return;
-        }
-        setTailnetOptions(
-          records.map((record) => ({ id: record.id, label: record.label })),
-        );
-      })
-      .catch(() => {
-        // tailnet 을 못 읽어도 호스트 편집 자체는 되어야 한다.
-      });
-  }, []);
+  const refreshTailnetOptions = useCallback(
+    async (isCancelled?: () => boolean) => {
+      // Promise 로 감싸는 이유: 브리지가 없으면 listTailnets 가 동기적으로 던지고, 그러면
+      // .catch 가 잡지 못해 셸 전체가 죽는다. tailnet 을 못 읽는 것이 호스트 편집을 막을
+      // 이유는 없다.
+      await Promise.resolve()
+        .then(listTailnets)
+        .then((records) => {
+          if (isCancelled?.()) {
+            return;
+          }
+          setTailnetOptions(
+            records.map((record) => ({ id: record.id, label: record.label })),
+          );
+        })
+        .catch(() => {
+          // tailnet 을 못 읽어도 호스트 편집 자체는 되어야 한다.
+        });
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!isDrawerOpen) {
@@ -252,13 +286,13 @@ export function HomeShell({
   }, [isDrawerOpen, refreshTailnetOptions]);
   const highlightedHostId = editingHostId ?? selectedHostId;
   const sectionTitle =
-    homeViewModel.homeSection === 'portForwarding'
-      ? 'Port Forwarding'
-      : homeViewModel.homeSection === 'snippets'
-        ? 'Snippets'
-        : homeViewModel.homeSection === 'logs'
-          ? 'Logs'
-          : 'Settings';
+    homeViewModel.homeSection === "portForwarding"
+      ? "Port Forwarding"
+      : homeViewModel.homeSection === "snippets"
+        ? "Snippets"
+        : homeViewModel.homeSection === "logs"
+          ? "Logs"
+          : "Settings";
 
   function resetHostBrowserMessages() {
     setHostBrowserError(null);
@@ -266,13 +300,15 @@ export function HomeShell({
   }
 
   function handleHostViewModeChange(mode: HomeHostViewMode) {
-    void settingsViewModel.updateSettings({ homeHostViewMode: mode }).catch((error) => {
-      setHostBrowserError(
-        error instanceof Error
-          ? error.message
-          : translate('home.error.layoutSaveFailed'),
-      );
-    });
+    void settingsViewModel
+      .updateSettings({ homeHostViewMode: mode })
+      .catch((error) => {
+        setHostBrowserError(
+          error instanceof Error
+            ? error.message
+            : translate("home.error.layoutSaveFailed"),
+        );
+      });
   }
 
   async function handleQuickConnectSsh(input: ParsedQuickSshCommand) {
@@ -284,8 +320,8 @@ export function HomeShell({
       return;
     }
 
-    const draft: Extract<HostDraft, { kind: 'ssh' }> = {
-      kind: 'ssh',
+    const draft: Extract<HostDraft, { kind: "ssh" }> = {
+      kind: "ssh",
       label: buildQuickSshHostLabel(
         input,
         homeViewModel.hosts,
@@ -297,7 +333,7 @@ export function HomeShell({
       hostname: input.hostname,
       port: input.port,
       username: input.username,
-      authType: 'password',
+      authType: "password",
       privateKeyPath: null,
       certificatePath: null,
       secretRef: null,
@@ -316,14 +352,19 @@ export function HomeShell({
     await homeViewModel.connectHost(created.id, 120, 32);
   }
 
-  function buildMovedGroupPath(path: string, targetParentPath: string | null): string | null {
+  function buildMovedGroupPath(
+    path: string,
+    targetParentPath: string | null,
+  ): string | null {
     const normalizedPath = normalizeGroupPath(path);
     if (!normalizedPath) {
       return null;
     }
     const normalizedTargetParentPath = normalizeGroupPath(targetParentPath);
     return normalizeGroupPath(
-      normalizedTargetParentPath ? `${normalizedTargetParentPath}/${getGroupLabel(normalizedPath)}` : getGroupLabel(normalizedPath)
+      normalizedTargetParentPath
+        ? `${normalizedTargetParentPath}/${getGroupLabel(normalizedPath)}`
+        : getGroupLabel(normalizedPath),
     );
   }
 
@@ -333,7 +374,9 @@ export function HomeShell({
       return null;
     }
     const parentPath = getParentGroupPath(normalizedPath);
-    return normalizeGroupPath(parentPath ? `${parentPath}/${name.trim()}` : name.trim());
+    return normalizeGroupPath(
+      parentPath ? `${parentPath}/${name.trim()}` : name.trim(),
+    );
   }
 
   function handleSelectHost(hostId: string) {
@@ -355,7 +398,7 @@ export function HomeShell({
    */
   function guardEditorExit(run: () => void): boolean {
     if (
-      homeViewModel.hostDrawer.mode === 'closed' ||
+      homeViewModel.hostDrawer.mode === "closed" ||
       !hostDrawerRef.current?.isDirty()
     ) {
       run();
@@ -376,9 +419,9 @@ export function HomeShell({
    */
   function canSelectHostWhileEditing(
     hostId: string,
-    options?: { reason?: 'click' | 'menu' },
+    options?: { reason?: "click" | "menu" },
   ): boolean {
-    if (homeViewModel.hostDrawer.mode === 'closed') {
+    if (homeViewModel.hostDrawer.mode === "closed") {
       return true;
     }
     if (hostId === editingHostId) {
@@ -387,13 +430,38 @@ export function HomeShell({
     // 우클릭은 메뉴를 열려는 동작이다. 그것 때문에 "저장하시겠습니까" 가 뜨면 메뉴를 한 번 열려고
     // 편집 흐름을 끊게 된다 — 편집 중에는 선택을 옮기지 않고 조용히 넘긴다(메뉴 대상 표시가
     // 무엇에 걸리는지 알려 준다).
-    if (options?.reason === 'menu') {
+    if (options?.reason === "menu") {
       return false;
     }
     guardEditorExit(() => switchEditTargetTo(hostId));
     // 선택은 selectedHostId 로 옮긴다(가드가 통과했으면 이미 옮겼다). 내부 상태까지 여기서 또
     // 움직이면 경로가 둘이 되고, 확인 대기 중에는 하이라이트만 먼저 튄다.
     return false;
+  }
+
+  /**
+   * 호스트가 아닌 항목(Workspace)을 고르려면 편집기를 떠나야 한다.
+   *
+   * canSelectHostWhileEditing 의 짝이고, onLeaveGroupScope 와 같은 "이어서 실행" 모양이다 —
+   * 막기만 하면 확인을 받은 뒤 선택을 다시 실행할 주체가 없어 편집기만 닫히고 클릭이 사라진다.
+   * 우클릭(menu)은 아무것도 부르지 않는다: 메뉴 한 번 열려고 편집 흐름을 끊지 않는다.
+   */
+  function onLeaveHostEditorForAsset(
+    proceed: () => void,
+    options?: { reason?: "click" | "menu" },
+  ): void {
+    if (homeViewModel.hostDrawer.mode === "closed") {
+      proceed();
+      return;
+    }
+    if (options?.reason === "menu") {
+      return;
+    }
+    guardEditorExit(() => {
+      setSelectedHostId(null);
+      homeViewModel.closeHostDrawer();
+      proceed();
+    });
   }
 
   function handleEditHost(hostId: string) {
@@ -410,14 +478,14 @@ export function HomeShell({
       (item) => item.secretRef === secretRef,
     );
     onRequestSecretEditor({
-      source: 'host',
+      source: "host",
       secretRef,
       label: entry?.label ?? currentHost.label,
       linkedHosts: homeViewModel.hosts
         .filter(isSshHostRecord)
         .filter((host) => getHostSecretRef(host) === secretRef)
         .map(toLinkedHostSummary),
-      initialMode: 'clone-for-host',
+      initialMode: "clone-for-host",
       initialHostId: currentHost.id,
     });
   }
@@ -430,14 +498,14 @@ export function HomeShell({
       return;
     }
     onRequestSecretEditor({
-      source: 'keychain',
+      source: "keychain",
       secretRef,
       label: entry.label,
       linkedHosts: homeViewModel.hosts
         .filter(isSshHostRecord)
         .filter((host) => getHostSecretRef(host) === secretRef)
         .map(toLinkedHostSummary),
-      initialMode: 'update-shared',
+      initialMode: "update-shared",
       initialHostId: null,
     });
   }
@@ -449,8 +517,8 @@ export function HomeShell({
     const linkedHostCount = entry?.linkedHostCount ?? 0;
     const confirmed = window.confirm(
       linkedHostCount > 0
-        ? translate('home.secret.deleteLinked', { count: linkedHostCount })
-        : translate('home.secret.delete'),
+        ? translate("home.secret.deleteLinked", { count: linkedHostCount })
+        : translate("home.secret.delete"),
     );
     if (!confirmed) {
       return;
@@ -464,7 +532,7 @@ export function HomeShell({
   ) {
     const host = findHost(homeViewModel.hosts, hostId);
     if (!host || (!isSshHostRecord(host) && !isAwsEc2HostRecord(host))) {
-      throw new Error(translate('home.error.sshHostNotFound'));
+      throw new Error(translate("home.error.sshHostNotFound"));
     }
     // EC2는 SSH-over-SSM(EIC)로 접속해 설치만 한다 — 매 연결 임시 키를 쓰므로
     // "이 키로 접속 전환"이 없다.
@@ -473,18 +541,22 @@ export function HomeShell({
     const result = await settingsViewModel.installSshPublicKey({
       secretRef: key.secretRef,
       hostIds: [host.id],
-      mode: isEc2 ? 'installOnly' : 'installAndUse',
+      mode: isEc2 ? "installOnly" : "installAndUse",
       passphraseOverride:
-        input.passphrase && !input.savePassphrase ? input.passphrase : undefined,
+        input.passphrase && !input.savePassphrase
+          ? input.passphrase
+          : undefined,
     });
-    const failed = result.results.find((entry) => entry.status === 'failed');
+    const failed = result.results.find((entry) => entry.status === "failed");
     if (failed) {
-      throw new Error(failed.message ?? translate('home.error.keyInstallFailed'));
+      throw new Error(
+        failed.message ?? translate("home.error.keyInstallFailed"),
+      );
     }
     setHostBrowserStatus(
       isEc2
-        ? translate('home.key.installedAuthorizedKeys', { label: host.label })
-        : translate('home.key.switched', { label: host.label }),
+        ? translate("home.key.installedAuthorizedKeys", { label: host.label })
+        : translate("home.key.switched", { label: host.label }),
     );
   }
 
@@ -493,7 +565,7 @@ export function HomeShell({
     <HostDrawer
       ref={hostDrawerRef}
       open={isDrawerOpen}
-      mode={homeViewModel.hostDrawer.mode === 'create' ? 'create' : 'edit'}
+      mode={homeViewModel.hostDrawer.mode === "create" ? "create" : "edit"}
       host={currentHost}
       keychainEntries={settingsViewModel.keychainEntries}
       groupOptions={groupOptions}
@@ -502,14 +574,14 @@ export function HomeShell({
       tailnetOptions={tailnetOptions}
       snippets={homeViewModel.snippets}
       defaultGroupPath={
-        homeViewModel.hostDrawer.mode === 'create'
+        homeViewModel.hostDrawer.mode === "create"
           ? homeViewModel.hostDrawer.defaultGroupPath
           : homeViewModel.currentGroupPath
       }
       createKind={
-        homeViewModel.hostDrawer.mode === 'create'
+        homeViewModel.hostDrawer.mode === "create"
           ? homeViewModel.hostDrawer.kind
-          : 'ssh'
+          : "ssh"
       }
       desktopPlatform={desktopPlatform}
       // 서버가 계정 데이터 수준을 저장할 수 있을 때만 RDP 를 만들 수 있다(HostDrawer 주석 참고).
@@ -523,13 +595,13 @@ export function HomeShell({
       }
       onClose={homeViewModel.closeHostDrawer}
       onSubmit={async (draft, secrets) => {
-        const isEdit = homeViewModel.hostDrawer.mode === 'edit';
+        const isEdit = homeViewModel.hostDrawer.mode === "edit";
         // 공유 폴더는 **레코드로 내보내지 않는다.** 경로가 이 기기의 것이라 동기화되면 다른
         // 기기에서 열 수 없는 값이 된다(모니터 세부 선택과 같은 이유). 저장한 뒤 그 호스트의
         // 기기 로컬 설정에 넣는다 — 새로 만든 경우에도 id 는 저장이 끝나야 나온다.
         const { draft: outgoing, drives } = detachHostDrives(draft);
         const saved = await homeViewModel.saveHost(
-          isEdit ? currentHost?.id ?? null : null,
+          isEdit ? (currentHost?.id ?? null) : null,
           outgoing,
           secrets,
         );
@@ -564,13 +636,13 @@ export function HomeShell({
   return (
     <section
       className={cn(
-        'absolute inset-0 flex min-h-0 flex-col transition-[opacity,transform] duration-180',
+        "absolute inset-0 flex min-h-0 flex-col transition-[opacity,transform] duration-180",
         active
-          ? 'pointer-events-auto opacity-100 scale-100'
-          : 'pointer-events-none opacity-0 scale-[0.995]',
+          ? "pointer-events-auto opacity-100 scale-100"
+          : "pointer-events-none opacity-0 scale-[0.995]",
       )}
     >
-      {authState.status === 'offline-authenticated' && authState.offline ? (
+      {authState.status === "offline-authenticated" && authState.offline ? (
         <OfflineModeBanner
           expiryLabel={offlineLeaseExpiryLabel}
           isRetrying={loginController.isRetryingOnline}
@@ -581,10 +653,25 @@ export function HomeShell({
       ) : null}
 
       <div className="relative min-h-0 flex-1">
-        {homeViewModel.homeSection === 'hosts' ? (
+        {homeViewModel.homeSection === "hosts" ? (
           <HostBrowser
             active={active}
             hostEditor={hostEditor}
+            savedWorkspaces={homeViewModel.savedWorkspaces}
+            workspaceActivityLogs={settingsViewModel.activityLogs}
+            onOpenSavedWorkspace={(workspaceId) =>
+              homeViewModel.openSavedWorkspace(
+                workspaceId,
+                BOOTSTRAP_TERMINAL_SIZE.cols,
+                BOOTSTRAP_TERMINAL_SIZE.rows,
+              )
+            }
+            onRenameSavedWorkspace={homeViewModel.renameSavedWorkspace}
+            onDuplicateSavedWorkspace={homeViewModel.duplicateSavedWorkspace}
+            onSetSavedWorkspaceFavorite={
+              homeViewModel.setSavedWorkspaceFavorite
+            }
+            onRemoveSavedWorkspace={homeViewModel.removeSavedWorkspace}
             tmuxPrefixKey={settingsViewModel.settings.tmuxPrefixKey}
             activePortForwardEntryCount={countActivePortForwardEntries(
               homeViewModel.portForwardRuntimes,
@@ -596,7 +683,7 @@ export function HomeShell({
             keychainEntries={settingsViewModel.keychainEntries}
             currentGroupPath={homeViewModel.currentGroupPath}
             searchQuery={homeViewModel.searchQuery}
-            hostViewMode={settingsViewModel.settings.homeHostViewMode ?? 'grid'}
+            hostViewMode={settingsViewModel.settings.homeHostViewMode ?? "grid"}
             selectedHostId={highlightedHostId}
             errorMessage={hostBrowserError}
             statusMessage={hostBrowserStatus}
@@ -616,7 +703,7 @@ export function HomeShell({
                   setHostBrowserError(
                     error instanceof Error
                       ? error.message
-                      : translate('home.error.localTerminalFailed'),
+                      : translate("home.error.localTerminalFailed"),
                   );
                 });
             }}
@@ -654,21 +741,25 @@ export function HomeShell({
               setSelectedHostId(null);
               setIsWarpgateImportOpen(true);
             }}
-            onExportHosts={(hostIds) => {
+            onExportAssets={(assets) => {
               resetHostBrowserMessages();
-              setExportHostIds(hostIds);
+              setExportAssets(assets);
             }}
             onCreateGroup={homeViewModel.createGroup}
             onRemoveGroup={homeViewModel.removeGroup}
             onReorderGroup={async (path, targetParentPath, targetIndex) => {
               resetHostBrowserMessages();
               try {
-                await homeViewModel.reorderGroup(path, targetParentPath, targetIndex);
+                await homeViewModel.reorderGroup(
+                  path,
+                  targetParentPath,
+                  targetIndex,
+                );
               } catch (error) {
                 setHostBrowserError(
                   error instanceof Error
                     ? error.message
-                    : translate('home.group.moveFailed'),
+                    : translate("home.group.moveFailed"),
                 );
               }
             }}
@@ -678,13 +769,15 @@ export function HomeShell({
                 await homeViewModel.moveGroup(path, targetParentPath);
                 const nextPath = buildMovedGroupPath(path, targetParentPath);
                 setHostBrowserStatus(
-                  nextPath ? translate('home.group.movedTo', { path: nextPath }) : translate('home.group.moved'),
+                  nextPath
+                    ? translate("home.group.movedTo", { path: nextPath })
+                    : translate("home.group.moved"),
                 );
               } catch (error) {
                 setHostBrowserError(
                   error instanceof Error
                     ? error.message
-                    : translate('home.error.groupMoveFailed'),
+                    : translate("home.error.groupMoveFailed"),
                 );
                 throw error;
               }
@@ -695,13 +788,15 @@ export function HomeShell({
                 await homeViewModel.renameGroup(path, name);
                 const nextPath = buildRenamedGroupPath(path, name);
                 setHostBrowserStatus(
-                  nextPath ? translate('home.group.renamedTo', { path: nextPath }) : translate('home.group.renamed'),
+                  nextPath
+                    ? translate("home.group.renamedTo", { path: nextPath })
+                    : translate("home.group.renamed"),
                 );
               } catch (error) {
                 setHostBrowserError(
                   error instanceof Error
                     ? error.message
-                    : translate('home.error.groupRenameFailed'),
+                    : translate("home.error.groupRenameFailed"),
                 );
                 throw error;
               }
@@ -724,6 +819,7 @@ export function HomeShell({
             }}
             onSelectHost={handleSelectHost}
             canSelectHost={canSelectHostWhileEditing}
+            onLeaveHostEditor={onLeaveHostEditorForAsset}
             onEditHost={handleEditHost}
             onDuplicateHosts={async (hostIds) => {
               resetHostBrowserMessages();
@@ -731,18 +827,21 @@ export function HomeShell({
                 await homeViewModel.duplicateHosts(hostIds);
                 setHostBrowserStatus(
                   hostIds.length === 1
-                    ? 'Copied 1 host.'
+                    ? "Copied 1 host."
                     : `Copied ${hostIds.length} hosts.`,
                 );
               } catch (error) {
                 setHostBrowserError(
                   error instanceof Error
                     ? error.message
-                    : 'Failed to copy the selected hosts.',
+                    : "Failed to copy the selected hosts.",
                 );
               }
             }}
             onMoveHostToGroup={homeViewModel.moveHostToGroup}
+            onMoveSavedWorkspaceToGroup={
+              homeViewModel.moveSavedWorkspaceToGroup
+            }
             onSetHostFavorite={homeViewModel.setHostFavorite}
             onRemoveHost={homeViewModel.removeHost}
             onRemoveSecret={settingsViewModel.removeKeychainSecret}
@@ -755,7 +854,7 @@ export function HomeShell({
                 setHostBrowserError(
                   error instanceof Error
                     ? error.message
-                    : translate('home.error.connectFailed'),
+                    : translate("home.error.connectFailed"),
                 );
               }
             }}
@@ -764,12 +863,18 @@ export function HomeShell({
               try {
                 setHostBrowserError(null);
                 setSelectedHostId(hostId);
-                await homeViewModel.connectHost(hostId, 120, 32, undefined, true);
+                await homeViewModel.connectHost(
+                  hostId,
+                  120,
+                  32,
+                  undefined,
+                  true,
+                );
               } catch (error) {
                 setHostBrowserError(
                   error instanceof Error
                     ? error.message
-                    : translate('home.error.tmuxFailed'),
+                    : translate("home.error.tmuxFailed"),
                 );
               }
             }}
@@ -782,7 +887,7 @@ export function HomeShell({
                 setHostBrowserError(
                   error instanceof Error
                     ? error.message
-                    : translate('home.error.containersFailed'),
+                    : translate("home.error.containersFailed"),
                 );
               }
             }}
@@ -798,18 +903,22 @@ export function HomeShell({
                 setHostBrowserError(
                   error instanceof Error
                     ? error.message
-                    : translate('home.error.quickConnectFailed'),
+                    : translate("home.error.quickConnectFailed"),
                 );
               }
             }}
             onOpenSftp={(hostId) => {
               resetHostBrowserMessages();
               setSelectedHostId(hostId);
-              void homeViewModel.connectSftpHost('right', hostId).catch((error) => {
-                setHostBrowserError(
-                  error instanceof Error ? error.message : translate('home.error.sftpFailed'),
-                );
-              });
+              void homeViewModel
+                .connectSftpHost("right", hostId)
+                .catch((error) => {
+                  setHostBrowserError(
+                    error instanceof Error
+                      ? error.message
+                      : translate("home.error.sftpFailed"),
+                  );
+                });
             }}
             onSelectSection={homeViewModel.openHomeSection}
             detailTab={detailTab}
@@ -823,7 +932,7 @@ export function HomeShell({
             <div className="flex items-center gap-3 border-b border-[var(--border)] px-[1.1rem] py-[0.9rem]">
               <button
                 type="button"
-                onClick={() => homeViewModel.openHomeSection('hosts')}
+                onClick={() => homeViewModel.openHomeSection("hosts")}
                 className="group inline-flex items-center gap-[0.4rem] rounded-[10px] border border-[var(--border)] bg-[var(--surface-elevated)] py-[0.5rem] pl-[0.65rem] pr-[0.9rem] text-[0.82rem] font-semibold text-[var(--text-soft)] transition-[color,border-color,background-color] duration-140 hover:border-[color-mix(in_srgb,var(--accent-strong)_38%,var(--border)_62%)] hover:bg-[var(--selection-tint)] hover:text-[var(--accent-strong)]"
               >
                 <ArrowLeft
@@ -832,104 +941,119 @@ export function HomeShell({
                 />
                 Hosts
               </button>
-              <h2 className="text-[1rem] font-bold text-[var(--text)]">{sectionTitle}</h2>
+              <h2 className="text-[1rem] font-bold text-[var(--text)]">
+                {sectionTitle}
+              </h2>
             </div>
             <main className="min-h-0 flex-1 overflow-auto px-[1.1rem] pb-[1.3rem] pt-[1.1rem]">
-              {homeViewModel.homeSection === 'portForwarding' ? (
-          <PortForwardingPanel
-            hosts={homeViewModel.hosts}
-            containerTabs={containersViewModel.containerTabs}
-            rules={homeViewModel.portForwards}
-            dnsOverrides={homeViewModel.dnsOverrides}
-            runtimes={homeViewModel.portForwardRuntimes}
-            interactiveAuth={
-              modalViewModel.pendingInteractiveAuths.find(
-                (auth) => auth.source === 'portForward',
-              ) ?? null
-            }
-            discoveryInteractiveAuth={
-              modalViewModel.pendingInteractiveAuths.find(
-                (auth) => auth.source === 'containers',
-              ) ?? null
-            }
-            onSave={homeViewModel.savePortForward}
-            onSaveDnsOverride={homeViewModel.saveDnsOverride}
-            onSetStaticDnsOverrideActive={homeViewModel.setStaticDnsOverrideActive}
-            onRemoveDnsOverride={homeViewModel.removeDnsOverride}
-            onRemove={homeViewModel.removePortForward}
-            onStart={homeViewModel.startPortForward}
-            onStop={homeViewModel.stopPortForward}
-            onRespondInteractiveAuth={modalViewModel.respondInteractiveAuth}
-            onReopenInteractiveAuthUrl={modalViewModel.reopenInteractiveAuthUrl}
-            onClearInteractiveAuth={modalViewModel.clearPendingInteractiveAuth}
-          />
-        ) : null}
+              {homeViewModel.homeSection === "portForwarding" ? (
+                <PortForwardingPanel
+                  hosts={homeViewModel.hosts}
+                  containerTabs={containersViewModel.containerTabs}
+                  rules={homeViewModel.portForwards}
+                  dnsOverrides={homeViewModel.dnsOverrides}
+                  runtimes={homeViewModel.portForwardRuntimes}
+                  interactiveAuth={
+                    modalViewModel.pendingInteractiveAuths.find(
+                      (auth) => auth.source === "portForward",
+                    ) ?? null
+                  }
+                  discoveryInteractiveAuth={
+                    modalViewModel.pendingInteractiveAuths.find(
+                      (auth) => auth.source === "containers",
+                    ) ?? null
+                  }
+                  onSave={homeViewModel.savePortForward}
+                  onSaveDnsOverride={homeViewModel.saveDnsOverride}
+                  onSetStaticDnsOverrideActive={
+                    homeViewModel.setStaticDnsOverrideActive
+                  }
+                  onRemoveDnsOverride={homeViewModel.removeDnsOverride}
+                  onRemove={homeViewModel.removePortForward}
+                  onStart={homeViewModel.startPortForward}
+                  onStop={homeViewModel.stopPortForward}
+                  onRespondInteractiveAuth={
+                    modalViewModel.respondInteractiveAuth
+                  }
+                  onReopenInteractiveAuthUrl={
+                    modalViewModel.reopenInteractiveAuthUrl
+                  }
+                  onClearInteractiveAuth={
+                    modalViewModel.clearPendingInteractiveAuth
+                  }
+                />
+              ) : null}
 
-        {homeViewModel.homeSection === 'snippets' ? (
-          <SnippetsPanel
-            snippets={homeViewModel.snippets}
-            hosts={homeViewModel.hosts}
-            onSave={homeViewModel.saveSnippet}
-            onRemove={homeViewModel.removeSnippet}
-          />
-        ) : null}
+              {homeViewModel.homeSection === "snippets" ? (
+                <SnippetsPanel
+                  snippets={homeViewModel.snippets}
+                  hosts={homeViewModel.hosts}
+                  onSave={homeViewModel.saveSnippet}
+                  onRemove={homeViewModel.removeSnippet}
+                />
+              ) : null}
 
-        {homeViewModel.homeSection === 'logs' ? (
-          <LogsPanel
-            logs={settingsViewModel.activityLogs}
-            onClear={settingsViewModel.clearLogs}
-            onOpenReplay={openSessionReplay}
-          />
-        ) : null}
+              {homeViewModel.homeSection === "logs" ? (
+                <LogsPanel
+                  logs={settingsViewModel.activityLogs}
+                  onClear={settingsViewModel.clearLogs}
+                  onOpenReplay={openSessionReplay}
+                />
+              ) : null}
 
-        {homeViewModel.homeSection === 'settings' ? (
-          <SettingsPanel
-            activeSection={settingsViewModel.settingsSection}
-            hosts={settingsViewModel.hosts}
-            settings={settingsViewModel.settings}
-            knownHosts={settingsViewModel.knownHosts}
-            keychainEntries={settingsViewModel.keychainEntries}
-            savedCredentialsSearchQuery={settingsViewModel.savedCredentialsSearchQuery}
-            currentUserEmail={authState.session?.user.email ?? null}
-            isLocalOnly={isLocalOnlyAuthState(authState)}
-            onStartLogin={async () => onRequestLogin()}
-            passwordState={
-              authState.status === 'authenticated'
-                ? (authState.session?.user.passwordState ?? null)
-                : null
-            }
-            desktopPlatform={desktopPlatform}
-            onSelectSection={settingsViewModel.openSettingsSection}
-            onSavedCredentialsSearchQueryChange={
-              settingsViewModel.setSavedCredentialsSearchQuery
-            }
-            onUpdateSettings={settingsViewModel.updateSettings}
-            onRemoveKnownHost={settingsViewModel.removeKnownHost}
-            onRevokeRdpCertificate={settingsViewModel.revokeRdpCertificateTrust}
-            onRemoveSecret={handleRemoveSecret}
-            onEditSecret={openKeychainSecretEditor}
-            onGenerateSshKey={settingsViewModel.generateSshKey}
-            onCopySshPublicKey={settingsViewModel.copySshPublicKey}
-            onInstallSshPublicKey={settingsViewModel.installSshPublicKey}
-            onLoadSessionReplayStorageUsage={
-              settingsViewModel.loadSessionReplayStorageUsage
-            }
-            onLogout={loginController.logout}
-            onDeleteAccount={loginController.deleteAccount}
-            onChangeAccountPassword={loginController.changeAccountPassword}
-            webauthnSupported={authState.capabilities?.webauthn ?? false}
-            onAddPasskey={loginController.addPasskey}
-            onListPasskeys={loginController.listPasskeys}
-            onDeletePasskey={loginController.deletePasskey}
-            vaultStatus={authState.vault?.status ?? null}
-            onChangeVaultPassphrase={changeVaultPassphrase}
-            onResetVault={resetVault}
-          />
-        ) : null}
+              {homeViewModel.homeSection === "settings" ? (
+                <SettingsPanel
+                  activeSection={settingsViewModel.settingsSection}
+                  hosts={settingsViewModel.hosts}
+                  settings={settingsViewModel.settings}
+                  knownHosts={settingsViewModel.knownHosts}
+                  keychainEntries={settingsViewModel.keychainEntries}
+                  savedCredentialsSearchQuery={
+                    settingsViewModel.savedCredentialsSearchQuery
+                  }
+                  currentUserEmail={authState.session?.user.email ?? null}
+                  isLocalOnly={isLocalOnlyAuthState(authState)}
+                  onStartLogin={async () => onRequestLogin()}
+                  passwordState={
+                    authState.status === "authenticated"
+                      ? (authState.session?.user.passwordState ?? null)
+                      : null
+                  }
+                  desktopPlatform={desktopPlatform}
+                  onSelectSection={settingsViewModel.openSettingsSection}
+                  onSavedCredentialsSearchQueryChange={
+                    settingsViewModel.setSavedCredentialsSearchQuery
+                  }
+                  onUpdateSettings={settingsViewModel.updateSettings}
+                  onRemoveKnownHost={settingsViewModel.removeKnownHost}
+                  onRevokeRdpCertificate={
+                    settingsViewModel.revokeRdpCertificateTrust
+                  }
+                  onRemoveSecret={handleRemoveSecret}
+                  onEditSecret={openKeychainSecretEditor}
+                  onGenerateSshKey={settingsViewModel.generateSshKey}
+                  onCopySshPublicKey={settingsViewModel.copySshPublicKey}
+                  onInstallSshPublicKey={settingsViewModel.installSshPublicKey}
+                  onLoadSessionReplayStorageUsage={
+                    settingsViewModel.loadSessionReplayStorageUsage
+                  }
+                  onLogout={loginController.logout}
+                  onDeleteAccount={loginController.deleteAccount}
+                  onChangeAccountPassword={
+                    loginController.changeAccountPassword
+                  }
+                  webauthnSupported={authState.capabilities?.webauthn ?? false}
+                  onAddPasskey={loginController.addPasskey}
+                  onListPasskeys={loginController.listPasskeys}
+                  onDeletePasskey={loginController.deletePasskey}
+                  vaultStatus={authState.vault?.status ?? null}
+                  onChangeVaultPassphrase={changeVaultPassphrase}
+                  onResetVault={resetVault}
+                />
+              ) : null}
             </main>
           </div>
         )}
-
       </div>
 
       <AwsImportDialog
@@ -943,18 +1067,27 @@ export function HomeShell({
       />
 
       <HostExportDialog
-        open={Boolean(exportHostIds)}
-        hostIds={exportHostIds ?? []}
-        onClose={() => setExportHostIds(null)}
+        open={Boolean(exportAssets)}
+        hostIds={exportHostIds}
+        workspaceIds={exportWorkspaceIds}
+        onClose={() => setExportAssets(null)}
         onExported={(result) => {
           setHostBrowserStatus(
-            `${translate('home.transfer.exported', { count: result.exportedHostCount })}${
-              result.skippedHostCount > 0
-                ? translate('home.transfer.exportSkipped', { count: result.skippedHostCount })
-                : ''
-            }`,
+            translate("home.transfer.assetsExported", {
+              hosts: result.exportedHostCount,
+              workspaces: result.exportedWorkspaceCount,
+            }) +
+              (result.skippedHostCount + result.skippedWorkspaceCount > 0
+                ? translate("home.transfer.assetsSkipped", {
+                    hosts: result.skippedHostCount,
+                    workspaces: result.skippedWorkspaceCount,
+                  })
+                : "") +
+              // 경고는 실패가 아니다. 예전에는 warnings[0] 을 오류 슬롯에 넣어서, 내보내기가
+              // 정상 완료됐는데도 빨간 경고 배너(role="alert")가 함께 떴다.
+              (result.warnings.length > 0 ? ` ${result.warnings.join(" ")}` : ""),
           );
-          setHostBrowserError(result.warnings[0] ?? null);
+          setHostBrowserError(null);
         }}
       />
 
@@ -964,10 +1097,15 @@ export function HomeShell({
         onImported={async (result) => {
           await homeViewModel.refreshSyncedWorkspaceData();
           setHostBrowserStatus(
-            `${translate('home.transfer.dolgateImported', { count: result.importedHostCount })}${
+            `${translate("home.transfer.dolgateAssetsImported", {
+              hosts: result.importedHostCount,
+              workspaces: result.importedWorkspaceCount,
+            })}${
               result.skippedCount > 0
-                ? translate('home.transfer.dolgateSkipped', { count: result.skippedCount })
-                : ''
+                ? translate("home.transfer.dolgateSkipped", {
+                    count: result.skippedCount,
+                  })
+                : ""
             }`,
           );
           setHostBrowserError(result.warnings[0] ?? null);
@@ -980,14 +1118,16 @@ export function HomeShell({
         onImported={async (result) => {
           await homeViewModel.refreshHostCatalog();
           setHostBrowserStatus(
-            `${translate('home.transfer.termiusImported', {
+            `${translate("home.transfer.termiusImported", {
               hosts: result.createdHostCount,
               groups: result.createdGroupCount,
               secrets: result.createdSecretCount,
             })}${
               result.skippedHostCount > 0
-                ? translate('home.transfer.termiusSkipped', { count: result.skippedHostCount })
-                : ''
+                ? translate("home.transfer.termiusSkipped", {
+                    count: result.skippedHostCount,
+                  })
+                : ""
             }`,
           );
           setHostBrowserError(result.warnings[0]?.message ?? null);
@@ -1001,14 +1141,18 @@ export function HomeShell({
         onImported={async (result) => {
           await homeViewModel.refreshHostCatalog();
           setHostBrowserStatus(
-            `${translate('home.transfer.opensshImported', { count: result.createdHostCount })}${
+            `${translate("home.transfer.opensshImported", { count: result.createdHostCount })}${
               result.createdSecretCount > 0
-                ? translate('home.transfer.opensshSecrets', { count: result.createdSecretCount })
-                : ''
+                ? translate("home.transfer.opensshSecrets", {
+                    count: result.createdSecretCount,
+                  })
+                : ""
             }${
               result.skippedHostCount > 0
-                ? translate('home.transfer.skippedHosts', { count: result.skippedHostCount })
-                : ''
+                ? translate("home.transfer.skippedHosts", {
+                    count: result.skippedHostCount,
+                  })
+                : ""
             }`,
           );
           setHostBrowserError(result.warnings[0]?.message ?? null);
@@ -1024,13 +1168,15 @@ export function HomeShell({
             setHostBrowserStatus(buildXshellImportStatusMessage(result)),
           );
           setHostBrowserStatus(
-            `${translate('home.transfer.xshellImported', {
+            `${translate("home.transfer.xshellImported", {
               hosts: result.createdHostCount,
               groups: result.createdGroupCount,
             })}${
               result.skippedHostCount > 0
-                ? translate('home.transfer.skippedHosts', { count: result.skippedHostCount })
-                : ''
+                ? translate("home.transfer.skippedHosts", {
+                    count: result.skippedHostCount,
+                  })
+                : ""
             }`,
           );
           setHostBrowserError(result.warnings[0]?.message ?? null);

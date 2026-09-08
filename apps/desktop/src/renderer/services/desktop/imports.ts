@@ -11,8 +11,10 @@ export function getSyncStatus() {
   return desktopApi.sync.status();
 }
 
-export function previewHostExport(hostIds: string[]) {
-  return desktopApi.hostTransfer.previewExport(hostIds);
+export function previewHostExport(
+  selection: Parameters<DesktopApi['hostTransfer']['previewExport']>[0],
+) {
+  return desktopApi.hostTransfer.previewExport(selection);
 }
 
 export function exportHostSelection(

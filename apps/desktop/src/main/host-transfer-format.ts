@@ -9,6 +9,7 @@ import {
   type ManagedAwsProfilePayload,
   type ManagedSecretPayload,
   type PortForwardRuleRecord,
+  type SavedWorkspaceRecord,
   type SnippetRecord,
   type TailnetPayload,
   type VaultKdfDescriptor,
@@ -35,8 +36,12 @@ export interface DolgateHostBundleV1 {
   scope: "hosts";
   exportedAt: string;
   rootHostIds: string[];
+  /** Optional for archives created before Home Assets included Workspaces. */
+  rootWorkspaceIds?: string[];
   groups: GroupRecord[];
   hosts: HostRecord[];
+  /** Optional for backward compatibility with Host-only schema-version-1 files. */
+  workspaces?: SavedWorkspaceRecord[];
   secrets: ManagedSecretPayload[];
   knownHosts: KnownHostRecord[];
   portForwards: PortForwardRuleRecord[];

@@ -13,6 +13,7 @@ import type {
   SettingsRepository,
   TailnetRepository,
   SnippetRepository,
+  SavedWorkspaceRepository,
   SyncOutboxRepository,
 } from "./database";
 import { LocalFileService } from "./file-service";
@@ -48,6 +49,7 @@ export interface RegisterIpcDependencies {
   portForwards: PortForwardRepository;
   dnsOverrides: DnsOverrideRepository;
   snippets: SnippetRepository;
+  savedWorkspaces: SavedWorkspaceRepository;
   knownHosts: KnownHostRepository;
   activityLogs: ActivityLogRepository;
   secretMetadata: SecretMetadataRepository;
@@ -79,6 +81,7 @@ export function createMainIpcContext(
     portForwards,
     dnsOverrides,
     snippets,
+    savedWorkspaces,
     knownHosts,
     activityLogs,
     secretMetadata,
@@ -209,32 +212,8 @@ export function createMainIpcContext(
   });
 
   return {
+    ...deps,
     resolveJumpHostTarget: hostCoordinator.resolveJumpHostTarget,
-    hosts,
-    groups,
-    settings,
-    tailnets,
-    portForwards,
-    dnsOverrides,
-    snippets,
-    knownHosts,
-    activityLogs,
-    secretMetadata,
-    syncOutbox,
-    secretStore,
-    awsService,
-    awsSsmTunnelService,
-    warpgateService,
-    coreManager,
-    hostsOverrideManager,
-    updater,
-    authService,
-    syncService,
-    termiusImportService,
-    opensshImportService,
-    xshellImportService,
-    sessionShareService,
-    sessionReplayService,
     localFiles,
     aiService,
     portForwardLifecycleLogger,

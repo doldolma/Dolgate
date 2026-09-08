@@ -57,7 +57,7 @@ async function writeFileAtomically(filePath: string, content: Buffer | string): 
 export function registerImportIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.hostTransfer.previewExport,
-    async (_event, hostIds: string[]) => hostTransferService.previewExport(hostIds),
+    async (_event, selection) => hostTransferService.previewExport(selection),
   );
 
   ipcMain.handle(
@@ -66,14 +66,20 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
       if (
         !input ||
         !Array.isArray(input.hostIds) ||
+        (input.workspaceIds !== undefined &&
+          !Array.isArray(input.workspaceIds)) ||
         (input.format !== "dolgate" && input.format !== "openssh")
       ) {
         throw new Error(t("imports.exportRequestInvalid"));
       }
+      const selection = {
+        hostIds: input.hostIds,
+        workspaceIds: input.workspaceIds ?? [],
+      };
       const window = ctx.resolveWindowFromSender(event.sender);
       if (input.format === "dolgate") {
         const exported = await hostTransferService.createDolgateExport(
-          input.hostIds,
+          selection,
           input.password ?? "",
           app.getVersion(),
         );
@@ -90,7 +96,9 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
             canceled: true,
             savedPath: null,
             exportedHostCount: 0,
+            exportedWorkspaceCount: 0,
             skippedHostCount: 0,
+            skippedWorkspaceCount: 0,
             warnings: [],
           };
         }
@@ -103,12 +111,14 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
           canceled: false,
           savedPath,
           exportedHostCount: exported.hostCount,
+          exportedWorkspaceCount: exported.workspaceCount,
           skippedHostCount: 0,
+          skippedWorkspaceCount: 0,
           warnings: [],
         };
       }
 
-      const exported = hostTransferService.createOpenSshExport(input.hostIds);
+      const exported = hostTransferService.createOpenSshExport(selection);
       if (!exported.content) {
         throw new Error(t("imports.opensshNoExportable"));
       }
@@ -125,7 +135,9 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
           canceled: true,
           savedPath: null,
           exportedHostCount: 0,
+          exportedWorkspaceCount: 0,
           skippedHostCount: exported.skippedCount,
+          skippedWorkspaceCount: selection.workspaceIds.length,
           warnings: exported.warnings,
         };
       }
@@ -140,7 +152,12 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
         canceled: false,
         savedPath,
         exportedHostCount: exported.exportedRootCount + exported.dependencyCount,
+        exportedWorkspaceCount: 0,
         skippedHostCount: exported.skippedCount,
+        skippedWorkspaceCount: selection.workspaceIds.length,
+        // 제외된 Workspace 수는 skippedWorkspaceCount 로 이미 올라가고 상태 줄이 그것을 문장으로
+        // 만든다. 같은 사실을 warnings 에 또 넣지 않는다 — 렌더러가 그 배열을 경고로 표시하므로
+        // 정상 완료가 경고처럼 보였다.
         warnings: exported.warnings,
       };
     },
@@ -182,6 +199,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
       const result = hostTransferService.commitImport(snapshotId);
       const importedCount =
         result.importedHostCount +
+        result.importedWorkspaceCount +
         result.importedGroupCount +
         result.importedSecretCount +
         result.importedAwsProfileCount +
@@ -209,6 +227,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
       }
       ctx.activityLogs.append("info", "audit", logMessage("imports.dolgateImported"), {
         importedHostCount: result.importedHostCount,
+        importedWorkspaceCount: result.importedWorkspaceCount,
         skippedCount: result.skippedCount,
         warningCount: result.warnings.length,
       });

@@ -493,6 +493,10 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
               hostId: hydratedHost.id,
               hostLabel: hydratedHost.label,
               title,
+              // 이 세션이 컨테이너 안에서 돈다는 사실을 주 프로세스 탭에도 남긴다 —
+              // 렌더러 리로드 뒤 bootstrap 이 탭을 다시 채울 때 이 표식이 없으면
+              // 컨테이너 셸이 평범한 호스트 셸로 보인다(TerminalTab.containerId 주석).
+              containerId,
               transport: "ssh",
               connectionKind: "aws-ssm",
               connectionDetails: `${profileName} · ${hydratedHost.awsRegion} · ${hydratedHost.awsInstanceId}`,
@@ -539,6 +543,10 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
               hostId: hydratedHost.id,
               hostLabel: hydratedHost.label,
               title,
+              // 이 세션이 컨테이너 안에서 돈다는 사실을 주 프로세스 탭에도 남긴다 —
+              // 렌더러 리로드 뒤 bootstrap 이 탭을 다시 채울 때 이 표식이 없으면
+              // 컨테이너 셸이 평범한 호스트 셸로 보인다(TerminalTab.containerId 주석).
+              containerId,
               transport: "ssh",
               connectionKind: "aws-ssm",
               connectionDetails: `${profileName} · ${hydratedHost.awsRegion} · ${hydratedHost.awsInstanceId}`,
@@ -573,6 +581,10 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
           hostId: typedHost.id,
           hostLabel: typedHost.label,
           title,
+          // 이 세션이 컨테이너 안에서 돈다는 사실을 주 프로세스 탭에도 남긴다 —
+          // 렌더러 리로드 뒤 bootstrap 이 탭을 다시 채울 때 이 표식이 없으면
+          // 컨테이너 셸이 평범한 호스트 셸로 보인다(TerminalTab.containerId 주석).
+          containerId,
           transport: "warpgate",
         });
       }

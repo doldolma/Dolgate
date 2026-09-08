@@ -229,7 +229,8 @@ export function buildHostBrowserCommandPaletteItems(
         ),
         keywords: [host.label, host.groupName ?? '', getHostPaletteText(host)],
         Icon: SquareTerminal,
-        run: () => hb.onConnectHost(host.id),
+        // 연결은 홈을 떠난다 — 열려 있는 호스트 편집기의 저장하지 않은 편집을 먼저 묻는다.
+        run: () => hb.withLeaveHostEditor(() => void hb.onConnectHost(host.id)),
       });
     }
     if (hb.onOpenSftp && hostSupportsSftp(host)) {

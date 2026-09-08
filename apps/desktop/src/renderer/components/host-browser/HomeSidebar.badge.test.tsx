@@ -20,7 +20,7 @@ const model = () =>
     currentGroupPath: [],
     selectedGroupPathSet: new Set<string>(),
     selectedGroupPaths: [],
-    favoriteHostIds: new Set<string>(),
+    favoriteHostIds: [] as string[],
     favoritesFilterActive: false,
     toggleFavoritesFilter: vi.fn(),
     tagCounts: [],
@@ -40,26 +40,50 @@ const model = () =>
 
 describe('HomeSidebar 의 포트 포워딩 배지', () => {
   it('켜진 것이 없으면 배지를 그리지 않는다', () => {
-    render(<HomeSidebar hb={model()} activePortForwardEntryCount={0} />);
+    render(
+      <HomeSidebar
+        hb={model()}
+        activePortForwardEntryCount={0}
+        workspaceCount={0}
+        favoriteWorkspaceCount={0}
+      />);
     // 이름이 그대로면 배지도 없다.
     expect(screen.getByRole('button', { name: 'Port Forwarding' })).toBeTruthy();
   });
 
   it('개수를 아이콘 위에 얹고 이름에도 붙인다', () => {
     // 아이콘만 있는 버튼이라 숫자만 읽히면 뜻이 없다.
-    render(<HomeSidebar hb={model()} activePortForwardEntryCount={3} />);
+    render(
+      <HomeSidebar
+        hb={model()}
+        activePortForwardEntryCount={3}
+        workspaceCount={0}
+        favoriteWorkspaceCount={0}
+      />);
     const button = screen.getByRole('button', { name: 'Port Forwarding (3 active)' });
     expect(button.textContent).toContain('3');
   });
 
   it('두 자리를 넘으면 잘라서 아이콘을 가리지 않는다', () => {
-    render(<HomeSidebar hb={model()} activePortForwardEntryCount={12} />);
+    render(
+      <HomeSidebar
+        hb={model()}
+        activePortForwardEntryCount={12}
+        workspaceCount={0}
+        favoriteWorkspaceCount={0}
+      />);
     const button = screen.getByRole('button', { name: 'Port Forwarding (12 active)' });
     expect(button.textContent).toContain('9+');
   });
 
   it('다른 섹션에는 배지가 붙지 않는다', () => {
-    render(<HomeSidebar hb={model()} activePortForwardEntryCount={3} />);
+    render(
+      <HomeSidebar
+        hb={model()}
+        activePortForwardEntryCount={3}
+        workspaceCount={0}
+        favoriteWorkspaceCount={0}
+      />);
     for (const name of ['Snippets', 'Logs', 'Settings']) {
       expect(screen.getByRole('button', { name }).textContent).toBe('');
     }

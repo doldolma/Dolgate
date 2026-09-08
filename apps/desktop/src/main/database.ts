@@ -38,6 +38,7 @@ import {
   normalizeGroupPath,
   normalizeHostEnvVars,
   normalizeJumpHostIds,
+  normalizeSavedWorkspaceRecord,
   normalizeServerUrl,
   normalizeSftpBrowserColumnWidths,
   rebaseGroupPath,
@@ -86,6 +87,8 @@ import type {
   PortForwardDraft,
   PortForwardRuleRecord,
   SecretMetadataRecord,
+  SavedWorkspaceDraft,
+  SavedWorkspaceRecord,
   SerialDataBits,
   SerialFlowControl,
   SerialHostDraft,
@@ -1349,6 +1352,19 @@ export class HostRepository {
   }
 }
 
+/** 이 그룹 경로(하위 포함)에 저장된 Workspace 가 있는가. removeGroupFrom/mutateGroupPathIn 의 pathAlsoOccupied 로 넘긴다. */
+function hasSavedWorkspaceWithinGroup(
+  savedWorkspaces: readonly SavedWorkspaceRecord[],
+  normalizedTargetPath: string | null
+): boolean {
+  if (!normalizedTargetPath) {
+    return false;
+  }
+  return savedWorkspaces.some((workspace) =>
+    isGroupWithinPath(normalizeGroupPath(workspace.groupName), normalizedTargetPath)
+  );
+}
+
 export class GroupRepository {
   list(): GroupRecord[] {
     return stateStorage
@@ -1375,13 +1391,13 @@ export class GroupRepository {
   }
 
   move(targetPath: string, targetParentPath: string | null): GroupPathMutationResult {
-    return this.applyPathMutation((groups, hosts, options) =>
+    return this.applyPathMutation(targetPath, (groups, hosts, options) =>
       moveGroupIn(groups, hosts, targetPath, targetParentPath, options)
     );
   }
 
   rename(targetPath: string, name: string): GroupPathMutationResult {
-    return this.applyPathMutation((groups, hosts, options) =>
+    return this.applyPathMutation(targetPath, (groups, hosts, options) =>
       renameGroupIn(groups, hosts, targetPath, name, options)
     );
   }
@@ -1393,26 +1409,48 @@ export class GroupRepository {
    * 상태를 읽어 넘기고, 결과를 저장하고, 정렬해서 돌려주는 것만 한다.
    */
   private applyPathMutation(
+    targetPath: string,
     mutate: (
       groups: GroupRecord[],
       hosts: HostRecord[],
-      options: { timestamp: string; normalizeHost: (host: HostRecord) => HostRecord }
+      options: {
+        timestamp: string;
+        normalizeHost: (host: HostRecord) => HostRecord;
+        pathAlsoOccupied: boolean;
+      }
     ) => { groups: GroupRecord[]; hosts: HostRecord[]; nextPath: string }
   ): GroupPathMutationResult {
     let nextPath = '';
+    const timestamp = nowIso();
     const nextState = stateStorage.updateState((state) => {
       const result = mutate(state.data.groups, state.data.hosts, {
-        timestamp: nowIso(),
-        normalizeHost: normalizeIncomingHostRecord
+        timestamp,
+        normalizeHost: normalizeIncomingHostRecord,
+        // 이름 변경·이동도 Workspace 만 남은 경로에서 거부됐다(삭제와 같은 원인).
+        pathAlsoOccupied: hasSavedWorkspaceWithinGroup(
+          state.data.savedWorkspaces,
+          normalizeGroupPath(targetPath)
+        )
       });
       state.data.groups = result.groups;
       state.data.hosts = result.hosts;
+      state.data.savedWorkspaces = state.data.savedWorkspaces.map((workspace) => {
+        const groupName = rebaseGroupPath(
+          normalizeGroupPath(workspace.groupName),
+          targetPath,
+          result.nextPath,
+        );
+        return groupName === normalizeGroupPath(workspace.groupName)
+          ? workspace
+          : { ...workspace, groupName, updatedAt: timestamp };
+      });
       nextPath = result.nextPath;
     });
 
     return {
       groups: nextState.data.groups.sort((left, right) => left.path.localeCompare(right.path)),
       hosts: nextState.data.hosts.sort(compareHosts),
+      savedWorkspaces: nextState.data.savedWorkspaces.slice().sort(compareSavedWorkspaces),
       nextPath
     };
   }
@@ -1423,16 +1461,49 @@ export class GroupRepository {
   ): GroupRemoveResult & {
     removedGroupIds: string[];
     removedHostIds: string[];
+    removedWorkspaceIds: string[];
   } {
     let removedGroupIds: string[] = [];
     let removedHostIds: string[] = [];
+    let removedWorkspaceIds: string[] = [];
+    const normalizedTargetPath = normalizeGroupPath(targetPath);
+    const timestamp = nowIso();
     const nextState = stateStorage.updateState((state) => {
       const result = removeGroupFrom(state.data.groups, state.data.hosts, targetPath, mode, {
-        timestamp: nowIso(),
-        normalizeHost: normalizeIncomingHostRecord
+        timestamp,
+        normalizeHost: normalizeIncomingHostRecord,
+        // 저장된 Workspace 만 남은 경로도 점유된 것으로 알려 준다(pathAlsoOccupied 주석 참고).
+        pathAlsoOccupied: hasSavedWorkspaceWithinGroup(
+          state.data.savedWorkspaces,
+          normalizedTargetPath
+        )
       });
       state.data.groups = result.groups;
       state.data.hosts = result.hosts;
+      if (normalizedTargetPath && mode === 'delete-subtree') {
+        const removed = state.data.savedWorkspaces.filter((workspace) =>
+          isGroupWithinPath(
+            normalizeGroupPath(workspace.groupName),
+            normalizedTargetPath,
+          ),
+        );
+        removedWorkspaceIds = removed.map((workspace) => workspace.id);
+        const removedWorkspaceIdSet = new Set(removedWorkspaceIds);
+        state.data.savedWorkspaces = state.data.savedWorkspaces.filter(
+          (workspace) => !removedWorkspaceIdSet.has(workspace.id),
+        );
+      } else if (normalizedTargetPath) {
+        state.data.savedWorkspaces = state.data.savedWorkspaces.map((workspace) => {
+          const currentGroupName = normalizeGroupPath(workspace.groupName);
+          const groupName = stripRemovedGroupSegment(
+            currentGroupName,
+            normalizedTargetPath,
+          );
+          return groupName === currentGroupName
+            ? workspace
+            : { ...workspace, groupName, updatedAt: timestamp };
+        });
+      }
       removedGroupIds = result.removedGroupIds;
       removedHostIds = result.removedHostIds;
     });
@@ -1440,8 +1511,10 @@ export class GroupRepository {
     return {
       groups: nextState.data.groups.sort((left, right) => left.path.localeCompare(right.path)),
       hosts: nextState.data.hosts.sort(compareHosts),
+      savedWorkspaces: nextState.data.savedWorkspaces.slice().sort(compareSavedWorkspaces),
       removedGroupIds,
-      removedHostIds
+      removedHostIds,
+      removedWorkspaceIds
     };
   }
 
@@ -2334,6 +2407,141 @@ export class SnippetRepository {
   replaceAll(records: SnippetRecord[]): void {
     stateStorage.updateState((state) => {
       state.data.snippets = records.map(normalizeIncomingSnippetRecord).sort(compareSnippets);
+    });
+  }
+}
+
+function compareSavedWorkspaces(
+  left: SavedWorkspaceRecord,
+  right: SavedWorkspaceRecord,
+): number {
+  if (left.favorite !== right.favorite) {
+    return left.favorite ? -1 : 1;
+  }
+  const recent = (right.lastOpenedAt ?? '').localeCompare(left.lastOpenedAt ?? '');
+  return recent || left.name.localeCompare(right.name) || left.id.localeCompare(right.id);
+}
+
+export class SavedWorkspaceRepository {
+  list(): SavedWorkspaceRecord[] {
+    return stateStorage.getState().data.savedWorkspaces.slice().sort(compareSavedWorkspaces);
+  }
+
+  getById(id: string): SavedWorkspaceRecord | null {
+    return stateStorage.getState().data.savedWorkspaces.find((record) => record.id === id) ?? null;
+  }
+
+  create(draft: SavedWorkspaceDraft): SavedWorkspaceRecord {
+    const timestamp = nowIso();
+    const record = normalizeSavedWorkspaceRecord({
+      version: 1,
+      id: randomUUID(),
+      name: draft.name,
+      root: draft.root,
+      favorite: draft.favorite === true,
+      groupName: normalizeGroupPath(draft.groupName),
+      lastOpenedAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    if (!record) {
+      throw new Error('Invalid saved workspace');
+    }
+    stateStorage.updateState((state) => {
+      state.data.savedWorkspaces.push(record);
+    });
+    return record;
+  }
+
+  rename(id: string, name: string): SavedWorkspaceRecord {
+    const current = this.getById(id);
+    const nextName = name.trim();
+    if (!current) {
+      throw new Error('Saved workspace not found');
+    }
+    if (!nextName) {
+      throw new Error('Workspace name is required');
+    }
+    const record: SavedWorkspaceRecord = {
+      ...current,
+      name: nextName,
+      updatedAt: nowIso(),
+    };
+    stateStorage.updateState((state) => {
+      state.data.savedWorkspaces = state.data.savedWorkspaces.map((entry) =>
+        entry.id === id ? record : entry,
+      );
+    });
+    return record;
+  }
+
+  setFavorite(id: string, favorite: boolean): SavedWorkspaceRecord {
+    const current = this.getById(id);
+    if (!current) {
+      throw new Error('Saved workspace not found');
+    }
+    const record: SavedWorkspaceRecord = {
+      ...current,
+      favorite,
+      updatedAt: nowIso(),
+    };
+    stateStorage.updateState((state) => {
+      state.data.savedWorkspaces = state.data.savedWorkspaces.map((entry) =>
+        entry.id === id ? record : entry,
+      );
+    });
+    return record;
+  }
+
+  moveToGroup(id: string, groupName: string | null): SavedWorkspaceRecord {
+    const current = this.getById(id);
+    if (!current) {
+      throw new Error('Saved workspace not found');
+    }
+    const record: SavedWorkspaceRecord = {
+      ...current,
+      groupName: normalizeGroupPath(groupName),
+      updatedAt: nowIso(),
+    };
+    stateStorage.updateState((state) => {
+      state.data.savedWorkspaces = state.data.savedWorkspaces.map((entry) =>
+        entry.id === id ? record : entry,
+      );
+    });
+    return record;
+  }
+
+  touchOpened(id: string): SavedWorkspaceRecord {
+    const current = this.getById(id);
+    if (!current) {
+      throw new Error('Saved workspace not found');
+    }
+    const timestamp = nowIso();
+    const record: SavedWorkspaceRecord = {
+      ...current,
+      lastOpenedAt: timestamp,
+      updatedAt: timestamp,
+    };
+    stateStorage.updateState((state) => {
+      state.data.savedWorkspaces = state.data.savedWorkspaces.map((entry) =>
+        entry.id === id ? record : entry,
+      );
+    });
+    return record;
+  }
+
+  remove(id: string): void {
+    stateStorage.updateState((state) => {
+      state.data.savedWorkspaces = state.data.savedWorkspaces.filter((entry) => entry.id !== id);
+    });
+  }
+
+  replaceAll(records: SavedWorkspaceRecord[]): void {
+    stateStorage.updateState((state) => {
+      state.data.savedWorkspaces = records
+        .map(normalizeSavedWorkspaceRecord)
+        .filter((entry): entry is SavedWorkspaceRecord => entry !== null)
+        .sort(compareSavedWorkspaces);
     });
   }
 }

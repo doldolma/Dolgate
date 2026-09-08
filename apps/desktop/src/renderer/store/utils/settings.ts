@@ -3,11 +3,15 @@ import type { AppSettings, TerminalFontFamilyId } from "@shared";
 import type { HomeSection, SettingsSection } from "../types";
 
 export function normalizeHomeSectionInput(
-  section: HomeSection | "knownHosts" | "keychain",
+  section: HomeSection | "knownHosts" | "keychain" | "workspaces",
 ): {
   homeSection: HomeSection;
   settingsSection?: SettingsSection;
 } {
+  if (section === "workspaces") {
+    return { homeSection: "hosts" };
+  }
+
   if (section === "knownHosts") {
     return {
       homeSection: "settings",
@@ -27,8 +31,11 @@ export function normalizeHomeSectionInput(
   };
 }
 
-
-export function detectRendererPlatform(): "darwin" | "win32" | "linux" | "unknown" {
+export function detectRendererPlatform():
+  | "darwin"
+  | "win32"
+  | "linux"
+  | "unknown" {
   if (typeof navigator === "undefined") {
     return "unknown";
   }

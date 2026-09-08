@@ -12,6 +12,7 @@ export function useHomeViewModel() {
   const portForwards = useAppStore((state) => state.portForwards);
   const dnsOverrides = useAppStore((state) => state.dnsOverrides);
   const snippets = useAppStore((state) => state.snippets);
+  const savedWorkspaces = useAppStore((state) => state.savedWorkspaces);
   const portForwardRuntimes = useAppStore((state) => state.portForwardRuntimes);
   const bootstrap = useAppStore((state) => state.bootstrap);
   const refreshHostCatalog = useAppStore((state) => state.refreshHostCatalog);
@@ -39,6 +40,9 @@ export function useHomeViewModel() {
   const saveHost = useAppStore((state) => state.saveHost);
   const duplicateHosts = useAppStore((state) => state.duplicateHosts);
   const moveHostToGroup = useAppStore((state) => state.moveHostToGroup);
+  const moveSavedWorkspaceToGroup = useAppStore(
+    (state) => state.moveSavedWorkspaceToGroup,
+  );
   const setHostFavorite = useAppStore((state) => state.setHostFavorite);
   const removeHost = useAppStore((state) => state.removeHost);
   const openLocalTerminal = useAppStore((state) => state.openLocalTerminal);
@@ -54,6 +58,13 @@ export function useHomeViewModel() {
   const removePortForward = useAppStore((state) => state.removePortForward);
   const saveSnippet = useAppStore((state) => state.saveSnippet);
   const removeSnippet = useAppStore((state) => state.removeSnippet);
+  const renameSavedWorkspace = useAppStore((state) => state.renameSavedWorkspace);
+  const duplicateSavedWorkspace = useAppStore((state) => state.duplicateSavedWorkspace);
+  const setSavedWorkspaceFavorite = useAppStore(
+    (state) => state.setSavedWorkspaceFavorite,
+  );
+  const removeSavedWorkspace = useAppStore((state) => state.removeSavedWorkspace);
+  const openSavedWorkspace = useAppStore((state) => state.openSavedWorkspace);
   const startPortForward = useAppStore((state) => state.startPortForward);
   const stopPortForward = useAppStore((state) => state.stopPortForward);
   const handleCoreEvent = useAppStore((state) => state.handleCoreEvent);
@@ -74,6 +85,7 @@ export function useHomeViewModel() {
     portForwards,
     dnsOverrides,
     snippets,
+    savedWorkspaces,
     portForwardRuntimes,
     bootstrap,
     refreshHostCatalog,
@@ -97,6 +109,7 @@ export function useHomeViewModel() {
     saveHost,
     duplicateHosts,
     moveHostToGroup,
+    moveSavedWorkspaceToGroup,
     setHostFavorite,
     removeHost,
     openLocalTerminal,
@@ -110,6 +123,11 @@ export function useHomeViewModel() {
     removePortForward,
     saveSnippet,
     removeSnippet,
+    renameSavedWorkspace,
+    duplicateSavedWorkspace,
+    setSavedWorkspaceFavorite,
+    removeSavedWorkspace,
+    openSavedWorkspace,
     startPortForward,
     stopPortForward,
     handleCoreEvent,

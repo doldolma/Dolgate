@@ -31,14 +31,20 @@ describe("createAppStore catalog and settings", () => {
     const before = store.getState().hosts[0];
     expect(before).toBeDefined();
     const updated = { ...before, terminalThemeId: "kanagawa-wave" as const };
-    (api.hosts.setTerminalTheme as ReturnType<typeof vi.fn>).mockResolvedValue(updated);
+    (api.hosts.setTerminalTheme as ReturnType<typeof vi.fn>).mockResolvedValue(
+      updated,
+    );
 
     await store.getState().setHostTerminalTheme(before.id, "kanagawa-wave");
 
-    expect(api.hosts.setTerminalTheme).toHaveBeenCalledWith(before.id, "kanagawa-wave");
+    expect(api.hosts.setTerminalTheme).toHaveBeenCalledWith(
+      before.id,
+      "kanagawa-wave",
+    );
     expect(api.hosts.update).not.toHaveBeenCalled();
     expect(
-      store.getState().hosts.find((host) => host.id === before.id)?.terminalThemeId,
+      store.getState().hosts.find((host) => host.id === before.id)
+        ?.terminalThemeId,
     ).toBe("kanagawa-wave");
   });
 
@@ -204,7 +210,7 @@ describe("createAppStore catalog and settings", () => {
         theme: "system",
         tailnetHostname: null,
         rdpMonitorsByHostId: {},
-      rdpDrivesByHostId: {},
+        rdpDrivesByHostId: {},
         globalTerminalThemeId: "dolssh-dark",
         terminalFontFamily: "sf-mono",
         terminalFontSize: 13,
@@ -236,7 +242,7 @@ describe("createAppStore catalog and settings", () => {
         theme: "dark",
         tailnetHostname: null,
         rdpMonitorsByHostId: {},
-      rdpDrivesByHostId: {},
+        rdpDrivesByHostId: {},
         globalTerminalThemeId: "dolssh-dark",
         terminalFontFamily: "sf-mono",
         terminalFontSize: 13,
@@ -283,13 +289,21 @@ describe("createAppStore catalog and settings", () => {
 
     expect(api.bootstrap.getSyncedWorkspaceSnapshot).toHaveBeenCalledTimes(1);
     expect(store.getState().hosts.map((host) => host.id)).toEqual(["host-2"]);
-    expect(store.getState().groups.map((group) => group.id)).toEqual(["group-2"]);
-    expect(store.getState().portForwards.map((rule) => rule.id)).toEqual(["forward-2"]);
-    expect(store.getState().dnsOverrides.map((override) => override.id)).toEqual(["dns-2"]);
-    expect(store.getState().knownHosts.map((record) => record.id)).toEqual(["known-2"]);
-    expect(store.getState().keychainEntries.map((entry) => entry.secretRef)).toEqual([
-      "secret:host-2",
+    expect(store.getState().groups.map((group) => group.id)).toEqual([
+      "group-2",
     ]);
+    expect(store.getState().portForwards.map((rule) => rule.id)).toEqual([
+      "forward-2",
+    ]);
+    expect(
+      store.getState().dnsOverrides.map((override) => override.id),
+    ).toEqual(["dns-2"]);
+    expect(store.getState().knownHosts.map((record) => record.id)).toEqual([
+      "known-2",
+    ]);
+    expect(
+      store.getState().keychainEntries.map((entry) => entry.secretRef),
+    ).toEqual(["secret:host-2"]);
     expect(store.getState().settings.theme).toBe("dark");
     expect(store.getState().activeWorkspaceTab).toBe("session:session-1");
     expect(store.getState().sftp.leftPane.currentPath).toBe(
@@ -355,7 +369,7 @@ describe("createAppStore catalog and settings", () => {
     });
   });
 
-  it("normalizes legacy known hosts and keychain sections into settings subsections", async () => {
+  it("normalizes legacy Home sections into their current destinations", async () => {
     const store = createAppStore(createMockApi());
 
     await store.getState().bootstrap();
@@ -367,6 +381,9 @@ describe("createAppStore catalog and settings", () => {
     store.getState().openHomeSection("keychain" as never);
     expect(store.getState().homeSection).toBe("settings");
     expect(store.getState().settingsSection).toBe("secrets");
+
+    store.getState().openHomeSection("workspaces" as never);
+    expect(store.getState().homeSection).toBe("hosts");
 
     store.getState().openSettingsSection("general");
     expect(store.getState().homeSection).toBe("settings");
@@ -383,16 +400,25 @@ describe("createAppStore catalog and settings", () => {
 
     await store.getState().bootstrap();
     store.getState().openEditHostDrawer("host-1");
-    expect(store.getState().hostDrawer).toEqual({ mode: "edit", hostId: "host-1" });
+    expect(store.getState().hostDrawer).toEqual({
+      mode: "edit",
+      hostId: "host-1",
+    });
 
     store.getState().openSettingsSection("tailnet");
     expect(store.getState().homeSection).toBe("settings");
     expect(store.getState().settingsSection).toBe("tailnet");
     // 편집 중이던 호스트가 그대로 남아야 한다.
-    expect(store.getState().hostDrawer).toEqual({ mode: "edit", hostId: "host-1" });
+    expect(store.getState().hostDrawer).toEqual({
+      mode: "edit",
+      hostId: "host-1",
+    });
 
     store.getState().openHomeSection("hosts");
-    expect(store.getState().hostDrawer).toEqual({ mode: "edit", hostId: "host-1" });
+    expect(store.getState().hostDrawer).toEqual({
+      mode: "edit",
+      hostId: "host-1",
+    });
   });
 
   it("preserves saved credentials search while navigating settings", async () => {
@@ -832,17 +858,20 @@ describe("createAppStore catalog and settings", () => {
         updatedAt: "2026-08-01T00:00:00.000Z",
       } as HostRecord,
     ]);
-    vi.mocked(api.hosts.create).mockImplementation(async (draft) => ({
-      id: "rdp-old-copy",
-      kind: "rdp",
-      label: draft.label,
-      hostname: "10.0.0.9",
-      port: 3389,
-      groupName: null,
-      secretRef: null,
-      createdAt: "2026-08-01T00:00:00.000Z",
-      updatedAt: "2026-08-01T00:00:00.000Z",
-    }) as never);
+    vi.mocked(api.hosts.create).mockImplementation(
+      async (draft) =>
+        ({
+          id: "rdp-old-copy",
+          kind: "rdp",
+          label: draft.label,
+          hostname: "10.0.0.9",
+          port: 3389,
+          groupName: null,
+          secretRef: null,
+          createdAt: "2026-08-01T00:00:00.000Z",
+          updatedAt: "2026-08-01T00:00:00.000Z",
+        }) as never,
+    );
 
     const store = createAppStore(api);
     await store.getState().bootstrap();
@@ -879,24 +908,29 @@ describe("createAppStore catalog and settings", () => {
         updatedAt: "2026-08-01T00:00:00.000Z",
       } as HostRecord,
     ]);
-    vi.mocked(api.hosts.create).mockImplementation(async (draft) => ({
-      id: "rdp-2",
-      kind: "rdp",
-      label: draft.label,
-      hostname: "10.0.0.5",
-      port: 3389,
-      groupName: null,
-      secretRef: null,
-      createdAt: "2026-08-01T00:00:00.000Z",
-      updatedAt: "2026-08-01T00:00:00.000Z",
-    }) as never);
+    vi.mocked(api.hosts.create).mockImplementation(
+      async (draft) =>
+        ({
+          id: "rdp-2",
+          kind: "rdp",
+          label: draft.label,
+          hostname: "10.0.0.5",
+          port: 3389,
+          groupName: null,
+          secretRef: null,
+          createdAt: "2026-08-01T00:00:00.000Z",
+          updatedAt: "2026-08-01T00:00:00.000Z",
+        }) as never,
+    );
 
     const store = createAppStore(api);
     await store.getState().bootstrap();
     store.setState((state) => ({
       settings: {
         ...state.settings!,
-        rdpDrivesByHostId: { "rdp-1": [{ path: "/Users/me/here", readOnly: true }] },
+        rdpDrivesByHostId: {
+          "rdp-1": [{ path: "/Users/me/here", readOnly: true }],
+        },
       },
     }));
 
@@ -909,5 +943,4 @@ describe("createAppStore catalog and settings", () => {
       },
     });
   });
-
 });

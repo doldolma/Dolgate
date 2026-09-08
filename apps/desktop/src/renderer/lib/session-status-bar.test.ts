@@ -86,12 +86,23 @@ describe('연결종류 칩', () => {
     expect(resolveSessionKindChip({ host: sshHost() })).toBeNull();
   });
 
-  it('컨테이너 exec 은 호스트 종류보다 앞선다', () => {
+  // 판정 기준은 탭의 containerId 다. 예전에는 `shellKind === 'container-exec'` 였는데 코어가 그
+  // 값을 보내지 않아 이 분기가 제품에서는 한 번도 돌지 않았다 — 이 테스트만 초록불이었다.
+  it('컨테이너 세션은 호스트 종류보다 앞선다', () => {
     const chip = resolveSessionKindChip({
       host: sshHost({ kind: 'aws-ec2' } as Partial<HostRecord>),
-      shellKind: 'container-exec',
+      containerSession: true,
     });
     expect(chip?.kind).toBe('container');
+  });
+
+  it('컨테이너가 아니면 호스트 종류로 그린다', () => {
+    expect(
+      resolveSessionKindChip({
+        host: sshHost({ kind: 'aws-ec2' } as Partial<HostRecord>),
+        containerSession: false,
+      })?.kind,
+    ).toBe('ssm');
   });
 
   // SSH over SSM 과 SSM 셸은 다른 물건이다 — 이 칩이 그것을 상시로 말하는 유일한 자리다.

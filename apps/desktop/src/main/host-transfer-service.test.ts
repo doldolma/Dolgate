@@ -3,6 +3,7 @@ import type {
   AwsProfileMetadataRecord,
   HostRecord,
   ManagedAwsProfilePayload,
+  SavedWorkspaceRecord,
   TailnetPayload,
 } from "@shared";
 import type { DolgateHostBundleV1 } from "./host-transfer-format";
@@ -106,6 +107,7 @@ function stateWithHosts(hosts: HostRecord[]): DesktopStateFile {
       secretMetadata: [],
       awsProfiles: [],
       snippets: [],
+      savedWorkspaces: [],
       tailnets: [],
       syncOutbox: [],
     },
@@ -278,6 +280,123 @@ describe("buildDolgateHostBundle", () => {
       awsProfileId: null,
       awsProfileName: "",
     });
+  });
+});
+
+describe("Saved Workspace transfer", () => {
+  function workspace(id: string): SavedWorkspaceRecord {
+    return {
+      version: 1,
+      id,
+      name: "Production Layout",
+      favorite: true,
+      groupName: "Layouts/Production",
+      root: {
+        id: `${id}-root`,
+        kind: "split",
+        axis: "horizontal",
+        ratio: 0.5,
+        first: {
+          id: `${id}-existing`,
+          kind: "leaf",
+          target: { kind: "host", hostId: "host-app", label: "App" },
+        },
+        second: {
+          id: `${id}-nested`,
+          kind: "split",
+          axis: "vertical",
+          ratio: 0.5,
+          first: {
+            id: `${id}-missing`,
+            kind: "leaf",
+            target: {
+              kind: "host",
+              hostId: "host-missing",
+              label: "Removed DB",
+            },
+          },
+          second: {
+            id: `${id}-local`,
+            kind: "leaf",
+            target: { kind: "local", label: "Local" },
+          },
+        },
+      },
+      lastOpenedAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+  }
+
+  it("exports a selected Workspace, its existing Host dependencies, and group ancestry", () => {
+    const state = stateWithHosts([host("host-app", "App")]);
+    state.data.savedWorkspaces.push(workspace("workspace-1"));
+    state.data.groups.push(
+      {
+        id: "group-layouts",
+        name: "Layouts",
+        path: "Layouts",
+        parentPath: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+      {
+        id: "group-production",
+        name: "Production",
+        path: "Layouts/Production",
+        parentPath: "Layouts",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+    );
+
+    const bundle = buildDolgateHostBundle(state, {
+      hostIds: [],
+      workspaceIds: ["workspace-1"],
+    });
+
+    expect(bundle.rootHostIds).toEqual([]);
+    expect(bundle.rootWorkspaceIds).toEqual(["workspace-1"]);
+    expect(bundle.workspaces?.map((record) => record.id)).toEqual([
+      "workspace-1",
+    ]);
+    expect(bundle.hosts.map((record) => record.id)).toEqual(["host-app"]);
+    expect(bundle.groups.map((record) => record.path)).toEqual([
+      "Layouts",
+      "Layouts/Production",
+    ]);
+
+    const parsed = parseDolgateBundle(JSON.parse(JSON.stringify(bundle))).bundle;
+    const parsedWorkspace = parsed.workspaces?.[0];
+    expect(JSON.stringify(parsedWorkspace?.root)).toContain("host-missing");
+
+    const plan = buildHostTransferImportPlan(parsed, stateWithHosts([]));
+    expect(plan.hosts.map((record) => record.id)).toEqual(["host-app"]);
+    expect(plan.workspaces.map((record) => record.id)).toEqual([
+      "workspace-1",
+    ]);
+    expect(plan.skippedCounts.workspaces).toBe(0);
+  });
+
+  it("skips an existing Workspace UUID and accepts legacy Host-only bundles", () => {
+    const existing = workspace("workspace-1");
+    const target = stateWithHosts([]);
+    target.data.savedWorkspaces.push(existing);
+    const bundle: DolgateHostBundleV1 = {
+      ...bundleWithHosts([]),
+      rootWorkspaceIds: [existing.id],
+      workspaces: [existing],
+    };
+
+    const plan = buildHostTransferImportPlan(bundle, target);
+    expect(plan.workspaces).toEqual([]);
+    expect(plan.skippedCounts.workspaces).toBe(1);
+
+    const legacy = parseDolgateBundle(
+      JSON.parse(JSON.stringify(bundleWithHosts([host("legacy", "Legacy")]))),
+    ).bundle;
+    expect(legacy.rootWorkspaceIds).toEqual([]);
+    expect(legacy.workspaces).toEqual([]);
   });
 });
 

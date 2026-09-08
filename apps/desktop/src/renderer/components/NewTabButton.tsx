@@ -15,26 +15,28 @@
 // 목록은 명령 팔레트를 그대로 쓴다 — 검색·최근 정렬·빠른 SSH 가 이미 거기 있다. 다만 이동·설정
 // 항목은 넣지 않는다: 이 버튼은 **새 탭을 여는 자리**이고, 설정으로 가는 길은 이미 여럿이다.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { useTranslation } from 'react-i18next';
-import type { HostRecord } from '@shared';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
+import type { HostRecord, SavedWorkspaceRecord } from "@shared";
 import {
   formatQuickSshHostLabel,
   getHostSubtitle,
   parseQuickSshCommand,
   type ParsedQuickSshCommand,
-} from '@shared';
-import { hostSubtitleLabels } from '../../common/shared-messages';
-import { CommandPalette, type CommandPaletteItem } from './CommandPalette';
-import { hostSupportsTerminalConnect } from './host-browser/hostCapabilities';
-import { matchesKeyboardLayoutQuery } from '../lib/keyboard-layout-search';
-import { Input } from '../ui';
-import { Plus, SquareTerminal } from '../ui/icons';
-import { cn } from '../lib/cn';
+} from "@shared";
+import { hostSubtitleLabels } from "../../common/shared-messages";
+import { CommandPalette, type CommandPaletteItem } from "./CommandPalette";
+import { hostSupportsTerminalConnect } from "./host-browser/hostCapabilities";
+import { matchesKeyboardLayoutQuery } from "../lib/keyboard-layout-search";
+import { Input } from "../ui";
+import { Columns2, Plus, SquareTerminal } from "../ui/icons";
+import { listSavedWorkspaceLeaves } from "../store/utils";
+import { cn } from "../lib/cn";
 
 /** 말풍선에 담는 호스트 수. 더 담으면 목록이 길어져 "빠르게 하나" 라는 성격을 잃는다. */
 const MAX_HOSTS = 5;
+const MAX_WORKSPACES = 3;
 
 /** 말풍선 폭(px). 화면 밖으로 나가지 않게 맞출 때 쓴다 — 아래 className 의 22rem 과 같은 값. */
 const POPOVER_WIDTH = 352;
@@ -47,6 +49,8 @@ interface NewTabButtonProps {
   onConnectHost: (hostId: string) => void;
   onOpenLocalTerminal: () => void;
   onQuickConnectSsh?: (target: ParsedQuickSshCommand) => void;
+  savedWorkspaces?: readonly SavedWorkspaceRecord[];
+  onOpenSavedWorkspace?: (workspaceId: string) => void;
   /** 바깥(⌘T)에서 온 신호. 값이 바뀔 때마다 여닫는다 — 같은 키로 닫히는 것이 자연스럽다. */
   openSignal?: number;
 }
@@ -57,17 +61,21 @@ export function NewTabButton({
   onConnectHost,
   onOpenLocalTerminal,
   onQuickConnectSsh,
+  savedWorkspaces = [],
+  onOpenSavedWorkspace,
   openSignal = 0,
 }: NewTabButtonProps) {
   const { t: translate } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const [anchor, setAnchor] = useState<{ left: number; top: number } | null>(null);
+  const [anchor, setAnchor] = useState<{ left: number; top: number } | null>(
+    null,
+  );
   // 열기 직전에 무엇이 포커스를 갖고 있었는지. 닫을 때 그리로 돌려준다 — 대개 터미널이고,
   // 안 돌려주면 ⌘T 를 눌렀다 취소한 사람이 키보드를 잃는다(어디에도 커서가 없다).
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -79,8 +87,8 @@ export function NewTabButton({
     if (openSignal === firstSignalRef.current) {
       return;
     }
-    setOpen(current => !current);
-    setQuery('');
+    setOpen((current) => !current);
+    setQuery("");
     setActiveIndex(0);
   }, [openSignal]);
 
@@ -133,8 +141,8 @@ export function NewTabButton({
         setOpen(false);
       }
     };
-    window.addEventListener('pointerdown', onPointerDown);
-    return () => window.removeEventListener('pointerdown', onPointerDown);
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [open]);
 
   // **자리를 잡은 뒤에 포커스한다.** 말풍선은 `anchor` 가 정해진 다음에야 그려지므로, 여는
@@ -148,11 +156,17 @@ export function NewTabButton({
 
   const items = useMemo<CommandPaletteItem[]>(() => {
     const trimmed = query.trim();
-    const connectable = hosts.filter((host) => hostSupportsTerminalConnect(host));
+    const connectable = hosts.filter((host) =>
+      hostSupportsTerminalConnect(host),
+    );
     const matched = trimmed
       ? connectable.filter((host) =>
           matchesKeyboardLayoutQuery(
-            [host.label, host.groupName ?? '', getHostSubtitle(host, hostSubtitleLabels())].join(' '),
+            [
+              host.label,
+              host.groupName ?? "",
+              getHostSubtitle(host, hostSubtitleLabels()),
+            ].join(" "),
             trimmed,
           ),
         )
@@ -163,6 +177,28 @@ export function NewTabButton({
             left.label.localeCompare(right.label),
         );
 
+    const workspaceMatches = savedWorkspaces
+      .filter((workspace) => {
+        if (!trimmed) {
+          return true;
+        }
+        const targetLabels = listSavedWorkspaceLeaves(workspace.root).map(
+          (leaf) => leaf.target.label,
+        );
+        return matchesKeyboardLayoutQuery(
+          [workspace.name, ...targetLabels].join(" "),
+          trimmed,
+        );
+      })
+      .sort((left, right) => {
+        if (trimmed) {
+          return left.name.localeCompare(right.name);
+        }
+        const rightRecent = Date.parse(right.lastOpenedAt ?? right.updatedAt);
+        const leftRecent = Date.parse(left.lastOpenedAt ?? left.updatedAt);
+        return rightRecent - leftRecent || left.name.localeCompare(right.name);
+      });
+
     const next: CommandPaletteItem[] = [];
 
     // `user@host` 를 그대로 친 경우. 저장하지 않고 바로 붙는다.
@@ -170,8 +206,8 @@ export function NewTabButton({
     if (quick && onQuickConnectSsh) {
       next.push({
         id: `quick:${quick.username}@${quick.hostname}:${quick.port}`,
-        group: 'quick-connect',
-        title: translate('palette.quickSsh'),
+        group: "quick-connect",
+        title: translate("palette.quickSsh"),
         subtitle: formatQuickSshHostLabel(quick),
         keywords: [],
         Icon: SquareTerminal,
@@ -182,10 +218,31 @@ export function NewTabButton({
       });
     }
 
+    if (onOpenSavedWorkspace) {
+      workspaceMatches.slice(0, MAX_WORKSPACES).forEach((workspace) => {
+        const leaves = listSavedWorkspaceLeaves(workspace.root);
+        next.push({
+          id: `workspace:${workspace.id}`,
+          group: "workspace",
+          title: workspace.name,
+          subtitle: translate("savedWorkspace.quickSubtitle", {
+            count: leaves.length,
+            targets: leaves.map((leaf) => leaf.target.label).join(" · "),
+          }),
+          keywords: leaves.map((leaf) => leaf.target.label),
+          Icon: Columns2,
+          run: () => {
+            setOpen(false);
+            onOpenSavedWorkspace(workspace.id);
+          },
+        });
+      });
+    }
+
     matched.slice(0, MAX_HOSTS).forEach((host) => {
       next.push({
         id: `host:${host.id}`,
-        group: 'host',
+        group: "host",
         title: host.label,
         subtitle: getHostSubtitle(host, hostSubtitleLabels()),
         keywords: [],
@@ -198,10 +255,10 @@ export function NewTabButton({
     });
 
     next.push({
-      id: 'terminal:local',
-      group: 'local-terminal',
-      title: translate('palette.nav.localTerminal'),
-      subtitle: translate('palette.nav.localShell'),
+      id: "terminal:local",
+      group: "local-terminal",
+      title: translate("palette.nav.localTerminal"),
+      subtitle: translate("palette.nav.localShell"),
       keywords: [],
       Icon: SquareTerminal,
       run: () => {
@@ -216,8 +273,10 @@ export function NewTabButton({
     lastConnectedByHostId,
     onConnectHost,
     onOpenLocalTerminal,
+    onOpenSavedWorkspace,
     onQuickConnectSsh,
     query,
+    savedWorkspaces,
     translate,
   ]);
 
@@ -229,20 +288,21 @@ export function NewTabButton({
         ref={buttonRef}
         type="button"
         aria-expanded={open}
-        aria-label={translate('titleBar.newTab')}
-        title={translate('titleBar.newTab')}
+        aria-label={translate("titleBar.newTab")}
+        title={translate("titleBar.newTab")}
         onClick={() => {
           setOpen((current) => !current);
-          setQuery('');
+          setQuery("");
           setActiveIndex(0);
         }}
         className={cn(
           // 크기·라운드는 탭을 따라간다(`self-center mb-[0.42rem] rounded-[10px]`) — 그래야 한
           // 줄로 선다. 다만 **평소에는 배경을 깔지 않는다**: 탭처럼 칠해 두면 안 눌렀는데도 켜져
           // 있는 것처럼 보이고, 탭 하나가 더 있는 것으로도 읽힌다.
-          'flex h-8 w-8 flex-none items-center justify-center rounded-[10px] border border-transparent bg-transparent text-[rgba(255,255,255,0.78)]',
-          'hover:bg-[rgba(255,255,255,0.12)] hover:text-white',
-          open && 'border-[rgba(255,255,255,0.16)] bg-[rgba(255,255,255,0.16)] text-white',
+          "flex h-8 w-8 flex-none items-center justify-center rounded-[10px] border border-transparent bg-transparent text-[rgba(255,255,255,0.78)]",
+          "hover:bg-[rgba(255,255,255,0.12)] hover:text-white",
+          open &&
+            "border-[rgba(255,255,255,0.16)] bg-[rgba(255,255,255,0.16)] text-white",
         )}
       >
         <Plus className="h-4 w-4" aria-hidden="true" />
@@ -250,63 +310,63 @@ export function NewTabButton({
 
       {open && anchor
         ? createPortal(
-        <div
-          ref={popoverRef}
-          data-testid="new-tab-popover"
-          style={{ left: anchor.left, top: anchor.top }}
-          className="fixed z-[200] w-[min(22rem,calc(100vw-2rem))] rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface)] p-3 shadow-[var(--shadow-floating)]"
-        >
-          <div>
-            <Input
-              ref={inputRef}
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setActiveIndex(0);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') {
-                  setOpen(false);
-                  return;
-                }
-                if (event.key === 'ArrowDown') {
-                  event.preventDefault();
-                  setActiveIndex((current) =>
-                    items.length === 0 ? 0 : (current + 1) % items.length,
-                  );
-                  return;
-                }
-                if (event.key === 'ArrowUp') {
-                  event.preventDefault();
-                  setActiveIndex((current) =>
-                    items.length === 0
-                      ? 0
-                      : (current - 1 + items.length) % items.length,
-                  );
-                  return;
-                }
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  items[clampedIndex]?.run();
-                }
-              }}
-              placeholder={translate('titleBar.newTabSearch')}
-              aria-label={translate('titleBar.newTabSearch')}
-              spellCheck={false}
-              autoCapitalize="off"
-              autoCorrect="off"
-            />
-            <CommandPalette
-              variant="inline"
-              items={items}
-              activeIndex={clampedIndex}
-              onActiveIndexChange={setActiveIndex}
-              onRunItem={(item) => item.run()}
-            />
-          </div>
-        </div>,
-        document.body,
-      )
+            <div
+              ref={popoverRef}
+              data-testid="new-tab-popover"
+              style={{ left: anchor.left, top: anchor.top }}
+              className="fixed z-[200] w-[min(22rem,calc(100vw-2rem))] rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface)] p-3 shadow-[var(--shadow-floating)]"
+            >
+              <div>
+                <Input
+                  ref={inputRef}
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setActiveIndex(0);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setOpen(false);
+                      return;
+                    }
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setActiveIndex((current) =>
+                        items.length === 0 ? 0 : (current + 1) % items.length,
+                      );
+                      return;
+                    }
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setActiveIndex((current) =>
+                        items.length === 0
+                          ? 0
+                          : (current - 1 + items.length) % items.length,
+                      );
+                      return;
+                    }
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      items[clampedIndex]?.run();
+                    }
+                  }}
+                  placeholder={translate("titleBar.newTabSearch")}
+                  aria-label={translate("titleBar.newTabSearch")}
+                  spellCheck={false}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                />
+                <CommandPalette
+                  variant="inline"
+                  items={items}
+                  activeIndex={clampedIndex}
+                  onActiveIndexChange={setActiveIndex}
+                  onRunItem={(item) => item.run()}
+                />
+              </div>
+            </div>,
+            document.body,
+          )
         : null}
     </div>
   );

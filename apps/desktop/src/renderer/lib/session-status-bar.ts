@@ -73,7 +73,14 @@ export interface SessionKindChip {
 
 interface KindChipInput {
   host: HostRecord | null | undefined;
-  shellKind?: string;
+  /**
+   * 이 세션이 호스트 안의 컨테이너에 붙어 있는가(TerminalTab.containerId).
+   *
+   * 예전에는 `shellKind === 'container-exec'` 로 판정했는데 코어는 그 값을 보내지 않아 이 분기가
+   * 한 번도 돌지 않았다 — 아이콘과 en/ko 라벨까지 다 있는데 컨테이너 셸이 호스트의 칩(SSM·점프
+   * 등)을 그대로 달고 있었다. 판정은 탭이 들고 있는 표식으로 한다.
+   */
+  containerSession?: boolean;
   hops?: readonly TerminalConnectionHop[] | null;
   /** EC2 세션이 실제로 탄 전송. 있으면 칩이 SSH over SSM 과 SSM 셸을 갈라 말한다. */
   awsTransport?: AwsSessionTransport;
@@ -109,13 +116,13 @@ function firstHopName(
 
 export function resolveSessionKindChip({
   host,
-  shellKind,
+  containerSession,
   hops,
   awsTransport,
 }: KindChipInput): SessionKindChip | null {
   const none = { hopCount: 0, hopName: null };
   // 컨테이너 exec 은 호스트 종류보다 먼저 본다 — 붙은 곳이 호스트가 아니라 그 안의 컨테이너다.
-  if (shellKind === 'container-exec') {
+  if (containerSession) {
     return { kind: 'container', ...none };
   }
   if (!host) {

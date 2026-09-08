@@ -390,14 +390,20 @@ export function createSessionServices(deps: SliceDeps) {
         { source: "host", hostId: host.id },
         get().tabs,
       );
-    const tab = createPendingSessionTab({
-      sessionId,
-      stableId: existingTab?.stableId,
-      source: "host",
-      hostId: host.id,
-      title,
-      progress,
-    });
+    const tab = {
+      ...createPendingSessionTab({
+        sessionId,
+        stableId: existingTab?.stableId,
+        source: "host",
+        hostId: host.id,
+        title,
+        progress,
+      }),
+      // 연결이 끝난 뒤에도 남는 표식이다. pendingConnectionAttempts 의 source 는 연결 중에만
+      // 있어서, 붙은 뒤(사용자가 Workspace 로 저장하는 시점)에는 이 pane 이 컨테이너 셸이라는
+      // 것을 알 방법이 없었다(TerminalTab.containerId 주석 참고).
+      containerId,
+    };
 
     set((state) => {
       const nextAttempts = [

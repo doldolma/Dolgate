@@ -2294,6 +2294,18 @@ describe("createAppStore containers", () => {
       tabs: [
         ...state.tabs,
         {
+          id: "tab-1",
+          stableId: "tab-1",
+          sessionId: "session-1",
+          source: "local",
+          hostId: null,
+          title: "Session 1",
+          status: "connected",
+          sessionShare: null,
+          hasReceivedOutput: true,
+          lastEventAt: "2026-03-28T00:00:00.000Z",
+        },
+        {
           id: "tab-2",
           stableId: "tab-2",
           sessionId: "session-2",

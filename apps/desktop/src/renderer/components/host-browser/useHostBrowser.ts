@@ -1,7 +1,14 @@
-import type { CSSProperties } from 'react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import Fuse from 'fuse.js';
-import { resolveContextMenuPosition } from './contextMenuPosition';
+import type { CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import Fuse from "fuse.js";
+import { resolveContextMenuPosition } from "./contextMenuPosition";
 import {
   collectGroupPaths,
   countHostsInGroupTree,
@@ -12,7 +19,7 @@ import {
   isGroupWithinPath,
   normalizeGroupPath,
   rebaseGroupPath,
-} from '@shared';
+} from "@shared";
 import type {
   ActivityLogRecord,
   GroupRecord,
@@ -21,43 +28,63 @@ import type {
   HostRecord,
   SecretMetadataRecord,
   SnippetRecord,
+  SavedWorkspaceRecord,
   SshKeyGenerateInput,
   SshKeyInstallInput,
   SshKeyInstallResult,
-} from '@shared';
-import type { HomeSection, SettingsSection } from '../../store/types';
-import { getUnusedSavedCredentialsAfterHostDeletion } from '../../lib/host-secret-cleanup';
-import { getKeyboardLayoutSearchQueries } from '../../lib/keyboard-layout-search';
-import { useResponsiveCardGrid } from '../../lib/useResponsiveCardGrid';
-import type { ParsedQuickSshCommand } from '@shared';
-import type { DesktopPlatform } from '../DesktopWindowControls';
-import { t } from '../../i18n';
-import { buildLastConnectedByHostId } from '../../lib/last-connected';
+} from "@shared";
+import type { HomeSection, SettingsSection } from "../../store/types";
+import { listSavedWorkspaceLeaves } from "../../store/utils";
+import { getUnusedSavedCredentialsAfterHostDeletion } from "../../lib/host-secret-cleanup";
+import {
+  getKeyboardLayoutSearchQueries,
+  matchesKeyboardLayoutQuery,
+} from "../../lib/keyboard-layout-search";
+import { useResponsiveCardGrid } from "../../lib/useResponsiveCardGrid";
+import type { ParsedQuickSshCommand } from "@shared";
+import type { DesktopPlatform } from "../DesktopWindowControls";
+import { t } from "../../i18n";
+import { buildLastConnectedByHostId } from "../../lib/last-connected";
+import {
+  buildHomeAssets,
+  getHomeAssetRange,
+  orderHomeAssetKeys,
+  parseHomeAssetKey,
+  partitionHomeAssetKeys,
+  toHomeAssetKey,
+  type HomeAsset,
+  type HomeAssetKey,
+  type HomeAssetRef,
+} from "./homeAssets";
 
 export const HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX = 235;
 export const HOME_BROWSER_HOST_CARD_MAX_WIDTH_PX = 460;
 export const HOME_BROWSER_CARD_GAP_PX = 13.6;
-export const HOST_DRAG_MIME_TYPE = 'application/x-dolssh-host-id';
-export const HOSTS_DRAG_MIME_TYPE = 'application/x-dolssh-host-ids';
-export const GROUP_DRAG_MIME_TYPE = 'application/x-dolssh-group-path';
+export const HOST_DRAG_MIME_TYPE = "application/x-dolssh-host-id";
+export const HOSTS_DRAG_MIME_TYPE = "application/x-dolssh-host-ids";
+export const HOME_ASSETS_DRAG_MIME_TYPE =
+  "application/x-dolgate-home-assets";
+export const GROUP_DRAG_MIME_TYPE = "application/x-dolssh-group-path";
 
 // Serial·RDP 는 여기 없다 — 가져오기가 아니라 새로 만들기라서, New Host 폼 맨 위의
 // 종류 셀렉터(SSH/Serial/RDP)로 옮겼다.
 export const HOST_BROWSER_IMPORT_MENU_LABELS = [
-  'Import Dolgate',
-  'Import OpenSSH',
-  'Import from Termius',
-  'Import from Xshell',
-  'Import from Warpgate',
-  'Import via AWS SSM',
+  "Import Dolgate",
+  "Import OpenSSH",
+  "Import from Termius",
+  "Import from Xshell",
+  "Import from Warpgate",
+  "Import via AWS SSM",
 ] as const;
 
 export function getHostBrowserVisibleImportMenuLabels(
   desktopPlatform: DesktopPlatform,
 ): string[] {
-  return desktopPlatform === 'win32'
+  return desktopPlatform === "win32"
     ? [...HOST_BROWSER_IMPORT_MENU_LABELS]
-    : HOST_BROWSER_IMPORT_MENU_LABELS.filter((label) => label !== 'Import from Xshell');
+    : HOST_BROWSER_IMPORT_MENU_LABELS.filter(
+        (label) => label !== "Import from Xshell",
+      );
 }
 
 export function getHostBrowserEmptyCalloutMessage(
@@ -65,13 +92,13 @@ export function getHostBrowserEmptyCalloutMessage(
   searchQuery: string,
 ): string {
   return hostCount === 0
-    ? t('hostBrowserEmpty.noHostsHint')
+    ? t("hostBrowserEmpty.noHostsHint")
     : searchQuery
-      ? t('hostBrowserEmpty.searchHint')
-      : t('hostBrowserEmpty.addHint');
+      ? t("hostBrowserEmpty.searchHint")
+      : t("hostBrowserEmpty.addHint");
 }
 
-export type HostSortKey = 'name' | 'recent' | 'group' | 'lastConnected';
+export type HostSortKey = "name" | "recent" | "group" | "lastConnected";
 
 // 그룹 사이드바 정렬: 이름순 / 최근 사용순 / 호스트 많은 순.
 /**
@@ -81,7 +108,7 @@ export type HostSortKey = 'name' | 'recent' | 'group' | 'lastConnected';
  * 이름순으로 떨어지므로 **예전과 같은 화면**이 나온다. 기본을 'name' 으로 두면 끌었을 때
  * 아무 일도 일어나지 않아, 사용자가 정렬 메뉴를 먼저 찾아야 한다.
  */
-export type GroupSortKey = 'manual' | 'name' | 'recent' | 'count';
+export type GroupSortKey = "manual" | "name" | "recent" | "count";
 export type HostViewMode = HomeHostViewMode;
 
 export interface GroupDeleteTarget {
@@ -89,6 +116,7 @@ export interface GroupDeleteTarget {
   groupCount: number;
   title: string;
   hostCount: number;
+  workspaceCount: number;
   childGroupCount: number;
 }
 
@@ -98,25 +126,25 @@ export interface HostDeleteTarget {
   hostCount: number;
 }
 
-export interface HostContextMenuState {
-  kind: 'host';
-  hostIds: string[];
+export interface AssetContextMenuState {
+  kind: "asset";
+  assetKeys: HomeAssetKey[];
   x: number;
   y: number;
 }
 
 export interface GroupContextMenuState {
-  kind: 'group';
+  kind: "group";
   groupPaths: string[];
   x: number;
   y: number;
 }
 
-export type ContextMenuState = HostContextMenuState | GroupContextMenuState;
+export type ContextMenuState = AssetContextMenuState | GroupContextMenuState;
 
 export type GroupModalState =
-  | { mode: 'create'; parentPath?: string | null }
-  | { mode: 'rename'; path: string };
+  | { mode: "create"; parentPath?: string | null }
+  | { mode: "rename"; path: string };
 
 export interface GroupTreeRow {
   path: string;
@@ -124,7 +152,7 @@ export interface GroupTreeRow {
   depth: number;
   parentPath: string | null;
   hasChildren: boolean;
-  hostCount: number;
+  assetCount: number;
 }
 
 export interface TagCount {
@@ -132,22 +160,33 @@ export interface TagCount {
   count: number;
 }
 
+/**
+ * savedWorkspaces 는 필수다 — 기본값 `[]` 를 두면 인자를 빼먹어도 컴파일이 통과하고, 그룹
+ * 개수만 조용히 줄어든다(빈 그룹 숨김·그룹 삭제 경고가 Workspace 만 든 그룹을 놓친다).
+ */
 export function buildGroupTreeRows(
   groupPaths: string[],
   groups: GroupRecord[],
   hosts: HostRecord[],
+  savedWorkspaces: readonly SavedWorkspaceRecord[],
 ): GroupTreeRow[] {
   const explicitGroupMap = new Map(groups.map((group) => [group.path, group]));
   const groupPathSet = new Set(groupPaths);
   return groupPaths.map((path) => ({
     path,
     label: explicitGroupMap.get(path)?.name ?? getGroupLabel(path),
-    depth: Math.max(0, path.split('/').length - 1),
+    depth: Math.max(0, path.split("/").length - 1),
     parentPath: normalizeGroupPath(
-      path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : null,
+      path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : null,
     ),
-    hasChildren: [...groupPathSet].some((candidate) => candidate.startsWith(`${path}/`)),
-    hostCount: countHostsInGroupTree(hosts, path),
+    hasChildren: [...groupPathSet].some((candidate) =>
+      candidate.startsWith(`${path}/`),
+    ),
+    assetCount:
+      countHostsInGroupTree(hosts, path) +
+      savedWorkspaces.filter((workspace) =>
+        isGroupWithinPath(normalizeGroupPath(workspace.groupName), path),
+      ).length,
   }));
 }
 
@@ -169,16 +208,19 @@ export function sortGroupTreeRows(
   }
   // 직접 순서는 들어온 배열이 이미 갖고 있다 — collectGroupPaths 가 랭크로 정렬하고
   // buildGroupTreeRows 가 그 순서를 유지한다. 여기서 다시 손대면 그 순서를 덮는다.
-  if (sortKey === 'manual') {
+  if (sortKey === "manual") {
     return rows;
   }
 
   const compare = (a: GroupTreeRow, b: GroupTreeRow): number => {
-    if (sortKey === 'count') {
-      return b.hostCount - a.hostCount || a.label.localeCompare(b.label);
+    if (sortKey === "count") {
+      return b.assetCount - a.assetCount || a.label.localeCompare(b.label);
     }
-    if (sortKey === 'recent') {
-      return (recentByPath.get(b.path) ?? 0) - (recentByPath.get(a.path) ?? 0) || a.label.localeCompare(b.label);
+    if (sortKey === "recent") {
+      return (
+        (recentByPath.get(b.path) ?? 0) - (recentByPath.get(a.path) ?? 0) ||
+        a.label.localeCompare(b.label)
+      );
     }
     return a.label.localeCompare(b.label);
   };
@@ -196,16 +238,16 @@ export function sortGroupTreeRows(
 
 export function isAdditiveSelectionEvent(
   event:
-    | Pick<MouseEvent, 'ctrlKey' | 'metaKey'>
-    | Pick<KeyboardEvent, 'ctrlKey' | 'metaKey'>,
+    | Pick<MouseEvent, "ctrlKey" | "metaKey">
+    | Pick<KeyboardEvent, "ctrlKey" | "metaKey">,
 ): boolean {
   return event.ctrlKey || event.metaKey;
 }
 
 function cssEscape(value: string): string {
-  return typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+  return typeof CSS !== "undefined" && typeof CSS.escape === "function"
     ? CSS.escape(value)
-    : value.replace(/["\\]/g, '\\$&');
+    : value.replace(/["\\]/g, "\\$&");
 }
 
 export function getHostNavigationStep(
@@ -213,13 +255,13 @@ export function getHostNavigationStep(
   columns: number,
 ): number | null {
   switch (key) {
-    case 'ArrowLeft':
+    case "ArrowLeft":
       return -1;
-    case 'ArrowRight':
+    case "ArrowRight":
       return 1;
-    case 'ArrowUp':
+    case "ArrowUp":
       return -columns;
-    case 'ArrowDown':
+    case "ArrowDown":
       return columns;
     default:
       return null;
@@ -235,7 +277,11 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   );
 }
 
-export function getSelectionRange<T extends string>(items: T[], anchor: T | null, target: T): T[] {
+export function getSelectionRange<T extends string>(
+  items: T[],
+  anchor: T | null,
+  target: T,
+): T[] {
   const targetIndex = items.indexOf(target);
   if (targetIndex < 0) {
     return [target];
@@ -249,17 +295,21 @@ export function getSelectionRange<T extends string>(items: T[], anchor: T | null
   return items.slice(start, end + 1);
 }
 
-export function normalizeGroupSelectionForDelete(groupPaths: string[]): string[] {
+export function normalizeGroupSelectionForDelete(
+  groupPaths: string[],
+): string[] {
   return [...groupPaths]
     .filter(
       (path) =>
         !groupPaths.some(
-          (candidate) => candidate !== path && isGroupWithinPath(path, candidate),
+          (candidate) =>
+            candidate !== path && isGroupWithinPath(path, candidate),
         ),
     )
     .sort(
       (left, right) =>
-        left.split('/').length - right.split('/').length || left.localeCompare(right),
+        left.split("/").length - right.split("/").length ||
+        left.localeCompare(right),
     );
 }
 
@@ -294,7 +344,10 @@ export function canReparentGroup(
   ) {
     return false;
   }
-  const nextGroupPath = buildNextGroupPath(normalizedGroupPath, normalizedTargetParentPath);
+  const nextGroupPath = buildNextGroupPath(
+    normalizedGroupPath,
+    normalizedTargetParentPath,
+  );
   return Boolean(nextGroupPath && nextGroupPath !== normalizedGroupPath);
 }
 
@@ -306,7 +359,8 @@ export function parseHostDragIds(payload: string): string[] {
     const parsed = JSON.parse(payload);
     return Array.isArray(parsed)
       ? parsed.filter(
-          (entry): entry is string => typeof entry === 'string' && entry.length > 0,
+          (entry): entry is string =>
+            typeof entry === "string" && entry.length > 0,
         )
       : [];
   } catch {
@@ -315,46 +369,111 @@ export function parseHostDragIds(payload: string): string[] {
 }
 
 // 정렬 키별 기본 방향: 이름/그룹은 오름차순(가나다), 시간 계열은 내림차순(최신 먼저).
-export function defaultHostSortDirection(key: HostSortKey): 'asc' | 'desc' {
-  return key === 'name' || key === 'group' ? 'asc' : 'desc';
+export function defaultHostSortDirection(key: HostSortKey): "asc" | "desc" {
+  return key === "name" || key === "group" ? "asc" : "desc";
 }
 
 function sortHosts(
   hosts: HostRecord[],
   sortKey: HostSortKey,
-  sortDirection: 'asc' | 'desc',
+  sortDirection: "asc" | "desc",
   lastConnectedByHostId: Map<string, number>,
 ): HostRecord[] {
   // 각 비교자는 오름차순 기준이고 방향(dir)으로 부호를 뒤집는다. 동률은 항상 이름 오름차순.
-  const dir = sortDirection === 'desc' ? -1 : 1;
-  const byName = (a: HostRecord, b: HostRecord) => a.label.localeCompare(b.label);
-  if (sortKey === 'group') {
+  const dir = sortDirection === "desc" ? -1 : 1;
+  const byName = (a: HostRecord, b: HostRecord) =>
+    a.label.localeCompare(b.label);
+  if (sortKey === "group") {
     return [...hosts].sort(
       (a, b) =>
         dir *
-          (normalizeGroupPath(a.groupName) ?? '').localeCompare(
-            normalizeGroupPath(b.groupName) ?? '',
+          (normalizeGroupPath(a.groupName) ?? "").localeCompare(
+            normalizeGroupPath(b.groupName) ?? "",
           ) || byName(a, b),
     );
   }
-  if (sortKey === 'lastConnected') {
+  if (sortKey === "lastConnected") {
     return [...hosts].sort((a, b) => {
       const ta = lastConnectedByHostId.get(a.id) ?? 0;
       const tb = lastConnectedByHostId.get(b.id) ?? 0;
       return dir * (ta - tb) || byName(a, b);
     });
   }
-  if (sortKey === 'recent') {
+  if (sortKey === "recent") {
     return [...hosts].sort(
-      (a, b) => dir * (a.updatedAt ?? '').localeCompare(b.updatedAt ?? '') || byName(a, b),
+      (a, b) =>
+        dir * (a.updatedAt ?? "").localeCompare(b.updatedAt ?? "") ||
+        byName(a, b),
     );
   }
   return [...hosts].sort((a, b) => dir * byName(a, b));
 }
 
+/**
+ * 명령 팔레트 후보 순서: 즐겨찾기 → 최근 사용 → 이름. **목록 정렬과 별개다** — 팔레트는 이름을
+ * 쳐서 건너가는 곳이라, 목록 정렬을 이름 역순으로 바꾼 순간 기본 후보가 z 로 시작하는 것들로
+ * 바뀌면 안 된다(호스트 쪽 getDefaultHostCandidates 와 같은 성격).
+ */
+function compareWorkspacesForPalette(
+  left: SavedWorkspaceRecord,
+  right: SavedWorkspaceRecord,
+): number {
+  const favoriteDifference = Number(right.favorite) - Number(left.favorite);
+  if (favoriteDifference !== 0) {
+    return favoriteDifference;
+  }
+  const rightRecent = Date.parse(right.lastOpenedAt ?? right.createdAt) || 0;
+  const leftRecent = Date.parse(left.lastOpenedAt ?? left.createdAt) || 0;
+  return rightRecent - leftRecent || left.name.localeCompare(right.name);
+}
+
+/**
+ * Workspace 도 호스트와 같은 정렬 컨트롤 아래 놓여 있다 — 키·방향·동률 규칙을 sortHosts 와
+ * 똑같이 쓴다. 예전에는 즐겨찾기 → 최근 사용 → 이름 고정 순서였는데, 표 머리글에 정렬 화살표가
+ * 켜지는데도 위쪽 Workspace 줄만 그 정렬을 따르지 않아 한 정렬로 보이지 않았다.
+ *
+ * 키 대응: name→이름, group→그룹 경로, recent→updatedAt(호스트와 같다),
+ * lastConnected→lastOpenedAt(Workspace 의 "마지막 사용"). 즐겨찾기를 위로 고정하지 않는 것도
+ * 호스트와 같다 — 고정하면 사용자가 고른 정렬을 덮는다(즐겨찾기만 보려면 필터가 있다).
+ */
+function sortSavedWorkspaces(
+  workspaces: readonly SavedWorkspaceRecord[],
+  sortKey: HostSortKey,
+  sortDirection: "asc" | "desc",
+): SavedWorkspaceRecord[] {
+  const dir = sortDirection === "desc" ? -1 : 1;
+  const byName = (a: SavedWorkspaceRecord, b: SavedWorkspaceRecord) =>
+    a.name.localeCompare(b.name);
+  if (sortKey === "group") {
+    return [...workspaces].sort(
+      (a, b) =>
+        dir *
+          (normalizeGroupPath(a.groupName) ?? "").localeCompare(
+            normalizeGroupPath(b.groupName) ?? "",
+          ) || byName(a, b),
+    );
+  }
+  if (sortKey === "lastConnected") {
+    return [...workspaces].sort((a, b) => {
+      const ta = Date.parse(a.lastOpenedAt ?? "") || 0;
+      const tb = Date.parse(b.lastOpenedAt ?? "") || 0;
+      return dir * (ta - tb) || byName(a, b);
+    });
+  }
+  if (sortKey === "recent") {
+    return [...workspaces].sort(
+      (a, b) =>
+        dir * (a.updatedAt ?? "").localeCompare(b.updatedAt ?? "") ||
+        byName(a, b),
+    );
+  }
+  return [...workspaces].sort((a, b) => dir * byName(a, b));
+}
+
 export interface UseHostBrowserParams {
   desktopPlatform: DesktopPlatform;
   hosts: HostRecord[];
+  savedWorkspaces?: readonly SavedWorkspaceRecord[];
   groups: GroupRecord[];
   keychainEntries: SecretMetadataRecord[];
   currentGroupPath: string | null;
@@ -374,8 +493,24 @@ export interface UseHostBrowserParams {
    */
   canSelectHost?: (
     hostId: string,
-    options?: { reason?: 'click' | 'menu' },
+    options?: { reason?: "click" | "menu" },
   ) => boolean;
+  /**
+   * 호스트가 아닌 항목(Workspace)을 고르려면 호스트 편집기를 떠나야 한다 — 상위가 가로챈다.
+   *
+   * canSelectHost 가 hostId 를 받는 탓에 예전에는 host 분기에만 가드가 걸려 있었고, Workspace
+   * 카드를 누르면 저장 확인이 뜨지 않은 채 선택만 반쯤 움직였다(센터는 Workspace, 우측은 옛 호스트
+   * 편집기).
+   *
+   * **거부가 아니라 "이어서 실행" 이다**(onLeaveGroupScope 와 같은 모양). 거부만 하면 확인을 받은
+   * 뒤 선택을 다시 실행할 주체가 없어 편집기만 닫히고 사용자의 클릭이 사라진다. 상위는 물어볼
+   * 필요가 없으면 즉시, 물어봤으면 사용자가 답한 뒤에 `proceed()` 를 부른다. 우클릭(menu)처럼
+   * 물어보지 않기로 한 경우에는 아무것도 부르지 않는다.
+   */
+  onLeaveHostEditor?: (
+    proceed: () => void,
+    options?: { reason?: "click" | "menu" },
+  ) => void;
   /**
    * 그룹 이동(그룹 카드·트리 클릭, All Hosts 복귀)을 상위가 가로챈다.
    *
@@ -386,7 +521,10 @@ export interface UseHostBrowserParams {
   onLeaveGroupScope?: (proceed: () => void) => void;
   activityLogs?: ActivityLogRecord[];
   snippets?: SnippetRecord[];
-  onSetHostFavorite: (hostId: string, favorite: boolean) => void | Promise<void>;
+  onSetHostFavorite: (
+    hostId: string,
+    favorite: boolean,
+  ) => void | Promise<void>;
   errorMessage?: string | null;
   statusMessage?: string | null;
   onSearchChange: (query: string) => void;
@@ -414,8 +552,15 @@ export interface UseHostBrowserParams {
   onSelectHost: (hostId: string) => void;
   onEditHost: (hostId: string) => void;
   onDuplicateHosts: (hostIds: string[]) => Promise<void>;
-  onExportHosts: (hostIds: string[]) => void;
-  onMoveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
+  onExportAssets: (assets: HomeAssetRef[]) => void;
+  onMoveHostToGroup: (
+    hostId: string,
+    groupPath: string | null,
+  ) => Promise<void>;
+  onMoveSavedWorkspaceToGroup: (
+    workspaceId: string,
+    groupPath: string | null,
+  ) => Promise<unknown>;
   onRemoveHost: (hostId: string) => Promise<void>;
   onRemoveSecret: (secretRef: string) => Promise<void>;
   onConnectHost: (hostId: string) => Promise<void>;
@@ -428,11 +573,16 @@ export interface UseHostBrowserParams {
   onActivateContainers?: () => void | Promise<void>;
   onOpenSettingsSection?: (section: SettingsSection) => void | Promise<void>;
   onQuickConnectSsh?: (input: ParsedQuickSshCommand) => Promise<void>;
-  detailTab?: 'overview' | 'connection';
-  onDetailTabChange?: (tab: 'overview' | 'connection') => void;
+  detailTab?: "overview" | "connection";
+  onDetailTabChange?: (tab: "overview" | "connection") => void;
   onOpenReplay?: (recordingId: string) => void | Promise<void>;
-  onGenerateAndInstallSshKey?: (hostId: string, input: SshKeyGenerateInput) => Promise<void>;
-  onInstallSshPublicKey?: (input: SshKeyInstallInput) => Promise<SshKeyInstallResult>;
+  onGenerateAndInstallSshKey?: (
+    hostId: string,
+    input: SshKeyGenerateInput,
+  ) => Promise<void>;
+  onInstallSshPublicKey?: (
+    input: SshKeyInstallInput,
+  ) => Promise<SshKeyInstallResult>;
 }
 
 /**
@@ -443,12 +593,14 @@ export interface UseHostBrowserParams {
 export function useHostBrowser(params: UseHostBrowserParams) {
   const {
     hosts,
+    savedWorkspaces = [],
     groups,
     keychainEntries,
     currentGroupPath,
     searchQuery,
     selectedHostId,
     canSelectHost,
+    onLeaveHostEditor,
     onLeaveGroupScope,
     onClearHostSelection,
     onSelectHost,
@@ -456,38 +608,58 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     onMoveGroup,
     onReorderGroup,
     onMoveHostToGroup,
+    onMoveSavedWorkspaceToGroup,
   } = params;
 
-  const [groupModalState, setGroupModalState] = useState<GroupModalState | null>(null);
-  const [newGroupName, setNewGroupName] = useState('');
+  const [groupModalState, setGroupModalState] =
+    useState<GroupModalState | null>(null);
+  const [newGroupName, setNewGroupName] = useState("");
   const [groupError, setGroupError] = useState<string | null>(null);
-  // 섹션 이동(로그/포트포워딩 등)으로 HostBrowser가 언마운트됐다 돌아와도 선택을 잃지 않도록,
-  // 영속되는 selectedHostId(상위 보관)로 초기화해 리스트 선택 상태를 복원한다.
-  const [selectedHostIds, setSelectedHostIds] = useState<string[]>(
-    selectedHostId ? [selectedHostId] : [],
+  const initialFocusedAssetKey = selectedHostId
+    ? (`host:${selectedHostId}` as const)
+    : null;
+  const [selectedAssetKeys, setSelectedAssetKeys] = useState<HomeAssetKey[]>(
+    initialFocusedAssetKey ? [initialFocusedAssetKey] : [],
   );
-  // 상위가 보관한 선택이 바뀌면 목록 하이라이트를 그것으로 맞춘다. 편집 중 전환처럼 상위가
-  // 직접 선택을 옮기는 경로가 있어서, 내부 상태만 두면 둘이 어긋난 채로 남는다.
+  const [focusedAssetKey, setFocusedAssetKey] =
+    useState<HomeAssetKey | null>(initialFocusedAssetKey);
+  const [assetSelectionAnchorKey, setAssetSelectionAnchorKey] =
+    useState<HomeAssetKey | null>(initialFocusedAssetKey);
+  // 편집 전환처럼 상위가 Host 선택을 직접 바꾸는 경로만 Home Asset 포커스로 동기화한다.
+  // Workspace를 고르며 상위 Host 선택을 비우는 경우에는 Workspace 선택을 지우지 않는다.
   useEffect(() => {
-    setSelectedHostIds(selectedHostId ? [selectedHostId] : []);
+    if (!selectedHostId) {
+      return;
+    }
+    const key = `host:${selectedHostId}` as HomeAssetKey;
+    setSelectedAssetKeys((current) =>
+      current.includes(key) ? current : [key],
+    );
+    setFocusedAssetKey(key);
+    setAssetSelectionAnchorKey(key);
   }, [selectedHostId]);
   const [selectedGroupPaths, setSelectedGroupPaths] = useState<string[]>([]);
-  const [hostSelectionAnchor, setHostSelectionAnchor] = useState<string | null>(null);
-  const [groupSelectionAnchor, setGroupSelectionAnchor] = useState<string | null>(null);
-  const [groupDeleteTarget, setGroupDeleteTarget] = useState<GroupDeleteTarget | null>(null);
+  const [groupSelectionAnchor, setGroupSelectionAnchor] = useState<
+    string | null
+  >(null);
+  const [groupDeleteTarget, setGroupDeleteTarget] =
+    useState<GroupDeleteTarget | null>(null);
   const [groupDeleteError, setGroupDeleteError] = useState<string | null>(null);
   const [isRemovingGroup, setIsRemovingGroup] = useState(false);
-  const [hostDeleteTarget, setHostDeleteTarget] = useState<HostDeleteTarget | null>(null);
+  const [hostDeleteTarget, setHostDeleteTarget] =
+    useState<HostDeleteTarget | null>(null);
   const [hostDeleteError, setHostDeleteError] = useState<string | null>(null);
   const [isRemovingHost, setIsRemovingHost] = useState(false);
-  const [removeUnusedSecretsOnHostDelete, setRemoveUnusedSecretsOnHostDelete] = useState(true);
+  const [removeUnusedSecretsOnHostDelete, setRemoveUnusedSecretsOnHostDelete] =
+    useState(true);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
-  const [contextMenuStyle, setContextMenuStyle] = useState<CSSProperties | null>(
+  const [contextMenuStyle, setContextMenuStyle] =
+    useState<CSSProperties | null>(null);
+  const [dragTargetGroupPath, setDragTargetGroupPath] = useState<string | null>(
     null,
   );
-  const [dragTargetGroupPath, setDragTargetGroupPath] = useState<string | null>(null);
-  const [draggedHostIds, setDraggedHostIds] = useState<string[]>([]);
+  const [draggedAssetKeys, setDraggedAssetKeys] = useState<HomeAssetKey[]>([]);
   const [draggedGroupPath, setDraggedGroupPath] = useState<string | null>(null);
   const [isRootDragTarget, setIsRootDragTarget] = useState(false);
   /**
@@ -496,31 +668,33 @@ export function useHostBrowser(params: UseHostBrowserParams) {
    */
   const [groupDropEdge, setGroupDropEdge] = useState<{
     path: string;
-    edge: 'before' | 'after';
+    edge: "before" | "after";
   } | null>(null);
   const [expandedHostTags, setExpandedHostTags] = useState<string[]>([]);
   const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
-  const [collapsedTreeGroupPaths, setCollapsedTreeGroupPaths] = useState<string[]>([]);
+  const [collapsedTreeGroupPaths, setCollapsedTreeGroupPaths] = useState<
+    string[]
+  >([]);
   // 신규: 태그 필터 / 정렬 / 뷰 모드.
   const [activeTagFilter, setActiveTagFilter] = useState<string[]>([]);
   const [favoritesFilterActive, setFavoritesFilterActive] = useState(false);
-  const [sortKey, setSortKey] = useState<HostSortKey>('name');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  function setSort(key: HostSortKey, direction?: 'asc' | 'desc') {
+  const [sortKey, setSortKey] = useState<HostSortKey>("name");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  function setSort(key: HostSortKey, direction?: "asc" | "desc") {
     setSortKey(key);
     setSortDirection(direction ?? defaultHostSortDirection(key));
   }
   // 테이블 헤더 클릭: 같은 키면 방향 토글, 다른 키면 그 키의 기본 방향으로.
   function toggleSort(key: HostSortKey) {
     if (key === sortKey) {
-      setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'));
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
     } else {
       setSort(key);
     }
   }
-  const [groupSortKey, setGroupSortKey] = useState<GroupSortKey>('manual');
+  const [groupSortKey, setGroupSortKey] = useState<GroupSortKey>("manual");
   const [hideEmptyGroups, setHideEmptyGroups] = useState(false);
-  const viewMode = params.hostViewMode ?? 'grid';
+  const viewMode = params.hostViewMode ?? "grid";
   const setViewMode: (mode: HostViewMode) => void | Promise<void> =
     params.onHostViewModeChange ?? (() => undefined);
   const importMenuRef = useRef<HTMLDivElement | null>(null);
@@ -530,13 +704,13 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       return;
     }
     const close = () => setContextMenu(null);
-    window.addEventListener('click', close);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
     return () => {
-      window.removeEventListener('click', close);
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
     };
   }, [contextMenu]);
 
@@ -550,7 +724,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     () =>
       scopedHosts.map((host) => ({
         ...host,
-        searchText: getHostSearchText(host).join(' '),
+        searchText: getHostSearchText(host).join(" "),
       })),
     [scopedHosts],
   );
@@ -558,7 +732,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   const fuse = useMemo(
     () =>
       new Fuse(searchableHosts, {
-        keys: ['label', 'groupName', 'searchText'],
+        keys: ["label", "groupName", "searchText"],
         threshold: 0.32,
       }),
     [searchableHosts],
@@ -603,7 +777,10 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     () => hosts.filter((host) => host.favorite === true).map((host) => host.id),
     [hosts],
   );
-  const favoriteHostIdSet = useMemo(() => new Set(favoriteHostIds), [favoriteHostIds]);
+  const favoriteHostIdSet = useMemo(
+    () => new Set(favoriteHostIds),
+    [favoriteHostIds],
+  );
 
   // 활동 로그에서 호스트별 마지막 연결 시각(ms). "최근 연결순" 정렬에 쓴다.
   const lastConnectedByHostId = useMemo(
@@ -633,10 +810,99 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     lastConnectedByHostId,
   ]);
 
-  const allGroupPaths = useMemo(() => collectGroupPaths(groups, hosts), [groups, hosts]);
+  const searchedWorkspaces = useMemo(() => {
+    const query = searchQuery.trim();
+    if (!query) {
+      return [...savedWorkspaces];
+    }
+    return savedWorkspaces.filter((workspace) => {
+      const labels = listSavedWorkspaceLeaves(workspace.root).map(
+        (leaf) => leaf.target.label,
+      );
+      return matchesKeyboardLayoutQuery(
+        [workspace.name, ...labels].join(" "),
+        query,
+      );
+    });
+  }, [savedWorkspaces, searchQuery]);
+
+  /**
+   * 명령 팔레트가 쓰는 Workspace 후보. **검색어만** 적용하고 그룹 스코프·태그·즐겨찾기 필터는
+   * 적용하지 않는다 — 팔레트의 호스트 항목은 hb.hosts(전체)에서 나오므로 여기만 좁히면 같은
+   * 드롭다운이 종류마다 다른 범위로 동작한다. 실제로 그룹 안에서는 다른 그룹의 호스트는 뜨는데
+   * Workspace 는 안 떴다.
+   */
+  const paletteWorkspaces = useMemo(
+    () => [...searchedWorkspaces].sort(compareWorkspacesForPalette),
+    [searchedWorkspaces],
+  );
+
+  const favoriteWorkspaceCount = useMemo(
+    () => savedWorkspaces.filter((workspace) => workspace.favorite).length,
+    [savedWorkspaces],
+  );
+
+  const visibleWorkspaces = useMemo(() => {
+    // 태그는 호스트만 가진 필드다 — 태그를 고르면 Workspace 는 보이지 않는다(의도된 동작).
+    if (activeTagFilter.length > 0) {
+      return [];
+    }
+    let next = currentGroupPath
+      ? searchedWorkspaces.filter((workspace) =>
+          isGroupWithinPath(
+            normalizeGroupPath(workspace.groupName),
+            currentGroupPath,
+          ),
+        )
+      : searchedWorkspaces;
+    if (favoritesFilterActive) {
+      next = next.filter((workspace) => workspace.favorite);
+    }
+    return sortSavedWorkspaces(next, sortKey, sortDirection);
+  }, [
+    activeTagFilter,
+    currentGroupPath,
+    favoritesFilterActive,
+    searchedWorkspaces,
+    sortKey,
+    sortDirection,
+  ]);
+
+  const visibleAssets = useMemo(
+    () => buildHomeAssets(visibleWorkspaces, visibleHosts),
+    [visibleHosts, visibleWorkspaces],
+  );
+  const visibleAssetKeys = useMemo(
+    () => visibleAssets.map((asset) => asset.key),
+    [visibleAssets],
+  );
+  const { hostIds: selectedHostIds, workspaceIds: selectedWorkspaceIds } =
+    partitionHomeAssetKeys(selectedAssetKeys);
+
+  const allGroupPaths = useMemo(() => {
+    const paths = collectGroupPaths(groups, hosts);
+    const known = new Set(paths);
+    for (const workspace of savedWorkspaces) {
+      const ancestors: string[] = [];
+      let path = normalizeGroupPath(workspace.groupName);
+      while (path) {
+        ancestors.unshift(path);
+        path = normalizeGroupPath(
+          path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : null,
+        );
+      }
+      for (const ancestor of ancestors) {
+        if (!known.has(ancestor)) {
+          known.add(ancestor);
+          paths.push(ancestor);
+        }
+      }
+    }
+    return paths;
+  }, [groups, hosts, savedWorkspaces]);
   const groupTreeRows = useMemo(
-    () => buildGroupTreeRows(allGroupPaths, groups, hosts),
-    [allGroupPaths, groups, hosts],
+    () => buildGroupTreeRows(allGroupPaths, groups, hosts, savedWorkspaces),
+    [allGroupPaths, groups, hosts, savedWorkspaces],
   );
   // 그룹별 최근 사용 시각(ms): 그룹 서브트리 내 호스트 활동의 최댓값(조상 경로에도 전파).
   const groupRecentByPath = useMemo(() => {
@@ -650,7 +916,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       while (path) {
         map.set(path, Math.max(map.get(path) ?? 0, ms));
         path = normalizeGroupPath(
-          path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : null,
+          path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : null,
         );
       }
     }
@@ -662,7 +928,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   );
 
   /** 끌어서 순서를 바꿀 수 있는 상태인가. 다른 정렬에서는 놓자마자 제자리로 튄다. */
-  const canReorderGroups = groupSortKey === 'manual';
+  const canReorderGroups = groupSortKey === "manual";
 
   /**
    * "이 행 위/아래" 를 부모와 index 로 옮긴다.
@@ -671,22 +937,27 @@ export function useHostBrowser(params: UseHostBrowserParams) {
    * 먼저 빼고 끼워 넣으므로, 그대로 세면 아래로 옮길 때 한 칸 어긋난다.
    */
   const resolveGroupDropTarget = useCallback(
-    (rowPath: string, edge: 'before' | 'after', draggedPath: string) => {
-      const row = sortedGroupTreeRows.find((candidate) => candidate.path === rowPath);
+    (rowPath: string, edge: "before" | "after", draggedPath: string) => {
+      const row = sortedGroupTreeRows.find(
+        (candidate) => candidate.path === rowPath,
+      );
       if (!row) {
         return null;
       }
       const siblings = sortedGroupTreeRows.filter(
         (candidate) =>
-          candidate.parentPath === row.parentPath && candidate.path !== draggedPath,
+          candidate.parentPath === row.parentPath &&
+          candidate.path !== draggedPath,
       );
-      const anchor = siblings.findIndex((candidate) => candidate.path === rowPath);
+      const anchor = siblings.findIndex(
+        (candidate) => candidate.path === rowPath,
+      );
       if (anchor < 0) {
         return null;
       }
       return {
         parentPath: row.parentPath,
-        index: edge === 'before' ? anchor : anchor + 1,
+        index: edge === "before" ? anchor : anchor + 1,
       };
     },
     [sortedGroupTreeRows],
@@ -703,7 +974,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   const visibleGroupTreeRows = useMemo(
     () =>
       sortedGroupTreeRows.filter((group) => {
-        if (hideEmptyGroups && group.hostCount === 0) {
+        if (hideEmptyGroups && group.assetCount === 0) {
           return false;
         }
         let ancestorPath = group.parentPath;
@@ -712,8 +983,8 @@ export function useHostBrowser(params: UseHostBrowserParams) {
             return false;
           }
           ancestorPath = normalizeGroupPath(
-            ancestorPath.includes('/')
-              ? ancestorPath.slice(0, ancestorPath.lastIndexOf('/'))
+            ancestorPath.includes("/")
+              ? ancestorPath.slice(0, ancestorPath.lastIndexOf("/"))
               : null,
           );
         }
@@ -721,7 +992,10 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       }),
     [collapsedTreeGroupPathSet, sortedGroupTreeRows, hideEmptyGroups],
   );
-  const visibleHostIds = useMemo(() => visibleHosts.map((host) => host.id), [visibleHosts]);
+  const visibleHostIds = useMemo(
+    () => visibleHosts.map((host) => host.id),
+    [visibleHosts],
+  );
   const visibleGroupPaths = useMemo(
     () => visibleGroupTreeRows.map((group) => group.path),
     [visibleGroupTreeRows],
@@ -732,30 +1006,33 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     style: hostGridStyle,
     layout: hostGridLayout,
   } = useResponsiveCardGrid({
-    itemCount: visibleHosts.length,
+    itemCount: visibleHosts.length + visibleWorkspaces.length,
     minWidth: HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX,
     maxWidth: HOME_BROWSER_HOST_CARD_MAX_WIDTH_PX,
     gap: HOME_BROWSER_CARD_GAP_PX,
   });
   const clampedHostCardStyle =
-    hostGridLayout.justifyContent === 'start' && hostGridLayout.cardWidth
-      ? { width: '100%', maxWidth: `${hostGridLayout.cardWidth}px` }
+    hostGridLayout.justifyContent === "start" && hostGridLayout.cardWidth
+      ? { width: "100%", maxWidth: `${hostGridLayout.cardWidth}px` }
       : undefined;
 
   const currentGroupPathLabel = currentGroupPath
-    ? currentGroupPath.split('/').join(' / ')
-    : 'All Groups';
+    ? currentGroupPath.split("/").join(" / ")
+    : "All Groups";
   const searchPlaceholder = currentGroupPath
     ? `Search hosts inside ${currentGroupPathLabel}`
-    : 'Search hosts or instances';
+    : "Search hosts and Workspaces";
   const emptyMessage =
     hosts.length === 0
-      ? t('hostBrowserEmpty.noHosts')
+      ? t("hostBrowserEmpty.noHosts")
       : searchQuery
-        ? t('hostBrowserEmpty.noResults')
-        : t('hostBrowserEmpty.noHostsHere');
+        ? t("hostBrowserEmpty.noResults")
+        : t("hostBrowserEmpty.noHostsHere");
   const groupDeleteDialogVariant = groupDeleteTarget
-    ? getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount)
+    ? getGroupDeleteDialogVariant(
+        groupDeleteTarget.childGroupCount,
+        groupDeleteTarget.hostCount + groupDeleteTarget.workspaceCount,
+      )
     : null;
   const hostDeleteUnusedLocalSecretRefs = useMemo(
     () =>
@@ -789,7 +1066,8 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       // scrollHeight 를 함께 본다: 앞서 열린 메뉴가 화면보다 커서 maxHeight 로 접혔다면 이번 첫
       // 프레임에도 그 값이 남아 있어 offsetHeight 가 접힌 높이로 나온다. 그 값으로 자리를 잡으면
       // 실제보다 짧다고 보고 아래로 펼쳐서 다시 잘린다.
-      height: Math.max(element?.scrollHeight ?? 0, element?.offsetHeight ?? 0) || 220,
+      height:
+        Math.max(element?.scrollHeight ?? 0, element?.offsetHeight ?? 0) || 220,
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
     });
@@ -798,7 +1076,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       top: placement.top,
       maxHeight: placement.maxHeight,
       // 화면보다 큰 메뉴만 스크롤된다. 잘라 버리면 마지막 항목을 누를 방법이 없다.
-      overflowY: 'auto',
+      overflowY: "auto",
     });
   }, [contextMenu]);
 
@@ -809,10 +1087,27 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   }, [allGroupPaths]);
 
   useEffect(() => {
-    setSelectedHostIds((current) =>
-      current.filter((hostId) => visibleHostIds.includes(hostId)),
+    setSelectedAssetKeys((current) =>
+      current.filter((key) => visibleAssetKeys.includes(key)),
     );
-  }, [visibleHostIds]);
+  }, [visibleAssetKeys]);
+
+  useEffect(() => {
+    if (focusedAssetKey && !visibleAssetKeys.includes(focusedAssetKey)) {
+      const nextFocus =
+        selectedAssetKeys.find((key) => visibleAssetKeys.includes(key)) ?? null;
+      setFocusedAssetKey(nextFocus);
+      // 포커스를 옮기는 다른 모든 경로처럼 상위의 선택도 같이 옮긴다. 이것만 빠져 있어서,
+      // 동기화가 포커스된 항목을 지우면 목록은 다음 항목을 고른 것처럼 보이는데 우측 상세는
+      // "선택된 것이 없습니다" 를 그리거나 이미 없는 호스트를 가리켰다.
+      const focusedRef = nextFocus ? parseHomeAssetKey(nextFocus) : null;
+      if (focusedRef?.kind === "host") {
+        onSelectHost(focusedRef.id);
+      } else {
+        onClearHostSelection();
+      }
+    }
+  }, [focusedAssetKey, selectedAssetKeys, visibleAssetKeys]);
 
   const keyboardActive = params.active !== false;
 
@@ -820,34 +1115,36 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     if (!keyboardActive) {
       return;
     }
-    const handleSelectAllHosts = (event: KeyboardEvent) => {
+    const handleSelectAllAssets = (event: KeyboardEvent) => {
       if (
         event.defaultPrevented ||
         event.altKey ||
         (!event.metaKey && !event.ctrlKey) ||
-        event.key.toLocaleLowerCase() !== 'a' ||
+        event.key.toLocaleLowerCase() !== "a" ||
         isEditableKeyboardTarget(event.target) ||
-        document.querySelector('[role="dialog"][aria-modal="true"]')
+        // alertdialog 도 모달이다. 파괴적인 확인창(Workspace 삭제)이 그 role 을 쓰는데,
+        // dialog 만 보던 동안 그 창이 떠 있어도 이 전역 키 처리가 계속 돌아 뒤쪽 목록의 선택을
+        // 바꾸고 포커스를 카드로 끌어갔다(그래서 Enter 가 확인을 누르지 못했다).
+        document.querySelector(
+          '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+        )
       ) {
         return;
       }
 
       event.preventDefault();
-      setSelectedHostIds(visibleHostIds);
+      setSelectedAssetKeys(visibleAssetKeys);
       setSelectedGroupPaths([]);
-      setHostSelectionAnchor(visibleHostIds[0] ?? null);
+      setAssetSelectionAnchorKey(visibleAssetKeys[0] ?? null);
+      setFocusedAssetKey((current) => current ?? visibleAssetKeys[0] ?? null);
       setGroupSelectionAnchor(null);
       setContextMenu(null);
     };
 
-    window.addEventListener('keydown', handleSelectAllHosts);
-    return () => window.removeEventListener('keydown', handleSelectAllHosts);
-  }, [keyboardActive, visibleHostIds]);
+    window.addEventListener("keydown", handleSelectAllAssets);
+    return () => window.removeEventListener("keydown", handleSelectAllAssets);
+  }, [keyboardActive, visibleAssetKeys]);
 
-  // 선택된 호스트를 화살표로 옮긴다. 카드가 DOM 포커스를 갖고 있지 않아도 동작해야 한다 —
-  // 사용자가 보고 있는 것은 "선택된 호스트"이고, 클릭 외에 커맨드 팔레트·정렬 변경으로도
-  // 선택이 생긴다. 가드는 위 전체 선택(Cmd+A) 핸들러와 같은 규칙이다: 검색 입력에서는
-  // 팔레트가 화살표를 쓰므로 넘기고, 모달이 떠 있으면 관여하지 않는다.
   useEffect(() => {
     if (!keyboardActive) {
       return;
@@ -855,8 +1152,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     const handleArrowNavigation = (event: KeyboardEvent) => {
       const step = getHostNavigationStep(
         event.key,
-        // 목록(테이블)은 한 줄에 하나뿐이라 좌우로 옮길 자리가 없다.
-        viewMode === 'list' ? 1 : Math.max(1, hostGridLayout.columns),
+        viewMode === "list" ? 1 : Math.max(1, hostGridLayout.columns),
       );
       if (
         step === null ||
@@ -866,60 +1162,60 @@ export function useHostBrowser(params: UseHostBrowserParams) {
         event.metaKey ||
         event.ctrlKey ||
         isEditableKeyboardTarget(event.target) ||
-        document.querySelector('[role="dialog"][aria-modal="true"]')
+        // alertdialog 도 모달이다. 파괴적인 확인창(Workspace 삭제)이 그 role 을 쓰는데,
+        // dialog 만 보던 동안 그 창이 떠 있어도 이 전역 키 처리가 계속 돌아 뒤쪽 목록의 선택을
+        // 바꾸고 포커스를 카드로 끌어갔다(그래서 Enter 가 확인을 누르지 못했다).
+        document.querySelector(
+          '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+        )
       ) {
         return;
       }
-      // 여러 개를 고른 상태에서 화살표를 누르면 무엇을 기준으로 옮길지 정할 수 없다 —
-      // 선택을 하나로 줄여 버리는 대신 아무것도 하지 않는다.
-      if (selectedGroupPaths.length > 0 || selectedHostIds.length > 1) {
+      if (selectedGroupPaths.length > 0 || selectedAssetKeys.length > 1) {
         return;
       }
-      const currentHostId = selectedHostIds[0] ?? selectedHostId;
-      if (!currentHostId) {
+      const currentKey = focusedAssetKey ?? selectedAssetKeys[0];
+      if (!currentKey) {
         return;
       }
-      const currentIndex = visibleHostIds.indexOf(currentHostId);
+      const currentIndex = visibleAssetKeys.indexOf(currentKey);
       if (currentIndex < 0) {
         return;
       }
-      // 끝에서는 멈춘다 — 순환시키면 목록 반대편으로 튀어 어디로 갔는지 놓친다.
       const nextIndex = Math.min(
         Math.max(currentIndex + step, 0),
-        visibleHostIds.length - 1,
+        visibleAssetKeys.length - 1,
       );
       event.preventDefault();
       if (nextIndex === currentIndex) {
         return;
       }
-      const nextHostId = visibleHostIds[nextIndex];
-      selectSingleHost(nextHostId);
-      // 다음 칠 때까지 기다린 뒤 화면 안으로 끌어오고 포커스를 옮긴다. 스크롤이 없으면
-      // 목록을 벗어난 순간 선택이 어디로 갔는지 보이지 않고, 포커스를 옮기지 않으면
-      // Enter(연결)가 여전히 이전 카드로 간다.
+      const nextKey = visibleAssetKeys[nextIndex];
+      selectSingleAsset(parseHomeAssetKey(nextKey));
       requestAnimationFrame(() => {
         const element = document.querySelector<HTMLElement>(
-          `[data-host-id="${cssEscape(nextHostId)}"]`,
+          `[data-home-asset-key="${cssEscape(nextKey)}"]`,
         );
-        // jsdom 에는 scrollIntoView 가 없다 — 테스트에서 rAF 안에서 터지면 실행 뒤에
-        // 잡히지 않는 예외가 된다.
-        element?.scrollIntoView?.({ block: 'nearest' });
+        element?.scrollIntoView?.({ block: "nearest" });
         element?.focus?.({ preventScroll: true });
       });
     };
 
-    window.addEventListener('keydown', handleArrowNavigation);
-    return () => window.removeEventListener('keydown', handleArrowNavigation);
-    // selectSingleHost 는 매 렌더 새로 만들어지므로 목록에 넣어도 재등록 빈도는 같다.
-    // 핸들러가 읽는 값만 적어 무엇에 의존하는지 드러낸다.
+    window.addEventListener("keydown", handleArrowNavigation);
+    return () => window.removeEventListener("keydown", handleArrowNavigation);
+    // 가드(canSelectHost/canLeaveHostEditor)는 상위가 렌더마다 새로 만들어 넘긴다. 여기 넣지
+    // 않으면 리스너가 호스트 편집기가 닫혀 있던 시절의 가드를 붙들고 있어, 편집 중에 방향키로
+    // 선택을 옮길 때 저장 확인이 뜨지 않는다.
   }, [
+    canSelectHost,
+    focusedAssetKey,
+    onLeaveHostEditor,
     hostGridLayout.columns,
     keyboardActive,
+    selectedAssetKeys,
     selectedGroupPaths,
-    selectedHostId,
-    selectedHostIds,
     viewMode,
-    visibleHostIds,
+    visibleAssetKeys,
   ]);
 
   useEffect(() => {
@@ -929,13 +1225,19 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   }, [visibleGroupPaths]);
 
   useEffect(() => {
-    if (hostSelectionAnchor && !visibleHostIds.includes(hostSelectionAnchor)) {
-      setHostSelectionAnchor(null);
+    if (
+      assetSelectionAnchorKey &&
+      !visibleAssetKeys.includes(assetSelectionAnchorKey)
+    ) {
+      setAssetSelectionAnchorKey(null);
     }
-  }, [hostSelectionAnchor, visibleHostIds]);
+  }, [assetSelectionAnchorKey, visibleAssetKeys]);
 
   useEffect(() => {
-    if (groupSelectionAnchor && !visibleGroupPaths.includes(groupSelectionAnchor)) {
+    if (
+      groupSelectionAnchor &&
+      !visibleGroupPaths.includes(groupSelectionAnchor)
+    ) {
       setGroupSelectionAnchor(null);
     }
   }, [groupSelectionAnchor, visibleGroupPaths]);
@@ -943,7 +1245,9 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   useEffect(() => {
     setExpandedHostTags((current) =>
       current.filter((hostId) =>
-        hosts.some((host) => host.id === hostId && (host.tags?.length ?? 0) > 0),
+        hosts.some(
+          (host) => host.id === hostId && (host.tags?.length ?? 0) > 0,
+        ),
       ),
     );
   }, [hosts]);
@@ -955,7 +1259,9 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   }, [tagCounts]);
 
   useEffect(() => {
-    setRemoveUnusedSecretsOnHostDelete(hostDeleteUnusedLocalSecretRefs.length > 0);
+    setRemoveUnusedSecretsOnHostDelete(
+      hostDeleteUnusedLocalSecretRefs.length > 0,
+    );
   }, [hostDeleteTarget, hostDeleteUnusedLocalSecretRefs.length]);
 
   useEffect(() => {
@@ -968,25 +1274,26 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         setIsImportMenuOpen(false);
       }
     };
     const handleResize = () => setIsImportMenuOpen(false);
-    window.addEventListener('mousedown', handlePointerDown);
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('resize', handleResize);
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleResize);
     return () => {
-      window.removeEventListener('mousedown', handlePointerDown);
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('resize', handleResize);
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleResize);
     };
   }, [isImportMenuOpen]);
 
   function clearSelections() {
-    setSelectedHostIds([]);
+    setSelectedAssetKeys([]);
     setSelectedGroupPaths([]);
-    setHostSelectionAnchor(null);
+    setAssetSelectionAnchorKey(null);
+    setFocusedAssetKey(null);
     setGroupSelectionAnchor(null);
     setContextMenu(null);
     onClearHostSelection();
@@ -1000,6 +1307,11 @@ export function useHostBrowser(params: UseHostBrowserParams) {
         isGroupWithinPath(normalizeGroupPath(host.groupName), path),
       ),
     ).length;
+    const workspaceCount = savedWorkspaces.filter((workspace) =>
+      normalizedPaths.some((path) =>
+        isGroupWithinPath(normalizeGroupPath(workspace.groupName), path),
+      ),
+    ).length;
     const childGroupCount = allGroupPaths.filter(
       (candidatePath) =>
         !normalizedPathSet.has(candidatePath) &&
@@ -1011,23 +1323,34 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       groupCount: normalizedPaths.length,
       title:
         normalizedPaths.length === 1
-          ? groups.find((group) => group.path === normalizedPaths[0])?.name ??
-            normalizedPaths[0]
+          ? (groups.find((group) => group.path === normalizedPaths[0])?.name ??
+            normalizedPaths[0])
           : `${normalizedPaths.length} groups`,
       hostCount,
+      workspaceCount,
       childGroupCount,
     };
   }
 
-  function getHostIdsInGroupTrees(groupPaths: string[]): string[] {
+  function getAssetKeysInGroupTrees(groupPaths: string[]): HomeAssetKey[] {
     const normalizedPaths = normalizeGroupSelectionForDelete(groupPaths);
-    return hosts
-      .filter((host) =>
+    return buildHomeAssets(savedWorkspaces, hosts)
+      .filter((asset) =>
         normalizedPaths.some((path) =>
-          isGroupWithinPath(normalizeGroupPath(host.groupName), path),
+          isGroupWithinPath(normalizeGroupPath(asset.groupName), path),
         ),
       )
-      .map((host) => host.id);
+      .map((asset) => asset.key);
+  }
+
+  function getUnusedLocalSecretRefsAfterHostDeletion(
+    hostIds: readonly string[],
+  ): string[] {
+    return getUnusedSavedCredentialsAfterHostDeletion(
+      hosts,
+      keychainEntries,
+      [...hostIds],
+    );
   }
 
   function buildHostDeleteTarget(hostIds: string[]): HostDeleteTarget {
@@ -1042,68 +1365,180 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       title:
         targetHosts.length === 1
           ? targetHosts[0].label
-          : t('hostBrowserEmpty.selectedHosts', { count: targetHosts.length }),
+          : t("hostBrowserEmpty.selectedHosts", { count: targetHosts.length }),
     };
   }
 
-  function selectHostRange(hostId: string) {
-    setSelectedHostIds(getSelectionRange(visibleHostIds, hostSelectionAnchor, hostId));
-    setHostSelectionAnchor(hostId);
-  }
-
-  function toggleHostSelection(hostId: string) {
-    setSelectedHostIds((current) => {
-      const next = current.includes(hostId)
-        ? current.filter((entry) => entry !== hostId)
-        : [...current, hostId];
-      if (next.length === 0) {
-        onClearHostSelection();
+  /**
+   * 이 항목으로 선택을 옮겨도 되는가. **선택을 움직이는 모든 경로가 여기를 지난다** — 평범한
+   * 클릭(selectSingleAsset), shift 범위(selectAssetRange), Cmd 추가(toggleAssetSelection),
+   * 방향키(리스너가 selectSingleAsset 을 부른다). 종류별 분기를 호출부에 흩어 두면 새 경로가
+   * 늘 때 가드가 빠진 채 추가된다.
+   */
+  function withSelectionGuard(
+    ref: HomeAssetRef,
+    reason: "click" | "menu",
+    apply: () => void,
+  ): boolean {
+    if (ref.kind === "host") {
+      if (canSelectHost && !canSelectHost(ref.id, { reason })) {
+        return false;
       }
-      return next;
-    });
-    setHostSelectionAnchor(hostId);
+      apply();
+      return true;
+    }
+    if (onLeaveHostEditor) {
+      // 상위가 즉시 이어서 실행했는지를 돌려준다. 확인을 띄운 경우에는 false 를 돌려주고,
+      // 사용자가 답한 뒤 상위가 apply 를 부른다(클릭이 사라지지 않는다).
+      let appliedNow = false;
+      onLeaveHostEditor(() => {
+        appliedNow = true;
+        apply();
+      }, { reason });
+      return appliedNow;
+    }
+    apply();
+    return true;
   }
 
   /**
-   * 호스트 하나를 단독 선택한다.
+   * 홈을 떠나 세션을 여는 동작(호스트 연결·Workspace 열기)도 편집기를 떠난다. 스토어가 세션 탭을
+   * 만들 때 hostDrawer 를 닫으므로(store/services/session.ts, sessionSlice.openSavedWorkspace)
+   * 감싸지 않으면 저장하지 않은 편집이 묻지도 않고 사라진다.
    *
-   * `reason` 은 상위가 판단을 달리할 근거다 — 우클릭(menu)으로 선택이 옮겨가는 것과 좌클릭으로
-   * 옮겨가는 것은 편집 중일 때 뜻이 다르다(메뉴를 열려던 동작이 확인 창을 띄우면 안 된다).
+   * 여러 개를 한 번에 열 때는 배치 전체를 한 번만 감싼다 — 항목마다 감싸면 확인 대화상자가
+   * 서로를 덮어써서 마지막 하나만 열린다.
    */
-  function selectSingleHost(hostId: string, reason: 'click' | 'menu' = 'click') {
-    if (canSelectHost && !canSelectHost(hostId, { reason })) {
+  function withLeaveHostEditor(run: () => void): void {
+    if (!onLeaveHostEditor) {
+      run();
       return;
     }
-    setSelectedHostIds([hostId]);
-    setSelectedGroupPaths([]);
-    setHostSelectionAnchor(hostId);
-    setGroupSelectionAnchor(null);
-    onSelectHost(hostId);
+    // 메뉴 "항목 실행" 은 메뉴를 여는 동작이 아니다 — menu 로 넘기면 조용히 무시된다.
+    onLeaveHostEditor(run, { reason: "click" });
   }
 
-  function handleHostSelection(
-    hostId: string,
-    event: Pick<MouseEvent, 'shiftKey' | 'ctrlKey' | 'metaKey'>,
+  function selectAssetRange(ref: HomeAssetRef) {
+    // shift 범위도 selectedHostId 를 움직이므로(아래 onSelectHost/onClearHostSelection) 평범한
+    // 클릭과 같은 가드를 지나야 한다. 예전에는 selectSingleAsset 만 지나서, 편집 중에 shift 로
+    // 고르면 저장 확인 없이 선택이 반쯤 움직였다.
+    withSelectionGuard(ref, "click", () => applyAssetRange(ref));
+  }
+
+  function applyAssetRange(ref: HomeAssetRef) {
+    const key = toHomeAssetKey(ref);
+    const next = getHomeAssetRange(
+      visibleAssets,
+      assetSelectionAnchorKey,
+      key,
+    );
+    setSelectedAssetKeys(next);
+    setSelectedGroupPaths([]);
+    // 포커스가 새 선택 밖에 있으면 옮긴다. `!focusedAssetKey` 만 보던 동안, 범위가 이전 포커스를
+    // 포함하지 않으면 포커스가 선택되지 않은 항목에 남아 우측 상세가 그 항목을 계속 보여주고
+    // 방향키도 거기서부터 움직였다(toggleAssetSelection 은 이미 이 경우를 처리한다).
+    if (!focusedAssetKey || !next.includes(focusedAssetKey)) {
+      const nextFocus = next.includes(key) ? key : (next[0] ?? null);
+      setFocusedAssetKey(nextFocus);
+      const focused = nextFocus ? parseHomeAssetKey(nextFocus) : null;
+      if (focused?.kind === "host") {
+        onSelectHost(focused.id);
+      } else {
+        onClearHostSelection();
+      }
+    }
+  }
+
+  function toggleAssetSelection(ref: HomeAssetRef) {
+    // Cmd/Ctrl 추가·해제도 포커스와 selectedHostId 를 움직인다(마지막 항목을 해제하면
+    // onClearHostSelection). 같은 가드를 지난다.
+    withSelectionGuard(ref, "click", () => applyAssetToggle(ref));
+  }
+
+  function applyAssetToggle(ref: HomeAssetRef) {
+    const key = toHomeAssetKey(ref);
+    const next = selectedAssetKeys.includes(key)
+      ? selectedAssetKeys.filter((entry) => entry !== key)
+      : orderHomeAssetKeys([...selectedAssetKeys, key], visibleAssets);
+    setSelectedAssetKeys(next);
+    setSelectedGroupPaths([]);
+    setAssetSelectionAnchorKey(key);
+    if (next.length === 0) {
+      setFocusedAssetKey(null);
+      onClearHostSelection();
+      return;
+    }
+    if (!focusedAssetKey || !next.includes(focusedAssetKey)) {
+      const nextFocus = next[0] ?? null;
+      setFocusedAssetKey(nextFocus);
+      if (nextFocus) {
+        const focused = parseHomeAssetKey(nextFocus);
+        if (focused.kind === "host") {
+          onSelectHost(focused.id);
+        } else {
+          onClearHostSelection();
+        }
+      }
+    }
+  }
+
+  /**
+   * 이 항목으로 선택을 옮겨도 되는가. **목록의 모든 종류가 여기를 지난다** — 종류별 분기를
+   * 호출부에 흩어 두면(예전처럼) 새 종류가 늘 때 가드가 빠진 채 추가된다.
+   */
+  function selectSingleAsset(
+    ref: HomeAssetRef,
+    reason: "click" | "menu" = "click",
+  ) {
+    return withSelectionGuard(ref, reason, () => applySingleAsset(ref));
+  }
+
+  function applySingleAsset(ref: HomeAssetRef) {
+    const key = toHomeAssetKey(ref);
+    setSelectedAssetKeys([key]);
+    setSelectedGroupPaths([]);
+    setAssetSelectionAnchorKey(key);
+    setFocusedAssetKey(key);
+    setGroupSelectionAnchor(null);
+    if (ref.kind === "host") {
+      onSelectHost(ref.id);
+    } else {
+      onClearHostSelection();
+    }
+  }
+
+  function handleAssetSelection(
+    ref: HomeAssetRef,
+    event: Pick<MouseEvent, "shiftKey" | "ctrlKey" | "metaKey">,
   ) {
     setContextMenu(null);
+    const key = toHomeAssetKey(ref);
     if (event.shiftKey) {
-      selectHostRange(hostId);
+      selectAssetRange(ref);
       return;
     }
     if (isAdditiveSelectionEvent(event)) {
-      toggleHostSelection(hostId);
+      toggleAssetSelection(ref);
       return;
     }
-    // 이미 단독 선택된 호스트를 다시 누르면 선택을 해제한다(상세 패널을 닫고 빈 상태로).
-    if (selectedHostIds.length === 1 && selectedHostIds[0] === hostId) {
+    if (selectedAssetKeys.length === 1 && selectedAssetKeys[0] === key) {
       clearSelections();
       return;
     }
-    selectSingleHost(hostId);
+    selectSingleAsset(ref);
+  }
+
+  function selectSingleHost(
+    hostId: string,
+    reason: "click" | "menu" = "click",
+  ) {
+    return selectSingleAsset({ kind: "host", id: hostId }, reason);
   }
 
   function selectGroupRange(groupPath: string) {
-    setSelectedGroupPaths(getSelectionRange(visibleGroupPaths, groupSelectionAnchor, groupPath));
+    setSelectedGroupPaths(
+      getSelectionRange(visibleGroupPaths, groupSelectionAnchor, groupPath),
+    );
     setGroupSelectionAnchor(groupPath);
   }
 
@@ -1118,15 +1553,16 @@ export function useHostBrowser(params: UseHostBrowserParams) {
 
   function selectSingleGroup(groupPath: string) {
     setSelectedGroupPaths([groupPath]);
-    setSelectedHostIds([]);
+    setSelectedAssetKeys([]);
+    setFocusedAssetKey(null);
     setGroupSelectionAnchor(groupPath);
-    setHostSelectionAnchor(null);
+    setAssetSelectionAnchorKey(null);
     onClearHostSelection();
   }
 
   function handleGroupSelection(
     groupPath: string,
-    event: Pick<MouseEvent, 'shiftKey' | 'ctrlKey' | 'metaKey'>,
+    event: Pick<MouseEvent, "shiftKey" | "ctrlKey" | "metaKey">,
   ) {
     setContextMenu(null);
     if (event.shiftKey) {
@@ -1138,7 +1574,10 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       return;
     }
     // 이미 단독 선택된 그룹을 다시 누르면 선택을 해제하고 루트로 복귀한다(호스트 재클릭 해제와 동일한 UX).
-    if (selectedGroupPaths.length === 1 && selectedGroupPaths[0] === groupPath) {
+    if (
+      selectedGroupPaths.length === 1 &&
+      selectedGroupPaths[0] === groupPath
+    ) {
       handleNavigateRoot();
       return;
     }
@@ -1165,9 +1604,10 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     setContextMenu(null);
     leaveGroupScope(() => {
       setSelectedGroupPaths([]);
-      setSelectedHostIds([]);
+      setSelectedAssetKeys([]);
+      setFocusedAssetKey(null);
       setGroupSelectionAnchor(null);
-      setHostSelectionAnchor(null);
+      setAssetSelectionAnchorKey(null);
       setFavoritesFilterActive(false);
       onClearHostSelection();
       onNavigateGroup(null);
@@ -1194,14 +1634,23 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     const orderedHostIds = getOrderedSelectedHostIds(hostIds);
     setContextMenu(null);
     for (const hostId of orderedHostIds) {
-      await action(hostId);
+      try {
+        await action(hostId);
+      } catch {
+        // Individual actions surface their own failure; keep processing the batch.
+      }
     }
   }
 
-  function applyGroupPathUiMutation(previousGroupPath: string, nextGroupPath: string) {
+  function applyGroupPathUiMutation(
+    previousGroupPath: string,
+    nextGroupPath: string,
+  ) {
     setSelectedGroupPaths((current) => {
       const nextSelected = current
-        .map((groupPath) => rebaseGroupPath(groupPath, previousGroupPath, nextGroupPath))
+        .map((groupPath) =>
+          rebaseGroupPath(groupPath, previousGroupPath, nextGroupPath),
+        )
         .filter((groupPath): groupPath is string => Boolean(groupPath));
       return [...new Set(nextSelected)];
     });
@@ -1210,72 +1659,118 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     );
     setCollapsedTreeGroupPaths((current) => {
       const nextCollapsed = current
-        .map((groupPath) => rebaseGroupPath(groupPath, previousGroupPath, nextGroupPath))
+        .map((groupPath) =>
+          rebaseGroupPath(groupPath, previousGroupPath, nextGroupPath),
+        )
         .filter((groupPath): groupPath is string => Boolean(groupPath));
       return [...new Set(nextCollapsed)];
     });
   }
 
   function openCreateGroupModal() {
-    setGroupModalState({ mode: 'create' });
-    setNewGroupName('');
+    setGroupModalState({ mode: "create" });
+    setNewGroupName("");
     setGroupError(null);
   }
 
   function openCreateSubgroupModal(parentPath: string) {
-    setGroupModalState({ mode: 'create', parentPath });
-    setNewGroupName('');
+    setGroupModalState({ mode: "create", parentPath });
+    setNewGroupName("");
     setGroupError(null);
   }
 
   function openRenameGroupModal(groupPath: string) {
-    setGroupModalState({ mode: 'rename', path: groupPath });
+    setGroupModalState({ mode: "rename", path: groupPath });
     setNewGroupName(getGroupLabel(groupPath));
     setGroupError(null);
   }
 
   function closeGroupModal() {
     setGroupModalState(null);
-    setNewGroupName('');
+    setNewGroupName("");
     setGroupError(null);
   }
 
   function clearDragState() {
     setDragTargetGroupPath(null);
-    setDraggedHostIds([]);
+    setDraggedAssetKeys([]);
     setDraggedGroupPath(null);
     setIsRootDragTarget(false);
   }
 
+  const selectedAssetKeySet = new Set(selectedAssetKeys);
   const selectedHostIdSet = new Set(selectedHostIds);
+  const selectedWorkspaceIdSet = new Set(selectedWorkspaceIds);
   const selectedGroupPathSet = new Set(selectedGroupPaths);
 
-  function getActiveDraggedHostIds(dataTransfer: DataTransfer): string[] {
-    const stateHostIds = getOrderedSelectedHostIds(draggedHostIds);
-    if (stateHostIds.length > 0) {
-      return stateHostIds;
+  function getActiveDraggedAssetKeys(
+    dataTransfer: DataTransfer,
+  ): HomeAssetKey[] {
+    const stateKeys = orderHomeAssetKeys(draggedAssetKeys, visibleAssets);
+    if (stateKeys.length > 0) {
+      return stateKeys;
+    }
+    try {
+      const parsed = JSON.parse(
+        dataTransfer.getData(HOME_ASSETS_DRAG_MIME_TYPE) || "[]",
+      ) as unknown;
+      if (Array.isArray(parsed)) {
+        const keys = parsed.flatMap((value) => {
+          if (!value || typeof value !== "object") {
+            return [];
+          }
+          const ref = value as Partial<HomeAssetRef>;
+          return (ref.kind === "host" || ref.kind === "workspace") &&
+            typeof ref.id === "string"
+            ? [toHomeAssetKey({ kind: ref.kind, id: ref.id })]
+            : [];
+        });
+        const ordered = orderHomeAssetKeys(keys, visibleAssets);
+        if (ordered.length > 0) {
+          return ordered;
+        }
+      }
+    } catch {
+      // Fall through to legacy Host drag payloads.
     }
     const payloadHostIds = getOrderedSelectedHostIds(
       parseHostDragIds(dataTransfer.getData(HOSTS_DRAG_MIME_TYPE)),
     );
     if (payloadHostIds.length > 0) {
-      return payloadHostIds;
+      return payloadHostIds.map((id) => `host:${id}` as HomeAssetKey);
     }
     const singleHostId = dataTransfer.getData(HOST_DRAG_MIME_TYPE);
-    return singleHostId ? getOrderedSelectedHostIds([singleHostId]) : [];
+    return singleHostId ? [`host:${singleHostId}`] : [];
   }
 
-  function getNextDraggedHostIds(host: HostRecord): string[] {
-    if (!selectedHostIdSet.has(host.id)) {
-      return [host.id];
+  function getNextDraggedAssetKeys(ref: HomeAssetRef): HomeAssetKey[] {
+    const key = toHomeAssetKey(ref);
+    if (!selectedAssetKeySet.has(key)) {
+      return [key];
     }
-    const orderedSelectedHostIds = getOrderedSelectedHostIds(selectedHostIds);
-    return orderedSelectedHostIds.length > 0 ? orderedSelectedHostIds : [host.id];
+    const ordered = orderHomeAssetKeys(selectedAssetKeys, visibleAssets);
+    return ordered.length > 0 ? ordered : [key];
+  }
+
+  async function moveAssetsToGroup(
+    assetKeys: readonly HomeAssetKey[],
+    groupPath: string | null,
+  ) {
+    for (const key of orderHomeAssetKeys(assetKeys, visibleAssets)) {
+      const ref = parseHomeAssetKey(key);
+      if (ref.kind === "host") {
+        await onMoveHostToGroup(ref.id, groupPath);
+      } else {
+        await onMoveSavedWorkspaceToGroup(ref.id, groupPath);
+      }
+    }
   }
 
   function toggleTagFilter(tag: string) {
     setActiveTagFilter((current) =>
-      current.includes(tag) ? current.filter((entry) => entry !== tag) : [...current, tag],
+      current.includes(tag)
+        ? current.filter((entry) => entry !== tag)
+        : [...current, tag],
     );
   }
 
@@ -1290,6 +1785,9 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     if (next) {
       // 즐겨찾기는 그룹과 무관하게 전체에서 보여준다 → 그룹 스코프/선택을 해제.
       setSelectedGroupPaths([]);
+      setSelectedAssetKeys([]);
+      setFocusedAssetKey(null);
+      setAssetSelectionAnchorKey(null);
       onClearHostSelection();
       onNavigateGroup(null);
     }
@@ -1303,6 +1801,8 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     searchPlaceholder,
     visibleHosts,
     visibleHostIds,
+    visibleWorkspaces,
+    paletteWorkspaces,
     emptyMessage,
     // tags / sort / view / favorites (UI only)
     tagCounts,
@@ -1311,6 +1811,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     setActiveTagFilter,
     favoriteHostIds,
     favoriteHostIdSet,
+    favoriteWorkspaceCount,
     toggleFavorite,
     favoritesFilterActive,
     toggleFavoritesFilter,
@@ -1336,34 +1837,44 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     expandAllGroups,
     collapseAllGroups,
     // selection state
+    visibleAssets,
+    visibleAssetKeys,
+    selectedAssetKeys,
+    setSelectedAssetKeys,
+    selectedAssetKeySet,
+    focusedAssetKey,
+    setFocusedAssetKey,
+    assetSelectionAnchorKey,
+    setAssetSelectionAnchorKey,
     selectedHostIds,
-    setSelectedHostIds,
+    selectedWorkspaceIds,
     selectedGroupPaths,
     setSelectedGroupPaths,
     selectedHostIdSet,
+    selectedWorkspaceIdSet,
     selectedGroupPathSet,
-    setHostSelectionAnchor,
     setGroupSelectionAnchor,
     expandedHostTags,
     setExpandedHostTags,
     // selection handlers
-    handleHostSelection,
+    handleAssetSelection,
+    selectSingleAsset,
     selectSingleHost,
-    toggleHostSelection,
-    selectHostRange,
+    toggleAssetSelection,
+    selectAssetRange,
+    withLeaveHostEditor,
     handleGroupSelection,
     selectSingleGroup,
     handleNavigateRoot,
     handleToggleGroupBranch,
-    getOrderedSelectedHostIds,
     runForOrderedHosts,
-    getHostIdsInGroupTrees,
+    getAssetKeysInGroupTrees,
     clearSelections,
     // drag state + helpers
     draggedGroupPath,
     setDraggedGroupPath,
-    draggedHostIds,
-    setDraggedHostIds,
+    draggedAssetKeys,
+    setDraggedAssetKeys,
     dragTargetGroupPath,
     setDragTargetGroupPath,
     groupDropEdge,
@@ -1373,8 +1884,9 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     resolveGroupDropTarget,
     isRootDragTarget,
     setIsRootDragTarget,
-    getActiveDraggedHostIds,
-    getNextDraggedHostIds,
+    getActiveDraggedAssetKeys,
+    getNextDraggedAssetKeys,
+    moveAssetsToGroup,
     clearDragState,
     canReparentGroup,
     buildNextGroupPath,
@@ -1418,6 +1930,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     hostDeleteTarget,
     setHostDeleteTarget,
     buildHostDeleteTarget,
+    getUnusedLocalSecretRefsAfterHostDeletion,
     hostDeleteUnusedLocalSecretRefs,
     removeUnusedSecretsOnHostDelete,
     setRemoveUnusedSecretsOnHostDelete,

@@ -17,6 +17,7 @@ import type {
   DesktopApi,
   DnsOverrideDraft,
   DnsOverrideResolvedRecord,
+  SavedWorkspaceRecord,
   SnippetRecord,
   SnippetDraft,
   FileEntry,
@@ -97,12 +98,24 @@ export type HomeSection =
   | "snippets"
   | "logs"
   | "settings";
-export type SettingsSection = "general" | "sftp" | "security" | "secrets" | "aws-profiles" | "tailnet" | "ai" | "account";
+export type SettingsSection =
+  | "general"
+  | "sftp"
+  | "security"
+  | "secrets"
+  | "aws-profiles"
+  | "tailnet"
+  | "ai"
+  | "account";
 export type SftpSourceKind = "local" | "host";
 export type WorkspaceDropDirection = "left" | "right" | "top" | "bottom";
 export type HostDrawerState =
   | { mode: "closed" }
-  | { mode: "create"; defaultGroupPath: string | null; kind: "ssh" | "serial" | "rdp" }
+  | {
+      mode: "create";
+      defaultGroupPath: string | null;
+      kind: "ssh" | "serial" | "rdp";
+    }
   | { mode: "edit"; hostId: string };
 
 export interface WorkspaceLeafNode {
@@ -335,7 +348,7 @@ export interface SessionContainerTunnel {
   targetPort: number;
   /** 우리가 잡은 로컬 포트. 코어가 빈 포트를 골라 알려 줄 때까지 0. */
   bindPort: number;
-  status: 'starting' | 'running' | 'error';
+  status: "starting" | "running" | "error";
   /** 열기를 누른 시각. 응답이 영영 안 와도 다시 누를 수 있게 하는 기준이다. */
   startedAtMs: number;
   message?: string;
@@ -610,28 +623,33 @@ interface PendingInteractiveAuthBase {
   deliveryError?: string | null;
 }
 
-export interface PendingSessionInteractiveAuth
-  extends PendingInteractiveAuthBase {
+export interface PendingSessionInteractiveAuth extends PendingInteractiveAuthBase {
   source: "ssh";
 }
 
-export interface PendingSftpInteractiveAuth
-  extends Omit<PendingInteractiveAuthBase, "sessionId"> {
+export interface PendingSftpInteractiveAuth extends Omit<
+  PendingInteractiveAuthBase,
+  "sessionId"
+> {
   source: "sftp";
   endpointId: string;
   paneId: SftpPaneId;
   hostId: string;
 }
 
-export interface PendingContainersInteractiveAuth
-  extends Omit<PendingInteractiveAuthBase, "sessionId"> {
+export interface PendingContainersInteractiveAuth extends Omit<
+  PendingInteractiveAuthBase,
+  "sessionId"
+> {
   source: "containers";
   endpointId: string;
   hostId: string;
 }
 
-export interface PendingPortForwardInteractiveAuth
-  extends Omit<PendingInteractiveAuthBase, "sessionId"> {
+export interface PendingPortForwardInteractiveAuth extends Omit<
+  PendingInteractiveAuthBase,
+  "sessionId"
+> {
   source: "portForward";
   endpointId: string;
   ruleId: string;
@@ -645,8 +663,7 @@ export interface PendingPortForwardInteractiveAuth
  * 서비스라 코어의 대기표가 그 ID 에 걸려 있다). **카드는 sessionId 로** 그린다 — VNC 탭 위에
  * 띄워야 사용자가 본다. 하나만 들고 있으면 답이 사라지거나 카드가 사라진다.
  */
-export interface PendingVncTunnelInteractiveAuth
-  extends PendingInteractiveAuthBase {
+export interface PendingVncTunnelInteractiveAuth extends PendingInteractiveAuthBase {
   source: "vncTunnel";
   endpointId: string;
   sessionId: string;
@@ -661,8 +678,7 @@ export interface PendingVncTunnelInteractiveAuth
  * 없었다. sessionId 에 `keyinstall:<hostId>` 를 실어 그 대화상자를 찾는다
  * (@shared 의 KEY_INSTALL_CORRELATION_PREFIX).
  */
-export interface PendingKeyInstallInteractiveAuth
-  extends PendingInteractiveAuthBase {
+export interface PendingKeyInstallInteractiveAuth extends PendingInteractiveAuthBase {
   source: "keyInstall";
   sessionId: string;
   hostId: string;
@@ -751,7 +767,6 @@ export type TerminalUploadResult =
       message?: string;
     };
 
-
 /**
  * 포트 포워딩 편집기를 어떤 상태로 열지.
  *
@@ -760,15 +775,16 @@ export type TerminalUploadResult =
  * 열어도 홈 화면의 탭이 따라 움직이지 않는다.
  */
 export type PortForwardEditorIntent =
-  | { kind: 'create'; transport: PortForwardTransport | 'dns'; hostId?: string }
-  | { kind: 'edit'; ruleId: string }
-  | { kind: 'edit-dns'; dnsOverrideId: string };
+  | { kind: "create"; transport: PortForwardTransport | "dns"; hostId?: string }
+  | { kind: "edit"; ruleId: string }
+  | { kind: "edit-dns"; dnsOverrideId: string };
 interface AppStateParts {
   hosts: HostRecord[];
   groups: GroupRecord[];
   tabs: TerminalTab[];
   sessionShareChatNotifications: Record<string, SessionShareChatMessage[]>;
   workspaces: WorkspaceTab[];
+  savedWorkspaces: SavedWorkspaceRecord[];
   tmuxGroups: TmuxSessionGroup[];
   tmuxCommandPrompt: TmuxCommandPromptState | null;
   containerTabs: HostContainersTabState[];
@@ -976,6 +992,31 @@ interface AppStateParts {
   disconnectTab: (sessionId: string) => Promise<void>;
   cancelSessionReconnect: (sessionId: string) => void;
   closeWorkspace: (workspaceId: string) => Promise<void>;
+  createSavedWorkspace: (
+    workspaceId: string,
+    name: string,
+  ) => Promise<SavedWorkspaceRecord>;
+  renameSavedWorkspace: (
+    savedWorkspaceId: string,
+    name: string,
+  ) => Promise<SavedWorkspaceRecord>;
+  duplicateSavedWorkspace: (
+    savedWorkspaceId: string,
+  ) => Promise<SavedWorkspaceRecord>;
+  setSavedWorkspaceFavorite: (
+    savedWorkspaceId: string,
+    favorite: boolean,
+  ) => Promise<SavedWorkspaceRecord>;
+  moveSavedWorkspaceToGroup: (
+    savedWorkspaceId: string,
+    groupName: string | null,
+  ) => Promise<SavedWorkspaceRecord>;
+  removeSavedWorkspace: (savedWorkspaceId: string) => Promise<void>;
+  openSavedWorkspace: (
+    savedWorkspaceId: string,
+    cols: number,
+    rows: number,
+  ) => Promise<void>;
   /** Cmd+W: 활성 동적 탭을 닫는다. 닫을 탭이 없으면(home/sftp/containers) false. */
   closeActiveTab: () => boolean;
   /** 메뉴 탭 단축키(다음/이전/번호/마지막/닫은탭 다시 열기) 처리. */
@@ -1032,7 +1073,10 @@ interface AppStateParts {
     hostId: string,
     action: "start" | "stop" | "restart" | "remove",
   ) => Promise<void>;
-  openHostContainerShell: (hostId: string, containerId: string) => Promise<void>;
+  openHostContainerShell: (
+    hostId: string,
+    containerId: string,
+  ) => Promise<void>;
   openEcsExecShell: (
     hostId: string,
     serviceName: string,
@@ -1080,7 +1124,10 @@ interface AppStateParts {
    */
   detachTmuxWorkspace: (workspaceId: string) => Promise<void>;
   /** tmux window-close/exit 후 로컬 workspace·pane 탭 정리(명령 미전송). windowId 생략 시 controlSessionId 전체. 윈도우가 모두 사라지면 그룹/상단탭도 제거. */
-  removeTmuxWorkspacesLocal: (controlSessionId: string, windowId?: string) => void;
+  removeTmuxWorkspacesLocal: (
+    controlSessionId: string,
+    windowId?: string,
+  ) => void;
   /** 자동 재연결 진행 표시: 그룹의 reconnect 요약 + 패인 탭을 'connecting'(재연결 중)으로. */
   applyTmuxGroupReconnecting: (
     groupId: string,
@@ -1184,11 +1231,17 @@ interface AppStateParts {
   ) => Promise<SshKeyInstallResult>;
   loadSessionReplayStorageUsage: () => Promise<SessionReplayStorageUsage>;
   testAiConnection: (input: AiTestConnectionInput) => Promise<AiTestResult>;
-  setAiApiKey: (providerId: AiProviderId, key: string) => Promise<AiApiKeyStatus>;
+  setAiApiKey: (
+    providerId: AiProviderId,
+    key: string,
+  ) => Promise<AiApiKeyStatus>;
   clearAiApiKey: (providerId: AiProviderId) => Promise<AiApiKeyStatus>;
   getAiApiKeyStatus: (providerId: AiProviderId) => Promise<AiApiKeyStatus>;
   getAiSearchKeyStatus: (backend: AiSearchBackend) => Promise<AiApiKeyStatus>;
-  setAiSearchKey: (backend: AiSearchBackend, key: string) => Promise<AiApiKeyStatus>;
+  setAiSearchKey: (
+    backend: AiSearchBackend,
+    key: string,
+  ) => Promise<AiApiKeyStatus>;
   clearAiSearchKey: (backend: AiSearchBackend) => Promise<AiApiKeyStatus>;
   codexLoginStart: () => Promise<CodexLoginStart>;
   getCodexAuthStatus: () => Promise<CodexAuthStatus>;
@@ -1216,7 +1269,9 @@ interface AppStateParts {
   }) => Promise<void>;
   dismissPendingMissingUsernamePrompt: () => void;
   submitMissingUsernamePrompt: (input: { username: string }) => Promise<void>;
-  confirmStartupCommandPrompt: (values: Record<string, string>) => Promise<void>;
+  confirmStartupCommandPrompt: (
+    values: Record<string, string>,
+  ) => Promise<void>;
   cancelStartupCommandPrompt: () => void;
   respondInteractiveAuth: (
     challengeId: string,
@@ -1315,10 +1370,15 @@ interface AppStateParts {
      * 어디로 연결할지의 근거를 가져오는 함수. **"여는 중" 을 찍은 뒤에 부른다** — 값이 이미
      * 있으면 그 자리에서 돌아오고, 없으면 한 번 물어보는 동안 화면은 이미 반응해 있다.
      */
-    resolveNetworks?: () => Promise<readonly { name: string; ipAddress: string }[]>;
+    resolveNetworks?: () => Promise<
+      readonly { name: string; ipAddress: string }[]
+    >;
   }) => Promise<void>;
   /** 연 터널을 닫는다. */
-  closeSessionContainerTunnel: (sessionId: string, ruleId: string) => Promise<void>;
+  closeSessionContainerTunnel: (
+    sessionId: string,
+    ruleId: string,
+  ) => Promise<void>;
   setSftpPaneFilter: (paneId: SftpPaneId, query: string) => void;
   setSftpHostSearchQuery: (paneId: SftpPaneId, query: string) => void;
   navigateSftpHostGroup: (paneId: SftpPaneId, path: string | null) => void;
@@ -1446,6 +1506,7 @@ export type SessionSlice = Pick<
   | "tabs"
   | "sessionShareChatNotifications"
   | "workspaces"
+  | "savedWorkspaces"
   | "tmuxGroups"
   | "tmuxCommandPrompt"
   | "tabStrip"
@@ -1469,6 +1530,13 @@ export type SessionSlice = Pick<
   | "disconnectTab"
   | "cancelSessionReconnect"
   | "closeWorkspace"
+  | "createSavedWorkspace"
+  | "renameSavedWorkspace"
+  | "duplicateSavedWorkspace"
+  | "setSavedWorkspaceFavorite"
+  | "moveSavedWorkspaceToGroup"
+  | "removeSavedWorkspace"
+  | "openSavedWorkspace"
   | "closeActiveTab"
   | "runTabCommand"
   | "splitSessionIntoWorkspace"
@@ -1696,7 +1764,11 @@ export interface AiConversation {
   // 현재 진행 중인 턴의 도구 실행들(스트리밍 중 펼쳐서 표시). done 시 마지막 메시지에 옮겨 접는다.
   toolRuns: AiToolRun[];
   // run_command 변경 명령 승인 대기(패널에 승인/거부 카드 표시). 응답/취소 시 clear.
-  pendingApproval: { toolCallId: string; command: string; reason: string } | null;
+  pendingApproval: {
+    toolCallId: string;
+    command: string;
+    reason: string;
+  } | null;
 }
 
 export interface AiChatSlice {

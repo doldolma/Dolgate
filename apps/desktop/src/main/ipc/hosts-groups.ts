@@ -283,17 +283,22 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
       for (const hostId of result.removedHostIds) {
         ctx.syncOutbox.upsertDeletion("hosts", hostId);
       }
+      for (const workspaceId of result.removedWorkspaceIds) {
+        ctx.syncOutbox.upsertDeletion("workspaces", workspaceId);
+      }
       ctx.activityLogs.append("warn", "audit", logMessage('hostsIpc.groupDeleted'), {
         path,
         mode,
         removedGroupCount: result.removedGroupIds.length,
         removedHostCount: result.removedHostIds.length,
+        removedWorkspaceCount: result.removedWorkspaceIds.length,
       });
       ctx.queueSync();
       ctx.emitWorkspaceChanged?.(event?.sender);
       return {
         groups: result.groups,
         hosts: result.hosts,
+        savedWorkspaces: result.savedWorkspaces,
       };
     },
   );

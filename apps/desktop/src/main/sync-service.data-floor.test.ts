@@ -13,7 +13,9 @@ let tempDir = "";
 
 vi.mock("electron", () => ({
   app: {
-    getPath: vi.fn((name: string) => (name === "userData" ? tempDir : os.tmpdir())),
+    getPath: vi.fn((name: string) =>
+      name === "userData" ? tempDir : os.tmpdir(),
+    ),
     getVersion: vi.fn(() => "1.9.0-test"),
     isPackaged: false,
   },
@@ -102,6 +104,7 @@ async function createHarness(hosts: HostRecord[]) {
     { load: vi.fn(), remove: vi.fn() } as never,
     { list: vi.fn(() => []), clearMany: vi.fn(), clearAll: vi.fn() } as never,
     emptyRepository as never,
+    emptyRepository as never,
   );
   return service;
 }
@@ -119,7 +122,12 @@ function stubFetch() {
     vi.fn(async (url: URL, init?: RequestInit) => {
       if (new URL(String(url)).pathname === "/api/info") {
         return new Response(
-          JSON.stringify({ capabilities: { sync: { awsProfiles: true }, vault: { e2ee: true } } }),
+          JSON.stringify({
+            capabilities: {
+              sync: { awsProfiles: true },
+              vault: { e2ee: true },
+            },
+          }),
           { status: 200, headers: { "content-type": "application/json" } },
         );
       }

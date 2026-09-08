@@ -44,6 +44,7 @@ import type {
   SettingsRepository,
   TailnetRepository,
   SnippetRepository,
+  SavedWorkspaceRepository,
   SyncOutboxRepository,
 } from "../database";
 import type { LocalFileService } from "../file-service";
@@ -100,6 +101,7 @@ export interface MainIpcContext {
   portForwards: PortForwardRepository;
   dnsOverrides: DnsOverrideRepository;
   snippets: SnippetRepository;
+  savedWorkspaces: SavedWorkspaceRepository;
   knownHosts: KnownHostRepository;
   activityLogs: ActivityLogRepository;
   secretMetadata: SecretMetadataRepository;

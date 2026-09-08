@@ -1211,11 +1211,15 @@ export type GroupRemoveMode = 'delete-subtree' | 'reparent-descendants';
 export interface GroupRemoveResult {
   groups: GroupRecord[];
   hosts: HostRecord[];
+  /** Desktop Home assets moved or removed with the group. Older clients may omit it. */
+  savedWorkspaces?: SavedWorkspaceRecord[];
 }
 
 export interface GroupPathMutationResult {
   groups: GroupRecord[];
   hosts: HostRecord[];
+  /** Desktop Home assets whose group paths were rebased. Older clients may omit it. */
+  savedWorkspaces?: SavedWorkspaceRecord[];
   nextPath: string;
 }
 
@@ -2671,6 +2675,204 @@ export interface SnippetDraft {
   keyword?: string | null;
 }
 
+/**
+ * 저장된 Workspace의 leaf가 다시 열 대상을 가리키는 방식.
+ *
+ * 호스트 라벨은 스냅샷이다. 호스트가 나중에 삭제돼도 카드/상세에서 어떤 pane이 사라졌는지
+ * 말할 수 있어야 하므로 id만 저장하지 않는다. 연결할 때는 항상 hostId의 최신 레코드를 쓴다.
+ */
+export type SavedWorkspaceLeafTarget =
+  | { kind: 'host'; hostId: string; label: string }
+  | { kind: 'local'; label: string };
+
+export interface SavedWorkspaceLeafNode {
+  id: string;
+  kind: 'leaf';
+  target: SavedWorkspaceLeafTarget;
+}
+
+export interface SavedWorkspaceSplitNode {
+  id: string;
+  kind: 'split';
+  axis: 'horizontal' | 'vertical';
+  ratio: number;
+  first: SavedWorkspaceNode;
+  second: SavedWorkspaceNode;
+}
+
+export type SavedWorkspaceNode = SavedWorkspaceLeafNode | SavedWorkspaceSplitNode;
+
+export interface SavedWorkspaceRecord {
+  version: 1;
+  id: string;
+  name: string;
+  root: SavedWorkspaceNode;
+  favorite: boolean;
+  groupName?: string | null;
+  lastOpenedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SavedWorkspaceDraft {
+  name: string;
+  root: SavedWorkspaceNode;
+  favorite?: boolean;
+  groupName?: string | null;
+}
+
+export const MAX_SAVED_WORKSPACE_DEPTH = 24;
+export const MAX_SAVED_WORKSPACE_PANES = 64;
+
+/**
+ * 이 트리를 저장된 Workspace 로 받아 줄 수 있는가(깊이·pane 수 상한).
+ *
+ * 저장 UI 가 이것을 보지 않던 동안, 상한을 넘는 레이아웃도 "Workspace 로 저장" 이 제공됐고
+ * 이름까지 입력한 뒤 주 프로세스 정규화가 거절해 번역되지 않은 내부 문구가 그대로 떴다.
+ * 판정 기준은 normalizeSavedWorkspaceRecord 와 같은 상수를 쓴다.
+ */
+export function isSavedWorkspaceNodeWithinLimits(node: SavedWorkspaceNode): boolean {
+  let paneCount = 0;
+  const walk = (input: SavedWorkspaceNode, depth: number): boolean => {
+    if (depth > MAX_SAVED_WORKSPACE_DEPTH) {
+      return false;
+    }
+    if (input.kind === 'leaf') {
+      paneCount += 1;
+      return paneCount <= MAX_SAVED_WORKSPACE_PANES;
+    }
+    return walk(input.first, depth + 1) && walk(input.second, depth + 1);
+  };
+  return walk(node, 0);
+}
+
+/** 디스크·sync에서 들어온 Workspace를 렌더 전에 검증한다. */
+export function normalizeSavedWorkspaceRecord(
+  value: unknown,
+): SavedWorkspaceRecord | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.version !== 1 ||
+    typeof record.id !== 'string' ||
+    !record.id.trim() ||
+    typeof record.name !== 'string' ||
+    !record.name.trim() ||
+    typeof record.createdAt !== 'string' ||
+    typeof record.updatedAt !== 'string'
+  ) {
+    return null;
+  }
+
+  let paneCount = 0;
+  const normalizeNode = (input: unknown, depth: number): SavedWorkspaceNode | null => {
+    if (
+      depth > MAX_SAVED_WORKSPACE_DEPTH ||
+      !input ||
+      typeof input !== 'object' ||
+      Array.isArray(input)
+    ) {
+      return null;
+    }
+    const node = input as Record<string, unknown>;
+    if (typeof node.id !== 'string' || !node.id.trim()) {
+      return null;
+    }
+    if (node.kind === 'leaf') {
+      paneCount += 1;
+      if (paneCount > MAX_SAVED_WORKSPACE_PANES) {
+        return null;
+      }
+      if (!node.target || typeof node.target !== 'object' || Array.isArray(node.target)) {
+        return null;
+      }
+      const target = node.target as Record<string, unknown>;
+      if (target.kind === 'host') {
+        if (
+          typeof target.hostId !== 'string' ||
+          !target.hostId.trim() ||
+          typeof target.label !== 'string' ||
+          !target.label.trim()
+        ) {
+          return null;
+        }
+        return {
+          id: node.id,
+          kind: 'leaf',
+          target: {
+            kind: 'host',
+            hostId: target.hostId.trim(),
+            label: target.label.trim(),
+          },
+        };
+      }
+      if (target.kind === 'local') {
+        return {
+          id: node.id,
+          kind: 'leaf',
+          target: {
+            kind: 'local',
+            label:
+              typeof target.label === 'string' && target.label.trim()
+                ? target.label.trim()
+                : 'Local Terminal',
+          },
+        };
+      }
+      return null;
+    }
+    if (node.kind !== 'split') {
+      return null;
+    }
+    if (node.axis !== 'horizontal' && node.axis !== 'vertical') {
+      return null;
+    }
+    const first = normalizeNode(node.first, depth + 1);
+    const second = normalizeNode(node.second, depth + 1);
+    if (!first || !second) {
+      return null;
+    }
+    const ratio =
+      typeof node.ratio === 'number' && Number.isFinite(node.ratio)
+        ? Math.min(0.9, Math.max(0.1, node.ratio))
+        : 0.5;
+    return {
+      id: node.id,
+      kind: 'split',
+      axis: node.axis,
+      ratio,
+      first,
+      second,
+    };
+  };
+
+  const root = normalizeNode(record.root, 0);
+  if (!root || paneCount < 2) {
+    return null;
+  }
+  return {
+    version: 1,
+    id: record.id.trim(),
+    name: record.name.trim(),
+    root,
+    favorite: record.favorite === true,
+    groupName:
+      typeof record.groupName === 'string'
+        ? record.groupName
+            .split('/')
+            .map((segment) => segment.trim())
+            .filter(Boolean)
+            .join('/') || null
+        : null,
+    lastOpenedAt:
+      typeof record.lastOpenedAt === 'string' ? record.lastOpenedAt : null,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
 export function isEcsTaskPortForwardRuleRecord(rule: PortForwardRuleRecord): rule is EcsTaskPortForwardRuleRecord {
   return rule.transport === 'ecs-task';
 }
@@ -3613,6 +3815,15 @@ export interface TerminalTab {
   hostId: string | null;
   title: string;
   shellKind?: string;
+  /**
+   * 이 pane 이 호스트의 컨테이너 안에서 도는 셸이면 그 컨테이너 id.
+   *
+   * 컨테이너 셸 탭은 `source: "host"` + `hostId` 로 만들어져 평범한 호스트 셸과 구별되지 않았다.
+   * 그래서 Workspace 로 저장하면 일반 호스트 pane 으로 적혔고, 다시 열면 컨테이너가 아니라
+   * **호스트에 그냥 SSH 로** 붙었다(레이아웃은 복원된 것처럼 보이고 제목도 호스트 이름이라
+   * 알아채기 어렵다). 저장 가능 여부를 판정하려면 연결이 끝난 뒤에도 남는 표식이 필요하다.
+   */
+  containerId?: string;
   status: 'pending' | 'connecting' | 'connected' | 'disconnecting' | 'closed' | 'error';
   /**
    * 코어가 올려 보낸 **원문**. 화면에 쓸 때는 분류기를 지나게 한다

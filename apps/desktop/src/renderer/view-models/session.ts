@@ -30,6 +30,7 @@ export function useSessionWorkspaceViewModel() {
     (state) => state.setRdpMonitors,
   );
   const closeWorkspace = useAppStore((state) => state.closeWorkspace);
+  const createSavedWorkspace = useAppStore((state) => state.createSavedWorkspace);
   const splitSessionIntoWorkspace = useAppStore(
     (state) => state.splitSessionIntoWorkspace,
   );
@@ -79,6 +80,7 @@ export function useSessionWorkspaceViewModel() {
     disconnectTab,
     setRdpMonitors,
     closeWorkspace,
+    createSavedWorkspace,
     splitSessionIntoWorkspace,
     moveWorkspaceSession,
     detachSessionFromWorkspace,

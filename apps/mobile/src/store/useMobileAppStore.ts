@@ -1473,7 +1473,8 @@ function countSyncPayloadRecords(payload: SyncPayloadV2): number {
     (payload.tailnets?.length ?? 0) +
     (payload.preferences?.length ?? 0) +
     (payload.awsProfiles?.length ?? 0) +
-    (payload.snippets?.length ?? 0)
+    (payload.snippets?.length ?? 0) +
+    (payload.workspaces?.length ?? 0)
   );
 }
 

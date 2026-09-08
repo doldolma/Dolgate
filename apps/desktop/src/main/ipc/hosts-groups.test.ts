@@ -355,4 +355,32 @@ describe("registerHostsGroupsIpcHandlers", () => {
       "secret:existing",
     );
   });
+
+  it("writes Workspace tombstones when deleting a group subtree", async () => {
+    const ctx = createContext();
+    const savedWorkspaces = [{ id: "workspace-kept", groupName: null }];
+    ctx.groups.remove.mockReturnValue({
+      groups: [],
+      hosts: [],
+      savedWorkspaces,
+      removedGroupIds: ["group-1"],
+      removedHostIds: ["host-1"],
+      removedWorkspaceIds: ["workspace-1"],
+    });
+
+    registerHostsGroupsIpcHandlers(ctx);
+    const removeHandler = getRegisteredHandler(ipcChannels.groups.remove);
+    const result = await removeHandler(
+      { sender: "renderer" },
+      "Servers",
+      "delete-subtree",
+    );
+
+    expect(ctx.syncOutbox.upsertDeletion).toHaveBeenCalledWith(
+      "workspaces",
+      "workspace-1",
+    );
+    expect(result).toEqual({ groups: [], hosts: [], savedWorkspaces });
+    expect(ctx.queueSync).toHaveBeenCalledOnce();
+  });
 });

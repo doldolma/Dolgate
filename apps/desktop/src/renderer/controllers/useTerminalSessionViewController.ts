@@ -488,12 +488,15 @@ export function useTerminalSessionViewController({
   const recordHostOs = useCallback(
     (detectedOs: HostDetectedOs) => {
       const hostId = host?.id;
-      if (!hostId || tab?.shellKind === 'container-exec') {
+      // 판정은 탭의 containerId 로 한다. 예전 조건(`shellKind === 'container-exec'`)은 코어가
+      // 그 값을 보내지 않아 한 번도 참이 아니었고, 그래서 컨테이너 셸에서 잡힌 **이미지의 OS** 가
+      // 호스트 레코드에 그대로 저장돼 호스트 아이콘이 틀어졌다.
+      if (!hostId || tab?.containerId) {
         return;
       }
       void appStore.getState().setHostDetectedOs(hostId, detectedOs);
     },
-    [host?.id, tab?.shellKind],
+    [host?.id, tab?.containerId],
   );
 
   const autocomplete = useTerminalAutocomplete({

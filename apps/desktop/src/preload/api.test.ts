@@ -52,6 +52,10 @@ describe("createDesktopApi", () => {
     await api.ssh.stopAutocomplete("session-1");
     await api.sshKeys.copyPublicKey("secret-key");
     await api.hostTransfer.previewExport(["host-1"]);
+    await api.savedWorkspaces.list();
+    await api.savedWorkspaces.create({ name: "Ops", root: {} as never });
+    await api.savedWorkspaces.moveToGroup("workspace-1", "Clients");
+    await api.savedWorkspaces.remove("workspace-1");
 
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       1,
@@ -147,6 +151,22 @@ describe("createDesktopApi", () => {
       ipcChannels.hostTransfer.previewExport,
       ["host-1"],
     );
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      ipcChannels.savedWorkspaces.list,
+    );
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      ipcChannels.savedWorkspaces.create,
+      { name: "Ops", root: {} },
+    );
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      ipcChannels.savedWorkspaces.moveToGroup,
+      "workspace-1",
+      "Clients",
+    );
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      ipcChannels.savedWorkspaces.remove,
+      "workspace-1",
+    );
   });
 
   it("resolves dropped file paths through Electron webUtils without IPC", async () => {
@@ -172,12 +192,20 @@ describe("createDesktopApi", () => {
     const { registerPreloadEventBindings } = await import("./events/register");
     const { ipcChannels } = await import("../common/ipc-channels");
 
-    const handlers = new Map<string, (event: unknown, payload: unknown) => void>();
+    const handlers = new Map<
+      string,
+      (event: unknown, payload: unknown) => void
+    >();
     const ipcRenderer = {
       invoke: vi.fn(),
-      on: vi.fn((channel: string, handler: (event: unknown, payload: unknown) => void) => {
-        handlers.set(channel, handler);
-      }),
+      on: vi.fn(
+        (
+          channel: string,
+          handler: (event: unknown, payload: unknown) => void,
+        ) => {
+          handlers.set(channel, handler);
+        },
+      ),
     } as any;
 
     registerPreloadEventBindings(ipcRenderer);

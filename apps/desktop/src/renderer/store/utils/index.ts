@@ -29,5 +29,6 @@ export * from "./session-share";
 export * from "./settings";
 export * from "./sftp";
 export * from "./sorting";
+export * from "./saved-workspaces";
 export * from "./vnc";
 export * from "./workspaces";

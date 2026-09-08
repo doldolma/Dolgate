@@ -1,17 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
-import type { AuthState, DesktopWindowState, UpdateState } from '@shared';
-import { AppTitleBar } from '../components/AppTitleBar';
-import { cn } from '../lib/cn';
-import { useAppStore } from '../store/appStore';
-import { BOOTSTRAP_TERMINAL_SIZE } from '../components/terminal-resize';
-import { titleBarMode } from '../components/useTitleBarAutoHide';
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import type { AuthState, DesktopWindowState, UpdateState } from "@shared";
+import { AppTitleBar } from "../components/AppTitleBar";
+import { cn } from "../lib/cn";
+import { useAppStore } from "../store/appStore";
+import { BOOTSTRAP_TERMINAL_SIZE } from "../components/terminal-resize";
+import { titleBarMode } from "../components/useTitleBarAutoHide";
 import {
   resolveSpreadTarget,
   useRdpMonitorSpread,
-} from '../components/rdp/useRdpMonitorSpread';
-import type { SecretEditDialogRequest } from '../components/SecretEditDialog';
-import type { useLoginController } from '../controllers/useLoginController';
+} from "../components/rdp/useRdpMonitorSpread";
+import type { SecretEditDialogRequest } from "../components/SecretEditDialog";
+import type { useLoginController } from "../controllers/useLoginController";
 import type {
   useAppModalViewModel,
   useAppSettingsViewModel,
@@ -19,25 +19,25 @@ import type {
   useHomeViewModel,
   useSessionWorkspaceViewModel,
   useSftpViewModel,
-} from '../view-models/appViewModels';
-import { AppModals } from './AppModals';
-import { ContainersShell } from './ContainersShell';
-import { HomeShell } from './HomeShell';
-import { SessionShell } from './SessionShell';
-import { SftpShell } from './SftpShell';
-import { SessionShareChromeButton } from '../components/terminal-workspace/SessionShareChromeButton';
-import { LocalOnlyChromeButton } from '../components/LocalOnlyChromeButton';
-import { LoginDialog } from '../components/LoginDialog';
-import { NewTabButton } from '../components/NewTabButton';
-import { buildLastConnectedByHostId } from '../lib/last-connected';
-import { isLocalOnlyAuthState } from '../lib/local-only';
-import { countActivePortForwards } from '../lib/port-forward-status';
-import { installNewTabShortcut } from '../lib/new-tab-shortcut';
+} from "../view-models/appViewModels";
+import { AppModals } from "./AppModals";
+import { ContainersShell } from "./ContainersShell";
+import { HomeShell } from "./HomeShell";
+import { SessionShell } from "./SessionShell";
+import { SftpShell } from "./SftpShell";
+import { SessionShareChromeButton } from "../components/terminal-workspace/SessionShareChromeButton";
+import { LocalOnlyChromeButton } from "../components/LocalOnlyChromeButton";
+import { LoginDialog } from "../components/LoginDialog";
+import { NewTabButton } from "../components/NewTabButton";
+import { buildLastConnectedByHostId } from "../lib/last-connected";
+import { isLocalOnlyAuthState } from "../lib/local-only";
+import { countActivePortForwards } from "../lib/port-forward-status";
+import { installNewTabShortcut } from "../lib/new-tab-shortcut";
 import {
   type DraggedSessionPayload,
   workspaceContainsSession,
-} from './appShellUtils';
-import { t } from '../i18n';
+} from "./appShellUtils";
+import { t } from "../i18n";
 
 interface AppShellProps {
   /**
@@ -46,7 +46,7 @@ interface AppShellProps {
    */
   authState: AuthState;
   offlineLeaseExpiryLabel: string | null;
-  desktopPlatform: 'darwin' | 'win32' | 'linux' | 'unknown';
+  desktopPlatform: "darwin" | "win32" | "linux" | "unknown";
   prefersDark: boolean;
   updateState: UpdateState;
   windowState: DesktopWindowState;
@@ -96,9 +96,8 @@ export function AppShell({
     );
   }, []);
   const [isLoginDialogOpen, setIsLoginDialogOpen] = useState(false);
-  const [draggedSession, setDraggedSession] = useState<DraggedSessionPayload | null>(
-    null,
-  );
+  const [draggedSession, setDraggedSession] =
+    useState<DraggedSessionPayload | null>(null);
 
   // 끌던 pane 헤더가 drop 전에 unmount 되면(드래그 중 세션 종료 등) 그 노드의 onDragEnd 가
   // 오지 않아 draggedSession 이 영구히 남고, titlebar 탭 영역이 no-drag 로 고착돼 창 드래그가
@@ -109,13 +108,13 @@ export function AppShell({
       return;
     }
     const reset = () => setDraggedSession(null);
-    document.addEventListener('dragend', reset);
-    document.addEventListener('drop', reset);
-    window.addEventListener('blur', reset);
+    document.addEventListener("dragend", reset);
+    document.addEventListener("drop", reset);
+    window.addEventListener("blur", reset);
     return () => {
-      document.removeEventListener('dragend', reset);
-      document.removeEventListener('drop', reset);
-      window.removeEventListener('blur', reset);
+      document.removeEventListener("dragend", reset);
+      document.removeEventListener("drop", reset);
+      window.removeEventListener("blur", reset);
     };
   }, [draggedSession]);
 
@@ -140,19 +139,21 @@ export function AppShell({
     }),
   );
 
-  const isHomeActive = homeViewModel.activeWorkspaceTab === 'home';
-  const isSftpActive = homeViewModel.activeWorkspaceTab === 'sftp';
-  const isContainersActive = homeViewModel.activeWorkspaceTab === 'containers';
+  const isHomeActive = homeViewModel.activeWorkspaceTab === "home";
+  const isSftpActive = homeViewModel.activeWorkspaceTab === "sftp";
+  const isContainersActive = homeViewModel.activeWorkspaceTab === "containers";
   const isSessionViewActive =
     !isHomeActive && !isSftpActive && !isContainersActive;
   const hasActiveTransfers = sftpViewModel.transfers.some(
     (job) =>
-      job.status === 'queued' ||
-      job.status === 'running' ||
-      job.status === 'cancelling',
+      job.status === "queued" ||
+      job.status === "running" ||
+      job.status === "cancelling",
   );
   // 판정은 lib 한 곳에 있다 — 사이드바 배지·탭 hover 와 같은 기준을 써야 한다.
-  const activePortForwardCount = countActivePortForwards(homeViewModel.portForwardRuntimes);
+  const activePortForwardCount = countActivePortForwards(
+    homeViewModel.portForwardRuntimes,
+  );
   const hasBlockingUpdateInstall =
     sessionViewModel.tabs.length > 0 ||
     hasActiveTransfers ||
@@ -176,7 +177,8 @@ export function AppShell({
       );
       if (owningWorkspace) {
         if (
-          homeViewModel.activeWorkspaceTab === `workspace:${owningWorkspace.id}` &&
+          homeViewModel.activeWorkspaceTab ===
+            `workspace:${owningWorkspace.id}` &&
           owningWorkspace.activeSessionId ===
             modalViewModel.pendingCredentialRetry.sessionId
         ) {
@@ -238,6 +240,14 @@ export function AppShell({
           renderNewTabAction={() => (
             <NewTabButton
               hosts={homeViewModel.hosts}
+              savedWorkspaces={homeViewModel.savedWorkspaces}
+              onOpenSavedWorkspace={(workspaceId) =>
+                void homeViewModel.openSavedWorkspace(
+                  workspaceId,
+                  BOOTSTRAP_TERMINAL_SIZE.cols,
+                  BOOTSTRAP_TERMINAL_SIZE.rows,
+                )
+              }
               lastConnectedByHostId={lastConnectedByHostId}
               onConnectHost={(hostId) =>
                 void homeViewModel.connectHost(
@@ -275,23 +285,30 @@ export function AppShell({
           onSelectWorkspace={sessionViewModel.activateWorkspace}
           onCloseSession={sessionViewModel.disconnectTab}
           onCloseWorkspace={sessionViewModel.closeWorkspace}
+          onSaveWorkspace={async (workspaceId, name) => {
+            await sessionViewModel.createSavedWorkspace(workspaceId, name);
+          }}
           onSelectTmuxGroup={sessionViewModel.activateTmuxGroup}
           onCloseTmuxGroup={(tmuxGroupId) => {
             const group = sessionViewModel.tmuxGroups.find(
               (item) => item.id === tmuxGroupId,
             );
             if (group) {
-              void sessionViewModel.detachTmuxWorkspace(group.activeWorkspaceId);
+              void sessionViewModel.detachTmuxWorkspace(
+                group.activeWorkspaceId,
+              );
             }
           }}
           onNewTmuxWindow={sessionViewModel.tmuxNewWindowInWorkspace}
           onStartSessionDrag={(sessionId) => {
-            setDraggedSession({ sessionId, source: 'standalone-tab' });
+            setDraggedSession({ sessionId, source: "standalone-tab" });
           }}
           onEndSessionDrag={() => {
             setDraggedSession(null);
           }}
-          onDetachSessionToStandalone={sessionViewModel.detachSessionFromWorkspace}
+          onDetachSessionToStandalone={
+            sessionViewModel.detachSessionFromWorkspace
+          }
           onReorderDynamicTab={sessionViewModel.reorderDynamicTab}
           onCheckForUpdates={loginController.checkForUpdates}
           onDownloadUpdate={loginController.downloadUpdate}
@@ -315,7 +332,9 @@ export function AppShell({
               return null;
             }
             // 기기 로컬 설정에 있다. 호스트 레코드는 동기화되므로 모니터 선택을 담지 않는다.
-            return settingsViewModel.settings.rdpMonitorsByHostId[hostId] ?? null;
+            return (
+              settingsViewModel.settings.rdpMonitorsByHostId[hostId] ?? null
+            );
           }}
           onCloseWindow={loginController.closeWindow}
         />,
@@ -330,10 +349,10 @@ export function AppShell({
       <div
         aria-hidden
         className={cn(
-          'flex-none transition-[height] duration-150',
-          titleBarMode(windowState.isFullScreen, desktopPlatform) === 'visible'
-            ? 'h-[calc(2.95rem/var(--app-zoom))]'
-            : 'h-0',
+          "flex-none transition-[height] duration-150",
+          titleBarMode(windowState.isFullScreen, desktopPlatform) === "visible"
+            ? "h-[calc(2.95rem/var(--app-zoom))]"
+            : "h-0",
         )}
       />
 
@@ -400,7 +419,7 @@ export function AppShell({
         secretEditRequest={secretEditRequest}
         onCloseSecretEditor={() => setSecretEditRequest(null)}
         onSubmitSecretEditor={async (input) => {
-          if (input.mode === 'update-shared') {
+          if (input.mode === "update-shared") {
             await settingsViewModel.updateKeychainSecret(
               input.secretRef,
               input.secrets,
@@ -409,7 +428,7 @@ export function AppShell({
             return;
           }
           if (!input.hostId) {
-            throw new Error(t('appShell.selectTargetHost'));
+            throw new Error(t("appShell.selectTargetHost"));
           }
           await settingsViewModel.cloneKeychainSecretForHost(
             input.hostId,

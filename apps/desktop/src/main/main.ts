@@ -24,6 +24,7 @@ import {
   SettingsRepository,
   TailnetRepository,
   SnippetRepository,
+  SavedWorkspaceRepository,
   SyncOutboxRepository
 } from './database';
 import { AI_STORED_KEY_SECRET_ACCOUNTS } from './ai-service';
@@ -283,6 +284,7 @@ if (termiusHelperArgIndex >= 0) {
   const portForwardRepository = new PortForwardRepository();
   const dnsOverrideRepository = new DnsOverrideRepository();
   const snippetRepository = new SnippetRepository();
+  const savedWorkspaceRepository = new SavedWorkspaceRepository();
   const knownHostRepository = new KnownHostRepository();
   const activityLogRepository = new ActivityLogRepository();
   const secretMetadataRepository = new SecretMetadataRepository();
@@ -372,7 +374,8 @@ if (termiusHelperArgIndex >= 0) {
     settingsRepository,
     secretStore,
     syncOutboxRepository,
-    tailnetRepository
+    tailnetRepository,
+    savedWorkspaceRepository
   );
   const sessionShareService = new SessionShareService(authService, coreManager);
   const sessionReplayService = new SessionReplayService(settingsRepository, coreManager);
@@ -833,6 +836,7 @@ if (termiusHelperArgIndex >= 0) {
       portForwardRepository,
       dnsOverrideRepository,
       snippetRepository,
+      savedWorkspaceRepository,
       knownHostRepository,
       activityLogRepository,
       secretMetadataRepository,

@@ -39,6 +39,7 @@ function makeModel(hosts: HostRecord[], searchQuery = ''): HostBrowserModel {
     favoriteHostIdSet: new Set<string>(),
     lastConnectedByHostId: new Map<string, number>(),
     onConnectHost: vi.fn(),
+    withLeaveHostEditor: (run: () => void) => run(),
     onOpenHostContainers: vi.fn(),
     onCreateHost: vi.fn(),
     onEditHost: vi.fn(),

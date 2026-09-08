@@ -37,6 +37,7 @@ import type {
   SftpConflictPolicy,
   SshPortForwardRuleRecord,
   SecretMetadataRecord,
+  SavedWorkspaceRecord,
   SnippetRecord,
   AiProviderId,
   AiSettings,
@@ -64,6 +65,7 @@ import {
   normalizeAiTokenLimit,
   normalizeHostEnvVars,
   normalizeJumpHostIds,
+  normalizeSavedWorkspaceRecord,
   normalizeSftpBrowserColumnWidths
 } from '@shared';
 import type { SyncKind } from '@shared';
@@ -190,6 +192,7 @@ export interface DesktopStateFile {
     /** 등록된 tailnet. auth key 는 secure.tailnetAuthKeysById 에 따로 둔다. */
     tailnets: TailnetRecord[];
     snippets: SnippetRecord[];
+    savedWorkspaces: SavedWorkspaceRecord[];
     syncOutbox: SyncDeletionRecord[];
   };
   secure: {
@@ -626,6 +629,7 @@ function createDefaultStateFile(): DesktopStateFile {
       awsProfiles: [],
       tailnets: [],
       snippets: [],
+      savedWorkspaces: [],
       syncOutbox: []
     },
     secure: {
@@ -1397,6 +1401,11 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
             .filter((entry): entry is SecretMetadataRecord => entry !== null)
         : [],
       snippets: Array.isArray(data.snippets) ? (data.snippets as SnippetRecord[]) : [],
+      savedWorkspaces: Array.isArray(data.savedWorkspaces)
+        ? data.savedWorkspaces
+            .map(normalizeSavedWorkspaceRecord)
+            .filter((entry): entry is SavedWorkspaceRecord => entry !== null)
+        : [],
       awsProfiles: Array.isArray(data.awsProfiles) ? (data.awsProfiles as AwsProfileMetadataRecord[]) : [],
       tailnets: Array.isArray(data.tailnets) ? (data.tailnets as TailnetRecord[]) : [],
       syncOutbox: Array.isArray(data.syncOutbox) ? (data.syncOutbox as SyncDeletionRecord[]) : []

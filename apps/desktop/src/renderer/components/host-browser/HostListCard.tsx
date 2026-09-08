@@ -57,10 +57,14 @@ export function HostListCard({
   const overflowTagCount = tags.length - visibleTags.length;
   const typeLine = [shortType, region].filter(Boolean).join(' · ');
 
+  // data-home-asset-key 는 홈 목록의 공용 식별자다(카드 종류를 가리지 않는다). 방향키 이동과
+  // 배경 클릭 판정이 이 속성만 본다 — 호출부가 넘기게 두면 새 렌더 자리에서 빼먹어도 컴파일은
+  // 통과하고 그 카드에서만 이동·클릭 판정이 조용히 어긋난다. 그래서 카드가 직접 붙인다.
   return (
     <article
       data-host-card="true"
       data-host-id={host.id}
+      data-home-asset-key={`host:${host.id}`}
       data-host-card-state={selected ? 'selected' : 'idle'}
       data-host-menu-target={menuTarget ? 'true' : undefined}
       className={cn(

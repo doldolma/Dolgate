@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DolgateImportDialog, HostExportDialog } from './HostTransferDialogs';
 
@@ -38,6 +39,7 @@ describe('HostExportDialog', () => {
       <HostExportDialog
         open
         hostIds={['host-1']}
+        workspaceIds={[]}
         onClose={vi.fn()}
         onExported={vi.fn()}
       />,
@@ -52,10 +54,13 @@ describe('HostExportDialog', () => {
   it('explains why a Dolgate export password is not ready', async () => {
     mocks.previewHostExport.mockResolvedValue({
       selectedHostCount: 1,
+      selectedWorkspaceCount: 0,
       dolgateHostCount: 1,
+      dolgateWorkspaceCount: 0,
       opensshHostCount: 1,
       opensshDependencyCount: 0,
       opensshSkippedCount: 0,
+      opensshWorkspaceSkippedCount: 0,
       opensshWarnings: [],
     });
 
@@ -63,6 +68,7 @@ describe('HostExportDialog', () => {
       <HostExportDialog
         open
         hostIds={['host-1']}
+        workspaceIds={[]}
         onClose={vi.fn()}
         onExported={vi.fn()}
       />,
@@ -89,6 +95,54 @@ describe('HostExportDialog', () => {
   });
 });
 
+  // 부모(HomeShell)는 선택을 HomeAssetRef[] 로 들고 있고, 예전에는 렌더마다 그 배열을
+  // filter().map() 으로 새로 만들어 넘겼다. 미리보기 효과가 그 배열 **동일성**에 걸려 있어서,
+  // 활동 로그가 하나 도착하거나 30초 동기화 폴링이 돌기만 해도 효과가 다시 실행돼 입력 중인
+  // 내보내기 암호가 지워졌다.
+  it('부모가 다시 렌더돼도 입력한 암호를 지우지 않는다', async () => {
+    mocks.previewHostExport.mockResolvedValue({
+      selectedHostCount: 1,
+      selectedWorkspaceCount: 0,
+      dolgateHostCount: 1,
+      dolgateWorkspaceCount: 0,
+      opensshHostCount: 1,
+      opensshDependencyCount: 0,
+      opensshSkippedCount: 0,
+      opensshWorkspaceSkippedCount: 0,
+      opensshWarnings: [],
+    });
+
+    let bumpParent = () => {};
+    function Parent() {
+      const [, setTick] = useState(0);
+      bumpParent = () => setTick((value) => value + 1);
+      return (
+        <HostExportDialog
+          open
+          // 렌더마다 새 배열 — 예전 HomeShell 이 넘기던 모양 그대로다.
+          hostIds={['host-1'].map((id) => id)}
+          workspaceIds={[]}
+          onClose={vi.fn()}
+          onExported={vi.fn()}
+        />
+      );
+    }
+
+    render(<Parent />);
+    const passwordInput = await screen.findByLabelText('암호');
+    fireEvent.change(passwordInput, { target: { value: 'super-secret-1234' } });
+    expect(passwordInput).toHaveValue('super-secret-1234');
+    const previewCallsBefore = mocks.previewHostExport.mock.calls.length;
+
+    act(() => {
+      bumpParent();
+    });
+
+    expect(screen.getByLabelText('암호')).toHaveValue('super-secret-1234');
+    // 선택이 바뀌지 않았으므로 미리보기도 다시 받지 않는다.
+    expect(mocks.previewHostExport.mock.calls.length).toBe(previewCallsBefore);
+  });
+
 describe('DolgateImportDialog', () => {
   beforeEach(() => {
     mocks.pickDolgateImportFile.mockReset();
@@ -105,6 +159,7 @@ describe('DolgateImportDialog', () => {
     mocks.probeDolgateImport.mockResolvedValue({
       snapshotId: 'snapshot-1',
       hostCount: 1,
+      workspaceCount: 0,
       groupCount: 0,
       secretCount: 0,
       awsProfileCount: 0,
@@ -115,6 +170,7 @@ describe('DolgateImportDialog', () => {
       skippedCount: 4,
       skippedCounts: {
         hosts: 0,
+        workspaces: 0,
         groups: 3,
         secrets: 0,
         awsProfiles: 1,

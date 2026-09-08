@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SyncPayloadV2 } from "@shared";
+import type { SavedWorkspaceRecord, SyncPayloadV2 } from "@shared";
 import type { AuthSyncContext } from "./auth-service";
 
 let tempDir = "";
@@ -42,6 +42,7 @@ function emptySyncPayload() {
     portForwards: [],
     dnsOverrides: [],
     snippets: [],
+    workspaces: [],
     preferences: [],
     awsProfiles: [],
     tailnets: [],
@@ -146,6 +147,10 @@ async function createHarness(initialContext: AuthSyncContext) {
     listPayloads: vi.fn(() => []),
     replaceAll: vi.fn(),
   };
+  const savedWorkspaces = {
+    list: vi.fn<() => SavedWorkspaceRecord[]>(() => []),
+    replaceAll: vi.fn(),
+  };
   const outbox = {
     list: vi.fn(() => []),
     clearMany: vi.fn(),
@@ -166,6 +171,7 @@ async function createHarness(initialContext: AuthSyncContext) {
     secretStore as never,
     outbox as never,
     emptyRepository as never,
+    savedWorkspaces as never,
   );
 
   return {
@@ -173,6 +179,7 @@ async function createHarness(initialContext: AuthSyncContext) {
     authService,
     secretStore,
     awsProfiles,
+    savedWorkspaces,
     settings,
     outbox,
     setContext: (next: AuthSyncContext) => {
@@ -212,6 +219,246 @@ describe("SyncService immutable lease", () => {
     label: "Shared credential",
     password: "secret-value",
     updatedAt: "2026-07-16T00:00:00.000Z",
+  });
+  const savedWorkspace: SavedWorkspaceRecord = {
+    id: "workspace-1",
+    version: 1,
+    name: "Operations",
+    root: {
+      id: "workspace-root",
+      kind: "split",
+      axis: "horizontal",
+      ratio: 0.6,
+      first: {
+        id: "workspace-host",
+        kind: "leaf",
+        target: { kind: "host", hostId: "host-1", label: "Prod" },
+      },
+      second: {
+        id: "workspace-local",
+        kind: "leaf",
+        target: { kind: "local", label: "Local shell" },
+      },
+    },
+    favorite: false,
+    groupName: null,
+    lastOpenedAt: null,
+    createdAt: "2026-07-16T00:00:00.000Z",
+    updatedAt: "2026-07-16T00:00:00.000Z",
+  };
+
+  it("encrypts saved Workspaces into outgoing snapshots", async () => {
+    const harness = await createHarness(oldContext);
+    harness.savedWorkspaces.list.mockReturnValue([savedWorkspace]);
+    harness.secretStore.load.mockResolvedValue(null);
+    let requestInit: RequestInit | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: URL, init?: RequestInit) => {
+        requestInit = init;
+        return new Response(JSON.stringify({ revision: 1 }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    harness.service.markLocalChangesPendingPush();
+    await harness.service.pushDirty();
+
+    const payload = JSON.parse(String(requestInit?.body)) as SyncPayloadV2;
+    expect(payload.workspaces).toHaveLength(1);
+    expect(
+      decryptRecord<SavedWorkspaceRecord>(
+        payload.workspaces[0].encrypted_payload,
+        oldContext.vaultKeyBase64,
+      ),
+    ).toEqual(savedWorkspace);
+  });
+
+  it("decrypts and atomically applies remote saved Workspaces", async () => {
+    const harness = await createHarness(oldContext);
+    const payload: SyncPayloadV2 = {
+      ...emptySyncPayload(),
+      workspaces: [
+        encryptRecord(
+          savedWorkspace.id,
+          savedWorkspace,
+          oldContext.vaultKeyBase64,
+        ),
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: URL) => {
+        if (new URL(String(url)).pathname === "/api/info") {
+          return new Response(
+            JSON.stringify({
+              capabilities: {
+                sync: { awsProfiles: true },
+                vault: { e2ee: true },
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "content-type": "application/json", etag: '"2"' },
+        });
+      }),
+    );
+
+    await harness.service.bootstrap();
+
+    const stateStorage = (
+      harness.service as unknown as {
+        stateStorage: {
+          getState: () => { data: { savedWorkspaces: SavedWorkspaceRecord[] } };
+        };
+      }
+    ).stateStorage;
+    expect(stateStorage.getState().data.savedWorkspaces).toEqual([
+      savedWorkspace,
+    ]);
+  });
+
+  // 그룹 경로 rename 은 그 경로로 키를 잡는 모든 것을 다시 써야 한다. 로컬에서 이름을 바꾸면
+  // GroupRepository 가 저장된 Workspace 까지 rebase 하지만, 이름 변경이 **동기화로 들어오면** 그
+  // 래퍼를 지나지 않아 아무도 rebase 하지 않았다 — groups/hosts 는 서버 값으로 맞춰지는데
+  // Workspace 의 groupName 만 옛 경로를 가리켜, 사이드바에 그 Workspace 를 안은 유령 그룹이 남았다.
+  it("동기화로 들어온 그룹 이름 변경을 저장된 Workspace 경로에도 적용한다", async () => {
+    const harness = await createHarness(oldContext);
+    const stateStorage = (
+      harness.service as unknown as {
+        stateStorage: {
+          getState: () => {
+            data: { savedWorkspaces: SavedWorkspaceRecord[] };
+          };
+          updateState: (mutate: (state: Record<string, any>) => void) => unknown;
+        };
+      }
+    ).stateStorage;
+
+    // 로컬은 아직 옛 경로("prod")를 안다.
+    stateStorage.updateState((state) => {
+      state.data.groups = [
+        {
+          id: "group-prod",
+          name: "prod",
+          path: "prod",
+          parentPath: null,
+          createdAt: "2026-07-16T00:00:00.000Z",
+          updatedAt: "2026-07-16T00:00:00.000Z",
+        },
+      ];
+    });
+
+    const staleWorkspace: SavedWorkspaceRecord = {
+      ...savedWorkspace,
+      groupName: "prod",
+    };
+    const payload: SyncPayloadV2 = {
+      ...emptySyncPayload(),
+      // 다른 기기가 prod → production 으로 바꿨다. 그룹 id 는 그대로여서 매핑을 알 수 있다.
+      groups: [
+        encryptRecord(
+          "group-prod",
+          {
+            id: "group-prod",
+            name: "production",
+            path: "production",
+            parentPath: null,
+            createdAt: "2026-07-16T00:00:00.000Z",
+            updatedAt: "2026-07-17T00:00:00.000Z",
+          },
+          oldContext.vaultKeyBase64,
+        ),
+      ],
+      // 서버의 Workspace 사본은 아직 옛 경로를 가리킨다.
+      workspaces: [
+        encryptRecord(
+          staleWorkspace.id,
+          staleWorkspace,
+          oldContext.vaultKeyBase64,
+        ),
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: URL) => {
+        if (new URL(String(url)).pathname === "/api/info") {
+          return new Response(
+            JSON.stringify({
+              capabilities: {
+                sync: { awsProfiles: true },
+                vault: { e2ee: true },
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "content-type": "application/json", etag: '"2"' },
+        });
+      }),
+    );
+
+    await harness.service.bootstrap();
+
+    const [applied] = stateStorage.getState().data.savedWorkspaces;
+    expect(applied?.groupName).toBe("production");
+    // push 는 전체 목록을 보내므로, 고친 값이 서버에도 반영되도록 updatedAt 을 올려 둔다.
+    expect(applied?.updatedAt).not.toBe(staleWorkspace.updatedAt);
+  });
+
+  it("경로가 그대로면 저장된 Workspace 를 건드리지 않는다", async () => {
+    const harness = await createHarness(oldContext);
+    const stateStorage = (
+      harness.service as unknown as {
+        stateStorage: {
+          getState: () => {
+            data: { savedWorkspaces: SavedWorkspaceRecord[] };
+          };
+        };
+      }
+    ).stateStorage;
+
+    const grouped: SavedWorkspaceRecord = {
+      ...savedWorkspace,
+      groupName: "prod",
+    };
+    const payload: SyncPayloadV2 = {
+      ...emptySyncPayload(),
+      workspaces: [
+        encryptRecord(grouped.id, grouped, oldContext.vaultKeyBase64),
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: URL) => {
+        if (new URL(String(url)).pathname === "/api/info") {
+          return new Response(
+            JSON.stringify({
+              capabilities: {
+                sync: { awsProfiles: true },
+                vault: { e2ee: true },
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "content-type": "application/json", etag: '"2"' },
+        });
+      }),
+    );
+
+    await harness.service.bootstrap();
+
+    expect(stateStorage.getState().data.savedWorkspaces).toEqual([grouped]);
   });
 
   it("purges account-scoped AWS artifacts after clearing the profile repository", async () => {
@@ -290,7 +537,10 @@ describe("SyncService immutable lease", () => {
     const stateStorage = (
       harness.service as unknown as {
         stateStorage: {
-          getSyncDataOwner: () => { userId: string | null; serverUrl: string | null };
+          getSyncDataOwner: () => {
+            userId: string | null;
+            serverUrl: string | null;
+          };
           updateSyncDataOwner: (owner: {
             userId: string | null;
             serverUrl: string | null;
@@ -302,10 +552,14 @@ describe("SyncService immutable lease", () => {
       userId: oldContext.userId,
       serverUrl: oldContext.serverUrl,
     });
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     const purgeAwsArtifacts = vi.fn(async () => {
       expect(harness.outbox.clearAll).toHaveBeenCalledOnce();
-      expect(harness.settings.clearSyncedTerminalPreferences).toHaveBeenCalledOnce();
+      expect(
+        harness.settings.clearSyncedTerminalPreferences,
+      ).toHaveBeenCalledOnce();
       expect(stateStorage.getSyncDataOwner()).toEqual({
         userId: null,
         serverUrl: null,
@@ -426,9 +680,9 @@ describe("SyncService immutable lease", () => {
     await harness.service.pushDirty();
 
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(
-      new Headers(requestInit?.headers).get("X-Dolgate-Vault-Epoch"),
-    ).toBe("3");
+    expect(new Headers(requestInit?.headers).get("X-Dolgate-Vault-Epoch")).toBe(
+      "3",
+    );
   });
 
   it("keeps the captured epoch on an in-flight push and discards its late response", async () => {
@@ -523,7 +777,9 @@ describe("SyncService immutable lease", () => {
     const harness = await createHarness(oldContext);
     harness.secretStore.load.mockResolvedValue(managedSecret);
     const recovery = createDeferred<void>();
-    harness.authService.handleVaultDekRejected.mockReturnValue(recovery.promise);
+    harness.authService.handleVaultDekRejected.mockReturnValue(
+      recovery.promise,
+    );
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -634,7 +890,9 @@ describe("SyncService immutable lease", () => {
   it("does not let decode recovery pause a changed same-generation context", async () => {
     const harness = await createHarness(oldContext);
     const recovery = createDeferred<void>();
-    harness.authService.handleVaultDekRejected.mockReturnValue(recovery.promise);
+    harness.authService.handleVaultDekRejected.mockReturnValue(
+      recovery.promise,
+    );
     const corruptedPayload: SyncPayloadV2 = {
       ...emptySyncPayload(),
       groups: [
@@ -713,7 +971,7 @@ describe("SyncService immutable lease", () => {
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const push = harness.service.pushDirty();
 
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     pullResponse.resolve(new Response(null, { status: 304 }));
@@ -739,8 +997,6 @@ describe("SyncService immutable lease", () => {
     await harness.service.bootstrap();
 
     expect(harness.authService.noteServerVaultSupport).not.toHaveBeenCalled();
-    expect(harness.service.getState().awsProfilesServerSupport).toBe(
-      "unknown",
-    );
+    expect(harness.service.getState().awsProfilesServerSupport).toBe("unknown");
   });
 });

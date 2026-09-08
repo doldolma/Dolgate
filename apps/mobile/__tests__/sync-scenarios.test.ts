@@ -73,6 +73,7 @@ const SYNC_KINDS = [
   'preferences',
   'awsProfiles',
   'snippets',
+  'workspaces',
   'tailnets',
 ] as const;
 type SyncKind = (typeof SYNC_KINDS)[number];
@@ -124,7 +125,9 @@ class FakeSyncServer {
 
   liveIds(kind: SyncKind): string[] {
     return [...this.records.entries()]
-      .filter(([key, record]) => key.startsWith(`${kind}:`) && !record.deleted_at)
+      .filter(
+        ([key, record]) => key.startsWith(`${kind}:`) && !record.deleted_at,
+      )
       .map(([, record]) => record.id)
       .sort();
   }
@@ -500,7 +503,10 @@ describe('sync survives the awkward orders', () => {
   });
 
   it('서버가 그대로면 당겨도 아무것도 바뀌지 않는다', async () => {
-    const { hostId, secretRef } = await addHostWithPassword('idle', 'idle-pass');
+    const { hostId, secretRef } = await addHostWithPassword(
+      'idle',
+      'idle-pass',
+    );
     await settle();
 
     const revisionBefore = server.revision;
@@ -510,6 +516,30 @@ describe('sync survives the awkward orders', () => {
     expect(server.revision).toBe(revisionBefore);
     expect(localHostIds()).toEqual([hostId]);
     expect(localSecretPassword(secretRef)).toBe('idle-pass');
+  });
+
+  it('모바일 동기화는 데스크톱 Workspace 저장본을 읽거나 덮어쓰지 않고 보존한다', async () => {
+    const workspaceRecord: SyncRecord = {
+      id: 'workspace-desktop-1',
+      encrypted_payload: 'opaque-desktop-workspace-ciphertext',
+      updated_at: '2026-09-05T00:00:00.000Z',
+    };
+    server.push({
+      ...server.snapshot(),
+      workspaces: [workspaceRecord],
+    });
+
+    // pull 에 Workspace만 있어도 빈 서버로 오판하지 않아야 한다. 모바일 store에는 materialize하지
+    // 않고, 이후 호스트 변경 push에서도 workspaces는 빈 변경 배열로 남겨 서버 레코드를 보존한다.
+    await sync();
+    await addHostWithPassword('mobile-host', 'mobile-pass');
+    await settle();
+
+    expect(server.liveIds('workspaces')).toEqual(['workspace-desktop-1']);
+    expect(server.snapshot().workspaces).toEqual([workspaceRecord]);
+    expect(
+      pushedPayloads.every(payload => payload.workspaces.length === 0),
+    ).toBe(true);
   });
 
   it('밀기가 반복해서 실패해도 큐는 남고, 회복되면 전부 올라간다', async () => {
@@ -536,7 +566,10 @@ describe('sync survives the awkward orders', () => {
   it('빈 서버로 복구할 때도 비밀을 함께 올린다', async () => {
     // 서버가 초기화된 계정. 로컬을 재업로드하는 경로가 도는데, 그때 비밀이 빠지면
     // 다른 기기에는 "자격증명이 달린 호스트" 만 생기고 실제 비밀번호는 없다.
-    const { hostId, secretRef } = await addHostWithPassword('reset', 'reset-pass');
+    const { hostId, secretRef } = await addHostWithPassword(
+      'reset',
+      'reset-pass',
+    );
     await settle();
     expect(server.liveIds('secrets')).toEqual([secretRef]);
 
@@ -555,7 +588,10 @@ describe('sync survives the awkward orders', () => {
     // 로컬에는 남았는데 큐 항목만 없어진 경우(저장 직후 앱이 죽는 등). 예전에는 올라가지도
     // 지워지지도 않는 유령이 됐다 — 병합이 "서버에 없는 로컬" 을 찾아 다시 큐에 넣는다.
     pushBlocked = true;
-    const { hostId, secretRef } = await addHostWithPassword('ghost', 'ghost-pass');
+    const { hostId, secretRef } = await addHostWithPassword(
+      'ghost',
+      'ghost-pass',
+    );
     useMobileAppStore.setState({ syncOutbox: [] });
 
     pushBlocked = false;
@@ -591,7 +627,10 @@ describe('sync survives the awkward orders', () => {
   });
 
   it('오프라인에서 지운 호스트는 복귀 후 서버에서도 지워진다', async () => {
-    const { hostId, secretRef } = await addHostWithPassword('gone', 'gone-pass');
+    const { hostId, secretRef } = await addHostWithPassword(
+      'gone',
+      'gone-pass',
+    );
     await settle();
     expect(server.liveIds('hosts')).toEqual([hostId]);
 
@@ -748,7 +787,9 @@ describe('sync survives the awkward orders', () => {
     pushBlocked = true;
     pullBlocked = true;
     await act(async () => {
-      await useMobileAppStore.getState().removeGroup('doomed', 'delete-subtree');
+      await useMobileAppStore
+        .getState()
+        .removeGroup('doomed', 'delete-subtree');
     });
     expect(localHostIds()).toEqual([]);
 
@@ -778,7 +819,10 @@ describe('sync survives the awkward orders', () => {
   });
 
   it('동기화가 겹쳐 돌아도 큐를 두 번 밀지 않는다', async () => {
-    const { hostId, secretRef } = await addHostWithPassword('race', 'race-pass');
+    const { hostId, secretRef } = await addHostWithPassword(
+      'race',
+      'race-pass',
+    );
 
     await act(async () => {
       await Promise.all([
@@ -876,9 +920,7 @@ describe('sync survives the awkward orders', () => {
     };
     server.push({
       ...server.snapshot(),
-      hosts: [
-        remoteRecord(hostId, desktopEdit, '2099-01-01T00:00:00.000Z'),
-      ],
+      hosts: [remoteRecord(hostId, desktopEdit, '2099-01-01T00:00:00.000Z')],
     });
     const remoteRevision = server.revision;
 
@@ -893,9 +935,8 @@ describe('sync survives the awkward orders', () => {
     expect(server.revision).toBe(remoteRevision);
     // 로컬도 서버의 최신을 따랐다.
     expect(
-      useMobileAppStore
-        .getState()
-        .hosts.find(record => record.id === hostId)?.label,
+      useMobileAppStore.getState().hosts.find(record => record.id === hostId)
+        ?.label,
     ).toBe('desktop newer');
 
     // 밀기가 살아나도 마찬가지다 — 로컬은 이미 서버의 최신을 따랐다.

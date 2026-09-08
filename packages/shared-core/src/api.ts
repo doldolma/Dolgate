@@ -84,6 +84,7 @@ export type SyncKind =
   | 'preferences'
   | 'awsProfiles'
   | 'snippets'
+  | 'workspaces'
   | 'tailnets';
 
 // 서버는 payload를 해석하지 않고 암호문 그대로 저장한다.
@@ -105,6 +106,8 @@ export interface SyncPayloadV2 {
   preferences: SyncRecord[];
   awsProfiles: SyncRecord[];
   snippets: SyncRecord[];
+  /** 저장된 데스크톱 split 배치. 모바일은 읽지 않고 빈 변경으로 보존한다. */
+  workspaces: SyncRecord[];
   /** 서버는 kind 를 열거하지 않는다 — 항목 추가는 클라이언트만 고치면 된다. */
   tailnets: SyncRecord[];
 }

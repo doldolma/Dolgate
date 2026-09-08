@@ -15,6 +15,7 @@ import type {
   SettingsRepository,
   TailnetRepository,
   SnippetRepository,
+  SavedWorkspaceRepository,
   SyncOutboxRepository,
 } from "./database";
 import type { HostsOverrideManager } from "./hosts-override-manager";
@@ -39,6 +40,7 @@ import { registerTailnetIpcHandlers } from "./ipc/tailnet";
 import { registerPortForwardAndDnsIpcHandlers } from "./ipc/port-forwards-dns";
 import { registerSessionShareIpcHandlers } from "./ipc/session-shares";
 import { registerSnippetsIpcHandlers } from "./ipc/snippets";
+import { registerSavedWorkspacesIpcHandlers } from "./ipc/saved-workspaces";
 import { registerSerialIpcHandlers } from "./ipc/serial";
 import { createCertificatePromptBridge, registerRdpIpcHandlers } from "./ipc/rdp";
 import { registerVncIpcHandlers } from "./ipc/vnc";
@@ -58,6 +60,7 @@ export function registerIpcHandlers(
   portForwards: PortForwardRepository,
   dnsOverrides: DnsOverrideRepository,
   snippets: SnippetRepository,
+  savedWorkspaces: SavedWorkspaceRepository,
   knownHosts: KnownHostRepository,
   activityLogs: ActivityLogRepository,
   secretMetadata: SecretMetadataRepository,
@@ -89,6 +92,7 @@ export function registerIpcHandlers(
     portForwards,
     dnsOverrides,
     snippets,
+    savedWorkspaces,
     knownHosts,
     activityLogs,
     secretMetadata,
@@ -131,6 +135,7 @@ export function registerIpcHandlers(
   registerSftpIpcHandlers(ctx);
   registerPortForwardAndDnsIpcHandlers(ctx);
   registerSnippetsIpcHandlers(ctx);
+  registerSavedWorkspacesIpcHandlers(ctx);
   registerKnownHostsLogsKeychainIpcHandlers(ctx);
   registerTailnetIpcHandlers(ctx);
   registerSshKeyIpcHandlers(ctx);

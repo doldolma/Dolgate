@@ -281,6 +281,7 @@ export function buildEmptySyncPayload(): SyncPayloadV2 {
     preferences: [],
     awsProfiles: [],
     snippets: [],
+    workspaces: [],
   };
 }
 

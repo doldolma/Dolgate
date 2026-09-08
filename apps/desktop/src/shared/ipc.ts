@@ -5,6 +5,8 @@ import type {
   AppSettings,
   DnsOverrideDraft,
   DnsOverrideResolvedRecord,
+  SavedWorkspaceDraft,
+  SavedWorkspaceRecord,
   SnippetRecord,
   SnippetDraft,
   AwsSsmPortForwardTargetKind,
@@ -137,17 +139,26 @@ export type DesktopWindowLaunchIntent = {
 
 export type HostExportFormat = "dolgate" | "openssh";
 
+export interface HostExportAssetSelection {
+  hostIds: string[];
+  workspaceIds: string[];
+}
+
 export interface HostExportPreview {
   selectedHostCount: number;
+  selectedWorkspaceCount: number;
   dolgateHostCount: number;
+  dolgateWorkspaceCount: number;
   opensshHostCount: number;
   opensshDependencyCount: number;
   opensshSkippedCount: number;
+  opensshWorkspaceSkippedCount: number;
   opensshWarnings: string[];
 }
 
 export interface HostExportSelectionInput {
   hostIds: string[];
+  workspaceIds?: string[];
   format: HostExportFormat;
   password?: string;
 }
@@ -156,7 +167,9 @@ export interface HostExportResult {
   canceled: boolean;
   savedPath: string | null;
   exportedHostCount: number;
+  exportedWorkspaceCount: number;
   skippedHostCount: number;
+  skippedWorkspaceCount: number;
   warnings: string[];
 }
 
@@ -167,6 +180,7 @@ export interface DolgateImportFileSelection {
 
 export interface DolgateImportItemCounts {
   hosts: number;
+  workspaces: number;
   groups: number;
   secrets: number;
   awsProfiles: number;
@@ -180,6 +194,7 @@ export interface DolgateImportItemCounts {
 export interface DolgateImportPreview {
   snapshotId: string;
   hostCount: number;
+  workspaceCount: number;
   groupCount: number;
   secretCount: number;
   awsProfileCount: number;
@@ -195,6 +210,7 @@ export interface DolgateImportPreview {
 
 export interface DolgateImportResult {
   importedHostCount: number;
+  importedWorkspaceCount: number;
   importedGroupCount: number;
   importedSecretCount: number;
   importedAwsProfileCount: number;
@@ -1453,7 +1469,9 @@ export interface DesktopApi {
     discardSnapshot: (snapshotId: string) => Promise<void>;
   };
   hostTransfer: {
-    previewExport: (hostIds: string[]) => Promise<HostExportPreview>;
+    previewExport: (
+      selection: HostExportAssetSelection | string[],
+    ) => Promise<HostExportPreview>;
     exportSelection: (
       input: HostExportSelectionInput,
     ) => Promise<HostExportResult>;
@@ -1788,6 +1806,15 @@ export interface DesktopApi {
     list: () => Promise<SnippetRecord[]>;
     create: (draft: SnippetDraft) => Promise<SnippetRecord>;
     update: (id: string, draft: SnippetDraft) => Promise<SnippetRecord>;
+    remove: (id: string) => Promise<void>;
+  };
+  savedWorkspaces: {
+    list: () => Promise<SavedWorkspaceRecord[]>;
+    create: (draft: SavedWorkspaceDraft) => Promise<SavedWorkspaceRecord>;
+    rename: (id: string, name: string) => Promise<SavedWorkspaceRecord>;
+    moveToGroup: (id: string, groupName: string | null) => Promise<SavedWorkspaceRecord>;
+    setFavorite: (id: string, favorite: boolean) => Promise<SavedWorkspaceRecord>;
+    touchOpened: (id: string) => Promise<SavedWorkspaceRecord>;
     remove: (id: string) => Promise<void>;
   };
   notifications: {

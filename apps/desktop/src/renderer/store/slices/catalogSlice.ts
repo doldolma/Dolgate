@@ -1,5 +1,6 @@
 import type { SliceDeps } from "../services/context";
 import type { CatalogSlice } from "../types";
+import type { HostRecord, SavedWorkspaceRecord } from "@shared";
 import {
   collectGroupPaths,
   getGroupLabel,
@@ -176,506 +177,531 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
     isReady: false,
     setSearchQuery: (value) => set({ searchQuery: value }),
     setSavedCredentialsSearchQuery: (value) =>
-            set({ savedCredentialsSearchQuery: value }),
+      set({ savedCredentialsSearchQuery: value }),
     toggleHostTag: (tag) =>
-            set((state) => {
-              const key = normalizeTagValue(tag);
-              const alreadySelected = state.selectedHostTags.some(
-                (value) => normalizeTagValue(value) === key,
-              );
-              return {
-                selectedHostTags: alreadySelected
-                  ? state.selectedHostTags.filter(
-                      (value) => normalizeTagValue(value) !== key,
-                    )
-                  : [...state.selectedHostTags, tag],
-              };
-            }),
+      set((state) => {
+        const key = normalizeTagValue(tag);
+        const alreadySelected = state.selectedHostTags.some(
+          (value) => normalizeTagValue(value) === key,
+        );
+        return {
+          selectedHostTags: alreadySelected
+            ? state.selectedHostTags.filter(
+                (value) => normalizeTagValue(value) !== key,
+              )
+            : [...state.selectedHostTags, tag],
+        };
+      }),
     clearHostTagFilter: () => set({ selectedHostTags: [] }),
     activateHome: () => {
-            // 다른 탭에서 오면 홈 탭으로 전환하되 마지막 홈 섹션(로그 등)을 유지한다
-            // (세션 갔다 Home 복귀 시 보던 섹션 보존). 이미 홈 탭인데 다시 Home을 누르면
-            // 홈(호스트) 랜딩으로 리셋한다(홈 섹션에서 Home = 홈으로 가기).
-            if (get().activeWorkspaceTab === "home") {
-              get().openHomeSection("hosts");
-            } else {
-              set({ activeWorkspaceTab: "home" });
-            }
-          },
+      // 다른 탭에서 오면 홈 탭으로 전환하되 마지막 홈 섹션(로그 등)을 유지한다
+      // (세션 갔다 Home 복귀 시 보던 섹션 보존). 이미 홈 탭인데 다시 Home을 누르면
+      // 홈(호스트) 랜딩으로 리셋한다(홈 섹션에서 Home = 홈으로 가기).
+      if (get().activeWorkspaceTab === "home") {
+        get().openHomeSection("hosts");
+      } else {
+        set({ activeWorkspaceTab: "home" });
+      }
+    },
     activateSftp: () => set({ activeWorkspaceTab: "sftp" }),
     activateSession: (sessionId) =>
-            set({ activeWorkspaceTab: asSessionTabId(sessionId) }),
+      set({ activeWorkspaceTab: asSessionTabId(sessionId) }),
     activateWorkspace: (workspaceId) => {
-            // tmux workspace(=tmux window) 로 전환하면 control 채널의 select-window 로도
-            // 동기화해, 원격 tmux 의 활성 window 가 따라오게 한다. window id 는 workspace 에,
-            // 대상 control 세션은 그 workspace 의 pane 가상 sessionId 로 식별한다.
-            const workspace = get().workspaces.find(
-              (item) => item.id === workspaceId,
-            );
-            if (workspace?.tmux && workspace.activeSessionId.startsWith("tmux:")) {
-              void api.ssh.tmuxSelectWindow(
-                workspace.activeSessionId,
-                workspace.tmux.windowId,
-              );
-            }
-            // tmux 윈도우면 상단 세션 탭(tmuxgrp:)을 활성 유지하고 그룹의 활성
-            // 윈도우만 옮긴다(세션 탭 강조 + 윈도우 바·화면 일치 보장).
-            const group = findTmuxGroupForWorkspace(get().tmuxGroups, workspace);
-            if (group) {
-              set((state) => ({
-                activeWorkspaceTab: asTmuxSessionGroupTabId(group.id),
-                tmuxGroups: state.tmuxGroups.map((g) =>
-                  g.id === group.id
-                    ? { ...g, activeWorkspaceId: workspaceId }
-                    : g,
-                ),
-              }));
-              return;
-            }
-            set({ activeWorkspaceTab: asWorkspaceTabId(workspaceId) });
-          },
+      // tmux workspace(=tmux window) 로 전환하면 control 채널의 select-window 로도
+      // 동기화해, 원격 tmux 의 활성 window 가 따라오게 한다. window id 는 workspace 에,
+      // 대상 control 세션은 그 workspace 의 pane 가상 sessionId 로 식별한다.
+      const workspace = get().workspaces.find(
+        (item) => item.id === workspaceId,
+      );
+      if (workspace?.tmux && workspace.activeSessionId.startsWith("tmux:")) {
+        void api.ssh.tmuxSelectWindow(
+          workspace.activeSessionId,
+          workspace.tmux.windowId,
+        );
+      }
+      // tmux 윈도우면 상단 세션 탭(tmuxgrp:)을 활성 유지하고 그룹의 활성
+      // 윈도우만 옮긴다(세션 탭 강조 + 윈도우 바·화면 일치 보장).
+      const group = findTmuxGroupForWorkspace(get().tmuxGroups, workspace);
+      if (group) {
+        set((state) => ({
+          activeWorkspaceTab: asTmuxSessionGroupTabId(group.id),
+          tmuxGroups: state.tmuxGroups.map((g) =>
+            g.id === group.id ? { ...g, activeWorkspaceId: workspaceId } : g,
+          ),
+        }));
+        return;
+      }
+      set({ activeWorkspaceTab: asWorkspaceTabId(workspaceId) });
+    },
     activateTmuxGroup: (tmuxGroupId) => {
-            // tmux 세션 그룹 상단 탭으로 전환한다. 그룹 내 활성 window 전환은
-            // selectTmuxWindow 가 담당하므로 여기선 active 탭만 그룹으로 바꾼다.
-            set({ activeWorkspaceTab: asTmuxSessionGroupTabId(tmuxGroupId) });
-          },
+      // tmux 세션 그룹 상단 탭으로 전환한다. 그룹 내 활성 window 전환은
+      // selectTmuxWindow 가 담당하므로 여기선 active 탭만 그룹으로 바꾼다.
+      set({ activeWorkspaceTab: asTmuxSessionGroupTabId(tmuxGroupId) });
+    },
     activateContainers: () =>
-            set((state) => ({
-              activeWorkspaceTab: "containers",
-              activeContainerHostId:
-                state.activeContainerHostId ?? state.containerTabs[0]?.hostId ?? null,
-            })),
+      set((state) => ({
+        activeWorkspaceTab: "containers",
+        activeContainerHostId:
+          state.activeContainerHostId ?? state.containerTabs[0]?.hostId ?? null,
+      })),
     focusHostContainersTab: (hostId) =>
-            set((state) => {
-              if (!state.containerTabs.some((tab) => tab.hostId === hostId)) {
-                return state;
-              }
-              return {
-                activeWorkspaceTab: "containers",
-                activeContainerHostId: hostId,
-              };
-            }),
+      set((state) => {
+        if (!state.containerTabs.some((tab) => tab.hostId === hostId)) {
+          return state;
+        }
+        return {
+          activeWorkspaceTab: "containers",
+          activeContainerHostId: hostId,
+        };
+      }),
     openHomeSection: (section) =>
-            set((state) => {
-              const nextSection = normalizeHomeSectionInput(section);
-              return {
-                activeWorkspaceTab: "home",
-                homeSection: nextSection.homeSection,
-                settingsSection:
-                  nextSection.homeSection === "settings"
-                    ? (nextSection.settingsSection ?? state.settingsSection)
-                    : state.settingsSection,
-                hostDrawer:
-                  nextSection.homeSection === "hosts"
-                    ? get().hostDrawer
-                    : { mode: "closed" },
-              };
-            }),
+      set((state) => {
+        const nextSection = normalizeHomeSectionInput(section);
+        return {
+          activeWorkspaceTab: "home",
+          homeSection: nextSection.homeSection,
+          settingsSection:
+            nextSection.homeSection === "settings"
+              ? (nextSection.settingsSection ?? state.settingsSection)
+              : state.settingsSection,
+          hostDrawer:
+            nextSection.homeSection === "hosts"
+              ? get().hostDrawer
+              : { mode: "closed" },
+        };
+      }),
     openSettingsSection: (section) =>
-            // 호스트 드로어는 닫지 않는다. 편집 중에 "Manage" 로 설정을 다녀오는 것이 정상 흐름
-            // 인데, 닫아 버리면 돌아왔을 때 편집하던 호스트를 다시 찾아 들어가야 한다.
-            //
-            // 열어 둬도 설정 화면을 가리지 않는다 — 드로어는 HostBrowser 안에 렌더되고, 그건
-            // homeSection === 'hosts' 일 때만 마운트된다.
-            set({
-              activeWorkspaceTab: "home",
-              homeSection: "settings",
-              settingsSection: section,
-            }),
+      // 호스트 드로어는 닫지 않는다. 편집 중에 "Manage" 로 설정을 다녀오는 것이 정상 흐름
+      // 인데, 닫아 버리면 돌아왔을 때 편집하던 호스트를 다시 찾아 들어가야 한다.
+      //
+      // 열어 둬도 설정 화면을 가리지 않는다 — 드로어는 HostBrowser 안에 렌더되고, 그건
+      // homeSection === 'hosts' 일 때만 마운트된다.
+      set({
+        activeWorkspaceTab: "home",
+        homeSection: "settings",
+        settingsSection: section,
+      }),
     // 종류(SSH·Serial·RDP)는 드로어 안 셀렉터가 정한다 — 여기서는 기본값만 정해 준다.
     openCreateHostDrawer: () =>
-            set({
-              activeWorkspaceTab: "home",
-              homeSection: "hosts",
-              hostDrawer: {
-                mode: "create",
-                defaultGroupPath: get().currentGroupPath,
-                kind: "ssh",
-              },
-            }),
+      set({
+        activeWorkspaceTab: "home",
+        homeSection: "hosts",
+        hostDrawer: {
+          mode: "create",
+          defaultGroupPath: get().currentGroupPath,
+          kind: "ssh",
+        },
+      }),
     openEditHostDrawer: (hostId) =>
-            set({
-              activeWorkspaceTab: "home",
-              homeSection: "hosts",
-              hostDrawer: { mode: "edit", hostId },
-            }),
+      set({
+        activeWorkspaceTab: "home",
+        homeSection: "hosts",
+        hostDrawer: { mode: "edit", hostId },
+      }),
     closeHostDrawer: () => set({ hostDrawer: { mode: "closed" } }),
     navigateGroup: (path) =>
-            set({
-              activeWorkspaceTab: "home",
-              homeSection: "hosts",
-              currentGroupPath: normalizeGroupPath(path),
-              hostDrawer: { mode: "closed" },
-            }),
+      set({
+        activeWorkspaceTab: "home",
+        homeSection: "hosts",
+        currentGroupPath: normalizeGroupPath(path),
+        hostDrawer: { mode: "closed" },
+      }),
     bootstrap: async () => {
-            const [snapshot, snippets] = await Promise.all([
-              api.bootstrap.getInitialSnapshot(),
-              api.snippets.list(),
-            ]);
-            // 아래 set이 terminalUploadEndpoints 참조를 통째로 버리므로, 그 전에
-            // 실제 연결을 닫아 고아 커넥션을 막는다 (첫 부트스트랩에서는 no-op).
-            releaseTerminalUploadEndpoints(api, get().sftp.terminalUploadEndpoints);
-            set({
-              hosts: sortHosts(snapshot.hosts),
-              groups: sortGroups(snapshot.groups),
-              tabs: snapshot.tabs.map((tab) => ({
-                ...tab,
-                sessionShare: normalizeSessionShareState(tab.sessionShare),
-                hasReceivedOutput:
-                  tab.status === "connected"
-                    ? true
-                    : (tab.hasReceivedOutput ?? false),
-              })),
-              workspaces: [],
-              tabStrip: snapshot.tabs.map((tab) => ({
-                kind: "session" as const,
-                sessionId: tab.sessionId,
-              })),
-              portForwards: sortPortForwards(snapshot.portForwardSnapshot.rules),
-              dnsOverrides: sortDnsOverrides(snapshot.dnsOverrides),
-              snippets,
-              portForwardRuntimes: snapshot.portForwardSnapshot.runtimes,
-              knownHosts: sortKnownHosts(snapshot.knownHosts),
-              activityLogs: sortLogs(snapshot.activityLogs),
-              keychainEntries: sortKeychainEntries(snapshot.keychainEntries),
-              activeWorkspaceTab: "home",
-              homeSection: "hosts",
-              settingsSection: "general",
-              hostDrawer: { mode: "closed" },
-              currentGroupPath: null,
-              selectedHostTags: [],
-              settings: snapshot.settings,
-              isReady: true,
-              pendingHostKeyPrompt: null,
-              queuedHostKeyPrompts: [],
-              pendingCredentialRetry: null,
-              pendingAwsSftpConfigRetry: null,
-              pendingMissingUsernamePrompt: null,
-              pendingInteractiveAuths: [],
-              pendingConnectionAttempts: [],
-              sftp: {
-                localHomePath: snapshot.localHomePath,
-                leftPane: {
-                  ...createEmptyPane("left"),
-                  sourceKind: "local",
-                  currentPath: snapshot.localHomeListing.path,
-                  lastLocalPath: snapshot.localHomeListing.path,
-                  history: [snapshot.localHomeListing.path],
-                  historyIndex: 0,
-                  entries: snapshot.localHomeListing.entries,
-                  warningMessages: snapshot.localHomeListing.warnings ?? [],
-                },
-                rightPane: createEmptyPane("right"),
-                transfers: [],
-                pendingConflictDialog: null,
-                terminalUploadEndpoints: {},
-              },
-            });
+      const [snapshot, snippets, savedWorkspaces] = await Promise.all([
+        api.bootstrap.getInitialSnapshot(),
+        api.snippets.list(),
+        api.savedWorkspaces.list(),
+      ]);
+      // 아래 set이 terminalUploadEndpoints 참조를 통째로 버리므로, 그 전에
+      // 실제 연결을 닫아 고아 커넥션을 막는다 (첫 부트스트랩에서는 no-op).
+      releaseTerminalUploadEndpoints(api, get().sftp.terminalUploadEndpoints);
+      set({
+        hosts: sortHosts(snapshot.hosts),
+        groups: sortGroups(snapshot.groups),
+        tabs: snapshot.tabs.map((tab) => ({
+          ...tab,
+          sessionShare: normalizeSessionShareState(tab.sessionShare),
+          hasReceivedOutput:
+            tab.status === "connected"
+              ? true
+              : (tab.hasReceivedOutput ?? false),
+        })),
+        workspaces: [],
+        tabStrip: snapshot.tabs.map((tab) => ({
+          kind: "session" as const,
+          sessionId: tab.sessionId,
+        })),
+        portForwards: sortPortForwards(snapshot.portForwardSnapshot.rules),
+        dnsOverrides: sortDnsOverrides(snapshot.dnsOverrides),
+        snippets,
+        savedWorkspaces,
+        portForwardRuntimes: snapshot.portForwardSnapshot.runtimes,
+        knownHosts: sortKnownHosts(snapshot.knownHosts),
+        activityLogs: sortLogs(snapshot.activityLogs),
+        keychainEntries: sortKeychainEntries(snapshot.keychainEntries),
+        activeWorkspaceTab: "home",
+        homeSection: "hosts",
+        settingsSection: "general",
+        hostDrawer: { mode: "closed" },
+        currentGroupPath: null,
+        selectedHostTags: [],
+        settings: snapshot.settings,
+        isReady: true,
+        pendingHostKeyPrompt: null,
+        queuedHostKeyPrompts: [],
+        pendingCredentialRetry: null,
+        pendingAwsSftpConfigRetry: null,
+        pendingMissingUsernamePrompt: null,
+        pendingInteractiveAuths: [],
+        pendingConnectionAttempts: [],
+        sftp: {
+          localHomePath: snapshot.localHomePath,
+          leftPane: {
+            ...createEmptyPane("left"),
+            sourceKind: "local",
+            currentPath: snapshot.localHomeListing.path,
+            lastLocalPath: snapshot.localHomeListing.path,
+            history: [snapshot.localHomeListing.path],
+            historyIndex: 0,
+            entries: snapshot.localHomeListing.entries,
+            warningMessages: snapshot.localHomeListing.warnings ?? [],
           },
+          rightPane: createEmptyPane("right"),
+          transfers: [],
+          pendingConflictDialog: null,
+          terminalUploadEndpoints: {},
+        },
+      });
+    },
     refreshHostCatalog: async () => {
-            const [nextHosts, nextGroups, nextKeychainEntries] = await Promise.all([
-              api.hosts.list(),
-              api.groups.list(),
-              api.keychain.list(),
-            ]);
-            set({
-              hosts: sortHosts(nextHosts),
-              groups: sortGroups(nextGroups),
-              keychainEntries: sortKeychainEntries(nextKeychainEntries),
-            });
-          },
+      const [nextHosts, nextGroups, nextKeychainEntries] = await Promise.all([
+        api.hosts.list(),
+        api.groups.list(),
+        api.keychain.list(),
+      ]);
+      set({
+        hosts: sortHosts(nextHosts),
+        groups: sortGroups(nextGroups),
+        keychainEntries: sortKeychainEntries(nextKeychainEntries),
+      });
+    },
     refreshOperationalData: async () => {
-            await syncOperationalData(set);
-          },
+      await syncOperationalData(set);
+    },
     refreshSyncedWorkspaceData: async () => {
-            await syncSyncedWorkspaceData(set);
-          },
+      await syncSyncedWorkspaceData(set);
+    },
     clearSyncedWorkspaceData: () =>
-            set({
-              hosts: [],
-              groups: [],
-              portForwards: [],
-              dnsOverrides: [],
-              portForwardRuntimes: [],
-              knownHosts: [],
-              activityLogs: [],
-              keychainEntries: [],
-            }),
+      set({
+        hosts: [],
+        groups: [],
+        portForwards: [],
+        dnsOverrides: [],
+        portForwardRuntimes: [],
+        knownHosts: [],
+        activityLogs: [],
+        keychainEntries: [],
+        savedWorkspaces: [],
+      }),
     createGroup: async (name, parentPath) => {
-            const next = await api.groups.create(
-              name,
-              parentPath !== undefined ? parentPath : get().currentGroupPath,
-            );
-            set((state) => ({
-              groups: sortGroups([
-                ...state.groups.filter((group) => group.id !== next.id),
-                next,
-              ]),
-            }));
-          },
+      const next = await api.groups.create(
+        name,
+        parentPath !== undefined ? parentPath : get().currentGroupPath,
+      );
+      set((state) => ({
+        groups: sortGroups([
+          ...state.groups.filter((group) => group.id !== next.id),
+          next,
+        ]),
+      }));
+    },
     removeGroup: async (path, mode) => {
-            const result = await api.groups.remove(path, mode);
-            set((state) => ({
-              groups: sortGroups(result.groups),
-              hosts: sortHosts(result.hosts),
-              currentGroupPath: resolveCurrentGroupPathAfterGroupRemoval(
-                state.currentGroupPath,
-                path,
-                mode,
-              ),
-            }));
-          },
+      const result = await api.groups.remove(path, mode);
+      set((state) => ({
+        groups: sortGroups(result.groups),
+        hosts: sortHosts(result.hosts),
+        savedWorkspaces: result.savedWorkspaces ?? state.savedWorkspaces,
+        currentGroupPath: resolveCurrentGroupPathAfterGroupRemoval(
+          state.currentGroupPath,
+          path,
+          mode,
+        ),
+      }));
+    },
     moveGroup: async (path, targetParentPath) => {
-            const result = await api.groups.move(path, targetParentPath);
-            set((state) => ({
-              groups: sortGroups(result.groups),
-              hosts: sortHosts(result.hosts),
-              currentGroupPath: resolveCurrentGroupPathAfterGroupMutation(
-                state.currentGroupPath,
-                path,
-                result.nextPath,
-              ),
-              hostDrawer:
-                state.hostDrawer.mode === "create"
-                  ? {
-                      ...state.hostDrawer,
-                      defaultGroupPath: rebaseGroupPath(
-                        state.hostDrawer.defaultGroupPath,
-                        path,
-                        result.nextPath,
-                      ),
-                    }
-                  : state.hostDrawer,
-            }));
-          },
+      const result = await api.groups.move(path, targetParentPath);
+      set((state) => ({
+        groups: sortGroups(result.groups),
+        hosts: sortHosts(result.hosts),
+        savedWorkspaces: result.savedWorkspaces ?? state.savedWorkspaces,
+        currentGroupPath: resolveCurrentGroupPathAfterGroupMutation(
+          state.currentGroupPath,
+          path,
+          result.nextPath,
+        ),
+        hostDrawer:
+          state.hostDrawer.mode === "create"
+            ? {
+                ...state.hostDrawer,
+                defaultGroupPath: rebaseGroupPath(
+                  state.hostDrawer.defaultGroupPath,
+                  path,
+                  result.nextPath,
+                ),
+              }
+            : state.hostDrawer,
+      }));
+    },
     reorderGroup: async (path, targetParentPath, targetIndex) => {
-            const nextParentPath = normalizeGroupPath(targetParentPath);
-            let groups = get().groups;
-            let hosts = get().hosts;
-            let movedPath = normalizeGroupPath(path);
-            if (!movedPath) {
-              return;
-            }
+      const nextParentPath = normalizeGroupPath(targetParentPath);
+      let groups = get().groups;
+      // hosts 도 이 동작이 소유하지 않는다. 그룹을 옮겨 호스트의 groupName 이 바뀐 경우에만 주
+      // 프로세스가 준 새 목록을 쓰고, 그 밖에는 손대지 않는다 — savedWorkspaces 와 같은 이유로,
+      // 아래 await 들 사이에 들어온 호스트 갱신(동기화 폴링, 이름 변경, detectedOs)을 스냅샷으로
+      // 덮어써서 되돌리던 자리다.
+      let movedHosts: HostRecord[] | null = null;
+      let hosts = get().hosts;
+      // 이 동작은 savedWorkspaces 를 소유하지 않는다. 그룹을 옮겨 경로가 바뀐 경우에만 주 프로세스가
+      // 준 새 목록을 쓰고, 그 밖에는 손대지 않는다 — 아래 await 들 사이에 들어온 갱신(touchOpened,
+      // 이름 변경, 삭제)을 스냅샷으로 덮어써서 되돌리던 자리다.
+      let movedSavedWorkspaces: SavedWorkspaceRecord[] | null = null;
+      let movedPath = normalizeGroupPath(path);
+      if (!movedPath) {
+        return;
+      }
 
-            // 부모가 다르면 먼저 옮긴다 — 경로가 바뀌므로 형제 목록을 그 뒤에 만들어야 한다.
-            if (getParentGroupPath(movedPath) !== nextParentPath) {
-              const moved = await api.groups.move(movedPath, nextParentPath);
-              groups = moved.groups;
-              hosts = moved.hosts;
-              movedPath = moved.nextPath;
-            }
+      // 부모가 다르면 먼저 옮긴다 — 경로가 바뀌므로 형제 목록을 그 뒤에 만들어야 한다.
+      if (getParentGroupPath(movedPath) !== nextParentPath) {
+        const moved = await api.groups.move(movedPath, nextParentPath);
+        groups = moved.groups;
+        hosts = moved.hosts;
+        movedHosts = moved.hosts;
+        movedSavedWorkspaces = moved.savedWorkspaces ?? null;
+        movedPath = moved.nextPath;
+      }
 
-            // 형제 목록을 **화면에 보이는 순서**로 만든다. planGroupReorder 가 그 순서를 전제한다.
-            const siblingPaths = collectGroupPaths(groups, hosts).filter((candidate: string) =>
-              isDirectGroupChild(candidate, nextParentPath),
-            );
+      // 형제 목록을 **화면에 보이는 순서**로 만든다. planGroupReorder 가 그 순서를 전제한다.
+      const siblingPaths = collectGroupPaths(groups, hosts).filter(
+        (candidate: string) => isDirectGroupChild(candidate, nextParentPath),
+      );
 
-            // 레코드가 없는 형제(호스트의 groupName 만으로 존재)는 순서를 적을 곳이 없다.
-            // 그대로 두면 랭크 없는 것으로 취급돼 맨 뒤로 밀려 목록이 흐트러지므로, 여기서
-            // 레코드를 만들어 준다. 이름·경로는 이미 정해져 있어 물을 것이 없다.
-            const recordByPath = new Map(groups.map((record) => [record.path, record]));
-            for (const siblingPath of siblingPaths) {
-              if (recordByPath.has(siblingPath)) {
-                continue;
-              }
-              const created = await api.groups.create(
-                getGroupLabel(siblingPath),
-                nextParentPath,
-              );
-              recordByPath.set(created.path, created);
-              groups = [...groups, created];
-            }
+      // 레코드가 없는 형제(호스트의 groupName 만으로 존재)는 순서를 적을 곳이 없다.
+      // 그대로 두면 랭크 없는 것으로 취급돼 맨 뒤로 밀려 목록이 흐트러지므로, 여기서
+      // 레코드를 만들어 준다. 이름·경로는 이미 정해져 있어 물을 것이 없다.
+      const recordByPath = new Map(
+        groups.map((record) => [record.path, record]),
+      );
+      for (const siblingPath of siblingPaths) {
+        if (recordByPath.has(siblingPath)) {
+          continue;
+        }
+        const created = await api.groups.create(
+          getGroupLabel(siblingPath),
+          nextParentPath,
+        );
+        recordByPath.set(created.path, created);
+        groups = [...groups, created];
+      }
 
-            const siblings = siblingPaths
-              .map((siblingPath) => recordByPath.get(siblingPath))
-              .filter((record): record is NonNullable<typeof record> => Boolean(record));
-            const moved = recordByPath.get(movedPath);
-            if (!moved) {
-              return;
-            }
+      const siblings = siblingPaths
+        .map((siblingPath) => recordByPath.get(siblingPath))
+        .filter((record): record is NonNullable<typeof record> =>
+          Boolean(record),
+        );
+      const moved = recordByPath.get(movedPath);
+      if (!moved) {
+        return;
+      }
 
-            const assignments = planGroupReorder(siblings, moved.id, targetIndex);
-            const nextGroups =
-              assignments.length > 0 ? await api.groups.setOrder(assignments) : groups;
+      const assignments = planGroupReorder(siblings, moved.id, targetIndex);
+      const nextGroups =
+        assignments.length > 0
+          ? await api.groups.setOrder(assignments)
+          : groups;
 
-            set({ groups: sortGroups(nextGroups), hosts: sortHosts(hosts) });
-          },
+      set((state) => ({
+        // groups 는 이 동작이 실제로 쓴 결과다(setOrder/create 를 거친 nextGroups).
+        groups: sortGroups(nextGroups),
+        hosts: movedHosts ? sortHosts(movedHosts) : state.hosts,
+        savedWorkspaces: movedSavedWorkspaces ?? state.savedWorkspaces,
+      }));
+    },
     renameGroup: async (path, name) => {
-            const result = await api.groups.rename(path, name);
-            set((state) => ({
-              groups: sortGroups(result.groups),
-              hosts: sortHosts(result.hosts),
-              currentGroupPath: resolveCurrentGroupPathAfterGroupMutation(
-                state.currentGroupPath,
-                path,
-                result.nextPath,
-              ),
-              hostDrawer:
-                state.hostDrawer.mode === "create"
-                  ? {
-                      ...state.hostDrawer,
-                      defaultGroupPath: rebaseGroupPath(
-                        state.hostDrawer.defaultGroupPath,
-                        path,
-                        result.nextPath,
-                      ),
-                    }
-                  : state.hostDrawer,
-            }));
-          },
+      const result = await api.groups.rename(path, name);
+      set((state) => ({
+        groups: sortGroups(result.groups),
+        hosts: sortHosts(result.hosts),
+        savedWorkspaces: result.savedWorkspaces ?? state.savedWorkspaces,
+        currentGroupPath: resolveCurrentGroupPathAfterGroupMutation(
+          state.currentGroupPath,
+          path,
+          result.nextPath,
+        ),
+        hostDrawer:
+          state.hostDrawer.mode === "create"
+            ? {
+                ...state.hostDrawer,
+                defaultGroupPath: rebaseGroupPath(
+                  state.hostDrawer.defaultGroupPath,
+                  path,
+                  result.nextPath,
+                ),
+              }
+            : state.hostDrawer,
+      }));
+    },
     saveHost: async (hostId, draft, secrets) => {
-            const next = hostId
-              ? await api.hosts.update(hostId, draft, secrets)
-              : await api.hosts.create(draft, secrets);
-            set({
-              hosts: sortHosts([
-                ...get().hosts.filter((host) => host.id !== next.id),
-                next,
-              ]),
-              // 편집 저장은 드로어를 편집 모드로 유지(호출부가 성공 시 닫는다). 새로 생성한
-              // 경우엔 편집 창으로 넘어가지 않도록 드로어를 닫는다(호출부가 방금 만든 호스트를
-              // 선택/상세 화면으로 전환). 편집창이 잠깐 스쳐 보이는 것도 막는다.
-              hostDrawer: hostId
-                ? { mode: "edit", hostId: next.id }
-                : { mode: "closed" },
-            });
-            await refreshHostAndKeychainState(set);
-            await syncOperationalData(set);
-            return next;
-          },
+      const next = hostId
+        ? await api.hosts.update(hostId, draft, secrets)
+        : await api.hosts.create(draft, secrets);
+      set({
+        hosts: sortHosts([
+          ...get().hosts.filter((host) => host.id !== next.id),
+          next,
+        ]),
+        // 편집 저장은 드로어를 편집 모드로 유지(호출부가 성공 시 닫는다). 새로 생성한
+        // 경우엔 편집 창으로 넘어가지 않도록 드로어를 닫는다(호출부가 방금 만든 호스트를
+        // 선택/상세 화면으로 전환). 편집창이 잠깐 스쳐 보이는 것도 막는다.
+        hostDrawer: hostId
+          ? { mode: "edit", hostId: next.id }
+          : { mode: "closed" },
+      });
+      await refreshHostAndKeychainState(set);
+      await syncOperationalData(set);
+      return next;
+    },
     duplicateHosts: async (hostIds) => {
-            if (hostIds.length === 0) {
-              return;
-            }
-    
-            let workingHosts = get().hosts;
-            let didCreate = false;
-            for (const hostId of hostIds) {
-              const current = workingHosts.find((host) => host.id === hostId);
-              if (!current) {
-                continue;
-              }
-    
-              const draft = toHostDraft(
-                current,
-                buildDuplicateHostLabel(current, workingHosts),
-              );
-              const next = await api.hosts.create(
-                // 공유 폴더의 주인은 **기기 로컬 설정**이다. 레코드에 남아 있는 옛 값(마이그레이션
-                // 전에 저장된 것)을 복제본에 실어 보내면 `/Users/...` 같은 이 기기의 경로가 다시
-                // 동기화돼 다른 기기로 흘러간다. 아래에서 로컬 설정으로 옮겨 담는다.
-                draft.kind === "rdp" ? { ...draft, drives: null } : draft,
-              );
-              // 공유 폴더는 기기 로컬 설정에 있다 — 레코드를 복사하는 것만으로는 따라오지
-              // 않는다. 복제는 **같은 기기 안**에서 일어나므로 경로가 그대로 유효하고, 원본이
-              // 열어 둔 폴더가 복제본에서 조용히 사라지면 왜 파일이 안 보이는지 알 수 없다.
-              if (current.kind === "rdp") {
-                const drives = resolveHostDrives(
-                  current.id,
-                  get().settings.rdpDrivesByHostId,
-                  current.drives,
-                );
-                if (drives.length > 0) {
-                  const settings = await api.settings.update({
-                    rdpDrivesByHostId: withHostDrives(
-                      get().settings.rdpDrivesByHostId,
-                      next.id,
-                      drives,
-                    ),
-                  });
-                  set({ settings });
-                }
-              }
-              workingHosts = sortHosts([
-                ...workingHosts.filter((host) => host.id !== next.id),
-                next,
-              ]);
-              didCreate = true;
-            }
-    
-            if (!didCreate) {
-              return;
-            }
-    
-            set({
-              hosts: workingHosts,
-            });
-            await syncOperationalData(set);
-          },
-    moveHostToGroup: async (hostId, groupPath) => {
-            const current = get().hosts.find((host) => host.id === hostId);
-            if (!current) {
-              return;
-            }
-    
-            const next = await api.hosts.update(hostId, {
-              ...toHostDraft(current, current.label),
-              groupName: groupPath,
-            });
-    
-            set((state) => ({
-              hosts: sortHosts([
-                ...state.hosts.filter((host) => host.id !== next.id),
-                next,
-              ]),
-            }));
-            await syncOperationalData(set);
-          },
-    setHostDetectedOs: async (hostId, detectedOs) => {
-            const next = await api.hosts.setDetectedOs(hostId, detectedOs);
-            if (!next) {
-              return;
-            }
-            set((state) => ({
-              hosts: sortHosts([
-                ...state.hosts.filter((host) => host.id !== next.id),
-                next,
-              ]),
-            }));
-            await syncOperationalData(set);
-          },
-    setHostTerminalTheme: async (hostId, terminalThemeId) => {
-            const next = await api.hosts.setTerminalTheme(hostId, terminalThemeId);
-            if (!next) {
-              return;
-            }
-            set((state) => ({
-              hosts: sortHosts([
-                ...state.hosts.filter((host) => host.id !== next.id),
-                next,
-              ]),
-            }));
-            await syncOperationalData(set);
-          },
-    setHostFavorite: async (hostId, favorite) => {
-            const next = await api.hosts.setFavorite(hostId, favorite);
-            if (!next) {
-              return;
-            }
-            set((state) => ({
-              hosts: sortHosts([
-                ...state.hosts.filter((host) => host.id !== next.id),
-                next,
-              ]),
-            }));
-            await syncOperationalData(set);
-          },
-    removeHost: async (hostId) => {
-            await api.hosts.remove(hostId);
-            const currentDrawer = get().hostDrawer;
-            set({
-              hosts: get().hosts.filter((host) => host.id !== hostId),
-              pendingMissingUsernamePrompt:
-                get().pendingMissingUsernamePrompt?.hostId === hostId
-                  ? null
-                  : get().pendingMissingUsernamePrompt,
-              hostDrawer:
-                currentDrawer.mode === "edit" && currentDrawer.hostId === hostId
-                  ? { mode: "closed" }
-                  : currentDrawer,
-            });
-            await syncOperationalData(set);
-          }
-  };
+      if (hostIds.length === 0) {
+        return;
+      }
 
+      let workingHosts = get().hosts;
+      let didCreate = false;
+      for (const hostId of hostIds) {
+        const current = workingHosts.find((host) => host.id === hostId);
+        if (!current) {
+          continue;
+        }
+
+        const draft = toHostDraft(
+          current,
+          buildDuplicateHostLabel(current, workingHosts),
+        );
+        const next = await api.hosts.create(
+          // 공유 폴더의 주인은 **기기 로컬 설정**이다. 레코드에 남아 있는 옛 값(마이그레이션
+          // 전에 저장된 것)을 복제본에 실어 보내면 `/Users/...` 같은 이 기기의 경로가 다시
+          // 동기화돼 다른 기기로 흘러간다. 아래에서 로컬 설정으로 옮겨 담는다.
+          draft.kind === "rdp" ? { ...draft, drives: null } : draft,
+        );
+        // 공유 폴더는 기기 로컬 설정에 있다 — 레코드를 복사하는 것만으로는 따라오지
+        // 않는다. 복제는 **같은 기기 안**에서 일어나므로 경로가 그대로 유효하고, 원본이
+        // 열어 둔 폴더가 복제본에서 조용히 사라지면 왜 파일이 안 보이는지 알 수 없다.
+        if (current.kind === "rdp") {
+          const drives = resolveHostDrives(
+            current.id,
+            get().settings.rdpDrivesByHostId,
+            current.drives,
+          );
+          if (drives.length > 0) {
+            const settings = await api.settings.update({
+              rdpDrivesByHostId: withHostDrives(
+                get().settings.rdpDrivesByHostId,
+                next.id,
+                drives,
+              ),
+            });
+            set({ settings });
+          }
+        }
+        workingHosts = sortHosts([
+          ...workingHosts.filter((host) => host.id !== next.id),
+          next,
+        ]);
+        didCreate = true;
+      }
+
+      if (!didCreate) {
+        return;
+      }
+
+      set({
+        hosts: workingHosts,
+      });
+      await syncOperationalData(set);
+    },
+    moveHostToGroup: async (hostId, groupPath) => {
+      const current = get().hosts.find((host) => host.id === hostId);
+      if (!current) {
+        return;
+      }
+
+      const next = await api.hosts.update(hostId, {
+        ...toHostDraft(current, current.label),
+        groupName: groupPath,
+      });
+
+      set((state) => ({
+        hosts: sortHosts([
+          ...state.hosts.filter((host) => host.id !== next.id),
+          next,
+        ]),
+      }));
+      await syncOperationalData(set);
+    },
+    setHostDetectedOs: async (hostId, detectedOs) => {
+      const next = await api.hosts.setDetectedOs(hostId, detectedOs);
+      if (!next) {
+        return;
+      }
+      set((state) => ({
+        hosts: sortHosts([
+          ...state.hosts.filter((host) => host.id !== next.id),
+          next,
+        ]),
+      }));
+      await syncOperationalData(set);
+    },
+    setHostTerminalTheme: async (hostId, terminalThemeId) => {
+      const next = await api.hosts.setTerminalTheme(hostId, terminalThemeId);
+      if (!next) {
+        return;
+      }
+      set((state) => ({
+        hosts: sortHosts([
+          ...state.hosts.filter((host) => host.id !== next.id),
+          next,
+        ]),
+      }));
+      await syncOperationalData(set);
+    },
+    setHostFavorite: async (hostId, favorite) => {
+      const next = await api.hosts.setFavorite(hostId, favorite);
+      if (!next) {
+        return;
+      }
+      set((state) => ({
+        hosts: sortHosts([
+          ...state.hosts.filter((host) => host.id !== next.id),
+          next,
+        ]),
+      }));
+      await syncOperationalData(set);
+    },
+    removeHost: async (hostId) => {
+      await api.hosts.remove(hostId);
+      const currentDrawer = get().hostDrawer;
+      set({
+        hosts: get().hosts.filter((host) => host.id !== hostId),
+        pendingMissingUsernamePrompt:
+          get().pendingMissingUsernamePrompt?.hostId === hostId
+            ? null
+            : get().pendingMissingUsernamePrompt,
+        hostDrawer:
+          currentDrawer.mode === "edit" && currentDrawer.hostId === hostId
+            ? { mode: "closed" }
+            : currentDrawer,
+      });
+      await syncOperationalData(set);
+    },
+  };
 }

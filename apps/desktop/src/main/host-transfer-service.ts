@@ -3,6 +3,7 @@ import {
   isKnownHostKind,
   normalizeGroupPath,
   normalizeJumpHostIds,
+  normalizeSavedWorkspaceRecord,
   projectSecretMetadata,
   type AwsProfileMetadataRecord,
   type DnsOverrideRecord,
@@ -16,6 +17,7 @@ import {
   type ManagedSecretPayload,
   type PortForwardRuleRecord,
   type SecretMetadataRecord,
+  type SavedWorkspaceRecord,
   type SnippetRecord,
   type TailnetPayload,
   type SyncKind,
@@ -25,6 +27,7 @@ import type {
   DolgateImportItemCounts,
   DolgateImportPreview,
   DolgateImportResult,
+  HostExportAssetSelection,
   HostExportPreview,
 } from "../shared/ipc";
 import {
@@ -58,6 +61,7 @@ interface ImportSnapshot {
 interface ImportPlan {
   groups: GroupRecord[];
   hosts: HostRecord[];
+  workspaces: SavedWorkspaceRecord[];
   secrets: ManagedSecretPayload[];
   secretMetadata: SecretMetadataRecord[];
   knownHosts: KnownHostRecord[];
@@ -325,7 +329,29 @@ export function parseDolgateBundle(value: unknown): ParsedDolgateBundle {
   const rootHostIds = requireArray(value.rootHostIds, "transfer.field.selectedHosts").map((id) =>
     requireString(id, "transfer.field.selectedHostId"),
   );
+  const rootWorkspaceIds = (
+    value.rootWorkspaceIds === undefined
+      ? []
+      : requireArray(value.rootWorkspaceIds, "transfer.field.selectedWorkspaces")
+  ).map((id) => requireString(id, "transfer.field.selectedWorkspaceId"));
   const groups = requireArray(value.groups, "transfer.field.groups").map(parseGroup);
+  // 이 버전이 받을 수 없는 Workspace(version 이 올라갔거나, 깊이·pane 수 상한을 넘거나, 모르는
+  // leaf 종류)는 파일 전체를 거부하지 않고 그것만 건너뛴다 — 모르는 호스트 종류를 건너뛰는 것과
+  // 같은 이유다(아래 주석 참고). 하나 때문에 호스트·자격증명·그룹까지 못 가져오면 안 된다.
+  const rawWorkspaces =
+    value.workspaces === undefined
+      ? []
+      : requireArray(value.workspaces, "transfer.field.workspaces");
+  let skippedWorkspaceCount = 0;
+  const workspaces: SavedWorkspaceRecord[] = [];
+  for (const raw of rawWorkspaces) {
+    const parsed = normalizeSavedWorkspaceRecord(raw);
+    if (!parsed) {
+      skippedWorkspaceCount += 1;
+      continue;
+    }
+    workspaces.push(parsed);
+  }
 
   // 이 버전이 모르는 종류의 호스트는 파일 전체를 거부하지 않고 그 호스트만 건너뛴다.
   // 종류는 계속 추가되므로(RDP 가 그랬다) 거부하면 새 버전에서 내보낸 파일이 옛 버전에서
@@ -461,6 +487,7 @@ export function parseDolgateBundle(value: unknown): ParsedDolgateBundle {
   const totalRecords =
     groups.length +
     hosts.length +
+    workspaces.length +
     unknownKindHostCount +
     secrets.length +
     knownHosts.length +
@@ -475,6 +502,7 @@ export function parseDolgateBundle(value: unknown): ParsedDolgateBundle {
 
   assertUniqueIds(groups, (record) => record.id, "transfer.field.groups");
   assertUniqueIds(hosts, (record) => record.id, "transfer.field.hosts");
+  assertUniqueIds(workspaces, (record) => record.id, "transfer.field.workspaces");
   assertUniqueIds(secrets, (record) => record.secretRef, "transfer.field.secrets");
   assertUniqueIds(knownHosts, (record) => record.id, "known host");
   assertUniqueIds(portForwards, (record) => record.id, "transfer.field.portForwards");
@@ -485,14 +513,19 @@ export function parseDolgateBundle(value: unknown): ParsedDolgateBundle {
   if (new Set(rootHostIds).size !== rootHostIds.length) {
     throw new Error(t("transfer.error.duplicateSelectedHostId"));
   }
+  if (new Set(rootWorkspaceIds).size !== rootWorkspaceIds.length) {
+    throw new Error(t("transfer.error.duplicateSelectedWorkspaceId"));
+  }
 
   const bundle: DolgateHostBundleV1 = {
     schemaVersion: 1,
     scope: "hosts",
     exportedAt: requireString(value.exportedAt, "transfer.field.exportedAt"),
     rootHostIds: rootHostIds.filter((id) => !skippedHostIds.has(id)),
+    rootWorkspaceIds,
     groups,
     hosts,
+    workspaces,
     secrets,
     knownHosts,
     portForwards,
@@ -516,6 +549,9 @@ export function parseDolgateBundle(value: unknown): ParsedDolgateBundle {
 
 function assertBundleReferences(bundle: DolgateHostBundleV1): void {
   const hostIds = new Set(bundle.hosts.map((record) => record.id));
+  const workspaceIds = new Set(
+    (bundle.workspaces ?? []).map((record) => record.id),
+  );
   const secretIds = new Set(bundle.secrets.map((record) => record.secretRef));
   const profileIds = new Set(bundle.awsProfiles.map((record) => record.id));
   const snippetIds = new Set(bundle.snippets.map((record) => record.id));
@@ -523,6 +559,11 @@ function assertBundleReferences(bundle: DolgateHostBundleV1): void {
   for (const id of bundle.rootHostIds) {
     if (!hostIds.has(id)) {
       throw new Error(t("transfer.error.invalidSelectedHostRef"));
+    }
+  }
+  for (const id of bundle.rootWorkspaceIds ?? []) {
+    if (!workspaceIds.has(id)) {
+      throw new Error(t("transfer.error.invalidSelectedWorkspaceRef"));
     }
   }
   for (const host of bundle.hosts) {
@@ -584,15 +625,51 @@ function decodeJsonRecord<T>(record: StoredEncryptedValue | undefined, label: st
   }
 }
 
+function normalizeExportSelection(
+  selection: HostExportAssetSelection | string[],
+): HostExportAssetSelection {
+  return Array.isArray(selection)
+    ? { hostIds: selection, workspaceIds: [] }
+    : selection;
+}
+
+function getSavedWorkspaceHostIds(workspace: SavedWorkspaceRecord): string[] {
+  const ids = new Set<string>();
+  const visit = (node: SavedWorkspaceRecord["root"]) => {
+    if (node.kind === "leaf") {
+      if (node.target.kind === "host") {
+        ids.add(node.target.hostId);
+      }
+      return;
+    }
+    visit(node.first);
+    visit(node.second);
+  };
+  visit(workspace.root);
+  return [...ids];
+}
+
 export function buildDolgateHostBundle(
   state: DesktopStateFile,
-  requestedHostIds: string[],
+  requestedSelection: HostExportAssetSelection | string[],
 ): DolgateHostBundleV1 {
-  const rootHostIds = [...new Set(requestedHostIds)];
-  if (rootHostIds.length === 0) {
-    throw new Error(t("transfer.error.selectHostRequired"));
+  const selection = normalizeExportSelection(requestedSelection);
+  const rootHostIds = [...new Set(selection.hostIds)];
+  const rootWorkspaceIds = [...new Set(selection.workspaceIds)];
+  if (rootHostIds.length === 0 && rootWorkspaceIds.length === 0) {
+    throw new Error(t("transfer.error.selectAssetRequired"));
   }
   const hostsById = new Map(state.data.hosts.map((record) => [record.id, record]));
+  const workspacesById = new Map(
+    state.data.savedWorkspaces.map((record) => [record.id, record]),
+  );
+  const selectedWorkspaces = rootWorkspaceIds.map((workspaceId) => {
+    const workspace = workspacesById.get(workspaceId);
+    if (!workspace) {
+      throw new Error(t("transfer.error.selectedWorkspaceMissing"));
+    }
+    return workspace;
+  });
   const includedHostIds = new Set<string>();
   const collectHost = (hostId: string, visiting: Set<string>) => {
     const host = hostsById.get(hostId);
@@ -624,6 +701,13 @@ export function buildDolgateHostBundle(
   };
   for (const hostId of rootHostIds) {
     collectHost(hostId, new Set<string>());
+  }
+  for (const workspace of selectedWorkspaces) {
+    for (const hostId of getSavedWorkspaceHostIds(workspace)) {
+      if (hostsById.has(hostId)) {
+        collectHost(hostId, new Set<string>());
+      }
+    }
   }
   const selectedHosts = state.data.hosts.filter((record) => includedHostIds.has(record.id));
   const profileMetadataById = new Map(
@@ -738,6 +822,13 @@ export function buildDolgateHostBundle(
       path = getParentGroupPath(path);
     }
   }
+  for (const workspace of selectedWorkspaces) {
+    let path = normalizeGroupPath(workspace.groupName);
+    while (path) {
+      groupPaths.add(path);
+      path = getParentGroupPath(path);
+    }
+  }
   const groups = state.data.groups.filter((record) => groupPaths.has(record.path));
   const portForwards = state.data.portForwards.filter((record) =>
     includedHostIds.has(record.hostId),
@@ -789,8 +880,10 @@ export function buildDolgateHostBundle(
     scope: "hosts",
     exportedAt: new Date().toISOString(),
     rootHostIds,
+    rootWorkspaceIds,
     groups,
     hosts,
+    workspaces: selectedWorkspaces,
     secrets,
     knownHosts,
     portForwards,
@@ -815,6 +908,7 @@ export function buildHostTransferImportPlan(
   let skippedCount = 0;
   const skippedCounts: DolgateImportItemCounts = {
     hosts: 0,
+    workspaces: 0,
     groups: 0,
     secrets: 0,
     awsProfiles: 0,
@@ -918,6 +1012,12 @@ export function buildHostTransferImportPlan(
       updatedAt: now,
     };
   });
+  const workspaces = takeNew(
+    bundle.workspaces ?? [],
+    new Set(state.data.savedWorkspaces.map((record) => record.id)),
+    (record) => record.id,
+    "workspaces",
+  ).map((record) => ({ ...record, updatedAt: now }));
   const portForwards = takeNew(
     bundle.portForwards,
     new Set(state.data.portForwards.map((record) => record.id)),
@@ -1034,6 +1134,7 @@ export function buildHostTransferImportPlan(
   return {
     groups,
     hosts,
+    workspaces,
     secrets,
     secretMetadata,
     knownHosts,
@@ -1053,6 +1154,7 @@ function toImportPreview(snapshotId: string, plan: ImportPlan): DolgateImportPre
   return {
     snapshotId,
     hostCount: plan.hosts.length,
+    workspaceCount: plan.workspaces.length,
     groupCount: plan.groups.length,
     secretCount: plan.secrets.length,
     awsProfileCount: plan.awsProfiles.length,
@@ -1070,6 +1172,7 @@ function toImportPreview(snapshotId: string, plan: ImportPlan): DolgateImportPre
 function toImportResult(plan: ImportPlan): DolgateImportResult {
   return {
     importedHostCount: plan.hosts.length,
+    importedWorkspaceCount: plan.workspaces.length,
     importedGroupCount: plan.groups.length,
     importedSecretCount: plan.secrets.length,
     importedAwsProfileCount: plan.awsProfiles.length,
@@ -1093,6 +1196,7 @@ function clearImportedTombstones(state: DesktopStateFile, plan: ImportPlan): voi
   };
   add("groups", plan.groups.map((record) => record.id));
   add("hosts", plan.hosts.map((record) => record.id));
+  add("workspaces", plan.workspaces.map((record) => record.id));
   add("secrets", plan.secrets.map((record) => record.secretRef));
   add("knownHosts", plan.knownHosts.map((record) => record.id));
   add("portForwards", plan.portForwards.map((record) => record.id));
@@ -1105,38 +1209,80 @@ function clearImportedTombstones(state: DesktopStateFile, plan: ImportPlan): voi
   );
 }
 
+function getOpenSshRequestedHostIds(
+  state: DesktopStateFile,
+  requestedSelection: HostExportAssetSelection | string[],
+): string[] {
+  const selection = normalizeExportSelection(requestedSelection);
+  const hostIds = new Set(selection.hostIds);
+  const workspacesById = new Map(
+    state.data.savedWorkspaces.map((record) => [record.id, record]),
+  );
+  for (const workspaceId of selection.workspaceIds) {
+    const workspace = workspacesById.get(workspaceId);
+    if (!workspace) {
+      throw new Error(t("transfer.error.selectedWorkspaceMissing"));
+    }
+    for (const hostId of getSavedWorkspaceHostIds(workspace)) {
+      if (state.data.hosts.some((host) => host.id === hostId)) {
+        hostIds.add(hostId);
+      }
+    }
+  }
+  return [...hostIds];
+}
+
 export class HostTransferService {
   private readonly storage = getDesktopStateStorage();
   private readonly importSnapshots = new Map<string, ImportSnapshot>();
 
-  previewExport(hostIds: string[]): HostExportPreview {
+  previewExport(
+    requestedSelection: HostExportAssetSelection | string[],
+  ): HostExportPreview {
     const state = this.storage.getState();
-    const bundle = buildDolgateHostBundle(state, hostIds);
-    const openssh = buildOpenSshConfig(state.data.hosts, hostIds);
+    const selection = normalizeExportSelection(requestedSelection);
+    const bundle = buildDolgateHostBundle(state, selection);
+    const openssh = buildOpenSshConfig(
+      state.data.hosts,
+      getOpenSshRequestedHostIds(state, selection),
+    );
     return {
-      selectedHostCount: [...new Set(hostIds)].length,
+      selectedHostCount: [...new Set(selection.hostIds)].length,
+      selectedWorkspaceCount: [...new Set(selection.workspaceIds)].length,
       dolgateHostCount: bundle.hosts.length,
+      dolgateWorkspaceCount: bundle.workspaces?.length ?? 0,
       opensshHostCount: openssh.exportedRootCount,
       opensshDependencyCount: openssh.dependencyCount,
       opensshSkippedCount: openssh.skippedCount,
+      opensshWorkspaceSkippedCount: [...new Set(selection.workspaceIds)].length,
       opensshWarnings: openssh.warnings,
     };
   }
 
   async createDolgateExport(
-    hostIds: string[],
+    requestedSelection: HostExportAssetSelection | string[],
     password: string,
     appVersion: string,
-  ): Promise<{ bytes: Buffer; hostCount: number }> {
-    const bundle = buildDolgateHostBundle(this.storage.getState(), hostIds);
+  ): Promise<{ bytes: Buffer; hostCount: number; workspaceCount: number }> {
+    const bundle = buildDolgateHostBundle(
+      this.storage.getState(),
+      requestedSelection,
+    );
     return {
       bytes: await encryptDolgateHostBundle(bundle, password, appVersion),
       hostCount: bundle.hosts.length,
+      workspaceCount: bundle.workspaces?.length ?? 0,
     };
   }
 
-  createOpenSshExport(hostIds: string[]): OpenSshExportBuild {
-    return buildOpenSshConfig(this.storage.getState().data.hosts, hostIds);
+  createOpenSshExport(
+    requestedSelection: HostExportAssetSelection | string[],
+  ): OpenSshExportBuild {
+    const state = this.storage.getState();
+    return buildOpenSshConfig(
+      state.data.hosts,
+      getOpenSshRequestedHostIds(state, requestedSelection),
+    );
   }
 
   async probeImport(file: Buffer, password: string): Promise<DolgateImportPreview> {
@@ -1184,6 +1330,7 @@ export class HostTransferService {
       this.storage.updateState((state) => {
         state.data.groups.push(...plan.groups);
         state.data.hosts.push(...plan.hosts);
+        state.data.savedWorkspaces.push(...plan.workspaces);
         state.data.secretMetadata.push(...plan.secretMetadata);
         state.data.knownHosts.push(...plan.knownHosts);
         state.data.portForwards.push(...plan.portForwards);

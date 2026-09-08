@@ -1,40 +1,99 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
-import { createPortal } from 'react-dom';
-import type { DesktopWindowState, HostRecord, PortForwardRuntimeRecord, RdpMonitorSelection, SessionConnectionKind, TailnetPeer, TailnetStatus, TerminalTab, UpdateState } from '@shared';
-import { describeRdpDrives, isRdpHostRecord, isSshHostRecord, isVncHostRecord, withLocalHostDrives } from '@shared';
-import { useAppStore } from '../store/appStore';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { createPortal } from "react-dom";
+import type {
+  DesktopWindowState,
+  HostRecord,
+  PortForwardRuntimeRecord,
+  RdpMonitorSelection,
+  SessionConnectionKind,
+  TailnetPeer,
+  TailnetStatus,
+  TerminalTab,
+  UpdateState,
+} from "@shared";
+import {
+  describeRdpDrives,
+  isRdpHostRecord,
+  isSshHostRecord,
+  isVncHostRecord,
+  withLocalHostDrives,
+} from "@shared";
+import { useAppStore } from "../store/appStore";
 import type {
   DynamicTabStripItem,
   TmuxSessionGroup,
   WorkspaceTab,
-  WorkspaceTabId
-} from '../store/createAppStore';
-import { DesktopWindowControls, type DesktopPlatform } from './DesktopWindowControls';
-import { listTailnets, snapshotTailnets } from '../services/desktop/tailnet';
-import { cidrPrefixLength, isAddressInCidr, isIpAddress } from '../lib/ip-prefix';
-import { cn } from '../lib/cn';
-import { CHROME_TOGGLE_CLASS, CHROME_TOGGLE_ON_CLASS } from './chrome-toggle';
-import { rttColor } from '../lib/rtt';
-import { activePortForwardsForHost } from '../lib/port-forward-status';
-import { RdpMonitorPicker } from './rdp/RdpMonitorPicker';
-import { titleBarMode, useTitleBarAutoHide } from './useTitleBarAutoHide';
+  WorkspaceTabId,
+} from "../store/createAppStore";
+import {
+  DesktopWindowControls,
+  type DesktopPlatform,
+} from "./DesktopWindowControls";
+import { listTailnets, snapshotTailnets } from "../services/desktop/tailnet";
+import {
+  cidrPrefixLength,
+  isAddressInCidr,
+  isIpAddress,
+} from "../lib/ip-prefix";
+import { cn } from "../lib/cn";
+import { CHROME_TOGGLE_CLASS, CHROME_TOGGLE_ON_CLASS } from "./chrome-toggle";
+import { rttColor } from "../lib/rtt";
+import { activePortForwardsForHost } from "../lib/port-forward-status";
+import { RdpMonitorPicker } from "./rdp/RdpMonitorPicker";
+import { titleBarMode, useTitleBarAutoHide } from "./useTitleBarAutoHide";
 import {
   getSessionConnectedAt,
   getSessionCwd,
   getSessionLastCommandAt,
-} from '../lib/terminal-cwd-registry';
-import { getVncCapabilities } from '../lib/vnc-capability-registry';
-import { listWorkspaceSessionIds } from './terminal-workspace/terminalWorkspaceLayout';
-import { Badge, Button, IconButton, TabButton, Tabs, Tooltip } from '../ui';
-import { ArrowUpRight, Bell, Columns2, Container, Download, Folder, Home, PanelRight, Plus, RefreshCw, Rows2, X } from '../ui/icons';
-import { resolveFocusedPaneSessionId } from './terminal-workspace/terminalWorkspaceLayout';
-import { useTranslation } from 'react-i18next';
-import { getFormatLocale, t } from '../i18n';
+} from "../lib/terminal-cwd-registry";
+import { getVncCapabilities } from "../lib/vnc-capability-registry";
+import { listWorkspaceSessionIds } from "./terminal-workspace/terminalWorkspaceLayout";
+import {
+  Badge,
+  Button,
+  IconButton,
+  Input,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  ModalShell,
+  NoticeCard,
+  TabButton,
+  Tabs,
+  Tooltip,
+} from "../ui";
+import {
+  ArrowUpRight,
+  Bell,
+  Columns2,
+  Container,
+  Download,
+  Folder,
+  Home,
+  PanelRight,
+  Plus,
+  RefreshCw,
+  Rows2,
+  X,
+} from "../ui/icons";
+import { resolveFocusedPaneSessionId } from "./terminal-workspace/terminalWorkspaceLayout";
+import { useTranslation } from "react-i18next";
+import { getFormatLocale, t } from "../i18n";
+import { captureSavedWorkspaceNode } from "../store/utils";
+import { isSavedWorkspaceNodeWithinLimits } from "@shared";
+import { DialogBackdrop } from "./DialogBackdrop";
 
 interface DraggedSessionPayload {
   sessionId: string;
-  source: 'standalone-tab' | 'workspace-pane';
+  source: "standalone-tab" | "workspace-pane";
   workspaceId?: string;
 }
 
@@ -52,7 +111,10 @@ interface AppTitleBarProps {
    * 이 RDP 세션의 호스트가 쓸 로컬 모니터를 정한다. 선택은 호스트에 남고, 배치는 접속 시점에
    * 정해지므로 적용에 재접속이 따른다.
    */
-  onSetRdpMonitors: (sessionId: string, monitors: RdpMonitorSelection[]) => void;
+  onSetRdpMonitors: (
+    sessionId: string,
+    monitors: RdpMonitorSelection[],
+  ) => void;
   /** 이 세션의 호스트에 저장된 모니터 선택. 배치도를 열 때 켜둘 화면을 정한다. */
   resolveRdpMonitors: (sessionId: string) => RdpMonitorSelection[] | null;
   activeWorkspaceTab: WorkspaceTabId;
@@ -85,6 +147,8 @@ interface AppTitleBarProps {
   onSelectWorkspace: (workspaceId: string) => void;
   onCloseSession: (sessionId: string) => Promise<void>;
   onCloseWorkspace: (workspaceId: string) => Promise<void>;
+  /** 일반 분할 Workspace(pane 2개 이상)를 새 저장본으로 만든다. */
+  onSaveWorkspace?: (workspaceId: string, name: string) => Promise<void>;
   /** tmux 세션 그룹 상단 탭 클릭 → 그룹 활성화. */
   onSelectTmuxGroup: (tmuxGroupId: string) => void;
   /** tmux 세션 그룹 상단 탭 × → detach(서버 세션 유지). */
@@ -94,7 +158,11 @@ interface AppTitleBarProps {
   onStartSessionDrag: (sessionId: string) => void;
   onEndSessionDrag: () => void;
   onDetachSessionToStandalone: (workspaceId: string, sessionId: string) => void;
-  onReorderDynamicTab: (source: DynamicTabStripItem, target: DynamicTabStripItem, placement: 'before' | 'after') => void;
+  onReorderDynamicTab: (
+    source: DynamicTabStripItem,
+    target: DynamicTabStripItem,
+    placement: "before" | "after",
+  ) => void;
   onCheckForUpdates: () => Promise<void>;
   onDownloadUpdate: () => Promise<void>;
   onInstallUpdate: () => Promise<void>;
@@ -107,15 +175,15 @@ interface AppTitleBarProps {
 
 // 탭 인디게이터(터미널 영역 안 먹고 탭 chrome에): 상태 점 + (활성 탭) RTT.
 // 하이브리드 — 연결 문제(재연결/에러/대기)는 점이 우선, 정상 연결이면 셸 통합 명령 상태.
-type TabConnState = 'connected' | 'reconnecting' | 'error' | 'idle';
-type TabDotState = TabConnState | 'running';
+type TabConnState = "connected" | "reconnecting" | "error" | "idle";
+type TabDotState = TabConnState | "running";
 
 const TAB_DOT_COLOR: Record<TabDotState, string> = {
-  connected: 'var(--success,#3fae8f)',
-  reconnecting: 'var(--warning-text)',
-  error: 'var(--danger,#e2504a)',
-  idle: 'var(--text-muted,#8b96ad)',
-  running: 'var(--accent,#5b9bd5)',
+  connected: "var(--success,#3fae8f)",
+  reconnecting: "var(--warning-text)",
+  error: "var(--danger,#e2504a)",
+  idle: "var(--text-muted,#8b96ad)",
+  running: "var(--accent,#5b9bd5)",
 };
 
 function TabStatusDot({ state }: { state: TabDotState }) {
@@ -123,8 +191,8 @@ function TabStatusDot({ state }: { state: TabDotState }) {
     <span
       className={cn(
         // TabButton 은 flex 가 아니라 gap 이 안 먹으므로 점 자체에 우측 여백을 준다.
-        'mr-2 inline-block h-2 w-2 flex-none rounded-full align-middle',
-        (state === 'reconnecting' || state === 'running') && 'animate-pulse',
+        "mr-2 inline-block h-2 w-2 flex-none rounded-full align-middle",
+        (state === "reconnecting" || state === "running") && "animate-pulse",
       )}
       style={{ backgroundColor: TAB_DOT_COLOR[state] }}
       aria-hidden
@@ -135,57 +203,57 @@ function TabStatusDot({ state }: { state: TabDotState }) {
 // 탭의 연결 상태(status/reconnect/moshState)에서 점 색을 도출한다.
 function tabConnStateFromTab(tab: TerminalTab | undefined): TabConnState {
   if (!tab) {
-    return 'idle';
+    return "idle";
   }
-  if (tab.status === 'error' || tab.moshState === 'disconnected') {
-    return 'error';
+  if (tab.status === "error" || tab.moshState === "disconnected") {
+    return "error";
   }
   if (
     tab.reconnect != null ||
-    tab.status === 'connecting' ||
-    tab.status === 'pending' ||
-    tab.moshState === 'reconnecting'
+    tab.status === "connecting" ||
+    tab.status === "pending" ||
+    tab.moshState === "reconnecting"
   ) {
-    return 'reconnecting';
+    return "reconnecting";
   }
-  if (tab.status === 'connected') {
-    return 'connected';
+  if (tab.status === "connected") {
+    return "connected";
   }
-  return 'idle';
+  return "idle";
 }
 
 // 하이브리드 점 상태: 연결 문제(연결 안 정상)는 그대로 우선, 정상 연결이면 셸 통합
 // 명령 상태 — 실행 중=running, 실패=error(빨강), 성공/미관측=connected(초록).
 function combineDotState(
   conn: TabConnState,
-  command: TerminalTab['commandState'],
+  command: TerminalTab["commandState"],
 ): TabDotState {
-  if (conn !== 'connected') {
+  if (conn !== "connected") {
     return conn;
   }
-  if (command === 'running') {
-    return 'running';
+  if (command === "running") {
+    return "running";
   }
-  if (command === 'failed') {
-    return 'error';
+  if (command === "failed") {
+    return "error";
   }
-  return 'connected';
+  return "connected";
 }
 
 type TitlebarDynamicItem =
   | {
-      kind: 'session';
+      kind: "session";
       sessionId: string;
       title: string;
-      status: TerminalTab['status'];
+      status: TerminalTab["status"];
       active: boolean;
       dotState: TabDotState;
       /** 원격 화면 세션에만 있는 메뉴를 위해 종류를 구분한다. */
-      paneKind: 'terminal' | 'rdp' | 'vnc';
+      paneKind: "terminal" | "rdp" | "vnc";
       rttMs: number | null;
     }
   | {
-      kind: 'workspace';
+      kind: "workspace";
       workspaceId: string;
       title: string;
       paneCount: number;
@@ -196,7 +264,7 @@ type TitlebarDynamicItem =
       rttMs: number | null;
     }
   | {
-      kind: 'tmux';
+      kind: "tmux";
       tmuxGroupId: string;
       title: string;
       windowCount: number;
@@ -211,24 +279,24 @@ type TitlebarDynamicItem =
 // 절대 SSH 로 표기하지 않는다.
 function connectionKindLabel(kind: SessionConnectionKind): string {
   switch (kind) {
-    case 'local':
-      return t('titleBar.kind.local');
-    case 'ssh':
-      return 'SSH';
-    case 'mosh':
-      return 'Mosh';
-    case 'aws-ssm':
-      return 'AWS SSM';
-    case 'aws-ecs-exec':
-      return 'AWS ECS';
-    case 'warpgate':
-      return 'Warpgate';
-    case 'serial':
-      return t('titleBar.kind.serial');
-    case 'rdp':
-      return 'RDP';
-    case 'vnc':
-      return 'VNC';
+    case "local":
+      return t("titleBar.kind.local");
+    case "ssh":
+      return "SSH";
+    case "mosh":
+      return "Mosh";
+    case "aws-ssm":
+      return "AWS SSM";
+    case "aws-ecs-exec":
+      return "AWS ECS";
+    case "warpgate":
+      return "Warpgate";
+    case "serial":
+      return t("titleBar.kind.serial");
+    case "rdp":
+      return "RDP";
+    case "vnc":
+      return "VNC";
     default:
       return kind;
   }
@@ -244,27 +312,27 @@ function deriveSessionConnectionKind(
   if (!tab) {
     return null;
   }
-  if (tab.source === 'local' || !tab.hostId) {
-    return 'local';
+  if (tab.source === "local" || !tab.hostId) {
+    return "local";
   }
   if (!host) {
     return null;
   }
   switch (host.kind) {
-    case 'serial':
-      return 'serial';
-    case 'warpgate-ssh':
-      return 'warpgate';
-    case 'aws-ecs':
-      return 'aws-ecs-exec';
-    case 'aws-ec2':
-      return 'aws-ssm';
-    case 'rdp':
-      return 'rdp';
-    case 'vnc':
-      return 'vnc';
-    case 'ssh':
-      return host.useMosh || tab.moshState != null ? 'mosh' : 'ssh';
+    case "serial":
+      return "serial";
+    case "warpgate-ssh":
+      return "warpgate";
+    case "aws-ecs":
+      return "aws-ecs-exec";
+    case "aws-ec2":
+      return "aws-ssm";
+    case "rdp":
+      return "rdp";
+    case "vnc":
+      return "vnc";
+    case "ssh":
+      return host.useMosh || tab.moshState != null ? "mosh" : "ssh";
     default:
       return null;
   }
@@ -273,24 +341,24 @@ function deriveSessionConnectionKind(
 // 연결 대상 한 줄(user@host:port 등). 종류/점프/mosh 는 별도 표기하므로 여기선 순수 타겟만.
 function formatHostTarget(host: HostRecord): string | null {
   switch (host.kind) {
-    case 'ssh':
+    case "ssh":
       return `${host.username}@${host.hostname}:${host.port}`;
     // 계정은 자격증명에만 있어 여기선 모른다 — 세션 탭 hover 는 접속 응답에 실려 온
     // rdpUsername 으로 user@host 를 따로 만든다(buildTabHoverInfo 참고).
-    case 'rdp':
-    case 'vnc':
+    case "rdp":
+    case "vnc":
       return `${host.hostname}:${host.port}`;
-    case 'warpgate-ssh':
+    case "warpgate-ssh":
       return `${host.warpgateUsername}@${host.warpgateSshHost}:${host.warpgateSshPort}`;
-    case 'aws-ec2':
+    case "aws-ec2":
       return `${host.awsPrivateIp ?? host.awsInstanceId} · ${host.awsRegion}`;
-    case 'aws-ecs':
+    case "aws-ecs":
       return `${host.awsEcsClusterName} · ${host.awsRegion}`;
-    case 'serial':
+    case "serial":
       return host.devicePath
         ? `${host.devicePath} · ${host.baudRate}bps`
         : host.host
-          ? `${host.host}:${host.port ?? ''}`
+          ? `${host.host}:${host.port ?? ""}`
           : `${host.baudRate}bps`;
     default:
       return null;
@@ -301,44 +369,44 @@ function formatHostTarget(host: HostRecord): string | null {
 function formatElapsed(sinceMs: number): string {
   const sec = Math.max(0, Math.floor((Date.now() - sinceMs) / 1000));
   if (sec < 60) {
-    return t('titleBar.elapsed.seconds', { count: sec });
+    return t("titleBar.elapsed.seconds", { count: sec });
   }
   const min = Math.floor(sec / 60);
   if (min < 60) {
-    return t('titleBar.elapsed.minutes', { count: min });
+    return t("titleBar.elapsed.minutes", { count: min });
   }
   const hr = Math.floor(min / 60);
   if (hr < 24) {
     const remMin = min % 60;
     return remMin > 0
-      ? t('titleBar.elapsed.hoursMinutes', { hours: hr, minutes: remMin })
-      : t('titleBar.elapsed.hours', { count: hr });
+      ? t("titleBar.elapsed.hoursMinutes", { hours: hr, minutes: remMin })
+      : t("titleBar.elapsed.hours", { count: hr });
   }
   const days = Math.floor(hr / 24);
   const remHr = hr % 24;
   return remHr > 0
-    ? t('titleBar.elapsed.daysHours', { days, hours: remHr })
-    : t('titleBar.elapsed.days', { count: days });
+    ? t("titleBar.elapsed.daysHours", { days, hours: remHr })
+    : t("titleBar.elapsed.days", { count: days });
 }
 
 // 상대 시각("2분 전"). 마지막 명령 시각용.
 function formatAgo(atMs: number): string {
   const sec = Math.max(0, Math.floor((Date.now() - atMs) / 1000));
   if (sec < 10) {
-    return t('titleBar.ago.justNow');
+    return t("titleBar.ago.justNow");
   }
   if (sec < 60) {
-    return t('titleBar.ago.seconds', { count: sec });
+    return t("titleBar.ago.seconds", { count: sec });
   }
   const min = Math.floor(sec / 60);
   if (min < 60) {
-    return t('titleBar.ago.minutes', { count: min });
+    return t("titleBar.ago.minutes", { count: min });
   }
   const hr = Math.floor(min / 60);
   if (hr < 24) {
-    return t('titleBar.ago.hours', { count: hr });
+    return t("titleBar.ago.hours", { count: hr });
   }
-  return t('titleBar.ago.days', { count: Math.floor(hr / 24) });
+  return t("titleBar.ago.days", { count: Math.floor(hr / 24) });
 }
 
 type TabHoverRow = { label: string; value: string; valueColor?: string };
@@ -389,12 +457,12 @@ const TAILNET_PATH_POLL_MS = 5_000;
  */
 export function tailnetIdOf(host: HostRecord | undefined | null): string {
   if (!host) {
-    return '';
+    return "";
   }
   if (isSshHostRecord(host) || isRdpHostRecord(host) || isVncHostRecord(host)) {
-    return host.tailnetId?.trim() ?? '';
+    return host.tailnetId?.trim() ?? "";
   }
-  return '';
+  return "";
 }
 
 /**
@@ -410,13 +478,15 @@ export function tailnetIdOf(host: HostRecord | undefined | null): string {
  * 보인다(연결은 멀쩡한데 표시만 깨진다).
  */
 export function collectTailnetIdsInUse(
-  tabs: Pick<TerminalTab, 'hostId'>[],
-  tmuxGroups: Pick<TmuxSessionGroup, 'hostId'>[],
+  tabs: Pick<TerminalTab, "hostId">[],
+  tmuxGroups: Pick<TmuxSessionGroup, "hostId">[],
   hosts: HostRecord[],
 ): Set<string> {
   const ids = new Set<string>();
   const addFor = (hostId: string | null | undefined) => {
-    const tailnetId = tailnetIdOf(hosts.find((candidate) => candidate.id === hostId));
+    const tailnetId = tailnetIdOf(
+      hosts.find((candidate) => candidate.id === hostId),
+    );
     if (tailnetId) {
       ids.add(tailnetId);
     }
@@ -440,10 +510,15 @@ function useTailnetPathLookup(
     [tabs, tmuxGroups, hosts],
   );
   // Set 은 매번 새 객체라 의존성으로 쓰면 효과가 매 렌더 재실행된다. 내용으로 비교한다.
-  const tailnetKey = useMemo(() => [...tailnetIdsInUse].sort().join(','), [tailnetIdsInUse]);
+  const tailnetKey = useMemo(
+    () => [...tailnetIdsInUse].sort().join(","),
+    [tailnetIdsInUse],
+  );
 
   const [labels, setLabels] = useState<Map<string, string>>(new Map());
-  const [statuses, setStatuses] = useState<Map<string, TailnetStatus>>(new Map());
+  const [statuses, setStatuses] = useState<Map<string, TailnetStatus>>(
+    new Map(),
+  );
 
   useEffect(() => {
     if (!tailnetKey) {
@@ -456,7 +531,9 @@ function useTailnetPathLookup(
       .then(listTailnets)
       .then((records) => {
         if (!cancelled) {
-          setLabels(new Map(records.map((record) => [record.id, record.label])));
+          setLabels(
+            new Map(records.map((record) => [record.id, record.label])),
+          );
         }
       })
       .catch(() => {
@@ -468,7 +545,9 @@ function useTailnetPathLookup(
         .then(snapshotTailnets)
         .then((snapshot) => {
           if (!cancelled) {
-            setStatuses(new Map(snapshot.statuses.map((status) => [status.id, status])));
+            setStatuses(
+              new Map(snapshot.statuses.map((status) => [status.id, status])),
+            );
           }
         })
         .catch(() => {
@@ -491,17 +570,26 @@ function useTailnetPathLookup(
       }
       // 주소도 종류별로 다른 필드에 있다. tailnet 을 쓰는 세 종류는 모두 hostname 이지만,
       // 그 사실을 여기서 좁혀 두지 않으면 AWS 레코드까지 들어와 타입이 안 맞는다.
-      if (!isSshHostRecord(host) && !isRdpHostRecord(host) && !isVncHostRecord(host)) {
+      if (
+        !isSshHostRecord(host) &&
+        !isRdpHostRecord(host) &&
+        !isVncHostRecord(host)
+      ) {
         return null;
       }
       const label = labels.get(tailnetId) ?? tailnetId;
       const status = statuses.get(tailnetId);
-      if (!status || status.state !== 'running') {
+      if (!status || status.state !== "running") {
         return { label, connected: false };
       }
       const peer = findTailnetPeer(status.peers, host.hostname);
       if (peer) {
-        return { label, connected: true, direct: peer.direct, relay: peer.relay };
+        return {
+          label,
+          connected: true,
+          direct: peer.direct,
+          relay: peer.relay,
+        };
       }
       // 대상이 tailnet 노드가 아니면 그것으로 끝이 아니다 — 서브넷 라우터를 거쳐 닿는
       // 호스트가 흔하다. 라우터를 못 찾을 때만 "경로 확인 중"이다.
@@ -514,7 +602,7 @@ function useTailnetPathLookup(
         connected: true,
         direct: router.direct,
         relay: router.relay,
-        via: router.hostName || router.dnsName?.split('.')[0] || undefined,
+        via: router.hostName || router.dnsName?.split(".")[0] || undefined,
       };
     },
     [labels, statuses],
@@ -531,7 +619,7 @@ export function findTailnetPeer(
   peers: TailnetPeer[] | undefined,
   hostname: string,
 ): TailnetPeer | null {
-  const target = hostname.trim().toLowerCase().replace(/\.$/, '');
+  const target = hostname.trim().toLowerCase().replace(/\.$/, "");
   if (!target || !peers) {
     return null;
   }
@@ -545,7 +633,7 @@ export function findTailnetPeer(
         return true;
       }
       // 짧은 이름으로 저장한 호스트를 FQDN peer 에 맞춘다(그 역도 위에서 처리된다).
-      if (dnsName && dnsName.split('.')[0] === target) {
+      if (dnsName && dnsName.split(".")[0] === target) {
         return true;
       }
       return peer.ips?.includes(target) === true;
@@ -645,49 +733,55 @@ function portForwardRow(
   if (active.length === 0) {
     return null;
   }
-  const starting = active.filter((runtime) => runtime.status === 'starting').length;
+  const starting = active.filter(
+    (runtime) => runtime.status === "starting",
+  ).length;
   // hover 카드 폭이 좁다. 포트를 다 적으면 줄이 넘치므로 앞의 몇 개만 적고 나머지는 수로 남긴다.
-  const ports = active.slice(0, 3).map((runtime) => runtime.bindPort).join(', ');
-  const rest = active.length > 3 ? ` +${active.length - 3}` : '';
-  const detail = starting > 0
-    ? t('titleBar.hover.portForwardStarting', { count: starting })
-    : `${ports}${rest}`;
+  const ports = active
+    .slice(0, 3)
+    .map((runtime) => runtime.bindPort)
+    .join(", ");
+  const rest = active.length > 3 ? ` +${active.length - 3}` : "";
+  const detail =
+    starting > 0
+      ? t("titleBar.hover.portForwardStarting", { count: starting })
+      : `${ports}${rest}`;
   return {
-    label: t('titleBar.hover.portForward'),
+    label: t("titleBar.hover.portForward"),
     value: `${active.length} · ${detail}`,
   };
 }
 function tailnetPathRow(info: TailnetPathInfo): TabHoverRow {
   if (!info.connected) {
     return {
-      label: t('titleBar.hover.tailnet'),
-      value: `${info.label} · ${t('titleBar.hover.tailnetNotConnected')}`,
+      label: t("titleBar.hover.tailnet"),
+      value: `${info.label} · ${t("titleBar.hover.tailnetNotConnected")}`,
       valueColor: TAB_DOT_COLOR.error,
     };
   }
   if (info.direct === undefined) {
     return {
-      label: t('titleBar.hover.tailnet'),
-      value: `${info.label} · ${t('titleBar.hover.tailnetPathUnknown')}`,
+      label: t("titleBar.hover.tailnet"),
+      value: `${info.label} · ${t("titleBar.hover.tailnetPathUnknown")}`,
     };
   }
   // 라우터 경유면 그 사실을 먼저 말한다 — 경로(직결/릴레이)가 대상이 아니라 라우터까지의
   // 것이라, 그 말이 없으면 숫자를 잘못 읽는다.
   const path = info.direct
-    ? t('titleBar.hover.tailnetPathDirect')
+    ? t("titleBar.hover.tailnetPathDirect")
     : info.relay
-      ? t('titleBar.hover.tailnetPathRelay', { relay: info.relay })
-      : t('titleBar.hover.tailnetPathRelayUnknown');
+      ? t("titleBar.hover.tailnetPathRelay", { relay: info.relay })
+      : t("titleBar.hover.tailnetPathRelayUnknown");
   const detail = info.via
-    ? t('titleBar.hover.tailnetPathViaRouter', {
+    ? t("titleBar.hover.tailnetPathViaRouter", {
         router: shortenRouterName(info.via),
         path,
       })
     : path;
   return {
-    label: t('titleBar.hover.tailnet'),
+    label: t("titleBar.hover.tailnet"),
     value: `${info.label} · ${detail}`,
-    valueColor: info.direct ? 'var(--success,#3fae8f)' : 'var(--warning-text)',
+    valueColor: info.direct ? "var(--success,#3fae8f)" : "var(--warning-text)",
   };
 }
 
@@ -705,24 +799,32 @@ export function vncCapabilityRows(sessionId: string): TabHoverRow[] {
   }
   const rows: TabHoverRow[] = [];
   const enabled = [
-    capabilities.cursor ? t('titleBar.hover.capabilityCursor') : null,
-    capabilities.desktopResize ? t('titleBar.hover.capabilityResize') : null,
-    capabilities.continuousUpdates ? t('titleBar.hover.capabilityContinuous') : null,
-    capabilities.qemuKeys ? t('titleBar.hover.capabilityScancode') : null,
+    capabilities.cursor ? t("titleBar.hover.capabilityCursor") : null,
+    capabilities.desktopResize ? t("titleBar.hover.capabilityResize") : null,
+    capabilities.continuousUpdates
+      ? t("titleBar.hover.capabilityContinuous")
+      : null,
+    capabilities.qemuKeys ? t("titleBar.hover.capabilityScancode") : null,
   ].filter((name): name is string => name !== null);
   rows.push({
-    label: t('titleBar.hover.capabilities'),
-    value: enabled.length > 0 ? enabled.join(' · ') : t('titleBar.hover.capabilityNone'),
+    label: t("titleBar.hover.capabilities"),
+    value:
+      enabled.length > 0
+        ? enabled.join(" · ")
+        : t("titleBar.hover.capabilityNone"),
   });
   rows.push({
-    label: t('titleBar.hover.clipboard'),
+    label: t("titleBar.hover.clipboard"),
     value: capabilities.extendedClipboard
-      ? t('titleBar.hover.clipboardUtf8')
-      : t('titleBar.hover.clipboardAscii'),
+      ? t("titleBar.hover.clipboardUtf8")
+      : t("titleBar.hover.clipboardAscii"),
   });
   // 인코딩은 대역폭을 설명한다 — Raw 만 오면 화면 한 장이 수 MB 다. 아직 픽셀을 못 받았으면 뺀다.
   if (capabilities.encoding) {
-    rows.push({ label: t('titleBar.hover.encoding'), value: capabilities.encoding });
+    rows.push({
+      label: t("titleBar.hover.encoding"),
+      value: capabilities.encoding,
+    });
   }
   return rows;
 }
@@ -739,37 +841,46 @@ export function buildTabHoverInfo(
 ): TabHoverInfo {
   const rows: TabHoverRow[] = [];
 
-  if (item.kind === 'session') {
-    const tab = tabs.find((candidate) => candidate.sessionId === item.sessionId);
+  if (item.kind === "session") {
+    const tab = tabs.find(
+      (candidate) => candidate.sessionId === item.sessionId,
+    );
     const host = tab?.hostId
-      ? hosts.find((candidate) => candidate.id === tab.hostId) ?? null
+      ? (hosts.find((candidate) => candidate.id === tab.hostId) ?? null)
       : null;
     const kind = deriveSessionConnectionKind(tab, host);
     // 연결할 때 감지한 운영체제. 뱃지는 마크가 있을 때만 바뀌므로(Windows·NAS 는 글자로 남는다)
     // 실제로 무엇을 잡았는지는 여기서만 볼 수 있다.
     if (host?.detectedOs) {
       rows.push({
-        label: t('titleBar.hover.os'),
+        label: t("titleBar.hover.os"),
         value: host.detectedOs.prettyName || host.detectedOs.id,
       });
     }
-    if (host?.kind === 'ssh' && host.jumpHostId) {
+    if (host?.kind === "ssh" && host.jumpHostId) {
       const jump = hosts.find((candidate) => candidate.id === host.jumpHostId);
-      rows.push({ label: t('titleBar.hover.jump'), value: jump?.label ?? host.jumpHostId });
+      rows.push({
+        label: t("titleBar.hover.jump"),
+        value: jump?.label ?? host.jumpHostId,
+      });
     }
     if (tab?.reconnect) {
       rows.push({
-        label: t('titleBar.hover.reconnect'),
+        label: t("titleBar.hover.reconnect"),
         value: tab.reconnect.waitingForNetwork
-          ? t('titleBar.hover.waitingNetwork')
-          : t('titleBar.hover.attempts', {
+          ? t("titleBar.hover.waitingNetwork")
+          : t("titleBar.hover.attempts", {
               attempt: tab.reconnect.attempt,
               max: tab.reconnect.maxAttempts,
             }),
         valueColor: TAB_DOT_COLOR.reconnecting,
       });
-    } else if (tab?.status === 'error' && tab.errorMessage) {
-      rows.push({ label: t('titleBar.hover.error'), value: tab.errorMessage, valueColor: TAB_DOT_COLOR.error });
+    } else if (tab?.status === "error" && tab.errorMessage) {
+      rows.push({
+        label: t("titleBar.hover.error"),
+        value: tab.errorMessage,
+        valueColor: TAB_DOT_COLOR.error,
+      });
     }
 
     // 마이크를 보낼 수 없으면 그 이유. **조용히 실패하면 사용자는 마이크가 켜진 줄 알고 원격에서
@@ -777,51 +888,57 @@ export function buildTabHoverInfo(
     // 배너로 겹쳐 두었는데 작업 표시줄과 섞여 읽히지 않았다).
     if (tab?.rdpMicrophoneProblem) {
       rows.push({
-        label: t('titleBar.hover.microphone'),
+        label: t("titleBar.hover.microphone"),
         // hover 행은 좁고 잘린다(truncate). 긴 안내 문장 대신 짧은 상태 말을 쓴다.
         value: t(`rdp.microphone.short.${tab.rdpMicrophoneProblem}`),
-        valueColor: 'var(--warning-text)',
+        valueColor: "var(--warning-text)",
       });
     }
 
     if (tab?.rdpCameraProblem) {
       rows.push({
-        label: t('titleBar.hover.camera'),
+        label: t("titleBar.hover.camera"),
         value: t(`rdp.camera.short.${tab.rdpCameraProblem}`),
-        valueColor: 'var(--warning-text)',
+        valueColor: "var(--warning-text)",
       });
     }
     const cwd = getSessionCwd(item.sessionId);
     if (cwd) {
-      rows.push({ label: t('titleBar.hover.cwd'), value: cwd });
+      rows.push({ label: t("titleBar.hover.cwd"), value: cwd });
     }
     if (tab?.shellKind) {
-      rows.push({ label: t('titleBar.hover.shell'), value: tab.shellKind });
+      rows.push({ label: t("titleBar.hover.shell"), value: tab.shellKind });
     }
     // "연결 경과"는 현재 실제로 연결된 동안만 의미가 있다. tmux control 연결은 SSH 가
     // 붙는 순간 코어가 낙관적으로 connected 를 emit 해 connectedAt 이 찍히는데, 직후
     // tmux 가 없어 실패하면 status 가 error 가 된다. 그 상태에서 경과시간이 계속 늘면
     // 안 되므로 status==='connected' 일 때만 표시한다.
     const connectedAt = getSessionConnectedAt(item.sessionId);
-    if (connectedAt != null && tab?.status === 'connected') {
-      rows.push({ label: t('titleBar.hover.connectedFor'), value: formatElapsed(connectedAt) });
-    }
-    if (tab?.commandState === 'running') {
+    if (connectedAt != null && tab?.status === "connected") {
       rows.push({
-        label: t('titleBar.hover.command'),
-        value: t('titleBar.hover.running'),
+        label: t("titleBar.hover.connectedFor"),
+        value: formatElapsed(connectedAt),
+      });
+    }
+    if (tab?.commandState === "running") {
+      rows.push({
+        label: t("titleBar.hover.command"),
+        value: t("titleBar.hover.running"),
         valueColor: TAB_DOT_COLOR.running,
       });
     } else {
       const lastCommandAt = getSessionLastCommandAt(item.sessionId);
       if (lastCommandAt != null) {
         rows.push({
-          label: t('titleBar.hover.lastCommand'),
+          label: t("titleBar.hover.lastCommand"),
           value:
-            tab?.commandState === 'failed'
-              ? t('titleBar.hover.lastCommandFailed', { ago: formatAgo(lastCommandAt) })
+            tab?.commandState === "failed"
+              ? t("titleBar.hover.lastCommandFailed", {
+                  ago: formatAgo(lastCommandAt),
+                })
               : formatAgo(lastCommandAt),
-          valueColor: tab?.commandState === 'failed' ? TAB_DOT_COLOR.error : undefined,
+          valueColor:
+            tab?.commandState === "failed" ? TAB_DOT_COLOR.error : undefined,
         });
       }
     }
@@ -833,10 +950,10 @@ export function buildTabHoverInfo(
         const monitorCount = tab.rdpMonitorCount ?? 1;
         const size = `${tab.rdpDesktopSize.width}×${tab.rdpDesktopSize.height}`;
         rows.push({
-          label: t('titleBar.hover.resolution'),
+          label: t("titleBar.hover.resolution"),
           value:
             monitorCount > 1
-              ? `${size} · ${t('titleBar.hover.monitorCount', { count: monitorCount })}`
+              ? `${size} · ${t("titleBar.hover.monitorCount", { count: monitorCount })}`
               : size,
         });
       }
@@ -846,26 +963,38 @@ export function buildTabHoverInfo(
           .slice(0, 2)
           .map((drive) =>
             drive.readOnly
-              ? t('titleBar.hover.driveReadOnly', { name: drive.name })
+              ? t("titleBar.hover.driveReadOnly", { name: drive.name })
               : drive.name,
           )
-          .join(', ');
+          .join(", ");
         rows.push({
-          label: t('titleBar.hover.drives'),
+          label: t("titleBar.hover.drives"),
           value:
             drives.length > 2
-              ? t('titleBar.hover.drivesMore', { names, count: drives.length - 2 })
+              ? t("titleBar.hover.drivesMore", {
+                  names,
+                  count: drives.length - 2,
+                })
               : names,
         });
       }
       if (host.audioEnabled === false) {
-        rows.push({ label: t('titleBar.hover.audio'), value: t('titleBar.hover.off') });
+        rows.push({
+          label: t("titleBar.hover.audio"),
+          value: t("titleBar.hover.off"),
+        });
       }
       if (host.clipboardEnabled === false) {
-        rows.push({ label: t('titleBar.hover.clipboard'), value: t('titleBar.hover.off') });
+        rows.push({
+          label: t("titleBar.hover.clipboard"),
+          value: t("titleBar.hover.off"),
+        });
       }
       if (host.adminSession === true) {
-        rows.push({ label: t('titleBar.hover.adminSession'), value: t('titleBar.hover.on') });
+        rows.push({
+          label: t("titleBar.hover.adminSession"),
+          value: t("titleBar.hover.on"),
+        });
       }
     }
     // VNC 는 RDP 와 같은 순서로 읽는다 — **무엇이 보이는가(해상도)** 다음에 **내가 바꾼 설정**,
@@ -874,38 +1003,40 @@ export function buildTabHoverInfo(
     if (tab && host && isVncHostRecord(host)) {
       if (tab.rdpDesktopSize) {
         rows.push({
-          label: t('titleBar.hover.resolution'),
+          label: t("titleBar.hover.resolution"),
           value: `${tab.rdpDesktopSize.width}×${tab.rdpDesktopSize.height}`,
         });
       }
-      if (host.imageQuality === 'balanced' || host.imageQuality === 'fast') {
+      if (host.imageQuality === "balanced" || host.imageQuality === "fast") {
         rows.push({
-          label: t('titleBar.hover.quality'),
+          label: t("titleBar.hover.quality"),
           value: t(
-            host.imageQuality === 'balanced'
-              ? 'titleBar.hover.qualityBalanced'
-              : 'titleBar.hover.qualityFast',
+            host.imageQuality === "balanced"
+              ? "titleBar.hover.qualityBalanced"
+              : "titleBar.hover.qualityFast",
           ),
         });
       }
       if (host.viewOnly === true) {
         rows.push({
-          label: t('titleBar.hover.viewOnly'),
-          value: t('titleBar.hover.on'),
+          label: t("titleBar.hover.viewOnly"),
+          value: t("titleBar.hover.on"),
         });
       }
       if (host.shared === false) {
         rows.push({
-          label: t('titleBar.hover.screenShare'),
-          value: t('titleBar.hover.off'),
+          label: t("titleBar.hover.screenShare"),
+          value: t("titleBar.hover.off"),
         });
       }
       // SSH 터널을 경유하면 그 호스트를 이름으로 보여준다 — 주소만 보면 왜 localhost 로 붙는지
       // 알 수 없다(SSH 의 점프 행과 같은 뜻이라 같은 라벨을 쓴다).
       if (host.sshTunnelHostId) {
-        const tunnel = hosts.find((candidate) => candidate.id === host.sshTunnelHostId);
+        const tunnel = hosts.find(
+          (candidate) => candidate.id === host.sshTunnelHostId,
+        );
         rows.push({
-          label: t('titleBar.hover.jump'),
+          label: t("titleBar.hover.jump"),
           value: tunnel?.label ?? host.sshTunnelHostId,
         });
       }
@@ -927,17 +1058,23 @@ export function buildTabHoverInfo(
       }
     }
     if (item.rttMs != null) {
-      rows.push({ label: t('titleBar.hover.latency'), value: `${item.rttMs}ms`, valueColor: rttColor(item.rttMs) });
+      rows.push({
+        label: t("titleBar.hover.latency"),
+        value: `${item.rttMs}ms`,
+        valueColor: rttColor(item.rttMs),
+      });
     }
     if (tab?.sessionShare?.shareUrl) {
       rows.push({
-        label: t('titleBar.hover.share'),
-        value: t('titleBar.hover.viewers', { count: tab.sessionShare.viewerCount }),
+        label: t("titleBar.hover.share"),
+        value: t("titleBar.hover.viewers", {
+          count: tab.sessionShare.viewerCount,
+        }),
         valueColor: TAB_DOT_COLOR.running,
       });
     }
     return {
-      heading: kind ? connectionKindLabel(kind) : t('titleBar.kind.session'),
+      heading: kind ? connectionKindLabel(kind) : t("titleBar.kind.session"),
       // RDP 계정은 호스트 레코드에 없어 접속 응답에서 온 rdpUsername 으로 붙인다.
       target:
         host && isRdpHostRecord(host) && tab?.rdpUsername
@@ -949,17 +1086,19 @@ export function buildTabHoverInfo(
     };
   }
 
-  if (item.kind === 'tmux') {
-    const group = tmuxGroups.find((candidate) => candidate.id === item.tmuxGroupId);
+  if (item.kind === "tmux") {
+    const group = tmuxGroups.find(
+      (candidate) => candidate.id === item.tmuxGroupId,
+    );
     const host = group?.hostId
-      ? hosts.find((candidate) => candidate.id === group.hostId) ?? null
+      ? (hosts.find((candidate) => candidate.id === group.hostId) ?? null)
       : null;
     if (group?.reconnect) {
       rows.push({
-        label: t('titleBar.hover.reconnect'),
+        label: t("titleBar.hover.reconnect"),
         value: group.reconnect.waitingForNetwork
-          ? t('titleBar.hover.waitingNetwork')
-          : t('titleBar.hover.attempts', {
+          ? t("titleBar.hover.waitingNetwork")
+          : t("titleBar.hover.attempts", {
               attempt: group.reconnect.attempt,
               max: group.reconnect.maxAttempts,
             }),
@@ -967,8 +1106,8 @@ export function buildTabHoverInfo(
       });
     }
     rows.push({
-      label: t('titleBar.hover.windows'),
-      value: t('titleBar.hover.windowCount', { count: item.windowCount }),
+      label: t("titleBar.hover.windows"),
+      value: t("titleBar.hover.windowCount", { count: item.windowCount }),
     });
     if (host) {
       const path = tailnetPath(host);
@@ -984,80 +1123,96 @@ export function buildTabHoverInfo(
       }
     }
     if (item.rttMs != null) {
-      rows.push({ label: t('titleBar.hover.latency'), value: `${item.rttMs}ms`, valueColor: rttColor(item.rttMs) });
+      rows.push({
+        label: t("titleBar.hover.latency"),
+        value: `${item.rttMs}ms`,
+        valueColor: rttColor(item.rttMs),
+      });
     }
     return {
-      heading: 'tmux',
+      heading: "tmux",
       target: host ? formatHostTarget(host) : null,
       rows,
     };
   }
 
-  const workspace = workspaces.find((candidate) => candidate.id === item.workspaceId);
+  const workspace = workspaces.find(
+    (candidate) => candidate.id === item.workspaceId,
+  );
   if (workspace) {
     listWorkspaceSessionIds(workspace.layout).forEach((sessionId, index) => {
-      const paneTab = tabs.find((candidate) => candidate.sessionId === sessionId);
+      const paneTab = tabs.find(
+        (candidate) => candidate.sessionId === sessionId,
+      );
       const paneHost = paneTab?.hostId
-        ? hosts.find((candidate) => candidate.id === paneTab.hostId) ?? null
+        ? (hosts.find((candidate) => candidate.id === paneTab.hostId) ?? null)
         : null;
       rows.push({
-        label: t('titleBar.hover.pane', { index: index + 1 }),
-        value: paneHost?.label ?? paneTab?.title ?? t('titleBar.kind.local'),
+        label: t("titleBar.hover.pane", { index: index + 1 }),
+        value: paneHost?.label ?? paneTab?.title ?? t("titleBar.kind.local"),
       });
     });
   }
   return {
-    heading: t(item.isTmux ? 'titleBar.kind.splitTmux' : 'titleBar.kind.split'),
+    heading: t(item.isTmux ? "titleBar.kind.splitTmux" : "titleBar.kind.split"),
     target: null,
     rows,
   };
 }
 
-const TAB_DRAG_MIME = 'application/x-dolssh-tab-item';
+const TAB_DRAG_MIME = "application/x-dolssh-tab-item";
 
 function serializeDraggedTab(item: DynamicTabStripItem): string {
-  if (item.kind === 'session') {
+  if (item.kind === "session") {
     return `session:${item.sessionId}`;
   }
-  if (item.kind === 'tmux') {
+  if (item.kind === "tmux") {
     return `tmuxgrp:${item.tmuxGroupId}`;
   }
   return `workspace:${item.workspaceId}`;
 }
 
 function parseDraggedTab(payload: string): DynamicTabStripItem | null {
-  if (payload.startsWith('session:')) {
-    const sessionId = payload.slice('session:'.length);
-    return sessionId ? { kind: 'session', sessionId } : null;
+  if (payload.startsWith("session:")) {
+    const sessionId = payload.slice("session:".length);
+    return sessionId ? { kind: "session", sessionId } : null;
   }
-  if (payload.startsWith('tmuxgrp:')) {
-    const tmuxGroupId = payload.slice('tmuxgrp:'.length);
-    return tmuxGroupId ? { kind: 'tmux', tmuxGroupId } : null;
+  if (payload.startsWith("tmuxgrp:")) {
+    const tmuxGroupId = payload.slice("tmuxgrp:".length);
+    return tmuxGroupId ? { kind: "tmux", tmuxGroupId } : null;
   }
-  if (payload.startsWith('workspace:')) {
-    const workspaceId = payload.slice('workspace:'.length);
-    return workspaceId ? { kind: 'workspace', workspaceId } : null;
+  if (payload.startsWith("workspace:")) {
+    const workspaceId = payload.slice("workspace:".length);
+    return workspaceId ? { kind: "workspace", workspaceId } : null;
   }
   return null;
 }
 
 function formatProgressPercent(updateState: UpdateState): string {
   if (!updateState.progress) {
-    return '';
+    return "";
   }
   return `${Math.round(updateState.progress.percent)}%`;
 }
 
 function shouldShowBadge(updateState: UpdateState): boolean {
-  if (updateState.status === 'downloading' || updateState.status === 'downloaded') {
+  if (
+    updateState.status === "downloading" ||
+    updateState.status === "downloaded"
+  ) {
     return true;
   }
-  return updateState.status === 'available' && updateState.release?.version !== updateState.dismissedVersion;
+  return (
+    updateState.status === "available" &&
+    updateState.release?.version !== updateState.dismissedVersion
+  );
 }
 
-export function getEmptyReleaseMessage(updateState: UpdateState): string | null {
-  if (updateState.status === 'checking') {
-    return t('titleBar.update.checking');
+export function getEmptyReleaseMessage(
+  updateState: UpdateState,
+): string | null {
+  if (updateState.status === "checking") {
+    return t("titleBar.update.checking");
   }
   return null;
 }
@@ -1073,15 +1228,15 @@ function formatPublishedAt(value?: string | null): string | null {
   }
 
   return new Intl.DateTimeFormat(getFormatLocale(), {
-    month: 'short',
-    day: 'numeric'
+    month: "short",
+    day: "numeric",
   }).format(parsed);
 }
 
 function resolveReleaseUrl(updateState: UpdateState): string {
   const version = updateState.release?.version;
   if (!version) {
-    return 'https://github.com/doldolma/dolgate/releases';
+    return "https://github.com/doldolma/dolgate/releases";
   }
   return `https://github.com/doldolma/dolgate/releases/tag/v${version}`;
 }
@@ -1094,7 +1249,7 @@ function countWorkspacePanes(workspace: WorkspaceTab): number {
     if (!node) {
       continue;
     }
-    if (node.kind === 'leaf') {
+    if (node.kind === "leaf") {
       count += 1;
       continue;
     }
@@ -1108,7 +1263,7 @@ function countWorkspacePanes(workspace: WorkspaceTab): number {
 // 흰 탭이 붕 뜨지 않게), 비활성=투명(바에 녹아듦) + 밝은 글자. 크롬은 두 테마 모두 어두움.
 function getTitlebarTabClass(active: boolean): string {
   const base =
-    'h-full gap-2 !rounded-t-[10px] !rounded-b-none border-transparent px-[0.95rem] py-0 text-[0.86rem]';
+    "h-full gap-2 !rounded-t-[10px] !rounded-b-none border-transparent px-[0.95rem] py-0 text-[0.86rem]";
   if (active) {
     return `${base} bg-[var(--app-bg)] text-[var(--text)] shadow-none hover:text-[var(--text)]`;
   }
@@ -1121,36 +1276,36 @@ function getTitlebarTabClass(active: boolean): string {
 // 또렷이(정적 탭과 동일 규칙 — 다크 테마에서 흰 알약이 튀지 않게).
 function getTitlebarDynamicTabContainerClass(active: boolean): string {
   if (active) {
-    return 'border-[rgba(255,255,255,0.16)] bg-[var(--app-bg)] shadow-none';
+    return "border-[rgba(255,255,255,0.16)] bg-[var(--app-bg)] shadow-none";
   }
 
-  return 'border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.07)] shadow-none hover:bg-[rgba(255,255,255,0.12)]';
+  return "border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.07)] shadow-none hover:bg-[rgba(255,255,255,0.12)]";
 }
 
 function getTitlebarDynamicTabButtonClass(active: boolean): string {
   return cn(
     // pr 은 pl 보다 좁다. 오른쪽에는 닫기 버튼이 바로 붙어서, 같은 여백을 주면 이름과 × 사이만
     // 크게 벌어진다(예전에 지연 숫자가 있던 자리라 넓게 잡혀 있었다).
-    'min-w-0 justify-start rounded-none border-transparent bg-transparent pl-3 pr-1 py-[0.3rem] shadow-none hover:bg-transparent',
+    "min-w-0 justify-start rounded-none border-transparent bg-transparent pl-3 pr-1 py-[0.3rem] shadow-none hover:bg-transparent",
     active
-      ? 'text-[var(--text)] hover:text-[var(--text)]'
-      : 'text-[rgba(243,247,251,0.82)] hover:text-white',
+      ? "text-[var(--text)] hover:text-[var(--text)]"
+      : "text-[rgba(243,247,251,0.82)] hover:text-white",
   );
 }
 
 function getTitlebarCloseButtonClass(active: boolean): string {
   if (active) {
-    return 'h-6 w-6 rounded-[7px] text-[0.9rem] text-[color-mix(in_srgb,var(--accent-strong)_84%,var(--text)_16%)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent)] hover:text-[var(--accent-strong)]';
+    return "h-6 w-6 rounded-[7px] text-[0.9rem] text-[color-mix(in_srgb,var(--accent-strong)_84%,var(--text)_16%)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent)] hover:text-[var(--accent-strong)]";
   }
 
-  return 'h-6 w-6 rounded-[7px] text-[0.9rem] text-[rgba(243,247,251,0.78)] hover:bg-[rgba(255,255,255,0.12)] hover:text-white';
+  return "h-6 w-6 rounded-[7px] text-[0.9rem] text-[rgba(243,247,251,0.78)] hover:bg-[rgba(255,255,255,0.12)] hover:text-white";
 }
 
 function isDynamicWorkspaceTab(tabId: WorkspaceTabId): boolean {
   return (
-    tabId.startsWith('session:') ||
-    tabId.startsWith('workspace:') ||
-    tabId.startsWith('tmuxgrp:')
+    tabId.startsWith("session:") ||
+    tabId.startsWith("workspace:") ||
+    tabId.startsWith("tmuxgrp:")
   );
 }
 
@@ -1181,6 +1336,7 @@ export function AppTitleBar({
   onSelectWorkspace,
   onCloseSession,
   onCloseWorkspace,
+  onSaveWorkspace,
   onSelectTmuxGroup,
   onCloseTmuxGroup,
   onNewTmuxWindow,
@@ -1193,7 +1349,7 @@ export function AppTitleBar({
   onOpenReleasePage,
   onMinimizeWindow,
   onToggleFullScreenWindow,
-  onCloseWindow
+  onCloseWindow,
 }: AppTitleBarProps) {
   const { t: translate } = useTranslation();
   // 탭 툴팁이 말하는 공유 폴더는 연결이 실제로 붙이는 것과 같아야 한다 — 드라이브는 기기 로컬
@@ -1201,13 +1357,20 @@ export function AppTitleBar({
   const hostsWithLocalDrives = useHostsWithLocalDrives(hosts);
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [isDetachHovering, setIsDetachHovering] = useState(false);
-  const [tabDropPreview, setTabDropPreview] = useState<{ targetKey: string; placement: 'before' | 'after' } | null>(null);
+  const [tabDropPreview, setTabDropPreview] = useState<{
+    targetKey: string;
+    placement: "before" | "after";
+  } | null>(null);
   const [isTabDragging, setIsTabDragging] = useState(false);
   // 끌고 있는 탭을 투명하게 가리는 플래그. dragstart 와 같은 틱에 숨기면 Chromium 이
   // 드래그를 취소하므로(드래그 이미지 캡처 전 소스 소멸), 다음 틱으로 지연시킨다.
   const [tabDragSourceHidden, setTabDragSourceHidden] = useState(false);
   // hover 카드(호스트·상태·RTT). fixed 위치라 스크롤 스트립에 안 잘린다.
-  const [hoveredTab, setHoveredTab] = useState<{ key: string; left: number; top: number } | null>(null);
+  const [hoveredTab, setHoveredTab] = useState<{
+    key: string;
+    left: number;
+    top: number;
+  } | null>(null);
   const draggedTabRef = useRef<DynamicTabStripItem | null>(null);
   const updateMenuRef = useRef<HTMLDivElement | null>(null);
   const titlebarTabStripRef = useRef<HTMLDivElement | null>(null);
@@ -1237,8 +1400,8 @@ export function AppTitleBar({
    * "빈 곳 더블클릭으로 전체화면 종료" 를 만들 수 없다.
    */
   const chromeDragRegion = windowState.isFullScreen
-    ? '[-webkit-app-region:no-drag]'
-    : '[-webkit-app-region:drag]';
+    ? "[-webkit-app-region:no-drag]"
+    : "[-webkit-app-region:drag]";
 
   /**
    * 상단바 빈 곳 더블클릭 → 전체화면 종료.
@@ -1278,24 +1441,90 @@ export function AppTitleBar({
   // 모니터 배치도를 띄운 RDP 세션. null 이면 닫혀 있다.
   const [monitorPicker, setMonitorPicker] = useState<string | null>(null);
 
-  // RDP 탭 우클릭 메뉴. 지금은 항목이 하나뿐이라 전용 컴포넌트를 만들지 않았다.
-  const [tabMenu, setTabMenu] = useState<{
-    sessionId: string;
-    x: number;
-    y: number;
-  } | null>(null);
+  // 탭 우클릭 메뉴: RDP 모니터 배치와 일반 분할 Workspace 저장만 노출한다.
+  const [tabMenu, setTabMenu] = useState<
+    | { kind: "rdp"; sessionId: string; x: number; y: number }
+    | { kind: "workspace"; workspaceId: string; x: number; y: number }
+    | null
+  >(null);
+  const tabMenuRef = useRef<HTMLDivElement | null>(null);
+  const tabMenuTriggerRef = useRef<HTMLElement | null>(null);
+  const closeTabMenu = useCallback((restoreFocus = false) => {
+    setTabMenu(null);
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => tabMenuTriggerRef.current?.focus());
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!tabMenu) {
+      return;
+    }
+    window.requestAnimationFrame(() =>
+      tabMenuRef.current
+        ?.querySelector<HTMLElement>('[role="menuitem"]')
+        ?.focus(),
+    );
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeTabMenu(true);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [closeTabMenu, tabMenu]);
+
+  const [saveWorkspaceTarget, setSaveWorkspaceTarget] =
+    useState<WorkspaceTab | null>(null);
+  const [saveWorkspaceName, setSaveWorkspaceName] = useState("");
+  const [saveWorkspaceError, setSaveWorkspaceError] = useState<string | null>(
+    null,
+  );
+  const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
+
+  const closeSaveWorkspaceDialog = () => {
+    if (isSavingWorkspace) {
+      return;
+    }
+    setSaveWorkspaceTarget(null);
+    setSaveWorkspaceError(null);
+  };
+
+  const submitSaveWorkspace = async () => {
+    const name = saveWorkspaceName.trim();
+    if (!saveWorkspaceTarget || !name || !onSaveWorkspace) {
+      return;
+    }
+    setIsSavingWorkspace(true);
+    setSaveWorkspaceError(null);
+    try {
+      await onSaveWorkspace(saveWorkspaceTarget.id, name);
+      setSaveWorkspaceTarget(null);
+    } catch (error) {
+      setSaveWorkspaceError(
+        error instanceof Error
+          ? error.message
+          : translate("savedWorkspace.saveFailed"),
+      );
+    } finally {
+      setIsSavingWorkspace(false);
+    }
+  };
 
   const dynamicItems = useMemo<TitlebarDynamicItem[]>(
     () =>
       tabStrip
         .map((item) => {
-          if (item.kind === 'session') {
-            const tab = tabs.find((candidate) => candidate.sessionId === item.sessionId);
+          if (item.kind === "session") {
+            const tab = tabs.find(
+              (candidate) => candidate.sessionId === item.sessionId,
+            );
             if (!tab) {
               return null;
             }
             return {
-              kind: 'session',
+              kind: "session",
               sessionId: tab.sessionId,
               title: tab.title,
               status: tab.status,
@@ -1305,32 +1534,38 @@ export function AppTitleBar({
                 tab.commandState,
               ),
               // RDP 탭에만 뜨는 메뉴가 있어 종류를 함께 싣는다.
-              paneKind: tab.paneKind ?? 'terminal',
-              rttMs: tab.lastRttMs ?? null
+              paneKind: tab.paneKind ?? "terminal",
+              rttMs: tab.lastRttMs ?? null,
             } satisfies TitlebarDynamicItem;
           }
 
-          if (item.kind === 'workspace') {
-            const workspace = workspaces.find((candidate) => candidate.id === item.workspaceId);
+          if (item.kind === "workspace") {
+            const workspace = workspaces.find(
+              (candidate) => candidate.id === item.workspaceId,
+            );
             if (!workspace) {
               return null;
             }
             // 분할 워크스페이스는 pane 들의 최악 상태로 집계한다(error > reconnecting > connected).
-            const paneStates = listWorkspaceSessionIds(workspace.layout).map((id) =>
-              tabConnStateFromTab(tabs.find((candidate) => candidate.sessionId === id)),
+            const paneStates = listWorkspaceSessionIds(workspace.layout).map(
+              (id) =>
+                tabConnStateFromTab(
+                  tabs.find((candidate) => candidate.sessionId === id),
+                ),
             );
-            const wsConnState: TabConnState = paneStates.includes('error')
-              ? 'error'
-              : paneStates.includes('reconnecting')
-                ? 'reconnecting'
-                : paneStates.length > 0 && paneStates.every((s) => s === 'connected')
-                  ? 'connected'
-                  : 'idle';
+            const wsConnState: TabConnState = paneStates.includes("error")
+              ? "error"
+              : paneStates.includes("reconnecting")
+                ? "reconnecting"
+                : paneStates.length > 0 &&
+                    paneStates.every((s) => s === "connected")
+                  ? "connected"
+                  : "idle";
             const wsActivePaneTab = tabs.find(
               (candidate) => candidate.sessionId === workspace.activeSessionId,
             );
             return {
-              kind: 'workspace',
+              kind: "workspace",
               workspaceId: workspace.id,
               title: workspace.title,
               paneCount: countWorkspacePanes(workspace),
@@ -1340,12 +1575,14 @@ export function AppTitleBar({
                 wsConnState,
                 wsActivePaneTab?.commandState ?? null,
               ),
-              rttMs: wsActivePaneTab?.lastRttMs ?? null
+              rttMs: wsActivePaneTab?.lastRttMs ?? null,
             } satisfies TitlebarDynamicItem;
           }
 
-          if (item.kind === 'tmux') {
-            const group = tmuxGroups.find((candidate) => candidate.id === item.tmuxGroupId);
+          if (item.kind === "tmux") {
+            const group = tmuxGroups.find(
+              (candidate) => candidate.id === item.tmuxGroupId,
+            );
             if (!group) {
               return null;
             }
@@ -1355,7 +1592,7 @@ export function AppTitleBar({
               ? hosts.find((candidate) => candidate.id === group.hostId)
               : undefined;
             return {
-              kind: 'tmux',
+              kind: "tmux",
               tmuxGroupId: group.id,
               title: host?.label
                 ? `${host.label}-${group.sessionName}`
@@ -1366,13 +1603,12 @@ export function AppTitleBar({
               ).length,
               active: activeWorkspaceTab === `tmuxgrp:${group.id}`,
               reconnecting: group.reconnect != null,
-              rttMs: group.lastRttMs ?? null
+              rttMs: group.lastRttMs ?? null,
             } satisfies TitlebarDynamicItem;
           }
-
         })
         .filter((item): item is TitlebarDynamicItem => item !== null),
-    [activeWorkspaceTab, hosts, tabStrip, tabs, tmuxGroups, workspaces]
+    [activeWorkspaceTab, hosts, tabStrip, tabs, tmuxGroups, workspaces],
   );
 
   // 세션 패널을 열 수 있는 대상. 세션 셸과 같은 계산을 써야 토글이 켜는 패널과 실제로 열리는
@@ -1387,7 +1623,7 @@ export function AppTitleBar({
       return null;
     }
     const tab = tabs.find((item) => item.sessionId === focused);
-    if (!tab || (tab.paneKind ?? 'terminal') !== 'terminal') {
+    if (!tab || (tab.paneKind ?? "terminal") !== "terminal") {
       return null;
     }
     return focused;
@@ -1396,7 +1632,7 @@ export function AppTitleBar({
   const showBadge = shouldShowBadge(updateState);
   const publishedAt = formatPublishedAt(updateState.release?.publishedAt);
   const releaseUrl = resolveReleaseUrl(updateState);
-  const showInstallAction = updateState.status === 'downloaded';
+  const showInstallAction = updateState.status === "downloaded";
 
   // Installing quits and relaunches the app, and the gap before the window goes
   // away reads as the click not having registered. Spin until then.
@@ -1407,7 +1643,7 @@ export function AppTitleBar({
   // There is deliberately no reset on success: the app is on its way out, and
   // dropping the spinner first would just flash the idle button.
   useEffect(() => {
-    if (updateState.status === 'error') {
+    if (updateState.status === "error") {
       setIsInstallingUpdate(false);
     }
   }, [updateState.status]);
@@ -1421,24 +1657,26 @@ export function AppTitleBar({
   }, [isInstallingUpdate, onInstallUpdate]);
   const showCheckAction =
     updateState.enabled &&
-    (updateState.status === 'idle' ||
-      updateState.status === 'upToDate' ||
-      updateState.status === 'error');
+    (updateState.status === "idle" ||
+      updateState.status === "upToDate" ||
+      updateState.status === "error");
   const showDevDisabledAction = !updateState.enabled;
   const isAutoDownloading =
-    updateState.status === 'available' || updateState.status === 'downloading';
+    updateState.status === "available" || updateState.status === "downloading";
   const titleText = showInstallAction
-    ? translate('titleBar.update.readyTitle')
+    ? translate("titleBar.update.readyTitle")
     : isAutoDownloading
-      ? translate('titleBar.update.downloadingTitle')
-      : translate('titleBar.update.title');
+      ? translate("titleBar.update.downloadingTitle")
+      : translate("titleBar.update.title");
   const installTooltip = updateState.release?.version
-    ? translate('titleBar.update.installTooltip', {
-        version: `${updateState.release.version.startsWith('v') ? '' : 'v'}${updateState.release.version}`,
+    ? translate("titleBar.update.installTooltip", {
+        version: `${updateState.release.version.startsWith("v") ? "" : "v"}${updateState.release.version}`,
       })
-    : translate('titleBar.update.installTooltipFallback');
+    : translate("titleBar.update.installTooltipFallback");
 
-  const canDetachToTabs = draggedSession?.source === 'workspace-pane' && Boolean(draggedSession.workspaceId);
+  const canDetachToTabs =
+    draggedSession?.source === "workspace-pane" &&
+    Boolean(draggedSession.workspaceId);
   const isTitlebarInternalDragActive = isTabDragging || canDetachToTabs;
 
   const updateTitlebarTabStripFades = useCallback(() => {
@@ -1449,7 +1687,10 @@ export function AppTitleBar({
       return;
     }
 
-    const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
+    const maxScrollLeft = Math.max(
+      0,
+      container.scrollWidth - container.clientWidth,
+    );
     const nextShowLeft = container.scrollLeft > 1;
     const nextShowRight = container.scrollLeft < maxScrollLeft - 1;
     setShowLeftTabStripFade((previous) =>
@@ -1469,7 +1710,8 @@ export function AppTitleBar({
     }
     el.scrollLeft += dir * 14;
     updateTitlebarTabStripFades();
-    tabAutoScrollRafRef.current = window.requestAnimationFrame(stepTabAutoScroll);
+    tabAutoScrollRafRef.current =
+      window.requestAnimationFrame(stepTabAutoScroll);
   }, [updateTitlebarTabStripFades]);
 
   const updateTabAutoScroll = useCallback(
@@ -1492,9 +1734,10 @@ export function AppTitleBar({
       if (
         dir !== 0 &&
         tabAutoScrollRafRef.current == null &&
-        typeof window.requestAnimationFrame === 'function'
+        typeof window.requestAnimationFrame === "function"
       ) {
-        tabAutoScrollRafRef.current = window.requestAnimationFrame(stepTabAutoScroll);
+        tabAutoScrollRafRef.current =
+          window.requestAnimationFrame(stepTabAutoScroll);
       }
     },
     [stepTabAutoScroll],
@@ -1509,23 +1752,23 @@ export function AppTitleBar({
   }, []);
 
   function getTabKey(item: DynamicTabStripItem): string {
-    if (item.kind === 'session') {
+    if (item.kind === "session") {
       return `session:${item.sessionId}`;
     }
-    if (item.kind === 'tmux') {
+    if (item.kind === "tmux") {
       return `tmuxgrp:${item.tmuxGroupId}`;
     }
     return `workspace:${item.workspaceId}`;
   }
 
   function itemToTarget(item: TitlebarDynamicItem): DynamicTabStripItem {
-    if (item.kind === 'session') {
-      return { kind: 'session', sessionId: item.sessionId };
+    if (item.kind === "session") {
+      return { kind: "session", sessionId: item.sessionId };
     }
-    if (item.kind === 'tmux') {
-      return { kind: 'tmux', tmuxGroupId: item.tmuxGroupId };
+    if (item.kind === "tmux") {
+      return { kind: "tmux", tmuxGroupId: item.tmuxGroupId };
     }
-    return { kind: 'workspace', workspaceId: item.workspaceId };
+    return { kind: "workspace", workspaceId: item.workspaceId };
   }
 
   // 드래그 시작 시 호출: 각 탭의 중심을 content 좌표(스크롤 무관)로 고정 캡처하고,
@@ -1543,7 +1786,9 @@ export function AppTitleBar({
       const key = getTabKey(itemToTarget(item));
       const node = titlebarTabItemRefs.current[key];
       const rect = node?.getBoundingClientRect();
-      const center = rect ? rect.left + rect.width / 2 - stripLeft + scrollLeft : 0;
+      const center = rect
+        ? rect.left + rect.width / 2 - stripLeft + scrollLeft
+        : 0;
       return { key, center };
     });
   }
@@ -1553,22 +1798,23 @@ export function AppTitleBar({
   // 맨 오른쪽 너머로 끌면 자연히 마지막 위치가 된다.
   function computeTabDrop(
     clientX: number,
-  ): { target: DynamicTabStripItem; placement: 'before' | 'after' } | null {
+  ): { target: DynamicTabStripItem; placement: "before" | "after" } | null {
     if (dynamicItems.length === 0) {
       return null;
     }
     const el = titlebarTabStripRef.current;
     const layout = tabDragLayoutRef.current;
     if (el && layout.length === dynamicItems.length) {
-      const pointerX = clientX - el.getBoundingClientRect().left + el.scrollLeft;
+      const pointerX =
+        clientX - el.getBoundingClientRect().left + el.scrollLeft;
       for (let i = 0; i < dynamicItems.length; i += 1) {
         if (pointerX < layout[i].center) {
-          return { target: itemToTarget(dynamicItems[i]), placement: 'before' };
+          return { target: itemToTarget(dynamicItems[i]), placement: "before" };
         }
       }
       return {
         target: itemToTarget(dynamicItems[dynamicItems.length - 1]),
-        placement: 'after',
+        placement: "after",
       };
     }
     // 캡처가 없으면 라이브 측정으로 폴백.
@@ -1579,12 +1825,12 @@ export function AppTitleBar({
       }
       const rect = node.getBoundingClientRect();
       if (clientX < rect.left + rect.width / 2) {
-        return { target: itemToTarget(item), placement: 'before' };
+        return { target: itemToTarget(item), placement: "before" };
       }
     }
     return {
       target: itemToTarget(dynamicItems[dynamicItems.length - 1]),
-      placement: 'after',
+      placement: "after",
     };
   }
 
@@ -1600,10 +1846,18 @@ export function AppTitleBar({
       return 0;
     }
     const width = tabDragSourceWidthRef.current;
-    if (dragSourceIndex < dropGap && index > dragSourceIndex && index < dropGap) {
+    if (
+      dragSourceIndex < dropGap &&
+      index > dragSourceIndex &&
+      index < dropGap
+    ) {
       return -width;
     }
-    if (dropGap < dragSourceIndex && index >= dropGap && index < dragSourceIndex) {
+    if (
+      dropGap < dragSourceIndex &&
+      index >= dropGap &&
+      index < dragSourceIndex
+    ) {
       return width;
     }
     return 0;
@@ -1642,9 +1896,9 @@ export function AppTitleBar({
       setIsUpdateOpen(false);
     }
 
-    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener("mousedown", handlePointerDown);
     return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener("mousedown", handlePointerDown);
     };
   }, [isUpdateOpen]);
 
@@ -1656,9 +1910,9 @@ export function AppTitleBar({
     const handleResize = () => {
       updateTitlebarTabStripFades();
     };
-    window.addEventListener('resize', handleResize);
+    window.addEventListener("resize", handleResize);
     return () => {
-      window.removeEventListener('resize', handleResize);
+      window.removeEventListener("resize", handleResize);
     };
   }, [updateTitlebarTabStripFades]);
 
@@ -1689,11 +1943,11 @@ export function AppTitleBar({
       setIsTabDragging(false);
       stopTabAutoScroll();
     };
-    document.addEventListener('dragend', reset);
-    document.addEventListener('drop', reset);
+    document.addEventListener("dragend", reset);
+    document.addEventListener("drop", reset);
     return () => {
-      document.removeEventListener('dragend', reset);
-      document.removeEventListener('drop', reset);
+      document.removeEventListener("dragend", reset);
+      document.removeEventListener("drop", reset);
     };
   }, [isTabDragging, stopTabAutoScroll]);
 
@@ -1710,11 +1964,11 @@ export function AppTitleBar({
       return;
     }
 
-    if (typeof activeItem.scrollIntoView === 'function') {
-      activeItem.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    if (typeof activeItem.scrollIntoView === "function") {
+      activeItem.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
 
-    if (typeof window.requestAnimationFrame !== 'function') {
+    if (typeof window.requestAnimationFrame !== "function") {
       updateTitlebarTabStripFades();
       return;
     }
@@ -1733,7 +1987,9 @@ export function AppTitleBar({
       ? getTabKey(draggedTabRef.current)
       : null;
   const dragSourceIndex = draggedKey
-    ? dynamicItems.findIndex((item) => getTabKey(itemToTarget(item)) === draggedKey)
+    ? dynamicItems.findIndex(
+        (item) => getTabKey(itemToTarget(item)) === draggedKey,
+      )
     : -1;
   let dropGap = -1;
   if (isTabDragging && tabDropPreview) {
@@ -1741,15 +1997,16 @@ export function AppTitleBar({
       (item) => getTabKey(itemToTarget(item)) === tabDropPreview.targetKey,
     );
     if (targetIndex >= 0) {
-      dropGap = tabDropPreview.placement === 'before' ? targetIndex : targetIndex + 1;
+      dropGap =
+        tabDropPreview.placement === "before" ? targetIndex : targetIndex + 1;
     }
   }
 
   const hoveredItem =
     hoveredTab && !isTabDragging
-      ? dynamicItems.find(
+      ? (dynamicItems.find(
           (item) => getTabKey(itemToTarget(item)) === hoveredTab.key,
-        ) ?? null
+        ) ?? null)
       : null;
   const tailnetPath = useTailnetPathLookup(tabs, tmuxGroups, hosts);
   const hoverInfo = hoveredItem
@@ -1779,7 +2036,7 @@ export function AppTitleBar({
       className={cn(
         // 상단바 chrome 배경 전체를 창 드래그 영역으로 둔다(macOS·Windows 공통). 실제 탭/버튼처럼
         // 조작 가능한 요소만 no-drag 로 좁혀, 같은 배경처럼 보이는 빈 영역은 일관되게 창을 움직인다.
-        'fixed inset-x-0 top-0 z-[7] [zoom:calc(1/var(--app-zoom))] flex min-h-[2.95rem] select-none items-stretch gap-4 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[0.9rem] pt-[0.42rem] pb-0 text-[#f3f7fb]',
+        "fixed inset-x-0 top-0 z-[7] [zoom:calc(1/var(--app-zoom))] flex min-h-[2.95rem] select-none items-stretch gap-4 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[0.9rem] pt-[0.42rem] pb-0 text-[#f3f7fb]",
         chromeDragRegion,
         // 신호등 자리는 창 모드에서만 비워둔다. macOS 전체화면에서는 신호등이 OS 오버레이로
         // 올라가 우리 바에 없다 — 그대로 두면 왼쪽이 이유 없이 5.7rem 비어 보인다.
@@ -1788,53 +2045,68 @@ export function AppTitleBar({
         // 크기가 고정이라(대략 78px) 5.1rem(76.5px)에서는 탭이 신호등을 덮는다. 좁을 때 9px 을
         // 더 얻는 것보다 안 덮는 편이 낫다. 화면 배율을 키우면 이 침범이 더 넓은 창에서도
         // 일어났는데, 원인은 배율이 아니라 이 규칙이었다.
-        desktopPlatform === 'darwin' && !windowState.isFullScreen && 'pl-[5.7rem]',
+        desktopPlatform === "darwin" &&
+          !windowState.isFullScreen &&
+          "pl-[5.7rem]",
         // 전체화면에서는 위로 밀어 감춘다. display 대신 transform 을 쓰는 이유는 두 가지다:
         // 레이아웃을 유지해야 내려올 때 흔들리지 않고, 숨은 동안에도 포인터 진입을 받을 수 있다.
-        'transition-transform duration-150',
-        !titleBar.visible && '-translate-y-full',
+        "transition-transform duration-150",
+        !titleBar.visible && "-translate-y-full",
       )}
     >
       {/* ① 좌측 드래그 존: macOS 신호등 영역(헤더 좌측 패딩). 스크롤 스트립과 겹치지 않는
           고정 rect 라 위치-의존 버그가 없다. 네이티브 신호등 클릭은 그대로, 빈 곳은 창 드래그. */}
-      {desktopPlatform === 'darwin' && !windowState.isFullScreen ? (
+      {desktopPlatform === "darwin" && !windowState.isFullScreen ? (
         <div
           aria-hidden
-          className={cn('absolute left-0 top-0 bottom-0 w-[5.7rem]', chromeDragRegion)}
+          className={cn(
+            "absolute left-0 top-0 bottom-0 w-[5.7rem]",
+            chromeDragRegion,
+          )}
         />
       ) : null}
       <div
         data-testid="titlebar-tab-region"
         className={cn(
-          'relative flex min-w-0 flex-1 self-stretch transition-[background-color,box-shadow] duration-140',
+          "relative flex min-w-0 flex-1 self-stretch transition-[background-color,box-shadow] duration-140",
           !isTitlebarInternalDragActive
             ? chromeDragRegion
-            : '[-webkit-app-region:no-drag]',
+            : "[-webkit-app-region:no-drag]",
           isDetachHovering &&
-            'bg-[rgba(142,209,194,0.08)] shadow-[inset_0_0_0_1px_rgba(142,209,194,0.16)]',
+            "bg-[rgba(142,209,194,0.08)] shadow-[inset_0_0_0_1px_rgba(142,209,194,0.16)]",
         )}
         onDragOver={(event) => {
           if (!canDetachToTabs) {
             return;
           }
           event.preventDefault();
-          event.dataTransfer.dropEffect = 'move';
+          event.dataTransfer.dropEffect = "move";
           setIsDetachHovering(true);
         }}
         onDragLeave={(event) => {
           const nextTarget = event.relatedTarget;
-          if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+          if (
+            nextTarget instanceof Node &&
+            event.currentTarget.contains(nextTarget)
+          ) {
             return;
           }
           setIsDetachHovering(false);
         }}
         onDrop={(event) => {
-          if (!draggedSession || draggedSession.source !== 'workspace-pane' || !draggedSession.workspaceId) {
+          if (
+            !draggedSession ||
+            draggedSession.source !== "workspace-pane" ||
+            !draggedSession.workspaceId
+          ) {
             return;
           }
           event.preventDefault();
           setIsDetachHovering(false);
-          onDetachSessionToStandalone(draggedSession.workspaceId, draggedSession.sessionId);
+          onDetachSessionToStandalone(
+            draggedSession.workspaceId,
+            draggedSession.sessionId,
+          );
           onEndSessionDrag();
         }}
       >
@@ -1849,8 +2121,8 @@ export function AppTitleBar({
             className="shrink-0 flex"
           >
             <TabButton
-              active={activeWorkspaceTab === 'home'}
-              className={getTitlebarTabClass(activeWorkspaceTab === 'home')}
+              active={activeWorkspaceTab === "home"}
+              className={getTitlebarTabClass(activeWorkspaceTab === "home")}
               onClick={onSelectHome}
             >
               <Home className="h-4 w-4 flex-none" aria-hidden />
@@ -1864,15 +2136,15 @@ export function AppTitleBar({
             className="shrink-0 flex"
           >
             <TabButton
-              active={activeWorkspaceTab === 'sftp'}
-              className={getTitlebarTabClass(activeWorkspaceTab === 'sftp')}
+              active={activeWorkspaceTab === "sftp"}
+              className={getTitlebarTabClass(activeWorkspaceTab === "sftp")}
               onClick={onSelectSftp}
             >
               <Folder className="h-4 w-4 flex-none" aria-hidden />
               SFTP
             </TabButton>
           </div>
-          {hasOpenContainers || activeWorkspaceTab === 'containers' ? (
+          {hasOpenContainers || activeWorkspaceTab === "containers" ? (
             <div
               ref={(node) => {
                 titlebarTabItemRefs.current.containers = node;
@@ -1880,8 +2152,10 @@ export function AppTitleBar({
               className="shrink-0 flex"
             >
               <TabButton
-                active={activeWorkspaceTab === 'containers'}
-                className={getTitlebarTabClass(activeWorkspaceTab === 'containers')}
+                active={activeWorkspaceTab === "containers"}
+                className={getTitlebarTabClass(
+                  activeWorkspaceTab === "containers",
+                )}
                 onClick={onSelectContainers}
               >
                 <Container className="h-4 w-4 flex-none" aria-hidden />
@@ -1920,10 +2194,10 @@ export function AppTitleBar({
             ref={titlebarTabStripRef}
             data-titlebar-tab-strip="true"
             className={cn(
-              'flex min-w-0 items-stretch gap-[0.3rem] overflow-x-auto overflow-y-hidden pl-1.5 h-full',
+              "flex min-w-0 items-stretch gap-[0.3rem] overflow-x-auto overflow-y-hidden pl-1.5 h-full",
               !isTitlebarInternalDragActive
                 ? chromeDragRegion
-                : '[-webkit-app-region:no-drag]',
+                : "[-webkit-app-region:no-drag]",
             )}
             onScroll={updateTitlebarTabStripFades}
             onWheel={(event) => {
@@ -1947,7 +2221,7 @@ export function AppTitleBar({
                 return;
               }
               event.preventDefault();
-              event.dataTransfer.dropEffect = 'move';
+              event.dataTransfer.dropEffect = "move";
               const drop = computeTabDrop(event.clientX);
               if (drop) {
                 const targetKey = getTabKey(drop.target);
@@ -1997,8 +2271,11 @@ export function AppTitleBar({
               const tabSlideStyle: CSSProperties = {
                 transform: slideX ? `translateX(${slideX}px)` : undefined,
               };
-              if (item.kind === 'session') {
-                const target = { kind: 'session', sessionId: item.sessionId } as const;
+              if (item.kind === "session") {
+                const target = {
+                  kind: "session",
+                  sessionId: item.sessionId,
+                } as const;
                 const targetKey = getTabKey(target);
                 return (
                   <div
@@ -2009,293 +2286,364 @@ export function AppTitleBar({
                     style={tabSlideStyle}
                     data-titlebar-tab-item="true"
                     className={cn(
-                      'group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150 [-webkit-app-region:no-drag]',
+                      "group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150 [-webkit-app-region:no-drag]",
                       getTitlebarDynamicTabContainerClass(item.active),
-                      isDragSource && tabDragSourceHidden && 'opacity-0',
+                      isDragSource && tabDragSourceHidden && "opacity-0",
                     )}
                     draggable
-                onMouseEnter={(event) => showTabHover(targetKey, event.currentTarget)}
-                onMouseLeave={() => hideTabHover(targetKey)}
-                onContextMenu={(event) => {
-                  // 지금은 RDP 세션에만 메뉴가 있다(모니터 펼치기). VNC 는 프레임버퍼가 하나라
-                  // 그 메뉴가 성립하지 않는다. 다른 탭은 기본 동작을 막지 않는다.
-                  if (item.paneKind !== 'rdp') {
-                    return;
-                  }
-                  event.preventDefault();
-                  hideTabHover(targetKey);
-                  setTabMenu({
-                    sessionId: item.sessionId,
-                    x: event.clientX,
-                    y: event.clientY,
-                  });
-                }}
-                onDragStart={(event) => {
-                  event.dataTransfer.effectAllowed = 'move';
-                  event.dataTransfer.setData('application/x-dolssh-session-id', item.sessionId);
-                  event.dataTransfer.setData(TAB_DRAG_MIME, serializeDraggedTab({ kind: 'session', sessionId: item.sessionId }));
-                  const nextDraggedTab = { kind: 'session', sessionId: item.sessionId } as const;
-                  draggedTabRef.current = nextDraggedTab;
-                  captureTabDragLayout(event.currentTarget.offsetWidth);
-                  setIsTabDragging(true);
-                  onStartSessionDrag(item.sessionId);
-                }}
-                onDragEnd={() => {
-                  draggedTabRef.current = null;
-                  setTabDropPreview(null);
-                  setIsTabDragging(false);
-                  setIsDetachHovering(false);
-                  stopTabAutoScroll();
-                  onEndSessionDrag();
-                }}
-              >
-                <TabButton
-                  active={item.active}
-                  // 이름과 닫기 버튼 사이를 좁힌다. 예전에는 지연 숫자(9ms → 142ms)가 그 자리에
-                  // 있었지만 세션 하단바로 내려갔고, 남은 여백은 이제 빈자리일 뿐이다.
-                  // 긴 이름이 탭 줄을 다 먹지 않도록 위쪽 한계만 둔다.
-                  className={cn(
-                    'max-w-[16rem]',
-                    getTitlebarDynamicTabButtonClass(item.active),
-                  )}
-                  // 제목은 잘려서 보이고(truncate) 상태 점이 같은 버튼 안에 섞여 있다. 이름을
-                  // 따로 주지 않으면 화면 낭독이 "● Prod" 처럼 읽고, 자동화도 이 탭을 특정할 수
-                  // 없다(닫기 버튼에만 이름이 있었다).
-                  //
-                  // 지연 숫자는 여기 없다 — 세션 하단바로 내렸다. 탭 안에 두면 자릿수가 바뀔 때
-                  // (9ms → 142ms) 활성 탭 폭이 흔들려 제목 잘리는 위치가 같이 움직였고, 분할에서는
-                  // 활성 pane 것만 보여 나머지 pane 의 지연은 볼 수 없었다. hover 행에는 남아 있다.
-                  aria-label={translate('titleBar.tab.selectSession', { title: item.title })}
-                  onClick={() => onSelectSession(item.sessionId)}
-                >
-                  <TabStatusDot state={item.dotState} />
-                  <span className="truncate">{item.title}</span>
-                </TabButton>
-                <IconButton
-                  size="sm"
-                  tone="ghost"
-                  className={getTitlebarCloseButtonClass(item.active)}
-                  aria-label={translate('titleBar.tab.closeSession', { title: item.title })}
-                  onClick={async (event) => {
-                    event.stopPropagation();
-                    await onCloseSession(item.sessionId);
-                  }}
-                  disabled={item.status === 'disconnecting'}
-                >
-                  ×
-                </IconButton>
-              </div>
-            );
-          }
-
-          if (item.kind === 'tmux') {
-            const target = {
-              kind: 'tmux',
-              tmuxGroupId: item.tmuxGroupId,
-            } as const;
-            const tmuxTargetKey = getTabKey(target);
-            return (
-              <div
-                key={`tmuxgrp:${item.tmuxGroupId}`}
-                ref={(node) => {
-                  titlebarTabItemRefs.current[tmuxTargetKey] = node;
-                }}
-                style={tabSlideStyle}
-                data-titlebar-tab-item="true"
-                className={cn(
-                  'group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150 [-webkit-app-region:no-drag]',
-                  getTitlebarDynamicTabContainerClass(item.active),
-                  isDragSource && tabDragSourceHidden && 'opacity-0',
-                )}
-                draggable
-                onMouseEnter={(event) => showTabHover(tmuxTargetKey, event.currentTarget)}
-                onMouseLeave={() => hideTabHover(tmuxTargetKey)}
-                onDragStart={(event) => {
-                  event.dataTransfer.effectAllowed = 'move';
-                  event.dataTransfer.setData('text/plain', item.title);
-                  event.dataTransfer.setData(
-                    TAB_DRAG_MIME,
-                    serializeDraggedTab({
-                      kind: 'tmux',
-                      tmuxGroupId: item.tmuxGroupId,
-                    }),
-                  );
-                  draggedTabRef.current = {
-                    kind: 'tmux',
-                    tmuxGroupId: item.tmuxGroupId,
-                  };
-                  captureTabDragLayout(event.currentTarget.offsetWidth);
-                  setIsTabDragging(true);
-                }}
-                onDragEnd={() => {
-                  draggedTabRef.current = null;
-                  setTabDropPreview(null);
-                  setIsTabDragging(false);
-                  setIsDetachHovering(false);
-                  stopTabAutoScroll();
-                }}
-              >
-                <TabButton
-                  active={item.active}
-                  // 이름과 닫기 버튼 사이를 좁힌다. 예전에는 지연 숫자(9ms → 142ms)가 그 자리에
-                  // 있었지만 세션 하단바로 내려갔고, 남은 여백은 이제 빈자리일 뿐이다.
-                  // 긴 이름이 탭 줄을 다 먹지 않도록 위쪽 한계만 둔다.
-                  className={cn(
-                    'max-w-[16rem]',
-                    getTitlebarDynamicTabButtonClass(item.active),
-                  )}
-                  onClick={() => onSelectTmuxGroup(item.tmuxGroupId)}
-                >
-                  <span
-                    className={cn(
-                      'mr-1.5',
-                      item.reconnecting
-                        ? 'animate-spin text-[var(--warning-text)]'
-                        : 'text-[var(--accent)]',
-                    )}
-                    aria-hidden
+                    onMouseEnter={(event) =>
+                      showTabHover(targetKey, event.currentTarget)
+                    }
+                    onMouseLeave={() => hideTabHover(targetKey)}
+                    onContextMenu={(event) => {
+                      // 지금은 RDP 세션에만 메뉴가 있다(모니터 펼치기). VNC 는 프레임버퍼가 하나라
+                      // 그 메뉴가 성립하지 않는다. 다른 탭은 기본 동작을 막지 않는다.
+                      if (item.paneKind !== "rdp") {
+                        return;
+                      }
+                      event.preventDefault();
+                      hideTabHover(targetKey);
+                      tabMenuTriggerRef.current = event.currentTarget;
+                      setTabMenu({
+                        kind: "rdp",
+                        sessionId: item.sessionId,
+                        x: event.clientX,
+                        y: event.clientY,
+                      });
+                    }}
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData(
+                        "application/x-dolssh-session-id",
+                        item.sessionId,
+                      );
+                      event.dataTransfer.setData(
+                        TAB_DRAG_MIME,
+                        serializeDraggedTab({
+                          kind: "session",
+                          sessionId: item.sessionId,
+                        }),
+                      );
+                      const nextDraggedTab = {
+                        kind: "session",
+                        sessionId: item.sessionId,
+                      } as const;
+                      draggedTabRef.current = nextDraggedTab;
+                      captureTabDragLayout(event.currentTarget.offsetWidth);
+                      setIsTabDragging(true);
+                      onStartSessionDrag(item.sessionId);
+                    }}
+                    onDragEnd={() => {
+                      draggedTabRef.current = null;
+                      setTabDropPreview(null);
+                      setIsTabDragging(false);
+                      setIsDetachHovering(false);
+                      stopTabAutoScroll();
+                      onEndSessionDrag();
+                    }}
                   >
-                    {item.reconnecting ? (
-                      <RefreshCw className="h-4 w-4" />
-                    ) : (
-                      <Columns2 className="h-4 w-4" />
-                    )}
-                  </span>
-                  <span className="truncate">{item.title}</span>
-                </TabButton>
-                <IconButton
-                  size="sm"
-                  tone="ghost"
-                  className={getTitlebarCloseButtonClass(item.active)}
-                  aria-label={translate('titleBar.tab.detachTmux', { title: item.title })}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onCloseTmuxGroup(item.tmuxGroupId);
-                  }}
-                >
-                  ×
-                </IconButton>
-              </div>
-            );
-          }
+                    <TabButton
+                      active={item.active}
+                      // 이름과 닫기 버튼 사이를 좁힌다. 예전에는 지연 숫자(9ms → 142ms)가 그 자리에
+                      // 있었지만 세션 하단바로 내려갔고, 남은 여백은 이제 빈자리일 뿐이다.
+                      // 긴 이름이 탭 줄을 다 먹지 않도록 위쪽 한계만 둔다.
+                      className={cn(
+                        "max-w-[16rem]",
+                        getTitlebarDynamicTabButtonClass(item.active),
+                      )}
+                      // 제목은 잘려서 보이고(truncate) 상태 점이 같은 버튼 안에 섞여 있다. 이름을
+                      // 따로 주지 않으면 화면 낭독이 "● Prod" 처럼 읽고, 자동화도 이 탭을 특정할 수
+                      // 없다(닫기 버튼에만 이름이 있었다).
+                      //
+                      // 지연 숫자는 여기 없다 — 세션 하단바로 내렸다. 탭 안에 두면 자릿수가 바뀔 때
+                      // (9ms → 142ms) 활성 탭 폭이 흔들려 제목 잘리는 위치가 같이 움직였고, 분할에서는
+                      // 활성 pane 것만 보여 나머지 pane 의 지연은 볼 수 없었다. hover 행에는 남아 있다.
+                      aria-label={translate("titleBar.tab.selectSession", {
+                        title: item.title,
+                      })}
+                      onClick={() => onSelectSession(item.sessionId)}
+                    >
+                      <TabStatusDot state={item.dotState} />
+                      <span className="truncate">{item.title}</span>
+                    </TabButton>
+                    <IconButton
+                      size="sm"
+                      tone="ghost"
+                      className={getTitlebarCloseButtonClass(item.active)}
+                      aria-label={translate("titleBar.tab.closeSession", {
+                        title: item.title,
+                      })}
+                      onClick={async (event) => {
+                        event.stopPropagation();
+                        await onCloseSession(item.sessionId);
+                      }}
+                      disabled={item.status === "disconnecting"}
+                    >
+                      ×
+                    </IconButton>
+                  </div>
+                );
+              }
 
-          const target = { kind: 'workspace', workspaceId: item.workspaceId } as const;
-          const targetKey = getTabKey(target);
-          return (
-            <div
-              key={item.workspaceId}
-              ref={(node) => {
-                titlebarTabItemRefs.current[targetKey] = node;
-              }}
-              style={tabSlideStyle}
-              data-titlebar-tab-item="true"
-              className={cn(
-                'group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150 [-webkit-app-region:no-drag]',
-                getTitlebarDynamicTabContainerClass(item.active),
-                isDragSource && tabDragSourceHidden && 'opacity-0',
-              )}
-              draggable
-              onMouseEnter={(event) => showTabHover(targetKey, event.currentTarget)}
-              onMouseLeave={() => hideTabHover(targetKey)}
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = 'move';
-                event.dataTransfer.setData('text/plain', item.title);
-                event.dataTransfer.setData(TAB_DRAG_MIME, serializeDraggedTab({ kind: 'workspace', workspaceId: item.workspaceId }));
-                const nextDraggedTab = { kind: 'workspace', workspaceId: item.workspaceId } as const;
-                draggedTabRef.current = nextDraggedTab;
-                captureTabDragLayout(event.currentTarget.offsetWidth);
-                setIsTabDragging(true);
-              }}
-              onDragEnd={() => {
-                draggedTabRef.current = null;
-                setTabDropPreview(null);
-                setIsTabDragging(false);
-                setIsDetachHovering(false);
-                stopTabAutoScroll();
-              }}
-            >
-              <TabButton
-                active={item.active}
-                className={cn(
-                  'min-w-[10.5rem] gap-2',
-                  getTitlebarDynamicTabButtonClass(item.active),
-                )}
-                onClick={() => onSelectWorkspace(item.workspaceId)}
-              >
-                <span
+              if (item.kind === "tmux") {
+                const target = {
+                  kind: "tmux",
+                  tmuxGroupId: item.tmuxGroupId,
+                } as const;
+                const tmuxTargetKey = getTabKey(target);
+                return (
+                  <div
+                    key={`tmuxgrp:${item.tmuxGroupId}`}
+                    ref={(node) => {
+                      titlebarTabItemRefs.current[tmuxTargetKey] = node;
+                    }}
+                    style={tabSlideStyle}
+                    data-titlebar-tab-item="true"
+                    className={cn(
+                      "group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150 [-webkit-app-region:no-drag]",
+                      getTitlebarDynamicTabContainerClass(item.active),
+                      isDragSource && tabDragSourceHidden && "opacity-0",
+                    )}
+                    draggable
+                    onMouseEnter={(event) =>
+                      showTabHover(tmuxTargetKey, event.currentTarget)
+                    }
+                    onMouseLeave={() => hideTabHover(tmuxTargetKey)}
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", item.title);
+                      event.dataTransfer.setData(
+                        TAB_DRAG_MIME,
+                        serializeDraggedTab({
+                          kind: "tmux",
+                          tmuxGroupId: item.tmuxGroupId,
+                        }),
+                      );
+                      draggedTabRef.current = {
+                        kind: "tmux",
+                        tmuxGroupId: item.tmuxGroupId,
+                      };
+                      captureTabDragLayout(event.currentTarget.offsetWidth);
+                      setIsTabDragging(true);
+                    }}
+                    onDragEnd={() => {
+                      draggedTabRef.current = null;
+                      setTabDropPreview(null);
+                      setIsTabDragging(false);
+                      setIsDetachHovering(false);
+                      stopTabAutoScroll();
+                    }}
+                  >
+                    <TabButton
+                      active={item.active}
+                      // 이름과 닫기 버튼 사이를 좁힌다. 예전에는 지연 숫자(9ms → 142ms)가 그 자리에
+                      // 있었지만 세션 하단바로 내려갔고, 남은 여백은 이제 빈자리일 뿐이다.
+                      // 긴 이름이 탭 줄을 다 먹지 않도록 위쪽 한계만 둔다.
+                      className={cn(
+                        "max-w-[16rem]",
+                        getTitlebarDynamicTabButtonClass(item.active),
+                      )}
+                      onClick={() => onSelectTmuxGroup(item.tmuxGroupId)}
+                    >
+                      <span
+                        className={cn(
+                          "mr-1.5",
+                          item.reconnecting
+                            ? "animate-spin text-[var(--warning-text)]"
+                            : "text-[var(--accent)]",
+                        )}
+                        aria-hidden
+                      >
+                        {item.reconnecting ? (
+                          <RefreshCw className="h-4 w-4" />
+                        ) : (
+                          <Columns2 className="h-4 w-4" />
+                        )}
+                      </span>
+                      <span className="truncate">{item.title}</span>
+                    </TabButton>
+                    <IconButton
+                      size="sm"
+                      tone="ghost"
+                      className={getTitlebarCloseButtonClass(item.active)}
+                      aria-label={translate("titleBar.tab.detachTmux", {
+                        title: item.title,
+                      })}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onCloseTmuxGroup(item.tmuxGroupId);
+                      }}
+                    >
+                      ×
+                    </IconButton>
+                  </div>
+                );
+              }
+
+              const target = {
+                kind: "workspace",
+                workspaceId: item.workspaceId,
+              } as const;
+              const targetKey = getTabKey(target);
+              return (
+                <div
+                  key={item.workspaceId}
+                  ref={(node) => {
+                    titlebarTabItemRefs.current[targetKey] = node;
+                  }}
+                  style={tabSlideStyle}
+                  data-titlebar-tab-item="true"
                   className={cn(
-                    'inline-flex h-6 w-6 items-center justify-center rounded-full text-[0.9rem]',
-                    item.active
-                      ? 'bg-[var(--accent-surface)] text-[var(--accent-strong)]'
-                      : 'bg-[rgba(255,255,255,0.08)] text-[rgba(243,247,251,0.78)]',
+                    "group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150 [-webkit-app-region:no-drag]",
+                    getTitlebarDynamicTabContainerClass(item.active),
+                    isDragSource && tabDragSourceHidden && "opacity-0",
                   )}
-                  aria-hidden="true"
-                >
-                  <Rows2 className="h-4 w-4" />
-                </span>
-                <span className="truncate">{item.title}</span>
-                <span
-                  className={cn(
-                    'ml-auto inline-flex min-w-[1.5rem] items-center justify-center rounded-full px-2 py-0.5 text-[0.7rem] font-semibold',
-                    item.active
-                      ? 'bg-[var(--accent-surface)] text-[var(--accent-strong)]'
-                      : 'bg-[rgba(255,255,255,0.08)] text-[rgba(243,247,251,0.78)]',
-                  )}
-                >
-                  {item.paneCount}
-                </span>
-              </TabButton>
-              {item.isTmux ? (
-                <IconButton
-                  size="sm"
-                  tone="ghost"
-                  className={getTitlebarCloseButtonClass(item.active)}
-                  aria-label={translate('titleBar.tab.newTmuxWindow', { title: item.title })}
-                  title={translate('titleBar.tab.newTmuxWindowTitle')}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onNewTmuxWindow?.(item.workspaceId);
+                  draggable
+                  onMouseEnter={(event) =>
+                    showTabHover(targetKey, event.currentTarget)
+                  }
+                  onMouseLeave={() => hideTabHover(targetKey)}
+                  onContextMenu={(event) => {
+                    const workspace = workspaces.find(
+                      (candidate) => candidate.id === item.workspaceId,
+                    );
+                    const capturedRoot = workspace
+                      ? captureSavedWorkspaceNode(workspace.layout, tabs, hosts)
+                      : null;
+                    if (
+                      !onSaveWorkspace ||
+                      !workspace ||
+                      workspace.tmux != null ||
+                      item.paneCount < 2 ||
+                      capturedRoot === null ||
+                      // 상한(깊이·pane 수)을 넘는 레이아웃은 주 프로세스가 거절한다. 여기서
+                      // 걸러야 이름까지 입력한 뒤 번역되지 않은 내부 문구를 보지 않는다.
+                      !isSavedWorkspaceNodeWithinLimits(capturedRoot)
+                    ) {
+                      return;
+                    }
+                    event.preventDefault();
+                    hideTabHover(targetKey);
+                    tabMenuTriggerRef.current = event.currentTarget;
+                    setTabMenu({
+                      kind: "workspace",
+                      workspaceId: item.workspaceId,
+                      x: event.clientX,
+                      y: event.clientY,
+                    });
+                  }}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", item.title);
+                    event.dataTransfer.setData(
+                      TAB_DRAG_MIME,
+                      serializeDraggedTab({
+                        kind: "workspace",
+                        workspaceId: item.workspaceId,
+                      }),
+                    );
+                    const nextDraggedTab = {
+                      kind: "workspace",
+                      workspaceId: item.workspaceId,
+                    } as const;
+                    draggedTabRef.current = nextDraggedTab;
+                    captureTabDragLayout(event.currentTarget.offsetWidth);
+                    setIsTabDragging(true);
+                  }}
+                  onDragEnd={() => {
+                    draggedTabRef.current = null;
+                    setTabDropPreview(null);
+                    setIsTabDragging(false);
+                    setIsDetachHovering(false);
+                    stopTabAutoScroll();
                   }}
                 >
-                  <Plus className="h-4 w-4" />
-                </IconButton>
-              ) : null}
-              <IconButton
-                size="sm"
-                tone="ghost"
-                className={getTitlebarCloseButtonClass(item.active)}
-                // tmux workspace 의 × 는 그 window 하나만 닫는다(closeWorkspace → 그 window 의
-                // pane 만 kill-pane; tmux 가 마지막 pane kill 시 해당 window 만 닫음). 세션 전체
-                // detach 는 pane 하단 control 바의 Detach 로만 한다.
-                aria-label={
-                  item.isTmux
-                    ? translate('titleBar.tab.closeThisWindow', { title: item.title })
-                    : translate('titleBar.tab.close', { title: item.title })
-                }
-                title={
-                  item.isTmux
-                    ? translate('titleBar.tab.closeThisWindowTooltip')
-                    : undefined
-                }
-                onClick={async (event) => {
-                  event.stopPropagation();
-                  await onCloseWorkspace(item.workspaceId);
-                }}
-              >
-                <X className="h-4 w-4" />
-              </IconButton>
-            </div>
-          );
-        })}
-        {/* 마지막 탭 뒤 여백 스페이서. flex + overflow-x 컨테이너는 스크롤 끝에서
+                  <TabButton
+                    active={item.active}
+                    className={cn(
+                      "min-w-[10.5rem] gap-2",
+                      getTitlebarDynamicTabButtonClass(item.active),
+                    )}
+                    onClick={() => onSelectWorkspace(item.workspaceId)}
+                  >
+                    <span
+                      className={cn(
+                        "inline-flex h-6 w-6 items-center justify-center rounded-full text-[0.9rem]",
+                        item.active
+                          ? "bg-[var(--accent-surface)] text-[var(--accent-strong)]"
+                          : "bg-[rgba(255,255,255,0.08)] text-[rgba(243,247,251,0.78)]",
+                      )}
+                      aria-hidden="true"
+                    >
+                      <Rows2 className="h-4 w-4" />
+                    </span>
+                    <span className="truncate">{item.title}</span>
+                    <span
+                      className={cn(
+                        "ml-auto inline-flex min-w-[1.5rem] items-center justify-center rounded-full px-2 py-0.5 text-[0.7rem] font-semibold",
+                        item.active
+                          ? "bg-[var(--accent-surface)] text-[var(--accent-strong)]"
+                          : "bg-[rgba(255,255,255,0.08)] text-[rgba(243,247,251,0.78)]",
+                      )}
+                    >
+                      {item.paneCount}
+                    </span>
+                  </TabButton>
+                  {item.isTmux ? (
+                    <IconButton
+                      size="sm"
+                      tone="ghost"
+                      className={getTitlebarCloseButtonClass(item.active)}
+                      aria-label={translate("titleBar.tab.newTmuxWindow", {
+                        title: item.title,
+                      })}
+                      title={translate("titleBar.tab.newTmuxWindowTitle")}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onNewTmuxWindow?.(item.workspaceId);
+                      }}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </IconButton>
+                  ) : null}
+                  <IconButton
+                    size="sm"
+                    tone="ghost"
+                    className={getTitlebarCloseButtonClass(item.active)}
+                    // tmux workspace 의 × 는 그 window 하나만 닫는다(closeWorkspace → 그 window 의
+                    // pane 만 kill-pane; tmux 가 마지막 pane kill 시 해당 window 만 닫음). 세션 전체
+                    // detach 는 pane 하단 control 바의 Detach 로만 한다.
+                    aria-label={
+                      item.isTmux
+                        ? translate("titleBar.tab.closeThisWindow", {
+                            title: item.title,
+                          })
+                        : translate("titleBar.tab.close", { title: item.title })
+                    }
+                    title={
+                      item.isTmux
+                        ? translate("titleBar.tab.closeThisWindowTooltip")
+                        : undefined
+                    }
+                    onClick={async (event) => {
+                      event.stopPropagation();
+                      await onCloseWorkspace(item.workspaceId);
+                    }}
+                  >
+                    <X className="h-4 w-4" />
+                  </IconButton>
+                </div>
+              );
+            })}
+            {/* 마지막 탭 뒤 여백 스페이서. flex + overflow-x 컨테이너는 스크롤 끝에서
             오른쪽 padding 을 무시해(Chromium) 마지막 탭의 둥근 모서리가 잘린다 → 패딩 대신
             항상 스페이서로 여백을 확보한다. 드래그 중엔 넓혀 '맨 끝으로 놓기'도 쉽게. */}
-        {dynamicItems.length > 0 ? (
-          <div
-            aria-hidden
-            className={cn('h-10 flex-none', isTabDragging ? 'w-8' : 'w-2')}
-          />
-        ) : null}
+            {dynamicItems.length > 0 ? (
+              <div
+                aria-hidden
+                className={cn("h-10 flex-none", isTabDragging ? "w-8" : "w-2")}
+              />
+            ) : null}
           </div>
         </div>
         {/* 마지막 탭 옆의 새 탭 버튼.
@@ -2313,7 +2661,7 @@ export function AppTitleBar({
           항상 드래그 영역이 남는다. 스크롤 스트립과 겹치지 않는 형제라 안전. */}
       <div
         aria-hidden
-        className={cn('min-w-16 flex-none self-stretch', chromeDragRegion)}
+        className={cn("min-w-16 flex-none self-stretch", chromeDragRegion)}
       />
       <div className="relative flex items-center self-center mb-[0.42rem] gap-[0.55rem] [-webkit-app-region:no-drag]">
         {/* 아래 두 버튼(패널 토글·알림)은 같은 규칙을 쓴다: 평소엔 아이콘만, 켜져 있으면 채운
@@ -2331,51 +2679,65 @@ export function AppTitleBar({
         {sessionPanelSessionId ? (
           <IconButton
             tone="default"
-            className={cn(CHROME_TOGGLE_CLASS, sessionPanelOpen && CHROME_TOGGLE_ON_CLASS)}
+            className={cn(
+              CHROME_TOGGLE_CLASS,
+              sessionPanelOpen && CHROME_TOGGLE_ON_CLASS,
+            )}
             aria-pressed={sessionPanelOpen}
-            aria-label={translate('sessionPanel.toggle')}
-            title={translate('sessionPanel.toggle')}
+            aria-label={translate("sessionPanel.toggle")}
+            title={translate("sessionPanel.toggle")}
             onClick={onToggleSessionPanel}
           >
-            <PanelRight className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
+            <PanelRight
+              className="h-[1.15rem] w-[1.15rem]"
+              aria-hidden="true"
+            />
           </IconButton>
         ) : null}
-        <div className="relative [-webkit-app-region:no-drag]" ref={updateMenuRef}>
+        <div
+          className="relative [-webkit-app-region:no-drag]"
+          ref={updateMenuRef}
+        >
           {showInstallAction ? (
             <Tooltip label={installTooltip}>
               <Button
                 variant="primary"
                 size="sm"
                 className="h-9 min-h-9 whitespace-nowrap rounded-[9px] px-3"
-                aria-label={translate('titleBar.update.label')}
+                aria-label={translate("titleBar.update.label")}
                 aria-busy={isInstallingUpdate}
                 disabled={isInstallingUpdate}
                 onClick={handleInstallUpdate}
               >
                 {isInstallingUpdate ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  <RefreshCw
+                    className="h-4 w-4 animate-spin"
+                    aria-hidden="true"
+                  />
                 ) : (
                   <Download className="h-4 w-4" aria-hidden="true" />
                 )}
                 {isInstallingUpdate
-                  ? translate('titleBar.update.installing')
-                  : translate('titleBar.update.badge')}
+                  ? translate("titleBar.update.installing")
+                  : translate("titleBar.update.badge")}
               </Button>
             </Tooltip>
           ) : (
             <IconButton
               tone="default"
               className={cn(
-                'relative',
+                "relative",
                 CHROME_TOGGLE_CLASS,
                 isUpdateOpen && CHROME_TOGGLE_ON_CLASS,
               )}
               aria-pressed={isUpdateOpen}
-              aria-label={translate('titleBar.update.viewStatus')}
+              aria-label={translate("titleBar.update.viewStatus")}
               onClick={() => setIsUpdateOpen((current) => !current)}
             >
               <Bell className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
-              {showBadge ? <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[var(--accent-strong)] ring-2 ring-[var(--chrome-bg)]" /> : null}
+              {showBadge ? (
+                <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[var(--accent-strong)] ring-2 ring-[var(--chrome-bg)]" />
+              ) : null}
             </IconButton>
           )}
 
@@ -2387,14 +2749,19 @@ export function AppTitleBar({
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2.5 text-[var(--text)]">
-                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface))] text-[var(--accent-strong)]" aria-hidden="true">
+                    <span
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface))] text-[var(--accent-strong)]"
+                      aria-hidden="true"
+                    >
                       <ArrowUpRight className="h-[1.05rem] w-[1.05rem]" />
                     </span>
                     <strong>{titleText}</strong>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.82rem] text-[var(--text-soft)]">
                     {publishedAt ? <span>{publishedAt}</span> : null}
-                    {updateState.release?.version ? <span>Version {updateState.release.version}</span> : null}
+                    {updateState.release?.version ? (
+                      <span>Version {updateState.release.version}</span>
+                    ) : null}
                   </div>
                 </div>
                 <Badge>{updateState.currentVersion}</Badge>
@@ -2402,47 +2769,58 @@ export function AppTitleBar({
 
               <div className="space-y-3 pb-4 text-[0.9rem] leading-[1.55] text-[var(--text-soft)]">
                 {!updateState.enabled ? (
-                  <p>{translate('titleBar.update.devOnly')}</p>
+                  <p>{translate("titleBar.update.devOnly")}</p>
                 ) : null}
 
                 {!updateState.release && getEmptyReleaseMessage(updateState) ? (
                   <p>{getEmptyReleaseMessage(updateState)}</p>
                 ) : null}
 
-                {updateState.status === 'upToDate' ? <p>{translate('titleBar.update.upToDate')}</p> : null}
-                {updateState.status === 'available' ? (
-                  <p>{translate('titleBar.update.available')}</p>
+                {updateState.status === "upToDate" ? (
+                  <p>{translate("titleBar.update.upToDate")}</p>
                 ) : null}
-                {updateState.status === 'downloading' ? (
+                {updateState.status === "available" ? (
+                  <p>{translate("titleBar.update.available")}</p>
+                ) : null}
+                {updateState.status === "downloading" ? (
                   <p>
-                    {translate('titleBar.update.downloading', {
+                    {translate("titleBar.update.downloading", {
                       percent: formatProgressPercent(updateState),
                     })}
                   </p>
                 ) : null}
-                {updateState.status === 'downloaded' ? (
-                  <p>{translate('titleBar.update.downloaded')}</p>
+                {updateState.status === "downloaded" ? (
+                  <p>{translate("titleBar.update.downloaded")}</p>
                 ) : null}
-                {updateState.status === 'error' && updateState.errorMessage ? (
-                  <p className="text-[var(--danger-text)]">{updateState.errorMessage}</p>
+                {updateState.status === "error" && updateState.errorMessage ? (
+                  <p className="text-[var(--danger-text)]">
+                    {updateState.errorMessage}
+                  </p>
                 ) : null}
               </div>
 
               <div className="flex flex-wrap items-center justify-end gap-3 border-t border-[color-mix(in_srgb,var(--border)_82%,white_18%)] pt-4">
-                <Button variant="secondary" onClick={async () => {
-                  await onOpenReleasePage(releaseUrl);
-                }}>
+                <Button
+                  variant="secondary"
+                  onClick={async () => {
+                    await onOpenReleasePage(releaseUrl);
+                  }}
+                >
                   Changelog
                   <ArrowUpRight className="h-[0.9rem] w-[0.9rem]" />
                 </Button>
                 {showCheckAction ? (
                   <Button variant="primary" onClick={onCheckForUpdates}>
-                    {translate(updateState.status === 'error' ? 'titleBar.update.retry' : 'titleBar.update.check')}
+                    {translate(
+                      updateState.status === "error"
+                        ? "titleBar.update.retry"
+                        : "titleBar.update.check",
+                    )}
                   </Button>
                 ) : null}
                 {showDevDisabledAction ? (
                   <Button variant="secondary" disabled>
-                    {translate('titleBar.update.devDisabled')}
+                    {translate("titleBar.update.devDisabled")}
                   </Button>
                 ) : null}
               </div>
@@ -2463,40 +2841,42 @@ export function AppTitleBar({
           탭보다 왼쪽에 떨어졌다. */}
       {hoveredTab && hoverInfo
         ? createPortal(
-        <div
-          role="tooltip"
-          className="pointer-events-none fixed z-[200] w-max max-w-[300px] rounded-[10px] border border-[var(--chrome-border)] bg-[color-mix(in_srgb,var(--chrome-bg)_92%,black_8%)] px-3 py-2.5 text-[#f3f7fb] shadow-[0_12px_32px_rgba(0,0,0,0.45)] [-webkit-app-region:no-drag]"
-          style={{ left: hoveredTab.left, top: hoveredTab.top }}
-        >
-          <div className="text-[0.82rem] font-semibold tracking-[0.01em]">
-            {hoverInfo.heading}
-          </div>
-          {hoverInfo.target ? (
-            <div className="mt-0.5 max-w-[276px] truncate font-mono text-[0.7rem] text-[rgba(243,247,251,0.62)]">
-              {hoverInfo.target}
-            </div>
-          ) : null}
-          {hoverInfo.rows.length > 0 ? (
-            <div className="mt-2 space-y-1 border-t border-[rgba(255,255,255,0.08)] pt-2">
-              {hoverInfo.rows.map((row) => (
-                <div
-                  key={row.label}
-                  className="flex items-center justify-between gap-5 text-[0.7rem]"
-                >
-                  <span className="flex-none text-[rgba(243,247,251,0.45)]">
-                    {row.label}
-                  </span>
-                  <span
-                    className="max-w-[190px] truncate text-right text-[rgba(243,247,251,0.9)]"
-                    style={row.valueColor ? { color: row.valueColor } : undefined}
-                  >
-                    {row.value}
-                  </span>
+            <div
+              role="tooltip"
+              className="pointer-events-none fixed z-[200] w-max max-w-[300px] rounded-[10px] border border-[var(--chrome-border)] bg-[color-mix(in_srgb,var(--chrome-bg)_92%,black_8%)] px-3 py-2.5 text-[#f3f7fb] shadow-[0_12px_32px_rgba(0,0,0,0.45)] [-webkit-app-region:no-drag]"
+              style={{ left: hoveredTab.left, top: hoveredTab.top }}
+            >
+              <div className="text-[0.82rem] font-semibold tracking-[0.01em]">
+                {hoverInfo.heading}
+              </div>
+              {hoverInfo.target ? (
+                <div className="mt-0.5 max-w-[276px] truncate font-mono text-[0.7rem] text-[rgba(243,247,251,0.62)]">
+                  {hoverInfo.target}
                 </div>
-              ))}
-            </div>
-          ) : null}
-        </div>,
+              ) : null}
+              {hoverInfo.rows.length > 0 ? (
+                <div className="mt-2 space-y-1 border-t border-[rgba(255,255,255,0.08)] pt-2">
+                  {hoverInfo.rows.map((row) => (
+                    <div
+                      key={row.label}
+                      className="flex items-center justify-between gap-5 text-[0.7rem]"
+                    >
+                      <span className="flex-none text-[rgba(243,247,251,0.45)]">
+                        {row.label}
+                      </span>
+                      <span
+                        className="max-w-[190px] truncate text-right text-[rgba(243,247,251,0.9)]"
+                        style={
+                          row.valueColor ? { color: row.valueColor } : undefined
+                        }
+                      >
+                        {row.value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>,
             document.body,
           )
         : null}
@@ -2515,36 +2895,162 @@ export function AppTitleBar({
 
       {tabMenu
         ? createPortal(
-        <>
-          {/* 바깥을 누르면 닫는다. 메뉴보다 아래에 깔되 나머지 UI 는 덮는다. */}
-          <div
-            className="fixed inset-0 z-[60] [-webkit-app-region:no-drag]"
-            onClick={() => setTabMenu(null)}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              setTabMenu(null);
-            }}
-          />
-          <div
-            className="fixed z-[61] min-w-[13rem] rounded-[8px] border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[0_14px_28px_rgba(0,0,0,0.22)] [-webkit-app-region:no-drag]"
-            style={{ left: tabMenu.x, top: tabMenu.y }}
-          >
-            <button
-              type="button"
-              className="block w-full px-3 py-[0.4rem] text-left text-[0.82rem] text-[var(--text)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)]"
-              onClick={() => {
-                const sessionId = tabMenu.sessionId;
-                setTabMenu(null);
-                setMonitorPicker(sessionId);
-              }}
+            <>
+              {/* 바깥을 누르면 닫는다. 메뉴보다 아래에 깔되 나머지 UI 는 덮는다. */}
+              <div
+                className="fixed inset-0 z-[60] [-webkit-app-region:no-drag]"
+                onClick={() => closeTabMenu(true)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  closeTabMenu(true);
+                }}
+              />
+              <div
+                ref={tabMenuRef}
+                role="menu"
+                aria-label={
+                  tabMenu.kind === "rdp"
+                    ? translate("rdpMonitors.menuItem")
+                    : translate("savedWorkspace.saveMenu")
+                }
+                className="fixed z-[61] min-w-[13rem] rounded-[10px] border border-[var(--border)] bg-[var(--dialog-surface)] p-[0.35rem] shadow-[var(--shadow-floating)] [-webkit-app-region:no-drag]"
+                style={{
+                  left: Math.max(
+                    8,
+                    Math.min(tabMenu.x, window.innerWidth - 224),
+                  ),
+                  top: Math.max(
+                    8,
+                    Math.min(
+                      tabMenu.y,
+                      window.innerHeight -
+                        (tabMenu.kind === "rdp" ? 92 : 50) -
+                        8,
+                    ),
+                  ),
+                }}
+              >
+                {tabMenu.kind === "rdp" ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-start gap-[0.65rem] rounded-[8px] px-[0.7rem] py-[0.55rem] text-left text-[0.82rem] text-[var(--text)] transition-colors hover:bg-[var(--dialog-surface-muted)]"
+                    onClick={() => {
+                      const sessionId = tabMenu.sessionId;
+                      closeTabMenu();
+                      setMonitorPicker(sessionId);
+                    }}
+                  >
+                    <Rows2
+                      className="mt-[0.12rem] h-4 w-4 shrink-0 text-[var(--text-soft)]"
+                      aria-hidden="true"
+                    />
+                    <span>
+                      {translate("rdpMonitors.menuItem")}
+                      <span className="mt-[0.15rem] block text-[0.72rem] leading-[1.35] text-[var(--text-soft)]">
+                        {translate("rdpMonitors.menuHint")}
+                      </span>
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-[0.65rem] rounded-[8px] px-[0.7rem] py-[0.55rem] text-left text-[0.82rem] text-[var(--text)] transition-colors hover:bg-[var(--dialog-surface-muted)]"
+                    onClick={() => {
+                      const workspace = workspaces.find(
+                        (candidate) => candidate.id === tabMenu.workspaceId,
+                      );
+                      closeTabMenu();
+                      if (!workspace) {
+                        return;
+                      }
+                      setSaveWorkspaceTarget(workspace);
+                      setSaveWorkspaceName(workspace.title);
+                      setSaveWorkspaceError(null);
+                    }}
+                  >
+                    <Columns2
+                      className="h-4 w-4 shrink-0 text-[var(--text-soft)]"
+                      aria-hidden="true"
+                    />
+                    {translate("savedWorkspace.saveMenu")}
+                  </button>
+                )}
+              </div>
+            </>,
+            document.body,
+          )
+        : null}
+
+      {saveWorkspaceTarget
+        ? createPortal(
+            <DialogBackdrop
+              className="bg-[rgba(8,14,24,0.56)]"
+              onDismiss={closeSaveWorkspaceDialog}
+              dismissDisabled={isSavingWorkspace}
             >
-              {translate("rdpMonitors.menuItem")}
-              <span className="mt-[0.15rem] block text-[0.72rem] leading-[1.35] text-[var(--text-soft)]">
-                {translate("rdpMonitors.menuHint")}
-              </span>
-            </button>
-          </div>
-        </>,
+              <ModalShell
+                size="sm"
+                className="w-[min(26rem,calc(100vw-2rem))]"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="save-workspace-title"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <ModalHeader className="block px-5 pb-3 pt-4">
+                  <h3
+                    id="save-workspace-title"
+                    className="text-base font-bold text-[var(--text)]"
+                  >
+                    {translate("savedWorkspace.saveTitle")}
+                  </h3>
+                  <p className="mt-1 text-[0.78rem] leading-5 text-[var(--text-soft)]">
+                    {translate("savedWorkspace.saveDescription")}
+                  </p>
+                </ModalHeader>
+                <ModalBody className="px-5 pb-4 pt-3">
+                  <label className="grid gap-1.5 text-[0.76rem] font-semibold text-[var(--text-soft)]">
+                    {translate("savedWorkspace.nameLabel")}
+                    <Input
+                      autoFocus
+                      value={saveWorkspaceName}
+                      maxLength={80}
+                      onChange={(event) =>
+                        setSaveWorkspaceName(event.target.value)
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void submitSaveWorkspace();
+                        }
+                      }}
+                    />
+                  </label>
+                  {saveWorkspaceError ? (
+                    <NoticeCard tone="danger" className="mt-3" role="alert">
+                      {saveWorkspaceError}
+                    </NoticeCard>
+                  ) : null}
+                </ModalBody>
+                <ModalFooter className="gap-2 px-5 py-3">
+                  <Button
+                    variant="secondary"
+                    onClick={closeSaveWorkspaceDialog}
+                    disabled={isSavingWorkspace}
+                  >
+                    {translate("common.cancel")}
+                  </Button>
+                  <Button
+                    variant="primary"
+                    disabled={isSavingWorkspace || !saveWorkspaceName.trim()}
+                    onClick={() => void submitSaveWorkspace()}
+                  >
+                    {translate("savedWorkspace.saveAction")}
+                  </Button>
+                </ModalFooter>
+              </ModalShell>
+            </DialogBackdrop>,
             document.body,
           )
         : null}

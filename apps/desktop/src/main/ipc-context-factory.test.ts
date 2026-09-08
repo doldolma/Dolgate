@@ -38,6 +38,9 @@ function createDependencies(): RegisterIpcDependencies {
     snippets: {
       list: vi.fn(() => []),
     } as any,
+    savedWorkspaces: {
+      list: vi.fn(() => []),
+    } as any,
     knownHosts: {
       list: vi.fn(() => []),
       // 신뢰된 키가 없어도 설치는 진행된다 — 처음 보는 키는 코어가 연결 안에서 묻는다.
@@ -133,7 +136,9 @@ describe("createMainIpcContext", () => {
     expect(snapshot.groups).toHaveLength(1);
     expect(snapshot.portForwardSnapshot).toEqual({ rules: [], runtimes: [] });
     expect(snapshot.dnsOverrides).toEqual([]);
-    expect(deps.hostsOverrideManager.pruneStaticOverrideStates).toHaveBeenCalled();
+    expect(
+      deps.hostsOverrideManager.pruneStaticOverrideStates,
+    ).toHaveBeenCalled();
   });
 
   // 감싸는 함수가 인자를 줄이면 타입 검사가 잡아 주지 않는다 — 인자가 적은 함수는 많은 쪽에
@@ -158,7 +163,8 @@ describe("createMainIpcContext", () => {
           "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGX8pbiVYy3HVD1jfhKrzjs3b7ZgoE4BdAvAYMM7Ka8b prod",
         publicKeyFingerprintSha256: "SHA256:stored",
         keyAlgorithm: "ssh-ed25519",
-        privateKeyPem: "-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----",
+        privateKeyPem:
+          "-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----",
       }) as never,
     );
     const ctx = createMainIpcContext(deps);

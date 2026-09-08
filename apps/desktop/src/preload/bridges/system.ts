@@ -137,6 +137,25 @@ export function buildSnippetsBridge(
   };
 }
 
+export function buildSavedWorkspacesBridge(
+  ipcRenderer: IpcRenderer,
+): DesktopApi["savedWorkspaces"] {
+  return {
+    list: () => ipcRenderer.invoke(ipcChannels.savedWorkspaces.list),
+    create: (draft) => ipcRenderer.invoke(ipcChannels.savedWorkspaces.create, draft),
+    rename: (id: string, name: string) =>
+      ipcRenderer.invoke(ipcChannels.savedWorkspaces.rename, id, name),
+    moveToGroup: (id: string, groupName: string | null) =>
+      ipcRenderer.invoke(ipcChannels.savedWorkspaces.moveToGroup, id, groupName),
+    setFavorite: (id: string, favorite: boolean) =>
+      ipcRenderer.invoke(ipcChannels.savedWorkspaces.setFavorite, id, favorite),
+    touchOpened: (id: string) =>
+      ipcRenderer.invoke(ipcChannels.savedWorkspaces.touchOpened, id),
+    remove: (id: string) =>
+      ipcRenderer.invoke(ipcChannels.savedWorkspaces.remove, id),
+  };
+}
+
 export function buildNotificationsBridge(
   ipcRenderer: IpcRenderer,
 ): DesktopApi["notifications"] {

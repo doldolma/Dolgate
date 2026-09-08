@@ -24,8 +24,14 @@ vi.mock("electron", () => ({
   },
   screen: {
     getAllDisplays: vi.fn(() => []),
-    getPrimaryDisplay: vi.fn(() => ({ id: 1, bounds: { x: 0, y: 0, width: 1, height: 1 } })),
-    getDisplayMatching: vi.fn(() => ({ id: 1, bounds: { x: 0, y: 0, width: 1, height: 1 } })),
+    getPrimaryDisplay: vi.fn(() => ({
+      id: 1,
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+    })),
+    getDisplayMatching: vi.fn(() => ({
+      id: 1,
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+    })),
     on: vi.fn(),
   },
   BrowserWindow: {
@@ -79,8 +85,7 @@ vi.mock("./ipc/port-forwards-dns", () => ({
   registerPortForwardAndDnsIpcHandlers: moduleSpies.portForwardsDns,
 }));
 vi.mock("./ipc/known-hosts-logs-keychain", () => ({
-  registerKnownHostsLogsKeychainIpcHandlers:
-    moduleSpies.knownHostsLogsKeychain,
+  registerKnownHostsLogsKeychainIpcHandlers: moduleSpies.knownHostsLogsKeychain,
 }));
 vi.mock("./ipc/ssh-keys", () => ({
   registerSshKeyIpcHandlers: moduleSpies.sshKeys,
@@ -120,6 +125,7 @@ function createDependencySet() {
     portForwards: {} as any,
     dnsOverrides: {} as any,
     snippets: {} as any,
+    savedWorkspaces: {} as any,
     knownHosts: {} as any,
     activityLogs: {} as any,
     secretMetadata: {} as any,
@@ -166,6 +172,7 @@ describe("registerIpcHandlers", () => {
       deps.portForwards,
       deps.dnsOverrides,
       deps.snippets,
+      deps.savedWorkspaces,
       deps.knownHosts,
       deps.activityLogs,
       deps.secretMetadata,
@@ -190,7 +197,9 @@ describe("registerIpcHandlers", () => {
     );
 
     expect(deps.coreManager.setTerminalEventHandler).toHaveBeenCalledTimes(1);
-    expect(deps.coreManager.setPortForwardEventHandler).toHaveBeenCalledTimes(1);
+    expect(deps.coreManager.setPortForwardEventHandler).toHaveBeenCalledTimes(
+      1,
+    );
     expect(deps.coreManager.setTerminalStreamHandler).toHaveBeenCalledTimes(1);
 
     expect(moduleSpies.auth).toHaveBeenCalledTimes(1);

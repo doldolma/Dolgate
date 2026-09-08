@@ -21,7 +21,83 @@
     "cancel": "취소",
     "close": "닫기",
     "delete": "삭제",
+    "rename": "이름 변경",
+    "duplicate": "복제",
     "apply": "적용"
+  },
+  "savedWorkspace": {
+    "section": "Workspaces",
+    "count": "저장됨 {{count}}개",
+    "panes": "pane {{count}}개",
+    "panesHeading": "Pane 배치",
+    "open": "Workspace 열기",
+    "favorite": "Workspace 즐겨찾기",
+    "unfavorite": "즐겨찾기에서 제거",
+    "moreActions": "{{name}} 추가 작업",
+    "created": "{{date}} 생성",
+    "local": "로컬",
+    "missing": "호스트 없음",
+    "ready": "준비됨",
+    "recentActivity": "최근 활동",
+    "noRecentActivity": "이 Workspace 호스트의 최근 활동이 없습니다.",
+    "quickSubtitle": "pane {{count}}개 · {{targets}}",
+    "cardType": "Workspace",
+    "cardMeta": "Workspace · pane {{count}}개",
+    "ungrouped": "미분류",
+    "hostCount": "호스트 {{count}}개",
+    "localCount": "로컬 {{count}}개",
+    "missingCount": "없음 {{count}}개",
+    "lastOpened": "{{date}} 열림",
+    "assetCount": "항목 {{count}}개",
+    "emptyAssetsTitle": "호스트 또는 Workspace가 없습니다",
+    "emptyAssetsDescription": "호스트를 추가하거나 분할 탭을 Workspace로 저장하세요.",
+    "noMatchingAssets": "검색어, 필터 또는 홈 범위를 변경해 보세요.",
+    "saveMenu": "Workspace로 저장…",
+    "saveTitle": "Workspace로 저장",
+    "saveDescription": "이 분할 배치에서 새 Workspace 저장본을 만듭니다.",
+    "saveAction": "Workspace 저장",
+    "saveFailed": "Workspace를 저장하지 못했습니다.",
+    "renameTitle": "Workspace 이름 변경",
+    "renameDescription": "이 배치를 쉽게 알아볼 수 있는 이름을 입력하세요.",
+    "renameFailed": "Workspace 이름을 변경하지 못했습니다.",
+    "nameLabel": "Workspace 이름",
+    "deleteTitle": "Workspace를 삭제할까요?",
+    "deleteDescription": "“{{name}}”을(를) 삭제합니다. 실행 중인 세션과 호스트에는 영향을 주지 않습니다.",
+    "deleteFailed": "Workspace를 삭제하지 못했습니다.",
+    "unsupported": "이 탭은 Workspace로 저장할 수 없습니다.",
+    "notFound": "저장된 Workspace를 찾을 수 없습니다.",
+    "copyName": "{{name}} 복사본",
+    "invalid": "저장된 Workspace 배치가 올바르지 않습니다.",
+    "hostMissing": "{{label}} 호스트가 더 이상 없습니다. 호스트를 다시 추가한 뒤 이 pane을 재시도하세요.",
+    "hostUnsupported": "{{label}}은(는) 분할 Workspace에서 복원할 수 없습니다.",
+    "empty": {
+      "title": "저장된 Workspace가 없습니다",
+      "description": "탭을 pane 두 개 이상으로 분할한 뒤 탭을 우클릭하고 Workspace로 저장을 선택하세요."
+    },
+    "detail": {
+      "title": "Workspace 상세",
+      "placeholder": "Workspace를 선택하면 배치와 pane 정보를 볼 수 있습니다."
+    },
+    "hostMissingUsername": "{{label}} 호스트에 사용자 이름이 없습니다. 호스트에 사용자 이름을 지정한 뒤 이 pane 을 재시도하세요."
+  },
+  "homeAssets": {
+    "menu": {
+      "openMany": "열기 ({{count}}개)",
+      "connectNewWindowMany": "새 창에서 연결 (호스트 {{count}}개)",
+      "connectNewWindowHostSubset": "새 창에서 연결 (호스트 {{count}}개)",
+      "sftpHostSubset": "SFTP 연결 (호스트 {{count}}개)",
+      "sftpSelectOne": "SFTP 연결 (호스트 {{count}}개 중 1개만 선택)",
+      "tmuxHostSubset": "tmux로 연결 (호스트 {{count}}개)",
+      "containersHostSubset": "컨테이너 (호스트 {{count}}개)",
+      "editHostSubset": "호스트 수정 ({{count}}개)",
+      "renameWorkspace": "Workspace 이름 변경",
+      "renameWorkspaceSubset": "Workspace 이름 변경 ({{count}}개)",
+      "deleteMany": "삭제 ({{count}}개)"
+    },
+    "delete": {
+      "title": "항목 {{count}}개를 삭제할까요? (호스트 {{hosts}}개 · Workspace {{workspaces}}개)",
+      "failed": "항목 {{count}}개를 삭제하지 못했습니다. 남은 항목을 다시 시도할 수 있습니다."
+    }
   },
   "login": {
     "openBrowser": "브라우저로 로그인하기",
@@ -826,7 +902,7 @@
       "selectSession": "{{title}} 세션으로 이동"
     },
     "newTab": "새 탭",
-    "newTabSearch": "호스트 검색"
+    "newTabSearch": "Workspace와 호스트 검색"
   },
   "aws": {
     "ssm": {
@@ -993,8 +1069,11 @@
       "snippetUpdatedAt": "snippet 수정 시각",
       "selectedHostId": "선택 호스트 ID",
       "selectedHosts": "선택 호스트",
+      "selectedWorkspaceId": "선택 Workspace ID",
+      "selectedWorkspaces": "선택 Workspace",
       "groups": "그룹",
       "hosts": "호스트",
+      "workspaces": "Workspace",
       "secrets": "자격증명",
       "portForwards": "포트 포워딩",
       "awsProfiles": "AWS 프로필",
@@ -1012,6 +1091,7 @@
       "invalidGroup": "Dolgate 파일의 그룹 정보가 올바르지 않습니다.",
       "invalidGroupPath": "Dolgate 파일의 그룹 경로가 올바르지 않습니다.",
       "invalidHost": "Dolgate 파일의 호스트 정보가 올바르지 않습니다.",
+      "invalidWorkspace": "Dolgate 파일의 Workspace 정보가 올바르지 않습니다.",
       "invalidTailnet": "Dolgate 파일의 Tailnet 정보가 올바르지 않습니다.",
       "tailnetMissing": "{{label}}: 이 호스트가 쓰는 Tailnet 설정이 파일에 없습니다. Tailnet을 등록해야 연결됩니다.",
       "unknownHostKindSkipped": "이 버전이 모르는 종류의 호스트 {{count}}개를 건너뛰었습니다. 앱을 업데이트하면 가져올 수 있습니다.",
@@ -1031,7 +1111,9 @@
       "invalidDnsOverride": "Dolgate 파일의 DNS override 정보가 올바르지 않습니다.",
       "tooManyItems": "Dolgate 파일에 항목이 너무 많습니다.",
       "duplicateSelectedHostId": "Dolgate 파일에 중복된 선택 호스트 ID가 있습니다.",
+      "duplicateSelectedWorkspaceId": "Dolgate 파일에 중복된 선택 Workspace ID가 있습니다.",
       "invalidSelectedHostRef": "Dolgate 파일의 선택 호스트 참조가 올바르지 않습니다.",
+      "invalidSelectedWorkspaceRef": "Dolgate 파일의 선택 Workspace 참조가 올바르지 않습니다.",
       "missingSecret": "{{label}}: 연결된 자격증명이 파일에 없습니다.",
       "missingJumpHost": "{{label}}: 연결된 점프 호스트가 파일에 없습니다.",
       "missingAwsProfile": "{{label}}: 연결된 AWS 프로필이 파일에 없습니다.",
@@ -1043,7 +1125,9 @@
       "secureValueUnreadable": "{{label}}의 보안 저장 값을 읽을 수 없습니다.",
       "secureValueCorrupt": "{{label}}의 저장 값이 손상되었습니다.",
       "selectHostRequired": "내보낼 호스트를 선택해 주세요.",
+      "selectAssetRequired": "내보낼 호스트 또는 Workspace를 하나 이상 선택해 주세요.",
       "selectedHostMissing": "선택한 호스트를 찾을 수 없습니다. 목록을 새로고침해 주세요.",
+      "selectedWorkspaceMissing": "선택한 Workspace를 찾을 수 없습니다. 목록을 새로고침해 주세요.",
       "jumpHostCycle": "{{label}}: 점프 호스트 연결에 순환 참조가 있습니다.",
       "awsRoleCycle": "AWS 역할 프로필 연결에 순환 참조가 있습니다.",
       "secretIdMismatch": "자격증명 ID와 저장 값이 일치하지 않습니다.",
@@ -1665,6 +1749,7 @@
     "kind": {
       "tailnets": "Tailnet",
       "hosts": "호스트",
+      "workspaces": "Workspace",
       "groups": "그룹",
       "secrets": "자격증명",
       "awsProfiles": "AWS 프로필",
@@ -1672,7 +1757,7 @@
     },
     "counts": "{{label}} {{count}}개",
     "export": {
-      "title": "선택한 호스트 내보내기",
+      "title": "선택한 항목 내보내기",
       "close": "내보내기 닫기",
       "loading": "연결된 항목을 확인하는 중입니다.",
       "previewFailed": "내보내기 항목을 확인하지 못했습니다.",
@@ -1682,11 +1767,13 @@
       "confirmMismatch": "암호와 암호 확인이 일치하지 않습니다.",
       "passphraseMatch": "암호가 일치합니다.",
       "dolgateTitle": "Dolgate 파일",
-      "dolgateDescription": "선택한 호스트와 연결에 필요한 자격증명 및 설정을 암호화해 저장합니다.",
+      "dolgateDescription": "선택한 호스트와 Workspace 및 연결에 필요한 자격증명과 설정을 암호화해 저장합니다.",
       "dolgateHostCount": " 총 {{count}}개 호스트가 포함됩니다.",
+      "dolgateAssetCount": " 호스트 {{hosts}}개와 Workspace {{workspaces}}개가 포함됩니다.",
       "opensshNoSecrets": "자격증명은 제외됩니다.",
       "opensshCount": " {{count}}개 호스트{{jump}}를 내보낼 수 있습니다.",
       "opensshJump": "와 점프 호스트 {{count}}개",
+      "opensshWorkspaceExcluded": " Workspace 배치 {{count}}개는 제외되며 참조된 호환 호스트는 포함됩니다.",
       "passphraseLabel": "암호",
       "confirmLabel": "암호 확인",
       "passphraseWarning": "이 암호는 복구할 수 없으며 가져올 때 동일한 암호가 필요합니다.",
@@ -1730,7 +1817,7 @@
       "exportMany": "내보내기... ({{count}}개)",
       "newSubgroup": "하위 그룹 생성",
       "rename": "이름 변경",
-      "exportGroup": "내보내기... ({{count}}개 호스트)"
+      "exportGroup": "내보내기... (항목 {{count}}개)"
     },
     "error": {
       "groupCreateFailed": "그룹을 만들지 못했습니다.",
@@ -1744,7 +1831,7 @@
       "hostMany": "선택한 {{count}}개 호스트를 삭제할까요?",
       "groupSingle": "{{title}} 그룹을 삭제할까요?",
       "groupMany": "선택한 {{count}}개 그룹을 삭제할까요?",
-      "groupImpact": "하위 그룹 {{groups}}개와 호스트 {{hosts}}개가 함께 영향을 받습니다.",
+      "groupImpact": "하위 그룹 {{groups}}개, 호스트 {{hosts}}개, Workspace {{workspaces}}개가 함께 영향을 받습니다.",
       "groupEmpty": "이 그룹은 비어 있습니다. 삭제하면 바로 사라집니다.",
       "keepChildren": "하위 항목 유지",
       "deleteChildren": "하위 항목까지 삭제"
@@ -1882,8 +1969,8 @@
       "show": "값 표시"
     },
     "empty": {
-      "title": "호스트를 선택하세요",
-      "description": "왼쪽의 호스트 카드 또는 그룹에서 하나를 선택하면 상세 정보가 표시됩니다.",
+      "title": "호스트 또는 Workspace를 선택하세요",
+      "description": "왼쪽의 호스트/Workspace 카드 또는 그룹에서 하나를 선택하면 상세 정보가 표시됩니다.",
       "quickStart": "빠른 시작",
       "newHost": "새 호스트",
       "import": "가져오기",
@@ -1945,6 +2032,7 @@
       "navigation": "이동",
       "settings": "설정",
       "host": "호스트",
+      "workspace": "Workspaces",
       "quickConnect": "빠른 연결",
       "localTerminal": "터미널"
     },
@@ -1989,6 +2077,7 @@
     "opensshNoExportable": "선택한 호스트 중 OpenSSH 형식으로 내보낼 수 있는 항목이 없습니다.",
     "opensshExportTitle": "OpenSSH config 내보내기",
     "opensshExported": "선택한 호스트를 OpenSSH config로 내보냈습니다.",
+    "opensshWorkspaceLayoutsExcluded": "OpenSSH config에는 Workspace 배치가 포함되지 않습니다({{count}}개 제외). 참조된 호환 호스트는 포함했습니다.",
     "dolgateImportTitle": "Dolgate 호스트 파일 가져오기",
     "importRequestInvalid": "가져오기 요청이 올바르지 않습니다.",
     "fileTooLarge": "Dolgate 파일이 너무 크거나 올바른 파일이 아닙니다.",
@@ -2152,7 +2241,10 @@
     "transfer": {
       "exported": "{{count}}개 호스트를 내보냈습니다.",
       "exportSkipped": " {{count}}개는 제외했습니다.",
+      "assetsExported": "호스트 {{hosts}}개와 Workspace {{workspaces}}개를 내보냈습니다.",
+      "assetsSkipped": " 호스트 {{hosts}}개와 Workspace 배치 {{workspaces}}개는 제외했습니다.",
       "dolgateImported": "Dolgate 파일에서 호스트 {{count}}개를 가져왔습니다.",
+      "dolgateAssetsImported": "Dolgate 파일에서 호스트 {{hosts}}개와 Workspace {{workspaces}}개를 가져왔습니다.",
       "dolgateSkipped": " 이미 있는 항목 {{count}}개는 건너뛰었습니다.",
       "termiusImported": "Termius에서 {{hosts}}개 호스트, {{groups}}개 그룹, {{secrets}}개 secret을 가져왔습니다.",
       "termiusSkipped": " 불완전 호스트 {{count}}개는 건너뛰었습니다.",
@@ -2336,7 +2428,7 @@
       "newWindow": "새 창",
       "searchHosts": "호스트 검색",
       "find": "검색 / 찾기",
-      "newTab": "새 탭 (호스트 검색)",
+      "newTab": "새 탭 (Workspace와 호스트 검색)",
       "nextTab": "다음 탭",
       "prevTab": "이전 탭",
       "tab1to8": "1~8번째 탭",
@@ -3683,7 +3775,8 @@
     "message": "이 창을 그리는 중 오류가 났습니다. 다시 시도해도 같으면 아래 내용을 알려 주세요.",
     "retry": "다시 시도",
     "reload": "새로고침",
-    "hostRow": "이 호스트를 표시할 수 없습니다 — {{label}}"
+    "hostRow": "이 호스트를 표시할 수 없습니다 — {{label}}",
+    "workspaceDetail": "이 Workspace 를 표시할 수 없습니다 — {{label}}"
   },
   "hostDrawer": {
     "kindNeedsServerUpdate": "동기화 서버가 {{kind}} 호스트를 지원하지 않습니다. 서버를 업데이트하면 열립니다."

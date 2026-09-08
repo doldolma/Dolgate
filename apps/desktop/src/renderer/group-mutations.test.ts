@@ -136,3 +136,31 @@ describe('removeGroupFrom', () => {
     expect(result.removedGroupIds).toContain('g:work/aws');
   });
 });
+
+// 이 모듈은 groups 와 hosts 만 안다. 데스크톱에는 그룹에 소속된 저장된 Workspace 가 있어서,
+// 레코드 없는 그룹(임포트가 host.groupName 만 남긴 경우)에서 마지막 호스트가 사라지면 여기서는
+// "없는 그룹" 으로 보였다 — 사이드바에는 Workspace 를 든 행이 그대로 보이는데 삭제·이름변경·이동이
+// 모두 거부되는, 빠져나올 수 없는 상태였다.
+describe('pathAlsoOccupied', () => {
+  const OCCUPIED = { ...OPTIONS, pathAlsoOccupied: true };
+
+  it('Workspace 만 남은 경로도 삭제할 수 있다', () => {
+    const result = removeGroupFrom([], [], 'legacy', 'delete-subtree', OCCUPIED);
+
+    expect(result.groups).toEqual([]);
+    expect(result.removedGroupIds).toEqual([]);
+  });
+
+  it('Workspace 만 남은 경로도 이름을 바꿀 수 있다', () => {
+    const result = renameGroupIn([], [], 'legacy', 'archive', OCCUPIED);
+
+    expect(result.nextPath).toBe('archive');
+  });
+
+  it('알려 주지 않으면 예전처럼 거부한다', () => {
+    expect(() => removeGroupFrom([], [], 'legacy', 'delete-subtree', OPTIONS)).toThrow(
+      /not found/,
+    );
+    expect(() => renameGroupIn([], [], 'legacy', 'archive', OPTIONS)).toThrow(/not found/);
+  });
+});

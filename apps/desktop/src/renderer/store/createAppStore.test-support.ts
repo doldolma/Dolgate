@@ -182,7 +182,8 @@ export function createMockApi(): DesktopApi {
             token: "offline-token",
             issuedAt: "2025-01-01T00:00:00.000Z",
             expiresAt: "2025-01-04T00:00:00.000Z",
-            verificationPublicKeyPem: "-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----",
+            verificationPublicKeyPem:
+              "-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----",
           },
           syncServerTime: "2025-01-01T00:00:00.000Z",
         },
@@ -204,7 +205,8 @@ export function createMockApi(): DesktopApi {
             token: "offline-token",
             issuedAt: "2025-01-01T00:00:00.000Z",
             expiresAt: "2025-01-04T00:00:00.000Z",
-            verificationPublicKeyPem: "-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----",
+            verificationPublicKeyPem:
+              "-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----",
           },
           syncServerTime: "2025-01-01T00:00:00.000Z",
         },
@@ -226,7 +228,8 @@ export function createMockApi(): DesktopApi {
             token: "offline-token",
             issuedAt: "2025-01-01T00:00:00.000Z",
             expiresAt: "2025-01-04T00:00:00.000Z",
-            verificationPublicKeyPem: "-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----",
+            verificationPublicKeyPem:
+              "-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----",
           },
           syncServerTime: "2025-01-01T00:00:00.000Z",
         },
@@ -383,29 +386,31 @@ export function createMockApi(): DesktopApi {
         status: "ready",
         errorMessage: null,
       }),
-      loadHostSshMetadata: vi.fn().mockImplementation(async (hostId: string) => ({
-        id: hostId,
-        kind: "aws-ec2",
-        label: "AWS Linux",
-        awsProfileId: "profile-default",
-        awsProfileName: "default",
-        awsRegion: "ap-northeast-2",
-        awsInstanceId: "i-aws",
-        awsAvailabilityZone: "ap-northeast-2a",
-        awsInstanceName: "aws-linux",
-        awsPlatform: "Linux/UNIX",
-        awsPrivateIp: "10.0.0.20",
-        awsState: "running",
-        awsSshUsername: "ubuntu",
-        awsSshPort: 22,
-        awsSshMetadataStatus: "ready",
-        awsSshMetadataError: null,
-        groupName: "Servers",
-        tags: [],
-        terminalThemeId: null,
-        createdAt: "2025-01-01T00:00:00.000Z",
-        updatedAt: "2025-01-01T00:00:00.000Z",
-      })),
+      loadHostSshMetadata: vi
+        .fn()
+        .mockImplementation(async (hostId: string) => ({
+          id: hostId,
+          kind: "aws-ec2",
+          label: "AWS Linux",
+          awsProfileId: "profile-default",
+          awsProfileName: "default",
+          awsRegion: "ap-northeast-2",
+          awsInstanceId: "i-aws",
+          awsAvailabilityZone: "ap-northeast-2a",
+          awsInstanceName: "aws-linux",
+          awsPlatform: "Linux/UNIX",
+          awsPrivateIp: "10.0.0.20",
+          awsState: "running",
+          awsSshUsername: "ubuntu",
+          awsSshPort: 22,
+          awsSshMetadataStatus: "ready",
+          awsSshMetadataError: null,
+          groupName: "Servers",
+          tags: [],
+          terminalThemeId: null,
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
+        })),
       loadEcsClusterSnapshot: vi.fn().mockResolvedValue({
         profileName: "default",
         region: "ap-northeast-2",
@@ -419,7 +424,8 @@ export function createMockApi(): DesktopApi {
         },
         services: [
           {
-            serviceArn: "arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api",
+            serviceArn:
+              "arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api",
             serviceName: "api",
             status: "ACTIVE",
             rolloutState: "COMPLETED",
@@ -434,7 +440,8 @@ export function createMockApi(): DesktopApi {
             capacityProviderSummary: null,
             configuredCpu: "512",
             configuredMemory: "1024",
-            taskDefinitionArn: "arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:7",
+            taskDefinitionArn:
+              "arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:7",
             taskDefinitionRevision: 7,
             latestEventMessage: "steady state",
           },
@@ -608,43 +615,51 @@ export function createMockApi(): DesktopApi {
         groups: [],
         hosts: [],
       }),
-      move: vi.fn().mockImplementation(async (path: string, targetParentPath: string | null) => {
-        const segments = path.split("/");
-        const leafName = segments[segments.length - 1] ?? path;
-        const nextPath = targetParentPath ? `${targetParentPath}/${leafName}` : leafName;
-        return {
-          groups: [
-            {
-              id: "group-1",
-              name: leafName,
-              path: nextPath,
-              parentPath: targetParentPath,
-              createdAt: "2025-01-01T00:00:00.000Z",
-              updatedAt: "2025-01-04T00:00:00.000Z",
-            },
-          ],
-          hosts: [
-            {
-              id: "host-1",
-              kind: "ssh",
-              label: "Prod",
-              hostname: "prod.example.com",
-              port: 22,
-              username: "ubuntu",
-              authType: "password",
-              privateKeyPath: null,
-              secretRef: "host:host-1",
-              groupName: nextPath,
-              terminalThemeId: null,
-              createdAt: "2025-01-01T00:00:00.000Z",
-              updatedAt: "2025-01-04T00:00:00.000Z",
-            },
-          ],
-          nextPath,
-        };
-      }),
+      move: vi
+        .fn()
+        .mockImplementation(
+          async (path: string, targetParentPath: string | null) => {
+            const segments = path.split("/");
+            const leafName = segments[segments.length - 1] ?? path;
+            const nextPath = targetParentPath
+              ? `${targetParentPath}/${leafName}`
+              : leafName;
+            return {
+              groups: [
+                {
+                  id: "group-1",
+                  name: leafName,
+                  path: nextPath,
+                  parentPath: targetParentPath,
+                  createdAt: "2025-01-01T00:00:00.000Z",
+                  updatedAt: "2025-01-04T00:00:00.000Z",
+                },
+              ],
+              hosts: [
+                {
+                  id: "host-1",
+                  kind: "ssh",
+                  label: "Prod",
+                  hostname: "prod.example.com",
+                  port: 22,
+                  username: "ubuntu",
+                  authType: "password",
+                  privateKeyPath: null,
+                  secretRef: "host:host-1",
+                  groupName: nextPath,
+                  terminalThemeId: null,
+                  createdAt: "2025-01-01T00:00:00.000Z",
+                  updatedAt: "2025-01-04T00:00:00.000Z",
+                },
+              ],
+              nextPath,
+            };
+          },
+        ),
       rename: vi.fn().mockImplementation(async (path: string, name: string) => {
-        const parentPath = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : null;
+        const parentPath = path.includes("/")
+          ? path.slice(0, path.lastIndexOf("/"))
+          : null;
         const nextPath = parentPath ? `${parentPath}/${name}` : name;
         return {
           groups: [
@@ -812,7 +827,9 @@ export function createMockApi(): DesktopApi {
         lines: [],
         matchCount: 0,
       }),
-      openShell: vi.fn().mockResolvedValue({ sessionId: "session-container-1" }),
+      openShell: vi
+        .fn()
+        .mockResolvedValue({ sessionId: "session-container-1" }),
       release: vi.fn().mockResolvedValue(undefined),
       onConnectionProgress: vi.fn().mockReturnValue(() => undefined),
     },
@@ -923,8 +940,9 @@ export function createMockApi(): DesktopApi {
         terminalMinimumContrastRatio: input.terminalMinimumContrastRatio ?? 1,
         terminalAltIsMeta: input.terminalAltIsMeta ?? false,
         terminalWebglEnabled: input.terminalWebglEnabled ?? true,
-        sftpBrowserColumnWidths:
-          input.sftpBrowserColumnWidths ?? { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
+        sftpBrowserColumnWidths: input.sftpBrowserColumnWidths ?? {
+          ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
+        },
         sftpConflictPolicy: input.sftpConflictPolicy ?? "ask",
         sftpPreserveMtime: input.sftpPreserveMtime ?? true,
         sftpPreservePermissions: input.sftpPreservePermissions ?? false,
@@ -979,6 +997,23 @@ export function createMockApi(): DesktopApi {
       list: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
       update: vi.fn(),
+      remove: vi.fn().mockResolvedValue(undefined),
+    },
+    savedWorkspaces: {
+      list: vi.fn().mockResolvedValue([]),
+      create: vi.fn().mockImplementation(async (draft) => ({
+        id: "saved-workspace-1",
+        version: 1,
+        ...draft,
+        favorite: false,
+        lastOpenedAt: null,
+        createdAt: "2026-09-05T00:00:00.000Z",
+        updatedAt: "2026-09-05T00:00:00.000Z",
+      })),
+      rename: vi.fn(),
+      moveToGroup: vi.fn(),
+      setFavorite: vi.fn(),
+      touchOpened: vi.fn(),
       remove: vi.fn().mockResolvedValue(undefined),
     },
     tailnet: {

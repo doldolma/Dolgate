@@ -160,6 +160,8 @@ type CoreSessionConnectPayload = ResolvedCoreConnectPayload & {
   connectionDetails?: string | null;
   startupCommand?: string;
   tmux?: boolean;
+  /** 컨테이너 셸이면 그 컨테이너 id — 탭에 남겨 렌더러 리로드를 넘겨 준다. */
+  containerId?: string;
 };
 
 interface AwsServerProxyStartPayload {
@@ -1851,6 +1853,9 @@ export class CoreManager {
       sessionId,
       status: "connecting",
       lastEventAt: new Date().toISOString(),
+      // 컨테이너 셸 표식은 여기(주 프로세스 탭)에 있어야 렌더러 리로드를 넘긴다. 렌더러
+      // 메모리에만 두면 bootstrap 이 listTabs() 로 탭을 통째로 갈아치울 때 사라진다.
+      ...(payload.containerId ? { containerId: payload.containerId } : {}),
     });
     const ready = options.awaitReady
       ? new Promise<void>((resolve, reject) => {
