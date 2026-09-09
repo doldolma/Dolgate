@@ -1094,6 +1094,7 @@
       "invalidWorkspace": "The Workspace data in the Dolgate file is not valid.",
       "invalidTailnet": "The tailnet data in the Dolgate file is not valid.",
       "tailnetMissing": "{{label}}: the tailnet this host uses is not in the file. Add the tailnet to connect.",
+      "unsupportedWorkspaceSkipped": "Skipped {{count}} unsupported Workspace(s). Update the app to import them.",
       "unknownHostKindSkipped": "Skipped {{count}} host(s) of a kind this version does not recognize. Update the app to import them.",
       "unknownHostKindDependentsSkipped": "Also excluded {{count}} item(s) that depend on the skipped hosts (jump hosts, port forwards, DNS).",
       "invalidSecret": "The credential data in the Dolgate file is not valid.",

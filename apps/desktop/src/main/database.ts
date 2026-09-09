@@ -353,6 +353,18 @@ function normalizeHomeHostViewMode(value: unknown): HomeHostViewMode {
 }
 
 function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
+  // 그룹 변경과 replaceAll도 이 경로를 지난다. 원격 화면 호스트는 username이 없으므로
+  // 아래의 구형 SSH 판별에 맡기면 거부된다. 연결 종류와 전용 설정을 그대로 보존한다.
+  if (record.kind === 'rdp' || record.kind === 'vnc') {
+    return {
+      ...record,
+      favorite: record.favorite === true ? true : null,
+      groupName: normalizeGroupPath(record.groupName),
+      tags: normalizeTags(record.tags),
+      terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId),
+    };
+  }
+
   if (record.kind === 'aws-ec2') {
     return {
       ...record,
@@ -2418,7 +2430,7 @@ function compareSavedWorkspaces(
   if (left.favorite !== right.favorite) {
     return left.favorite ? -1 : 1;
   }
-  const recent = (right.lastOpenedAt ?? '').localeCompare(left.lastOpenedAt ?? '');
+  const recent = (Date.parse(right.lastOpenedAt ?? '') || 0) - (Date.parse(left.lastOpenedAt ?? '') || 0);
   return recent || left.name.localeCompare(right.name) || left.id.localeCompare(right.id);
 }
 
@@ -2520,7 +2532,7 @@ export class SavedWorkspaceRepository {
     const record: SavedWorkspaceRecord = {
       ...current,
       lastOpenedAt: timestamp,
-      updatedAt: timestamp,
+      // 기기별 사용 기록은 Workspace 내용의 LWW 수정 시각을 올리지 않는다.
     };
     stateStorage.updateState((state) => {
       state.data.savedWorkspaces = state.data.savedWorkspaces.map((entry) =>

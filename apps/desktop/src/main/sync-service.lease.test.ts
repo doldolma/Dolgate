@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renameGroupIn, type HostRecord } from "@shared";
 import type { SavedWorkspaceRecord, SyncPayloadV2 } from "@shared";
 import type { AuthSyncContext } from "./auth-service";
 
@@ -249,7 +250,7 @@ describe("SyncService immutable lease", () => {
 
   it("encrypts saved Workspaces into outgoing snapshots", async () => {
     const harness = await createHarness(oldContext);
-    harness.savedWorkspaces.list.mockReturnValue([savedWorkspace]);
+    harness.savedWorkspaces.list.mockReturnValue([{ ...savedWorkspace, lastOpenedAt: "2026-09-03T00:00:00.000Z" }]);
     harness.secretStore.load.mockResolvedValue(null);
     let requestInit: RequestInit | undefined;
     vi.stubGlobal(
@@ -409,6 +410,74 @@ describe("SyncService immutable lease", () => {
 
     const [applied] = stateStorage.getState().data.savedWorkspaces;
     expect(applied?.groupName).toBe("production");
+    // push 는 전체 목록을 보내므로, 고친 값이 서버에도 반영되도록 updatedAt 을 올려 둔다.
+    expect(applied?.updatedAt).not.toBe(staleWorkspace.updatedAt);
+  });
+
+  it("Host만 있던 그룹의 rename을 추적하며 로컬 열기 기록을 유지한다", async () => {
+    const harness = await createHarness(oldContext);
+    const stateStorage = (
+      harness.service as unknown as {
+        stateStorage: {
+          getState: () => {
+            data: { savedWorkspaces: SavedWorkspaceRecord[] };
+          };
+          updateState: (mutate: (state: Record<string, any>) => void) => unknown;
+        };
+      }
+    ).stateStorage;
+
+    const host = { id: "host-prod", kind: "ssh", label: "Prod", groupName: "prod", hostname: "example.com", port: 22, username: "ubuntu", authType: "password", createdAt: "2026-07-16T00:00:00.000Z", updatedAt: "2026-07-16T00:00:00.000Z" } as HostRecord;
+    const renamed = renameGroupIn([], [host], "prod", "production", { timestamp: "2026-07-17T00:00:00.000Z" });
+    stateStorage.updateState((state) => {
+      state.data.groups = [];
+      state.data.hosts = [host];
+      state.data.savedWorkspaces = [{ ...savedWorkspace, groupName: "prod", lastOpenedAt: "2026-09-03T00:00:00.000Z" }];
+    });
+
+    const staleWorkspace: SavedWorkspaceRecord = {
+      ...savedWorkspace,
+      groupName: "prod",
+    };
+    const payload: SyncPayloadV2 = {
+      ...emptySyncPayload(),
+      groups: renamed.groups.map((group) => encryptRecord(group.id, group, oldContext.vaultKeyBase64)),
+      hosts: renamed.hosts.map((host) => encryptRecord(host.id, host, oldContext.vaultKeyBase64)),
+      // 서버의 Workspace 사본은 아직 옛 경로를 가리킨다.
+      workspaces: [
+        encryptRecord(
+          staleWorkspace.id,
+          staleWorkspace,
+          oldContext.vaultKeyBase64,
+        ),
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: URL) => {
+        if (new URL(String(url)).pathname === "/api/info") {
+          return new Response(
+            JSON.stringify({
+              capabilities: {
+                sync: { awsProfiles: true },
+                vault: { e2ee: true },
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "content-type": "application/json", etag: '"2"' },
+        });
+      }),
+    );
+
+    await harness.service.bootstrap();
+
+    const [applied] = stateStorage.getState().data.savedWorkspaces;
+    expect(applied?.groupName).toBe("production");
+    expect(applied?.lastOpenedAt).toBe("2026-09-03T00:00:00.000Z");
     // push 는 전체 목록을 보내므로, 고친 값이 서버에도 반영되도록 updatedAt 을 올려 둔다.
     expect(applied?.updatedAt).not.toBe(staleWorkspace.updatedAt);
   });

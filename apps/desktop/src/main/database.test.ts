@@ -1373,7 +1373,8 @@ describe('GroupRepository.move', () => {
     const result = groups.move('root/implicit', null);
 
     expect(result.nextPath).toBe('implicit');
-    expect(result.groups.map((group) => group.path)).toEqual(['root']);
+    // 이동한 암시적 경로도 ID를 가진 그룹으로 남아 다른 기기가 변경을 추적한다.
+    expect(result.groups.map((group) => group.path)).toEqual(['implicit', 'root']);
     expect(result.hosts.map((host) => [host.id, host.groupName])).toEqual([['host-implicit', 'implicit']]);
   });
 
@@ -2564,5 +2565,42 @@ describe('DnsOverrideRepository', () => {
       hostname: 'kafka-static.internal',
       address: '10.0.0.15',
     });
+  });
+});
+
+describe('remote desktop hosts in group mutations', () => {
+  it.each(['rdp', 'vnc'] as const)('%s keeps its connection settings through rename, move, reparent and replaceAll', async (kind) => {
+    const { HostRepository, GroupRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+    const groups = new GroupRepository();
+    groups.create('group-lab', 'Lab');
+    groups.create('group-child', 'Nested', 'Lab');
+    groups.create('group-other', 'Other');
+    const common = {
+      label: 'Remote desktop',
+      hostname: 'remote.example.com',
+      groupName: 'Lab/Nested',
+      tags: ['remote'],
+      tailnetId: 'tailnet-1',
+    };
+    const original = hosts.create('remote-1', kind === 'rdp'
+      ? { ...common, kind, port: 3389, adminSession: true }
+      : { ...common, kind, port: 5900, viewOnly: true, shared: false },
+    'secret-remote');
+    const expectPreserved = (groupName: string) => {
+      expect(hosts.getById(original.id)).toMatchObject({
+        ...original, groupName, updatedAt: expect.any(String),
+      });
+      expect(hosts.getById(original.id)).not.toHaveProperty('username');
+    };
+
+    groups.rename('Lab', 'dolma');
+    expectPreserved('dolma/Nested');
+    groups.move('dolma/Nested', 'Other');
+    expectPreserved('Other/Nested');
+    groups.remove('Other', 'reparent-descendants');
+    expectPreserved('Nested');
+    hosts.replaceAll(hosts.list());
+    expectPreserved('Nested');
   });
 });

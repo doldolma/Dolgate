@@ -111,6 +111,22 @@ describe('HomeShell 편집기 이탈 가드', () => {
     drawerSave.mockClear();
   });
 
+  it('우클릭 편집도 저장 확인 후 대상을 바꾼다', async () => {
+    drawerIsDirty = true;
+    const { openEditHostDrawer } = renderHome();
+    act(() => (browserProps.onEditHost as (id: string) => void)('host-2'));
+    expect(openEditHostDrawer).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    await waitFor(() => expect(openEditHostDrawer).toHaveBeenCalledWith('host-2'));
+  });
+
+  it('로컬 터미널 진입도 미저장 변경 확인을 거친다', () => {
+    drawerIsDirty = true;
+    renderHome();
+    act(() => (browserProps.onOpenLocalTerminal as () => void)());
+    expect(screen.getByText('저장하지 않은 변경사항이 있습니다')).toBeInTheDocument();
+  });
+
   it('호스트 목록과 그룹 이동에 가드 콜백을 넘긴다', () => {
     renderHome();
 

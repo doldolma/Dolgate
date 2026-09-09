@@ -68,7 +68,7 @@ import {
   normalizeSavedWorkspaceRecord,
   normalizeSftpBrowserColumnWidths
 } from '@shared';
-import type { SyncKind } from '@shared';
+import type { HostDetectedOs, SyncKind } from '@shared';
 import { normalizeAppLanguage } from '../common/i18n/locale';
 import {
   resolveLocalHistoryScope,
@@ -800,6 +800,25 @@ function normalizeStoredRdpDrivesByHost(
   return result;
 }
 
+/**
+ * 접속할 때 감지한 OS.
+ *
+ * 폼에서 입력하는 값이 아니라 좁은 setter(HostRepository.setDetectedOs)로만 쓰는 필드라, 아래
+ * 화이트리스트에서 빠뜨리기 쉽다. 빠지면 **파일에는 저장되는데 다시 켤 때 사라진다** —
+ * 게다가 updatedAt 은 그대로 유지되므로, 벗겨진 레코드를 push 하면 서버의 정상 사본을
+ * "같은 타임스탬프 · 다른 내용"으로 덮어써(마지막 쓰기 승) 다른 기기에서도 지워진다.
+ */
+function normalizeStoredDetectedOs(value: unknown): HostDetectedOs | null {
+  if (!isObject(value) || typeof value.id !== 'string' || !value.id.trim()) {
+    return null;
+  }
+  return {
+    id: value.id,
+    like: typeof value.like === 'string' ? value.like : null,
+    prettyName: typeof value.prettyName === 'string' ? value.prettyName : null
+  };
+}
+
 function normalizeStoredHostStartupCommand(value: unknown): HostStartupCommand | null {
   if (!isObject(value)) {
     return null;
@@ -865,6 +884,7 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
         typeof value.awsSshMetadataError === 'string' ? value.awsSshMetadataError : null,
       awsSsmServerProxyEnabled: value.awsSsmServerProxyEnabled === true,
       agentForwarding: value.agentForwarding === true ? true : null,
+      detectedOs: normalizeStoredDetectedOs(value.detectedOs),
       favorite: value.favorite === true ? true : null,
       createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
@@ -892,6 +912,7 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
       awsRegion: value.awsRegion,
       awsEcsClusterArn: value.awsEcsClusterArn,
       awsEcsClusterName: value.awsEcsClusterName,
+      detectedOs: normalizeStoredDetectedOs(value.detectedOs),
       favorite: value.favorite === true ? true : null,
       createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
@@ -924,6 +945,7 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
       warpgateTargetId: value.warpgateTargetId,
       warpgateTargetName: value.warpgateTargetName,
       warpgateUsername: value.warpgateUsername,
+      detectedOs: normalizeStoredDetectedOs(value.detectedOs),
       favorite: value.favorite === true ? true : null,
       createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
@@ -984,6 +1006,7 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
           : 'none',
       localEcho: Boolean(value.localEcho),
       localLineEditing: Boolean(value.localLineEditing),
+      detectedOs: normalizeStoredDetectedOs(value.detectedOs),
       favorite: value.favorite === true ? true : null,
       createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
@@ -1026,6 +1049,7 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
       tailnetId: typeof value.tailnetId === 'string' && value.tailnetId.trim() ? value.tailnetId.trim() : null,
       awsSsm: normalizeStoredRdpAwsSsm(value.awsSsm),
       monitors: normalizeStoredRdpMonitors(value.monitors),
+      detectedOs: normalizeStoredDetectedOs(value.detectedOs),
       favorite: value.favorite === true ? true : null,
       createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
@@ -1072,6 +1096,7 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
         value.imageQuality === 'balanced' || value.imageQuality === 'fast'
           ? value.imageQuality
           : null,
+      detectedOs: normalizeStoredDetectedOs(value.detectedOs),
       favorite: value.favorite === true ? true : null,
       createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
@@ -1134,6 +1159,7 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
     agentForwarding: value.agentForwarding === true ? true : null,
     // env는 호스트 속성으로 저장된다(시크릿 분리). 디스크 리로드 시에도 보존돼야 한다.
     env: normalizeHostEnvVars(value.env as HostEnvVar[] | undefined),
+    detectedOs: normalizeStoredDetectedOs(value.detectedOs),
     favorite: value.favorite === true ? true : null,
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()

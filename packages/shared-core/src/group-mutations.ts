@@ -1,5 +1,8 @@
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import type { GroupRecord, GroupRemoveMode, HostRecord } from './models';
 import {
+  collectGroupPaths,
   getGroupLabel,
   getParentGroupPath,
   isGroupWithinPath,
@@ -85,6 +88,36 @@ export function createGroupIn(
 }
 
 /**
+ * Host만으로 존재하는 경로에도 rename을 추적할 ID를 준다. 같은 이전 스냅샷을 가진
+ * 기기는 같은 ID를 계산한다. 이름만 해시하지 않고 구성 Host ID를 섞는다.
+ * 단순 Host 이동으로 rename을 추측하지 않고, 실제 그룹 변경이 이 레코드를 전송한다.
+ */
+export function materializeImplicitHostGroups(
+  groups: GroupRecord[],
+  hosts: HostRecord[],
+  withinPath: string | null = null,
+): GroupRecord[] {
+  const known = new Set(groups.map((record) => record.path));
+  const additions: GroupRecord[] = [];
+  for (const path of collectGroupPaths(groups, hosts)) {
+    if (known.has(path) || !isGroupWithinPath(path, withinPath)) continue;
+    const anchor = hosts
+      .filter((host) => isGroupWithinPath(normalizeGroupPath(host.groupName), path))
+      .sort((left, right) => left.id.localeCompare(right.id))[0];
+    if (!anchor) continue;
+    additions.push({
+      id: `implicit-${bytesToHex(sha256(utf8ToBytes(JSON.stringify([anchor.id, path]))))}`,
+      name: getGroupLabel(path),
+      path,
+      parentPath: getParentGroupPath(path),
+      createdAt: anchor.createdAt,
+      updatedAt: anchor.updatedAt,
+    });
+  }
+  return [...groups, ...additions];
+}
+
+/**
  * 그룹 경로를 통째로 옮긴다. 이름 변경과 이동이 모두 이것이다 — 둘 다 "이 경로 아래를
  * 저 경로 아래로" 이고, 다른 것은 새 경로를 어떻게 구하느냐뿐이다.
  */
@@ -95,6 +128,7 @@ export function mutateGroupPathIn(
   nextPath: string,
   options: GroupMutationOptions
 ): GroupPathMutation {
+  groups = materializeImplicitHostGroups(groups, hosts, targetPath);
   const affectedGroups = groups.filter((record) => isGroupWithinPath(record.path, targetPath));
   const affectedHosts = hosts.filter((record) =>
     isGroupWithinPath(normalizeGroupPath(record.groupName), targetPath)

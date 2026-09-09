@@ -4,8 +4,15 @@ import { Star } from '../ui/icons';
 import { useTranslation } from 'react-i18next';
 
 interface HostCardProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
-  badgeLabel: ReactNode;
+  /** 칸 안에 그릴 내용(글자·아이콘). 카드가 자기 칸을 그린다. */
+  badgeLabel?: ReactNode;
   badgeMarker?: string;
+  /**
+   * **칸까지 완성된** 뱃지. 주면 카드는 자기 칸을 그리지 않는다.
+   *
+   * HostBadge 처럼 스스로 칸과 색을 갖는 뱃지를 badgeLabel 로 넘기면 칸이 이중으로 겹친다.
+   */
+  badge?: ReactNode;
   title: ReactNode;
   subtitle: ReactNode;
   groupLabel: ReactNode;
@@ -28,6 +35,7 @@ interface HostCardProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
 export function HostCard({
   badgeLabel,
   badgeMarker,
+  badge,
   title,
   subtitle,
   groupLabel,
@@ -67,17 +75,19 @@ export function HostCard({
       )}
       {...props}
     >
-      <div
-        data-host-card-badge={badgeMarker}
-        className={cn(
-          'inline-grid h-[2.3rem] w-[2.3rem] shrink-0 place-items-center rounded-[10px] bg-[color-mix(in_srgb,var(--accent-strong)_68%,var(--chrome-bg)_32%)] text-[0.9rem] font-bold text-white',
-          typeof badgeLabel === 'string' &&
-            badgeLabel.length > 3 &&
-            'text-[0.82rem] tracking-[-0.02em]',
-        )}
-      >
-        {badgeLabel}
-      </div>
+      {badge ?? (
+        <div
+          data-host-card-badge={badgeMarker}
+          className={cn(
+            'inline-grid h-[2.3rem] w-[2.3rem] shrink-0 place-items-center rounded-[10px] bg-[color-mix(in_srgb,var(--accent-strong)_68%,var(--chrome-bg)_32%)] text-[0.9rem] font-bold text-white',
+            typeof badgeLabel === 'string' &&
+              badgeLabel.length > 3 &&
+              'text-[0.82rem] tracking-[-0.02em]',
+          )}
+        >
+          {badgeLabel}
+        </div>
+      )}
       <div className="min-w-0">
         <strong className="mb-[0.25rem] block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-[0.9rem] text-[var(--text)]">
           {title}

@@ -786,6 +786,52 @@ describe("SftpWorkspace column resizing", () => {
     expect(results.contains(screen.getByLabelText("Search hosts"))).toBe(false);
   });
 
+  // 감지한 OS 는 홈 목록에만 나오고 이 화면에는 안 나왔다 — 뱃지를 각 화면이 따로 그린 탓이다.
+  it("shows the detected OS mark on host picker cards", () => {
+    const sftp = createSftpState();
+    sftp.rightPane = createHostPickerPane();
+
+    renderWorkspace({
+      hosts: [
+        {
+          ...connectableHosts[0],
+          detectedOs: {
+            id: "ubuntu",
+            like: null,
+            prettyName: "Ubuntu 24.04.1 LTS",
+          },
+        },
+        connectableHosts[1],
+      ],
+      groups: hostGroups,
+      sftp,
+    });
+
+    const results = screen.getByLabelText("Available hosts for right pane");
+    const cards = [
+      ...results.querySelectorAll('[data-host-grid="true"] [data-host-card="true"]'),
+    ] as HTMLElement[];
+    const detected = cards.find((card) =>
+      card.textContent?.includes("Prod SSH"),
+    );
+    const undetected = cards.find((card) =>
+      card.textContent?.includes("Batch SSH"),
+    );
+
+    expect(
+      detected?.querySelector('[data-host-os-mark="true"] svg'),
+    ).toBeTruthy();
+    expect(
+      detected?.querySelector('[role="img"][aria-label="Ubuntu 24.04.1 LTS"]'),
+    ).toBeTruthy();
+    // 감지 못한 호스트는 예전처럼 글자 뱃지를 유지한다.
+    expect(
+      undetected?.querySelector('[data-host-os-mark="true"]'),
+    ).toBeNull();
+    // password 인증 SSH 의 글자 뱃지는 "S" 다(getHostBadgeLabel).
+    expect(within(undetected as HTMLElement).getByText("S")).toBeTruthy();
+  });
+
   it("renders the current host group as a compact breadcrumb with a clear root label", () => {
     const sftp = createSftpState();
     sftp.rightPane = createHostPickerPane({

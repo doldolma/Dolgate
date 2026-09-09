@@ -246,7 +246,7 @@ function sortSavedWorkspaces<
       return left.favorite ? -1 : 1;
     }
     return (
-      (right.lastOpenedAt ?? "").localeCompare(left.lastOpenedAt ?? "") ||
+      (Date.parse(right.lastOpenedAt ?? "") || 0) - (Date.parse(left.lastOpenedAt ?? "") || 0) ||
       left.name.localeCompare(right.name) ||
       left.id.localeCompare(right.id)
     );
@@ -796,15 +796,16 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
       }
 
       if (
-        currentAttempt?.source === "container-shell" &&
-        currentAttempt.hostId &&
-        currentAttempt.containerId
+        currentTab.hostId &&
+        (currentTab.containerId || currentAttempt?.source === "container-shell")
       ) {
+        const containerId = currentTab.containerId ?? currentAttempt?.containerId;
+        if (!containerId) return;
         const pendingSessionId = createPendingSessionId();
-        const latestCols = currentAttempt.latestCols ?? 120;
-        const latestRows = currentAttempt.latestRows ?? 32;
+        const latestCols = currentAttempt?.latestCols ?? 120;
+        const latestRows = currentAttempt?.latestRows ?? 32;
         const host = get().hosts.find(
-          (item) => item.id === currentAttempt.hostId,
+          (item) => item.id === currentTab.hostId,
         );
         if (!host) {
           return;
@@ -820,7 +821,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                 sessionId: pendingSessionId,
                 stableId: tab.stableId,
                 source: "host",
-                hostId: currentAttempt.hostId,
+                hostId: currentTab.hostId,
                 title: tab.title,
                 progress: isAwsEc2HostRecord(host)
                   ? createConnectionProgress(
@@ -834,7 +835,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               // 이 분기는 컨테이너 셸 재시도다(뒤에서 startPendingContainerShellConnect 를 부른다).
               // 새 탭을 맨몸으로 만들면 containerId 가 사라져, 재연결 한 번으로 컨테이너 셸이
               // 평범한 호스트 셸로 보인다 — 저장/복원과 감지 OS 기록이 다시 틀어진다.
-              containerId: tab.containerId,
+              containerId,
             }),
           ),
           pendingConnectionAttempts: [
@@ -844,11 +845,11 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             {
               sessionId: pendingSessionId,
               source: "container-shell" as const,
-              hostId: currentAttempt.hostId,
+              hostId: currentTab.hostId,
               title: currentTab.title,
               latestCols,
               latestRows,
-              containerId: currentAttempt.containerId,
+              containerId,
             },
           ],
         }));
@@ -858,14 +859,14 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
         }
 
         const trusted = await ensureTrustedHost(set, {
-          hostId: currentAttempt.hostId,
+          hostId: currentTab.hostId,
           sessionId: pendingSessionId,
-          endpointId: buildContainersEndpointId(currentAttempt.hostId),
+          endpointId: buildContainersEndpointId(currentTab.hostId),
           // 이미 신뢰된 호스트/베스천은 재-probe 생략(중복 순회 방지, 실연결이 strict 검사).
           action: {
             kind: "containerShell",
-            hostId: currentAttempt.hostId,
-            containerId: currentAttempt.containerId,
+            hostId: currentTab.hostId,
+            containerId,
           },
         });
         if (!trusted) {
@@ -880,8 +881,8 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
           set,
           get,
           pendingSessionId,
-          currentAttempt.hostId,
-          currentAttempt.containerId,
+          currentTab.hostId,
+          containerId,
         );
         return;
       }
@@ -1396,44 +1397,23 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
         return;
       }
 
-      // 비 tmux workspace: 각 세션 disconnect + 로컬 제거.
-      await Promise.all(
-        sessionIds.map((sessionId) => api.ssh.disconnect(sessionId)),
-      );
+      // 먼저 로컬 세션과 시도를 제거해야 늦게 끝난 연결도 취소 경로로 간다.
+      // pending/error pane 은 코어에 없어 closed 이벤트가 오지 않을 수 있다.
+      for (const sessionId of sessionIds) {
+        const tab = get().tabs.find((item) => item.sessionId === sessionId);
+        if (tab) cancelReconnect(tab.stableId, "user-disconnect");
+      }
       set((state) => {
-        const workspaceIndex = state.tabStrip.findIndex(
-          (item) =>
-            item.kind === "workspace" && item.workspaceId === workspaceId,
-        );
-        const nextTabStrip = state.tabStrip.filter(
-          (item) =>
-            !(item.kind === "workspace" && item.workspaceId === workspaceId),
-        );
-        const nextActive =
-          state.activeWorkspaceTab === asWorkspaceTabId(workspaceId)
-            ? resolveNextVisibleTab(
-                nextTabStrip,
-                workspaceIndex >= 0 ? workspaceIndex : nextTabStrip.length,
-              )
-            : state.activeWorkspaceTab;
-
-        return {
-          workspaces: state.workspaces.filter(
-            (item) => item.id !== workspaceId,
-          ),
-          tabStrip: nextTabStrip,
-          tabs: state.tabs.map((tab) =>
-            sessionIds.includes(tab.sessionId)
-              ? {
-                  ...tab,
-                  status: "disconnecting",
-                  lastEventAt: new Date().toISOString(),
-                }
-              : tab,
-          ),
-          activeWorkspaceTab: nextActive,
-        };
+        let next = state;
+        for (const sessionId of sessionIds) {
+          next = { ...next, ...removeSessionFromState(next, sessionId) };
+        }
+        return next;
       });
+      await Promise.all(sessionIds.filter((id) => !isPendingSessionId(id)).map(async (id) => {
+        await api.sessionShares.stop(id).catch(() => undefined);
+        await api.ssh.disconnect(id).catch(() => undefined);
+      }));
     },
     createSavedWorkspace: async (workspaceId, name) => {
       const state = get();
@@ -1691,27 +1671,6 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
           );
         }),
       );
-
-      set((state) => {
-        const currentWorkspace = state.workspaces.find(
-          (item) => item.id === workspaceId,
-        );
-        const restoredFirstSessionId = currentWorkspace
-          ? (listWorkspaceSessionIds(currentWorkspace.layout)[0] ??
-            firstSessionId)
-          : firstSessionId;
-        // 활성 탭은 위 set 에서 이미 이 워크스페이스로 옮겼다. 여기서 다시 지정하지 않는다 —
-        // 이 블록은 모든 pane 의 연결이 끝난 뒤(호스트키 확인·SSM 프로필 조회로 수 초~수 분)
-        // 실행되므로, 그 사이 Home 으로 갔거나 이 탭을 닫은 사용자를 끌고 오거나 이미 없는
-        // 탭을 가리키게 된다.
-        return {
-          workspaces: state.workspaces.map((item) =>
-            item.id === workspaceId
-              ? { ...item, activeSessionId: restoredFirstSessionId }
-              : item,
-          ),
-        };
-      });
     },
     splitSessionIntoWorkspace: (sessionId, direction, targetSessionId) => {
       // tmux pane 의 분할은 자유로운 drag-split 이 아니라 tmux 의 split-window 다.

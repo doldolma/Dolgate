@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GroupRecord, HostRecord } from '@shared';
-import { buildGroupOptions, rebaseGroupPath } from '@shared';
+import { collectGroupPaths, buildGroupOptions, rebaseGroupPath } from '@shared';
 
 const groups: GroupRecord[] = [
   {
@@ -52,4 +52,11 @@ describe('rebaseGroupPath', () => {
   it('returns the original path when it is outside the moved subtree', () => {
     expect(rebaseGroupPath('Servers/API', 'Servers/Nested', 'Clients/Nested')).toBe('Servers/API');
   });
+});
+
+it('keeps Workspace-only descendants immediately after their parent', () => {
+  const paths = collectGroupPaths([], [
+    { ...hosts[0]!, groupName: 'prod' }, { ...hosts[0]!, id: 'other', groupName: 'staging' },
+  ], [{ groupName: 'prod/ws-only' }]);
+  expect(paths).toEqual(['prod', 'prod/ws-only', 'staging']);
 });

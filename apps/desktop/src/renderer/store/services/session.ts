@@ -13,6 +13,7 @@ import { rdpViewportSize } from "./rdp-viewport";
 import { createTrustAuthServices } from "./trust-auth";
 import {
   activateSessionContextInState,
+  listWorkspaceSessionIds,
   asSessionTabId,
   buildSessionTitle,
   captureSessionReturnTarget,
@@ -210,7 +211,10 @@ export function createSessionServices(deps: SliceDeps) {
             item.sessionId === sessionId ? tab : item,
           ),
           pendingConnectionAttempts: nextAttempts,
-          ...activateSessionContextInState(state, sessionId),
+          // 복원 중인 pane 초기화는 사용자가 고른 pane이나 화면을 바꾸지 않는다.
+          ...(state.workspaces.some((workspace) => listWorkspaceSessionIds(workspace.layout).includes(sessionId))
+            ? {}
+            : activateSessionContextInState(state, sessionId)),
         };
       }
 
@@ -336,7 +340,10 @@ export function createSessionServices(deps: SliceDeps) {
             item.sessionId === sessionId ? tab : item,
           ),
           pendingConnectionAttempts: nextAttempts,
-          ...activateSessionContextInState(state, sessionId),
+          // 복원 중인 pane 초기화는 사용자가 고른 pane이나 화면을 바꾸지 않는다.
+          ...(state.workspaces.some((workspace) => listWorkspaceSessionIds(workspace.layout).includes(sessionId))
+            ? {}
+            : activateSessionContextInState(state, sessionId)),
         };
       }
 

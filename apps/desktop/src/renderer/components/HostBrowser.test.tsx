@@ -1,5 +1,6 @@
 import { cloneElement } from "react";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -31,6 +32,7 @@ import {
   getHostBrowserVisibleImportMenuLabels,
   HOST_BROWSER_IMPORT_MENU_LABELS,
 } from "./HostBrowser";
+import * as hostDetailModule from "./host-browser/HostDetailPanel";
 import { resolveResponsiveCardGridLayout } from "../lib/responsive-card-grid";
 import {
   getHostNavigationStep,
@@ -463,6 +465,7 @@ function renderBrowser({
   return {
     ...view,
     /** 상위가 selectedHostId 만 바꿔 내려주는 경로(편집 대상 전환)를 흉내낸다. */
+    rerenderEditor: (editor: React.ReactNode) => view.rerender(cloneElement(element, { hostEditor: editor })),
     rerenderSelectedHost: (nextHostId: string | null) =>
       view.rerender(cloneElement(element, { selectedHostId: nextHostId })),
   };
@@ -1366,11 +1369,12 @@ describe("HostBrowser unified Workspace Home", () => {
       }),
     );
 
+    // 화면 순서(이름 오름차순, 종류 무관)로 넘어간다: App, AWS App, DB, Operations Layout.
     expect(onExportAssets).toHaveBeenCalledWith([
-      { kind: "workspace", id: "workspace-ops" },
       { kind: "host", id: "host-1" },
       { kind: "host", id: "aws-1" },
       { kind: "host", id: "host-2" },
+      { kind: "workspace", id: "workspace-ops" },
     ]);
   });
 
@@ -1402,43 +1406,31 @@ describe("HostBrowser unified Workspace Home", () => {
         '[data-home-asset-key="host:host-1"]',
       ) as HTMLElement;
 
-      // 정렬 컨트롤은 Workspace 에도 걸린다(기본 이름 오름차순) — shift 범위가 무엇을 잡는지는
-      // 이 화면 순서에 달렸으므로 여기서 못 박아 둔다.
+      // 정렬은 한 목록에 한 번만 걸린다 — 종류로 갈라 놓지 않는다(기본 이름 오름차순):
+      // App, AWS App, Database Watch, DB, Operations Layout. shift 범위가 무엇을 잡는지는
+      // 이 순서에 달렸으므로 여기서 못 박아 둔다.
       expect(assetKeysInOrder()).toEqual([
-        "workspace:workspace-db",
-        "workspace:workspace-ops",
         "host:host-1",
         "host:aws-1",
+        "workspace:workspace-db",
         "host:host-2",
-      ]);
-
-      fireEvent.click(operations);
-      fireEvent.click(app, { metaKey: true });
-      expect(selectedAssetKeys()).toEqual([
         "workspace:workspace-ops",
-        "host:host-1",
       ]);
 
-      // shift 범위는 앵커(마지막으로 누른 host-1)부터 대상까지의 **연속 구간으로 교체**한다.
-      // 종류 경계를 그냥 넘어간다.
+      fireEvent.click(app);
+      fireEvent.click(operations, { metaKey: true });
+      expect(selectedAssetKeys()).toEqual([
+        "host:host-1",
+        "workspace:workspace-ops",
+      ]);
+
+      // shift 범위는 앵커(마지막으로 누른 Operations Layout)부터 대상까지의 **연속 구간으로
+      // 교체**한다 — 종류 경계를 그냥 넘어가고, 구간 밖의 host-1 은 빠진다.
       fireEvent.click(database, { shiftKey: true });
       expect(selectedAssetKeys()).toEqual([
         "workspace:workspace-db",
-        "workspace:workspace-ops",
-        "host:host-1",
-      ]);
-
-      // 반대쪽으로 범위를 다시 잡으면 이전 구간을 더하지 않고 갈아치운다.
-      fireEvent.click(
-        document.querySelector(
-          '[data-home-asset-key="host:host-2"]',
-        ) as HTMLElement,
-        { shiftKey: true },
-      );
-      expect(selectedAssetKeys()).toEqual([
-        "host:host-1",
-        "host:aws-1",
         "host:host-2",
+        "workspace:workspace-ops",
       ]);
 
       fireEvent.keyDown(window, { key: "a", ctrlKey: true });
@@ -1460,7 +1452,19 @@ describe("HostBrowser unified Workspace Home", () => {
   describe("정렬", () => {
     // 이름 순서와 마지막 사용 순서가 어긋나야 어떤 키가 걸렸는지 구별된다. Bravo 를 즐겨찾기로
     // 두어 "즐겨찾기를 위로 고정하지 않는다"(호스트와 같다)도 같이 확인한다.
+    //
+    // Charlie 는 Alpha 와 마지막 사용 시각이 같고 배열에서는 앞에 둔다 — 동률을 이름
+    // 오름차순으로 가르는 규칙이 실제로 걸리는지 보려면 입력 순서가 이름 순서와 어긋나야 한다
+    // (Array.sort 는 안정 정렬이라, 어긋나지 않으면 규칙을 지워도 결과가 같다).
     const sortFixture: SavedWorkspaceRecord[] = [
+      {
+        ...savedWorkspaces[0],
+        id: "ws-charlie",
+        name: "Charlie",
+        favorite: false,
+        lastOpenedAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
       {
         ...savedWorkspaces[0],
         id: "ws-alpha",
@@ -1479,14 +1483,17 @@ describe("HostBrowser unified Workspace Home", () => {
       },
     ];
 
-    it("이름 오름차순이 기본이고 즐겨찾기를 위로 고정하지 않는다", () => {
+    it("Workspace 와 호스트가 한 목록으로 섞여 정렬된다", () => {
       renderBrowser({ savedWorkspaces: sortFixture, hostViewMode: "list" });
 
+      // Alpha, App, AWS App, Bravo, Charlie, DB — Workspace 가 위에 뭉쳐 있지 않다.
+      // 즐겨찾기(Bravo)를 위로 고정하지 않는 것도 호스트와 같다.
       expect(assetKeysInOrder()).toEqual([
         "workspace:ws-alpha",
-        "workspace:ws-bravo",
         "host:host-1",
         "host:aws-1",
+        "workspace:ws-bravo",
+        "workspace:ws-charlie",
         "host:host-2",
       ]);
     });
@@ -1496,29 +1503,41 @@ describe("HostBrowser unified Workspace Home", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "이름" }));
 
+      // 한 목록이 통째로 뒤집힌다.
       expect(assetKeysInOrder()).toEqual([
-        "workspace:ws-bravo",
-        "workspace:ws-alpha",
         "host:host-2",
+        "workspace:ws-charlie",
+        "workspace:ws-bravo",
         "host:aws-1",
         "host:host-1",
+        "workspace:ws-alpha",
       ]);
     });
 
     it("최근 접속 머리글은 Workspace 의 마지막 사용 시각을 쓴다", () => {
       renderBrowser({ savedWorkspaces: sortFixture, hostViewMode: "list" });
 
-      // 시간 계열의 기본 방향은 내림차순(최신 먼저) — 이름 순서와 반대가 된다.
+      // 시간 계열의 기본 방향은 내림차순(최신 먼저). 호스트는 연결 기록이 없어 0 이라
+      // 뒤로 밀리고, 동률은 이름 오름차순으로 갈린다.
       fireEvent.click(screen.getByRole("button", { name: "최근 접속" }));
-      expect(assetKeysInOrder().slice(0, 2)).toEqual([
+      expect(assetKeysInOrder()).toEqual([
         "workspace:ws-bravo",
+        // 같은 시각인 Alpha·Charlie 는 이름 오름차순으로 갈린다(배열 순서는 Charlie 가 앞).
         "workspace:ws-alpha",
+        "workspace:ws-charlie",
+        "host:host-1",
+        "host:aws-1",
+        "host:host-2",
       ]);
 
-      // 같은 머리글을 다시 누르면 방향만 뒤집힌다.
+      // 같은 머리글을 다시 누르면 한 목록이 통째로 뒤집힌다 — 0 인 호스트가 앞으로 온다.
       fireEvent.click(screen.getByRole("button", { name: "최근 접속" }));
-      expect(assetKeysInOrder().slice(0, 2)).toEqual([
+      expect(assetKeysInOrder()).toEqual([
+        "host:host-1",
+        "host:aws-1",
+        "host:host-2",
         "workspace:ws-alpha",
+        "workspace:ws-charlie",
         "workspace:ws-bravo",
       ]);
     });
@@ -1540,8 +1559,8 @@ describe("HostBrowser unified Workspace Home", () => {
     fireEvent.click(getWorkspaceCard("workspace-ops"), { metaKey: true });
 
     expect(selectedAssetKeys()).toEqual([
-      "workspace:workspace-ops",
       "host:host-1",
+      "workspace:workspace-ops",
     ]);
     expect(onClearHostSelection).not.toHaveBeenCalled();
   });
@@ -1604,10 +1623,13 @@ describe("HostBrowser unified Workspace Home", () => {
       ];
       renderBrowser({ savedWorkspaces: fixture, hostViewMode: "list" });
 
-      // 목록은 사용자가 고른 정렬(기본 이름 오름차순)을 따른다.
-      expect(assetKeysInOrder().slice(0, 2)).toEqual([
+      // 목록은 사용자가 고른 정렬(기본 이름 오름차순)을 따른다 — Alpha 가 Bravo 보다 앞이다.
+      expect(assetKeysInOrder()).toEqual([
         "workspace:ws-alpha",
+        "host:host-1",
+        "host:aws-1",
         "workspace:ws-bravo",
+        "host:host-2",
       ]);
 
       // 팔레트는 최근에 연 것부터 — 목록 정렬을 따라가면 이름을 쳐서 건너가는 흐름이 정렬 설정에
@@ -1680,8 +1702,8 @@ describe("HostBrowser unified Workspace Home", () => {
       }),
     );
     expect(onExportAssets).toHaveBeenCalledWith([
-      { kind: "workspace", id: "workspace-ops" },
       { kind: "host", id: "host-1" },
+      { kind: "workspace", id: "workspace-ops" },
     ]);
   });
 
@@ -1764,8 +1786,8 @@ describe("HostBrowser unified Workspace Home", () => {
     });
     expect(dataTransfer.getData("application/x-dolgate-home-assets")).toBe(
       JSON.stringify([
-        { kind: "workspace", id: "workspace-ops" },
         { kind: "host", id: "host-1" },
+        { kind: "workspace", id: "workspace-ops" },
       ]),
     );
   });
@@ -2861,5 +2883,83 @@ describe("호스트 편집기를 떠나는 가드", () => {
       expect(onConnectHost).not.toHaveBeenCalled();
       expect(onOpenSavedWorkspace).not.toHaveBeenCalled();
     });
+  });
+});
+
+
+describe("home review regressions", () => {
+  it("clears a Host card when its parent clears selection", () => {
+    const onSelectHost = vi.fn();
+    const view = renderBrowser({ selectedHostId: "host-1", onSelectHost });
+    const card = document.querySelector('[data-home-asset-key="host:host-1"]') as HTMLElement;
+    expect(card.dataset.hostCardState).toBe("selected");
+    view.rerenderSelectedHost(null);
+    expect(card.dataset.hostCardState).not.toBe("selected");
+    fireEvent.click(card);
+    expect(onSelectHost).toHaveBeenCalledWith("host-1");
+  });
+
+  it("preserves a Workspace selection when it clears the parent Host", () => {
+    const view = renderBrowser({ selectedHostId: "host-1", savedWorkspaces });
+    const card = document.querySelector('[data-home-asset-key="workspace:workspace-ops"]') as HTMLElement;
+    fireEvent.click(card);
+    view.rerenderSelectedHost(null);
+    expect(card.dataset.workspaceCardState).toBe("selected");
+  });
+
+  it.each(["tmux로 연결", "컨테이너"])("guards the whole %s batch before connecting", async (label) => {
+    const onLeaveHostEditor = vi.fn();
+    const connect = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({ onLeaveHostEditor, onConnectHostTmux: connect, onOpenHostContainers: connect });
+    fireEvent.contextMenu(document.querySelector('[data-home-asset-key="host:host-1"]') as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    expect(connect).not.toHaveBeenCalled();
+    expect(onLeaveHostEditor).toHaveBeenCalledTimes(1);
+    await act(async () => onLeaveHostEditor.mock.calls[0]![0]());
+    expect(connect).toHaveBeenCalledWith("host-1");
+  });
+
+  it("allows editing the same host after its detail panel fails", () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const detail = vi.spyOn(hostDetailModule, "HostDetailPanel").mockImplementation(() => { throw new Error("bad detail"); });
+    try {
+      const view = renderBrowser({ selectedHostId: "host-1" });
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+      view.rerenderEditor(<div>Recovery editor</div>);
+      expect(screen.getByText("Recovery editor")).toBeInTheDocument();
+    } finally { detail.mockRestore(); log.mockRestore(); }
+  });
+
+  it("cleans credentials of successful deletions and retains failed hosts' credentials for retry", async () => {
+    const onRemoveHost = vi.fn().mockImplementation(async (id) => {
+      if (id === "host-2") throw new Error("cannot delete B");
+    });
+    const onRemoveSecret = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({
+      hosts: hosts.filter((host) => host.kind === "ssh").map((host) => ({ ...host, secretRef: `secret:${host.id}` })),
+      keychainEntries: ["host-1", "host-2"].map((id) => ({ secretRef: `secret:${id}`, label: id, hasPassword: true, hasPassphrase: false, hasManagedPrivateKey: false, hasCertificate: false, linkedHostCount: 1, updatedAt: "2025-01-01T00:00:00.000Z" })),
+      savedWorkspaces,
+      onRemoveHost,
+      onRemoveSecret,
+    });
+    const card = (key: string) => document.querySelector(`[data-home-asset-key="${key}"]`) as HTMLElement;
+    fireEvent.click(card("workspace:workspace-ops"));
+    fireEvent.click(card("host:host-1"), { ctrlKey: true });
+    fireEvent.click(card("host:host-2"), { ctrlKey: true });
+    fireEvent.contextMenu(card("host:host-1"));
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("button", { name: "삭제 (3개)" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "삭제" }));
+    await waitFor(() => expect(onRemoveSecret).toHaveBeenCalledWith("secret:host-1"));
+    expect(onRemoveSecret).not.toHaveBeenCalledWith("secret:host-2");
+    onRemoveHost.mockResolvedValue(undefined);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "삭제" }));
+    await waitFor(() => expect(onRemoveSecret).toHaveBeenCalledWith("secret:host-2"));
+    expect(onRemoveSecret).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows no last-used date for a never-opened Workspace", () => {
+    renderBrowser({ hosts: [], hostViewMode: "list", savedWorkspaces: [{ ...savedWorkspaces[0]!, lastOpenedAt: null }] });
+    const row = document.querySelector('[data-home-asset-key="workspace:workspace-ops"]') as HTMLElement;
+    expect(within(row).getByText("—")).toBeInTheDocument();
   });
 });

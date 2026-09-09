@@ -116,7 +116,7 @@ describe("saved workspace IPC", () => {
       await electronMocks.handlers.get(channel)?.({ sender }, ...args);
     }
 
-    expect(ctx.queueSync).toHaveBeenCalledTimes(invocations.length);
+    expect(ctx.queueSync).toHaveBeenCalledTimes(invocations.length - 1);
     expect(ctx.emitWorkspaceChanged).toHaveBeenCalledTimes(invocations.length);
     // 보낸 창은 이미 자기 store 를 고쳤으므로 제외한다.
     for (const call of ctx.emitWorkspaceChanged.mock.calls) {

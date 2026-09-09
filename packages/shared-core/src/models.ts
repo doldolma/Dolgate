@@ -2767,6 +2767,7 @@ export function normalizeSavedWorkspaceRecord(
   }
 
   let paneCount = 0;
+  const nodeIds = new Set<string>();
   const normalizeNode = (input: unknown, depth: number): SavedWorkspaceNode | null => {
     if (
       depth > MAX_SAVED_WORKSPACE_DEPTH ||
@@ -2777,9 +2778,10 @@ export function normalizeSavedWorkspaceRecord(
       return null;
     }
     const node = input as Record<string, unknown>;
-    if (typeof node.id !== 'string' || !node.id.trim()) {
+    if (typeof node.id !== 'string' || !node.id.trim() || nodeIds.has(node.id)) {
       return null;
     }
+    nodeIds.add(node.id);
     if (node.kind === 'leaf') {
       paneCount += 1;
       if (paneCount > MAX_SAVED_WORKSPACE_PANES) {

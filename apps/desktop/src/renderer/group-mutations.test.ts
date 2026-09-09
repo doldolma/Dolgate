@@ -80,7 +80,10 @@ describe('renameGroupIn', () => {
   it('renames a group that exists only through its hosts', () => {
     const result = renameGroupIn([], [host('h1', 'work/aws')], 'work', 'office', OPTIONS);
 
-    expect(result.groups).toEqual([]);
+    expect(result.groups.map((record) => record.path)).toEqual(['office', 'office/aws']);
+    expect(result.groups.every((record) => record.updatedAt === TS)).toBe(true);
+    const again = renameGroupIn([], [host('h1', 'work/aws')], 'work', 'office', OPTIONS);
+    expect(again.groups.map((record) => record.id)).toEqual(result.groups.map((record) => record.id));
     expect(result.hosts[0]?.groupName).toBe('office/aws');
   });
 

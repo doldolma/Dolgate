@@ -6,7 +6,8 @@ import type { MainIpcContext } from "./context";
 /**
  * 저장된 Workspace 의 IPC 핸들러.
  *
- * **변경 핸들러는 queueSync 와 emitWorkspaceChanged 를 함께 부른다.** queueSync 만 부르던 동안
+ * 내용 변경은 queueSync 와 emitWorkspaceChanged 를 함께 부른다. 기기별 열기 기록은
+ * emitWorkspaceChanged만 사용한다. queueSync 만 부르던 동안
  * 다른 창은 아무 통지를 받지 못해 삭제한 카드를 계속 보여주고, 거기서 이름을 바꾸면 주 프로세스가
  * "Saved workspace not found" 로 거절했다. 로그인한 온라인 세션은 30초 폴링으로 스스로 낫지만
  * 그 폴링은 계정이 있어야 돌고 Workspace 는 계정이 필요 없는 기능이라, 로컬 전용·오프라인·볼트가
@@ -61,7 +62,6 @@ export function registerSavedWorkspacesIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.savedWorkspaces.touchOpened,
     async (event, id: string) => {
       const record = ctx.savedWorkspaces.touchOpened(id);
-      ctx.queueSync();
       ctx.emitWorkspaceChanged?.(event?.sender);
       return record;
     },

@@ -51,7 +51,7 @@ export function filterHostsInGroupTree<T extends Pick<HostRecord, 'groupName'>>(
   return hosts.filter((host) => isGroupWithinPath(normalizeGroupPath(host.groupName), currentGroupPath));
 }
 
-export function collectGroupPaths(groups: GroupRecord[], hosts: HostRecord[]): string[] {
+export function collectGroupPaths(groups: GroupRecord[], hosts: HostRecord[], assets: readonly { groupName?: string | null }[] = []): string[] {
   const paths = new Set<string>();
 
   const appendPathWithAncestors = (targetPath?: string | null) => {
@@ -69,7 +69,7 @@ export function collectGroupPaths(groups: GroupRecord[], hosts: HostRecord[]): s
     appendPathWithAncestors(group.path);
   }
 
-  for (const host of hosts) {
+  for (const host of [...hosts, ...assets]) {
     appendPathWithAncestors(host.groupName);
   }
 

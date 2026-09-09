@@ -22,6 +22,7 @@ import {
   formatSyncRevisionEtag,
   isKnownHostKind,
   collectGroupPaths,
+  materializeImplicitHostGroups,
   isGroupWithinPath,
   normalizeGroupPath,
   normalizeSavedWorkspaceRecord,
@@ -1085,6 +1086,15 @@ export class SyncService {
   ): Promise<{ payload: SyncPayloadV2; includedDeletions: SyncDeletionRecord[] }> {
     this.assertSyncLeaseActive(lease);
     const vaultKeyBase64 = lease.vaultKeyBase64;
+    // 구버전 기기도 pull 이후에는 실제 Group ID로 이름을 바꿀 수 있도록,
+    // Host만으로 존재하던 경로를 push 전에 영속화한다.
+    const data = this.stateStorage.getState().data;
+    const materializedGroups = materializeImplicitHostGroups(data.groups, data.hosts);
+    if (materializedGroups.length !== data.groups.length) {
+      this.stateStorage.updateState((state) => {
+        state.data.groups = materializedGroups;
+      });
+    }
     const groups = this.groups.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const hosts = this.hosts.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const knownHosts = this.knownHosts.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
@@ -1093,7 +1103,7 @@ export class SyncService {
     const snippets = this.snippets.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const workspaces = this.savedWorkspaces
       .list()
-      .map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
+      .map((record) => this.toSyncRecord(record.id, record.updatedAt, { ...record, lastOpenedAt: null }, vaultKeyBase64));
     // auth key 를 포함한 페이로드를 올린다. 서버는 암호문만 보므로(E2EE) 키가 실려도 안전하다.
     const tailnets = this.tailnets
       .listPayloads()
@@ -1299,7 +1309,10 @@ export class SyncService {
     this.assertSyncLeaseActive(lease);
     this.stateStorage.updateState((state) => {
       // groups 를 덮기 전에 경로 rename 을 구한다(collectRenamedGroupPaths 주석 참고).
-      const renamedGroupPaths = collectRenamedGroupPaths(state.data.groups, groups);
+      const renamedGroupPaths = collectRenamedGroupPaths(
+        materializeImplicitHostGroups(state.data.groups, state.data.hosts),
+        groups,
+      );
       state.data.groups = groups;
       state.data.hosts = hosts;
       state.data.knownHosts = knownHosts;
@@ -1318,7 +1331,11 @@ export class SyncService {
       rebasedWorkspaceGroups = nextSavedWorkspaces.some(
         (record, index) => record !== workspaces[index]
       );
-      state.data.savedWorkspaces = nextSavedWorkspaces;
+      const localOpenedAt = new Map(state.data.savedWorkspaces.map((record) => [record.id, record.lastOpenedAt]));
+      state.data.savedWorkspaces = nextSavedWorkspaces.map((record) => ({
+        ...record,
+        lastOpenedAt: localOpenedAt.get(record.id) ?? null,
+      }));
       // 레코드와 auth key 를 한 커밋에서 같이 쓴다. 나눠 쓰면 그 사이에 ephemeral 판정이
       // hasAuthKey 를 잘못 보게 된다.
       state.data.tailnets = tailnets.map(normalizeTailnetPayloadForStorage);

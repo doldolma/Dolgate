@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
+  getHostSecretRef,
   getParentGroupPath,
   normalizeGroupPath,
   type ActivityLogRecord,
@@ -180,8 +181,11 @@ export function HostBrowser({
   const mixedDeleteTargets = partitionHomeAssetKeys(
     mixedDeleteAssetKeys ?? [],
   );
-  const mixedDeleteUnusedLocalSecretRefs =
-    hb.getUnusedLocalSecretRefsAfterHostDeletion(mixedDeleteTargets.hostIds);
+  // 실패분만 재시도해도 먼저 삭제한 Host의 정리 후보를 잃지 않는다.
+  const [mixedDeleteUnusedLocalSecretRefs, setMixedDeleteUnusedLocalSecretRefs] = useState<string[]>([]);
+  const mixedDeletedHostIds = useRef(new Set<string>());
+  const latestHosts = useRef(hb.hosts);
+  latestHosts.current = hb.hosts;
   const groupExportAssetKeys =
     contextMenu?.kind === "group"
       ? hb.getAssetKeysInGroupTrees(contextMenu.groupPaths)
@@ -257,6 +261,8 @@ export function HostBrowser({
     setMixedRemoveUnusedSecrets(
       hb.getUnusedLocalSecretRefsAfterHostDeletion(hostIds).length > 0,
     );
+    mixedDeletedHostIds.current = new Set();
+    setMixedDeleteUnusedLocalSecretRefs(hb.getUnusedLocalSecretRefsAfterHostDeletion(hostIds));
     setMixedDeleteAssetKeys(ordered);
     setMixedDeleteError(null);
   }
@@ -314,7 +320,7 @@ export function HostBrowser({
           // 방법도 없어진다.
           <ErrorBoundary
             label="host-detail"
-            resetKey={`${hb.selectedHostId ?? ""}|${selectedWorkspace?.id ?? ""}`}
+            resetKey={`${hb.selectedHostId ?? ""}|${selectedWorkspace?.id ?? ""}|${Boolean(hostEditor)}`}
             fallback={() => (
               <NoticeCard tone="danger" className="m-[0.9rem]" role="alert">
                 {selectedWorkspace
@@ -446,11 +452,11 @@ export function HostBrowser({
                     <button
                       type="button"
                       className={CTX_ITEM}
-                      onClick={async () => {
-                        await hb.runForOrderedHosts(
-                          tmuxTargetIds,
-                          hb.onConnectHostTmux!,
-                        );
+                      onClick={() => {
+                        hb.setContextMenu(null);
+                        hb.withLeaveHostEditor(() => {
+                          void hb.runForOrderedHosts(tmuxTargetIds, hb.onConnectHostTmux!);
+                        });
                       }}
                     >
                       <Columns2 className={CTX_ICON} aria-hidden />
@@ -469,11 +475,11 @@ export function HostBrowser({
                     <button
                       type="button"
                       className={CTX_ITEM}
-                      onClick={async () => {
-                        await hb.runForOrderedHosts(
-                          containersTargetIds,
-                          hb.onOpenHostContainers,
-                        );
+                      onClick={() => {
+                        hb.setContextMenu(null);
+                        hb.withLeaveHostEditor(() => {
+                          void hb.runForOrderedHosts(containersTargetIds, hb.onOpenHostContainers);
+                        });
                       }}
                     >
                       <Container className={CTX_ICON} aria-hidden />
@@ -1008,16 +1014,13 @@ export function HostBrowser({
           }}
           onConfirm={async () => {
             const failedKeys: HomeAssetKey[] = [];
-            // 정리 대상은 **이 선택 기준으로** 열 때 계산한 것이다. 아래에서 실패분만 남기고
-            // 돌아가면 그 목록에는 호스트가 없어, 다시 계산한 refs 가 비고 체크박스가 아무 일도
-            // 하지 않는다(지워진 호스트의 자격증명이 키체인에 남는다).
-            const secretRefsForSelection = mixedDeleteUnusedLocalSecretRefs;
             setIsMixedDeleting(true);
             for (const key of mixedDeleteAssetKeys) {
               const ref = parseHomeAssetKey(key);
               try {
                 if (ref.kind === "host") {
                   await hb.onRemoveHost(ref.id);
+                  mixedDeletedHostIds.current.add(ref.id);
                 } else if (onRemoveSavedWorkspace) {
                   await onRemoveSavedWorkspace(ref.id);
                 } else {
@@ -1028,49 +1031,39 @@ export function HostBrowser({
               }
             }
 
-            // 호스트가 하나도 실패하지 않았다면(Workspace 만 남았다면) 자격증명 정리는 지금
-            // 한다 — 열 때 계산한 refs 가 정확히 그 호스트 집합의 것이다.
-            const hostDeleteFailed = failedKeys.some(
-              (key) => parseHomeAssetKey(key).kind === "host",
-            );
-            if (failedKeys.length > 0) {
-              if (mixedRemoveUnusedSecrets && !hostDeleteFailed) {
-                for (const secretRef of secretRefsForSelection) {
-                  try {
-                    await hb.onRemoveSecret(secretRef);
-                  } catch {
-                    // 재시도할 삭제가 남아 있는 화면이다 — 정리 실패로 그 흐름을 덮지 않는다.
-                  }
+            // 삭제에 성공한 Host의 자격증명은 실패한 다른 Host 때문에 유실하지 않는다.
+            // 실패한 Host나 그 사이 추가된 Host가 쓰는 자격증명은 남긴다.
+            const remainingRefs: string[] = [];
+            let secretError: unknown;
+            if (mixedRemoveUnusedSecrets) {
+              for (const secretRef of mixedDeleteUnusedLocalSecretRefs) {
+                const stillUsed = latestHosts.current.some((host) =>
+                  !mixedDeletedHostIds.current.has(host.id) && getHostSecretRef(host) === secretRef,
+                );
+                if (stillUsed) {
+                  remainingRefs.push(secretRef);
+                  continue;
+                }
+                try {
+                  await hb.onRemoveSecret(secretRef);
+                } catch (error) {
+                  remainingRefs.push(secretRef);
+                  secretError = error;
                 }
               }
+            }
+            setMixedDeleteUnusedLocalSecretRefs(remainingRefs);
+            setIsMixedDeleting(false);
+            if (failedKeys.length > 0 || secretError) {
               setMixedDeleteAssetKeys(failedKeys);
-              setMixedDeleteError(
-                translate("homeAssets.delete.failed", {
-                  count: failedKeys.length,
-                }),
-              );
-              setIsMixedDeleting(false);
+              setMixedDeleteError(failedKeys.length > 0
+                ? translate("homeAssets.delete.failed", { count: failedKeys.length })
+                : secretError instanceof Error ? secretError.message : translate("hostBrowser.error.unusedSecretDeleteFailed"));
               return;
             }
-
-            try {
-              if (mixedRemoveUnusedSecrets) {
-                for (const secretRef of secretRefsForSelection) {
-                  await hb.onRemoveSecret(secretRef);
-                }
-              }
-              hb.clearSelections();
-              setMixedDeleteAssetKeys(null);
-              setMixedDeleteError(null);
-            } catch (error) {
-              setMixedDeleteError(
-                error instanceof Error
-                  ? error.message
-                  : translate("hostBrowser.error.unusedSecretDeleteFailed"),
-              );
-            } finally {
-              setIsMixedDeleting(false);
-            }
+            hb.clearSelections();
+            setMixedDeleteAssetKeys(null);
+            setMixedDeleteError(null);
           }}
         />
       ) : null}

@@ -621,6 +621,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
         rows: 32,
         command,
         hostId: sshHost.id,
+        containerId,
         hostLabel: sshHost.label,
         title,
         transport: "ssh",

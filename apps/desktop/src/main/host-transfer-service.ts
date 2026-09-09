@@ -343,11 +343,13 @@ export function parseDolgateBundle(value: unknown): ParsedDolgateBundle {
       ? []
       : requireArray(value.workspaces, "transfer.field.workspaces");
   let skippedWorkspaceCount = 0;
+  const skippedWorkspaceIds = new Set<string>();
   const workspaces: SavedWorkspaceRecord[] = [];
   for (const raw of rawWorkspaces) {
     const parsed = normalizeSavedWorkspaceRecord(raw);
     if (!parsed) {
       skippedWorkspaceCount += 1;
+      if (isObject(raw) && typeof raw.id === "string") skippedWorkspaceIds.add(raw.id);
       continue;
     }
     workspaces.push(parsed);
@@ -488,6 +490,7 @@ export function parseDolgateBundle(value: unknown): ParsedDolgateBundle {
     groups.length +
     hosts.length +
     workspaces.length +
+    skippedWorkspaceCount +
     unknownKindHostCount +
     secrets.length +
     knownHosts.length +
@@ -522,7 +525,7 @@ export function parseDolgateBundle(value: unknown): ParsedDolgateBundle {
     scope: "hosts",
     exportedAt: requireString(value.exportedAt, "transfer.field.exportedAt"),
     rootHostIds: rootHostIds.filter((id) => !skippedHostIds.has(id)),
-    rootWorkspaceIds,
+    rootWorkspaceIds: rootWorkspaceIds.filter((id) => !skippedWorkspaceIds.has(id)),
     groups,
     hosts,
     workspaces,
@@ -537,6 +540,9 @@ export function parseDolgateBundle(value: unknown): ParsedDolgateBundle {
   assertBundleReferences(bundle);
 
   const warnings: string[] = [];
+  if (skippedWorkspaceCount > 0) {
+    warnings.push(t("transfer.error.unsupportedWorkspaceSkipped", { count: skippedWorkspaceCount }));
+  }
   if (unknownKindHostCount > 0) {
     warnings.push(t("transfer.error.unknownHostKindSkipped", { count: unknownKindHostCount }));
   }

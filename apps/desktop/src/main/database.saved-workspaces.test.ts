@@ -45,6 +45,19 @@ afterEach(() => {
 });
 
 describe("SavedWorkspaceRepository", () => {
+  it("opening does not change the content modification timestamp", async () => {
+    const repository = await createRepository();
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-01T00:00:00Z"));
+      const created = repository.create({ name: "Original", root: root() });
+      vi.setSystemTime(new Date("2026-09-03T00:00:00Z"));
+      const opened = repository.touchOpened(created.id);
+      expect(opened.updatedAt).toBe(created.updatedAt);
+      expect(opened.lastOpenedAt).toBe("2026-09-03T00:00:00.000Z");
+    } finally { vi.useRealTimers(); }
+  });
+
   it("always creates a new saved record and exposes no layout overwrite operation", async () => {
     const repository = await createRepository();
 

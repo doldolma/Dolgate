@@ -263,3 +263,82 @@ describe("saved workspace store orchestration", () => {
     );
   });
 });
+describe("saved workspace connection lifecycle regressions", () => {
+  it("removes missing-host placeholders and cancels late connections when closed", async () => {
+    const record = savedWorkspace();
+    const api = createMockApi();
+    api.savedWorkspaces.touchOpened = vi.fn().mockResolvedValue(record);
+    const deferred = createDeferred<{ sessionId: string }>();
+    api.ssh.connectLocal = vi.fn(() => deferred.promise);
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    store.setState({ hosts: [], savedWorkspaces: [record] });
+    const opening = store.getState().openSavedWorkspace(record.id, 120, 32);
+    await vi.waitFor(() => expect(api.ssh.connectLocal).toHaveBeenCalled());
+    expect(store.getState().tabs.some((tab) => tab.status === "error")).toBe(true);
+    await store.getState().closeWorkspace(store.getState().workspaces[0]!.id);
+    expect(store.getState().tabs).toEqual([]);
+    expect(store.getState().pendingConnectionAttempts).toEqual([]);
+    deferred.resolve({ sessionId: "late-local" });
+    await opening;
+    expect(api.ssh.disconnect).toHaveBeenCalledWith("late-local");
+    expect(store.getState().tabs).toEqual([]);
+    expect(store.getState().workspaces).toEqual([]);
+    expect(store.getState().tabStrip).toEqual([]);
+  });
+
+  it("keeps the pane and screen chosen while a host connection is pending", async () => {
+    const record = savedWorkspace();
+    const api = createMockApi();
+    api.savedWorkspaces.touchOpened = vi.fn().mockResolvedValue(record);
+    const deferred = createDeferred<{ sessionId: string }>();
+    api.ssh.connect = vi.fn(() => deferred.promise);
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    store.setState({ savedWorkspaces: [record] });
+    const opening = store.getState().openSavedWorkspace(record.id, 120, 32);
+    await vi.waitFor(() => expect(store.getState().tabs.some((tab) => tab.source === "local" && !tab.sessionId.startsWith("pending:"))).toBe(true));
+    const workspace = store.getState().workspaces[0]!;
+    const local = store.getState().tabs.find((tab) => tab.source === "local")!;
+    store.getState().focusWorkspaceSession(workspace.id, local.sessionId);
+    store.setState({ activeWorkspaceTab: "home" });
+    deferred.resolve({ sessionId: "late-host" });
+    await opening;
+    expect(store.getState().workspaces[0]!.activeSessionId).toBe(local.sessionId);
+    expect(store.getState().activeWorkspaceTab).toBe("home");
+  });
+
+  it("retries failed container exec with its durable container identity", async () => {
+    const api = createMockApi();
+    api.containers.openShell = vi.fn()
+      .mockRejectedValueOnce(new Error("container stopped"))
+      .mockResolvedValue({ sessionId: "retried-container" });
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().openHostContainerShell("host-1", "container-1");
+    const tab = store.getState().tabs[0]!;
+    expect(store.getState().pendingConnectionAttempts).toEqual([]);
+    await store.getState().retrySessionConnection(tab.sessionId);
+    expect(api.containers.openShell).toHaveBeenCalledTimes(2);
+    expect(api.ssh.connect).not.toHaveBeenCalled();
+    expect(store.getState().tabs[0]).toMatchObject({ sessionId: "retried-container", containerId: "container-1" });
+  });
+});
+
+
+it("moves and persists ordering for a group occupied only by a saved Workspace", async () => {
+  const record = savedWorkspace({ groupName: "legacy" });
+  const moved = { ...record, groupName: "work/legacy" };
+  const group = { id: "group-legacy", name: "legacy", path: "work/legacy", parentPath: "work", createdAt: record.createdAt, updatedAt: record.updatedAt };
+  const api = createMockApi();
+  api.groups.move = vi.fn().mockResolvedValue({ groups: [], hosts: [], savedWorkspaces: [moved], nextPath: "work/legacy" });
+  api.groups.create = vi.fn().mockResolvedValue(group);
+  api.groups.setOrder = vi.fn().mockResolvedValue([group]);
+  const store = createAppStore(api);
+  await store.getState().bootstrap();
+  store.setState({ groups: [], hosts: [], savedWorkspaces: [record] });
+  await store.getState().reorderGroup("legacy", "work", 0);
+  expect(api.groups.create).toHaveBeenCalledWith("legacy", "work");
+  expect(store.getState().savedWorkspaces[0]!.groupName).toBe("work/legacy");
+  expect(store.getState().groups).toEqual([group]);
+});

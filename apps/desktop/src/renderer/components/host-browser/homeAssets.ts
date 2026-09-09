@@ -136,3 +136,57 @@ export function getHomeAssetRange(
   const end = Math.max(anchorIndex, targetIndex);
   return orderedKeys.slice(start, end + 1);
 }
+
+/** 정렬 키. useHostBrowser 의 HostSortKey 와 같다(순환 import 를 피해 여기서 좁게 다시 적는다). */
+export type HomeAssetSortKey = "name" | "recent" | "group" | "lastConnected";
+
+/**
+ * 홈 목록을 **한 벌로** 정렬한다.
+ *
+ * 종류별로 따로 정렬해 이어 붙이면(예전) 목록이 "Workspace 전부 → 호스트 전부" 두 덩어리가
+ * 되어, 표 머리글에 정렬 화살표가 켜져 있는데도 이름순으로 Z 인 Workspace 가 A 인 호스트보다
+ * 위에 남는다. 사용자에게는 한 표이므로 정렬도 한 번만 걸려야 한다.
+ *
+ * 키·방향·동률 규칙은 호스트 정렬(sortHosts)과 같다: 각 비교자는 오름차순 기준이고 방향으로
+ * 부호를 뒤집으며, 동률은 항상 이름 오름차순이다. 종류별로 뜻만 대응시킨다 —
+ * `recent` 는 둘 다 updatedAt, `lastConnected` 는 호스트는 마지막 연결 시각, Workspace 는
+ * 마지막으로 연 시각(lastOpenedAt)이다. 즐겨찾기를 위로 고정하지 않는 것도 호스트와 같다.
+ */
+export function sortHomeAssets(
+  assets: readonly HomeAsset[],
+  sortKey: HomeAssetSortKey,
+  sortDirection: "asc" | "desc",
+  lastConnectedByHostId: ReadonlyMap<string, number>,
+): HomeAsset[] {
+  const dir = sortDirection === "desc" ? -1 : 1;
+  const byName = (left: HomeAsset, right: HomeAsset) =>
+    left.label.localeCompare(right.label);
+  const lastUsedAt = (asset: HomeAsset) =>
+    asset.kind === "host"
+      ? (lastConnectedByHostId.get(asset.id) ?? 0)
+      : Date.parse(asset.record.lastOpenedAt ?? "") || 0;
+
+  if (sortKey === "group") {
+    return [...assets].sort(
+      (left, right) =>
+        dir * (left.groupName ?? "").localeCompare(right.groupName ?? "") ||
+        byName(left, right),
+    );
+  }
+  if (sortKey === "lastConnected") {
+    return [...assets].sort(
+      (left, right) =>
+        dir * (lastUsedAt(left) - lastUsedAt(right)) || byName(left, right),
+    );
+  }
+  if (sortKey === "recent") {
+    return [...assets].sort(
+      (left, right) =>
+        dir *
+          (left.record.updatedAt ?? "").localeCompare(
+            right.record.updatedAt ?? "",
+          ) || byName(left, right),
+    );
+  }
+  return [...assets].sort((left, right) => dir * byName(left, right));
+}

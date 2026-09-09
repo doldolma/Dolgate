@@ -43,14 +43,14 @@ export function summarizeSavedWorkspace(
     }
     return host?.label ?? leaf.target.label;
   });
-  const timestamp = workspace.lastOpenedAt ?? workspace.createdAt;
+  const timestamp = workspace.lastOpenedAt ?? "";
   return {
     paneCount: countSavedWorkspacePanes(workspace.root),
     hostCount,
     localCount,
     missingCount,
     labels,
-    lastUsedAt: new Date(timestamp).getTime(),
+    lastUsedAt: Date.parse(timestamp) || 0,
   };
 }
 

@@ -17,7 +17,6 @@ import { useTranslation } from "react-i18next";
 import {
   buildVisibleGroups,
   filterHostsInGroupTree,
-  getHostBadgeLabel,
   getHostSearchText,
   getHostSubtitle,
   isAwsEc2HostRecord,
@@ -77,6 +76,7 @@ export {
 } from "../lib/file-drop";
 import { DialogBackdrop } from "./DialogBackdrop";
 import { HostCard } from "./HostCard";
+import { HostBadge } from "./host-browser/HostBadge";
 import { ConnectionHopSteps } from "./ConnectionHopSteps";
 import { ConnectionStatusOverlay } from "./ConnectionStatusOverlay";
 import { useAppStore } from "../store/appStore";
@@ -2257,7 +2257,6 @@ function HostPicker({
             ) : (
               visibleHosts.map((host) => {
                 const awsHost = isAwsEc2HostRecord(host) ? host : null;
-                const badgeLabel = getHostBadgeLabel(host);
                 const canOpenHostSettings = awsHost
                   ? !awsHost.awsSshUsername?.trim() || awsHost.awsSshMetadataStatus === "error"
                   : false;
@@ -2268,7 +2267,14 @@ function HostPicker({
                     key={host.id}
                     selected={isSelected}
                     busy={isBusy}
-                    badgeLabel={badgeLabel}
+                    // 홈 목록과 같은 뱃지를 쓴다 — 감지한 OS 가 있으면 그 마크가, 없으면
+                    // 예전처럼 글자가 나온다. 칸 크기는 이 카드의 것(2.3rem)에 맞춘다.
+                    badge={
+                      <HostBadge
+                        host={host}
+                        className="h-[2.3rem] w-[2.3rem] rounded-[10px]"
+                      />
+                    }
                     title={host.label}
                     subtitle={getHostSubtitle(host, hostSubtitleLabels())}
                     groupLabel={host.groupName || "Ungrouped"}

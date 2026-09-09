@@ -284,6 +284,26 @@ describe("buildDolgateHostBundle", () => {
 });
 
 describe("Saved Workspace transfer", () => {
+  it("skips unsupported layouts while retaining hosts and warns about them", () => {
+    const bundle = { ...bundleWithHosts([host("host-app", "App")]),
+      rootWorkspaceIds: ["future"], workspaces: [{ ...workspace("future"), version: 2 }] };
+    const parsed = parseDolgateBundle(bundle);
+    expect(parsed.bundle.hosts).toHaveLength(1);
+    expect(parsed.bundle.workspaces).toEqual([]);
+    expect(parsed.bundle.rootWorkspaceIds).toEqual([]);
+    expect(parsed.warnings).toHaveLength(1);
+    expect(() => parseDolgateBundle({ ...bundle, rootWorkspaceIds: ["absent"] })).toThrow();
+  });
+
+  it("rejects duplicate node IDs before opening a layout", () => {
+    const record = workspace("duplicate");
+    if (record.root.kind !== "split") throw new Error("fixture");
+    record.root.first.id = record.root.second.id;
+    const parsed = parseDolgateBundle({ ...bundleWithHosts([]), rootWorkspaceIds: [record.id], workspaces: [record] });
+    expect(parsed.bundle.workspaces).toEqual([]);
+    expect(parsed.warnings).toHaveLength(1);
+  });
+
   function workspace(id: string): SavedWorkspaceRecord {
     return {
       version: 1,

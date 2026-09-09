@@ -507,6 +507,7 @@ describe("registerContainersIpcHandlers", () => {
     expect(connect).toHaveBeenCalledWith(
       expect.objectContaining({
         host: "prod.example.ts.net",
+        containerId: "container-1",
         command: "/usr/bin/docker exec -it container-1 /bin/sh",
         transport: "ssh",
         tailnetId: "net-a",

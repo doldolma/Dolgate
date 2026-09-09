@@ -71,6 +71,7 @@ export function getHostAddress(host: HostRecord): string | null {
 
 /** 최근 사용(연결) 시각 ms → 상대시간(가까운 과거) / 날짜(오래됨). 카드·테이블 공용. */
 export function formatLastUsed(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "—";
   const diffMin = Math.round((Date.now() - ms) / 60000);
   if (diffMin < 1) {
     return t('hostDisplay.justNow');

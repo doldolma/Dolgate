@@ -481,7 +481,7 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
       }
 
       // 형제 목록을 **화면에 보이는 순서**로 만든다. planGroupReorder 가 그 순서를 전제한다.
-      const siblingPaths = collectGroupPaths(groups, hosts).filter(
+      const siblingPaths = collectGroupPaths(groups, hosts, movedSavedWorkspaces ?? get().savedWorkspaces).filter(
         (candidate: string) => isDirectGroupChild(candidate, nextParentPath),
       );
 

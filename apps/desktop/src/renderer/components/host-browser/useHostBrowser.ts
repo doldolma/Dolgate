@@ -51,6 +51,7 @@ import {
   orderHomeAssetKeys,
   parseHomeAssetKey,
   partitionHomeAssetKeys,
+  sortHomeAssets,
   toHomeAssetKey,
   type HomeAsset,
   type HomeAssetKey,
@@ -422,52 +423,9 @@ function compareWorkspacesForPalette(
   if (favoriteDifference !== 0) {
     return favoriteDifference;
   }
-  const rightRecent = Date.parse(right.lastOpenedAt ?? right.createdAt) || 0;
-  const leftRecent = Date.parse(left.lastOpenedAt ?? left.createdAt) || 0;
+  const rightRecent = Date.parse(right.lastOpenedAt ?? "") || 0;
+  const leftRecent = Date.parse(left.lastOpenedAt ?? "") || 0;
   return rightRecent - leftRecent || left.name.localeCompare(right.name);
-}
-
-/**
- * Workspace 도 호스트와 같은 정렬 컨트롤 아래 놓여 있다 — 키·방향·동률 규칙을 sortHosts 와
- * 똑같이 쓴다. 예전에는 즐겨찾기 → 최근 사용 → 이름 고정 순서였는데, 표 머리글에 정렬 화살표가
- * 켜지는데도 위쪽 Workspace 줄만 그 정렬을 따르지 않아 한 정렬로 보이지 않았다.
- *
- * 키 대응: name→이름, group→그룹 경로, recent→updatedAt(호스트와 같다),
- * lastConnected→lastOpenedAt(Workspace 의 "마지막 사용"). 즐겨찾기를 위로 고정하지 않는 것도
- * 호스트와 같다 — 고정하면 사용자가 고른 정렬을 덮는다(즐겨찾기만 보려면 필터가 있다).
- */
-function sortSavedWorkspaces(
-  workspaces: readonly SavedWorkspaceRecord[],
-  sortKey: HostSortKey,
-  sortDirection: "asc" | "desc",
-): SavedWorkspaceRecord[] {
-  const dir = sortDirection === "desc" ? -1 : 1;
-  const byName = (a: SavedWorkspaceRecord, b: SavedWorkspaceRecord) =>
-    a.name.localeCompare(b.name);
-  if (sortKey === "group") {
-    return [...workspaces].sort(
-      (a, b) =>
-        dir *
-          (normalizeGroupPath(a.groupName) ?? "").localeCompare(
-            normalizeGroupPath(b.groupName) ?? "",
-          ) || byName(a, b),
-    );
-  }
-  if (sortKey === "lastConnected") {
-    return [...workspaces].sort((a, b) => {
-      const ta = Date.parse(a.lastOpenedAt ?? "") || 0;
-      const tb = Date.parse(b.lastOpenedAt ?? "") || 0;
-      return dir * (ta - tb) || byName(a, b);
-    });
-  }
-  if (sortKey === "recent") {
-    return [...workspaces].sort(
-      (a, b) =>
-        dir * (a.updatedAt ?? "").localeCompare(b.updatedAt ?? "") ||
-        byName(a, b),
-    );
-  }
-  return [...workspaces].sort((a, b) => dir * byName(a, b));
 }
 
 export interface UseHostBrowserParams {
@@ -629,6 +587,13 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   // Workspace를 고르며 상위 Host 선택을 비우는 경우에는 Workspace 선택을 지우지 않는다.
   useEffect(() => {
     if (!selectedHostId) {
+      // Workspace 포커스를 위해 Host 선택만 비운 경우는 유지한다.
+      // New Host·가져오기 등 상위에서 Host 선택을 해제한 경우는 카드도 비운다.
+      if (!focusedAssetKey?.startsWith("workspace:")) {
+        setSelectedAssetKeys([]);
+        setFocusedAssetKey(null);
+        setAssetSelectionAnchorKey(null);
+      }
       return;
     }
     const key = `host:${selectedHostId}` as HomeAssetKey;
@@ -858,19 +823,33 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     if (favoritesFilterActive) {
       next = next.filter((workspace) => workspace.favorite);
     }
-    return sortSavedWorkspaces(next, sortKey, sortDirection);
+    // 정렬하지 않는다 — 화면 순서는 호스트와 한 벌로 visibleAssets 에서 정한다.
+    return next;
   }, [
     activeTagFilter,
     currentGroupPath,
     favoritesFilterActive,
     searchedWorkspaces,
-    sortKey,
-    sortDirection,
   ]);
 
+  // 정렬은 **여기서 한 번만** 걸린다. 종류별로 정렬해 이어 붙이면 목록이 "Workspace 전부 →
+  // 호스트 전부" 두 덩어리가 되어, 머리글에 정렬 화살표가 켜져 있는데도 이름순 Z 인 Workspace 가
+  // A 인 호스트보다 위에 남는다(sortHomeAssets 주석 참고).
   const visibleAssets = useMemo(
-    () => buildHomeAssets(visibleWorkspaces, visibleHosts),
-    [visibleHosts, visibleWorkspaces],
+    () =>
+      sortHomeAssets(
+        buildHomeAssets(visibleWorkspaces, visibleHosts),
+        sortKey,
+        sortDirection,
+        lastConnectedByHostId,
+      ),
+    [
+      lastConnectedByHostId,
+      sortDirection,
+      sortKey,
+      visibleHosts,
+      visibleWorkspaces,
+    ],
   );
   const visibleAssetKeys = useMemo(
     () => visibleAssets.map((asset) => asset.key),
@@ -879,27 +858,10 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   const { hostIds: selectedHostIds, workspaceIds: selectedWorkspaceIds } =
     partitionHomeAssetKeys(selectedAssetKeys);
 
-  const allGroupPaths = useMemo(() => {
-    const paths = collectGroupPaths(groups, hosts);
-    const known = new Set(paths);
-    for (const workspace of savedWorkspaces) {
-      const ancestors: string[] = [];
-      let path = normalizeGroupPath(workspace.groupName);
-      while (path) {
-        ancestors.unshift(path);
-        path = normalizeGroupPath(
-          path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : null,
-        );
-      }
-      for (const ancestor of ancestors) {
-        if (!known.has(ancestor)) {
-          known.add(ancestor);
-          paths.push(ancestor);
-        }
-      }
-    }
-    return paths;
-  }, [groups, hosts, savedWorkspaces]);
+  const allGroupPaths = useMemo(
+    () => collectGroupPaths(groups, hosts, savedWorkspaces),
+    [groups, hosts, savedWorkspaces],
+  );
   const groupTreeRows = useMemo(
     () => buildGroupTreeRows(allGroupPaths, groups, hosts, savedWorkspaces),
     [allGroupPaths, groups, hosts, savedWorkspaces],
@@ -992,9 +954,14 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       }),
     [collapsedTreeGroupPathSet, sortedGroupTreeRows, hideEmptyGroups],
   );
+  // 화면 순서에서 호스트만 걸러 낸다. visibleHosts 를 따로 정렬해 쓰면 두 순서가 갈릴 수
+  // 있는데, 이 값은 "화면에 보이는 순서" 로 쓰인다(선택 순회·삭제 대화상자 목록).
   const visibleHostIds = useMemo(
-    () => visibleHosts.map((host) => host.id),
-    [visibleHosts],
+    () =>
+      visibleAssets.flatMap((asset) =>
+        asset.kind === "host" ? [asset.id] : [],
+      ),
+    [visibleAssets],
   );
   const visibleGroupPaths = useMemo(
     () => visibleGroupTreeRows.map((group) => group.path),

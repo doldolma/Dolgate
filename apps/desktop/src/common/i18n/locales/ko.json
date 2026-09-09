@@ -1094,6 +1094,7 @@
       "invalidWorkspace": "Dolgate 파일의 Workspace 정보가 올바르지 않습니다.",
       "invalidTailnet": "Dolgate 파일의 Tailnet 정보가 올바르지 않습니다.",
       "tailnetMissing": "{{label}}: 이 호스트가 쓰는 Tailnet 설정이 파일에 없습니다. Tailnet을 등록해야 연결됩니다.",
+      "unsupportedWorkspaceSkipped": "이 버전이 지원하지 않는 Workspace {{count}}개를 건너뛰었습니다. 앱을 업데이트하면 가져올 수 있습니다.",
       "unknownHostKindSkipped": "이 버전이 모르는 종류의 호스트 {{count}}개를 건너뛰었습니다. 앱을 업데이트하면 가져올 수 있습니다.",
       "unknownHostKindDependentsSkipped": "건너뛴 호스트에 딸린 항목 {{count}}개(경유 호스트·포트 포워딩·DNS)도 함께 제외했습니다.",
       "invalidSecret": "Dolgate 파일의 자격증명 정보가 올바르지 않습니다.",

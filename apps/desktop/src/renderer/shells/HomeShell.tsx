@@ -465,9 +465,7 @@ export function HomeShell({
   }
 
   function handleEditHost(hostId: string) {
-    resetHostBrowserMessages();
-    setSelectedHostId(hostId);
-    homeViewModel.openEditHostDrawer(hostId);
+    guardEditorExit(() => switchEditTargetTo(hostId));
   }
 
   function openHostSecretEditor(secretRef: string) {
@@ -689,7 +687,7 @@ export function HomeShell({
             statusMessage={hostBrowserStatus}
             onSearchChange={homeViewModel.setSearchQuery}
             onHostViewModeChange={handleHostViewModeChange}
-            onOpenLocalTerminal={() => {
+            onOpenLocalTerminal={() => guardEditorExit(() => {
               resetHostBrowserMessages();
               setSelectedHostId(null);
               // 씨앗 크기로 연다 — 여기는 pane 이 없어 실제 격자를 모른다. 정정은
@@ -706,12 +704,12 @@ export function HomeShell({
                       : translate("home.error.localTerminalFailed"),
                   );
                 });
-            }}
-            onCreateHost={() => {
+            })}
+            onCreateHost={() => guardEditorExit(() => {
               resetHostBrowserMessages();
               setSelectedHostId(null);
               homeViewModel.openCreateHostDrawer();
-            }}
+            })}
             onOpenDolgateImport={() => {
               resetHostBrowserMessages();
               setIsDolgateImportOpen(true);

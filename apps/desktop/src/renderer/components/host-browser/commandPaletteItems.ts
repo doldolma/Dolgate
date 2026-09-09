@@ -252,7 +252,7 @@ export function buildHostBrowserCommandPaletteItems(
         subtitle: getHostPaletteSubtitle(host),
         keywords: ['containers', 'docker', 'podman', host.label, getHostPaletteText(host)],
         Icon: Container,
-        run: () => hb.onOpenHostContainers(host.id),
+        run: () => hb.withLeaveHostEditor(() => void hb.onOpenHostContainers(host.id)),
       });
     }
   }));
