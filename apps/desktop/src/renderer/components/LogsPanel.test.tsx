@@ -652,4 +652,166 @@ describe('LogsPanel', () => {
     expect(screen.getByText('Kafka tunnel')).toBeInTheDocument();
     expect(screen.queryByText('ssh-host')).not.toBeInTheDocument();
   });
+
+  /**
+   * 카드 여섯 종류 중 다섯은 번역된 메시지를 안 쓰고 메타데이터에서 직접 그린다. 저장된
+   * message 만 훑는 검색은 화면에 보이는 글자의 대부분을 못 찾는다 — 그 배선을 지킨다.
+   */
+  it('searches the text the cards actually render, not the stored message', () => {
+    render(
+      <LogsPanel
+        logs={[
+          createPortForwardLifecycleLog({
+            ruleId: 'rule-7',
+            ruleLabel: 'Kafka tunnel',
+            hostId: 'host-7',
+            hostLabel: 'broker-host',
+            transport: 'ssh',
+            mode: 'local',
+            bindAddress: '127.0.0.1',
+            bindPort: 19092,
+            targetSummary: 'kafka.internal:9092',
+            startedAt: '2026-03-29T00:00:00.000Z',
+            status: 'running'
+          }),
+          createLifecycleLog({
+            sessionId: 'ssh-session-7',
+            hostId: 'host-8',
+            hostLabel: 'ssh-host',
+            title: 'SSH Host',
+            connectionKind: 'ssh',
+            connectedAt: '2026-03-29T00:01:00.000Z',
+            status: 'connected'
+          })
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    // 포트는 메타데이터에만 있고 message 에는 없다.
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: '19092' } });
+    expect(screen.getByText('Kafka tunnel')).toBeInTheDocument();
+    expect(screen.queryByText('ssh-host')).not.toBeInTheDocument();
+
+    // 전달 대상 주소도 마찬가지.
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'kafka.internal' } });
+    expect(screen.getByText('Kafka tunnel')).toBeInTheDocument();
+  });
+
+  it('matches host names case-insensitively and clears back to the full list', () => {
+    render(
+      <LogsPanel
+        logs={[
+          createLifecycleLog({
+            sessionId: 'a',
+            hostId: 'host-a',
+            hostLabel: 'prod-web-01',
+            title: 'prod-web-01',
+            connectionKind: 'ssh',
+            connectedAt: '2026-03-29T00:00:00.000Z',
+            status: 'connected'
+          }),
+          createLifecycleLog({
+            sessionId: 'b',
+            hostId: 'host-b',
+            hostLabel: 'db-replica',
+            title: 'db-replica',
+            connectionKind: 'ssh',
+            connectedAt: '2026-03-29T00:01:00.000Z',
+            status: 'connected'
+          })
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'PROD-WEB' } });
+    expect(screen.getByText('prod-web-01')).toBeInTheDocument();
+    expect(screen.queryByText('db-replica')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: '   ' } });
+    expect(screen.getByText('prod-web-01')).toBeInTheDocument();
+    expect(screen.getByText('db-replica')).toBeInTheDocument();
+  });
+
+  /** 호스트 검색과 같은 규칙. 같은 앱 안에서 검색 동작이 갈리면 안 된다. */
+  it('finds Hangul host names typed on a QWERTY layout', () => {
+    render(
+      <LogsPanel
+        logs={[
+          createLifecycleLog({
+            sessionId: 'kr',
+            hostId: 'host-kr',
+            hostLabel: '서버-01',
+            title: '서버-01',
+            connectionKind: 'ssh',
+            connectedAt: '2026-03-29T00:00:00.000Z',
+            status: 'connected'
+          }),
+          createLifecycleLog({
+            sessionId: 'en',
+            hostId: 'host-en',
+            hostLabel: 'bastion',
+            title: 'bastion',
+            connectionKind: 'ssh',
+            connectedAt: '2026-03-29T00:01:00.000Z',
+            status: 'connected'
+          })
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'tjqj' } });
+    expect(screen.getByText('서버-01')).toBeInTheDocument();
+    expect(screen.queryByText('bastion')).not.toBeInTheDocument();
+  });
+
+  it('narrows together with the category and level filters', () => {
+    render(
+      <LogsPanel
+        logs={[
+          createContainerActionLog({
+            actionId: 'act-1',
+            hostId: 'host-c',
+            hostLabel: 'docker-host',
+            containerId: 'abc123',
+            containerName: 'redis-cache',
+            action: 'restart',
+            status: 'success',
+            startedAt: '2026-03-29T00:00:00.000Z',
+            completedAt: '2026-03-29T00:00:02.000Z',
+            durationMs: 2000,
+          }),
+          createLifecycleLog({
+            sessionId: 'sess-c',
+            hostId: 'host-d',
+            hostLabel: 'redis-box',
+            title: 'redis-box',
+            connectionKind: 'ssh',
+            connectedAt: '2026-03-29T00:01:00.000Z',
+            status: 'connected'
+          })
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'redis' } });
+    expect(screen.getByText('redis-cache')).toBeInTheDocument();
+    expect(screen.getByText('redis-box')).toBeInTheDocument();
+
+    // 컨테이너 액션은 audit, 세션은 session 이다.
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'audit' } });
+    expect(screen.getByText('redis-cache')).toBeInTheDocument();
+    expect(screen.queryByText('redis-box')).not.toBeInTheDocument();
+
+    // 걸리는 것이 없으면 빈 상태 문구가 나온다(로그가 아예 없다는 뜻이 아니다).
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'nothing-here' } });
+    expect(screen.getByText('조건에 맞는 로그가 없습니다.')).toBeInTheDocument();
+  });
 });

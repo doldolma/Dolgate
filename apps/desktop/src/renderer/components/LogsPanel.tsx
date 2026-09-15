@@ -17,6 +17,7 @@ import {
   Card,
   CardMain,
   EmptyState,
+  Input,
   PanelSection,
   SelectField,
   Toolbar,
@@ -25,6 +26,9 @@ import { Play } from '../ui/icons';
 import { useTranslation } from 'react-i18next';
 import { getFormatLocale, t } from '../i18n';
 import { resolveLogMessage } from '../lib/activity-log-message';
+import { getKeyboardLayoutSearchQueries } from '../lib/keyboard-layout-search';
+
+type Translate = (key: string, params?: Record<string, unknown>) => string;
 
 interface LogsPanelProps {
   logs: ActivityLogRecord[];
@@ -353,10 +357,95 @@ function getSftpSummaryItems(metadata: SftpLifecycleLogMetadata): string[] {
   ].filter((item): item is string => Boolean(item));
 }
 
+/**
+ * 검색이 훑을 글자. **화면에 실제로 그려지는 것만** 모은다.
+ *
+ * 카드 여섯 종류 중 다섯은 번역된 메시지를 쓰지 않고 메타데이터에서 직접 그린다 — 호스트
+ * 이름도 컨테이너 이름도 포트도 전부 거기 있다. `log.message` 만 훑으면 화면에 보이는
+ * 글자의 대부분을 못 찾는다.
+ *
+ * 일부러 뺀 것 두 가지:
+ * - **시각과 소요 시간.** "2026" 이 거의 모든 줄에 걸려 거르는 데 도움이 안 된다.
+ * - **접혀 있는 Metadata JSON.** 맞았는데 왜 맞았는지 화면에 안 보이면 더 헷갈린다.
+ */
+function getLogSearchText(log: ActivityLogRecord, translate: Translate): string {
+  const parts: Array<string | null | undefined> = [];
+  const metadata = log.metadata;
+
+  if (log.kind === 'container-lifecycle' && isContainerLifecycleMetadata(metadata)) {
+    parts.push(
+      metadata.hostLabel,
+      metadata.workspaceKind === 'ecs-cluster' ? 'ECS cluster' : 'Host containers',
+      getContainerTransportLabel(metadata.transport),
+      metadata.runtime,
+      getContainerStatusLabel(metadata.status),
+      metadata.lastError,
+      metadata.endReason,
+    );
+  } else if (log.kind === 'container-action' && isContainerActionMetadata(metadata)) {
+    parts.push(
+      metadata.containerName,
+      metadata.containerId,
+      metadata.hostLabel,
+      metadata.runtime,
+      getContainerActionLabel(metadata.action),
+      metadata.status === 'success' ? 'Success' : 'Error',
+      metadata.errorMessage,
+    );
+  } else if (log.kind === 'session-lifecycle' && isSessionLifecycleMetadata(metadata)) {
+    parts.push(
+      metadata.hostLabel,
+      getSessionLifecycleSubtitle(metadata),
+      getConnectionKindLabel(metadata.connectionKind, metadata.tmux),
+      getLifecycleStatusLabel(metadata.status),
+      metadata.disconnectReason,
+    );
+  } else if (log.kind === 'sftp-lifecycle' && isSftpLifecycleMetadata(metadata)) {
+    parts.push(
+      metadata.hostLabel,
+      metadata.title,
+      'SFTP',
+      getSftpStatusLabel(metadata.status),
+      metadata.lastPath,
+      metadata.endReason,
+    );
+  } else if (log.kind === 'port-forward-lifecycle' && isPortForwardLifecycleMetadata(metadata)) {
+    parts.push(
+      metadata.ruleLabel,
+      metadata.hostLabel,
+      `${metadata.bindAddress}:${metadata.bindPort} -> ${metadata.targetSummary}`,
+      getPortForwardTransportLabel(metadata.transport),
+      getPortForwardStatusLabel(metadata.status),
+      metadata.endReason,
+    );
+  } else {
+    // 그 밖의 기록은 일반 카드로 그려진다 — 거기 보이는 것은 문구·레벨·카테고리뿐이다.
+    parts.push(resolveLogMessage(log, translate), log.level, log.category);
+  }
+
+  return parts
+    .filter((part): part is string => typeof part === 'string' && part.length > 0)
+    .join(' ')
+    .toLocaleLowerCase();
+}
+
 export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
   const { t: translate } = useTranslation();
   const [category, setCategory] = useState<'all' | ActivityLogCategory>('all');
   const [level, setLevel] = useState<'all' | ActivityLogLevel>('all');
+  const [search, setSearch] = useState('');
+
+  // 한 번만 뽑아 둔다. 최대 1만 건이라 글자마다 다시 만들면 입력이 끊긴다.
+  // translate 가 바뀌는 때는 언어가 바뀌는 때이고, 그때는 다시 만드는 것이 맞다.
+  const searchTextById = useMemo(
+    () => new Map(logs.map((log) => [log.id, getLogSearchText(log, translate)])),
+    [logs, translate]
+  );
+  // 호스트 검색과 같은 규칙: `tjqj` 로도 `서버` 가 걸린다. 같은 앱에서 검색이 갈리면 안 된다.
+  const searchQueries = useMemo(
+    () => getKeyboardLayoutSearchQueries(search).map((query) => query.toLocaleLowerCase()),
+    [search]
+  );
 
   const visibleLogs = useMemo(
     () =>
@@ -367,9 +456,15 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
         if (level !== 'all' && log.level !== level) {
           return false;
         }
+        if (searchQueries.length > 0) {
+          const haystack = searchTextById.get(log.id) ?? '';
+          if (!searchQueries.some((query) => haystack.includes(query))) {
+            return false;
+          }
+        }
         return true;
       }),
-    [category, level, logs]
+    [category, level, logs, searchQueries, searchTextById]
   );
 
   return (
@@ -404,6 +499,16 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
             <option value="warn">Warn</option>
             <option value="error">Error</option>
           </SelectField>
+        </label>
+
+        <label className="flex w-full max-w-[320px] flex-col gap-[0.4rem]">
+          <span className="text-[0.9rem] text-[var(--text-soft)]">Search</span>
+          <Input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Host, container, port, error"
+          />
         </label>
 
         <Button variant="secondary" className="ml-auto" onClick={() => void onClear()}>
