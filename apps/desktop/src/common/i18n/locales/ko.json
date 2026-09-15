@@ -308,7 +308,7 @@
       "error": "오류: {{message}}"
     },
     "transfer": {
-      "hideDetails": "Details 숨기기",
+      "hideDetails": "Hide details",
       "details": "Details",
       "calculatingSpeed": "속도 계산 중",
       "cancelPending": "취소 요청을 처리하는 중입니다.",
@@ -448,12 +448,12 @@
     },
     "tab": {
       "aria": "포트 포워딩 전송 방식",
-      "ssh": "SSH 포워딩",
+      "ssh": "SSH Forwarding",
       "aws": "AWS EC2",
       "ecs": "ECS Task",
       "dns": "DNS Override",
-      "container": "컨테이너 터널링",
-      "containerShort": "컨테이너"
+      "container": "Container Tunneling",
+      "containerShort": "Container"
     },
     "create": {
       "ssh": "SSH 포워딩 추가",
@@ -466,9 +466,14 @@
       "dns": "DNS Override 편집"
     },
     "method": {
-      "sshFallback": "SSH 폴백",
+      "sshFallback": "SSH via Shell",
       "ssmRemoteHost": "SSM 원격 호스트",
-      "sshNative": "SSH 네이티브"
+      "sshNative": "SSH Direct"
+    },
+    "methodHint": {
+      "sshFallback": "서버가 포워딩 채널을 막아 셸을 거쳐 연결했습니다. 연결은 정상입니다.",
+      "ssmRemoteHost": "SSM 세션을 거쳐 원격 호스트로 연결합니다.",
+      "sshNative": "SSH 포워딩 채널로 대상에 바로 연결합니다."
     },
     "kind": {
       "aws": "AWS",
@@ -1938,7 +1943,7 @@
     },
     "commandCount": "명령 {{count}}개",
     "commandCount_other": "명령 {{count}}개",
-    "replay": "세션 리플레이 보기",
+    "replay": "세션 Replay 보기",
     "startup": {
       "snippetWithLabel": "스니펫 · {{label}}",
       "snippet": "스니펫"
@@ -2914,10 +2919,10 @@
       "ssm": "SSM",
       "ecs": "ECS",
       "warpgate": "Warpgate",
-      "serial": "시리얼",
-      "container": "컨테이너",
+      "serial": "Serial",
+      "container": "Container",
       "ssh-over-ssm": "SSH over SSM",
-      "ssm-shell": "SSM 셸"
+      "ssm-shell": "SSM shell"
     }
   },
   "sessionStore": {

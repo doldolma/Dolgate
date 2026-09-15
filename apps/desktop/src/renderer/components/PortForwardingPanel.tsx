@@ -73,6 +73,7 @@ import {
   StatusBadge,
   TabButton,
   Tabs,
+  Tooltip,
 } from '../ui';
 import { DialogBackdrop } from './DialogBackdrop';
 import { KnownHostPromptDialog } from './KnownHostPromptDialog';
@@ -428,17 +429,41 @@ function toDraft(rule: PortForwardRuleRecord): PortForwardDraft {
   };
 }
 
-function runtimeMethodLabel(runtime?: PortForwardRuntimeRecord) {
-  if (!runtime?.method) {
+/**
+ * 어느 길로 바이트가 가고 있는지. 이름은 짧게 두고 무슨 일이 있었는지는 툴팁이 말한다.
+ *
+ * 특히 셸 경유는 예전에 "SSH 폴백" 이었는데, 그 말이 **문제가 생긴 것처럼 읽혔다** —
+ * 서버가 포워딩 채널을 막았을 뿐 연결은 멀쩡하다. 이름은 한 일을 적고(`SSH via Shell`)
+ * 정상이라는 말은 툴팁이 맡는다.
+ */
+const METHOD_TEXT = {
+  'ssh-session-proxy': {
+    label: 'portForward.method.sshFallback',
+    hint: 'portForward.methodHint.sshFallback',
+  },
+  'ssm-remote-host': {
+    label: 'portForward.method.ssmRemoteHost',
+    hint: 'portForward.methodHint.ssmRemoteHost',
+  },
+} as const;
+
+const METHOD_TEXT_DEFAULT = {
+  label: 'portForward.method.sshNative',
+  hint: 'portForward.methodHint.sshNative',
+} as const;
+
+function MethodChip({ runtime }: { runtime?: PortForwardRuntimeRecord }) {
+  const { t: translate } = useTranslation();
+  const method = runtime?.method;
+  if (!method) {
     return null;
   }
-  if (runtime.method === 'ssh-session-proxy') {
-    return t('portForward.method.sshFallback');
-  }
-  if (runtime.method === 'ssm-remote-host') {
-    return t('portForward.method.ssmRemoteHost');
-  }
-  return t('portForward.method.sshNative');
+  const text = METHOD_TEXT[method as keyof typeof METHOD_TEXT] ?? METHOD_TEXT_DEFAULT;
+  return (
+    <Tooltip label={translate(text.hint)}>
+      <span>{translate(text.label)}</span>
+    </Tooltip>
+  );
 }
 
 
@@ -1097,7 +1122,7 @@ export function PortForwardingPanel({
             </CardTitleRow>
             <CardMeta>
               <span>AWS EC2</span>
-              {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
+              <MethodChip runtime={runtime} />
               <span>
                 {host ? `${host.label} (${host.awsProfileName} / ${host.awsRegion} / ${host.awsInstanceId})` : 'Unknown AWS host'}
               </span>
@@ -1141,7 +1166,7 @@ export function PortForwardingPanel({
             </CardTitleRow>
             <CardMeta>
               <span>ECS Task</span>
-              {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
+              <MethodChip runtime={runtime} />
               <span>
                 {host
                   ? `${host.label} (${host.awsProfileName} / ${host.awsRegion} / ${host.awsEcsClusterName})`
@@ -1188,7 +1213,7 @@ export function PortForwardingPanel({
             </CardTitleRow>
             <CardMeta>
               <span>Container</span>
-              {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
+              <MethodChip runtime={runtime} />
               <span>{host ? host.label : 'Unknown host'}</span>
               <span>{rule.containerName} ({rule.containerRuntime})</span>
               <span>{runtime?.bindAddress ?? '127.0.0.1'}:{(runtime?.bindPort ?? rule.bindPort) || 'auto'}</span>
@@ -1230,7 +1255,7 @@ export function PortForwardingPanel({
           </CardTitleRow>
           <CardMeta>
             <span>{rule.mode.toUpperCase()}</span>
-            {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
+            <MethodChip runtime={runtime} />
             <span>{host ? `${host.label} (${host.hostname})` : 'Unknown SSH host'}</span>
             <span>{rule.bindAddress}:{runtime?.bindPort ?? rule.bindPort}</span>
             <span>{rule.mode === 'dynamic' ? 'SOCKS5' : `${rule.targetHost}:${rule.targetPort}`}</span>
@@ -1278,7 +1303,7 @@ export function PortForwardingPanel({
           </CardTitleRow>
           <CardMeta>
             <span>ECS Task</span>
-            {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
+            <MethodChip runtime={runtime} />
             <span>
               {host && isAwsEcsHostRecord(host)
                 ? `${host.label} (${host.awsProfileName} / ${host.awsRegion} / ${host.awsEcsClusterName})`
@@ -1325,7 +1350,7 @@ export function PortForwardingPanel({
           </CardTitleRow>
           <CardMeta>
             <span>Container</span>
-            {runtimeMethodLabel(runtime) ? <span>{runtimeMethodLabel(runtime)}</span> : null}
+            <MethodChip runtime={runtime} />
             <span>{host?.label ?? 'Unknown host'}</span>
             <span>{containerName}</span>
             <span>{runtime.bindAddress}:{runtime.bindPort}</span>

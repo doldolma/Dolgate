@@ -190,7 +190,7 @@ function createDeferred<T>() {
 }
 
 function openContainerDialog() {
-  fireEvent.click(screen.getByRole('tab', { name: '컨테이너' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Container' }));
   fireEvent.click(screen.getByRole('button', { name: '컨테이너 터널 추가' }));
 }
 
@@ -366,7 +366,57 @@ describe('PortForwardingPanel runtime labels', () => {
       ]
     });
 
-    expect(screen.getByText('SSH 폴백')).toBeInTheDocument();
+    expect(screen.getByText('SSH via Shell')).toBeInTheDocument();
+  });
+
+  /**
+   * 이름만으로는 "문제가 생겼나" 로 읽힌다. 서버가 포워딩 채널을 막았을 뿐 연결은 멀쩡하다는
+   * 말은 툴팁이 맡으므로, 그 배선이 끊기면 화면 어디에서도 알 수 없다.
+   */
+  it('셸로 우회한 이유를 툴팁으로 알려 준다', () => {
+    renderPanel({
+      runtimes: [
+        {
+          ruleId: 'ssh-rule-1',
+          hostId: 'ssh-host-1',
+          transport: 'ssh',
+          mode: 'local',
+          method: 'ssh-session-proxy',
+          bindAddress: '127.0.0.1',
+          bindPort: 49152,
+          status: 'running',
+          updatedAt: '2025-01-01T00:00:00.000Z',
+          startedAt: '2025-01-01T00:00:00.000Z'
+        }
+      ]
+    });
+
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    fireEvent.mouseEnter(screen.getByText('SSH via Shell').parentElement as HTMLElement);
+
+    const tip = screen.getByRole('tooltip');
+    expect(tip.textContent).toContain('연결은 정상입니다');
+  });
+
+  it('포워딩 채널을 그대로 쓴 규칙은 SSH Direct 로 적는다', () => {
+    renderPanel({
+      runtimes: [
+        {
+          ruleId: 'ssh-rule-1',
+          hostId: 'ssh-host-1',
+          transport: 'ssh',
+          mode: 'local',
+          method: 'ssh-native',
+          bindAddress: '127.0.0.1',
+          bindPort: 49152,
+          status: 'running',
+          updatedAt: '2025-01-01T00:00:00.000Z',
+          startedAt: '2025-01-01T00:00:00.000Z'
+        }
+      ]
+    });
+
+    expect(screen.getByText('SSH Direct')).toBeInTheDocument();
   });
 });
 
@@ -990,7 +1040,7 @@ describe('PortForwardingPanel dialog', () => {
       ],
     });
 
-    fireEvent.click(screen.getByRole('tab', { name: '컨테이너' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Container' }));
 
     expect(screen.getByText('Running tunnels')).toBeInTheDocument();
     expect(screen.getByText('저장된 규칙')).toBeInTheDocument();

@@ -466,9 +466,14 @@
       "dns": "Edit DNS Override"
     },
     "method": {
-      "sshFallback": "SSH Fallback",
+      "sshFallback": "SSH via Shell",
       "ssmRemoteHost": "SSM Remote Host",
-      "sshNative": "SSH Native"
+      "sshNative": "SSH Direct"
+    },
+    "methodHint": {
+      "sshFallback": "The server blocked the forwarding channel, so this runs through a shell. The connection is fine.",
+      "ssmRemoteHost": "Connects to the remote host through an SSM session.",
+      "sshNative": "Connects straight to the target over the SSH forwarding channel."
     },
     "kind": {
       "aws": "AWS",
