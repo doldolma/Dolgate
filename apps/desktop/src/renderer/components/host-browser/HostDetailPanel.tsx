@@ -26,7 +26,7 @@ import { listTailnets } from '../../services/desktop/tailnet';
 import { listAwsProfiles } from '../../services/desktop/imports';
 import { cn } from '../../lib/cn';
 import { collectRecentLogScopeHostIds, resolveRecentLogScope } from './recentLogScope';
-import { Button } from '../../ui';
+import { Button, Tooltip } from '../../ui';
 import {
   Columns2,
   Container,
@@ -91,7 +91,30 @@ function formatRelativeTime(value: string): string {
   if (diffDay < 7) {
     return t('hostDetail.ago.days', { count: diffDay });
   }
-  // 7일 넘은 과거는 절대 일시로 표시한다(날짜만이 아니라 시각까지 포함).
+  /**
+   * 7일이 넘어도 **상대 표기를 이어 간다.**
+   *
+   * 예전에는 여기서 절대 일시(`2026년 9월 7일 오후 05:17`)로 넘어갔는데, 그 한 줄이 오른쪽
+   * 열을 150px 가까이 먹어 다른 것을 놓을 자리가 없었다. 이 카드가 답하는 질문은 "정확히
+   * 언제"가 아니라 "얼마나 최근"이다 — 정확한 일시는 올리면 나오고(툴팁) 전체 로그에도 있다.
+   */
+  const diffWeek = Math.round(diffDay / 7);
+  if (diffWeek < 5) {
+    return t('hostDetail.ago.weeks', { count: diffWeek });
+  }
+  const diffMonth = Math.round(diffDay / 30);
+  if (diffMonth < 12) {
+    return t('hostDetail.ago.months', { count: diffMonth });
+  }
+  return t('hostDetail.ago.years', { count: Math.round(diffDay / 365) });
+}
+
+/** 툴팁에 넣을 정확한 일시. 목록이 상대 표기만 보여 주므로 이 값이 유일한 출처다. */
+function formatExactTime(value: string): string {
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) {
+    return value;
+  }
   return new Date(timestamp).toLocaleString(getFormatLocale(), {
     year: 'numeric',
     month: 'short',
@@ -99,6 +122,31 @@ function formatRelativeTime(value: string): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+/**
+ * 연결이 얼마나 이어졌는지. 분 아래는 초로, 한 시간이 넘으면 시간+분으로 적는다.
+ *
+ * 값이 없으면(아직 살아 있는 세션은 종료 때 계산된다) null 이라 화면이 그 줄을 그리지 않는다 —
+ * 0 으로 적으면 "바로 끊겼다"는 거짓말이 된다.
+ */
+function formatSessionDuration(durationMs: number | null | undefined): string | null {
+  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0) {
+    return null;
+  }
+  const totalSeconds = Math.round(durationMs / 1000);
+  if (totalSeconds < 60) {
+    return t('hostDetail.duration.seconds', { count: totalSeconds });
+  }
+  const totalMinutes = Math.round(totalSeconds / 60);
+  if (totalMinutes < 60) {
+    return t('hostDetail.duration.minutes', { count: totalMinutes });
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes === 0
+    ? t('hostDetail.duration.hours', { count: hours })
+    : t('hostDetail.duration.hoursMinutes', { hours, minutes });
 }
 
 function getLogHostId(log: ActivityLogRecord): string | null {
@@ -176,6 +224,7 @@ function ActivityRow({
   secondary,
   level,
   when,
+  duration,
   onClick,
   replayRecordingId,
   onOpenReplay,
@@ -184,6 +233,8 @@ function ActivityRow({
   secondary?: string | null;
   level?: string;
   when: string;
+  /** 연결이 이어진 시간. 아직 살아 있거나 옛 기록이면 null 이라 그 줄을 그리지 않는다. */
+  duration?: string | null;
   onClick?: () => void;
   replayRecordingId?: string | null;
   onOpenReplay?: (recordingId: string) => void;
@@ -230,8 +281,30 @@ function ActivityRow({
           Replay
         </button>
       ) : null}
-      <span className="shrink-0 text-[0.76rem] text-[var(--text-soft)]">
-        {formatRelativeTime(when)}
+      {/**
+       * 오른쪽 열은 [얼마나 이어졌나 / 언제였나] 두 줄이다.
+       *
+       * 목록이 답하는 질문이 "얼마나 최근"이라 위쪽을 유지시간에 내준다. 정확한 일시는
+       * 화면에 없으므로(상대 표기만 그린다) 아래 줄에 툴팁으로 단다 — 오래된 줄만이 아니라
+       * **모든 줄**에 단다. 어떤 줄은 나오고 어떤 줄은 안 나오면 그게 더 헷갈린다.
+       */}
+      <span className="flex shrink-0 flex-col items-end leading-[1.35]">
+        {duration ? (
+          <span className="text-[0.76rem] tabular-nums text-[var(--text-soft)]">
+            {duration}
+          </span>
+        ) : null}
+        <Tooltip label={formatExactTime(when)}>
+          <span
+            className={
+              duration
+                ? 'text-[0.68rem] text-[var(--text-muted)]'
+                : 'text-[0.76rem] text-[var(--text-soft)]'
+            }
+          >
+            {formatRelativeTime(when)}
+          </span>
+        </Tooltip>
       </span>
     </div>
   );
@@ -898,6 +971,7 @@ function EmptyDetail({
       name: string;
       detail: string;
       when: string;
+      duration: string | null;
       level?: string;
       replayRecordingId?: string | null;
     }> = [];
@@ -915,6 +989,8 @@ function EmptyDetail({
         title?: string;
         connectionKind?: string;
         tmux?: boolean;
+        durationMs?: number | null;
+        commandCount?: number | null;
       } | null;
       // 이름: 현재 호스트 목록 우선(최신 라벨), 없으면 로그 메타데이터(세션=hostLabel,
       // 감사 로그=label, 그 외=title) 순. UUID(hostId) 노출은 최후 수단.
@@ -928,12 +1004,22 @@ function EmptyDetail({
       const detail = metadata?.connectionKind
         ? getConnectionKindLabel(metadata.connectionKind, metadata.tmux)
         : resolveLogMessage(log, translate);
+      /**
+       * 명령 수는 **셸 통합이 붙은 세션에만** 있다. 없는 세션에 "명령 0개" 를 적으면 아무것도
+       * 안 한 것처럼 보이는데, 사실은 세지 못한 것이다 — 값이 없으면 그 조각을 뺀다.
+       */
+      const commandCount = metadata?.commandCount;
+      const detailWithCount =
+        typeof commandCount === 'number' && Number.isFinite(commandCount)
+          ? `${detail} · ${translate('hostDetail.commandCount', { count: commandCount })}`
+          : detail;
       items.push({
         id: log.id,
         hostId,
         name,
-        detail,
+        detail: detailWithCount,
         when: log.createdAt,
+        duration: formatSessionDuration(metadata?.durationMs),
         level: log.level,
         replayRecordingId: getReplayRecordingId(log),
       });
@@ -1040,6 +1126,7 @@ function EmptyDetail({
                 secondary={item.detail}
                 level={item.level}
                 when={item.when}
+                duration={item.duration}
                 onClick={() => hb.selectSingleHost(item.hostId)}
                 replayRecordingId={item.replayRecordingId}
                 onOpenReplay={hb.onOpenReplay}
@@ -1372,6 +1459,8 @@ function ActivityList({
           status?: string;
           disconnectReason?: string;
           tmux?: boolean;
+          durationMs?: number | null;
+          commandCount?: number | null;
         } | null;
         const isSession =
           log.kind === 'session-lifecycle' && Boolean(metadata?.connectionKind);
@@ -1387,13 +1476,20 @@ function ActivityList({
           : resolveLogMessage(log, translate);
         // 실패 사유만 부제로 노출(정상 종료의 기술적 사유는 노이즈라 숨김).
         const secondary = isError ? metadata?.disconnectReason ?? null : null;
+        // 최근 로그 카드와 같은 규칙: 센 값이 있을 때만 붙인다(없음 ≠ 0회).
+        const commandCount = metadata?.commandCount;
+        const primaryWithCount =
+          typeof commandCount === 'number' && Number.isFinite(commandCount)
+            ? `${primary} · ${translate('hostDetail.commandCount', { count: commandCount })}`
+            : primary;
         return (
           <ActivityRow
             key={log.id}
-            primary={primary}
+            primary={primaryWithCount}
             secondary={secondary}
             level={log.level}
             when={log.createdAt}
+            duration={isSession ? formatSessionDuration(metadata?.durationMs) : null}
             replayRecordingId={getReplayRecordingId(log)}
             onOpenReplay={onOpenReplay}
           />

@@ -1925,8 +1925,19 @@
       "justNow": "방금 전",
       "minutes": "{{count}}분 전",
       "hours": "{{count}}시간 전",
-      "days": "{{count}}일 전"
+      "days": "{{count}}일 전",
+      "weeks": "{{count}}주 전",
+      "months": "{{count}}개월 전",
+      "years": "{{count}}년 전"
     },
+    "duration": {
+      "seconds": "{{count}}초",
+      "minutes": "{{count}}분",
+      "hours": "{{count}}시간",
+      "hoursMinutes": "{{hours}}시간 {{minutes}}분"
+    },
+    "commandCount": "명령 {{count}}개",
+    "commandCount_other": "명령 {{count}}개",
     "replay": "세션 리플레이 보기",
     "startup": {
       "snippetWithLabel": "스니펫 · {{label}}",

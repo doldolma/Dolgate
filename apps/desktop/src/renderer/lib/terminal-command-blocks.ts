@@ -174,6 +174,19 @@ export function subscribeToCommandBlocks(
 }
 
 /** 목록이 바뀐 횟수. 구독자의 스냅샷 값으로 쓴다. */
+/**
+ * 이 세션에서 지금까지 시작된 명령 수.
+ *
+ * `blocks.length` 가 아니라 `seq` 다 — 블록 배열은 상한(400)에서 오래된 것부터 버리므로
+ * 길이는 "보관 중인 수"지 "실행한 수"가 아니다. `seq` 는 블록마다 한 번 오르고 줄지 않는다.
+ *
+ * 추적 중이 아니면(셸 통합이 안 붙었거나 꺼진 세션) null 이다. **0 과 구분해야 한다** —
+ * 0 은 "아무것도 안 했다"고, null 은 "셀 수 없었다"다.
+ */
+export function getCommandCount(sessionId: string): number | null {
+  return sessions.get(sessionId)?.seq ?? null;
+}
+
 export function getCommandBlocksVersion(sessionId: string): number {
   return sessions.get(sessionId)?.version ?? 0;
 }

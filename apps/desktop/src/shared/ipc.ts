@@ -1617,6 +1617,14 @@ export interface DesktopApi {
     /** shell 은 렌더러가 실행된 명령에서 알아낸 셸 이름(모르면 생략). */
     reinjectShellIntegration: (sessionId: string, shell?: string) => Promise<void>;
     /**
+     * 이 세션에서 지금까지 실행한 명령 수를 알린다(최근 로그에 적기 위한 값).
+     *
+     * 세는 주체가 렌더러다 — OSC 133 블록을 아는 것이 거기뿐이라서다. 명령이 시작될 때마다
+     * 보내는 이유는 **끝나는 순간을 잡으려 들지 않기 위해서**다. 세션이 어떻게 닫히든
+     * (정상 종료·오류·앱 종료) 마지막으로 보낸 값이 이미 메인에 있다.
+     */
+    noteCommandCount: (sessionId: string, count: number) => Promise<void>;
+    /**
      * 보조 채널에서 짧은 read-only 명령을 돌리고 stdout 을 받는다.
      *
      * `background: true` 는 사람이 결과를 기다리지 않는 질의다(세션 패널의 도커·호스트 지표

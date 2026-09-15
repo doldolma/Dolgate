@@ -45,6 +45,11 @@ export function reinjectTerminalShellIntegration(sessionId: string, shell?: stri
   return desktopApi.ssh.reinjectShellIntegration(sessionId, shell);
 }
 
+/** 이 세션에서 실행한 명령 수를 메인에 알린다(최근 로그 표시용). 실패는 삼킨다. */
+export function noteTerminalCommandCount(sessionId: string, count: number) {
+  return desktopApi.ssh.noteCommandCount(sessionId, count);
+}
+
 export function stopTerminalAutocomplete(sessionId: string) {
   return desktopApi.ssh.stopAutocomplete(sessionId);
 }

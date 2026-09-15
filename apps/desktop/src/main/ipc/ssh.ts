@@ -558,6 +558,14 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
   );
 
   ipcMain.handle(
+    ipcChannels.ssh.noteCommandCount,
+    async (_event, sessionId: string, count: number): Promise<void> => {
+      // 최근 로그에 적을 값이라 실패해도 세션에 영향이 없다 — 조용히 넘긴다.
+      ctx.coreManager.setSessionCommandCount(sessionId, count);
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.ssh.completionQuery,
     async (
       _event,

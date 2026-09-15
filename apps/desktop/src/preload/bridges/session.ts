@@ -37,6 +37,8 @@ export function buildSshBridge(ipcRenderer: IpcRenderer): DesktopApi["ssh"] {
       ipcRenderer.invoke(ipcChannels.ssh.disconnect, sessionId),
     prepareAutocomplete: (sessionId: string) =>
       ipcRenderer.invoke(ipcChannels.ssh.prepareAutocomplete, sessionId),
+    noteCommandCount: (sessionId: string, count: number) =>
+      ipcRenderer.invoke(ipcChannels.ssh.noteCommandCount, sessionId, count),
     installShellIntegration: (sessionId: string) =>
       ipcRenderer.invoke(ipcChannels.ssh.installShellIntegration, sessionId),
     reinjectShellIntegration: (sessionId: string, shell?: string) =>

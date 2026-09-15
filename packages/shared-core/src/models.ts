@@ -2982,6 +2982,13 @@ export interface SessionLifecycleLogMetadata {
   disconnectReason?: string | null;
   recordingId?: string | null;
   hasReplay?: boolean | null;
+  /**
+   * 이 세션에서 실행한 명령 수. **셸 통합이 붙은 세션에만 있다**(OSC 133 블록을 세므로).
+   *
+   * 없는 것과 0 은 다른 말이라 값이 없으면 필드째 비운다 — 0 으로 적으면 아무것도 안 한
+   * 세션처럼 보이는데, 사실은 셀 방법이 없었던 것이다.
+   */
+  commandCount?: number | null;
 }
 
 export interface PortForwardLifecycleLogMetadata {

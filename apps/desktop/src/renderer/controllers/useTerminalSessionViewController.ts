@@ -37,6 +37,7 @@ import {
 import {
   beginCommandBlock,
   clearCommandBlocks,
+  getCommandCount,
   finishCommandBlock,
   getCommandBlocks,
   jumpToAdjacentCommandBlock,
@@ -54,6 +55,7 @@ import {
 import { createZmodemController } from '../lib/zmodem/zmodem-controller';
 import {
   installTerminalShellIntegration,
+  noteTerminalCommandCount,
   reinjectTerminalShellIntegration,
   writeTerminalBinaryInput,
   tmuxSplitPane,
@@ -1081,6 +1083,21 @@ export function useTerminalSessionViewController({
                   liveSessionIdRef.current,
                   started,
                 );
+              }
+              /**
+               * 명령 수를 메인에 올린다(최근 로그에 적을 값).
+               *
+               * 세는 것은 여기밖에 못 한다 — OSC 133 블록을 아는 자리가 렌더러뿐이다. 끝나는
+               * 순간을 잡으려 하지 않고 **명령마다** 보내는 이유는, 세션이 어떻게 닫히든
+               * (정상 종료·오류·탭 닫기) 마지막 값이 이미 메인에 가 있게 하기 위해서다.
+               * 사람이 치는 속도라 왕복이 잦지도 않다.
+               */
+              const commandCount = getCommandCount(liveSessionIdRef.current);
+              if (commandCount !== null) {
+                void noteTerminalCommandCount(
+                  liveSessionIdRef.current,
+                  commandCount,
+                ).catch(() => undefined);
               }
             }
             appStore

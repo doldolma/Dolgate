@@ -146,6 +146,8 @@ interface SessionLifecycleState {
   status: "connected" | "closed" | "error" | null;
   recordingId: string | null;
   hasReplay: boolean;
+  /** 렌더러가 세어 올린 명령 수. 셸 통합이 없는 세션은 끝까지 null 이다. */
+  commandCount: number | null;
 }
 
 type CoreSessionConnectPayload = ResolvedCoreConnectPayload & {
@@ -1562,6 +1564,7 @@ export class CoreManager {
       disconnectReason: lifecycle.disconnectReason,
       recordingId: lifecycle.recordingId,
       hasReplay: lifecycle.hasReplay,
+      commandCount: lifecycle.commandCount,
     };
 
     this.upsertLog({
@@ -1843,6 +1846,8 @@ export class CoreManager {
       status: null,
       recordingId: null,
       hasReplay: false,
+      // 셸 통합이 붙기 전까지는 셀 수 없다 — 0 이 아니라 모름이다.
+      commandCount: null,
     });
     this.tabs.set(sessionId, {
       id: sessionId,
@@ -2525,6 +2530,8 @@ export class CoreManager {
       status: null,
       recordingId: null,
       hasReplay: false,
+      // 셸 통합이 붙기 전까지는 셀 수 없다 — 0 이 아니라 모름이다.
+      commandCount: null,
     });
     const tab: TerminalTab = {
       id: sessionId,
@@ -2640,6 +2647,8 @@ export class CoreManager {
           status: null,
           recordingId: null,
           hasReplay: false,
+          // 셸 통합이 붙기 전까지는 셀 수 없다 — 0 이 아니라 모름이다.
+          commandCount: null,
         });
         this.tabs.set(sessionId, {
           id: sessionId,
@@ -2945,6 +2954,8 @@ export class CoreManager {
         status: null,
         recordingId: null,
         hasReplay: false,
+        // 셸 통합이 붙기 전까지는 셀 수 없다 — 0 이 아니라 모름이다.
+        commandCount: null,
       });
     }
     this.tabs.set(sessionId, {
@@ -3005,6 +3016,8 @@ export class CoreManager {
       status: null,
       recordingId: null,
       hasReplay: false,
+      // 셸 통합이 붙기 전까지는 셀 수 없다 — 0 이 아니라 모름이다.
+      commandCount: null,
     });
     this.tabs.set(sessionId, {
       id: sessionId,
@@ -6434,6 +6447,26 @@ export class CoreManager {
     });
   }
 
+  /**
+   * 렌더러가 센 명령 수를 받아 둔다. 명령이 시작될 때마다 오므로 **끝나는 순간을 잡을 필요가
+   * 없다** — 세션이 어떻게 닫히든 마지막 값이 이미 여기 있다.
+   *
+   * 여기서는 값만 들고 있는다. 로그에 실리는 것은 그 다음에 세션 기록이 다시 쓰일 때이고,
+   * 보통은 세션이 닫히는 순간이다. 유지시간은 닫힐 때에만 계산되므로 살아 있는 줄에는
+   * 없는 것이 맞다.
+   */
+  setSessionCommandCount(sessionId: string, count: number): void {
+    const lifecycle = this.sessionLifecycleById.get(sessionId);
+    if (!lifecycle || !Number.isFinite(count) || count < 0) {
+      return;
+    }
+    if (lifecycle.commandCount === count) {
+      return;
+    }
+    lifecycle.commandCount = count;
+    this.sessionLifecycleById.set(sessionId, lifecycle);
+  }
+
   private getSessionLifecycleLogId(sessionId: string): string {
     return `session:${sessionId}`;
   }
@@ -6553,6 +6586,7 @@ export class CoreManager {
       disconnectedAt,
       durationMs,
       status,
+      commandCount: lifecycle.commandCount,
       disconnectReason,
       recordingId: lifecycle.recordingId,
       hasReplay: lifecycle.hasReplay,
