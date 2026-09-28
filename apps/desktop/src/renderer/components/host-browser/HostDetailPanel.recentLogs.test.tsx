@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { ActivityLogRecord, HostRecord, SshHostRecord } from '@shared';
 import { HostDetailPanel } from './HostDetailPanel';
 import type { HostBrowserModel } from './useHostBrowser';
@@ -138,6 +138,9 @@ describe('HostDetailPanel — 연결 시간과 명령 수', () => {
    * 유지시간을 놓을 자리가 없어진다 — 정확한 일시는 툴팁이 맡는다.
    */
   it('오래된 기록도 주·개월·년으로 적는다', () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-09T12:00:00.000Z'));
+    onTestFinished(() => clock.mockRestore());
+
     renderEmptyDetail({
       activityLogs: [
         makeFinishedLog('h-fav', '2026-08-02T03:10:00.000Z', { durationMs: 60 * 1000 }),
@@ -158,6 +161,9 @@ describe('HostDetailPanel — 연결 시간과 명령 수', () => {
    * 화면 어디에서도 "정확히 언제"를 알 수 없다.
    */
   it('날짜에 마우스를 올리면 정확한 일시가 뜬다', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-09T12:00:00.000Z'));
+    onTestFinished(() => clock.mockRestore());
+
     renderEmptyDetail({
       activityLogs: [
         makeFinishedLog('h-fav', '2026-08-02T03:10:00.000Z', { durationMs: 60 * 1000 }),
