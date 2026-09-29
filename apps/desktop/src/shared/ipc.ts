@@ -1602,6 +1602,7 @@ export interface DesktopApi {
       sessionId: string;
       awsTransport?: AwsSessionTransport;
       awsFallback?: AwsSessionFallback;
+      sessionProtocol?: 'ssh' | 'mosh' | 'ssm-shell';
     }>;
     connectLocal: (
       input: DesktopLocalConnectInput,

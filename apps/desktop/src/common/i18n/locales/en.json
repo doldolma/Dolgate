@@ -3493,6 +3493,8 @@
     "startupVarsConfirm": "Connect"
   },
   "zmodem": {
+    "remoteAborted": "The remote sender aborted the file transfer.",
+    "cancelFailed": "The transfer could not be ended safely. Reconnect the SSH session.",
     "tooLarge": "The file is too large (over 512MB). Use SFTP instead.",
     "downloadFailed": "The download failed."
   },

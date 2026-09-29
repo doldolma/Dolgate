@@ -17,6 +17,7 @@ import type {
 } from "nora-zmodemjs";
 import type { TransferJob } from "@shared";
 import { t } from '../../i18n';
+import { createTerminalHeaderFilter } from './terminal-header-filter';
 
 // 호출 시점에 해석한다: 테스트가 window.Zmodem으로 모의 객체를 주입하면 그것을 쓰고,
 // 아니면 정적 import한 실제 라이브러리를 쓴다.
@@ -35,9 +36,9 @@ const PROGRESS_EMIT_INTERVAL_MS = 100;
 export interface ZmodemControllerDeps {
   sessionId: string;
   hostLabel: string;
-  // false면 Sentry를 달지 않고 출력을 그대로 통과시킨다(예: SSM은 채널이 ZMODEM
-  // 바이너리를 신뢰성 있게 전달하지 못해 비활성). 기본 동작은 활성.
-  enabled?: boolean;
+  // false면 출력을 그대로 통과시킨다. SSM 셸은 제외하되 SSH-over-SSM은 활성화한다.
+  // 콜백은 연결 정보의 늦은 도착을 컨트롤러 재생성 없이 반영한다.
+  enabled?: boolean | (() => boolean);
   writeToTerminal: (bytes: Uint8Array) => void;
   sendToRemote: (bytes: Uint8Array) => void;
   saveDownload: (input: {
@@ -83,13 +84,18 @@ export function createZmodemController(
   let activeSession: ZmodemSession | null = null;
   let disposed = false;
   const canceledJobIds = new Set<string>();
+  const pendingFailures = new Set<(error: Error) => void>();
+  const cancellationCompletions = new Set<() => void>();
+  let quarantined = false;
+  let draining = false;
+  const terminalFilter = createTerminalHeaderFilter(deps.writeToTerminal);
 
   const nowIso = () => new Date().toISOString();
 
   const buildSentry = () =>
     new zmodemLib.Sentry({
       to_terminal: (octets) => {
-        deps.writeToTerminal(toUint8(octets));
+        if (!draining && !quarantined) terminalFilter.consume(toUint8(octets));
       },
       sender: (octets) => {
         deps.sendToRemote(toUint8(octets));
@@ -125,11 +131,21 @@ export function createZmodemController(
     });
     session.on("session_end", () => {
       activeSession = null;
+      draining = false;
+      quarantined = false;
+      for (const complete of cancellationCompletions) complete();
+      if (session.aborted?.()) {
+        for (const reject of pendingFailures) reject(new Error(t('zmodem.remoteAborted')));
+      }
     });
     session.start();
   }
 
   async function handleOffer(offer: ZmodemOffer): Promise<void> {
+    if (draining || disposed || quarantined) {
+      try { await offer.skip(); } catch { /* Existing cancellation owns recovery. */ }
+      return;
+    }
     const details = offer.get_details();
     const name = details.name || "download";
     const size = typeof details.size === "number" ? details.size : 0;
@@ -161,12 +177,34 @@ export function createZmodemController(
       return;
     }
 
+    let rejectTransfer: (error: Error) => void = () => {};
+    const interrupted = new Promise<never>((_, reject) => { rejectTransfer = reject; });
+    pendingFailures.add(rejectTransfer);
+    let cancelTimer: ReturnType<typeof setTimeout> | undefined;
+    let cancelFailure: Error | undefined;
+    const finishCancellation = () => rejectTransfer(new Error('cancelled'));
     deps.registerAbort(jobId, () => {
+      if (canceledJobIds.has(jobId)) return;
       canceledJobIds.add(jobId);
+      cancellationCompletions.add(finishCancellation);
+      draining = true;
+      cancelTimer = setTimeout(() => {
+        quarantined = true;
+        cancelFailure = new Error(t('zmodem.cancelFailed'));
+        rejectTransfer(cancelFailure);
+      }, 10_000);
       try {
-        activeSession?.abort();
+        // skip() can replace its internal promise on ZEOF. Session end, not
+        // that promise, is the reliable acknowledgement that draining is done.
+        Promise.resolve(offer.skip()).catch(() => {
+          quarantined = true;
+          cancelFailure = new Error(t('zmodem.cancelFailed'));
+          rejectTransfer(cancelFailure);
+        });
       } catch {
-        // ignore
+        quarantined = true;
+        cancelFailure = new Error(t('zmodem.cancelFailed'));
+        rejectTransfer(cancelFailure);
       }
     });
     deps.upsertJob(baseJob());
@@ -175,6 +213,7 @@ export function createZmodemController(
     let received = 0;
     let lastEmit = 0;
     offer.on("input", (octets) => {
+      if (canceledJobIds.has(jobId) || disposed || quarantined) return;
       const bytes = toUint8(octets);
       chunks.push(bytes);
       received += bytes.length;
@@ -195,7 +234,12 @@ export function createZmodemController(
     });
 
     try {
-      await offer.accept();
+      // Our input listener owns buffering; disable the library's duplicate spool.
+      await Promise.race([offer.accept({ on_input: () => {} }), interrupted]);
+      if (canceledJobIds.has(jobId)) await interrupted;
+      if (disposed) throw new Error('Session closed');
+      // Once local saving begins, the remote offer can no longer be cancelled.
+      deps.clearAbort(jobId);
       const merged = mergeChunks(chunks, received);
       const { savedPath } = await deps.saveDownload({ name, bytes: merged });
       deps.upsertJob({
@@ -210,8 +254,8 @@ export function createZmodemController(
       deps.upsertJob({
         ...baseJob(),
         bytesCompleted: received,
-        status: canceledJobIds.has(jobId) ? "cancelled" : "failed",
-        errorMessage: canceledJobIds.has(jobId)
+        status: canceledJobIds.has(jobId) && !cancelFailure && !quarantined ? "cancelled" : "failed",
+        errorMessage: canceledJobIds.has(jobId) && !cancelFailure && !quarantined
           ? undefined
           : error instanceof Error
             ? error.message
@@ -219,6 +263,10 @@ export function createZmodemController(
         updatedAt: nowIso(),
       });
     } finally {
+      clearTimeout(cancelTimer);
+      pendingFailures.delete(rejectTransfer);
+      cancellationCompletions.delete(finishCancellation);
+      chunks.length = 0;
       canceledJobIds.delete(jobId);
       deps.clearAbort(jobId);
     }
@@ -226,7 +274,12 @@ export function createZmodemController(
 
   return {
     consume: (chunk: Uint8Array) => {
-      if (disposed) {
+      if (disposed || (quarantined && !activeSession)) {
+        return;
+      }
+      // 연결 정보가 늦게 도착해도 Sentry를 재생성하지 않는다. 진행 중인 전송은 유지한다.
+      if (!activeSession && typeof deps.enabled === 'function' && !deps.enabled()) {
+        deps.writeToTerminal(chunk);
         return;
       }
       try {
@@ -238,6 +291,8 @@ export function createZmodemController(
           error,
         );
         if (activeSession) {
+          quarantined = true;
+          for (const reject of pendingFailures) reject(new Error(t('zmodem.cancelFailed')));
           // 세션 진행 중 파싱 오류(예: SSM 채널이 8-bit clean하지 않아 프레임 훼손).
           // raw 청크를 화면에 덤프하면 깨진 문자가 폭주하므로, 세션을 정리(abort)해
           // 원격 sz를 멈추게 하고 화면 오염을 막는다.
@@ -247,6 +302,7 @@ export function createZmodemController(
             // ignore
           }
           activeSession = null;
+          quarantined = true;
         } else {
           // 세션 시작 전 파싱 오류: 터미널이 멈추지 않도록 원본을 흘린다.
           deps.writeToTerminal(chunk);
@@ -260,6 +316,8 @@ export function createZmodemController(
     },
     dispose: () => {
       disposed = true;
+      terminalFilter.dispose();
+      for (const reject of pendingFailures) reject(new Error('Session closed'));
       if (activeSession) {
         try {
           activeSession.abort();

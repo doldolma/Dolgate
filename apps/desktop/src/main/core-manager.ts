@@ -134,6 +134,7 @@ interface ActivityLogInput {
 }
 
 interface SessionLifecycleState {
+  awsTransport?: TerminalTab['awsTransport'];
   hostId: string;
   hostLabel: string;
   title: string;
@@ -1550,6 +1551,7 @@ export class CoreManager {
       title: lifecycle.title,
       connectionDetails: lifecycle.connectionDetails,
       connectionKind: lifecycle.connectionKind,
+      awsTransport: lifecycle.awsTransport,
       tmux: lifecycle.tmux,
       connectedAt: lifecycle.connectedAt,
       disconnectedAt: lifecycle.disconnectedAt,
@@ -1831,6 +1833,7 @@ export class CoreManager {
         payload.connectionDetails ??
         `${payload.host} · ${payload.port} · ${payload.username}`,
       tmux: payload.tmux === true,
+      awsTransport: payload.connectionKind === 'aws-ssm' ? (transport === 'ssh' ? 'ssh-over-ssm' : 'ssm-shell') : undefined,
       connectionKind:
         payload.connectionKind ??
         (payload.useMosh
@@ -1854,6 +1857,8 @@ export class CoreManager {
       stableId: sessionId,
       title: payload.title,
       source: "host",
+      sessionProtocol: payload.useMosh ? 'mosh' : transport === 'aws-ssm' ? 'ssm-shell' : 'ssh',
+      awsTransport: payload.connectionKind === 'aws-ssm' ? (transport === 'ssh' ? 'ssh-over-ssm' : 'ssm-shell') : undefined,
       hostId: payload.hostId,
       sessionId,
       status: "connecting",
@@ -2523,6 +2528,7 @@ export class CoreManager {
         payload.connectionDetails ??
         `${payload.profileName} · ${payload.region} · ${payload.instanceId}`,
       connectionKind: payload.connectionKind ?? "aws-ssm",
+      awsTransport: 'ssm-shell',
       tmux: false,
       connectedAt: null,
       disconnectedAt: null,
@@ -2534,6 +2540,8 @@ export class CoreManager {
       commandCount: null,
     });
     const tab: TerminalTab = {
+      sessionProtocol: 'ssm-shell',
+      awsTransport: 'ssm-shell',
       id: sessionId,
       stableId: sessionId,
       title: payload.title,
@@ -2640,6 +2648,7 @@ export class CoreManager {
           title: payload.title,
           connectionDetails: `${payload.profileName} · ${payload.region} · ${payload.instanceId}`,
           connectionKind: "aws-ssm",
+          awsTransport: 'ssm-shell',
           tmux: false,
           connectedAt: null,
           disconnectedAt: null,
@@ -2651,6 +2660,8 @@ export class CoreManager {
           commandCount: null,
         });
         this.tabs.set(sessionId, {
+          sessionProtocol: 'ssm-shell',
+          awsTransport: 'ssm-shell',
           id: sessionId,
           stableId: sessionId,
           title: payload.title,
@@ -6520,6 +6531,7 @@ export class CoreManager {
       title: lifecycle.title,
       connectionDetails: lifecycle.connectionDetails,
       connectionKind: lifecycle.connectionKind,
+      awsTransport: lifecycle.awsTransport,
       tmux: lifecycle.tmux,
       connectedAt,
       disconnectedAt: null,

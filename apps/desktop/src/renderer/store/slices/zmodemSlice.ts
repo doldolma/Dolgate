@@ -23,7 +23,9 @@ export function createZmodemSlice(deps: SliceDeps): ZmodemSlice {
         zmodemTransfers: upsertTransferJob(state.zmodemTransfers, job),
       })),
     cancelZmodemTransfer: (jobId) => {
-      abortByJobId.get(jobId)?.();
+      const abort = abortByJobId.get(jobId);
+      if (!abort) return;
+      abort();
       set((state) => ({
         zmodemTransfers: state.zmodemTransfers.map((job) =>
           job.id === jobId && job.status === "running"

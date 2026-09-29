@@ -2967,6 +2967,7 @@ export interface KnownHostTrustInput {
 
 // ActivityLogRecord는 앱 활동 로그 화면이 그대로 렌더링하는 구조다.
 export interface SessionLifecycleLogMetadata {
+  awsTransport?: AwsSessionTransport;
   sessionId: string;
   hostId: string;
   hostLabel: string;
@@ -3813,6 +3814,8 @@ export interface AwsSessionFallback {
 }
 
 export interface TerminalTab {
+  /** 연결 결과의 실제 터미널 프로토콜. 미확정 상태에서 호스트 종류로 추측하지 않는다. */
+  sessionProtocol?: 'ssh' | 'mosh' | 'ssm-shell' | 'serial';
   id: string;
   /**
    * 탭 최초 생성 시 1회 발급되어 재연결/재시도로 sessionId가 바뀌어도 불변인 식별자.

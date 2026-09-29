@@ -81,6 +81,18 @@ function createContainerActionLog(metadata: ContainerActionLogMetadata): Activit
 }
 
 describe('LogsPanel', () => {
+  it.each([
+    ['ssh-over-ssm', true, 'SSH over SSM (tmux)'],
+    ['ssm-shell', false, 'SSM Shell'],
+    [undefined, false, 'AWS SSM'],
+  ] as const)('labels EC2 logs with actual transport %s', (awsTransport, tmux, label) => {
+    render(<LogsPanel onClear={vi.fn()} onOpenReplay={vi.fn()} logs={[createLifecycleLog({
+      sessionId: 'ec2', hostId: 'host', hostLabel: 'EC2', title: 'EC2',
+      connectionKind: 'aws-ssm', awsTransport, tmux,
+      connectedAt: '2026-06-18T00:00:00.000Z', status: 'connected',
+    })]} />);
+    expect(screen.getAllByText(label).length).toBeGreaterThan(0);
+  });
   it('renders a container lifecycle summary card', () => {
     render(
       <LogsPanel

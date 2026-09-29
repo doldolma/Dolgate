@@ -625,6 +625,7 @@ export function createSessionServices(deps: SliceDeps) {
         : (connection as {
             awsTransport?: AwsSessionTransport;
             awsFallback?: AwsSessionFallback;
+            sessionProtocol?: TerminalTab['sessionProtocol'];
           });
       const latestAttempt = findPendingConnectionAttempt(get(), sessionId);
       if (!latestAttempt) {
@@ -644,6 +645,7 @@ export function createSessionServices(deps: SliceDeps) {
             // EC2 가 실제로 탄 전송과, SSM 셸로 물러났을 때의 사연. 매 연결마다 새로 정한다 —
             // 지난 시도의 값이 남으면 거짓말이 된다. 시리얼 연결에는 이 필드가 없다.
             awsTransport: ec2Connection?.awsTransport,
+            sessionProtocol: isSerialHostRecord(host) ? 'serial' : ec2Connection?.sessionProtocol,
             awsFallback: ec2Connection?.awsFallback,
             connectionProgress: resolveConnectingProgress(host),
             hasReceivedOutput: false,

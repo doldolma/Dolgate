@@ -237,6 +237,8 @@ export function createContainersServices(deps: SliceDeps) {
             (tab) => ({
               ...tab,
               status: "connecting",
+              // openShell은 SSH exec 전용이다(ECS Exec은 아래 별도 경로).
+              sessionProtocol: 'ssh',
               errorMessage: undefined,
               connectionProgress: createConnectionProgress(
                 "connecting",

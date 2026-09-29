@@ -184,8 +184,8 @@ function getLogStatusColor(level?: string): string {
 }
 
 /** connectionKind(세션 연결 타입) → 표시 라벨. */
-function getConnectionKindLabel(kind?: string, tmux = false): string {
-  const suffix = tmux && kind === 'ssh' ? ' (tmux)' : '';
+function getConnectionKindLabel(kind?: string, tmux = false, awsTransport?: string): string {
+  const suffix = tmux ? ' (tmux)' : '';
   switch (kind) {
     case 'local':
       return 'Local';
@@ -194,7 +194,7 @@ function getConnectionKindLabel(kind?: string, tmux = false): string {
     case 'mosh':
       return 'Mosh';
     case 'aws-ssm':
-      return 'AWS SSM';
+      return `${awsTransport === 'ssh-over-ssm' ? 'SSH over SSM' : awsTransport === 'ssm-shell' ? 'SSM Shell' : 'AWS SSM'}${suffix}`;
     case 'aws-ecs-exec':
       return 'AWS ECS Exec';
     case 'warpgate':
@@ -988,6 +988,7 @@ function EmptyDetail({
         label?: string;
         title?: string;
         connectionKind?: string;
+        awsTransport?: string;
         tmux?: boolean;
         durationMs?: number | null;
         commandCount?: number | null;
@@ -1002,7 +1003,7 @@ function EmptyDetail({
         hostId;
       // 부제: 세션 로그는 연결 타입(SSH/AWS SSM 등), 그 외는 로그 메시지(무슨 일인지).
       const detail = metadata?.connectionKind
-        ? getConnectionKindLabel(metadata.connectionKind, metadata.tmux)
+        ? getConnectionKindLabel(metadata.connectionKind, metadata.tmux, metadata.awsTransport)
         : resolveLogMessage(log, translate);
       /**
        * 명령 수는 **셸 통합이 붙은 세션에만** 있다. 없는 세션에 "명령 0개" 를 적으면 아무것도
@@ -1456,6 +1457,7 @@ function ActivityList({
       {logs.map((log) => {
         const metadata = log.metadata as {
           connectionKind?: string;
+          awsTransport?: string;
           status?: string;
           disconnectReason?: string;
           tmux?: boolean;
@@ -1470,9 +1472,9 @@ function ActivityList({
         const primary = isSession
           ? isError
             ? translate('hostDetail.activity.connectFailed', {
-                kind: getConnectionKindLabel(metadata?.connectionKind, metadata?.tmux),
+                kind: getConnectionKindLabel(metadata?.connectionKind, metadata?.tmux, metadata?.awsTransport),
               })
-            : getConnectionKindLabel(metadata?.connectionKind, metadata?.tmux)
+            : getConnectionKindLabel(metadata?.connectionKind, metadata?.tmux, metadata?.awsTransport)
           : resolveLogMessage(log, translate);
         // 실패 사유만 부제로 노출(정상 종료의 기술적 사유는 노이즈라 숨김).
         const secondary = isError ? metadata?.disconnectReason ?? null : null;

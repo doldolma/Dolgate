@@ -376,6 +376,8 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               sessionId: sid,
               source: "host",
               hostId: paneHostId,
+              sessionProtocol: 'ssh',
+              awsTransport: state.tabs.find((tab) => tab.sessionId === controlSessionId)?.awsTransport,
               title: `pane ${paneNum}`,
               status: "connected",
               hasReceivedOutput: true,

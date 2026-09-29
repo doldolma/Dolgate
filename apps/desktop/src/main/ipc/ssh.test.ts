@@ -786,7 +786,7 @@ describe("registerSshIpcHandlers", () => {
         rows: 32,
         startupCommand: "sudo -i",
       }),
-    ).resolves.toMatchObject({ sessionId: "session-ssh" });
+    ).resolves.toMatchObject({ sessionId: "session-ssh", sessionProtocol: 'ssh', awsTransport: 'ssh-over-ssm' });
 
     expect(connectAwsEc2OverSsmMock).toHaveBeenCalledWith(
       ctx,
@@ -814,7 +814,7 @@ describe("registerSshIpcHandlers", () => {
 
     await expect(
       connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
-    ).resolves.toMatchObject({ sessionId: "session-ssh-proxy" });
+    ).resolves.toMatchObject({ sessionId: "session-ssh-proxy", sessionProtocol: 'ssh', awsTransport: 'ssh-over-ssm' });
 
     // 프록시 모드도 SSH-over-SSM이 성공하면 SSM 셸(프록시 세션)을 열지 않는다.
     expect(connectAwsEc2OverSsmMock).toHaveBeenCalledTimes(1);
@@ -850,7 +850,7 @@ describe("registerSshIpcHandlers", () => {
 
     await expect(
       connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
-    ).resolves.toMatchObject({ sessionId: "session-server-proxy-fallback" });
+    ).resolves.toMatchObject({ sessionId: "session-server-proxy-fallback", sessionProtocol: 'ssm-shell', awsTransport: 'ssm-shell' });
 
     expect(ctx.coreManager.connectAwsServerProxySession).toHaveBeenCalledTimes(1);
     expect(ctx.coreManager.connectAwsSession).not.toHaveBeenCalled();
@@ -871,7 +871,7 @@ describe("registerSshIpcHandlers", () => {
 
     await expect(
       connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
-    ).resolves.toMatchObject({ sessionId: "session-ssm-shell" });
+    ).resolves.toMatchObject({ sessionId: "session-ssm-shell", sessionProtocol: 'ssm-shell', awsTransport: 'ssm-shell' });
 
     expect(ctx.coreManager.connectAwsSession).toHaveBeenCalledTimes(1);
     expect(ctx.activityLogs.append).toHaveBeenCalledWith(

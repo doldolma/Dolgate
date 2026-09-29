@@ -14,6 +14,7 @@ import { canShareSessionTab } from './terminalSessionHelpers';
 import { captureTerminalShareSnapshot } from '../../lib/terminal-write-registry';
 import { openOwnerChatWindow } from '../../services/desktop/session-shares';
 import { TerminalSharePopover } from './TerminalSharePopover';
+import { getSessionCapabilities } from '../../lib/session-capabilities';
 
 interface SessionShareChromeButtonProps {
   /** 지금 포커스된 터미널 세션(분할이면 그 pane). */
@@ -31,7 +32,6 @@ export function SessionShareChromeButton({
 }: SessionShareChromeButtonProps) {
   const { t: translate } = useTranslation();
   const tabs = useAppStore((state) => state.tabs);
-  const hosts = useAppStore((state) => state.hosts);
   const startSessionShare = useAppStore((state) => state.startSessionShare);
   const setSessionShareInputEnabled = useAppStore(
     (state) => state.setSessionShareInputEnabled,
@@ -45,12 +45,8 @@ export function SessionShareChromeButton({
     () => tabs.find((entry) => entry.sessionId === sessionId) ?? null,
     [sessionId, tabs],
   );
-  const host = useMemo(
-    () => (tab?.hostId ? (hosts.find((entry) => entry.id === tab.hostId) ?? null) : null),
-    [hosts, tab?.hostId],
-  );
 
-  // 공유할 수 없는 세션(tmux pane · 로컬 터미널)에는 버튼을 두지 않는다 — pane 헤더의 Share 와
+  // 공유할 수 없는 세션(로컬 터미널 등)에는 버튼을 두지 않는다 — pane 헤더의 Share 와
   // 같은 규칙을 본다.
   if (!canShareSessionTab(tab)) {
     return null;
@@ -87,12 +83,11 @@ export function SessionShareChromeButton({
         if (!snapshot || !tab) {
           return;
         }
-        // 전송은 추측(호스트 종류)일 뿐이고 main 이 세션의 실제 전송으로 다시 판정한다 —
-        // pane 헤더의 Share 와 같은 값을 넘긴다.
+        // pane 헤더와 같은 실제 연결 정보 사용. main에서도 다시 검증한다.
         void startSessionShare({
           sessionId,
           title: tab.title,
-          transport: host?.kind === 'aws-ec2' ? 'aws-ssm' : 'ssh',
+          transport: getSessionCapabilities(tab).shareTransport,
           ...snapshot,
         });
         setOpen(true);

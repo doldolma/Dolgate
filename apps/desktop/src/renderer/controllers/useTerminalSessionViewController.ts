@@ -17,7 +17,7 @@ import {
   type TerminalRuntime,
 } from '../lib/terminal-runtime';
 import { createTerminalResizeScheduler } from '../components/terminal-resize';
-import { hostSupportsSftp } from '../components/host-browser/hostCapabilities';
+import { getSessionCapabilities } from '../lib/session-capabilities';
 import {
   loadScrollbackFromSession,
   registerTerminalHooks,
@@ -227,6 +227,7 @@ export function useTerminalSessionViewController({
   // 이 값에 묶어, 재연결 시 dispose/recreate 없이 스크롤백을 보존한다(입력·resize·데이터
   // 구독은 계속 sessionId 기준으로 동작 — liveSessionIdRef/데이터 구독 effect 참고).
   const stableId = tab?.stableId ?? sessionId;
+  const sessionCapabilities = getSessionCapabilities(tab);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const runtimeRef = useRef<TerminalRuntime | null>(null);
@@ -542,10 +543,15 @@ export function useTerminalSessionViewController({
 
   // 셸 통합(OSC 7 cwd / OSC 133)은 평소 autocomplete prepare 안에서 설치되지만,
   // autocomplete를 꺼도 파일 드롭 업로드의 cwd 인식·명령 알림이 동작하도록,
-  // 업로드 가능한(ssh/aws-ec2/warpgate) 연결 세션에서는 probe 없는 전용 경로로
+  // 실제 SSH 연결 세션에서는 probe 없는 전용 경로로
   // 한 번 보장한다. autocomplete가 켜져 있으면 그 훅이 이미 설치하므로 생략한다.
   const shellIntegrationEnsuredRef = useRef(false);
+  const shellIntegrationSessionRef = useRef(sessionId);
   useEffect(() => {
+    if (shellIntegrationSessionRef.current !== sessionId) {
+      shellIntegrationSessionRef.current = sessionId;
+      shellIntegrationEnsuredRef.current = false;
+    }
     if (tab?.status !== 'connected') {
       shellIntegrationEnsuredRef.current = false;
       return;
@@ -565,12 +571,11 @@ export function useTerminalSessionViewController({
       terminalAutocompleteEnabled &&
       host?.kind !== 'serial' &&
       tab?.shellKind !== 'aws-ecs-exec';
-    // 셸 통합은 SSH 세션 위에서만 성립한다 — Windows EC2 는 SSM 셸(PowerShell)이라 제외된다.
+    // 실제 SSH 채널이 없는 SSM 셸 폴백에서는 설치하지 않는다.
     // (코어도 같은 판단으로 거절하지만, 되지도 않을 설치를 요청할 이유가 없다.)
-    const sftpCapable = host ? hostSupportsSftp(host) : false;
     if (
       autocompleteActive ||
-      !sftpCapable ||
+      !sessionCapabilities.shellIntegration ||
       shellIntegrationEnsuredRef.current
     ) {
       return;
@@ -584,6 +589,7 @@ export function useTerminalSessionViewController({
     tab?.status,
     tab?.tmux,
     terminalAutocompleteEnabled,
+    sessionCapabilities.shellIntegration,
   ]);
 
   useEffect(() => {
@@ -1623,9 +1629,11 @@ export function useTerminalSessionViewController({
     const zmodem = createZmodemController({
       sessionId,
       hostLabel: liveSourceLabelRef.current || 'ZMODEM',
-      // SSM(aws-ec2)은 데이터 채널이 ZMODEM 바이너리 스트림을 신뢰성 있게 전달하지
-      // 못해(꼬리 바이트 누락) 비활성. SSH/Warpgate 등 8-bit clean 전송만 사용.
-      enabled: host?.kind !== 'aws-ec2',
+      // 스토어에서 읽어 연결 결과 반영 직후의 첫 바이트도 새 프로토콜로 처리한다.
+      // 메타데이터 갱신 때문에 진행 중인 Sentry를 dispose하지 않는다.
+      enabled: () => getSessionCapabilities(
+        appStore.getState().tabs.find((entry) => entry.sessionId === sessionId),
+      ).zmodem,
       writeToTerminal,
       // ZMODEM 회신은 활성 세션에만 보낸다(브로드캐스트 팬아웃 금지).
       sendToRemote: (bytes) => {
@@ -1648,7 +1656,6 @@ export function useTerminalSessionViewController({
       clearCommandBlocks(sessionId);
     };
   }, [
-    host?.kind,
     onSessionData,
     publishCurrentTerminalE2EState,
     refreshAutocompleteAnchor,
@@ -1790,13 +1797,8 @@ export function useTerminalSessionViewController({
     if (!payload || !canShareSession) {
       return;
     }
-    // tmux pane 은 hostId 가 null 이라 host 가 undefined 다(이전엔 !host 로 early-return →
-    // 공유 버튼이 눌려도 no-op). share 백엔드는 sessionId(tmux:<ctl>:<pane> 포함) 기준으로
-    // 스트림을 중계하므로 host 없이도 동작한다 — transport 만 도출한다.
-    // 이 값은 추측(호스트 종류)일 뿐이고, main(SessionShareService.start)이 세션의 실제
-    // 전송(getSessionTransport)으로 재판정한다 — EC2 기본 연결은 SSH-over-SSM("ssh")이라
-    // 여기서 aws-ssm 으로 보내도 SSM 셸 폴백 세션만 aws-ssm 으로 공유된다.
-    const transport = host?.kind === 'aws-ec2' ? 'aws-ssm' : 'ssh';
+    // SSM 셸도 공유한다. main의 실제 전송 재검증은 방어선으로 유지한다.
+    const transport = sessionCapabilities.shareTransport;
     await onStartSessionShare?.({
       sessionId,
       title,
@@ -1805,7 +1807,7 @@ export function useTerminalSessionViewController({
     });
     setSharePopoverOpen(true);
     setShareCopyStatus(null);
-  }, [canShareSession, captureShareSnapshot, host, onStartSessionShare, sessionId, title]);
+  }, [canShareSession, captureShareSnapshot, sessionCapabilities.shareTransport, onStartSessionShare, sessionId, title]);
 
   const handleCopyShareUrl = useCallback(async () => {
     if (!shareState?.shareUrl) {

@@ -32,8 +32,8 @@ declare module "nora-zmodemjs" {
     get_offset(): number;
     get_payloads(): Array<number[] | Uint8Array>;
     on(event: "input", handler: (octets: number[] | Uint8Array) => void): void;
-    accept(): Promise<void>;
-    skip(): void;
+    accept(options?: { on_input: (octets: number[] | Uint8Array) => void }): Promise<unknown>;
+    skip(): Promise<unknown> | void;
   }
 
   export interface ZmodemSession {
@@ -42,6 +42,7 @@ declare module "nora-zmodemjs" {
     on(event: "session_end", handler: () => void): void;
     start(): void;
     abort(): void;
+    aborted?(): boolean;
     close(): void;
   }
 

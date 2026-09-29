@@ -348,7 +348,12 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           input.cols,
           input.rows,
         );
-        return { ...connection, awsTransport, awsFallback };
+        return {
+          ...connection,
+          awsTransport,
+          awsFallback,
+          sessionProtocol: awsTransport === 'ssh-over-ssm' ? 'ssh' : 'ssm-shell',
+        };
       }
 
       if (isWarpgateSshHostRecord(host)) {
@@ -378,7 +383,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           input.cols,
           input.rows,
         );
-        return connection;
+        return { ...connection, sessionProtocol: 'ssh' };
       }
 
       ctx.assertSshHost(host);
@@ -457,7 +462,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         });
       }
 
-      return connection;
+      return { ...connection, sessionProtocol: useMosh ? 'mosh' : 'ssh' };
       }),
   );
 

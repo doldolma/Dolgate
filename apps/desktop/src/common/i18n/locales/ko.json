@@ -3493,6 +3493,8 @@
     "startupVarsConfirm": "연결"
   },
   "zmodem": {
+    "remoteAborted": "원격에서 파일 전송을 중단했습니다.",
+    "cancelFailed": "전송을 안전하게 종료하지 못했습니다. SSH 세션에 다시 연결하세요.",
     "tooLarge": "파일이 너무 큽니다(512MB 초과). SFTP를 사용하세요.",
     "downloadFailed": "다운로드에 실패했습니다."
   },

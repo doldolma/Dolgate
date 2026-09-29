@@ -66,6 +66,62 @@ afterEach(() => {
 });
 
 describe("createZmodemController", () => {
+  it('reads late connection capabilities without replacing its sentry', () => {
+    let enabled = false;
+    const deps = makeDeps({ enabled: () => enabled });
+    const controller = createZmodemController(deps);
+    const original = captured;
+    const chunk = Uint8Array.of(65);
+    controller.consume(chunk);
+    expect(deps.writeToTerminal).toHaveBeenCalledWith(chunk);
+    expect(captured?.consume).not.toHaveBeenCalled();
+    enabled = true;
+    controller.consume(chunk);
+    expect(captured).toBe(original);
+    expect(captured?.consume).toHaveBeenCalledWith(chunk);
+    controller.dispose();
+  });
+  it('drains a skipped transfer without awaiting accept or leaking bytes', async () => {
+    let enabled = true;
+    const deps = makeDeps({ enabled: () => enabled });
+    const controller = createZmodemController(deps);
+    let input: (bytes: number[]) => void = () => {};
+    let finishSkip: () => void = () => {};
+    let endSession: () => void = () => {};
+    const offer = {
+      get_details: () => ({ name: 'large.bin', size: 100 * 1024 * 1024 }),
+      on: (_: string, handler: typeof input) => { input = handler; },
+      accept: () => new Promise(() => {}),
+      skip: vi.fn(() => new Promise<void>(resolve => { finishSkip = resolve; })),
+    };
+    const session = {
+      type: 'receive',
+      on: (event: string, handler: any) => {
+        if (event === 'offer') handler(offer);
+        if (event === 'session_end') endSession = handler;
+      },
+      start: vi.fn(), abort: vi.fn(),
+    };
+    captured?.options.on_detect({ confirm: () => session });
+    // 메타데이터 변경은 이미 진행 중인 수신/취소 파서를 끊으면 안 된다.
+    enabled = false;
+    controller.consume(Uint8Array.of(1, 2, 3));
+    expect(captured?.consume).toHaveBeenCalledWith(Uint8Array.of(1, 2, 3));
+    const cancel = vi.mocked(deps.registerAbort).mock.calls[0][1];
+    cancel(); cancel();
+    input([1, 2, 3]);
+    captured?.options.to_terminal([4, 5, 6]);
+    expect(offer.skip).toHaveBeenCalledTimes(1);
+    expect(session.abort).not.toHaveBeenCalled();
+    expect(deps.writeToTerminal).not.toHaveBeenCalled();
+    endSession(); finishSkip();
+    await flush();
+    expect(vi.mocked(deps.upsertJob).mock.lastCall?.[0].status).toBe('cancelled');
+    expect(deps.saveDownload).not.toHaveBeenCalled();
+    captured?.options.to_terminal([36, 32]);
+    expect(deps.writeToTerminal).toHaveBeenCalledWith(Uint8Array.of(36, 32));
+    controller.dispose();
+  });
   it("passes raw output to the terminal when Zmodem is unavailable", () => {
     delete (window as unknown as { Zmodem?: unknown }).Zmodem;
     const deps = makeDeps();

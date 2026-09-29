@@ -116,13 +116,13 @@ function isContainerActionMetadata(value: Record<string, unknown> | null): value
   );
 }
 
-function getConnectionKindLabel(kind: SessionConnectionKind, tmux = false): string {
-  const suffix = tmux && kind === 'ssh' ? ' (tmux)' : '';
+function getConnectionKindLabel(kind: SessionConnectionKind, tmux = false, awsTransport?: string): string {
+  const suffix = tmux ? ' (tmux)' : '';
   if (kind === 'local') {
     return 'Local';
   }
   if (kind === 'aws-ssm') {
-    return 'AWS SSM';
+    return `${awsTransport === 'ssh-over-ssm' ? 'SSH over SSM' : awsTransport === 'ssm-shell' ? 'SSM Shell' : 'AWS SSM'}${suffix}`;
   }
   if (kind === 'aws-ecs-exec') {
     return 'AWS ECS Exec';
@@ -396,7 +396,7 @@ function getLogSearchText(log: ActivityLogRecord, translate: Translate): string 
     parts.push(
       metadata.hostLabel,
       getSessionLifecycleSubtitle(metadata),
-      getConnectionKindLabel(metadata.connectionKind, metadata.tmux),
+      getConnectionKindLabel(metadata.connectionKind, metadata.tmux, metadata.awsTransport),
       getLifecycleStatusLabel(metadata.status),
       metadata.disconnectReason,
     );
@@ -675,6 +675,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                         {getConnectionKindLabel(
                           sessionLifecycleMetadata.connectionKind,
                           sessionLifecycleMetadata.tmux,
+                          sessionLifecycleMetadata.awsTransport,
                         )}
                       </Badge>
                       <Badge tone={getLifecycleStatusTone(sessionLifecycleMetadata.status)}>

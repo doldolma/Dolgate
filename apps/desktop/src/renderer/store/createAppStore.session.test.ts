@@ -42,12 +42,15 @@ describe("createAppStore sessions and auth recovery", () => {
   }
 
   it("opens a new session tab and moves to focus mode on connect", async () => {
-    const store = createAppStore(createMockApi());
+    const api = createMockApi();
+    api.ssh.connect = vi.fn().mockResolvedValue({ sessionId: 'session-1', sessionProtocol: 'ssh' });
+    const store = createAppStore(api);
 
     await store.getState().bootstrap();
     await store.getState().connectHost("host-1", 120, 32);
 
     expect(store.getState().tabs[0]?.sessionId).toBe("session-1");
+    expect(store.getState().tabs[0]?.sessionProtocol).toBe('ssh');
     expect(store.getState().tabs[0]?.title).toBe("Prod");
     expect(store.getState().tabStrip).toEqual([
       { kind: "session", sessionId: "session-1" },

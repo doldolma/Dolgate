@@ -1055,7 +1055,11 @@ describe("CoreManager AWS SSM sessions", () => {
     expect(manager.getSessionLifecycleState(sessionId)).toMatchObject({
       connectionKind: "aws-ssm",
       connectionDetails: "default · ap-northeast-2 · i-ssh-over-ssm",
+      awsTransport: 'ssh-over-ssm',
       status: "connected",
+    });
+    expect(manager.listTabs().find((tab) => tab.sessionId === sessionId)).toMatchObject({
+      sessionProtocol: 'ssh', awsTransport: 'ssh-over-ssm',
     });
   });
 

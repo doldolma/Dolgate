@@ -110,12 +110,15 @@ describe('공유 시작', () => {
     });
   });
 
-  it('EC2 호스트는 SSM 전송으로 시작한다', () => {
-    setState({ hosts: [{ id: 'host-1', kind: 'aws-ec2' }] });
+  it.each([
+    ['ssh-over-ssm', 'ssh'],
+    ['ssm-shell', 'aws-ssm'],
+  ])('EC2 %s 세션은 실제 전송 %s로 공유한다', (awsTransport, expected) => {
+    setState({ hosts: [{ id: 'host-1', kind: 'aws-ec2' }], tabs: [tab({ awsTransport })] });
     render(<SessionShareChromeButton sessionId="session-1" />);
     fireEvent.click(screen.getByRole('button', { name: 'Share' }));
     fireEvent.click(screen.getByRole('button', { name: '공유 시작' }));
-    expect(startSessionShare.mock.calls[0][0].transport).toBe('aws-ssm');
+    expect(startSessionShare.mock.calls[0][0].transport).toBe(expected);
   });
 
   it('터미널이 없으면 시작하지 않는다', () => {
