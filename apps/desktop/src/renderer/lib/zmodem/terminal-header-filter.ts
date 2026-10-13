@@ -15,8 +15,22 @@ export function createTerminalHeaderFilter(write: (bytes: Uint8Array) => void) {
     }
   };
   return {
-    consume(bytes: Uint8Array) {
+    consume(input: Uint8Array) {
       clearTimeout(timer);
+      let bytes = input;
+      // 붙잡은 바이트가 없으면 첫 '*' 앞까지는 헤더일 수 없다 — 바이트마다 보지 않고 통째로 내보낸다.
+      // 아래 루프는 바이트마다 배열에 넣고 검사하고 빼서, 출력이 쏟아지면 메인 스레드의 22% 를 먹었다(실측).
+      if (pending.length === 0 && !optionalXon) {
+        const star = bytes.indexOf(42);
+        if (star === -1) {
+          if (bytes.length) write(bytes);
+          return;
+        }
+        if (star > 0) {
+          write(bytes.subarray(0, star));
+          bytes = bytes.subarray(star);
+        }
+      }
       const output: number[] = [];
       for (const byte of bytes) {
         if (optionalXon) {
@@ -50,6 +64,8 @@ export function createTerminalHeaderFilter(write: (bytes: Uint8Array) => void) {
       if (output.length) write(Uint8Array.from(output));
       if (pending.length && pending.length < 3) timer = setTimeout(flush, 250);
     },
+    /** 붙잡고 있는 바이트가 없다 — 이 필터를 건너뛰고 바로 써도 출력 순서가 바뀌지 않는다. */
+    isIdle: () => pending.length === 0 && !optionalXon,
     dispose() { clearTimeout(timer); pending = []; },
   };
 }

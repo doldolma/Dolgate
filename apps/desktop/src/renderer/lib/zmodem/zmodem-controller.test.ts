@@ -71,7 +71,8 @@ describe("createZmodemController", () => {
     const deps = makeDeps({ enabled: () => enabled });
     const controller = createZmodemController(deps);
     const original = captured;
-    const chunk = Uint8Array.of(65);
+    // 시작 신호의 첫 글자('*'). 그냥 글자는 감지기를 건너뛰므로 감지기까지 가는 바이트로 본다.
+    const chunk = Uint8Array.of(42);
     controller.consume(chunk);
     expect(deps.writeToTerminal).toHaveBeenCalledWith(chunk);
     expect(captured?.consume).not.toHaveBeenCalled();
@@ -131,13 +132,38 @@ describe("createZmodemController", () => {
     expect(deps.writeToTerminal).toHaveBeenCalledWith(chunk);
   });
 
-  it("feeds chunks to the sentry and forwards normal output via to_terminal", () => {
+  // 감지기는 조각마다 바이트를 숫자 배열로 바꿔 쌓아서, 출력이 쏟아지면 화면이 따라가지 못했다.
+  // 전송이 시작될 수 없는 조각('*'·ZDLE 가 없다)은 감지기를 건너뛴다.
+  it("feeds only chunks that could start a transfer to the sentry, and writes the rest directly", () => {
     const deps = makeDeps();
     const controller = createZmodemController(deps);
-    controller.consume(new Uint8Array([97]));
+    const plain = new Uint8Array([97]);
+    controller.consume(plain);
+    expect(captured?.consume).not.toHaveBeenCalled();
+    expect(deps.writeToTerminal).toHaveBeenCalledWith(plain);
+
+    controller.consume(new Uint8Array([42]));
     expect(captured?.consume).toHaveBeenCalledTimes(1);
     captured?.options.to_terminal([104, 105]);
     expect(deps.writeToTerminal).toHaveBeenCalledWith(new Uint8Array([104, 105]));
+  });
+
+  // 시작 신호는 ZDLE 뒤로 20바이트 남짓이 더 이어지고, 그 꼬리가 다음 조각으로 넘어가면 꼬리에는
+  // '*'·ZDLE 가 없다. 그래도 감지기에 넣어야 전송을 놓치지 않는다.
+  it("keeps feeding the sentry right after a chunk that may start a transfer", () => {
+    const deps = makeDeps();
+    const controller = createZmodemController(deps);
+    controller.consume(new Uint8Array([42, 42, 24]));
+    const tail = new TextEncoder().encode("B00000000000000\r\n");
+    controller.consume(tail);
+    expect(captured?.consume).toHaveBeenLastCalledWith(tail);
+
+    // 꼬리 몫(64바이트)이 지나면 다시 바로 화면으로 간다.
+    controller.consume(new Uint8Array(64).fill(97));
+    const after = new Uint8Array([98]);
+    controller.consume(after);
+    expect(captured?.consume).not.toHaveBeenCalledWith(after);
+    expect(deps.writeToTerminal).toHaveBeenCalledWith(after);
   });
 
   it("routes ZMODEM replies through sendToRemote", () => {
@@ -264,9 +290,12 @@ describe("createZmodemController", () => {
   it("falls back to a raw terminal write when consume throws", () => {
     const deps = makeDeps();
     const controller = createZmodemController(deps);
+    const failing = captured;
     consumeShouldThrow = true;
-    const chunk = new Uint8Array([5, 6, 7]);
+    // ZDLE 가 든 조각이라야 감지기까지 간다(그냥 글자는 감지기를 건너뛴다).
+    const chunk = new Uint8Array([5, 24, 7]);
     controller.consume(chunk);
+    expect(failing?.consume).toHaveBeenCalledWith(chunk);
     expect(deps.writeToTerminal).toHaveBeenCalledWith(chunk);
   });
 });

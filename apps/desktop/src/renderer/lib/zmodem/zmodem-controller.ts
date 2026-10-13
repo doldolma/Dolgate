@@ -33,6 +33,16 @@ function resolveZmodem(): ZmodemNamespace | undefined {
 const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;
 const PROGRESS_EMIT_INTERVAL_MS = 100;
 
+// ZMODEM 시작 신호(`**` ZDLE `B` 헥스…)에 들어가는 바이트. 둘 다 없는 조각으로는 전송이 시작될 수 없다.
+const ZPAD = 0x2a; // '*'
+const ZDLE = 0x18;
+/**
+ * '*'·ZDLE 가 나온 조각 뒤로 이만큼은 계속 감지기에 넣는다. 시작 신호는 ZDLE 뒤로 20바이트 남짓
+ * (`B` + 헥스 14자 + CR LF + XON)가 더 이어지는데, 그 꼬리가 다음 조각으로 넘어갈 수 있고 꼬리에는
+ * '*'·ZDLE 가 없다.
+ */
+const SENTRY_FOLLOW_BYTES = 64;
+
 export interface ZmodemControllerDeps {
   sessionId: string;
   hostLabel: string;
@@ -88,6 +98,8 @@ export function createZmodemController(
   const cancellationCompletions = new Set<() => void>();
   let quarantined = false;
   let draining = false;
+  // 아직 감지기에 더 넣어야 하는 바이트 수(SENTRY_FOLLOW_BYTES).
+  let sentryFollowBytes = 0;
   const terminalFilter = createTerminalHeaderFilter(deps.writeToTerminal);
 
   const nowIso = () => new Date().toISOString();
@@ -282,6 +294,29 @@ export function createZmodemController(
         deps.writeToTerminal(chunk);
         return;
       }
+      /**
+       * 전송이 시작될 수 없는 조각은 감지기를 건너뛰고 바로 화면으로 보낸다.
+       *
+       * 감지기(라이브러리 Sentry)는 조각마다 바이트 배열을 JS 숫자 배열로 바꿔 내부 버퍼에 붙이고, 화면으로
+       * 넘길 때 다시 바이트 배열로 바꾼다. 출력이 쏟아지면(0.5KB 조각이 초당 3만 개) 이것과 헤더 필터가
+       * 메인 스레드의 60% 를 먹어 화면이 출력을 따라가지 못했다 — 감지를 끄면 같은 출력을 밀림 없이
+       * 따라갔다(실측). 전송 중이거나, 시작 신호의 꼬리가 남았거나, 헤더 필터가 바이트를 붙잡고 있으면
+       * 순서와 감지를 위해 그대로 감지기로 간다.
+       */
+      const mayStartTransfer = chunk.indexOf(ZPAD) !== -1 || chunk.indexOf(ZDLE) !== -1;
+      if (
+        !mayStartTransfer &&
+        sentryFollowBytes === 0 &&
+        !activeSession &&
+        !draining &&
+        terminalFilter.isIdle()
+      ) {
+        deps.writeToTerminal(chunk);
+        return;
+      }
+      sentryFollowBytes = mayStartTransfer
+        ? SENTRY_FOLLOW_BYTES
+        : Math.max(0, sentryFollowBytes - chunk.length);
       try {
         sentry.consume(chunk);
       } catch (error) {

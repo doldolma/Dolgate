@@ -17,6 +17,22 @@ import { openTerminalExternalUrl } from '../services/desktop/terminal';
 const WRITE_FLUSH_THRESHOLD_BYTES = 64 * 1024;
 
 /**
+ * 한 번에 xterm 에 넘기는 출력의 상한. 쌓인 큐를 이 크기씩 나눠 넘긴다.
+ *
+ * xterm 은 넘겨받은 조각을 통째로 파싱하고, 화면이 멈추지 않게 쉬어 가는 것은 조각 **사이**에서다
+ * (12ms 마다). 큐를 한 조각으로 합치면 대량 출력에서 그 조각이 수십 MB 가 되어, 파싱이 끝날 때까지
+ * 렌더러가 통째로 멈췄다 — `yes` 를 10초 흘리자 58MB 한 조각에 앱 전체가 18초 동안 굳었다(실측).
+ *
+ * 그 크기는 탭을 영영 멈추게도 했다. xterm 은 밀린 양이 50MB 를 넘으면 새 쓰기를 예외로 거부하는데,
+ * 끝난 조각의 크기를 빼기 **전에** 완료 콜백을 부른다. 그 콜백에서 다음 조각을 넘기는 순간 거부당했고,
+ * 예외가 xterm 의 처리 루프를 빠져나가 다음 처리가 예약되지 않았다(아래 flushWriteQueue 의 catch).
+ *
+ * 한 번에 하나만 넘기므로(writeInFlight) xterm 에 밀리는 양은 이 크기 남짓을 넘지 않는다. 코어가
+ * 출력을 4KB 씩 읽어 보내므로 청크 하나가 이보다 큰 일은 없다 — 청크는 쪼개지 않는다.
+ */
+const MAX_WRITE_BATCH_BYTES = 256 * 1024;
+
+/**
  * Windows ConPTY 를 거치는 세션(isConptyHostedTab)의 xterm 에 주는 값.
  *
  * ConPTY 는 행이 늘면 자기 화면을 위쪽 정렬로 다시 그리고 아래에 빈 행을 붙인다. xterm 은 기본으로
@@ -384,6 +400,11 @@ export function createTerminalRuntime({
   let pendingWriteDrainCallback: (() => void) | null = null;
   let searchAddonLoaded = false;
   const queuedChunks: QueuedTerminalChunk[] = [];
+  // 큐에서 다음에 꺼낼 자리. Array.shift 는 큰 배열에서 매번 나머지 전체를 옮겨서, 대량 출력이 쌓였을 때
+  // 꺼내는 일이 그리는 구간 CPU 의 82% 를 먹었다(실측, 38,000 청크). 머리 자리만 옮기고, 꺼낸 앞부분이
+  // 절반을 넘으면 한 번에 잘라 낸다.
+  let queueHead = 0;
+  const queuedCount = () => queuedChunks.length - queueHead;
 
   const disposeDataSubscription = terminal.onData(onData);
   const disposeBinarySubscription = terminal.onBinary(onBinary);
@@ -552,7 +573,7 @@ export function createTerminalRuntime({
   };
 
   const flushPendingWriteDrainCallback = () => {
-    if (disposed || writeInFlight || queuedChunks.length > 0) {
+    if (disposed || writeInFlight || queuedCount() > 0) {
       return;
     }
 
@@ -562,7 +583,7 @@ export function createTerminalRuntime({
   };
 
   const flushWriteQueue = () => {
-    if (disposed || writeInFlight || queuedChunks.length === 0) {
+    if (disposed || writeInFlight || queuedCount() === 0) {
       return;
     }
 
@@ -571,41 +592,63 @@ export function createTerminalRuntime({
       pendingFrameHandle = null;
     }
 
-    const firstChunk = queuedChunks[0];
+    const firstChunk = queuedChunks[queueHead];
     if (!firstChunk) {
       return;
     }
     const chunkKind = firstChunk.kind;
     const nextChunks: QueuedTerminalChunk[] = [];
     let drainedSize = 0;
-    while (queuedChunks.length > 0 && queuedChunks[0]?.kind === chunkKind) {
-      const drained = queuedChunks.shift();
-      if (!drained) {
+    for (let next = queuedChunks[queueHead]; next && next.kind === chunkKind; next = queuedChunks[queueHead]) {
+      // 상한을 넘으면 나머지는 다음 쓰기로 넘긴다(MAX_WRITE_BATCH_BYTES). 첫 청크는 크기와 상관없이 넣는다.
+      if (nextChunks.length > 0 && drainedSize + next.size > MAX_WRITE_BATCH_BYTES) {
         break;
       }
-      nextChunks.push(drained);
-      drainedSize += drained.size;
+      queueHead += 1;
+      nextChunks.push(next);
+      drainedSize += next.size;
+    }
+    if (queueHead === queuedChunks.length) {
+      queuedChunks.length = 0;
+      queueHead = 0;
+    } else if (queueHead >= 1024 && queueHead * 2 >= queuedChunks.length) {
+      queuedChunks.splice(0, queueHead);
+      queueHead = 0;
     }
     queuedSize = Math.max(0, queuedSize - drainedSize);
     writeInFlight = true;
-    terminal.write(mergeQueuedChunks(nextChunks), () => {
-      writeInFlight = false;
-      if (disposed) {
-        return;
-      }
-      if (queuedChunks.length > 0) {
-        if (queuedSize >= WRITE_FLUSH_THRESHOLD_BYTES) {
-          flushWriteQueue();
+    try {
+      terminal.write(mergeQueuedChunks(nextChunks), () => {
+        writeInFlight = false;
+        if (disposed) {
           return;
         }
-        pendingFrameHandle = scheduleAnimationFrame(() => {
-          pendingFrameHandle = null;
-          flushWriteQueue();
-        });
-        return;
-      }
-      flushPendingWriteDrainCallback();
-    });
+        if (queuedCount() > 0) {
+          if (queuedSize >= WRITE_FLUSH_THRESHOLD_BYTES) {
+            flushWriteQueue();
+            return;
+          }
+          pendingFrameHandle = scheduleAnimationFrame(() => {
+            pendingFrameHandle = null;
+            flushWriteQueue();
+          });
+          return;
+        }
+        flushPendingWriteDrainCallback();
+      });
+    } catch (error) {
+      // xterm 이 쓰기를 거부했다(밀린 양이 한도를 넘었다). 이 함수는 xterm 의 완료 콜백 안에서도 불리므로,
+      // 예외를 그대로 올리면 xterm 의 처리 루프가 다음 처리를 예약하지 못하고 멈춘다 — 그 탭은 다시는
+      // 아무것도 그리지 않는다. 출력을 큐 앞에 되돌리고 다음 프레임에 다시 넘긴다.
+      writeInFlight = false;
+      queuedChunks.splice(queueHead, 0, ...nextChunks);
+      queuedSize += drainedSize;
+      safeWarn(logger, 'xterm rejected a terminal write, retrying on the next frame.', error);
+      pendingFrameHandle = scheduleAnimationFrame(() => {
+        pendingFrameHandle = null;
+        flushWriteQueue();
+      });
+    }
   };
 
   /**
@@ -624,7 +667,7 @@ export function createTerminalRuntime({
    * 즉시 쓴다 — 상호작용에서 이득을 보고 대량 출력은 손해가 없다.
    */
   const scheduleFlush = () => {
-    if (disposed || queuedChunks.length === 0) {
+    if (disposed || queuedCount() === 0) {
       return;
     }
     // 쓰는 중이면 아무것도 하지 않는다. 완료 콜백이 남은 큐를 이어서 비우고, 그 사이 도착한
@@ -816,6 +859,7 @@ export function createTerminalRuntime({
       }
       pendingWriteDrainCallback = null;
       queuedChunks.length = 0;
+      queueHead = 0;
       queuedSize = 0;
       clearWebglAddon();
       webLinksAddon?.dispose();

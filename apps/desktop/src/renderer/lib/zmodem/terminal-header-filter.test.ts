@@ -55,6 +55,18 @@ describe('real ZMODEM startup output', () => {
     }
   });
 
+  // 붙잡은 바이트가 없으면 첫 '*' 앞까지는 바이트마다 보지 않고 통째로 내보낸다. 붙잡은 '*' 가 있을 때
+  // 들어온 조각은 그 '*' 를 앞지르면 안 된다.
+  it('passes text before the first asterisk through and keeps order around a held asterisk', () => {
+    const output: number[] = [];
+    const filter = createTerminalHeaderFilter(bytes => output.push(...bytes));
+    filter.consume(new TextEncoder().encode('ab*'));
+    expect(new TextDecoder().decode(Uint8Array.from(output))).toBe('ab');
+    filter.consume(new TextEncoder().encode('cd'));
+    expect(new TextDecoder().decode(Uint8Array.from(output))).toBe('ab*cd');
+    filter.dispose();
+  });
+
   it('preserves ordinary text and invalid header candidates', () => {
     const output: number[] = [];
     const filter = createTerminalHeaderFilter(bytes => output.push(...bytes));

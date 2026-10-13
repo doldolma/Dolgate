@@ -948,3 +948,135 @@ describe('terminal-runtime', () => {
     expect(terminal.refresh).toHaveBeenCalledWith(0, 23);
   });
 });
+
+describe('terminal-runtime 대량 출력', () => {
+  function createRuntime(
+    terminal: ReturnType<typeof createFakeTerminal>['terminal'],
+    logger: Pick<Console, 'warn'> = { warn: vi.fn() },
+  ) {
+    // 프레임은 직접 돌린다. 취소된 것은 돌리지 않는다(실제 requestAnimationFrame 과 같게).
+    const frames = new Map<number, (time: number) => void>();
+    let nextFrame = 0;
+    const runtime = createTerminalRuntime({
+      container: document.createElement('div'),
+      appearance: createAppearance(),
+      onData: vi.fn(),
+      onBinary: vi.fn(),
+      dependencies: {
+        createTerminal: (() => terminal) as never,
+        createFitAddon: (() => ({ fit: vi.fn(), activate: vi.fn(), dispose: vi.fn() })) as never,
+        createSearchAddon: (() => ({
+          activate: vi.fn(),
+          dispose: vi.fn(),
+          findNext: vi.fn(() => true),
+          findPrevious: vi.fn(() => true),
+          clearDecorations: vi.fn(),
+          clearActiveDecoration: vi.fn(),
+        })) as never,
+        createUnicode11Addon: (() => ({ activate: vi.fn(), dispose: vi.fn() })) as never,
+        scheduleAnimationFrame: (callback: (time: number) => void) => {
+          nextFrame += 1;
+          frames.set(nextFrame, callback);
+          return nextFrame;
+        },
+        cancelScheduledAnimationFrame: (handle: number) => {
+          frames.delete(handle);
+        },
+        openExternal: vi.fn(),
+        logger,
+      },
+    });
+    return { runtime, frames };
+  }
+
+  /** xterm 처럼 쓰기를 하나씩 끝내고, 그사이 예약된 프레임도 돌린다. 쓰기도 프레임도 남지 않을 때까지. */
+  function drain(
+    writes: Array<{ callback?: () => void }>,
+    frames: Map<number, (time: number) => void>,
+    completedAlready = 0,
+  ) {
+    let completed = completedAlready;
+    for (let guard = 0; guard < 10_000; guard += 1) {
+      if (completed < writes.length) {
+        writes[completed]?.callback?.();
+        completed += 1;
+        continue;
+      }
+      const [handle] = frames.keys();
+      if (handle === undefined) {
+        return;
+      }
+      const frame = frames.get(handle);
+      frames.delete(handle);
+      frame?.(16);
+    }
+    throw new Error('출력이 끝나지 않았다');
+  }
+
+  // 쌓인 큐를 한 조각으로 합치면 대량 출력에서 그 조각이 수십 MB 가 되어 파싱하는 동안 렌더러가 통째로
+  // 멈췄고(앱 전체가 18초), xterm 의 50MB 한도에 걸려 탭이 영영 멈췄다. 정해진 크기씩 나눠 넘긴다.
+  it('쌓인 출력은 256KB 이하로 나눠 넘기고, 순서와 내용은 그대로다', () => {
+    const fake = createFakeTerminal();
+    const { runtime, frames } = createRuntime(fake.terminal);
+    // 코어는 출력을 4KB 씩 보낸다. 첫 쓰기가 끝나기 전에 800KB 가 쌓인다.
+    const chunks = Array.from({ length: 200 }, (_, index) =>
+      String.fromCharCode(65 + (index % 26)).repeat(4096),
+    );
+
+    runtime.write('first');
+    for (const chunk of chunks) {
+      runtime.write(chunk);
+    }
+    drain(fake.writes, frames);
+
+    const values = fake.writes.map((write) => write.value as string);
+    expect(values.length).toBeGreaterThan(4);
+    for (const value of values) {
+      expect(value.length).toBeLessThanOrEqual(256 * 1024);
+    }
+    expect(values.join('')).toBe(`first${chunks.join('')}`);
+  });
+
+  // 큐에서 꺼낼 때 Array.shift 를 쓰면 청크가 수만 개 쌓였을 때 매번 나머지를 다 옮겨, 그리는 시간의 대부분이
+  // 꺼내는 데 들었다. 머리 자리만 옮기고 앞부분을 가끔 잘라 내는데, 그 잘라 내기를 거쳐도 순서는 그대로여야 한다.
+  it('청크가 수천 개 쌓여도 순서와 내용을 지키며 모두 넘긴다', () => {
+    const fake = createFakeTerminal();
+    const { runtime, frames } = createRuntime(fake.terminal);
+    const chunks = Array.from({ length: 5_000 }, (_, index) => `${index}`.padStart(100, '.'));
+
+    runtime.write('first');
+    for (const chunk of chunks) {
+      runtime.write(chunk);
+    }
+    drain(fake.writes, frames);
+
+    expect(fake.writes.map((write) => write.value).join('')).toBe(`first${chunks.join('')}`);
+  });
+
+  // xterm 은 밀린 양이 한도를 넘으면 쓰기를 예외로 거부한다. 우리는 다음 쓰기를 xterm 의 완료 콜백 안에서
+  // 부르므로, 예외가 그대로 올라가면 xterm 의 처리 루프가 다음 처리를 예약하지 못해 탭이 다시는 그리지
+  // 않았다(실측).
+  it('xterm 이 쓰기를 거부해도 예외를 xterm 으로 올리지 않고, 다음 프레임에 그 출력을 다시 넘긴다', () => {
+    const fake = createFakeTerminal();
+    const logger = { warn: vi.fn() };
+    let calls = 0;
+    fake.terminal.write = vi.fn((value: string | Uint8Array, callback?: () => void) => {
+      calls += 1;
+      if (calls === 2) {
+        throw new Error('write data discarded, use flow control to avoid losing data');
+      }
+      fake.writes.push({ value, callback });
+    });
+    const { runtime, frames } = createRuntime(fake.terminal, logger);
+    const backlog = 'x'.repeat(100 * 1024);
+
+    runtime.write('first');
+    runtime.write(backlog);
+    // 쌓인 양이 64KB 를 넘으므로 첫 쓰기의 완료 콜백이 곧바로 이어 쓰고, 거기서 거부당한다.
+    expect(() => fake.writes[0]?.callback?.()).not.toThrow();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+
+    drain(fake.writes, frames, 1);
+    expect(fake.writes.map((write) => write.value).join('')).toBe(`first${backlog}`);
+  });
+});
