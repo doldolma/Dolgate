@@ -58,10 +58,14 @@ import {
   unregisterTerminalFocus,
 } from '../lib/terminal-focus-registry';
 import { createZmodemController } from '../lib/zmodem/zmodem-controller';
+import { createOutputFlowControl, type OutputFlowControl } from '../lib/output-flow-control';
 import {
+  ackTerminalOutput,
   installTerminalShellIntegration,
   noteTerminalCommandCount,
   reinjectTerminalShellIntegration,
+  startTerminalOutputFlow,
+  stopTerminalOutputFlow,
   writeTerminalBinaryInput,
   tmuxSplitPane,
   tmuxNewWindow,
@@ -289,6 +293,9 @@ export function useTerminalSessionViewController({
   // xterm 이 생기기 전에 도착한 출력. tmux pane 은 레이아웃을 알기 전엔 xterm 을 만들지 않는데,
   // 백로그(재연결 복원 포함)는 구독 즉시 흘러오므로 그 사이 온 바이트를 여기 들고 있다.
   const pendingWritesRef = useRef<Uint8Array[]>([]);
+  // 지금 구독 중인 세션의 출력 흐름 제어. 런타임은 재연결(sessionId 변경)을 넘어 살아남으므로, 런타임의
+  // "쓰기 끝남" 알림은 이 ref 로 그때의 세션에 닿는다.
+  const outputFlowRef = useRef<OutputFlowControl | null>(null);
   const shareSnapshotDirtyRef = useRef(false);
   const pendingShareSnapshotKindRef =
     useRef<SessionShareSnapshotInput['kind'] | null>(null);
@@ -1188,6 +1195,9 @@ export function useTerminalSessionViewController({
             noteScreenErased(liveSessionIdRef.current, blockTerminal);
           }
         },
+        onWriteSettled: () => {
+          outputFlowRef.current?.settle();
+        },
       });
       setTerminalInitError(null);
     } catch (error) {
@@ -1709,12 +1719,38 @@ export function useTerminalSessionViewController({
       clearAbort: clearZmodemAbort,
     });
 
+    // 화면이 처리한 만큼만 더 받는다(출력 흐름 제어). 구독보다 먼저 켠다 — 구독하면서 받는 백로그는 켜기
+    // 전에 나간 것이라 코어가 세지 않았지만, 더 알리는 것은 코어가 0 에서 멈추므로 해가 없다.
+    const outputFlow = createOutputFlowControl({
+      start: () => startTerminalOutputFlow(sessionId),
+      ack: (bytes) => ackTerminalOutput(sessionId, bytes),
+      stop: () => stopTerminalOutputFlow(sessionId),
+      pendingBytes: () => {
+        let pending = runtimeRef.current?.pendingOutputSize() ?? 0;
+        for (const bytes of pendingWritesRef.current) {
+          pending += bytes.byteLength;
+        }
+        return pending;
+      },
+      isVisible: () => document.visibilityState !== 'hidden',
+    });
+    outputFlowRef.current = outputFlow;
+    const settleOutputFlow = () => outputFlow.settle();
+    document.addEventListener('visibilitychange', settleOutputFlow);
+
     const unsubscribe = onSessionData(sessionId, (chunk) => {
+      outputFlow.received(chunk.byteLength);
       zmodem.consume(chunk);
+      outputFlow.settle();
     });
 
     return () => {
       unsubscribe();
+      document.removeEventListener('visibilitychange', settleOutputFlow);
+      if (outputFlowRef.current === outputFlow) {
+        outputFlowRef.current = null;
+      }
+      outputFlow.dispose();
       zmodem.dispose();
       clearSessionCwd(sessionId);
       clearCommandBlocks(sessionId);

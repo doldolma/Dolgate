@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"dolssh/services/ssh-core/internal/autocomplete"
+	"dolssh/services/ssh-core/internal/flowcontrol"
 	"dolssh/services/ssh-core/internal/protocol"
 	"dolssh/services/ssh-core/internal/sshcmd"
 )
@@ -61,6 +62,14 @@ type Manager struct {
 	emit         EventEmitter
 	emitStream   StreamEmitter
 	createRunner runnerFactory
+	// flow 는 화면이 못 따라가면 PTY 읽기를 멈추게 한다(internal/flowcontrol). 읽지 않으면 PTY 가
+	// 차서 프로그램이 출력하다가 기다린다. nil 이면 늘 읽는다.
+	flow *flowcontrol.Registry
+}
+
+// SetFlowControl 은 세션을 열기 전에 부른다.
+func (m *Manager) SetFlowControl(flow *flowcontrol.Registry) {
+	m.flow = flow
 }
 
 func NewManager(emit EventEmitter, stream StreamEmitter) *Manager {
@@ -490,6 +499,7 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 
 	buffer := make([]byte, 4096)
 	for {
+		m.flow.Wait(sessionID, handle.closed)
 		n, err := reader.Read(buffer)
 		if n > 0 {
 			chunk := make([]byte, n)
@@ -561,6 +571,7 @@ func (m *Manager) closeSession(sessionID string, message string) {
 	session.installGate.Disarm()
 	session.reinjectGate.Disarm()
 	session.handshake.StopIdleFlush()
+	m.flow.Stop(sessionID)
 	close(session.closed)
 
 	m.emit(protocol.Event{

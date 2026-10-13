@@ -43,6 +43,7 @@ vi.mock('../lib/terminal-runtime', () => ({
       terminal,
       fitAddon: { fit: vi.fn() },
       write: vi.fn(),
+      pendingOutputSize: vi.fn(() => 0),
       scheduleAfterWriteDrain: vi.fn(),
       captureSnapshot: vi.fn(() => ''),
       captureRestoreSnapshot: vi.fn(() => ''),
@@ -426,7 +427,10 @@ describe('TerminalWorkspace workspace switching', () => {
           write: vi.fn().mockResolvedValue(undefined),
           writeBinary: vi.fn().mockResolvedValue(undefined),
           resize: vi.fn().mockResolvedValue(undefined),
-          installShellIntegration: vi.fn().mockResolvedValue(undefined)
+          installShellIntegration: vi.fn().mockResolvedValue(undefined),
+          flowStart: vi.fn(),
+          flowAck: vi.fn(),
+          flowStop: vi.fn()
         }
       }
     });

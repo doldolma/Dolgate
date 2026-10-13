@@ -62,6 +62,8 @@ export interface TerminalRuntime {
   /** 현재 셀(글자 1칸) 픽셀 크기. 워크스페이스 단위 tmux client 리사이즈 계산용. */
   getCellSize: () => { width: number; height: number } | null;
   write: (data: Uint8Array | string) => void;
+  /** 넘겨받았지만 xterm 이 아직 처리를 끝내지 않은 출력의 크기(큐 + 쓰는 중인 묶음). */
+  pendingOutputSize: () => number;
   scheduleAfterWriteDrain: (callback: () => void) => void;
   captureSnapshot: () => string;
   /** 스크롤백까지 포함해 직렬화한다. 터미널 재생성 시 버퍼 복원용. */
@@ -151,6 +153,11 @@ interface CreateTerminalRuntimeOptions {
    * 명령 블록이 지워질 줄을 계속 자기 범위로 잡지 않게 알려 주는 용도다(Ctrl+L·clear·cls).
    */
   onScreenErase?: () => void;
+  /**
+   * xterm 이 묶음 하나를 처리할 때마다 불린다. 실시간 세션이 출력 흐름 제어에 처리한 양을 알리는
+   * 데 쓴다(pendingOutputSize 와 함께) — 리플레이는 넘기지 않는다.
+   */
+  onWriteSettled?: () => void;
   dependencies?: CreateTerminalRuntimeDependencies;
 }
 
@@ -367,6 +374,7 @@ export function createTerminalRuntime({
   onShellIntegration,
   onCwd,
   onScreenErase,
+  onWriteSettled,
   dependencies = {},
   initialSize,
   windowsPty,
@@ -396,6 +404,8 @@ export function createTerminalRuntime({
   let lastDevicePixelRatio = readDevicePixelRatio();
   let pendingFrameHandle: number | null = null;
   let writeInFlight = false;
+  // 쓰는 중인 묶음의 크기. 처리 안 된 출력(pendingOutputSize)은 큐와 이것의 합이다.
+  let inFlightSize = 0;
   let queuedSize = 0;
   let pendingWriteDrainCallback: (() => void) | null = null;
   let searchAddonLoaded = false;
@@ -582,6 +592,18 @@ export function createTerminalRuntime({
     nextCallback?.();
   };
 
+  // xterm 의 완료 콜백 안에서 불린다. 여기서 던지면 xterm 의 처리 루프가 멈추므로(위 catch 주석) 삼킨다.
+  const notifyWriteSettled = () => {
+    if (!onWriteSettled) {
+      return;
+    }
+    try {
+      onWriteSettled();
+    } catch (error) {
+      safeWarn(logger, 'Terminal write-settled handler failed.', error);
+    }
+  };
+
   const flushWriteQueue = () => {
     if (disposed || writeInFlight || queuedCount() === 0) {
       return;
@@ -617,30 +639,34 @@ export function createTerminalRuntime({
     }
     queuedSize = Math.max(0, queuedSize - drainedSize);
     writeInFlight = true;
+    inFlightSize = drainedSize;
     try {
       terminal.write(mergeQueuedChunks(nextChunks), () => {
         writeInFlight = false;
+        inFlightSize = 0;
         if (disposed) {
           return;
         }
         if (queuedCount() > 0) {
           if (queuedSize >= WRITE_FLUSH_THRESHOLD_BYTES) {
             flushWriteQueue();
-            return;
+          } else {
+            pendingFrameHandle = scheduleAnimationFrame(() => {
+              pendingFrameHandle = null;
+              flushWriteQueue();
+            });
           }
-          pendingFrameHandle = scheduleAnimationFrame(() => {
-            pendingFrameHandle = null;
-            flushWriteQueue();
-          });
-          return;
+        } else {
+          flushPendingWriteDrainCallback();
         }
-        flushPendingWriteDrainCallback();
+        notifyWriteSettled();
       });
     } catch (error) {
       // xterm 이 쓰기를 거부했다(밀린 양이 한도를 넘었다). 이 함수는 xterm 의 완료 콜백 안에서도 불리므로,
       // 예외를 그대로 올리면 xterm 의 처리 루프가 다음 처리를 예약하지 못하고 멈춘다 — 그 탭은 다시는
       // 아무것도 그리지 않는다. 출력을 큐 앞에 되돌리고 다음 프레임에 다시 넘긴다.
       writeInFlight = false;
+      inFlightSize = 0;
       queuedChunks.splice(queueHead, 0, ...nextChunks);
       queuedSize += drainedSize;
       safeWarn(logger, 'xterm rejected a terminal write, retrying on the next frame.', error);
@@ -749,6 +775,7 @@ export function createTerminalRuntime({
 
       scheduleFlush();
     },
+    pendingOutputSize: () => (disposed ? 0 : queuedSize + inFlightSize),
     scheduleAfterWriteDrain(callback) {
       if (disposed) {
         return;

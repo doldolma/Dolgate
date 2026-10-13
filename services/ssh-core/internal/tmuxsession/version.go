@@ -103,3 +103,13 @@ func (v tmuxVersion) supportsSendKeysHex() bool {
 	}
 	return v.patch >= 1 // 3.0a 이상(평이한 3.0 은 false)
 }
+
+// supportsPaneFlowControl 은 창별로 출력을 멈추고 다시 보내게 하는 `refresh-client -A '%N:pause'`·
+// `continue` 를 쓸 수 있는지(>= 3.2) 본다. 흐름 제어(PaneFlowControls)에만 쓴다.
+//
+// 다른 분기와 달리 **버전을 모르면 쓰지 않는다.** 모르는 tmux 에 보낸 흐름 제어 명령이 무엇을 할지
+// 장담할 수 없다 — 같은 -A 의 `off` 는 tmux 3.6b 서버를 보내자마자 죽였다(실측). 쓰지 않으면 그 창은
+// 흐름 제어 전처럼 동작할 뿐이다.
+func (v tmuxVersion) supportsPaneFlowControl() bool {
+	return v.known && v.atLeast(3, 2)
+}

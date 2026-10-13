@@ -48,6 +48,9 @@ type coreRuntime interface {
 	SendSessionInput(sessionID string, data []byte) error
 	SendControlSignal(sessionID string, payload protocol.ControlSignalPayload) error
 	ResizeSession(sessionID string, payload protocol.ResizePayload) error
+	FlowStart(sessionID string)
+	FlowStop(sessionID string)
+	FlowAck(sessionID string, bytes int64)
 	DisconnectSession(sessionID string) error
 	PrepareAutocomplete(sessionID, requestID string) error
 	RefreshAutocomplete(sessionID, requestID string) error
@@ -381,6 +384,20 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 			return err
 		}
 		return core.ResizeSession(request.SessionID, payload)
+	case protocol.CommandFlowStart:
+		core.FlowStart(request.SessionID)
+		return nil
+	case protocol.CommandFlowStop:
+		core.FlowStop(request.SessionID)
+		return nil
+	case protocol.CommandFlowAck:
+		var payload protocol.FlowAckPayload
+		// 깨진 ack 는 버린다. 오류를 돌려주면 router 가 그 세션에 오류 이벤트를 붙인다.
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return nil
+		}
+		core.FlowAck(request.SessionID, payload.Bytes)
+		return nil
 	case protocol.CommandDisconnect:
 		return core.DisconnectSession(request.SessionID)
 	case protocol.CommandTmuxSplitPane:

@@ -50,6 +50,8 @@ type Manager struct {
 	// restoreSettle 는 refresh-client 가 pane 크기에 반영될 때까지 두는 틈이다(0 이면 paneRestoreSettle).
 	// 복원과 레이아웃 재질의가 같은 틈을 쓴다. 테스트가 짧게 갈아끼운다.
 	restoreSettle time.Duration
+	// redrawQuiet 은 흐름 제어로 멈췄던 창을 다시 그리기 전에 기다리는 잠잠함이다(0 이면 paneRedrawQuiet).
+	redrawQuiet time.Duration
 
 	// panePrompt 는 pane 앞에 무엇이 있는지 tmux 에게 묻는 함수다. nil 이면 실제 조회
 	// (queryPaneState)를 쓴다 — 테스트가 tmux 서버 없이 판정 분기를 돌리기 위한 자리다.
@@ -124,6 +126,66 @@ type controlHandle struct {
 	sudoMu       sync.Mutex
 	sudoPassword string
 	sudoDenied   bool
+
+	// 흐름 제어(PaneFlowControls)로 한 번이라도 멈춘 창의 다시 그리기 상태다(scheduleQuietRedraw).
+	flowMu  sync.Mutex
+	redraws map[string]*paneRedraw
+}
+
+// paneRedraw 는 흐름 제어로 멈췄던 창을 다시 그리는 일의 상태다(controlHandle.flowMu).
+type paneRedraw struct {
+	paused     bool      // pause 를 보냈고 아직 %continue 가 오지 않았다
+	stale      bool      // 멈춘 동안 건너뛴 출력이 있을 수 있다 — 잠잠해지면 다시 그린다
+	drawing    bool      // 화면을 떠 와 그리는 중이다
+	dirty      bool      // 그리는 동안 출력이 왔다(떠 온 화면과 앞뒤가 엇갈렸을 수 있다)
+	lastOutput time.Time // 이 창의 마지막 %output 이 온 때
+	timer      *time.Timer
+}
+
+func (h *controlHandle) redrawLocked(paneID string) *paneRedraw {
+	if h.redraws == nil {
+		h.redraws = make(map[string]*paneRedraw)
+	}
+	state := h.redraws[paneID]
+	if state == nil {
+		state = &paneRedraw{}
+		h.redraws[paneID] = state
+	}
+	return state
+}
+
+func (h *controlHandle) markFlowPaused(paneID string) {
+	h.flowMu.Lock()
+	defer h.flowMu.Unlock()
+	state := h.redrawLocked(paneID)
+	state.paused = true
+	state.stale = true
+}
+
+// takeFlowPaused 는 우리가 멈춰 둔 창이었는지 보고 그 표시를 지운다.
+func (h *controlHandle) takeFlowPaused(paneID string) bool {
+	h.flowMu.Lock()
+	defer h.flowMu.Unlock()
+	state := h.redraws[paneID]
+	if state == nil || !state.paused {
+		return false
+	}
+	state.paused = false
+	return true
+}
+
+// notePaneOutput 은 창에 출력이 온 때를 적는다. 멈춘 적 없는 창은 아무것도 하지 않는다.
+func (h *controlHandle) notePaneOutput(paneID string) {
+	h.flowMu.Lock()
+	defer h.flowMu.Unlock()
+	state := h.redraws[paneID]
+	if state == nil {
+		return
+	}
+	state.lastOutput = time.Now()
+	if state.drawing {
+		state.dirty = true
+	}
 }
 
 // setSudoPassword 는 비밀번호로 붙은 연결에만 되물릴 값을 남긴다.
@@ -603,6 +665,8 @@ func (m *Manager) handleControlEvent(handle *controlHandle, ev ControlEvent) {
 			handle.collected = append(handle.collected, ev.Args[0])
 		}
 	case ControlOutput:
+		// 흐름 제어로 멈췄던 창이면 잠잠해지는 때를 재기 위해 출력이 온 때를 적는다.
+		handle.notePaneOutput(ev.PaneID)
 		// 서브셸 재주입을 기다리는 pane 이면 원본 출력으로 프롬프트 안착을 본다(필터 전에).
 		handle.observePaneOutput(ev.PaneID, ev.Data)
 		// 셸 통합 주입 중이면 그 pane 의 에코를 마커 전까지 숨긴다(없으면 그대로 통과).
@@ -680,6 +744,10 @@ func (m *Manager) handleControlEvent(handle *controlHandle, ev ControlEvent) {
 		m.emitPane(handle.id, coretypes.EventTmuxPaused, ev.PaneID)
 	case ControlContinue:
 		m.emitPane(handle.id, coretypes.EventTmuxContinue, ev.PaneID)
+		// 흐름 제어로 우리가 멈춰 둔 창이다. 멈춘 동안의 출력은 오지 않았으므로 잠잠해지면 다시 그린다.
+		if handle.takeFlowPaused(ev.PaneID) {
+			m.scheduleQuietRedraw(handle, ev.PaneID)
+		}
 	case ControlExit:
 		m.emit(coretypes.Event{
 			Type:      coretypes.EventTmuxExit,
@@ -1015,6 +1083,115 @@ func (m *Manager) restorePanes(handle *controlHandle, states []paneRestoreState)
 			Type:      coretypes.StreamTypeData,
 			SessionID: paneSessionID(handle.id, state.paneID),
 		}, data)
+	}
+}
+
+// PaneFlowControls 는 tmux 창(가상 세션 id)의 출력을 멈추게 하고 다시 보내게 하는 두 함수를 준다.
+// 출력 흐름 제어(internal/flowcontrol 의 StartObserved)가 쓴다.
+//
+// 모든 창이 제어 채널 하나로 와서 읽기를 멈출 수는 없다. 대신 그 창만 `refresh-client -A '%N:pause'`
+// 로 멈추고 `continue` 로 다시 보내게 한다. tmux 는 멈춘 동안에도 프로그램을 계속 돌리고 그 출력은 우리에게
+// 보내지 않으므로, 재개(%continue)한 뒤 잠잠해지면 지금 화면을 다시 그린다(scheduleQuietRedraw). 같은 -A 의
+// `off` 는 프로그램을 기다리게 할 수 있지만 tmux 3.6b 서버를 죽였다(실측) — 쓰지 않는다.
+//
+// tmux 3.2 이상인 것이 확인된 연결에서만 ok 다(supportsPaneFlowControl).
+func (m *Manager) PaneFlowControls(sessionID string) (pause, resume func(), ok bool) {
+	controlID, paneID, ok := parsePaneSessionID(sessionID)
+	if !ok || !isPaneID(paneID) {
+		return nil, nil, false
+	}
+	handle := m.getControl(controlID)
+	if handle == nil || !handle.version.supportsPaneFlowControl() {
+		return nil, nil, false
+	}
+	pause = func() {
+		handle.markFlowPaused(paneID)
+		_ = handle.writeStdin(paneFlowCommand(paneID, "pause"))
+	}
+	resume = func() {
+		_ = handle.writeStdin(paneFlowCommand(paneID, "continue"))
+	}
+	return pause, resume, true
+}
+
+func paneFlowCommand(paneID, action string) string {
+	return fmt.Sprintf("refresh-client -A '%s:%s'\n", paneID, action)
+}
+
+// paneRedrawQuiet 은 멈췄던 창을 다시 그리기 전에 그 창의 출력이 잠잠하기를 기다리는 시간이다.
+const paneRedrawQuiet = 100 * time.Millisecond
+
+// redrawQuietDelay 는 그 시간의 실제 값이다(테스트가 redrawQuiet 로 줄인다).
+func (m *Manager) redrawQuietDelay() time.Duration {
+	if m.redrawQuiet > 0 {
+		return m.redrawQuiet
+	}
+	return paneRedrawQuiet
+}
+
+// scheduleQuietRedraw 는 흐름 제어로 멈췄던 창의 출력이 잠잠해지면 지금 화면을 한 번 다시 그리게 한다.
+// Ctrl+C 뒤의 프롬프트처럼 멈춘 동안 나온 마지막 화면이 이것으로 보인다.
+//
+// 재개하자마자 그리지 않는 이유가 둘이다. 화면은 따로 연 exec 로 떠 오므로 제어 채널로 오는 출력과 앞뒤가
+// 보장되지 않는다 — 출력이 이어지는 중에 그리면, 떠 둔 옛 화면이 그 뒤에 온 출력(프롬프트)을 덮을 수 있다.
+// 그리고 쏟아지는 동안에는 1초에도 수십 번 멈췄다 풀리므로 그때마다 원격에 exec 를 연다. 잠잠해진 뒤에
+// 한 번 그리면 둘 다 없다. 그리는 동안 출력이 오면 다시 잠잠해진 뒤 한 번 더 그린다.
+func (m *Manager) scheduleQuietRedraw(handle *controlHandle, paneID string) {
+	handle.flowMu.Lock()
+	defer handle.flowMu.Unlock()
+	state := handle.redrawLocked(paneID)
+	if state.timer != nil {
+		return // 걸려 있는 타이머가 울릴 때 마지막 출력부터 다시 잰다
+	}
+	state.timer = time.AfterFunc(m.redrawQuietDelay(), func() { m.quietRedrawDue(handle, paneID) })
+}
+
+func (m *Manager) quietRedrawDue(handle *controlHandle, paneID string) {
+	handle.flowMu.Lock()
+	state := handle.redraws[paneID]
+	state.timer = nil
+	// 아직 멈춰 있으면 재개(%continue) 때, 그리는 중이면 그리기가 끝날 때 다시 건다.
+	if !handle.alive() || state.paused || state.drawing || !state.stale {
+		handle.flowMu.Unlock()
+		return
+	}
+	if wait := m.redrawQuietDelay() - time.Since(state.lastOutput); wait > 0 {
+		state.timer = time.AfterFunc(wait, func() { m.quietRedrawDue(handle, paneID) })
+		handle.flowMu.Unlock()
+		return
+	}
+	state.stale = false
+	state.drawing = true
+	state.dirty = false
+	handle.flowMu.Unlock()
+
+	m.drawPaneNow(handle, paneID)
+
+	handle.flowMu.Lock()
+	state.drawing = false
+	if state.dirty {
+		state.stale = true
+		state.dirty = false
+	}
+	again := state.stale && !state.paused
+	handle.flowMu.Unlock()
+	if again {
+		m.scheduleQuietRedraw(handle, paneID)
+	}
+}
+
+// drawPaneNow 는 창 하나의 지금 화면을 재연결 복원과 같은 바이트로 그 창에 보낸다.
+func (m *Manager) drawPaneNow(handle *controlHandle, paneID string) {
+	for _, state := range m.paneRestoreStatesOf(handle) {
+		if state.paneID != paneID {
+			continue
+		}
+		if data := buildPaneRestore(state, m.paneScreensOf(handle, state)); len(data) > 0 {
+			m.emitStream(coretypes.StreamFrame{
+				Type:      coretypes.StreamTypeData,
+				SessionID: paneSessionID(handle.id, paneID),
+			}, data)
+		}
 	}
 }
 

@@ -33,6 +33,9 @@ const (
 	CommandHostKeyTrustRespond         = coretypes.CommandHostKeyTrustRespond
 	CommandControlSignal               = coretypes.CommandControlSignal
 	CommandResize                      = coretypes.CommandResize
+	CommandFlowStart                   = coretypes.CommandFlowStart
+	CommandFlowStop                    = coretypes.CommandFlowStop
+	CommandFlowAck                     = coretypes.CommandFlowAck
 	CommandDisconnect                  = coretypes.CommandDisconnect
 	CommandProbeHostKey                = coretypes.CommandProbeHostKey
 	CommandInspectCertificate          = coretypes.CommandInspectCertificate
@@ -221,6 +224,7 @@ type HostKeyTrustRespondPayload = coretypes.HostKeyTrustRespondPayload
 type SSHBannerPayload = coretypes.SSHBannerPayload
 type ControlSignalPayload = coretypes.ControlSignalPayload
 type ResizePayload = coretypes.ResizePayload
+type FlowAckPayload = coretypes.FlowAckPayload
 type SFTPListPayload = coretypes.SFTPListPayload
 type SFTPMkdirPayload = coretypes.SFTPMkdirPayload
 type SFTPRenamePayload = coretypes.SFTPRenamePayload

@@ -132,6 +132,33 @@ async function waitForWriteCount(
   }
 }
 
+// 출력 흐름 제어. tmux 창은 코어가 그 창만 tmux 에게 멈추라고 말하므로
+// 보낸다. 제어 세션 자체에는 출력이 없어 보내지 않는다.
+describe("CoreManager output flow control", () => {
+  it("forwards flow control for tmux panes but not for the tmux control session", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const manager = new CoreManager();
+    const { sessionId } = await manager.connectLocalSession({ cols: 120, rows: 32, title: "Terminal" });
+    (manager as unknown as { tmuxControlSessionIds: Set<string> }).tmuxControlSessionIds.add("ctl-1");
+    const before = fakeProcess.writes.length;
+
+    manager.flowStart(sessionId);
+    manager.flowStart("tmux:ctl-1:0");
+    manager.flowAck("tmux:ctl-1:0", 131072);
+    manager.flowStart("ctl-1");
+    manager.flowStop("tmux:ctl-1:0");
+
+    const sent = fakeProcess.writes.slice(before).map((frame) => decodeControlFrame(frame));
+    expect(sent.map((request) => [request.type, request.sessionId, request.payload])).toEqual([
+      ["flowStart", sessionId, {}],
+      ["flowStart", "tmux:ctl-1:0", {}],
+      ["flowAck", "tmux:ctl-1:0", { bytes: 131072 }],
+      ["flowStop", "tmux:ctl-1:0", {}],
+    ]);
+  });
+});
+
 describe("CoreManager.isTmuxSession", () => {
   it("flags tmux: pane sessionIds as tmux; false for regular/undefined", () => {
     const manager = new CoreManager();

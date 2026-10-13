@@ -70,6 +70,17 @@ func (router *frameRouter) route(frame protocol.Frame) {
 		return
 	}
 
+	// 출력 흐름 제어 명령도 줄을 서지 않는다.
+	//
+	// 출력이 멈춘 프로그램은 입력도 읽지 않아서 그 세션 줄의 입력 쓰기가 막힐 수 있다. ack 가 그 뒤에
+	// 서면 출력이 영영 다시 흐르지 않는다(교착). 처리는 카운터를 바꾸는 것뿐이다(internal/flowcontrol).
+	if command == protocol.CommandFlowStart ||
+		command == protocol.CommandFlowStop ||
+		command == protocol.CommandFlowAck {
+		router.run(frame)
+		return
+	}
+
 	// 끊으러 온 명령은 먼저 진행 중인 작업을 중단시킨다.
 	//
 	// 정지·종료는 자기가 끊어야 할 작업과 **같은 대상**이라 같은 줄에 선다. 순서 보존은 옳은

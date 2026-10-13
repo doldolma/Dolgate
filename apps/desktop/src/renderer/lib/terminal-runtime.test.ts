@@ -953,6 +953,7 @@ describe('terminal-runtime 대량 출력', () => {
   function createRuntime(
     terminal: ReturnType<typeof createFakeTerminal>['terminal'],
     logger: Pick<Console, 'warn'> = { warn: vi.fn() },
+    onWriteSettled?: () => void,
   ) {
     // 프레임은 직접 돌린다. 취소된 것은 돌리지 않는다(실제 requestAnimationFrame 과 같게).
     const frames = new Map<number, (time: number) => void>();
@@ -962,6 +963,7 @@ describe('terminal-runtime 대량 출력', () => {
       appearance: createAppearance(),
       onData: vi.fn(),
       onBinary: vi.fn(),
+      onWriteSettled,
       dependencies: {
         createTerminal: (() => terminal) as never,
         createFitAddon: (() => ({ fit: vi.fn(), activate: vi.fn(), dispose: vi.fn() })) as never,
@@ -1078,5 +1080,45 @@ describe('terminal-runtime 대량 출력', () => {
 
     drain(fake.writes, frames, 1);
     expect(fake.writes.map((write) => write.value).join('')).toBe(`first${backlog}`);
+  });
+
+  // 출력 흐름 제어는 "받은 양 − 아직 처리 안 된 양" 을 처리한 양으로 알린다. 처리 안 된 양은 큐와 xterm 이
+  // 쓰는 중인 묶음의 합이고, xterm 이 묶음을 끝낼 때마다 다시 잰다.
+  it('아직 처리 안 된 출력의 크기를 알려 주고, xterm 이 묶음을 끝낼 때마다 알린다', () => {
+    const fake = createFakeTerminal();
+    const settled = vi.fn();
+    const { runtime, frames } = createRuntime(fake.terminal, undefined, settled);
+
+    runtime.write('a'.repeat(1000));
+    expect(runtime.pendingOutputSize()).toBe(1000);
+    runtime.write('b'.repeat(500));
+    expect(runtime.pendingOutputSize()).toBe(1500);
+
+    fake.writes[0]?.callback?.();
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(runtime.pendingOutputSize()).toBe(500);
+
+    drain(fake.writes, frames, 1);
+    expect(settled).toHaveBeenCalledTimes(2);
+    expect(runtime.pendingOutputSize()).toBe(0);
+  });
+
+  // 알림은 xterm 의 완료 콜백 안에서 불린다. 던진 예외가 xterm 으로 올라가면 그 탭은 다시 그리지 않는다.
+  it('쓰기 끝남 알림이 던져도 xterm 으로 올리지 않고 나머지 출력을 계속 넘긴다', () => {
+    const fake = createFakeTerminal();
+    const logger = { warn: vi.fn() };
+    const settled = vi.fn(() => {
+      throw new Error('boom');
+    });
+    const { runtime, frames } = createRuntime(fake.terminal, logger, settled);
+    const backlog = 'x'.repeat(100 * 1024);
+
+    runtime.write('first');
+    runtime.write(backlog);
+    expect(() => fake.writes[0]?.callback?.()).not.toThrow();
+
+    drain(fake.writes, frames, 1);
+    expect(fake.writes.map((write) => write.value).join('')).toBe(`first${backlog}`);
+    expect(logger.warn).toHaveBeenCalled();
   });
 });

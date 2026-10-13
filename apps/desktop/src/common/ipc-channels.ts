@@ -175,6 +175,10 @@ export const ipcChannels = {
     write: 'ssh:write',
     writeBinary: 'ssh:write-binary',
     resize: 'ssh:resize',
+    // 출력 흐름 제어. 보내고 잊는다(ipcRenderer.send) — ack 는 초당 수백 번 갈 수 있다.
+    flowStart: 'ssh:flow-start',
+    flowAck: 'ssh:flow-ack',
+    flowStop: 'ssh:flow-stop',
     disconnect: 'ssh:disconnect',
     prepareAutocomplete: 'ssh:autocomplete-prepare',
     installShellIntegration: 'ssh:install-shell-integration',

@@ -235,6 +235,9 @@ export type CoreCommandType =
   | "serialControl"
   | "controlSignal"
   | "resize"
+  | "flowStart"
+  | "flowAck"
+  | "flowStop"
   | "disconnect"
   | "probeHostKey"
   | "inspectCertificate"
@@ -1615,6 +1618,13 @@ export interface DesktopApi {
     write: (sessionId: string, data: string) => Promise<void>;
     writeBinary: (sessionId: string, data: Uint8Array) => Promise<void>;
     resize: (sessionId: string, cols: number, rows: number) => Promise<void>;
+    /**
+     * 출력 흐름 제어. 세션 출력을 구독하면 flowStart, 처리한 만큼
+     * flowAck(0 이면 "아직 처리 중"), 구독을 끊으면 flowStop. 보내고 잊는다.
+     */
+    flowStart: (sessionId: string) => void;
+    flowAck: (sessionId: string, bytes: number) => void;
+    flowStop: (sessionId: string) => void;
     disconnect: (sessionId: string) => Promise<void>;
     prepareAutocomplete: (sessionId: string) => Promise<void>;
     refreshAutocomplete: (sessionId: string) => Promise<void>;

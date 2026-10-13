@@ -520,6 +520,23 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
     },
   );
 
+  // 출력 흐름 제어. 보내고 잊는 신호라 응답이 없고, 이상한 값은 조용히 버린다.
+  ipcMain.on(ipcChannels.ssh.flowStart, (_event, sessionId: unknown) => {
+    if (typeof sessionId === "string") {
+      ctx.coreManager.flowStart(sessionId);
+    }
+  });
+  ipcMain.on(ipcChannels.ssh.flowAck, (_event, sessionId: unknown, bytes: unknown) => {
+    if (typeof sessionId === "string" && typeof bytes === "number" && Number.isFinite(bytes) && bytes >= 0) {
+      ctx.coreManager.flowAck(sessionId, Math.floor(bytes));
+    }
+  });
+  ipcMain.on(ipcChannels.ssh.flowStop, (_event, sessionId: unknown) => {
+    if (typeof sessionId === "string") {
+      ctx.coreManager.flowStop(sessionId);
+    }
+  });
+
   ipcMain.handle(
     ipcChannels.ssh.disconnect,
     async (_event, sessionId: string) => {

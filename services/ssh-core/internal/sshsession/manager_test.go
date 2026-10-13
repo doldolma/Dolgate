@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,6 +52,9 @@ type sshTestServer struct {
 	// passwordDisabled 는 password 방식을 아예 제시하지 않게 한다. 실제 OTP 서버가 그렇고, 남겨
 	// 두면 클라이언트가 password 로 먼저 붙어 keyboard-interactive 경로를 지나가지 않는다.
 	passwordDisabled bool
+	// floodingShell 이면 셸이 끝없이 출력하고(`yes` 처럼), 실제로 써 보낸 양을 floodWritten 에 센다.
+	floodingShell bool
+	floodWritten  atomic.Int64
 }
 
 func TestManagerPasswordFlow(t *testing.T) {
@@ -726,6 +730,10 @@ func handleConnection(raw net.Conn, config *ssh.ServerConfig, server *sshTestSer
 					_ = req.Reply(server.agentForwardingAccepted, nil)
 				case "shell":
 					_ = req.Reply(true, nil)
+					if server.floodingShell {
+						go floodShell(ch, server)
+						continue
+					}
 					_, _ = ch.Write([]byte("welcome\n"))
 					echoStarted.Do(func() {
 						go echoShell(ch, server)

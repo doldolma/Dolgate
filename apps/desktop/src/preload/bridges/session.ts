@@ -33,6 +33,12 @@ export function buildSshBridge(ipcRenderer: IpcRenderer): DesktopApi["ssh"] {
       ipcRenderer.invoke(ipcChannels.ssh.writeBinary, sessionId, data),
     resize: (sessionId: string, cols: number, rows: number) =>
       ipcRenderer.invoke(ipcChannels.ssh.resize, sessionId, cols, rows),
+    flowStart: (sessionId: string) =>
+      ipcRenderer.send(ipcChannels.ssh.flowStart, sessionId),
+    flowAck: (sessionId: string, bytes: number) =>
+      ipcRenderer.send(ipcChannels.ssh.flowAck, sessionId, bytes),
+    flowStop: (sessionId: string) =>
+      ipcRenderer.send(ipcChannels.ssh.flowStop, sessionId),
     disconnect: (sessionId: string) =>
       ipcRenderer.invoke(ipcChannels.ssh.disconnect, sessionId),
     prepareAutocomplete: (sessionId: string) =>

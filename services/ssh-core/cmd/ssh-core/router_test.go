@@ -163,6 +163,33 @@ func TestRouterServesAuthAnswerWhileTargetIsBlocked(t *testing.T) {
 	awaitClosed(t, "인증 응답", core.respondDone)
 }
 
+// 출력 흐름 제어 ack 는 같은 세션의 입력이 막혀 있어도 처리돼야 한다.
+//
+// 출력이 멈춘 프로그램은 입력을 읽지 않아 입력 쓰기가 막힌다. ack 가 그 뒤에 줄을 서면 출력이 다시
+// 흐를 길이 없어 교착이다.
+func TestRouterServesFlowAckWhileSessionInputIsBlocked(t *testing.T) {
+	core := &stubCoreRuntime{inputGate: make(chan struct{}), flowAcks: make(chan int64, 1)}
+	defer close(core.inputGate)
+	router := newFrameRouter(core, newEventWriter())
+
+	router.route(streamFrame(t, "session-1", "typed while output is paused"))
+	router.route(controlFrame(t, protocol.Request{
+		ID:        "ack-1",
+		Type:      protocol.CommandFlowAck,
+		SessionID: "session-1",
+		Payload:   mustMarshal(t, protocol.FlowAckPayload{Bytes: 131072}),
+	}))
+
+	select {
+	case bytes := <-core.flowAcks:
+		if bytes != 131072 {
+			t.Fatalf("ack bytes = %d, want 131072", bytes)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ack 가 막힌 입력 뒤에 줄을 섰다")
+	}
+}
+
 // 배차는 무슨 일이 있어도 막히지 않아야 한다(읽기 고루틴이 곧 그 배차다).
 func TestRouterNeverBlocksTheReader(t *testing.T) {
 	core := &stubCoreRuntime{

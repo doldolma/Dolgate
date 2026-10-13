@@ -43,6 +43,8 @@ type stubCoreRuntime struct {
 	// inputGate 가 있으면 첫 입력이 여기서 멈춘다(뒤 프레임이 새치기하는지 보려고).
 	inputGate     chan struct{}
 	inputGateUsed bool
+	// flowAcks 가 있으면 코어에 닿은 흐름 제어 ack 바이트 수를 넣는다.
+	flowAcks chan int64
 	// 포워딩 시작이 사람을 기다리는 상태를 흉내낸다.
 	forwardStarted     chan struct{}
 	forwardRelease     chan struct{}
@@ -142,6 +144,13 @@ func (stub *stubCoreRuntime) SendControlSignal(sessionID string, payload protoco
 }
 func (stub *stubCoreRuntime) ResizeSession(sessionID string, payload protocol.ResizePayload) error {
 	return nil
+}
+func (stub *stubCoreRuntime) FlowStart(sessionID string) {}
+func (stub *stubCoreRuntime) FlowStop(sessionID string)  {}
+func (stub *stubCoreRuntime) FlowAck(sessionID string, bytes int64) {
+	if stub.flowAcks != nil {
+		stub.flowAcks <- bytes
+	}
 }
 func (stub *stubCoreRuntime) DisconnectSession(sessionID string) error              { return nil }
 func (stub *stubCoreRuntime) PrepareAutocomplete(sessionID, requestID string) error { return nil }

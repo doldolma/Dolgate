@@ -2,11 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipcChannels } from "../../common/ipc-channels";
 
 const ipcHandlers = new Map<string, (...args: any[]) => any>();
+const ipcListeners = new Map<string, (...args: any[]) => any>();
 
 vi.mock("electron", () => ({
   ipcMain: {
     handle: vi.fn((channel: string, handler: (...args: any[]) => any) => {
       ipcHandlers.set(channel, handler);
+    }),
+    on: vi.fn((channel: string, listener: (...args: any[]) => any) => {
+      ipcListeners.set(channel, listener);
     }),
   },
   shell: {
@@ -49,6 +53,9 @@ function createContext() {
       connectLocalSession: vi.fn(),
       connectAwsSession: vi.fn(),
       connectAwsServerProxySession: vi.fn(),
+      flowStart: vi.fn(),
+      flowAck: vi.fn(),
+      flowStop: vi.fn(),
     },
     authService: {
       getServerUrl: vi.fn(() => "https://sync.example.com"),
@@ -74,6 +81,7 @@ function createContext() {
 describe("registerSshIpcHandlers", () => {
   beforeEach(() => {
     ipcHandlers.clear();
+    ipcListeners.clear();
     connectAwsEc2OverSsmMock.mockReset();
     // 기본값: SSH-over-SSM 실패 → 기존 테스트들은 SSM 셸 폴백 경로를 검증한다.
     connectAwsEc2OverSsmMock.mockRejectedValue(new Error("sshd unreachable"));
@@ -171,6 +179,26 @@ describe("registerSshIpcHandlers", () => {
       132,
       44,
     );
+  });
+
+  // 출력 흐름 제어 신호는 보내고 잊는다(ipcRenderer.send). 응답이 없으니 이상한 값은 코어로 넘기지 않고 버린다.
+  it("forwards output flow control signals to the core and drops malformed ones", () => {
+    const ctx = createContext();
+    registerSshIpcHandlers(ctx);
+
+    ipcListeners.get(ipcChannels.ssh.flowStart)?.(null, "session-1");
+    ipcListeners.get(ipcChannels.ssh.flowAck)?.(null, "session-1", 131072.7);
+    ipcListeners.get(ipcChannels.ssh.flowStop)?.(null, "session-1");
+    expect(ctx.coreManager.flowStart).toHaveBeenCalledWith("session-1");
+    expect(ctx.coreManager.flowAck).toHaveBeenCalledWith("session-1", 131072);
+    expect(ctx.coreManager.flowStop).toHaveBeenCalledWith("session-1");
+
+    ipcListeners.get(ipcChannels.ssh.flowStart)?.(null, 42);
+    ipcListeners.get(ipcChannels.ssh.flowAck)?.(null, "session-1", -1);
+    ipcListeners.get(ipcChannels.ssh.flowAck)?.(null, "session-1", Number.NaN);
+    ipcListeners.get(ipcChannels.ssh.flowAck)?.(null, "session-1", "131072");
+    expect(ctx.coreManager.flowStart).toHaveBeenCalledTimes(1);
+    expect(ctx.coreManager.flowAck).toHaveBeenCalledTimes(1);
   });
 
   it("blocks certificate auth before connect when certificate inspection reports an error", async () => {

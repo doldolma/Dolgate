@@ -18,9 +18,14 @@ const (
 	CommandSerialControl              CommandType = "serialControl"
 	CommandKeyboardInteractiveRespond CommandType = "keyboardInteractiveRespond"
 	// CommandHostKeyTrustRespond 는 "이 서버 키를 신뢰(또는 교체)하겠다" 는 사용자의 답이다.
-	CommandHostKeyTrustRespond         CommandType = "hostKeyTrustRespond"
-	CommandControlSignal               CommandType = "controlSignal"
-	CommandResize                      CommandType = "resize"
+	CommandHostKeyTrustRespond CommandType = "hostKeyTrustRespond"
+	CommandControlSignal       CommandType = "controlSignal"
+	CommandResize              CommandType = "resize"
+	// CommandFlowStart·Stop·Ack 는 출력 흐름 제어다(internal/flowcontrol). 렌더러가 세션 출력을
+	// 구독하면 Start, 처리한 만큼 Ack, 구독을 끊으면 Stop 이 온다.
+	CommandFlowStart                   CommandType = "flowStart"
+	CommandFlowStop                    CommandType = "flowStop"
+	CommandFlowAck                     CommandType = "flowAck"
 	CommandDisconnect                  CommandType = "disconnect"
 	CommandProbeHostKey                CommandType = "probeHostKey"
 	CommandInspectCertificate          CommandType = "inspectCertificate"
@@ -995,6 +1000,11 @@ type ControlSignalPayload struct {
 type ResizePayload struct {
 	Cols int `json:"cols"`
 	Rows int `json:"rows"`
+}
+
+// FlowAckPayload 는 렌더러가 처리를 마친 출력 바이트 수다. 0 은 "아직 살아서 처리 중" 이라는 뜻이다.
+type FlowAckPayload struct {
+	Bytes int64 `json:"bytes"`
 }
 
 type SFTPListPayload struct {

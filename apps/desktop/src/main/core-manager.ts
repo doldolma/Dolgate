@@ -4287,6 +4287,42 @@ export class CoreManager {
     });
   }
 
+  /**
+   * 출력 흐름 제어를 코어에 전한다. 렌더러가 세션 출력을 구독하면
+   * start, 처리한 만큼 ack(0 이면 "아직 처리 중"), 구독을 끊으면 stop 이 온다. 코어는 화면이 처리하지
+   * 못한 출력이 1MB 를 넘으면 그 세션의 읽기를 멈춰, 출력하던 프로그램이 기다리게 한다.
+   *
+   * tmux 창(`tmux:…`)은 모든 창이 채널 하나라 읽기를 멈출 수 없어, 코어가 그 창만 tmux 에게 멈추라고
+   * 말한다. tmux 제어 세션 자체에는 출력이 없고, Dolgate 서버를 거치는 AWS 세션은 출력이 코어를 거치지
+   * 않아 보내지 않는다(다른 종류는 코어가 거른다). 코어가 없으면 조용히 버린다 — 이 신호를 기다리는
+   * 쪽은 없고, 코어가 다시 뜨면 세션도 새로 열린다.
+   */
+  flowStart(sessionId: string): void {
+    this.sendFlowControl("flowStart", sessionId, {});
+  }
+
+  flowAck(sessionId: string, bytes: number): void {
+    this.sendFlowControl("flowAck", sessionId, { bytes });
+  }
+
+  flowStop(sessionId: string): void {
+    this.sendFlowControl("flowStop", sessionId, {});
+  }
+
+  private sendFlowControl(
+    type: "flowStart" | "flowAck" | "flowStop",
+    sessionId: string,
+    payload: Record<string, unknown>,
+  ): void {
+    if (this.tmuxControlSessionIds.has(sessionId) || this.awsServerProxySessions.has(sessionId)) {
+      return;
+    }
+    if (!this.writableCoreStdin()) {
+      return;
+    }
+    this.sendControl({ id: randomUUID(), type, sessionId, payload });
+  }
+
   resize(sessionId: string, cols: number, rows: number): void {
     if (sessionId.startsWith("tmux:")) {
       if (!this.isTmuxControlConnected(sessionId)) {

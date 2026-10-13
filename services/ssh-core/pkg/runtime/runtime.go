@@ -15,6 +15,7 @@ import (
 	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/awssession"
 	containersvc "dolssh/services/ssh-core/internal/containers"
+	"dolssh/services/ssh-core/internal/flowcontrol"
 	"dolssh/services/ssh-core/internal/forwarding"
 	"dolssh/services/ssh-core/internal/hostkeytrust"
 	"dolssh/services/ssh-core/internal/hostmetrics"
@@ -205,7 +206,10 @@ type Runtime struct {
 	hostKeyTrust *hostkeytrust.Registry
 	// dialer 는 세션 계열이 공유하는 연결 경로다. 대화형 인증 대기표가 여기 하나뿐이라 응답을
 	// 어느 매니저로 보낼지 고르는 분기가 없다(internal/sshdial).
-	dialer                    *sshdial.Dialer
+	dialer *sshdial.Dialer
+	// flow 는 세션별로 화면이 아직 처리하지 못한 출력을 센다(internal/flowcontrol). 테스트 생성자
+	// (newRuntimeWithDeps)에서는 nil 이고, 그러면 흐름 제어 명령은 아무것도 하지 않는다.
+	flow                      *flowcontrol.Registry
 	inspectCertificate        certificateInspectFunc
 	tailnetService            *tailnetservice.Service
 	autocompleteMu            sync.Mutex
@@ -221,6 +225,17 @@ func New(options Options) *Runtime {
 	emitStream := options.EmitStream
 	if emitStream == nil {
 		emitStream = func(coretypes.StreamFrame, []byte) {}
+	}
+	// 렌더러로 나가는 출력을 세션별로 센다(흐름 제어, internal/flowcontrol). 읽기 루프 밖에서 끼워
+	// 넣는 바이트(명령 끝 표시 등)도 있고 필터가 빼는 바이트도 있어서, 읽은 양이 아니라 실제로 내보낸
+	// 양을 이 한 곳에서 센다.
+	flow := flowcontrol.New()
+	sendStream := emitStream
+	emitStream = func(frame coretypes.StreamFrame, payload []byte) {
+		if frame.Type == coretypes.StreamTypeData {
+			flow.Sent(frame.SessionID, len(payload))
+		}
+		sendStream(frame, payload)
 	}
 
 	// 매니저는 런타임보다 먼저 만들어지는데 tailnet 레지스트리는 런타임 소유다. 그래서
@@ -250,7 +265,10 @@ func New(options Options) *Runtime {
 		TailnetDial:        tailnetDial,
 		HostKeyTrustPrompt: hostKeyTrustPrompt,
 		Dialer:             sessionDialer,
+		FlowControl:        flow,
 	})
+	localManager := localsession.NewManager(emitEvent, emitStream)
+	localManager.SetFlowControl(flow)
 	moshManager := moshsession.NewManagerWithConfig(emitEvent, emitStream, moshsession.ManagerConfig{
 		TailnetDial: tailnetDial,
 		Dialer:      sessionDialer,
@@ -272,7 +290,7 @@ func New(options Options) *Runtime {
 		sshManager,
 		moshManager,
 		awssession.NewManager(emitEvent, emitStream),
-		localsession.NewManager(emitEvent, emitStream),
+		localManager,
 		serialsession.NewManager(emitEvent, emitStream),
 		sftpService,
 		containersService,
@@ -361,6 +379,7 @@ func New(options Options) *Runtime {
 	// (newRuntimeWithDeps 는 테스트용이라 시그니처를 늘리지 않는다 — tailnetService 와 같은 방식).
 	instance.hostKeyTrust = hostKeyTrustRegistry
 	instance.dialer = sessionDialer
+	instance.flow = flow
 
 	return instance
 }
@@ -553,6 +572,39 @@ func (runtime *Runtime) ResizeSession(sessionID string, payload coretypes.Resize
 	default:
 		return runtime.ssh.Resize(sessionID, payload.Cols, payload.Rows)
 	}
+}
+
+// FlowStart 는 렌더러가 이 세션의 출력을 구독했다는 뜻이다. 그때부터 화면이 처리하지 못한 출력을
+// 센다(다시 구독하면 0부터).
+//
+// 로컬 셸과 SSH 는 읽기를 멈춰 상대가 기다리게 한다. tmux 는 모든 창이 채널 하나라 읽기를 멈출 수
+// 없어서, 그 창만 tmux 에게 멈추라고 말한다(PaneFlowControls — tmux 3.2 이상). SSM 은 데이터 채널
+// 하나가 초당 약 1MB 라 화면보다 훨씬 느려 쌓이지 않고, mosh 는 멈춰도 서버가 계속 보내고, 시리얼은
+// 멈추면 장비가 보낸 데이터가 버려진다. 아직 연결 중이라 어느 매니저에도 없는 세션은 그대로 켠다 — 읽기
+// 루프가 기다리지 않는 종류면 세기만 하다가 Stop 때 지워진다.
+func (runtime *Runtime) FlowStart(sessionID string) {
+	if runtime.tmux.HasSession(sessionID) {
+		if pause, resume, ok := runtime.tmux.PaneFlowControls(sessionID); ok {
+			runtime.flow.StartObserved(sessionID, pause, resume)
+		}
+		return
+	}
+	if runtime.mosh.HasSession(sessionID) ||
+		runtime.aws.HasSession(sessionID) ||
+		runtime.serial.HasSession(sessionID) {
+		return
+	}
+	runtime.flow.Start(sessionID)
+}
+
+// FlowStop 은 렌더러가 구독을 끊었다는 뜻이다. 멈춰 있던 읽기를 풀고 더 세지 않는다.
+func (runtime *Runtime) FlowStop(sessionID string) {
+	runtime.flow.Stop(sessionID)
+}
+
+// FlowAck 는 렌더러가 처리한 출력 바이트 수다. 0 이면 "아직 처리 중" 이라는 신호다.
+func (runtime *Runtime) FlowAck(sessionID string, bytes int64) {
+	runtime.flow.Ack(sessionID, bytes)
 }
 
 func (runtime *Runtime) DisconnectSession(sessionID string) error {

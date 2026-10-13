@@ -51,11 +51,13 @@ vi.mock('../lib/terminal-runtime', () => ({
       onData,
       onBinary,
       onShellIntegration,
+      onWriteSettled,
     }: {
       container: HTMLElement;
       onData: (value: string) => void;
       onBinary: (value: string) => void;
       onShellIntegration?: (marker: string) => void;
+      onWriteSettled?: () => void;
     }) => {
       const terminal = {
         rows: 24,
@@ -79,6 +81,7 @@ vi.mock('../lib/terminal-runtime', () => ({
         terminal,
         fitAddon: { fit: vi.fn() },
         write: vi.fn(),
+        pendingOutputSize: vi.fn(() => 0),
         scheduleAfterWriteDrain: vi.fn((callback: () => void) => {
           callback();
         }),
@@ -95,6 +98,8 @@ vi.mock('../lib/terminal-runtime', () => ({
         emitBinary: onBinary,
         // 셸이 보낸 OSC 133 마커를 흉내 낸다(서브셸 진입 판정이 여기로 들어온다).
         emitShellIntegration: (marker: string) => onShellIntegration?.(marker),
+        // xterm 이 묶음 하나를 처리했다(출력 흐름 제어가 처리한 양을 다시 잰다).
+        emitWriteSettled: () => onWriteSettled?.(),
         findNext: vi.fn(() => false),
         findPrevious: vi.fn(() => false),
         clearSearch: vi.fn(),
@@ -276,6 +281,9 @@ describe('useTerminalSessionViewController', () => {
           writeBinary: vi.fn().mockResolvedValue(undefined),
           resize: vi.fn().mockResolvedValue(undefined),
           installShellIntegration: vi.fn().mockResolvedValue(undefined),
+          flowStart: vi.fn(),
+          flowAck: vi.fn(),
+          flowStop: vi.fn(),
         },
       },
     });
@@ -379,6 +387,38 @@ describe('useTerminalSessionViewController', () => {
     });
 
     expect(mocks.reinjectShellIntegration).not.toHaveBeenCalled();
+  });
+
+  // 화면이 처리한 만큼만 더 받도록, 세션 출력 구독과 함께 흐름 제어를 켜고 끈다.
+  describe('출력 흐름 제어', () => {
+    it('구독할 때 켜고, xterm 이 처리한 출력을 알리고, 구독을 끊으면 끈다', async () => {
+      const ssh = (window as unknown as { dolssh: { ssh: Record<string, ReturnType<typeof vi.fn>> } }).dolssh.ssh;
+      const { unmount } = renderController(createProps());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(ssh.flowStart).toHaveBeenCalledWith('session-1');
+
+      const runtime = mocks.runtimeRecords[0];
+      const chunkSize = 256 * 1024;
+      // 받았지만 xterm 이 아직 처리하지 못했다 — 알리지 않는다.
+      runtime.pendingOutputSize.mockReturnValue(chunkSize);
+      await act(async () => {
+        mocks.sessionDataListeners.get('session-1')?.(new Uint8Array(chunkSize));
+      });
+      expect(runtime.write).toHaveBeenCalled();
+      expect(ssh.flowAck).not.toHaveBeenCalled();
+
+      // xterm 이 묶음을 끝냈다 — 처리한 양을 알린다.
+      runtime.pendingOutputSize.mockReturnValue(0);
+      await act(async () => {
+        runtime.emitWriteSettled();
+      });
+      expect(ssh.flowAck).toHaveBeenCalledWith('session-1', chunkSize);
+
+      unmount();
+      expect(ssh.flowStop).toHaveBeenCalledWith('session-1');
+    });
   });
 
   describe('탭 점의 명령 상태', () => {

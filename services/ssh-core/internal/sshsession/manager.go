@@ -15,6 +15,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"dolssh/services/ssh-core/internal/autocomplete"
+	"dolssh/services/ssh-core/internal/flowcontrol"
 	"dolssh/services/ssh-core/internal/hostkeytrust"
 	"dolssh/services/ssh-core/internal/neterr"
 	"dolssh/services/ssh-core/internal/protocol"
@@ -157,6 +158,10 @@ type ManagerConfig struct {
 	//
 	// nil 이면 위 설정값으로 하나 만들어 이 매니저만 쓴다 — 매니저 하나만 세우는 테스트용이다.
 	Dialer *sshdial.Dialer
+	// FlowControl 은 화면이 못 따라가면 세션 출력 읽기를 멈추게 한다(internal/flowcontrol). 읽지
+	// 않으면 x/crypto 가 서버에 창을 다시 열어 주지 않아(2MB) 원격 프로그램이 출력하다가 기다린다.
+	// nil 이면 늘 읽는다.
+	FlowControl *flowcontrol.Registry
 }
 
 var defaultManagerConfig = ManagerConfig{
@@ -915,6 +920,8 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 	// stdout/stderr 모두 동일한 raw stream frame으로 흘려 상위 레이어가 그대로 전달할 수 있게 한다.
 	buffer := make([]byte, 4096)
 	for {
+		// 화면이 못 따라가면 여기서 기다린다. stdout·stderr 는 창 하나를 같이 쓰므로 둘 다 멈춰야 한다.
+		m.config.FlowControl.Wait(sessionID, handle.closed)
 		n, err := reader.Read(buffer)
 		if n > 0 {
 			chunk := make([]byte, n)
@@ -1037,6 +1044,7 @@ func (m *Manager) closeSession(sessionID string, message string, reason string) 
 	}
 
 	session.handshake.StopIdleFlush()
+	m.config.FlowControl.Stop(sessionID)
 
 	session.closer.Do(func() {
 		close(session.closed)
