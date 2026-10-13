@@ -33,15 +33,26 @@ function resolveZmodem(): ZmodemNamespace | undefined {
 const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;
 const PROGRESS_EMIT_INTERVAL_MS = 100;
 
-// ZMODEM 시작 신호(`**` ZDLE `B` 헥스…)에 들어가는 바이트. 둘 다 없는 조각으로는 전송이 시작될 수 없다.
+// ZMODEM 시작 신호(`**` ZDLE `B` 헥스…)에 들어가는 바이트.
 const ZPAD = 0x2a; // '*'
 const ZDLE = 0x18;
 /**
- * '*'·ZDLE 가 나온 조각 뒤로 이만큼은 계속 감지기에 넣는다. 시작 신호는 ZDLE 뒤로 20바이트 남짓
- * (`B` + 헥스 14자 + CR LF + XON)가 더 이어지는데, 그 꼬리가 다음 조각으로 넘어갈 수 있고 꼬리에는
+ * 감지기에 넣어야 하는 조각 다음으로 이만큼은 계속 감지기에 넣는다. 시작 신호는 ZDLE 뒤로 20바이트
+ * 남짓(`B` + 헥스 14자 + CR LF + XON)이 더 이어지는데, 그 꼬리가 다음 조각으로 넘어갈 수 있고 꼬리에는
  * '*'·ZDLE 가 없다.
  */
 const SENTRY_FOLLOW_BYTES = 64;
+
+/**
+ * 이 조각에서 전송이 시작될 수 있는가.
+ *
+ * 시작 신호는 늘 ZDLE 를 품는다. ZDLE 가 없는 조각에서 신호가 시작될 수 있는 것은 끝이 '*' 라서 다음
+ * 조각에서 이어지는 경우뿐이다. 예전에는 '*' 가 어디에 있든 감지기로 보냈는데, 코어가 출력을 32KB
+ * 까지 합쳐 보내면서 소스 코드·마크다운처럼 '*' 가 흔한 출력은 거의 모든 조각이 느린 감지기로 갔다.
+ */
+function mayStartTransfer(chunk: Uint8Array): boolean {
+  return chunk.indexOf(ZDLE) !== -1 || chunk[chunk.length - 1] === ZPAD;
+}
 
 export interface ZmodemControllerDeps {
   sessionId: string;
@@ -303,9 +314,9 @@ export function createZmodemController(
        * 따라갔다(실측). 전송 중이거나, 시작 신호의 꼬리가 남았거나, 헤더 필터가 바이트를 붙잡고 있으면
        * 순서와 감지를 위해 그대로 감지기로 간다.
        */
-      const mayStartTransfer = chunk.indexOf(ZPAD) !== -1 || chunk.indexOf(ZDLE) !== -1;
+      const startable = mayStartTransfer(chunk);
       if (
-        !mayStartTransfer &&
+        !startable &&
         sentryFollowBytes === 0 &&
         !activeSession &&
         !draining &&
@@ -314,7 +325,7 @@ export function createZmodemController(
         deps.writeToTerminal(chunk);
         return;
       }
-      sentryFollowBytes = mayStartTransfer
+      sentryFollowBytes = startable
         ? SENTRY_FOLLOW_BYTES
         : Math.max(0, sentryFollowBytes - chunk.length);
       try {

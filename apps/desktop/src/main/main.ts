@@ -771,7 +771,7 @@ if (termiusHelperArgIndex >= 0) {
 
   authService.setOnSessionInvalidated(async (context) => {
     // 인증 세션이 사라지면 SSH/SFTP/포워딩 런타임도 함께 정리해서 로그인 게이트 뒤에 연결이 남지 않게 한다.
-    sessionReplayService.shutdown();
+    await sessionReplayService.shutdown();
     rdpManager.shutdown();
     await sessionShareService.shutdown();
     await awsSsmTunnelService.shutdown();
@@ -782,7 +782,7 @@ if (termiusHelperArgIndex >= 0) {
       // 회원 탈퇴 — 이 기기의 로컬 흔적까지 지운다: 세션 리플레이 파일(scope 가 살아 있는
       // deactivate 이전에), 활동 로그, AI 자격증명 키. 호스트/시크릿/known hosts 등은
       // 아래 purgeSyncedCache 가 지운다.
-      sessionReplayService.purgeAllRecordings();
+      await sessionReplayService.purgeAllRecordings();
       activityLogRepository.clear();
       for (const account of AI_STORED_KEY_SECRET_ACCOUNTS) {
         await secretStore.remove(account).catch(() => undefined);
@@ -947,10 +947,11 @@ if (termiusHelperArgIndex >= 0) {
     }
     event.preventDefault();
     isQuitting = true;
-    sessionReplayService.shutdown();
+    // 녹화를 끝낸다. 압축된 녹화 파일이 다 쓰일 때까지 아래 체인이 기다린다(안 그러면 끝부분을 잃는다).
+    const recordingsClosed = sessionReplayService.shutdown();
     // 사이드카는 동기 종료라 비동기 정리 체인에 끼울 필요가 없다.
     rdpManager.shutdown();
-    void sessionShareService.shutdown().finally(() => {
+    void Promise.all([recordingsClosed, sessionShareService.shutdown()]).finally(() => {
       void awsSsmTunnelService.shutdown().finally(() => {
         void coreManager
           .shutdown({ finalizePortForwardsAsStopped: true })

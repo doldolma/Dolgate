@@ -105,28 +105,10 @@ type coreRuntime interface {
 	Shutdown()
 }
 
-type eventWriter struct {
-	mu sync.Mutex
-}
-
-func newEventWriter() *eventWriter {
-	return &eventWriter{}
-}
-
-func (writer *eventWriter) emit(event protocol.Event) {
-	writer.mu.Lock()
-	defer writer.mu.Unlock()
-	_ = protocol.WriteControlFrame(os.Stdout, event)
-}
-
-func (writer *eventWriter) emitStream(metadata protocol.StreamFrame, payload []byte) {
-	writer.mu.Lock()
-	defer writer.mu.Unlock()
-	_ = protocol.WriteStreamFrame(os.Stdout, metadata, payload)
-}
-
 func main() {
 	writer := newEventWriter()
+	// 마지막에 남은 프레임을 내보낸다. defer 는 역순이라 아래 shutdown 이 낸 이벤트까지 나간다.
+	defer writer.close()
 	core := coreruntime.New(coreruntime.Options{
 		EmitEvent:  writer.emit,
 		EmitStream: writer.emitStream,
@@ -148,6 +130,7 @@ func main() {
 	go func() {
 		<-signals
 		shutdown()
+		writer.close()
 		os.Exit(0)
 	}()
 

@@ -148,6 +148,22 @@ describe("createZmodemController", () => {
     expect(deps.writeToTerminal).toHaveBeenCalledWith(new Uint8Array([104, 105]));
   });
 
+  // 코어가 출력을 32KB 까지 합쳐 보내면 '*' 는 아무 출력에나 들어 있다. 시작 신호는 늘 ZDLE 를 품으므로,
+  // ZDLE 가 없고 '*' 로 끝나지도 않는 조각은 '*' 가 있어도 감지기를 건너뛴다.
+  it("writes a chunk with asterisks straight to the terminal when it can't start a transfer", () => {
+    const deps = makeDeps();
+    const controller = createZmodemController(deps);
+    const code = new TextEncoder().encode("/* comment */\nint *p = &x;\n");
+    controller.consume(code);
+    expect(captured?.consume).not.toHaveBeenCalled();
+    expect(deps.writeToTerminal).toHaveBeenCalledWith(code);
+
+    // '*' 로 끝나면 다음 조각에서 신호가 이어질 수 있어 감지기로 간다.
+    const trailing = new TextEncoder().encode("ready **");
+    controller.consume(trailing);
+    expect(captured?.consume).toHaveBeenCalledWith(trailing);
+  });
+
   // 시작 신호는 ZDLE 뒤로 20바이트 남짓이 더 이어지고, 그 꼬리가 다음 조각으로 넘어가면 꼬리에는
   // '*'·ZDLE 가 없다. 그래도 감지기에 넣어야 전송을 놓치지 않는다.
   it("keeps feeding the sentry right after a chunk that may start a transfer", () => {

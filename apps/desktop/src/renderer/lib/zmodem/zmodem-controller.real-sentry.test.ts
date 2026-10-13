@@ -34,4 +34,32 @@ describe('ZMODEM 시작 감지 (실제 라이브러리)', () => {
       controller.dispose();
     }
   });
+
+  // '*' 가 든 앞 출력은 감지기를 건너뛰고 바로 화면으로 간다. 그래도 뒤이어 오는 시작 신호는 놓치면 안 된다.
+  it("'*' 가 든 출력 뒤에 오는 시작 신호도 감지한다", () => {
+    const header = new TextEncoder().encode('**\x18B00000000000000\r\n\x11');
+    const preamble = 'sz *.log\r\n/* a */ *b\r\n';
+    for (let split = 0; split <= header.length; split += 1) {
+      const output: number[] = [];
+      const sendToRemote = vi.fn();
+      const controller = createZmodemController({
+        sessionId: 's1',
+        hostLabel: 'host',
+        writeToTerminal: (bytes) => output.push(...bytes),
+        sendToRemote,
+        saveDownload: vi.fn(),
+        upsertJob: vi.fn(),
+        registerAbort: vi.fn(),
+        clearAbort: vi.fn(),
+      });
+
+      controller.consume(new TextEncoder().encode(preamble));
+      controller.consume(header.slice(0, split));
+      controller.consume(header.slice(split));
+
+      expect(sendToRemote, `split ${split}`).toHaveBeenCalled();
+      expect(new TextDecoder().decode(Uint8Array.from(output)), `split ${split}`).toBe(preamble);
+      controller.dispose();
+    }
+  });
 });

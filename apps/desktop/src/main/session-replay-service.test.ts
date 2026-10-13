@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -100,6 +101,7 @@ vi.mock("electron", () => {
   };
 });
 
+import { constants as zlibConstants, gunzipSync, gzipSync } from "node:zlib";
 import { SessionReplayService } from "./session-replay-service";
 import { resolveLocalHistoryScope } from "./local-history-scope";
 
@@ -165,7 +167,134 @@ describe("SessionReplayService", () => {
     browserWindowInstances.length = 0;
   });
 
-  it("records remote session output and resize events, then persists a replay on close", () => {
+  // 출력 조각마다 평문 파일을 열고-쓰고-닫으면 쏟아질 때 초당 수만 번이 메인 프로세스 시간의 대부분을
+  // 먹었다. 녹화는 열어 둔 gzip 스트림 하나에 이어 쓰고, 끝난 직후에 열어도 끝까지 읽혀야 한다.
+  it("streams a recording into one gzip file and reads all of it right after it ends", async () => {
+    const coreManager = {
+      getSessionLifecycleState: vi.fn(() => createLifecycleState()),
+      attachSessionRecording: vi.fn(),
+    };
+    const settingsRepository = {
+      get: vi.fn(() => ({ sessionReplayRetentionCount: 100 })),
+    };
+    const service = activateService(
+      new SessionReplayService(settingsRepository as never, coreManager as never),
+    );
+    service.handleTerminalEvent({
+      type: "connected",
+      sessionId: "session-1",
+      payload: { status: "connected" },
+    } as never);
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1];
+
+    for (let index = 0; index < 500; index += 1) {
+      service.handleTerminalStream("session-1", new Uint8Array(Buffer.from(`line ${index}\n`)));
+    }
+    service.handleTerminalResize("session-1", 100, 30);
+    service.handleTerminalEvent({
+      type: "closed",
+      sessionId: "session-1",
+      payload: { message: "closed" },
+    } as never);
+
+    const replay = await service.get(recordingId);
+    expect(replay.entries).toHaveLength(501);
+    const lastOutput = replay.entries[499];
+    expect(
+      lastOutput?.type === "output" ? Buffer.from(lastOutput.dataBase64, "base64").toString() : null,
+    ).toBe("line 499\n");
+
+    const { replayDirectoryPath } = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+    const files = readdirSync(replayDirectoryPath);
+    expect(files).toContain(`${recordingId}.events.jsonl.gz`);
+    expect(files).not.toContain(`${recordingId}.events.jsonl`);
+    const raw = readFileSync(path.join(replayDirectoryPath, `${recordingId}.events.jsonl.gz`));
+    expect([...raw.subarray(0, 2)]).toEqual([0x1f, 0x8b]);
+  });
+
+  // 녹화 중에도 주기적으로 압축기를 비워서, 그 사이 앱이 죽어도 비운 지점까지의 출력은 파일에 남는다.
+  it("flushes an active recording so its output survives a crash", async () => {
+    vi.useRealTimers();
+    const coreManager = {
+      getSessionLifecycleState: vi.fn(() => createLifecycleState()),
+      attachSessionRecording: vi.fn(),
+    };
+    const service = activateService(
+      new SessionReplayService(
+        { get: () => ({ sessionReplayRetentionCount: 100 }) } as never,
+        coreManager as never,
+      ),
+    );
+    service.handleTerminalEvent({
+      type: "connected",
+      sessionId: "session-1",
+      payload: { status: "connected" },
+    } as never);
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1];
+    for (let index = 0; index < 10; index += 1) {
+      service.handleTerminalStream("session-1", new Uint8Array(Buffer.from(`line ${index}\n`)));
+    }
+
+    // 끝내지 않은 채(마무리 없음) 파일만 읽는다 — 죽은 앱이 남긴 파일과 같다.
+    const { replayDirectoryPath } = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+    const eventsPath = path.join(replayDirectoryPath, `${recordingId}.events.jsonl.gz`);
+    await vi.waitFor(
+      () => {
+        const text = gunzipSync(readFileSync(eventsPath), {
+          finishFlush: zlibConstants.Z_SYNC_FLUSH,
+        }).toString();
+        expect(text.split("\n").filter(Boolean)).toHaveLength(10);
+      },
+      { timeout: 3000, interval: 100 },
+    );
+    await service.shutdown();
+  });
+
+  // 앱이 비정상 종료되면 gzip 마무리(trailer)가 없다. 그래도 마지막으로 비운 지점까지는 읽혀야 한다.
+  it("reads a gzip recording that was cut off before it was finished", async () => {
+    const coreManager = {
+      getSessionLifecycleState: vi.fn(() => null),
+      attachSessionRecording: vi.fn(),
+    };
+    const settingsRepository = {
+      get: vi.fn(() => ({ sessionReplayRetentionCount: 100 })),
+    };
+    const service = activateService(
+      new SessionReplayService(settingsRepository as never, coreManager as never),
+    );
+    const { replayDirectoryPath } = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+    mkdirSync(replayDirectoryPath, { recursive: true });
+    const recordingId = "cut-off";
+    writeFileSync(
+      path.join(replayDirectoryPath, `${recordingId}.meta.json`),
+      JSON.stringify({
+        recordingId,
+        sessionId: "session-1",
+        hostId: "host-1",
+        hostLabel: "nas",
+        title: "NAS",
+        connectionDetails: null,
+        connectionKind: "ssh",
+        connectedAt: "2026-03-29T00:00:00.000Z",
+        disconnectedAt: "2026-03-29T00:00:05.000Z",
+        durationMs: 5000,
+        initialCols: 120,
+        initialRows: 32,
+      }),
+    );
+    const lines = Array.from({ length: 50 }, (_, index) =>
+      JSON.stringify({ type: "output", atMs: index, dataBase64: Buffer.from(`l${index}`).toString("base64") }),
+    ).join("\n");
+    // 비운(sync flush) 지점에서 끝나고 마무리가 없는 스트림 — 비정상 종료한 녹화와 같다.
+    writeFileSync(
+      path.join(replayDirectoryPath, `${recordingId}.events.jsonl.gz`),
+      gzipSync(`${lines}\n`, { finishFlush: zlibConstants.Z_SYNC_FLUSH }),
+    );
+
+    expect((await service.get(recordingId)).entries).toHaveLength(50);
+  });
+
+  it("records remote session output and resize events, then persists a replay on close", async () => {
     const lifecycleStates = new Map<string, ReturnType<typeof createLifecycleState>>([
       ["session-1", createLifecycleState()],
     ]);
@@ -206,7 +335,7 @@ describe("SessionReplayService", () => {
       payload: { message: "closed" },
     } as never);
 
-    const replay = service.get(recordingId);
+    const replay = await service.get(recordingId);
     expect(replay).toMatchObject({
       recordingId,
       sessionId: "session-1",
@@ -234,7 +363,7 @@ describe("SessionReplayService", () => {
     ["aws-ecs-exec", "prod", "prod · api · web"],
   ] as const)(
     "records %s process-backed terminal output with the shared replay flow",
-    (connectionKind, hostLabel, title) => {
+    async (connectionKind, hostLabel, title) => {
       const lifecycleStates = new Map<
         string,
         ReturnType<typeof createLifecycleState>
@@ -277,7 +406,7 @@ describe("SessionReplayService", () => {
         payload: { message: "closed" },
       } as never);
 
-      expect(service.get(recordingId)).toMatchObject({
+      expect(await service.get(recordingId)).toMatchObject({
         recordingId,
         hostLabel,
         title,
@@ -340,9 +469,9 @@ describe("SessionReplayService", () => {
     const firstRecordingId = recordingIds[0]!;
     const lastRecordingId = recordingIds[10]!;
     expect(existsSync(path.join(replayDir, `${firstRecordingId}.meta.json`))).toBe(false);
-    expect(existsSync(path.join(replayDir, `${firstRecordingId}.events.jsonl`))).toBe(false);
+    expect(existsSync(path.join(replayDir, `${firstRecordingId}.events.jsonl.gz`))).toBe(false);
     expect(existsSync(path.join(replayDir, `${lastRecordingId}.meta.json`))).toBe(true);
-    expect(existsSync(path.join(replayDir, `${lastRecordingId}.events.jsonl`))).toBe(true);
+    expect(existsSync(path.join(replayDir, `${lastRecordingId}.events.jsonl.gz`))).toBe(true);
   });
 
   it("opens a replay window with the session replay route and recording id in dev", async () => {
@@ -438,7 +567,7 @@ describe("SessionReplayService", () => {
     });
   });
 
-  it("finalizes active recordings during shutdown so replay can still open after app quit", () => {
+  it("finalizes active recordings during shutdown so replay can still open after app quit", async () => {
     const lifecycleStates = new Map<string, ReturnType<typeof createLifecycleState>>([
       ["session-1", createLifecycleState()],
     ]);
@@ -473,7 +602,7 @@ describe("SessionReplayService", () => {
 
     service.shutdown();
 
-    const replay = service.get(recordingId);
+    const replay = await service.get(recordingId);
     expect(replay).toMatchObject({
       recordingId,
       sessionId: "session-1",
@@ -486,7 +615,7 @@ describe("SessionReplayService", () => {
     });
   });
 
-  it("isolates replay access by account and keeps an active recording in its starting scope", () => {
+  it("isolates replay access by account and keeps an active recording in its starting scope", async () => {
     const lifecycleStates = new Map<string, ReturnType<typeof createLifecycleState>>([
       ["session-1", createLifecycleState()],
     ]);
@@ -521,15 +650,15 @@ describe("SessionReplayService", () => {
       payload: { message: "closed" },
     } as never);
 
-    expect(() => service.get(recordingId)).toThrow();
+    await expect(service.get(recordingId)).rejects.toThrow();
     service.activate(TEST_HISTORY_OWNER);
-    expect(service.get(recordingId)).toMatchObject({
+    expect(await service.get(recordingId)).toMatchObject({
       recordingId,
       sessionId: "session-1",
     });
   });
 
-  it("migrates legacy replay files into the first activated account", () => {
+  it("migrates legacy replay files into the first activated account", async () => {
     const scope = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
     const recordingId = "legacy-recording";
     mkdirSync(scope.legacyReplayDirectoryPath, { recursive: true });
@@ -571,7 +700,7 @@ describe("SessionReplayService", () => {
       ),
     );
 
-    expect(service.get(recordingId)).toMatchObject({
+    expect(await service.get(recordingId)).toMatchObject({
       recordingId,
       sessionId: "legacy-session",
       entries: [expect.objectContaining({ type: "output", atMs: 100 })],
@@ -582,7 +711,7 @@ describe("SessionReplayService", () => {
     ).toBe(true);
   });
 
-  it("keeps scoped replay files when a partial legacy migration has matching files", () => {
+  it("keeps scoped replay files when a partial legacy migration has matching files", async () => {
     const scope = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
     const recordingId = "partially-migrated-recording";
     const createMeta = (sessionId: string) => ({
@@ -622,7 +751,7 @@ describe("SessionReplayService", () => {
       ),
     );
 
-    expect(service.get(recordingId).sessionId).toBe("scoped-session");
+    expect((await service.get(recordingId)).sessionId).toBe("scoped-session");
     expect(existsSync(scope.legacyReplayDirectoryPath)).toBe(false);
   });
 
@@ -658,12 +787,12 @@ describe("SessionReplayService", () => {
     service.deactivate();
 
     expect(browserWindowInstances[0]?.close).toHaveBeenCalledTimes(1);
-    expect(() => service.get(recordingId)).toThrow(
+    await expect(service.get(recordingId)).rejects.toThrow(
       "로그인된 계정의 Replay만 열 수 있습니다.",
     );
   });
 
-  it("purges every recording file on account deletion (purgeAllRecordings)", () => {
+  it("purges every recording file on account deletion (purgeAllRecordings)", async () => {
     const lifecycleStates = new Map<string, ReturnType<typeof createLifecycleState>>([
       ["session-1", createLifecycleState()],
     ]);
@@ -697,14 +826,14 @@ describe("SessionReplayService", () => {
       sessionId: "session-1",
       payload: { message: "closed" },
     } as never);
-    expect(service.get(recordingId).sessionId).toBe("session-1");
+    expect((await service.get(recordingId)).sessionId).toBe("session-1");
 
     const scope = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
-    service.purgeAllRecordings();
+    await service.purgeAllRecordings();
 
     expect(readdirSync(scope.replayDirectoryPath)).toEqual([]);
     expect(service.listExistingRecordingIds().size).toBe(0);
     expect(onRecordingsPruned).toHaveBeenCalled();
-    expect(() => service.get(recordingId)).toThrow();
+    await expect(service.get(recordingId)).rejects.toThrow();
   });
 });
