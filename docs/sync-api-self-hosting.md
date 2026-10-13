@@ -57,6 +57,7 @@ Examples:
 - For production, pin a version tag.
 - Images support both `linux/amd64` and `linux/arm64`; Docker selects the matching architecture.
 - Versioned images are published with Dolgate releases. A push to `main` alone does not update the production image.
+- Releases go out as a pre-release first. The `X.Y.Z` tag is published right away, but `latest` and `X.Y` move only when the release is promoted to a full release.
 
 Example:
 

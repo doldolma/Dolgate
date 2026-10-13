@@ -804,6 +804,15 @@ jobs:
           name: mobile-release-android
           path: release-artifacts
 
+      # **pre-release 로 만든다.** 앱의 자동 업데이트(electron-updater, allowPrerelease=false)와 랜딩
+      # 페이지의 다운로드 버튼(web/index.html)은 GitHub 의 Latest 릴리스만 보므로 pre-release 는
+      # 사용자에게 내려가지 않는다. 릴리스 페이지에서 직접 받아 써 보고, 문제가 없으면 일반 릴리스로
+      # 올린다 — 그때부터 업데이트되고 다운로드 버튼도 바뀐다:
+      #
+      #   gh release edit vX.Y.Z --prerelease=false --latest
+      #
+      # 서버 이미지도 같은 순간에 `:latest` 가 된다. 태그 때는 버전 태그(`:X.Y.Z`)만 올라가고, 이 전환이
+      # sync-api-container.yml 의 promote 를 깨운다.
       - name: Ensure GitHub Release exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -812,6 +821,7 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
             --title "${GITHUB_REF_NAME}" \
+            --prerelease \
             --generate-notes
 
       - name: Upload unified release assets

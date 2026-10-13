@@ -247,13 +247,16 @@ async function ensureRelease(config, accessToken, version) {
     return existing;
   }
 
+  // pre-release 로 만든다(CI 의 release.yml 과 같다). 앱의 자동 업데이트와 랜딩 페이지의 다운로드
+  // 버튼은 GitHub 의 Latest 릴리스만 보므로 사용자에게 바로 내려가지 않는다. 써 보고 문제가 없으면
+  // `gh release edit vX.Y.Z --prerelease=false --latest` 로 올린다.
   return githubRequest(config, accessToken, `/repos/${config.owner}/${config.repo}/releases`, {
     method: 'POST',
     body: {
       tag_name: tagName,
       name: tagName,
       draft: false,
-      prerelease: false,
+      prerelease: true,
       generate_release_notes: true
     }
   });
