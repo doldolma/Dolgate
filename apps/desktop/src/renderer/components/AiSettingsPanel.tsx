@@ -39,12 +39,16 @@ const DEFAULT_CODEX_MODEL = 'auto';
 
 // 모델 미지정 센티널 — codex 가 권장 모델을 자동 선택한다(항상 목록 맨 위 고정).
 // 정적 목록은 키를, 서버에서 받은 목록은 원문을 담는다 — 렌더 시점에 골라 쓴다.
-interface CodexModelOption {
+export interface CodexModelOption {
   id: string;
   label?: string;
   labelKey?: string;
   description?: string;
   descriptionKey?: string;
+  // descriptionKey 의 보간 값(Auto 의 현재 기본 모델 이름).
+  descriptionParams?: Record<string, string>;
+  // 번역한 codex description 원문. 실시간 목록의 설명이 이와 같을 때만 번역을 쓴다.
+  sourceDescription?: string;
 }
 
 const CODEX_AUTO_OPTION: CodexModelOption = {
@@ -53,41 +57,97 @@ const CODEX_AUTO_OPTION: CodexModelOption = {
   descriptionKey: 'ai.model.autoDescription',
 };
 
-// model/list 조회 실패(미로그인 등) 시의 폴백 목록. 평소에는 codex 의 model/list 를
-// 실시간으로 가져와 대체한다(설명은 당시 응답의 description 원문을 한국어로 옮긴 것).
+// model/list 조회 실패(미로그인 등) 시의 폴백 목록이자, 실시간 목록에 씌우는 번역표.
+// 설명은 codex 0.162.1 번들 카탈로그의 description 원문(sourceDescription)을 옮긴 것이다.
+// codex 는 세대가 바뀔 때 기존 모델의 설명을 고치므로(예: "Latest…" → "Older generation…"),
+// 원문이 달라진 모델은 낡은 번역 대신 서버 원문을 보여준다(buildCodexModelOptions).
 const CODEX_FALLBACK_MODEL_OPTIONS: CodexModelOption[] = [
   CODEX_AUTO_OPTION,
+  {
+    id: 'gpt-6.1-sol',
+    label: 'GPT-6.1 Sol',
+    descriptionKey: 'ai.model.gpt61sol',
+    sourceDescription: 'Latest workhorse model for coding and everyday work.',
+  },
+  {
+    id: 'gpt-6-astra',
+    label: 'GPT-6 Astra',
+    descriptionKey: 'ai.model.gpt6astra',
+    sourceDescription: 'Frontier intelligence for the most demanding work.',
+  },
+  {
+    id: 'gpt-6-sol',
+    label: 'GPT-6 Sol',
+    descriptionKey: 'ai.model.gpt6sol',
+    sourceDescription: 'Previous generation workhorse model.',
+  },
+  {
+    id: 'gpt-6-luna',
+    label: 'GPT-6 Luna',
+    descriptionKey: 'ai.model.gpt6luna',
+    sourceDescription: 'Fast and affordable model for easier tasks.',
+  },
   {
     id: 'gpt-5.6-sol',
     label: 'GPT-5.6 Sol',
     descriptionKey: 'ai.model.gpt56sol',
+    sourceDescription: 'Older generation workhorse model.',
   },
   {
     id: 'gpt-5.6-terra',
     label: 'GPT-5.6 Terra',
     descriptionKey: 'ai.model.gpt56terra',
+    sourceDescription: 'Older balanced model for straightforward work.',
   },
   {
     id: 'gpt-5.6-luna',
     label: 'GPT-5.6 Luna',
     descriptionKey: 'ai.model.gpt56luna',
+    sourceDescription: 'Older fast and efficient model.',
   },
   {
     id: 'gpt-5.5',
     label: 'GPT-5.5',
     descriptionKey: 'ai.model.gpt55',
-  },
-  {
-    id: 'gpt-5.4',
-    label: 'GPT-5.4',
-    descriptionKey: 'ai.model.gpt54',
-  },
-  {
-    id: 'gpt-5.4-mini',
-    label: 'GPT-5.4 Mini',
-    descriptionKey: 'ai.model.gpt54mini',
+    sourceDescription: 'Legacy coding model.',
   },
 ];
+
+// 모델 select 옵션: Auto 고정 + model/list 실시간 목록. 알려진 id 는 하우스 표기 라벨을 쓰고,
+// 설명은 서버 원문이 번역 당시 원문과 같을 때만 번역을 쓴다. 모르는 id 는 서버
+// displayName/description 원문. 조회 전/실패 시엔 폴백 정적 목록.
+export function buildCodexModelOptions(codexModels: CodexModel[] | null): CodexModelOption[] {
+  if (!codexModels || codexModels.length === 0) {
+    return CODEX_FALLBACK_MODEL_OPTIONS;
+  }
+  const knownCopy = new Map(
+    CODEX_FALLBACK_MODEL_OPTIONS.map((option) => [option.id, option]),
+  );
+  const defaultModel = codexModels.find((model) => model.isDefault);
+  const autoOption: CodexModelOption = defaultModel
+    ? {
+        ...CODEX_AUTO_OPTION,
+        descriptionKey: 'ai.model.autoDescriptionWithDefault',
+        descriptionParams: {
+          model: knownCopy.get(defaultModel.id)?.label ?? defaultModel.displayName,
+        },
+      }
+    : CODEX_AUTO_OPTION;
+  return [
+    autoOption,
+    ...codexModels.map((model): CodexModelOption => {
+      const known = knownCopy.get(model.id);
+      if (known && known.sourceDescription === model.description) {
+        return known;
+      }
+      return {
+        id: model.id,
+        label: known?.label ?? model.displayName,
+        description: model.description ?? '',
+      };
+    }),
+  ];
+}
 
 // codex 는 API 키 대신 브라우저 로그인(ChatGPT 계정)을 쓴다 — 키 발급 URL 없음.
 const API_KEY_HELP_URL: Record<Exclude<AiProviderId, 'codex'>, string> = {
@@ -208,44 +268,15 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
 
   // 저장된 설정이 실제로 바뀌면(저장 완료·최초 로드) 초안을 다시 맞춘다. 편집 중(props 불변)엔 안 건드린다.
   // 저장된 codex 모델이 목록 밖 값(구모델 등)이어도 강제 변환하지 않는다 — select 의
-  // "현재 설정값" 옵션으로 그대로 보여주고, 실행 시 main(normalizeCodexModel)이 auto 로 처리한다.
+  // "현재 설정값" 옵션으로 그대로 보여주고, 실행 시 main 이 model/list 로 확인해 목록에도
+  // 없으면 auto 로 처리한다(ai-service.resolveCodexModel).
   useEffect(() => {
     setDraft(JSON.parse(aiKey) as AiSettings);
   }, [aiKey]);
 
   const providerId = draft.providerId;
   const codexModelValue = draft.model.trim() || DEFAULT_CODEX_MODEL;
-  // 모델 select 옵션: Auto 고정 + model/list 실시간 목록(알려진 id 는 한국어 설명 유지,
-  // 새 id 는 서버 displayName/description 원문). 조회 전/실패 시엔 폴백 정적 목록.
-  const codexModelOptions = useMemo<CodexModelOption[]>(() => {
-    if (!codexModels || codexModels.length === 0) {
-      return CODEX_FALLBACK_MODEL_OPTIONS;
-    }
-    const knownCopy = new Map(
-      CODEX_FALLBACK_MODEL_OPTIONS.map((option) => [option.id, option]),
-    );
-    const defaultModel = codexModels.find((model) => model.isDefault);
-    const autoOption = defaultModel
-      ? {
-          ...CODEX_AUTO_OPTION,
-          descriptionKey: undefined,
-          description: translate('ai.model.autoDescriptionWithDefault', {
-            model: defaultModel.displayName,
-          }),
-        }
-      : CODEX_AUTO_OPTION;
-    return [
-      autoOption,
-      ...codexModels.map(
-        (model) =>
-          knownCopy.get(model.id) ?? {
-            id: model.id,
-            label: model.displayName,
-            description: model.description ?? '',
-          },
-      ),
-    ];
-  }, [codexModels]);
+  const codexModelOptions = useMemo(() => buildCodexModelOptions(codexModels), [codexModels]);
   const hasKnownCodexModel = codexModelOptions.some(
     (option) => option.id === codexModelValue,
   );
@@ -559,7 +590,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                     <option key={model.id} value={model.id}>
                       {model.labelKey ? translate(model.labelKey) : model.label} -{' '}
                       {model.descriptionKey
-                        ? translate(model.descriptionKey)
+                        ? translate(model.descriptionKey, model.descriptionParams)
                         : model.description}
                     </option>
                   ))}

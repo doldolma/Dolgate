@@ -33,7 +33,12 @@ import {
 } from "./ai/tools/read-terminal-output";
 import { AnthropicAdapter } from "./ai/provider-anthropic";
 import { CodexAdapter } from "./ai/provider-codex";
-import { normalizeCodexModel, rememberCodexModels } from "./ai/codex-models";
+import {
+  hasLearnedCodexModels,
+  isAllowedCodexModel,
+  normalizeCodexModel,
+  rememberCodexModels,
+} from "./ai/codex-models";
 import {
   codexAuthStatus,
   codexListModels,
@@ -490,7 +495,7 @@ export class AiService {
     }
     const model =
       ai.providerId === "codex"
-        ? normalizeCodexModel(requestModel || ai.model)
+        ? await this.resolveCodexModel(requestModel || ai.model)
         : requestModel || ai.model;
     // codex 는 모델 미지정 시 codex 기본 모델을 쓰므로 빈 값을 허용한다.
     if (!model && ai.providerId !== "codex") {
@@ -504,6 +509,17 @@ export class AiService {
       apiKey,
       temperature: ai.temperature,
     };
+  }
+
+  // 정적 allowlist 밖 모델(새 Codex 의 신규 모델)은 model/list 로 확인한 뒤 판정한다. 동적 목록은
+  // 설정 화면을 열 때만 채워져서, 재시작 직후 바로 채팅하면 고른 모델이 auto 로 조용히 바뀌었다.
+  // 목록을 이미 받았거나 조회가 실패하면 지금까지의 규칙(모르는 모델 → auto)대로 판정한다.
+  private async resolveCodexModel(model: string | undefined): Promise<string> {
+    const trimmed = model?.trim() ?? "";
+    if (trimmed && !isAllowedCodexModel(trimmed) && !hasLearnedCodexModels()) {
+      await this.codexListModels().catch(() => undefined);
+    }
+    return normalizeCodexModel(trimmed);
   }
 
   private async assertCodexAuthenticated(): Promise<void> {

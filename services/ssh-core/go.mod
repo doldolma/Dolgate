@@ -1,6 +1,6 @@
 module dolssh/services/ssh-core
 
-go 1.26.5
+go 1.26.9
 
 replace tailscale.com v1.102.1 => github.com/doldolma/tailscale v1.102.1-dolgate.1
 
@@ -13,9 +13,9 @@ require (
 	github.com/unixshells/mosh-go v0.5.2
 	github.com/xtaci/smux v1.5.57
 	go.bug.st/serial v1.7.1
-	golang.org/x/crypto v0.54.0
+	golang.org/x/crypto v0.58.0
 	golang.org/x/mobile v0.0.0-20260730202154-c700fe717e6e
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.49.0
 	tailscale.com v1.102.1
 )
 
@@ -69,14 +69,14 @@ require (
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
-	golang.org/x/mod v0.38.0 // indirect
-	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
+	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/term v0.45.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/term v0.47.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	golang.org/x/tools v0.48.0 // indirect
+	golang.org/x/tools v0.51.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
 	gvisor.dev/gvisor v0.0.0-20260224225140-573d5e7127a8 // indirect

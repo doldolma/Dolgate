@@ -8,7 +8,7 @@ const {
 module.exports = {
   appId: 'com.doldolma.dolgate',
   productName: 'Dolgate',
-  electronVersion: '42.7.0',
+  electronVersion: '42.11.12',
   artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
   protocols: [
     {

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   __resetDynamicCodexModelsForTest,
   CODEX_DEFAULT_MODEL,
+  hasLearnedCodexModels,
   isAllowedCodexModel,
   normalizeCodexModel,
   rememberCodexModels,
@@ -22,7 +23,9 @@ describe("codex model allowlist", () => {
 
   it("accepts models learned from model/list at runtime (dynamic list selections)", () => {
     expect(isAllowedCodexModel("gpt-5.7-nova")).toBe(false);
+    expect(hasLearnedCodexModels()).toBe(false);
     rememberCodexModels(["gpt-5.7-nova", " ", ""]);
+    expect(hasLearnedCodexModels()).toBe(true);
     expect(isAllowedCodexModel("gpt-5.7-nova")).toBe(true);
     expect(normalizeCodexModel("gpt-5.7-nova")).toBe("gpt-5.7-nova");
   });

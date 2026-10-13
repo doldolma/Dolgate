@@ -41,6 +41,7 @@ const codexMocks = vi.hoisted(() => ({
   authStatus: vi.fn(),
   logout: vi.fn(),
   usage: vi.fn(),
+  listModels: vi.fn(),
   registerMcp: vi.fn(),
   disposeMcp: vi.fn(),
 }));
@@ -60,6 +61,7 @@ vi.mock("./ai/codex-app-server", () => ({
   codexAuthStatus: codexMocks.authStatus,
   codexLogout: codexMocks.logout,
   codexUsage: codexMocks.usage,
+  codexListModels: codexMocks.listModels,
 }));
 vi.mock("./ai/codex-mcp-server", () => ({
   registerCodexMcpTools: codexMocks.registerMcp,
@@ -86,6 +88,7 @@ vi.mock("./ai/tools/registry", () => ({
 }));
 
 import { AiService, trimMessages } from "./ai-service";
+import { __resetDynamicCodexModelsForTest } from "./ai/codex-models";
 import type { AiChatEvent, AiChatMessage } from "../shared/ai";
 import { mergeTextAttachments } from "../shared/ai";
 
@@ -174,6 +177,9 @@ describe("AiService.startChat", () => {
     codexMocks.registerMcp.mockReset();
     codexMocks.disposeMcp.mockReset();
     codexMocks.usage.mockReset();
+    codexMocks.listModels.mockReset();
+    codexMocks.listModels.mockResolvedValue([]);
+    __resetDynamicCodexModelsForTest();
   });
 
   it("emits delta then done on success", async () => {
@@ -265,6 +271,71 @@ describe("AiService.startChat", () => {
       expect.objectContaining({ providerId: "codex", model: "auto" }),
       undefined,
     );
+  });
+
+  it("keeps a saved Codex model that model/list knows, even before the settings screen loaded the list", async () => {
+    adapterMocks.chat.mockResolvedValue({ text: "ok", finishReason: "stop" });
+    codexMocks.listModels.mockResolvedValue([
+      { id: "gpt-6.2-nova", displayName: "GPT-6.2 Nova", description: null, isDefault: false },
+    ]);
+    const service = new AiService(
+      makeSettings({ enabled: true, providerId: "codex", model: "gpt-6.2-nova" }) as never,
+      makeSecretStore() as never,
+    );
+    await collectChat(service, "r-codex-new-model", {
+      model: "",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(codexMocks.ctor).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: "codex", model: "gpt-6.2-nova" }),
+      undefined,
+    );
+
+    // 목록을 한 번 받은 뒤엔 모르는 모델이라도 다시 조회하지 않는다.
+    await collectChat(service, "r-codex-unknown-after-list", {
+      model: "Qwen-AgentWorld-35B-A3B",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(codexMocks.ctor).toHaveBeenLastCalledWith(
+      expect.objectContaining({ providerId: "codex", model: "auto" }),
+      undefined,
+    );
+    expect(codexMocks.listModels).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to auto when model/list cannot confirm a saved Codex model", async () => {
+    adapterMocks.chat.mockResolvedValue({ text: "ok", finishReason: "stop" });
+    codexMocks.listModels.mockRejectedValue(new Error("app-server exited"));
+    const service = new AiService(
+      makeSettings({ enabled: true, providerId: "codex", model: "gpt-6.2-nova" }) as never,
+      makeSecretStore() as never,
+    );
+    const events = await collectChat(service, "r-codex-list-failed", {
+      model: "",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(events.at(-1)).toMatchObject({ type: "done" });
+    expect(codexMocks.ctor).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: "codex", model: "auto" }),
+      undefined,
+    );
+  });
+
+  it("does not query model/list for models the static allowlist already accepts", async () => {
+    adapterMocks.chat.mockResolvedValue({ text: "ok", finishReason: "stop" });
+    const service = new AiService(
+      makeSettings({ enabled: true, providerId: "codex", model: "gpt-5.5" }) as never,
+      makeSecretStore() as never,
+    );
+    await collectChat(service, "r-codex-static", {
+      model: "",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(codexMocks.ctor).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: "codex", model: "gpt-5.5" }),
+      undefined,
+    );
+    expect(codexMocks.listModels).not.toHaveBeenCalled();
   });
 
   it("codex MCP invoke routes through the shared tool executor (events + result)", async () => {

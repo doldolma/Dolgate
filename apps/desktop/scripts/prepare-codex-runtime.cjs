@@ -1,5 +1,5 @@
 const { execFileSync } = require('node:child_process');
-const { chmodSync, cpSync, existsSync, mkdirSync, rmSync } = require('node:fs');
+const { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync } = require('node:fs');
 const path = require('node:path');
 
 const desktopRoot = path.resolve(__dirname, '..');
@@ -45,7 +45,7 @@ function packageNameToPath(root, packageName) {
   return path.join(root, 'node_modules', ...packageName.split('/'));
 }
 
-function resolvePackageJson(packageName, roots = [repoRoot, desktopRoot, cacheRoot]) {
+function resolvePackageJson(packageName, roots) {
   for (const root of roots) {
     const candidate = path.join(packageNameToPath(root, packageName), 'package.json');
     if (existsSync(candidate)) {
@@ -68,14 +68,32 @@ function resolveCodexOptionalPackageSpec(packageName) {
   return spec;
 }
 
-function materializeOptionalPackage(packageName) {
-  const destination = packageNameToPath(cacheRoot, packageName);
-  const manifestPath = path.join(destination, 'package.json');
-  if (existsSync(manifestPath)) {
-    return destination;
-  }
+function specVersion(spec) {
+  return spec.startsWith('npm:') ? spec.slice(spec.lastIndexOf('@') + 1) : spec;
+}
 
-  const spec = resolveCodexOptionalPackageSpec(packageName);
+function readPackageVersion(packageRoot) {
+  try {
+    return JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8')).version ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function pickPackageRootWithVersion(candidates, expectedVersion) {
+  return candidates.find((root) => root && readPackageVersion(root) === expectedVersion) ?? null;
+}
+
+function findInstalledPackageRoot(packageName) {
+  try {
+    return path.dirname(resolvePackageJson(packageName, [repoRoot, desktopRoot]));
+  } catch {
+    return null;
+  }
+}
+
+function materializeOptionalPackage(packageName, spec) {
+  const destination = packageNameToPath(cacheRoot, packageName);
   const tempDir = path.join(cacheRoot, 'tmp', packageName.replaceAll('/', '__'));
   rmSync(tempDir, { recursive: true, force: true });
   mkdirSync(tempDir, { recursive: true });
@@ -100,12 +118,29 @@ function materializeOptionalPackage(packageName) {
   return destination;
 }
 
+// 다른 플랫폼용 패키지는 npm 이 설치하지 않아 캐시에 받아 둔다. 설치본이든 캐시든
+// @openai/codex 가 요구하는 버전일 때만 쓴다 — 버전을 안 보면 codex 를 올려도 캐시에 남은
+// 이전 버전이 패키징된다(유니버설 mac 은 arm64 는 새 버전, x64 는 캐시의 옛 버전으로 섞인다).
 function resolvePlatformPackageRoot(packageName) {
-  try {
-    return path.dirname(resolvePackageJson(packageName));
-  } catch {
-    return materializeOptionalPackage(packageName);
+  const spec = resolveCodexOptionalPackageSpec(packageName);
+  const expectedVersion = specVersion(spec);
+  const cachedRoot = packageNameToPath(cacheRoot, packageName);
+  const usableRoot = pickPackageRootWithVersion(
+    [findInstalledPackageRoot(packageName), cachedRoot],
+    expectedVersion
+  );
+  if (usableRoot) {
+    return usableRoot;
   }
+
+  const cachedVersion = readPackageVersion(cachedRoot);
+  console.log(`Fetching ${packageName}@${expectedVersion}${cachedVersion ? ` (cached ${cachedVersion} is stale)` : ''}`);
+  const destination = materializeOptionalPackage(packageName, spec);
+  const fetchedVersion = readPackageVersion(destination);
+  if (fetchedVersion !== expectedVersion) {
+    throw new Error(`${packageName} version mismatch: expected ${expectedVersion}, got ${fetchedVersion}`);
+  }
+  return destination;
 }
 
 function ensureExecutable(targetPath) {
@@ -161,4 +196,12 @@ function main() {
   console.log(`Codex runtime prepared: ${targetKey}`);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  pickPackageRootWithVersion,
+  resolvePlatformPackageRoot,
+  specVersion
+};
