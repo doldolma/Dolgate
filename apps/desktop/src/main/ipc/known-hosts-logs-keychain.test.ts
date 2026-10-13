@@ -3,7 +3,7 @@ import { ipcChannels } from '../../common/ipc-channels';
 
 const electronMocks = vi.hoisted(() => ({
   ipcHandlers: new Map<string, (...args: any[]) => any>(),
-  clipboardWriteText: vi.fn(),
+  clipboardWriteText: vi.fn(async (_text: string) => {}),
 }));
 
 const ipcHandlers = electronMocks.ipcHandlers;

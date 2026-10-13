@@ -9,6 +9,7 @@ import {
   type RdpMonitorSelection,
   type RdpSessionEvent,
 } from "@shared";
+import path from "node:path";
 import type { WebContents } from "electron";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, screen, systemPreferences } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
@@ -724,23 +725,33 @@ export function registerRdpIpcHandlers(
     async (_event, sessionId: string) => rdpManager.describeSession(sessionId),
   );
 
+  // Electron 43 부터 defaultPath 가 없으면 대화상자가 늘 '다운로드'에서 열린다(OS 가 마지막 위치를
+  // 기억하지 않는다). 앱이 켜져 있는 동안은 마지막으로 고른 폴더가 있던 곳에서 연다.
+  let lastShareFolderParent: string | undefined;
   ipcMain.handle(ipcChannels.rdp.pickShareFolder, async () => {
     const result = await dialog.showOpenDialog({
       title: "Choose a folder to share with the remote session",
+      defaultPath: lastShareFolderParent,
       properties: ["openDirectory", "createDirectory"],
     });
     if (result.canceled || result.filePaths.length === 0) {
       return null;
     }
+    lastShareFolderParent = path.dirname(result.filePaths[0]);
     return result.filePaths[0];
   });
 
   // 원격에서 복사된 텍스트를 로컬 클립보드에 넣는다. 클립보드는 메인 프로세스가 소유한다.
   rdpManager.onRemoteClipboardText = (text) => {
     // 같은 값을 다시 쓰면 clipboard 변경 감지가 한 바퀴 더 돌아 원격으로 되돌아간다.
-    if (clipboard.readText() !== text) {
-      clipboard.writeText(text);
-    }
+    // Electron 44 부터 클립보드 읽기·쓰기는 Promise 다 — await 가 빠지면 비교가 늘 참이 된다.
+    void (async () => {
+      if ((await clipboard.readText()) !== text) {
+        await clipboard.writeText(text);
+      }
+    })().catch((error: unknown) => {
+      console.warn("[rdp] failed to write remote clipboard text", error);
+    });
   };
 
   ipcMain.on(
@@ -756,10 +767,16 @@ export function registerRdpIpcHandlers(
   // preventDefault 를 해야 하는데, 그러면 브라우저가 paste 이벤트를 만들지 않는다. 그리고
   // 붙여넣는 그 순간에 알려 봐야 서버의 데이터 요청과 경쟁한다 — 미리 올려둬야 한다.
   ipcMain.on(ipcChannels.rdp.syncClipboard, (_event, sessionId: string) => {
-    const text = clipboard.readText();
-    if (text) {
-      rdpManager.sendClipboardText(sessionId, text);
-    }
+    void clipboard
+      .readText()
+      .then((text) => {
+        if (text) {
+          rdpManager.sendClipboardText(sessionId, text);
+        }
+      })
+      .catch((error: unknown) => {
+        console.warn("[rdp] failed to read local clipboard text", error);
+      });
   });
 
   // 원격 화면이 키보드를 쥐었는지. 우리 앱 단축키를 비켜 주는 판단이 메인에 있어서

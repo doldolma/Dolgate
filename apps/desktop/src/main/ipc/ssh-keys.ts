@@ -14,7 +14,7 @@ export function registerSshKeyIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.sshKeys.copyPublicKey,
     async (_event, secretRef: string) => {
       const material = await ctx.resolveSshPublicKey(secretRef);
-      clipboard.writeText(material.publicKey);
+      await clipboard.writeText(material.publicKey);
     },
   );
 

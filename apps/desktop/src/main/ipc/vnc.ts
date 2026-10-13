@@ -220,9 +220,14 @@ export function registerVncIpcHandlers(
   // 원격에서 복사된 텍스트를 로컬 클립보드에 넣는다. 클립보드는 메인 프로세스가 소유한다.
   vncManager.onRemoteClipboardText = (text) => {
     // 같은 값을 다시 쓰면 우리가 포커스 때 그것을 또 원격으로 올려 한 바퀴 돈다.
-    if (clipboard.readText() !== text) {
-      clipboard.writeText(text);
-    }
+    // Electron 44 부터 클립보드 읽기·쓰기는 Promise 다 — await 가 빠지면 비교가 늘 참이 된다.
+    void (async () => {
+      if ((await clipboard.readText()) !== text) {
+        await clipboard.writeText(text);
+      }
+    })().catch((error: unknown) => {
+      console.warn("[vnc] failed to write remote clipboard text", error);
+    });
   };
 
   // 원격 화면에 포커스가 갈 때 로컬 클립보드를 밀어 넣는다.
@@ -230,10 +235,16 @@ export function registerVncIpcHandlers(
   // 붙여넣는 순간에 읽을 수는 없다 — 키를 원격으로 보내려면 keydown 에서 preventDefault 를 해야
   // 하고 그러면 브라우저가 paste 이벤트를 만들지 않는다(RDP 와 같은 제약, useRdpClipboard 참고).
   ipcMain.on(ipcChannels.vnc.syncClipboard, (_event, sessionId: string) => {
-    const text = clipboard.readText();
-    if (text) {
-      vncManager.sendClipboardText(sessionId, text);
-    }
+    void clipboard
+      .readText()
+      .then((text) => {
+        if (text) {
+          vncManager.sendClipboardText(sessionId, text);
+        }
+      })
+      .catch((error: unknown) => {
+        console.warn("[vnc] failed to read local clipboard text", error);
+      });
   });
 
   ipcMain.on(

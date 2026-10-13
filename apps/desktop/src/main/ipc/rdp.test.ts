@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RdpCertificateInfo } from "@shared";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -36,6 +36,15 @@ vi.mock("../rdp-monitor-windows", () => {
   return { RdpMonitorWindows: MockRdpMonitorWindows };
 });
 
+// 클립보드·대화상자. 테스트마다 값을 바꿔 끼운다. Electron 44 부터 클립보드 읽기·쓰기는 Promise 다.
+const { clipboardMock, dialogMock } = vi.hoisted(() => ({
+  clipboardMock: {
+    readText: vi.fn(async (): Promise<string> => ""),
+    writeText: vi.fn(async (_text: string) => {}),
+  },
+  dialogMock: { showOpenDialog: vi.fn() },
+}));
+
 // 마이크 권한 API. 테스트마다 상태를 바꿔 끼운다.
 const mediaAccess = {
   status: vi.fn((_type: string): string => "not-determined"),
@@ -51,8 +60,8 @@ vi.mock("electron", () => ({
     getDisplayMatching: () => displays[0],
     on: vi.fn(),
   },
-  dialog: { showOpenDialog: vi.fn() },
-  clipboard: { readText: () => "", writeText: vi.fn() },
+  dialog: dialogMock,
+  clipboard: clipboardMock,
   systemPreferences: {
     getMediaAccessStatus: (type: string) => mediaAccess.status(type),
     askForMediaAccess: (type: string) => mediaAccess.ask(type),
@@ -161,6 +170,8 @@ function createHarness(
     disconnect: vi.fn(),
     sendInput: vi.fn(),
     requestResize: vi.fn(),
+    sendClipboardText: vi.fn(),
+    onRemoteClipboardText: null as ((text: string) => void) | null,
   };
 
   const askCertificate = vi.fn(async () => true);
@@ -914,5 +925,77 @@ describe("registerRdpIpcHandlers monitor spread", () => {
     harness.monitorWindows.onCollapseRequested?.("sess-없음");
 
     expect(harness.mainWindow.setFullScreen).not.toHaveBeenCalled();
+  });
+});
+
+describe("registerRdpIpcHandlers clipboard", () => {
+  beforeEach(() => {
+    clipboardMock.readText.mockReset();
+    clipboardMock.writeText.mockReset();
+  });
+
+  it("원격 값이 로컬 클립보드와 같으면 다시 쓰지 않는다", async () => {
+    const harness = createHarness("AA:BB:CC");
+    clipboardMock.readText.mockResolvedValue("same");
+
+    harness.rdpManager.onRemoteClipboardText!("same");
+    await vi.waitFor(() => expect(clipboardMock.readText).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(clipboardMock.writeText).not.toHaveBeenCalled();
+  });
+
+  it("원격 값이 다르면 로컬 클립보드에 쓴다", async () => {
+    const harness = createHarness("AA:BB:CC");
+    clipboardMock.readText.mockResolvedValue("old");
+
+    harness.rdpManager.onRemoteClipboardText!("new");
+
+    await vi.waitFor(() => expect(clipboardMock.writeText).toHaveBeenCalledWith("new"));
+  });
+
+  it("포커스 때 로컬 클립보드를 원격으로 올리고, 비어 있으면 보내지 않는다", async () => {
+    const harness = createHarness("AA:BB:CC");
+    const sync = listeners.get("rdp:sync-clipboard")!;
+
+    clipboardMock.readText.mockResolvedValue("local text");
+    sync({}, "sess-1");
+    await vi.waitFor(() =>
+      expect(harness.rdpManager.sendClipboardText).toHaveBeenCalledWith("sess-1", "local text"),
+    );
+
+    harness.rdpManager.sendClipboardText.mockClear();
+    clipboardMock.readText.mockResolvedValue("");
+    sync({}, "sess-1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(harness.rdpManager.sendClipboardText).not.toHaveBeenCalled();
+  });
+});
+
+describe("registerRdpIpcHandlers share folder picker", () => {
+  it("다음 선택은 마지막으로 고른 폴더가 있던 곳에서 열고, 취소는 그 위치를 바꾸지 않는다", async () => {
+    createHarness("AA:BB:CC");
+    const pick = handlers.get("rdp:pick-share-folder")!;
+    dialogMock.showOpenDialog.mockReset();
+
+    dialogMock.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ["/Users/me/projects/shared"],
+    });
+    await expect(pick({})).resolves.toBe("/Users/me/projects/shared");
+    expect(dialogMock.showOpenDialog.mock.calls[0][0]).toMatchObject({ defaultPath: undefined });
+
+    dialogMock.showOpenDialog.mockResolvedValueOnce({ canceled: true, filePaths: [] });
+    await expect(pick({})).resolves.toBeNull();
+    expect(dialogMock.showOpenDialog.mock.calls[1][0]).toMatchObject({
+      defaultPath: "/Users/me/projects",
+    });
+
+    dialogMock.showOpenDialog.mockResolvedValueOnce({ canceled: true, filePaths: [] });
+    await pick({});
+    expect(dialogMock.showOpenDialog.mock.calls[2][0]).toMatchObject({
+      defaultPath: "/Users/me/projects",
+    });
   });
 });

@@ -115,9 +115,11 @@ export class RdpMonitorWindows {
         // macOS 는 타이틀바만 숨긴다 — frame:false 로 만들면 신호등이 아예 없어서, 이 창을 닫을
         // 방법이 메인 창에서 전체화면을 빠져나오는 것뿐이 된다. 다른 앱들도 여러 화면에
         // 전체화면일 때 화면마다 신호등을 남겨둔다.
+        // Electron 43 부터 Linux 의 프레임 없는 창은 기본이 둥근 모서리다. 이 창은 원격 화면을
+        // 꽉 채워야 하므로 귀퉁이가 잘리지 않게 끈다(macOS 에서 끄면 전체화면이 안 돼 제외).
         ...(process.platform === "darwin"
           ? { titleBarStyle: "hidden" as const }
-          : { frame: false }),
+          : { frame: false, roundedCorners: false }),
         show: false,
         backgroundColor: "#000000",
         // 이 창은 내용이 원격 화면뿐이다. macOS 가 비활성 창의 첫 클릭을 삼키면 원격에 클릭을

@@ -163,9 +163,13 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
     },
   );
 
+  // Electron 43 부터 defaultPath 가 없으면 대화상자가 늘 '다운로드'에서 열린다(OS 가 마지막 위치를
+  // 기억하지 않는다). 앱이 켜져 있는 동안은 마지막으로 가져온 파일이 있던 폴더에서 연다.
+  let lastImportDirectory: string | undefined;
   ipcMain.handle(ipcChannels.hostTransfer.pickImportFile, async (event) => {
     const result = await dialog.showOpenDialog(ctx.resolveWindowFromSender(event.sender), {
       title: t("imports.dolgateImportTitle"),
+      defaultPath: lastImportDirectory,
       properties: ["openFile"],
       filters: [{ name: "Dolgate encrypted host bundle", extensions: ["dolgate"] }],
     });
@@ -173,6 +177,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
       return null;
     }
     const filePath = result.filePaths[0];
+    lastImportDirectory = path.dirname(filePath);
     return { filePath, fileName: path.basename(filePath) };
   });
 

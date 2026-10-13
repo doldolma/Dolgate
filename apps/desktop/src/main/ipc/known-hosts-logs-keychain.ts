@@ -255,7 +255,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
         throw new Error(t('knownHostsIpc.noStoredPassword'));
       }
 
-      clipboard.writeText(payload.password);
+      await clipboard.writeText(payload.password);
     },
   );
 
