@@ -1048,11 +1048,16 @@ func (m *Manager) closeSession(sessionID string, message string, reason string) 
 
 	session.closer.Do(func() {
 		close(session.closed)
+		// **연결부터 끊는다.** 서버가 답 없이 사라지면(전원 차단 등 — FIN/RST 도 오지 않는다) 서버의 답을
+		// 기다리는 작업이 잠금을 쥔 채 멈춰 있다. 자동완성·세션 패널 작업자가 보조 채널을 여는 중이면
+		// 그렇고, 아래 작업자 정리가 그 잠금을 기다린다. 예전처럼 연결을 맨 끝에 끊으면 거기까지 가지
+		// 못해 closed 가 나가지 않았고 탭이 닫히지 않았다(keepalive 가 끊김을 알아채도 같은 곳에서 멈췄다).
+		// 연결을 끊으면 그 대기가 모두 곧바로 풀린다. 서버에는 채널 닫기 대신 연결 끊김으로 가지만 sshd 는
+		// 셸을 똑같이 정리한다.
+		_ = session.client.Close()
 		session.closeCompletionWorker()
-		// stdin, session, client를 같은 순서로 정리해 하위 리소스를 남기지 않는다.
 		_ = session.closeStdin()
 		_ = session.session.Close()
-		_ = session.client.Close()
 	})
 
 	// closed 이벤트는 UI 탭 상태와 버퍼 정리를 유도하는 최종 신호다.

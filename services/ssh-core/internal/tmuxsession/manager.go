@@ -1269,15 +1269,18 @@ func (m *Manager) detachControl(controlID string) *controlHandle {
 	handle.closer.Do(func() {
 		close(handle.closed)
 		handle.stopPaneIdleFlush()
+		// 연결부터 끊는다(sshsession.closeSession 과 같은 이유). 서버가 답 없이 사라지면 보조 채널을 여는
+		// 작업자가 잠금을 쥔 채 멈추고 아래 작업자 정리가 그 잠금을 기다려, 연결을 맨 끝에 끊으면 탭이 닫히지
+		// 않았다. 이미 써 둔 detach-client 는 소켓을 닫아도 커널이 먼저 보낸다.
+		if handle.client != nil {
+			_ = handle.client.Close()
+		}
 		handle.closeCompletionWorker()
 		if handle.stdin != nil {
 			_ = handle.stdin.Close()
 		}
 		if handle.session != nil {
 			_ = handle.session.Close()
-		}
-		if handle.client != nil {
-			_ = handle.client.Close()
 		}
 	})
 	return handle
