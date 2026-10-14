@@ -40,6 +40,14 @@ export interface OutputFlowControlDeps {
   pendingBytes: () => number;
   /** 창이 보이는가. 안 보이면 쌓인 것 중 OUTPUT_HIDDEN_BACKLOG_BYTES 까지는 처리한 것으로 친다. */
   isVisible: () => boolean;
+  /**
+   * 창이 숨었다(true)·다시 보인다(false)를 코어에 알린다. 바뀔 때만 부른다.
+   *
+   * 숨은 창은 타이머가 1분에 한 번으로 줄어 xterm 처리도, 0 바이트 ack 도 그만큼 뜸해진다. 코어는 멈춘
+   * 채 10초 동안 답이 없으면 렌더러가 사라진 것으로 보고 푸는데, 숨은 창에서 그게 일어나 쏟아지는
+   * 출력이 끝없이 쌓였다(최소화 7분에 2.3GB). 알려 주면 숨은 동안은 풀지 않고 기다린다.
+   */
+  setHidden?: (hidden: boolean) => void;
   now?: () => number;
 }
 
@@ -57,8 +65,17 @@ export function createOutputFlowControl(deps: OutputFlowControlDeps): OutputFlow
   let acked = 0;
   let lastAckAt = now();
   let disposed = false;
+  // 코어에 마지막으로 알린 숨김 상태. 코어는 구독(start)할 때 보이는 창으로 시작한다.
+  let reportedHidden = false;
+  const reportVisibility = (visible: boolean) => {
+    if (reportedHidden !== !visible) {
+      reportedHidden = !visible;
+      deps.setHidden?.(reportedHidden);
+    }
+  };
 
   deps.start();
+  reportVisibility(deps.isVisible());
 
   return {
     received(bytes) {
@@ -70,8 +87,10 @@ export function createOutputFlowControl(deps: OutputFlowControlDeps): OutputFlow
       if (disposed) {
         return;
       }
+      const visible = deps.isVisible();
+      reportVisibility(visible);
       const pending = Math.max(0, deps.pendingBytes());
-      const unprocessed = deps.isVisible() ? pending : Math.max(0, pending - OUTPUT_HIDDEN_BACKLOG_BYTES);
+      const unprocessed = visible ? pending : Math.max(0, pending - OUTPUT_HIDDEN_BACKLOG_BYTES);
       const processed = Math.max(acked, received - unprocessed);
       const delta = processed - acked;
       const at = now();

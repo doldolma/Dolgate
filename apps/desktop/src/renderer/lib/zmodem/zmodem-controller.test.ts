@@ -303,6 +303,64 @@ describe("createZmodemController", () => {
     expect(session.abort).toHaveBeenCalled();
   });
 
+  // 원격 sz(lrzsz)가 "OO" 없이 끝나면 라이브러리는 ZFIN 뒤에 온 셸 프롬프트에 예외를 던진다. 파일은 이미
+  // 다 받았으므로 정상 종료로 다루고 그 프롬프트를 화면에 보낸다 — 예전에는 그 탭의 출력이 영영 버려졌다.
+  it("finishes the session and shows the shell output when the sender ends without OO", () => {
+    const deps = makeDeps();
+    const controller = createZmodemController(deps);
+    const session = {
+      type: "receive" as const,
+      _got_ZFIN: false,
+      _input_buffer: [] as number[],
+      on: vi.fn(),
+      start: vi.fn(),
+      abort: vi.fn(),
+    };
+    controller.consume(new Uint8Array([24]));
+    captured?.options.on_detect({ confirm: () => session, deny: vi.fn() });
+
+    const prompt = new TextEncoder().encode("\x1b]133;D;0\x07\x1b]133;A\x07$ ");
+    session._got_ZFIN = true;
+    session._input_buffer = Array.from(prompt);
+    captured?.consume.mockImplementationOnce(() => {
+      throw "PROTOCOL: Only thing after ZFIN should be “OO” (79,79), not: 27,93";
+    });
+    controller.consume(prompt);
+
+    // 받을 sz 가 없으니 취소 바이트를 보내지 않는다(셸에 ^X 로 들어간다).
+    expect(session.abort).not.toHaveBeenCalled();
+    expect(deps.sendToRemote).not.toHaveBeenCalled();
+    const written = vi.mocked(deps.writeToTerminal).mock.calls.map((call) => new TextDecoder().decode(call[0]));
+    expect(written).toEqual([new TextDecoder().decode(prompt)]);
+
+    // 그 뒤 출력은 감지기를 거치지 않고 그대로 화면으로 간다.
+    const next = new TextEncoder().encode("ls\r\n");
+    controller.consume(next);
+    expect(deps.writeToTerminal).toHaveBeenLastCalledWith(next);
+  });
+
+  // 전송 중 파싱이 깨지면 세션을 끊고 남은 이진 조각은 버린다. 그것이 그치고 셸 출력이 오면 다시 화면에
+  // 보낸다 — 예전에는 격리가 끝나지 않아 그 탭이 굳었다.
+  it("lifts the quarantine once plain output resumes after a broken transfer", () => {
+    const deps = makeDeps();
+    const controller = createZmodemController(deps);
+    const session = { type: "receive" as const, on: vi.fn(), start: vi.fn(), abort: vi.fn() };
+    controller.consume(new Uint8Array([24]));
+    captured?.options.on_detect({ confirm: () => session, deny: vi.fn() });
+
+    consumeShouldThrow = true;
+    controller.consume(new Uint8Array([24, 1, 2]));
+    expect(session.abort).toHaveBeenCalled();
+    vi.mocked(deps.writeToTerminal).mockClear();
+
+    controller.consume(new Uint8Array([24, 9, 9]));
+    expect(deps.writeToTerminal).not.toHaveBeenCalled();
+
+    const prompt = new TextEncoder().encode("$ ");
+    controller.consume(prompt);
+    expect(deps.writeToTerminal).toHaveBeenCalledWith(prompt);
+  });
+
   it("falls back to a raw terminal write when consume throws", () => {
     const deps = makeDeps();
     const controller = createZmodemController(deps);

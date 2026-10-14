@@ -3083,10 +3083,12 @@ export interface SessionReplayResizeEntry {
   rows: number;
 }
 
+/** 녹화 파일의 한 줄(JSON). */
 export type SessionReplayEntry =
   | SessionReplayOutputEntry
   | SessionReplayResizeEntry;
 
+/** 녹화 한 건의 정보. 출력은 담지 않는다 — 구간(SessionReplaySegment)으로 나눠 따로 읽는다. */
 export interface SessionReplayRecording {
   recordingId: string;
   sessionId: string;
@@ -3100,7 +3102,39 @@ export interface SessionReplayRecording {
   durationMs: number;
   initialCols: number;
   initialRows: number;
-  entries: SessionReplayEntry[];
+}
+
+/** 녹화 파일의 한 구간. 녹화는 출력 1MB 남짓마다 구간을 끊어 쓴다. */
+export interface SessionReplaySegmentInfo {
+  /** 첫 항목의 시각(ms, 녹화 시작 기준). */
+  startAtMs: number;
+  /** 마지막 항목의 시각. */
+  endAtMs: number;
+  entryCount: number;
+  /** 출력 항목의 바이트 합. */
+  outputBytes: number;
+}
+
+/** 재생 창이 처음 받는 것: 녹화 정보와 구간 목록. 구간 내용은 재생하면서 필요한 만큼만 받는다. */
+export interface SessionReplayIndex extends SessionReplayRecording {
+  segments: SessionReplaySegmentInfo[];
+}
+
+/**
+ * 한 구간의 항목들. 항목이 수만 개일 수 있어 항목마다 객체를 만들지 않고 같은 길이의 배열들에 나눠
+ * 담는다 — i 번째 항목은 atMs[i], dataEnd[i], cols[i], rows[i] 이다.
+ */
+export interface SessionReplaySegment {
+  /** 항목의 시각(ms, 녹화 시작 기준). 앞 항목보다 작지 않다. */
+  atMs: Float64Array;
+  /** 출력 항목이 data 안에서 끝나는 위치. 시작은 앞 항목의 끝(첫 항목은 0)이다. 크기 바꿈 항목은 길이가 0 이다. */
+  dataEnd: Uint32Array;
+  /** 크기 바꿈 항목의 칸 수. 출력 항목은 0 이다. */
+  cols: Uint16Array;
+  /** 크기 바꿈 항목의 줄 수. 출력 항목은 0 이다. */
+  rows: Uint16Array;
+  /** 구간의 출력을 이어 붙인 것. */
+  data: Uint8Array;
 }
 
 export interface ActivityLogRecord {

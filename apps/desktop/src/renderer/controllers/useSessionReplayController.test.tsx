@@ -4,7 +4,8 @@ import { useSessionReplayController } from './useSessionReplayController';
 
 const mocks = vi.hoisted(() => ({
   getDesktopSettings: vi.fn(),
-  getSessionReplay: vi.fn(),
+  loadSessionReplay: vi.fn(),
+  readSessionReplaySegment: vi.fn(),
   openSessionReplay: vi.fn(),
 }));
 
@@ -13,7 +14,8 @@ vi.mock('../services/desktop/settings', () => ({
 }));
 
 vi.mock('../services/desktop/session-replays', () => ({
-  getSessionReplay: mocks.getSessionReplay,
+  loadSessionReplay: mocks.loadSessionReplay,
+  readSessionReplaySegment: mocks.readSessionReplaySegment,
   openSessionReplay: mocks.openSessionReplay,
 }));
 
@@ -30,12 +32,14 @@ describe('useSessionReplayController', () => {
 
     await act(async () => {
       await controller!.getDesktopSettings();
-      await controller!.getSessionReplay('recording-1');
+      await controller!.loadSessionReplay('recording-1');
+      await controller!.readSessionReplaySegment('recording-1', 2);
       await controller!.openSessionReplay('recording-1');
     });
 
     expect(mocks.getDesktopSettings).toHaveBeenCalledTimes(1);
-    expect(mocks.getSessionReplay).toHaveBeenCalledWith('recording-1');
+    expect(mocks.loadSessionReplay).toHaveBeenCalledWith('recording-1');
+    expect(mocks.readSessionReplaySegment).toHaveBeenCalledWith('recording-1', 2);
     expect(mocks.openSessionReplay).toHaveBeenCalledWith('recording-1');
   });
 });

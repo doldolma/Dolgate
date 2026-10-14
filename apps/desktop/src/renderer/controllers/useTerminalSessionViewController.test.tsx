@@ -284,6 +284,7 @@ describe('useTerminalSessionViewController', () => {
           flowStart: vi.fn(),
           flowAck: vi.fn(),
           flowStop: vi.fn(),
+          flowVisibility: vi.fn(),
         },
       },
     });
@@ -418,6 +419,34 @@ describe('useTerminalSessionViewController', () => {
 
       unmount();
       expect(ssh.flowStop).toHaveBeenCalledWith('session-1');
+    });
+
+    // 숨은 창은 타이머가 뜸해 코어가 렌더러를 잃은 것으로 오해한다. 숨고 보이는 것을 코어에 알린다.
+    it('창이 숨거나 다시 보이면 코어에 알린다', async () => {
+      const ssh = (window as unknown as { dolssh: { ssh: Record<string, ReturnType<typeof vi.fn>> } }).dolssh.ssh;
+      const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+      try {
+        renderController(createProps());
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(50);
+        });
+        expect(ssh.flowVisibility).not.toHaveBeenCalled();
+
+        visibility.mockReturnValue('hidden');
+        await act(async () => {
+          document.dispatchEvent(new Event('visibilitychange'));
+        });
+        expect(ssh.flowVisibility).toHaveBeenLastCalledWith('session-1', true);
+
+        visibility.mockReturnValue('visible');
+        await act(async () => {
+          document.dispatchEvent(new Event('visibilitychange'));
+        });
+        expect(ssh.flowVisibility).toHaveBeenLastCalledWith('session-1', false);
+        expect(ssh.flowVisibility).toHaveBeenCalledTimes(2);
+      } finally {
+        visibility.mockRestore();
+      }
     });
   });
 

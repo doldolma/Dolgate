@@ -1,7 +1,11 @@
 import { desktopApi } from '../desktopApi';
 
-export function getSessionReplay(recordingId: string) {
-  return desktopApi.sessionReplays.get(recordingId);
+export function loadSessionReplay(recordingId: string) {
+  return desktopApi.sessionReplays.load(recordingId);
+}
+
+export function readSessionReplaySegment(recordingId: string, segmentIndex: number) {
+  return desktopApi.sessionReplays.readSegment(recordingId, segmentIndex);
 }
 
 export function openSessionReplay(recordingId: string) {

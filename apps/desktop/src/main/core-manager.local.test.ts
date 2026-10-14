@@ -146,7 +146,9 @@ describe("CoreManager output flow control", () => {
     manager.flowStart(sessionId);
     manager.flowStart("tmux:ctl-1:0");
     manager.flowAck("tmux:ctl-1:0", 131072);
+    manager.flowVisibility("tmux:ctl-1:0", true);
     manager.flowStart("ctl-1");
+    manager.flowVisibility("ctl-1", true);
     manager.flowStop("tmux:ctl-1:0");
 
     const sent = fakeProcess.writes.slice(before).map((frame) => decodeControlFrame(frame));
@@ -154,6 +156,7 @@ describe("CoreManager output flow control", () => {
       ["flowStart", sessionId, {}],
       ["flowStart", "tmux:ctl-1:0", {}],
       ["flowAck", "tmux:ctl-1:0", { bytes: 131072 }],
+      ["flowVisibility", "tmux:ctl-1:0", { hidden: true }],
       ["flowStop", "tmux:ctl-1:0", {}],
     ]);
   });

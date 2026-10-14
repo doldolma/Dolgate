@@ -11,6 +11,9 @@
 //
 // 렌더러가 세션 출력을 구독하면 Start, 처리한 만큼 Ack, 구독을 끊으면 Stop 이 온다. 그 사이에만 센다.
 // 기본은 꺼져 있어서 렌더러가 없는 곳(모바일, 서버)과 흐름 제어를 쓰지 않는 세션 종류는 영향이 없다.
+//
+// 창이 숨으면 SetHidden 이 온다. 숨은 창은 타이머가 1분에 한 번으로 줄어 ack 가 그만큼 뜸해지므로,
+// 그동안은 안전망(DefaultStallTimeout)을 재지 않고 멈춘 채 기다린다.
 package flowcontrol
 
 import (
@@ -27,6 +30,7 @@ const (
 	DefaultLowWatermark int64 = 256 << 10
 	// DefaultStallTimeout 동안 멈춘 채 ack 가 하나도 없으면 렌더러가 사라진 것으로 보고 푼다.
 	// 렌더러는 처리 중이면 0 바이트 ack 로도 살아 있음을 알리므로, 정상이면 이 시간에 닿지 않는다.
+	// 푼 뒤에도 세기는 계속하고, 렌더러가 다시 ack 하면 다시 멈출 수 있게 된다.
 	DefaultStallTimeout = 10 * time.Second
 )
 
@@ -53,6 +57,13 @@ type gate struct {
 	onResume func()
 	// stallTimer 는 StartObserved 의 안전망이다(Wait 가 없어서 따로 잰다).
 	stallTimer *time.Timer
+	// hidden 이면 구독한 창이 안 보인다(SetHidden). 숨은 창은 타이머가 1분에 한 번으로 줄어(Chromium)
+	// ack 도 0 바이트 ack 도 그만큼 뜸해진다. 그동안 안전망이 풀면 쏟아지는 출력이 렌더러에 끝없이
+	// 쌓였다(실측: 최소화 7분에 2.3GB). 숨은 동안은 안전망을 재지 않는다.
+	hidden bool
+	// disabled 면 안전망이 풀어 둔 세션이다. 세기는 계속하고 멈추지는 않는다. 렌더러가 다시 ack 하면
+	// 풀린다 — 예전에는 다시 구독할 때까지 흐름 제어가 영영 꺼져 있었다.
+	disabled bool
 }
 
 func New() *Registry {
@@ -139,7 +150,7 @@ func (r *Registry) Sent(sessionID string, n int) {
 	}
 	current.unacked += int64(n)
 	var pause func()
-	if current.onPause != nil && !current.paused && current.unacked > r.high {
+	if current.onPause != nil && !current.paused && !current.disabled && current.unacked > r.high {
 		current.paused = true
 		// 조용하던 창이 막 쏟아지기 시작했을 수 있다. 멈춘 순간부터 렌더러의 답을 기다린다.
 		current.lastSign = r.now()
@@ -162,6 +173,9 @@ func (r *Registry) Ack(sessionID string, n int64) {
 		return
 	}
 	current.lastSign = r.now()
+	// 안전망이 풀어 둔 세션에 렌더러가 다시 답했다. 그동안 보낸 것도 세어 왔으므로, 처리 안 된 양이
+	// 상한 위면 다음 읽기(tmux 창은 다음 출력)에서 다시 멈춘다.
+	current.disabled = false
 	if n > 0 {
 		current.unacked -= n
 	}
@@ -181,7 +195,7 @@ func (r *Registry) Ack(sessionID string, n int64) {
 }
 
 // armStallTimerLocked 는 StartObserved 의 안전망을 건다. 멈춘 채 stall 동안 렌더러가 아무 말이 없으면
-// 상대를 다시 보내게 하고 그 세션은 더 세지 않는다(Wait 의 안전망과 같다).
+// 상대를 다시 보내게 하고, 렌더러가 다시 ack 할 때까지 멈추지 않는다(Wait 의 안전망과 같다).
 func (r *Registry) armStallTimerLocked(sessionID string, current *gate) {
 	current.stopStallTimer()
 	current.stallTimer = time.AfterFunc(r.stall, func() { r.checkObservedStall(sessionID, current) })
@@ -193,15 +207,49 @@ func (r *Registry) checkObservedStall(sessionID string, watched *gate) {
 		r.mu.Unlock()
 		return
 	}
+	if watched.hidden {
+		// 숨은 창은 멈춘 채 기다린다. 다시 보이면(SetHidden) 그때부터 다시 잰다.
+		watched.stallTimer = nil
+		r.mu.Unlock()
+		return
+	}
 	if remaining := r.stall - r.now().Sub(watched.lastSign); remaining > 0 {
 		// 그 사이 렌더러가 살아 있다고 알렸다. 남은 만큼 다시 잰다.
 		watched.stallTimer = time.AfterFunc(remaining, func() { r.checkObservedStall(sessionID, watched) })
 		r.mu.Unlock()
 		return
 	}
-	resume := r.dropLocked(sessionID)
+	watched.stallTimer = nil
+	watched.paused = false
+	watched.disabled = true
+	resume := watched.onResume
 	r.mu.Unlock()
 	call(resume)
+}
+
+// SetHidden 은 세션을 구독한 창이 안 보이게(hidden) 또는 다시 보이게 됐다는 뜻이다. 숨은 동안은 멈춘
+// 채 기다리고, 다시 보이면 그 순간부터 안전망을 잰다. 렌더러가 숨은 채 사라지면 메인이 Stop 을 보낸다.
+func (r *Registry) SetHidden(sessionID string, hidden bool) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, ok := r.sessions[sessionID]
+	if !ok || current.hidden == hidden {
+		return
+	}
+	current.hidden = hidden
+	if hidden || !current.paused {
+		return
+	}
+	current.lastSign = r.now()
+	if current.onPause != nil {
+		r.armStallTimerLocked(sessionID, current)
+		return
+	}
+	// 기다리는 읽기를 깨워 새 시한으로 다시 기다리게 한다. 멈춤은 그대로다.
+	current.release()
 }
 
 func (g *gate) stopStallTimer() {
@@ -218,7 +266,8 @@ func call(callback func()) {
 }
 
 // Wait 는 처리 안 된 출력이 상한을 넘었으면 하한 아래로 내려갈 때까지 기다린다. 세션이 닫히거나
-// (closed), 흐름 제어가 꺼지거나, 멈춘 채 stall 동안 렌더러가 아무 말이 없으면 바로 돌아온다.
+// (closed), 흐름 제어가 꺼지거나, 창이 보이는데 멈춘 채 stall 동안 렌더러가 아무 말이 없으면 바로
+// 돌아온다.
 //
 // 읽기 루프가 Read 하기 전에 부른다. 읽지 않으면 그 출력은 PTY·SSH 창에 머물고 프로그램이 기다린다.
 func (r *Registry) Wait(sessionID string, closed <-chan struct{}) {
@@ -228,7 +277,7 @@ func (r *Registry) Wait(sessionID string, closed <-chan struct{}) {
 	for {
 		r.mu.Lock()
 		current, ok := r.sessions[sessionID]
-		if !ok || (!current.paused && current.unacked <= r.high) {
+		if !ok || current.disabled || (!current.paused && current.unacked <= r.high) {
 			r.mu.Unlock()
 			return
 		}
@@ -237,26 +286,39 @@ func (r *Registry) Wait(sessionID string, closed <-chan struct{}) {
 			// 조용하던 세션이 막 쏟아지기 시작했을 수 있다. 멈춘 순간부터 기다린다.
 			current.lastSign = r.now()
 		}
-		remaining := r.stall - r.now().Sub(current.lastSign)
-		if remaining <= 0 {
-			// 렌더러가 죽었거나 버그로 ack 가 끊겼다. 세션이 영영 멈추지 않게 이 세션은 끈다 — 다음
-			// 구독(Start) 때 다시 켜진다.
-			current.release()
-			delete(r.sessions, sessionID)
-			r.mu.Unlock()
-			return
-		}
 		resume := current.resume
+		// 숨은 창은 시한 없이 기다린다(timeout 이 nil 이면 그 case 는 오지 않는다).
+		var timeout <-chan time.Time
+		var timer *time.Timer
+		if !current.hidden {
+			remaining := r.stall - r.now().Sub(current.lastSign)
+			if remaining <= 0 {
+				// 렌더러가 죽었거나 버그로 ack 가 끊겼다. 세션이 영영 멈추지 않게 풀고, 렌더러가 다시
+				// ack 할 때까지 멈추지 않는다.
+				current.paused = false
+				current.disabled = true
+				current.release()
+				r.mu.Unlock()
+				return
+			}
+			timer = time.NewTimer(remaining)
+			timeout = timer.C
+		}
 		r.mu.Unlock()
 
-		timer := time.NewTimer(remaining)
 		select {
 		case <-resume:
 		case <-closed:
-			timer.Stop()
+			stopTimer(timer)
 			return
-		case <-timer.C:
+		case <-timeout:
 		}
+		stopTimer(timer)
+	}
+}
+
+func stopTimer(timer *time.Timer) {
+	if timer != nil {
 		timer.Stop()
 	}
 }

@@ -9,6 +9,7 @@ import {
 } from "react";
 import type {
   AppTheme,
+  SessionReplayIndex,
   SessionReplayRecording,
   TerminalThemeId,
 } from "@shared";
@@ -23,7 +24,13 @@ import {
   type ReplayCommandBlock,
   type ReplayCommandScanResult,
 } from "../lib/replay-command-scan";
+import {
+  REPLAY_PENDING_LIMIT_BYTES,
+  ReplayPlayer,
+  ReplaySnapshotStore,
+} from "../lib/replay-player";
 import { createTerminalRuntime, type TerminalRuntime } from "../lib/terminal-runtime";
+import { normalizeErrorMessage } from "../store/utils/errors-and-prompts";
 import {
   getTerminalFontOption,
   getTerminalThemePreset,
@@ -123,15 +130,6 @@ function getConnectionKindLabel(kind: SessionReplayRecording["connectionKind"]):
   return "SSH";
 }
 
-function decodeBase64Chunk(dataBase64: string): Uint8Array {
-  const binary = window.atob(dataBase64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
 /**
  * detail 을 즉시 값이 아니라 팩토리로 받는다. 이 상태는 재생 중 매 프레임 갱신되는데,
  * detail 에 terminalText(captureSnapshot = 화면 전체 직렬화)가 들어 있어 값으로 받으면
@@ -160,8 +158,10 @@ export function SessionReplayWindow({
   recordingId: string;
 }) {
   const { t: translate } = useTranslation();
-  const { getDesktopSettings, getSessionReplay } = useSessionReplayController();
-  const [recording, setRecording] = useState<SessionReplayRecording | null>(null);
+  const { getDesktopSettings, loadSessionReplay, readSessionReplaySegment } =
+    useSessionReplayController();
+  // 녹화 정보와 구간 목록. 출력은 재생기가 구간 단위로 필요한 만큼만 받는다.
+  const [recording, setRecording] = useState<SessionReplayIndex | null>(null);
   // 명령 목록은 녹화 로드 직후 한 번의 사전 스캔으로 채운다(재생을 기다리지 않는다).
   const [commandScan, setCommandScan] = useState<ReplayCommandScanResult | null>(
     null,
@@ -201,10 +201,20 @@ export function SessionReplayWindow({
   } | null>(null);
   const [runtimeErrorMessage, setRuntimeErrorMessage] = useState<string | null>(null);
   const runtimeRef = useRef<TerminalRuntime | null>(null);
+  const playerRef = useRef<ReplayPlayer | null>(null);
   const isPlayingRef = useRef(false);
-  const appliedIndexRef = useRef(-1);
-  const appliedPositionRef = useRef(0);
-  const initializedRecordingIdRef = useRef<string | null>(null);
+  const playbackSpeedRef = useRef(playbackSpeed);
+  playbackSpeedRef.current = playbackSpeed;
+  // 재생 위치(ms). 스크럽바가 보여 주는 값이고, 재생기는 터미널을 여기까지 맞춘다.
+  const goalRef = useRef(0);
+  // 재생 시계의 기준: 이 위치(ms)에서 이 시각(performance.now)에 재생이 (다시) 흘러가기 시작했다. 재생
+  // 루프는 매 프레임 이것으로 위치를 계산한다. 예전에는 React 상태(positionMs)로 루프를 다시 걸었는데, 그
+  // 상태가 이미 적용한 위치보다 늦게 반영되면 위치가 뒤로 가서 터미널을 지우고 처음부터 다시 쓰기를
+  // 되풀이했다(출력 77MB 녹화가 16초에 1.8GB 를 다시 씀, 실측).
+  const playbackOriginRef = useRef({ positionMs: 0, startedAt: 0 });
+  // 예약한 프레임의 표. 새로 예약하면 바뀌어서, 늦게 도는 옛 프레임은 아무것도 하지 않는다.
+  const frameTokenRef = useRef(0);
+  const runFrameRef = useRef<() => void>(() => undefined);
   const appliedViewportRef = useRef<{
     cols: number;
     rows: number;
@@ -307,6 +317,11 @@ export function SessionReplayWindow({
     };
   }, [prefersDark]);
 
+  // 명령 스캔이 떠 두는 화면. 재생기가 되감거나 멀리 건너뛸 때 여기서부터 그린다.
+  const snapshotStore = useMemo(
+    () => (recording ? new ReplaySnapshotStore() : null),
+    [recording],
+  );
   const commandBlocks = commandScan?.blocks ?? NO_COMMAND_BLOCKS;
   // 재생 위치로 "지금 그 명령"을 정하는 건 숫자 비교라 프레임마다 돌아도 싸다. 대신 결과가
   // 바뀔 때만 패널이 리렌더되도록 id 만 내려보낸다.
@@ -324,17 +339,32 @@ export function SessionReplayWindow({
     runtimeRef.current?.repaint();
   }, [commandPanelOpen]);
 
-  // 녹화가 준비되면 명령 블록을 한 번 스캔한다. 실패해도 재생 자체는 계속 가능해야 하므로
-  // 결과가 없으면 목록만 비워 둔다.
+  // 녹화가 준비되면 명령 블록을 한 번 스캔한다(스냅샷도 이때 뜬다). 실패해도 재생 자체는 계속
+  // 가능해야 하므로 결과가 없으면 목록만 비워 둔다.
   useEffect(() => {
-    if (!recording) {
+    if (!recording || !snapshotStore) {
       setCommandScan(null);
       return;
     }
     let disposed = false;
     // 언마운트/녹화 교체 시 스캔 루프도 멈춘다(수 초짜리 작업이라 그냥 두면 CPU 와 메모리를
     // 계속 문다). 실패해도 재생은 되어야 하므로 catch 로 목록만 비운다.
-    void scanReplayCommands(recording, { isCancelled: () => disposed })
+    void scanReplayCommands(
+      {
+        initialCols: recording.initialCols,
+        initialRows: recording.initialRows,
+        segments: recording.segments,
+        readSegment: (segmentIndex) =>
+          readSessionReplaySegment(recording.recordingId, segmentIndex),
+      },
+      {
+        isCancelled: () => disposed,
+        snapshots: snapshotStore,
+        snapshotScrollback: () =>
+          effectiveTerminalSettingsRef.current?.scrollbackLines ??
+          FALLBACK_TERMINAL_SETTINGS.scrollbackLines,
+      },
+    )
       .then((result) => {
         if (!disposed) {
           setCommandScan(result);
@@ -349,11 +379,11 @@ export function SessionReplayWindow({
     return () => {
       disposed = true;
     };
-  }, [recording]);
+  }, [recording, snapshotStore]);
 
   useEffect(() => {
     let disposed = false;
-    void getSessionReplay(recordingId)
+    void loadSessionReplay(recordingId)
       .then((nextRecording) => {
         if (disposed) {
           return;
@@ -366,11 +396,7 @@ export function SessionReplayWindow({
         if (disposed) {
           return;
         }
-        setErrorMessage(
-          error instanceof Error
-            ? error.message
-            : translate('replay.loadFailed'),
-        );
+        setErrorMessage(normalizeErrorMessage(error, translate('replay.loadFailed')));
       })
       .finally(() => {
         if (!disposed) {
@@ -456,107 +482,122 @@ export function SessionReplayWindow({
     setTerminalViewport(nextViewport);
   }, []);
 
-  const resetTerminal = useCallback(() => {
-    if (!runtime || !recording) {
+  // 녹화와 재생 터미널이 준비되면 재생기를 만들고, 첫 구간을 받는 대로 처음부터 재생한다.
+  useEffect(() => {
+    if (!recording || !runtime || !snapshotStore) {
       return;
     }
-    runtime.terminal.reset();
-    runtime.terminal.resize(
-      recording.initialCols,
-      recording.initialRows,
-    );
-    runtime.terminal.clear();
-    appliedIndexRef.current = -1;
-    appliedPositionRef.current = 0;
-    syncTerminalViewport(recording.initialCols, recording.initialRows);
-  }, [recording, runtime, syncTerminalViewport]);
-
-  const applyUntil = useCallback(
-    (targetMs: number) => {
-      if (!recording || !runtime) {
+    const player = new ReplayPlayer({
+      segments: recording.segments,
+      readSegment: (segmentIndex) =>
+        readSessionReplaySegment(recording.recordingId, segmentIndex),
+      snapshots: snapshotStore,
+      terminal: {
+        write: (data) => runtime.write(data),
+        resize: (cols, rows) => runtime.terminal.resize(cols, rows),
+        reset: () => {
+          runtime.terminal.reset();
+          runtime.terminal.resize(recording.initialCols, recording.initialRows);
+          runtime.terminal.clear();
+          syncTerminalViewport(recording.initialCols, recording.initialRows);
+        },
+        pendingOutputSize: () => runtime.pendingOutputSize(),
+      },
+      onViewport: syncTerminalViewport,
+    });
+    playerRef.current = player;
+    goalRef.current = 0;
+    let disposed = false;
+    void player.whenReady().then(() => {
+      if (disposed) {
         return;
       }
-
-      if (targetMs < appliedPositionRef.current) {
-        resetTerminal();
+      player.advance(0);
+      setPositionMs(0);
+      setIsPlaying(true);
+    });
+    return () => {
+      disposed = true;
+      player.dispose();
+      if (playerRef.current === player) {
+        playerRef.current = null;
       }
+    };
+  }, [recording, runtime, snapshotStore, syncTerminalViewport]);
 
-      let latestViewport: { cols: number; rows: number } | null = null;
+  const requestFrame = useCallback(() => {
+    frameTokenRef.current += 1;
+    const token = frameTokenRef.current;
+    window.requestAnimationFrame(() => {
+      if (token === frameTokenRef.current) {
+        runFrameRef.current();
+      }
+    });
+  }, []);
 
-      for (
-        let index = appliedIndexRef.current + 1;
-        index < recording.entries.length;
-        index += 1
+  // 한 프레임. 재생기가 지금 위치까지 따라왔고 터미널에 밀린 출력이 적으면 재생 시계를 흘리고, 아니면
+  // 세운다 — 구간을 받거나 밀린 출력을 그리는 동안 기다렸다가 멈춘 자리에서 잇는다(건너뛰지 않는다).
+  // 재생 중이거나 아직 따라오는 중이면 다음 프레임을 예약한다.
+  runFrameRef.current = () => {
+    const player = playerRef.current;
+    if (!player || !recording) {
+      return;
+    }
+    const now = performance.now();
+    let goal = goalRef.current;
+    let caughtUp = player.advance(goal);
+    if (isPlayingRef.current) {
+      if (
+        caughtUp &&
+        (runtimeRef.current?.pendingOutputSize() ?? 0) <= REPLAY_PENDING_LIMIT_BYTES
       ) {
-        const entry = recording.entries[index];
-        if (entry.atMs > targetMs) {
-          break;
+        const origin = playbackOriginRef.current;
+        // 재생 중에는 지금 위치 뒤로 가지 않는다. 뒤로 가는 것은 사용자가 되감을 때(handleSeek)뿐이다.
+        const next = Math.min(
+          recording.durationMs,
+          Math.max(
+            goal,
+            origin.positionMs + (now - origin.startedAt) * playbackSpeedRef.current,
+          ),
+        );
+        if (next > goal) {
+          goal = next;
+          goalRef.current = goal;
+          caughtUp = player.advance(goal);
         }
-        if (entry.type === "resize") {
-          runtime.terminal.resize(entry.cols, entry.rows);
-          latestViewport = { cols: entry.cols, rows: entry.rows };
-        } else {
-          runtime.write(decodeBase64Chunk(entry.dataBase64));
-        }
-        appliedIndexRef.current = index;
+      } else {
+        playbackOriginRef.current = { positionMs: goal, startedAt: now };
       }
-
-      appliedPositionRef.current = targetMs;
-      if (latestViewport) {
-        syncTerminalViewport(latestViewport.cols, latestViewport.rows);
-      }
-    },
-    [recording, resetTerminal, runtime, syncTerminalViewport],
-  );
-
-  useEffect(() => {
-    if (!recording || !runtime) {
+    }
+    setPositionMs(goal);
+    if (isPlayingRef.current && caughtUp && goal >= recording.durationMs) {
+      setIsPlaying(false);
       return;
     }
-    if (initializedRecordingIdRef.current === recording.recordingId) {
-      return;
+    if (isPlayingRef.current || !caughtUp) {
+      requestFrame();
     }
-    resetTerminal();
-    applyUntil(0);
-    setPositionMs(0);
-    setIsPlaying(true);
-    initializedRecordingIdRef.current = recording.recordingId;
-  }, [applyUntil, recording, resetTerminal, runtime]);
+  };
 
   useEffect(() => {
     if (!isPlaying || !recording) {
       return;
     }
-
-    const startPosition = positionMs;
-    const startAt = performance.now();
-    let frameHandle = 0;
-
-    const tick = () => {
-      if (!isPlayingRef.current) {
-        return;
-      }
-      const elapsedMs = (performance.now() - startAt) * playbackSpeed;
-      const nextPosition = Math.min(
-        recording.durationMs,
-        startPosition + elapsedMs,
-      );
-      applyUntil(nextPosition);
-      setPositionMs(nextPosition);
-
-      if (nextPosition >= recording.durationMs) {
-        setIsPlaying(false);
-        return;
-      }
-
-      frameHandle = window.requestAnimationFrame(tick);
+    // 재생을 시작하거나 속도를 바꾸면 지금 위치에서 다시 잰다.
+    playbackOriginRef.current = {
+      positionMs: goalRef.current,
+      startedAt: performance.now(),
     };
+    requestFrame();
+  }, [isPlaying, playbackSpeed, recording, requestFrame]);
 
-    frameHandle = window.requestAnimationFrame(tick);
-    return () => {
-      window.cancelAnimationFrame(frameHandle);
-    };
-  }, [applyUntil, isPlaying, playbackSpeed, positionMs, recording]);
+  useEffect(
+    () => () => {
+      // 창을 닫으면 예약해 둔 프레임이 아무것도 하지 않게 한다.
+      frameTokenRef.current += 1;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!recording) {
@@ -599,10 +640,21 @@ export function SessionReplayWindow({
   const handleSeek = useCallback(
     (nextPosition: number) => {
       const clamped = Math.max(0, Math.min(totalDurationMs, nextPosition));
-      applyUntil(clamped);
+      goalRef.current = clamped;
       setPositionMs(clamped);
+      // 재생 중이면 옮긴 자리에서 이어서 재생한다.
+      playbackOriginRef.current = { positionMs: clamped, startedAt: performance.now() };
+      const player = playerRef.current;
+      if (!player) {
+        return;
+      }
+      player.seek(clamped);
+      // 그 자리까지 바로 그리지 못하면(구간을 받는 중, 되감기 전에 밀린 출력을 그리는 중) 프레임마다 마저 그린다.
+      if (!player.advance(clamped)) {
+        requestFrame();
+      }
     },
-    [applyUntil, totalDurationMs],
+    [requestFrame, totalDurationMs],
   );
 
   const togglePlayback = useCallback(() => {

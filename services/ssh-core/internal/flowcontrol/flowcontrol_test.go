@@ -39,6 +39,7 @@ func TestNilRegistryNeverBlocks(t *testing.T) {
 	registry.Start("s1")
 	registry.Sent("s1", 1<<30)
 	registry.Ack("s1", 1)
+	registry.SetHidden("s1", true)
 	registry.Stop("s1")
 	requireReturns(t, waitAsync(registry, "s1", nil), "nil registry must not block")
 }
@@ -134,15 +135,61 @@ func TestAckNeverDrivesTheCountNegative(t *testing.T) {
 	requireReturns(t, done, "must resume")
 }
 
-// 렌더러가 죽으면 ack 가 영영 안 온다. 멈춘 채 그만큼 조용하면 풀고 그 세션은 더 세지 않는다.
-func TestStalledRendererReleasesAndTurnsOff(t *testing.T) {
+// 렌더러가 죽으면 ack 가 영영 안 온다. 멈춘 채 그만큼 조용하면 풀고, 다시 ack 가 올 때까지 멈추지 않는다.
+func TestStalledRendererReleasesUntilItAcksAgain(t *testing.T) {
 	registry := NewWithLimits(100, 10, 80*time.Millisecond)
 	registry.Start("s1")
 	registry.Sent("s1", 200)
 	requireReturns(t, waitAsync(registry, "s1", nil), "a silent renderer must not stall the session forever")
 
 	registry.Sent("s1", 1000)
-	requireReturns(t, waitAsync(registry, "s1", nil), "after a stall the session is no longer counted")
+	requireReturns(t, waitAsync(registry, "s1", nil), "after a stall the session must not pause on its own")
+
+	// 렌더러가 다시 답하면 그동안 센 양으로 다시 멈춘다 — 예전에는 다시 구독할 때까지 영영 꺼져 있었다.
+	registry.Ack("s1", 0)
+	done := waitAsync(registry, "s1", nil)
+	requireBlocked(t, done, "once the renderer answers again the session must pause over the high watermark")
+	registry.Ack("s1", 1200)
+	requireReturns(t, done, "must resume when the renderer catches up")
+}
+
+// 숨은 창은 타이머가 1분에 한 번으로 줄어 ack 가 뜸하다. 숨은 동안은 안전망이 풀지 않는다 — 풀면
+// 쏟아지는 출력이 렌더러에 끝없이 쌓였다(최소화 7분에 2.3GB).
+func TestHiddenSessionStaysPausedPastTheStallTimeout(t *testing.T) {
+	registry := NewWithLimits(100, 10, 60*time.Millisecond)
+	registry.Start("s1")
+	registry.SetHidden("s1", true)
+	registry.Sent("s1", 200)
+	done := waitAsync(registry, "s1", nil)
+	time.Sleep(150 * time.Millisecond)
+	requireBlocked(t, done, "a hidden window must not be released by the stall guard")
+
+	registry.Ack("s1", 200)
+	requireReturns(t, done, "must resume when the hidden window catches up")
+}
+
+// 다시 보이면 그 순간부터 잰다. 숨어 있던 시간을 조용했던 시간으로 치지 않는다.
+func TestVisibleAgainRestartsTheStallClock(t *testing.T) {
+	registry := NewWithLimits(100, 10, 100*time.Millisecond)
+	registry.Start("s1")
+	registry.SetHidden("s1", true)
+	registry.Sent("s1", 200)
+	done := waitAsync(registry, "s1", nil)
+	time.Sleep(200 * time.Millisecond)
+
+	registry.SetHidden("s1", false)
+	requireBlocked(t, done, "becoming visible must not count the hidden time as a stall")
+	requireReturns(t, done, "a visible window that stays silent is released by the stall guard")
+}
+
+// 다시 구독하면 새 창이다. 이전 구독의 숨김 상태를 이어받지 않는다(렌더러가 새로 알린다).
+func TestRestartForgetsTheHiddenState(t *testing.T) {
+	registry := NewWithLimits(100, 10, 60*time.Millisecond)
+	registry.Start("s1")
+	registry.SetHidden("s1", true)
+	registry.Start("s1")
+	registry.Sent("s1", 200)
+	requireReturns(t, waitAsync(registry, "s1", nil), "a new subscription is visible until told otherwise")
 }
 
 // 조용하던 세션이 쏟아지기 시작한 경우: 마지막 ack 가 오래전이어도 멈춘 순간부터 기다린다.
@@ -226,7 +273,8 @@ func TestObservedSessionResumesWhenStoppedOrRestarted(t *testing.T) {
 	requireCounts(t, idle, 0, 0)
 }
 
-// 렌더러가 죽으면 ack 가 영영 안 온다. 멈춘 채 그만큼 조용하면 다시 보내게 하고 더 세지 않는다.
+// 렌더러가 죽으면 ack 가 영영 안 온다. 멈춘 채 그만큼 조용하면 다시 보내게 하고, 렌더러가 다시 답할
+// 때까지 멈추라고 하지 않는다.
 func TestObservedSessionResumesAfterAStall(t *testing.T) {
 	registry := NewWithLimits(100, 10, 80*time.Millisecond)
 	o := &observed{}
@@ -246,6 +294,34 @@ func TestObservedSessionResumesAfterAStall(t *testing.T) {
 	}
 	registry.Sent("tmux:c:1", 1000)
 	requireCounts(t, o, 1, 1)
+
+	registry.Ack("tmux:c:1", 0)
+	registry.Sent("tmux:c:1", 1)
+	requireCounts(t, o, 2, 1)
+}
+
+func TestObservedHiddenPaneStaysPausedPastTheStallTimeout(t *testing.T) {
+	registry := NewWithLimits(100, 10, 60*time.Millisecond)
+	o := &observed{}
+	registry.StartObserved("tmux:c:1", o.pause, o.resume)
+	registry.SetHidden("tmux:c:1", true)
+	registry.Sent("tmux:c:1", 200)
+	time.Sleep(200 * time.Millisecond)
+	requireCounts(t, o, 1, 0)
+
+	// 다시 보인 뒤에도 조용하면, 보인 순간부터 잰 시간이 지나 다시 보내게 한다.
+	registry.SetHidden("tmux:c:1", false)
+	requireCounts(t, o, 1, 0)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, resumes := o.counts(); resumes == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("a visible pane that stays silent must be resumed by the stall guard")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestObservedSessionStaysPausedWhileTheRendererIsAlive(t *testing.T) {

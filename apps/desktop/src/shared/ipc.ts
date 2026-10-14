@@ -59,7 +59,8 @@ import type {
   PortForwardRuntimeEvent,
   PortForwardRuntimeRecord,
   ResolvedAwsConnectPayload,
-  SessionReplayRecording,
+  SessionReplayIndex,
+  SessionReplaySegment,
   DirectoryListing,
   GroupRecord,
   GroupPathMutationResult,
@@ -238,6 +239,7 @@ export type CoreCommandType =
   | "flowStart"
   | "flowAck"
   | "flowStop"
+  | "flowVisibility"
   | "disconnect"
   | "probeHostKey"
   | "inspectCertificate"
@@ -1620,11 +1622,13 @@ export interface DesktopApi {
     resize: (sessionId: string, cols: number, rows: number) => Promise<void>;
     /**
      * 출력 흐름 제어. 세션 출력을 구독하면 flowStart, 처리한 만큼
-     * flowAck(0 이면 "아직 처리 중"), 구독을 끊으면 flowStop. 보내고 잊는다.
+     * flowAck(0 이면 "아직 처리 중"), 구독을 끊으면 flowStop. 창이 숨거나 다시 보이면
+     * flowVisibility. 보내고 잊는다.
      */
     flowStart: (sessionId: string) => void;
     flowAck: (sessionId: string, bytes: number) => void;
     flowStop: (sessionId: string) => void;
+    flowVisibility: (sessionId: string, hidden: boolean) => void;
     disconnect: (sessionId: string) => Promise<void>;
     prepareAutocomplete: (sessionId: string) => Promise<void>;
     refreshAutocomplete: (sessionId: string) => Promise<void>;
@@ -1888,7 +1892,13 @@ export interface DesktopApi {
   };
   sessionReplays: {
     open: (recordingId: string) => Promise<void>;
-    get: (recordingId: string) => Promise<SessionReplayRecording>;
+    /** 녹화 정보와 구간 목록(출력은 담지 않는다). */
+    load: (recordingId: string) => Promise<SessionReplayIndex>;
+    /** 한 구간의 항목. 재생 창이 재생 위치 근처만 받아 간다. */
+    readSegment: (
+      recordingId: string,
+      segmentIndex: number,
+    ) => Promise<SessionReplaySegment>;
     storageUsage: () => Promise<SessionReplayStorageUsage>;
   };
   keychain: {

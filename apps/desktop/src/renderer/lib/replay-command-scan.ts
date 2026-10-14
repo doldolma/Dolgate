@@ -3,7 +3,10 @@
 // 라이브와 달리 리플레이는 재생을 해야 OSC 133 이 흐르는데, 오른쪽 명령 목록과 재생바 마커는
 // 재생 전에 전체 목록이 있어야 성립한다. 그래서 화면 없는 터미널(xterm-headless)에 녹화
 // 스트림을 그대로 먹여 라이브와 동일한 방식으로 경계를 잡고, 각 경계에 녹화 시각(atMs)을
-// 붙인다.
+// 붙인다. 녹화는 구간 하나씩 받아 훑고 버린다 — 녹화 전체를 메모리에 올리지 않는다.
+//
+// 훑는 김에 출력이 쌓일 때마다 구간 경계에서 화면을 떠 둔다(스냅샷). 재생 창이 되감거나 멀리
+// 건너뛸 때 처음부터 다시 그리지 않고 가까운 스냅샷부터 그린다(replay-player).
 //
 // 명령 텍스트는 라이브와 같은 순서로 정한다 — 셸이 알려 준 원문(133;E, zsh)이 있으면 그것을,
 // 없으면(bash 등) 화면에 그려진 결과를 읽는다.
@@ -14,9 +17,12 @@
 // 했는데, 마커가 청크 경계로 쪼개지면 시각이 녹화 끝으로 튀는 버그가 있었다.)
 
 import { Terminal } from '@xterm/headless';
-import type { IMarker } from '@xterm/headless';
-import type { SessionReplayRecording } from '@shared';
+import type { IMarker, ITerminalAddon } from '@xterm/headless';
+import { SerializeAddon } from '@xterm/addon-serialize';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
+import type { SessionReplaySegment, SessionReplaySegmentInfo } from '@shared';
 import { classifyCommandExit } from '@shared';
+import type { ReplaySnapshotStore } from './replay-player';
 import {
   readCommandTextFromBuffer,
   unescapeReportedCommand,
@@ -46,6 +52,22 @@ export interface ReplayCommandScanResult {
   shellIntegrationDetected: boolean;
 }
 
+/** 스캔할 녹화. 구간을 하나씩 받아 훑는다. */
+export interface ReplayScanSource {
+  initialCols: number;
+  initialRows: number;
+  segments: readonly SessionReplaySegmentInfo[];
+  readSegment: (segmentIndex: number) => Promise<SessionReplaySegment>;
+}
+
+export interface ReplayScanOptions {
+  isCancelled?: () => boolean;
+  /** 주면 앞 스냅샷 뒤로 출력이 snapshots.spacingBytes 쌓일 때마다 구간 경계에서 화면을 떠 넣는다. */
+  snapshots?: ReplaySnapshotStore;
+  /** 스냅샷에 담을 스크롤백 줄 수. 재생 터미널 설정을 따른다. */
+  snapshotScrollback?: () => number;
+}
+
 function parseExitCode(data: string): number | null {
   const parts = data.split(';');
   if (parts.length < 2) {
@@ -66,15 +88,10 @@ function parseCwdFromOsc7(data: string): string | null {
 
 /** 큐에 쌓인 바이트가 이만큼을 넘으면 한 번 비운다(전부 큐에 올리면 수십 MB 를 물고 있게 된다). */
 const DRAIN_THRESHOLD_BYTES = 512 * 1024;
-
-function decodeBase64Chunk(dataBase64: string): Uint8Array {
-  const binary = atob(dataBase64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
+/** 스캔 터미널의 스크롤백. 긴 세션에서도 명령 줄이 버퍼에서 밀려나지 않도록 넉넉히. */
+const SCAN_SCROLLBACK_LINES = 10000;
+/** 재생 터미널 설정을 모를 때 스냅샷에 담을 스크롤백 줄 수. */
+const DEFAULT_SNAPSHOT_SCROLLBACK_LINES = 1000;
 
 function writeAsync(terminal: Terminal, data: Uint8Array): Promise<void> {
   return new Promise((resolve) => {
@@ -87,8 +104,8 @@ function writeAsync(terminal: Terminal, data: Uint8Array): Promise<void> {
  * 예외를 밖으로 던지지 않고 빈 결과를 돌려준다.
  */
 export async function scanReplayCommands(
-  recording: SessionReplayRecording,
-  options: { isCancelled?: () => boolean } = {},
+  source: ReplayScanSource,
+  options: ReplayScanOptions = {},
 ): Promise<ReplayCommandScanResult> {
   let terminal: Terminal | null = null;
   const blocks: ReplayCommandBlock[] = [];
@@ -109,13 +126,20 @@ export async function scanReplayCommands(
 
   try {
     terminal = new Terminal({
-      cols: recording.initialCols > 0 ? recording.initialCols : 80,
-      rows: recording.initialRows > 0 ? recording.initialRows : 24,
+      cols: source.initialCols > 0 ? source.initialCols : 80,
+      rows: source.initialRows > 0 ? source.initialRows : 24,
       allowProposedApi: true,
-      // 긴 세션에서도 명령 줄이 버퍼에서 밀려나지 않도록 넉넉히.
-      scrollback: 10000,
+      scrollback: SCAN_SCROLLBACK_LINES,
     });
     const activeTerminal = terminal;
+    // 글자 폭은 재생 터미널(terminal-runtime)과 같게 센다 — 다르면 넓은 글자가 있는 줄에서 스냅샷이 어긋난다.
+    // 애드온 타입은 화면 있는 xterm 기준이라 headless 에 맞춰 넘긴다(쓰는 API 는 같다).
+    activeTerminal.loadAddon(new Unicode11Addon() as unknown as ITerminalAddon);
+    activeTerminal.unicode.activeVersion = '11';
+    const serializer = options.snapshots ? new SerializeAddon() : null;
+    if (serializer) {
+      activeTerminal.loadAddon(serializer as unknown as ITerminalAddon);
+    }
 
     activeTerminal.parser.registerOscHandler(7, (data) => {
       currentCwd = parseCwdFromOsc7(data);
@@ -209,32 +233,72 @@ export async function scanReplayCommands(
       return true;
     });
 
-    const entries = recording.entries;
-    currentAtMs = entries[0]?.atMs ?? 0;
+    const { segments } = source;
+    const snapshots = options.snapshots;
+    currentAtMs = segments[0]?.startAtMs ?? 0;
     let queuedBytes = 0;
-    for (let index = 0; index < entries.length; index += 1) {
+    let bytesSinceSnapshot = 0;
+    for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex += 1) {
       if (options.isCancelled?.()) {
         return { blocks: [], shellIntegrationDetected: false };
       }
-      const entry = entries[index];
-      if (entry.type === 'resize') {
-        // resize 는 즉시 적용되므로, 큐에 남은 데이터를 먼저 파싱시켜야 순서가 맞는다.
-        await writeAsync(activeTerminal, new Uint8Array());
-        queuedBytes = 0;
-        currentAtMs = entry.atMs;
-        activeTerminal.resize(Math.max(1, entry.cols), Math.max(1, entry.rows));
-        continue;
+      const segment = await source.readSegment(segmentIndex);
+      const count = segment.atMs.length;
+      for (let index = 0; index < count; index += 1) {
+        if (options.isCancelled?.()) {
+          return { blocks: [], shellIntegrationDetected: false };
+        }
+        if (segment.cols[index] > 0) {
+          // resize 는 즉시 적용되므로, 큐에 남은 데이터를 먼저 파싱시켜야 순서가 맞는다.
+          await writeAsync(activeTerminal, new Uint8Array());
+          queuedBytes = 0;
+          currentAtMs = segment.atMs[index];
+          activeTerminal.resize(segment.cols[index], segment.rows[index]);
+          continue;
+        }
+        const bytes = segment.data.subarray(
+          index === 0 ? 0 : segment.dataEnd[index - 1],
+          segment.dataEnd[index],
+        );
+        // 콜백은 이 청크를 파싱한 "직후" 불리므로, 여기서 다음 청크의 시각을 미리 넣어 둔다.
+        const nextAtMs =
+          index + 1 < count
+            ? segment.atMs[index + 1]
+            : segments[segmentIndex + 1]?.startAtMs ?? segment.atMs[index];
+        activeTerminal.write(bytes, () => {
+          currentAtMs = nextAtMs;
+        });
+        queuedBytes += bytes.length;
+        bytesSinceSnapshot += bytes.length;
+        if (queuedBytes >= DRAIN_THRESHOLD_BYTES) {
+          await writeAsync(activeTerminal, new Uint8Array());
+          queuedBytes = 0;
+        }
       }
-      const bytes = decodeBase64Chunk(entry.dataBase64);
-      // 콜백은 이 청크를 파싱한 "직후" 불리므로, 여기서 다음 청크의 시각을 미리 넣어 둔다.
-      const nextAtMs = entries[index + 1]?.atMs ?? entry.atMs;
-      activeTerminal.write(bytes, () => {
-        currentAtMs = nextAtMs;
-      });
-      queuedBytes += bytes.length;
-      if (queuedBytes >= DRAIN_THRESHOLD_BYTES) {
+
+      if (
+        snapshots &&
+        serializer &&
+        count > 0 &&
+        segmentIndex + 1 < segments.length &&
+        bytesSinceSnapshot >= snapshots.spacingBytes
+      ) {
+        // 이 구간까지 다 반영된 화면을 뜬다. 재생기는 다음 구간의 첫 항목부터 이어 그린다.
         await writeAsync(activeTerminal, new Uint8Array());
         queuedBytes = 0;
+        bytesSinceSnapshot = 0;
+        snapshots.add({
+          segment: segmentIndex + 1,
+          atMs: segment.atMs[count - 1],
+          cols: activeTerminal.cols,
+          rows: activeTerminal.rows,
+          data: serializer.serialize({
+            scrollback: Math.max(
+              0,
+              options.snapshotScrollback?.() ?? DEFAULT_SNAPSHOT_SCROLLBACK_LINES,
+            ),
+          }),
+        });
       }
     }
 

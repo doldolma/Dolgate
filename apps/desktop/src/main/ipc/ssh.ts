@@ -14,7 +14,7 @@ import {
   type KeyboardInteractiveRespondInput,
   type ServerInfoResponse,
 } from "@shared";
-import { shell as electronShell, ipcMain } from "electron";
+import { shell as electronShell, ipcMain, type WebContents } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { AwsEc2HostRecord, MainIpcContext, SshHostRecord } from "./context";
 import { probeLocalAgent, resolveLocalAgentEndpoint } from "./agent-endpoint";
@@ -521,8 +521,38 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
   );
 
   // 출력 흐름 제어. 보내고 잊는 신호라 응답이 없고, 이상한 값은 조용히 버린다.
-  ipcMain.on(ipcChannels.ssh.flowStart, (_event, sessionId: unknown) => {
+  //
+  // 구독한 렌더러가 사라지면(창 닫힘·렌더러 충돌) 그 렌더러가 구독하던 세션의 흐름 제어를 대신 끝낸다.
+  // 코어는 숨은 창의 세션을 안전망으로 풀지 않으므로(flowVisibility), 이게 없으면 숨은 채 사라진 창의
+  // 세션이 멈춘 채 남는다.
+  const flowSessionsBySender = new Map<WebContents, Set<string>>();
+  const watchedFlowSenders = new WeakSet<WebContents>();
+  const releaseFlowSessions = (sender: WebContents) => {
+    const owned = flowSessionsBySender.get(sender);
+    flowSessionsBySender.delete(sender);
+    for (const sessionId of owned ?? []) {
+      ctx.coreManager.flowStop(sessionId);
+    }
+  };
+  const trackFlowSession = (sender: WebContents | undefined, sessionId: string) => {
+    if (!sender) {
+      return;
+    }
+    if (!watchedFlowSenders.has(sender)) {
+      watchedFlowSenders.add(sender);
+      sender.on("render-process-gone", () => releaseFlowSessions(sender));
+      sender.once("destroyed", () => releaseFlowSessions(sender));
+    }
+    let owned = flowSessionsBySender.get(sender);
+    if (!owned) {
+      owned = new Set();
+      flowSessionsBySender.set(sender, owned);
+    }
+    owned.add(sessionId);
+  };
+  ipcMain.on(ipcChannels.ssh.flowStart, (event, sessionId: unknown) => {
     if (typeof sessionId === "string") {
+      trackFlowSession(event?.sender, sessionId);
       ctx.coreManager.flowStart(sessionId);
     }
   });
@@ -531,9 +561,17 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
       ctx.coreManager.flowAck(sessionId, Math.floor(bytes));
     }
   });
-  ipcMain.on(ipcChannels.ssh.flowStop, (_event, sessionId: unknown) => {
+  ipcMain.on(ipcChannels.ssh.flowStop, (event, sessionId: unknown) => {
     if (typeof sessionId === "string") {
+      if (event?.sender) {
+        flowSessionsBySender.get(event.sender)?.delete(sessionId);
+      }
       ctx.coreManager.flowStop(sessionId);
+    }
+  });
+  ipcMain.on(ipcChannels.ssh.flowVisibility, (_event, sessionId: unknown, hidden: unknown) => {
+    if (typeof sessionId === "string" && typeof hidden === "boolean") {
+      ctx.coreManager.flowVisibility(sessionId, hidden);
     }
   });
 

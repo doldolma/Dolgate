@@ -54,6 +54,21 @@ function mayStartTransfer(chunk: Uint8Array): boolean {
   return chunk.indexOf(ZDLE) !== -1 || chunk[chunk.length - 1] === ZPAD;
 }
 
+/**
+ * 받기 세션이 상대의 ZFIN 을 받은 뒤 쌓인 바이트. ZFIN 을 받기 전이면 null.
+ *
+ * ZFIN 뒤에는 "OO" 만 와야 해서, 원격 `sz` 가 "OO" 없이 끝나면(lrzsz, Ubuntu 20.04 실측) 곧바로 온 셸
+ * 프롬프트에 라이브러리가 PROTOCOL 예외를 던진다. 그때 쌓인 바이트가 그 프롬프트다. 라이브러리
+ * (nora-zmodemjs 1.1.1)의 내부 필드다 — 공개 API 에는 이 상태가 없다.
+ */
+function bytesAfterZfin(session: ZmodemSession): number[] | null {
+  const internals = session as unknown as { type?: string; _got_ZFIN?: boolean; _input_buffer?: unknown };
+  if (internals.type !== "receive" || internals._got_ZFIN !== true) {
+    return null;
+  }
+  return Array.isArray(internals._input_buffer) ? (internals._input_buffer as number[]).slice() : [];
+}
+
 export interface ZmodemControllerDeps {
   sessionId: string;
   hostLabel: string;
@@ -297,8 +312,17 @@ export function createZmodemController(
 
   return {
     consume: (chunk: Uint8Array) => {
-      if (disposed || (quarantined && !activeSession)) {
+      if (disposed) {
         return;
+      }
+      if (quarantined && !activeSession) {
+        // 끊은 전송의 남은 이진 조각(ZDLE 가 든 조각)은 버린다. 그것이 그치고 셸 출력이 오면 격리를
+        // 끝낸다 — 예전에는 끝나지 않아 그 탭의 출력이 영영 버려졌다(탭이 굳은 것처럼 보였다).
+        if (chunk.indexOf(ZDLE) !== -1) {
+          return;
+        }
+        quarantined = false;
+        sentryFollowBytes = 0;
       }
       // 연결 정보가 늦게 도착해도 Sentry를 재생성하지 않는다. 진행 중인 전송은 유지한다.
       if (!activeSession && typeof deps.enabled === 'function' && !deps.enabled()) {
@@ -331,27 +355,42 @@ export function createZmodemController(
       try {
         sentry.consume(chunk);
       } catch (error) {
-        console.warn(
-          "[zmodem] consume error",
-          { hadSession: Boolean(activeSession) },
-          error,
-        );
-        if (activeSession) {
-          quarantined = true;
-          for (const reject of pendingFailures) reject(new Error(t('zmodem.cancelFailed')));
-          // 세션 진행 중 파싱 오류(예: SSM 채널이 8-bit clean하지 않아 프레임 훼손).
-          // raw 청크를 화면에 덤프하면 깨진 문자가 폭주하므로, 세션을 정리(abort)해
-          // 원격 sz를 멈추게 하고 화면 오염을 막는다.
-          try {
-            activeSession.abort();
-          } catch {
-            // ignore
-          }
+        const afterZfin = activeSession ? bytesAfterZfin(activeSession) : null;
+        if (afterZfin) {
+          // 파일은 다 받았고 원격 sz 는 이미 끝났다 — "OO" 자리에 셸 출력이 왔다. 세션을 정상으로
+          // 끝내고 그 출력을 화면으로 보낸다. 취소 바이트(abort)는 보내지 않는다: 받을 sz 가 없어
+          // 셸에 ^X 로 들어간다.
           activeSession = null;
-          quarantined = true;
+          draining = false;
+          quarantined = false;
+          sentryFollowBytes = 0;
+          for (const complete of cancellationCompletions) complete();
+          if (afterZfin.length > 0) {
+            terminalFilter.consume(Uint8Array.from(afterZfin));
+          }
         } else {
-          // 세션 시작 전 파싱 오류: 터미널이 멈추지 않도록 원본을 흘린다.
-          deps.writeToTerminal(chunk);
+          console.warn(
+            "[zmodem] consume error",
+            { hadSession: Boolean(activeSession) },
+            error,
+          );
+          if (activeSession) {
+            quarantined = true;
+            for (const reject of pendingFailures) reject(new Error(t('zmodem.cancelFailed')));
+            // 세션 진행 중 파싱 오류(예: SSM 채널이 8-bit clean하지 않아 프레임 훼손).
+            // raw 청크를 화면에 덤프하면 깨진 문자가 폭주하므로, 세션을 정리(abort)해
+            // 원격 sz를 멈추게 하고 화면 오염을 막는다.
+            try {
+              activeSession.abort();
+            } catch {
+              // ignore
+            }
+            activeSession = null;
+            quarantined = true;
+          } else {
+            // 세션 시작 전 파싱 오류: 터미널이 멈추지 않도록 원본을 흘린다.
+            deps.writeToTerminal(chunk);
+          }
         }
         try {
           sentry = buildSentry();

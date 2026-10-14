@@ -1,29 +1,33 @@
-import type { SessionReplayEntry, SessionReplayRecording } from '@shared';
+import type { SessionReplayEntry } from '@shared';
+import { Terminal } from '@xterm/headless';
 import { describe, expect, it } from 'vitest';
-import { scanReplayCommands } from './replay-command-scan';
+import { scanReplayCommands, type ReplayScanSource } from './replay-command-scan';
+import { ReplaySnapshotStore } from './replay-player';
+import { segmentReplayEntries } from './replay-segments.test-support';
 
 function output(atMs: number, text: string): SessionReplayEntry {
   return { type: 'output', atMs, dataBase64: btoa(text) };
 }
 
-function recordingOf(entries: SessionReplayEntry[]): SessionReplayRecording {
+function sourceOf(
+  entries: SessionReplayEntry[],
+  entriesPerSegment = Number.POSITIVE_INFINITY,
+): ReplayScanSource {
   return {
-    recordingId: 'rec-1',
-    sessionId: 'session-1',
-    hostId: 'host-1',
-    hostLabel: 'host',
-    title: 'host',
-    connectionKind: 'ssh',
-    connectedAt: new Date(0).toISOString(),
-    disconnectedAt: new Date(10_000).toISOString(),
-    durationMs: 10_000,
     initialCols: 80,
     initialRows: 24,
-    entries,
-  } as SessionReplayRecording;
+    ...segmentReplayEntries(entries, entriesPerSegment),
+  };
 }
 
-describe('scanReplayCommands', () => {
+// 녹화는 구간 단위로 훑는다. 마커나 시각이 구간 경계에 걸려도 결과가 같아야 하므로 나누는 방식마다 돌린다.
+describe.each([
+  ['한 구간', Number.POSITIVE_INFINITY],
+  ['항목마다 구간', 1],
+  ['두 항목씩 구간', 2],
+])('scanReplayCommands (%s)', (_label, entriesPerSegment) => {
+  const recordingOf = (entries: SessionReplayEntry[]) => sourceOf(entries, entriesPerSegment);
+
   it('명령어·종료코드·소요시간을 녹화 시각과 함께 뽑는다', async () => {
     const result = await scanReplayCommands(
       recordingOf([
@@ -251,5 +255,73 @@ describe('scanReplayCommands', () => {
     );
     expect(result.blocks).toHaveLength(1);
     expect(result.blocks[0].command).toBe('ls');
+  });
+});
+
+function screenLines(terminal: Terminal): string[] {
+  const buffer = terminal.buffer.active;
+  const lines: string[] = [];
+  for (let row = 0; row < buffer.length; row += 1) {
+    lines.push(buffer.getLine(row)?.translateToString(true) ?? '');
+  }
+  while (lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+  return lines;
+}
+
+function writeAll(terminal: Terminal, data: string | Uint8Array): Promise<void> {
+  return new Promise((resolve) => terminal.write(data, resolve));
+}
+
+describe('scanReplayCommands snapshots', () => {
+  // 재생 창은 되감거나 멀리 건너뛸 때 이 화면부터 그린다. 새 터미널에 쓰면 그 시점까지 그린 화면과 같아야 한다.
+  it('구간 경계에서 그때까지의 화면을 떠 둔다', async () => {
+    const entries: SessionReplayEntry[] = [
+      output(0, 'one\r\n'),
+      output(10, '\x1b[31mtwo\x1b[0m\r\n'),
+      { type: 'resize', atMs: 15, cols: 60, rows: 20 },
+      output(20, 'three\r\n'),
+      output(30, 'four'),
+    ];
+    const snapshots = new ReplaySnapshotStore(Number.POSITIVE_INFINITY, 1);
+
+    await scanReplayCommands(sourceOf(entries, 2), {
+      snapshots,
+      snapshotScrollback: () => 100,
+    });
+
+    // 구간 셋(두 항목씩)의 경계 둘. 마지막 구간 뒤는 뜨지 않는다.
+    expect(snapshots.size).toBe(2);
+    expect(snapshots.latest(9)).toBeNull();
+    const snapshot = snapshots.latest(25)!;
+    expect(snapshot).toMatchObject({ segment: 2, atMs: 20, cols: 60, rows: 20 });
+
+    // 그 시점까지(앞 두 구간) 차례로 그린 화면.
+    const expected = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+    for (const entry of entries.slice(0, 4)) {
+      if (entry.type === 'resize') {
+        expected.resize(entry.cols, entry.rows);
+      } else {
+        await writeAll(expected, atob(entry.dataBase64));
+      }
+    }
+    const restored = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+    restored.resize(snapshot.cols, snapshot.rows);
+    await writeAll(restored, snapshot.data);
+
+    expect(screenLines(restored)).toEqual(['one', 'two', 'three']);
+    expect(screenLines(restored)).toEqual(screenLines(expected));
+    expect(restored.buffer.active.cursorY).toBe(expected.buffer.active.cursorY);
+    expect(restored.buffer.active.cursorX).toBe(expected.buffer.active.cursorX);
+    expected.dispose();
+    restored.dispose();
+  });
+
+  it('스냅샷을 받지 않으면 구간만 차례로 훑는다', async () => {
+    const parts = segmentReplayEntries([output(0, 'a\r\n'), output(10, 'b\r\n')], 1);
+    const result = await scanReplayCommands({ initialCols: 80, initialRows: 24, ...parts });
+    expect(result.blocks).toHaveLength(0);
+    expect(parts.readSegment.mock.calls).toEqual([[0], [1]]);
   });
 });

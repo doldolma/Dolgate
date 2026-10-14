@@ -212,8 +212,14 @@ export function buildSessionReplaysBridge(
   return {
     open: (recordingId: string) =>
       ipcRenderer.invoke(ipcChannels.sessionReplays.open, recordingId),
-    get: (recordingId: string) =>
-      ipcRenderer.invoke(ipcChannels.sessionReplays.get, recordingId),
+    load: (recordingId: string) =>
+      ipcRenderer.invoke(ipcChannels.sessionReplays.load, recordingId),
+    readSegment: (recordingId: string, segmentIndex: number) =>
+      ipcRenderer.invoke(
+        ipcChannels.sessionReplays.readSegment,
+        recordingId,
+        segmentIndex,
+      ),
     storageUsage: () =>
       ipcRenderer.invoke(ipcChannels.sessionReplays.storageUsage),
   };

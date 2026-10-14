@@ -179,6 +179,7 @@ export const ipcChannels = {
     flowStart: 'ssh:flow-start',
     flowAck: 'ssh:flow-ack',
     flowStop: 'ssh:flow-stop',
+    flowVisibility: 'ssh:flow-visibility',
     disconnect: 'ssh:disconnect',
     prepareAutocomplete: 'ssh:autocomplete-prepare',
     installShellIntegration: 'ssh:install-shell-integration',
@@ -355,7 +356,8 @@ export const ipcChannels = {
   },
   sessionReplays: {
     open: 'session-replays:open',
-    get: 'session-replays:get',
+    load: 'session-replays:load',
+    readSegment: 'session-replays:read-segment',
     storageUsage: 'session-replays:storage-usage'
   },
   keychain: {

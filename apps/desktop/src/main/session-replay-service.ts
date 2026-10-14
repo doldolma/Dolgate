@@ -1,9 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
-  createWriteStream,
   existsSync,
   mkdirSync,
-  openSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -13,15 +11,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { pipeline } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
-import { constants as zlibConstants, createGzip, gunzip, type Gzip } from "node:zlib";
 import { BrowserWindow } from "electron";
 import type {
   CoreEvent,
   SessionReplayEntry,
+  SessionReplayIndex,
   SessionReplayRecording,
+  SessionReplaySegment,
   SessionReplayStorageUsage,
 } from "@shared";
 import {
@@ -38,16 +35,23 @@ import {
 } from "./local-history-scope";
 import { getMainLocale, t } from './i18n';
 import { APP_LOCALE_QUERY_PARAM } from "../common/i18n/locale";
+import {
+  isReplayDataError,
+  loadReplaySegments,
+  readReplaySegment,
+  REPLAY_TEMP_SUFFIX,
+  ReplayEventsWriter,
+  type ReplayEventFiles,
+  type ReplaySegmentRecord,
+} from "./session-replay-events";
 
 const META_SUFFIX = ".meta.json";
-// 옛 녹화. 새 녹화는 EVENTS_GZIP_SUFFIX 로 쓰고, 이것은 읽기만 한다.
+// 옛 녹화. 새 녹화는 EVENTS_GZIP_SUFFIX 로 쓰고, 이것은 처음 열 때 그 형식으로 바꿔 쓴다.
 const EVENTS_SUFFIX = ".events.jsonl";
 const EVENTS_GZIP_SUFFIX = ".events.jsonl.gz";
-/**
- * gzip 수준. 실제 녹화 226MB 를 수준 1로 압축하면 84.3MB·초당 160MB, 수준 6이면 80.0MB·초당 112MB 였다
- * (실측). 크기 차이는 5% 남짓이고 CPU 는 30% 덜 쓴다. 녹화로 들어오는 양은 흐름 제어로 초당 35MB 안팎이다.
- */
-const EVENTS_GZIP_LEVEL = zlibConstants.Z_BEST_SPEED;
+/** 녹화 파일의 구간 색인(session-replay-events 참고). */
+const INDEX_SUFFIX = ".index.jsonl";
+const REPLAY_FILE_SUFFIXES = [META_SUFFIX, EVENTS_SUFFIX, EVENTS_GZIP_SUFFIX, INDEX_SUFFIX];
 /**
  * 그 사이 쓴 것이 있으면 이만큼마다 압축기를 비운다. 비운 지점까지는 마무리 없이 끊긴 파일(비정상
  * 종료)에서도 읽히므로, 그때 잃는 것은 압축기 안에 남은 마지막 이만큼이다.
@@ -55,13 +59,17 @@ const EVENTS_GZIP_LEVEL = zlibConstants.Z_BEST_SPEED;
 const EVENTS_FLUSH_INTERVAL_MS = 1000;
 /** 앱을 끌 때 녹화 스트림이 다 쓰이기를 기다리는 한도. 디스크가 막혀도 종료가 멈추지 않게 한다. */
 const EVENTS_CLOSE_TIMEOUT_MS = 3000;
-const gunzipAsync = promisify(gunzip);
 const DEFAULT_REPLAY_COLS = 120;
 const DEFAULT_REPLAY_ROWS = 32;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-interface SessionReplayRecordingMeta
-  extends Omit<SessionReplayRecording, "entries"> {}
+/** 녹화 폴더에 이 서비스가 두는 파일인가(바꿔 쓰는 중인 파일 포함). */
+function isReplayFileName(fileName: string): boolean {
+  const name = fileName.endsWith(REPLAY_TEMP_SUFFIX)
+    ? fileName.slice(0, -REPLAY_TEMP_SUFFIX.length)
+    : fileName;
+  return REPLAY_FILE_SUFFIXES.some((suffix) => name.endsWith(suffix));
+}
 
 interface ActiveRecording {
   recordingId: string;
@@ -77,15 +85,15 @@ interface ActiveRecording {
   initialRows: number;
   replayDirectoryPath: string;
   /**
-   * 녹화가 끝날 때까지 열어 두고 이어 쓰는 gzip 스트림(EVENTS_GZIP_SUFFIX 파일).
+   * 녹화가 끝날 때까지 열어 두고 이어 쓰는 녹화 파일(EVENTS_GZIP_SUFFIX, 구간 색인은 INDEX_SUFFIX).
    *
    * 예전에는 출력 조각마다 평문 파일을 열고-쓰고-닫아서, 쏟아지면 초당 4만 번이 메인 프로세스 시간의
-   * 4분의 3을 먹었다(실측). 압축은 백그라운드 스레드에서 돌고, 모으는 것도 압축기가 안에서 한다. 쓰다가
-   * 실패하면 null 이 되고 그 녹화는 더 쓰지 않는다.
+   * 4분의 3을 먹었다(실측). 압축은 백그라운드 스레드에서 돈다. 쓰다가 실패하면 null 이 되고 그 녹화는 더
+   * 쓰지 않는다.
    */
-  events: Gzip | null;
-  /** 마지막으로 압축기를 비운 뒤 쓴 것이 있는가(EVENTS_FLUSH_INTERVAL_MS). */
-  eventsDirty: boolean;
+  events: ReplayEventsWriter | null;
+  /** 마지막 항목의 시각. 시스템 시계가 뒤로 가도 항목 시각이 줄지 않게 한다 — 재생은 시각 순서를 믿는다. */
+  lastAtMs: number;
 }
 
 function nowIso(): string {
@@ -106,43 +114,6 @@ function parseRecordingId(fileName: string): string | null {
   return fileName.slice(0, -META_SUFFIX.length).trim() || null;
 }
 
-function decodeRecordingEntries(content: string): SessionReplayEntry[] {
-  const lines = content
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const entries: SessionReplayEntry[] = [];
-  for (const line of lines) {
-    try {
-      const parsed = JSON.parse(line) as SessionReplayEntry;
-      if (
-        parsed &&
-        typeof parsed === "object" &&
-        typeof parsed.atMs === "number" &&
-        Number.isFinite(parsed.atMs)
-      ) {
-        if (
-          parsed.type === "output" &&
-          typeof parsed.dataBase64 === "string"
-        ) {
-          entries.push(parsed);
-        }
-        if (
-          parsed.type === "resize" &&
-          typeof parsed.cols === "number" &&
-          typeof parsed.rows === "number"
-        ) {
-          entries.push(parsed);
-        }
-      }
-    } catch {
-      continue;
-    }
-  }
-  entries.sort((left, right) => left.atMs - right.atMs);
-  return entries;
-}
-
 export class SessionReplayService {
   private readonly activeRecordings = new Map<string, ActiveRecording>();
   private readonly initialSizeBySession = new Map<
@@ -155,6 +126,11 @@ export class SessionReplayService {
    * 잠깐 걸리므로, 막 끝난 녹화를 열거나(get) 앱을 끌 때(shutdown) 이것을 기다린다.
    */
   private readonly eventStreamsDone = new Map<string, Promise<void>>();
+  /**
+   * 녹화별 구간 목록(녹화 파일 경로로 찾는다). 색인이 없는 옛 녹화는 이것을 만들면서 새 형식으로 바꿔
+   * 쓰므로, 같은 녹화를 두 번 바꿔 쓰지 않게 약속을 나눠 쓴다.
+   */
+  private readonly segmentLoads = new Map<string, Promise<ReplaySegmentRecord[]>>();
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private activeScope: LocalHistoryScope | null = null;
   private onRecordingsPruned: (() => void) | null = null;
@@ -180,11 +156,13 @@ export class SessionReplayService {
     this.closeReplayWindows();
     this.activeScope = null;
     this.initialSizeBySession.clear();
+    this.segmentLoads.clear();
   }
 
-  // 회원 탈퇴 — 현재 scope의 녹화 파일(meta/events)을 전부 삭제한다. 진행 중 녹화와
+  // 회원 탈퇴 — 현재 scope의 녹화 파일(meta/events/색인)을 전부 삭제한다. 진행 중 녹화와
   // 열린 리플레이 창도 정리한다. deactivate() 이전(scope가 살아 있을 때) 호출해야 한다.
   // 녹화 스트림이 다 쓰인 뒤에 지운다 — 먼저 지우면 아직 열리는 중이던 스트림이 파일을 다시 만든다.
+  // 옛 녹화를 바꿔 쓰는 중이었으면 그것도 끝난 뒤에 지운다.
   async purgeAllRecordings(): Promise<void> {
     const scope = this.activeScope;
     if (!scope) {
@@ -192,13 +170,11 @@ export class SessionReplayService {
     }
     await this.shutdown();
     this.closeReplayWindows();
+    await Promise.allSettled(this.segmentLoads.values());
+    this.segmentLoads.clear();
     if (existsSync(scope.replayDirectoryPath)) {
       for (const fileName of readdirSync(scope.replayDirectoryPath)) {
-        if (
-          fileName.endsWith(META_SUFFIX) ||
-          fileName.endsWith(EVENTS_SUFFIX) ||
-          fileName.endsWith(EVENTS_GZIP_SUFFIX)
-        ) {
+        if (isReplayFileName(fileName)) {
           rmSync(path.join(scope.replayDirectoryPath, fileName), {
             force: true,
           });
@@ -218,12 +194,16 @@ export class SessionReplayService {
     if (!active) {
       return;
     }
-    this.appendEntry(active, {
-      type: "resize",
-      atMs: Math.max(0, Date.now() - active.connectedAtMs),
-      cols,
-      rows,
-    });
+    this.appendEntry(
+      active,
+      {
+        type: "resize",
+        atMs: this.nextEntryAtMs(active),
+        cols,
+        rows,
+      },
+      0,
+    );
   }
 
   handleTerminalStream(sessionId: string, chunk: Uint8Array): void {
@@ -231,11 +211,15 @@ export class SessionReplayService {
     if (!active) {
       return;
     }
-    this.appendEntry(active, {
-      type: "output",
-      atMs: Math.max(0, Date.now() - active.connectedAtMs),
-      dataBase64: Buffer.from(chunk).toString("base64"),
-    });
+    this.appendEntry(
+      active,
+      {
+        type: "output",
+        atMs: this.nextEntryAtMs(active),
+        dataBase64: Buffer.from(chunk).toString("base64"),
+      },
+      chunk.length,
+    );
   }
 
   handleTerminalEvent(event: CoreEvent<Record<string, unknown>>): void {
@@ -340,38 +324,71 @@ export class SessionReplayService {
     }
   }
 
-  async get(recordingId: string): Promise<SessionReplayRecording> {
+  /**
+   * 녹화 정보와 구간 목록. 출력은 담지 않는다 — 재생 창이 readSegment 로 필요한 구간만 받아 간다. 색인이
+   * 없는 옛 녹화는 여기서 한 번 새 형식으로 바꿔 쓴다.
+   */
+  async load(recordingId: string): Promise<SessionReplayIndex> {
     const scope = this.requireActiveScope();
     const meta = this.loadRecordingMeta(recordingId, scope.replayDirectoryPath);
-    // 방금 끝난 녹화면 압축기에 남은 끝부분이 파일에 닿을 때까지 기다린다.
-    await this.eventStreamsDone.get(recordingId);
+    const segments = await this.loadSegments(recordingId, scope.replayDirectoryPath);
     return {
       ...meta,
-      entries: await this.readEntries(recordingId, scope.replayDirectoryPath),
+      segments: segments.map(({ startAtMs, endAtMs, entryCount, outputBytes }) => ({
+        startAtMs,
+        endAtMs,
+        entryCount,
+        outputBytes,
+      })),
     };
   }
 
-  private async readEntries(
+  async readSegment(
+    recordingId: string,
+    segmentIndex: number,
+  ): Promise<SessionReplaySegment> {
+    const scope = this.requireActiveScope();
+    const segments = await this.loadSegments(recordingId, scope.replayDirectoryPath);
+    const record = Number.isInteger(segmentIndex) ? segments[segmentIndex] : undefined;
+    if (!record) {
+      throw new Error(`Replay segment ${segmentIndex} does not exist`);
+    }
+    return readReplaySegment(
+      this.getEventsGzipPath(recordingId, scope.replayDirectoryPath),
+      record,
+    );
+  }
+
+  private async loadSegments(
     recordingId: string,
     replayDirectoryPath: string,
-  ): Promise<SessionReplayEntry[]> {
-    const gzipPath = this.getEventsGzipPath(recordingId, replayDirectoryPath);
-    if (existsSync(gzipPath)) {
-      try {
-        // 비정상 종료로 마무리 없이 끊긴 파일도 마지막으로 비운 지점까지는 읽는다.
-        const content = await gunzipAsync(readFileSync(gzipPath), {
-          finishFlush: zlibConstants.Z_SYNC_FLUSH,
-        });
-        return decodeRecordingEntries(content.toString("utf8"));
-      } catch (error) {
-        console.warn("[session-replay] could not read a recording", error);
-        return [];
-      }
+  ): Promise<ReplaySegmentRecord[]> {
+    // 방금 끝난 녹화면 압축기에 남은 끝부분과 마지막 색인이 파일에 닿을 때까지 기다린다.
+    await this.eventStreamsDone.get(recordingId);
+    const files: ReplayEventFiles = {
+      events: this.getEventsGzipPath(recordingId, replayDirectoryPath),
+      legacyEvents: this.getEventsPath(recordingId, replayDirectoryPath),
+      index: this.getIndexPath(recordingId, replayDirectoryPath),
+    };
+    let pending = this.segmentLoads.get(files.events);
+    if (!pending) {
+      const load: Promise<ReplaySegmentRecord[]> = loadReplaySegments(files).catch(
+        (error: unknown) => {
+          // 실패하면 다음에 다시 시도하게 지운다.
+          if (this.segmentLoads.get(files.events) === load) {
+            this.segmentLoads.delete(files.events);
+          }
+          if (isReplayDataError(error)) {
+            console.warn("[session-replay] a recording is damaged", error);
+            throw new Error(t('replaySvc.damaged'));
+          }
+          throw error;
+        },
+      );
+      pending = load;
+      this.segmentLoads.set(files.events, load);
     }
-    const eventsPath = this.getEventsPath(recordingId, replayDirectoryPath);
-    return existsSync(eventsPath)
-      ? decodeRecordingEntries(readFileSync(eventsPath, "utf8"))
-      : [];
+    return pending;
   }
 
   prune(): void {
@@ -393,15 +410,17 @@ export class SessionReplayService {
     );
 
     for (const stale of recordings.slice(retentionCount)) {
-      rmSync(this.getMetaPath(stale.recordingId, replayDirectoryPath), {
-        force: true,
-      });
-      rmSync(this.getEventsPath(stale.recordingId, replayDirectoryPath), {
-        force: true,
-      });
-      rmSync(this.getEventsGzipPath(stale.recordingId, replayDirectoryPath), {
-        force: true,
-      });
+      const eventsGzipPath = this.getEventsGzipPath(stale.recordingId, replayDirectoryPath);
+      this.segmentLoads.delete(eventsGzipPath);
+      for (const filePath of [
+        this.getMetaPath(stale.recordingId, replayDirectoryPath),
+        this.getEventsPath(stale.recordingId, replayDirectoryPath),
+        eventsGzipPath,
+        this.getIndexPath(stale.recordingId, replayDirectoryPath),
+      ]) {
+        rmSync(filePath, { force: true });
+        rmSync(`${filePath}${REPLAY_TEMP_SUFFIX}`, { force: true });
+      }
     }
     // 녹화가 사라졌으니(또는 활성화 시 재조정 시점) 활동 로그의 hasReplay를 실제 파일 기준으로
     // 맞춰, 더 이상 없는 녹화에 Replay 버튼이 남지 않게 한다.
@@ -431,7 +450,7 @@ export class SessionReplayService {
   }
 
   // 현재 scope의 리플레이 디렉토리가 디스크에서 차지하는 용량(설정 화면 표시용).
-  // meta/events 파일 합산이며, 프루닝과 경합해 파일이 사라질 수 있어 stat 실패는 건너뛴다.
+  // meta/events/색인 파일 합산이며, 프루닝과 경합해 파일이 사라질 수 있어 stat 실패는 건너뛴다.
   getStorageUsage(): SessionReplayStorageUsage {
     const scope = this.activeScope;
     if (!scope || !existsSync(scope.replayDirectoryPath)) {
@@ -439,11 +458,7 @@ export class SessionReplayService {
     }
     let totalBytes = 0;
     for (const fileName of readdirSync(scope.replayDirectoryPath)) {
-      if (
-        !fileName.endsWith(META_SUFFIX) &&
-        !fileName.endsWith(EVENTS_SUFFIX) &&
-        !fileName.endsWith(EVENTS_GZIP_SUFFIX)
-      ) {
+      if (!isReplayFileName(fileName)) {
         continue;
       }
       try {
@@ -493,7 +508,7 @@ export class SessionReplayService {
       initialRows: initialSize.rows,
       replayDirectoryPath: scope.replayDirectoryPath,
       events: null,
-      eventsDirty: false,
+      lastAtMs: 0,
     };
     active.events = this.openEventsStream(active);
 
@@ -505,26 +520,22 @@ export class SessionReplayService {
     }
   }
 
-  private openEventsStream(active: ActiveRecording): Gzip {
-    const events = createGzip({ level: EVENTS_GZIP_LEVEL });
-    // 파일은 지금 연다. 스트림에 경로만 주면 다음 틱에야 열려서, 녹화가 시작된 직후에는 파일이 없고 그
-    // 사이 폴더가 지워지면 늦게 실패한다.
-    const eventsPath = this.getEventsGzipPath(active.recordingId, active.replayDirectoryPath);
-    const file = createWriteStream(eventsPath, { fd: openSync(eventsPath, "w") });
-    const done = new Promise<void>((resolve) => {
-      pipeline(events, file, (error) => {
-        if (error) {
+  private openEventsStream(active: ActiveRecording): ReplayEventsWriter {
+    const events = new ReplayEventsWriter(
+      this.getEventsGzipPath(active.recordingId, active.replayDirectoryPath),
+      this.getIndexPath(active.recordingId, active.replayDirectoryPath),
+      {
+        onError: (error) => {
           // 디스크가 가득 찼거나 파일을 쓸 수 없다. 출력 경로로 예외를 올리지 않고 이 녹화만 멈춘다.
           console.warn("[session-replay] stopped recording after a write failure", error);
-          if (active.events === events) {
-            active.events = null;
-          }
-        }
-        if (this.eventStreamsDone.get(active.recordingId) === done) {
-          this.eventStreamsDone.delete(active.recordingId);
-        }
-        resolve();
-      });
+          active.events = null;
+        },
+      },
+    );
+    const done: Promise<void> = events.done.then(() => {
+      if (this.eventStreamsDone.get(active.recordingId) === done) {
+        this.eventStreamsDone.delete(active.recordingId);
+      }
     });
     this.eventStreamsDone.set(active.recordingId, done);
     return events;
@@ -532,10 +543,7 @@ export class SessionReplayService {
 
   private flushEventStreams(): void {
     for (const active of this.activeRecordings.values()) {
-      if (active.eventsDirty && active.events && !active.events.destroyed) {
-        active.eventsDirty = false;
-        active.events.flush(zlibConstants.Z_SYNC_FLUSH);
-      }
+      active.events?.flush();
     }
     if (this.activeRecordings.size === 0 && this.flushTimer) {
       clearInterval(this.flushTimer);
@@ -559,7 +567,7 @@ export class SessionReplayService {
       new Date(disconnectedAt).getTime() - active.connectedAtMs,
     );
 
-    const meta: SessionReplayRecordingMeta = {
+    const meta: SessionReplayRecording = {
       recordingId: active.recordingId,
       sessionId: active.sessionId,
       hostId: active.hostId,
@@ -586,27 +594,29 @@ export class SessionReplayService {
     this.pruneDirectory(active.replayDirectoryPath);
   }
 
-  private appendEntry(active: ActiveRecording, entry: SessionReplayEntry): void {
-    const events = active.events;
-    if (!events || events.destroyed || events.writableEnded) {
-      return;
-    }
-    events.write(`${JSON.stringify(entry)}\n`);
-    active.eventsDirty = true;
+  private nextEntryAtMs(active: ActiveRecording): number {
+    active.lastAtMs = Math.max(active.lastAtMs, Date.now() - active.connectedAtMs);
+    return active.lastAtMs;
+  }
+
+  private appendEntry(
+    active: ActiveRecording,
+    entry: SessionReplayEntry,
+    outputBytes: number,
+  ): void {
+    active.events?.append(JSON.stringify(entry), entry.atMs, outputBytes);
   }
 
   // 남은 것을 압축해 파일에 쓰고 닫는다. 다 쓰이면 eventStreamsDone 의 약속이 풀린다.
   private closeEventsStream(active: ActiveRecording): void {
     const events = active.events;
     active.events = null;
-    if (events && !events.destroyed && !events.writableEnded) {
-      events.end();
-    }
+    void events?.end();
   }
 
   private listRecordingMeta(
     replayDirectoryPath: string,
-  ): SessionReplayRecordingMeta[] {
+  ): SessionReplayRecording[] {
     this.ensureReplayDirectory(replayDirectoryPath);
     return readdirSync(replayDirectoryPath)
       .map((fileName) => parseRecordingId(fileName))
@@ -619,7 +629,7 @@ export class SessionReplayService {
         }
       })
       .filter(
-        (recording): recording is SessionReplayRecordingMeta =>
+        (recording): recording is SessionReplayRecording =>
           recording !== null,
       );
   }
@@ -627,10 +637,10 @@ export class SessionReplayService {
   private loadRecordingMeta(
     recordingId: string,
     replayDirectoryPath: string,
-  ): SessionReplayRecordingMeta {
+  ): SessionReplayRecording {
     const raw = JSON.parse(
       readFileSync(this.getMetaPath(recordingId, replayDirectoryPath), "utf8"),
-    ) as SessionReplayRecordingMeta;
+    ) as SessionReplayRecording;
     return raw;
   }
 
@@ -677,6 +687,13 @@ export class SessionReplayService {
       replayDirectoryPath,
       `${recordingId}${EVENTS_GZIP_SUFFIX}`,
     );
+  }
+
+  private getIndexPath(
+    recordingId: string,
+    replayDirectoryPath: string,
+  ): string {
+    return path.join(replayDirectoryPath, `${recordingId}${INDEX_SUFFIX}`);
   }
 
   private migrateLegacyRecordings(scope: LocalHistoryScope): void {

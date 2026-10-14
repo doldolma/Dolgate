@@ -3484,6 +3484,7 @@
   },
   "replaySvc": {
     "ownerOnly": "로그인된 계정의 Replay만 열 수 있습니다.",
+    "damaged": "녹화 파일이 손상되어 열 수 없습니다.",
     "titleWith": "세션 Replay · {{title}}",
     "title": "세션 Replay"
   },

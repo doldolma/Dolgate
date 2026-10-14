@@ -190,6 +190,31 @@ func TestRouterServesFlowAckWhileSessionInputIsBlocked(t *testing.T) {
 	}
 }
 
+// 창 숨김 알림도 ack 처럼 막힌 입력 뒤에 서지 않는다. 창이 다시 보였다는 알림이 늦으면 그만큼 안전망이
+// 늦게 잰다.
+func TestRouterServesFlowVisibilityWhileSessionInputIsBlocked(t *testing.T) {
+	core := &stubCoreRuntime{inputGate: make(chan struct{}), flowVisibility: make(chan bool, 1)}
+	defer close(core.inputGate)
+	router := newFrameRouter(core, newEventWriter())
+
+	router.route(streamFrame(t, "session-1", "typed while output is paused"))
+	router.route(controlFrame(t, protocol.Request{
+		ID:        "visibility-1",
+		Type:      protocol.CommandFlowVisibility,
+		SessionID: "session-1",
+		Payload:   mustMarshal(t, protocol.FlowVisibilityPayload{Hidden: true}),
+	}))
+
+	select {
+	case hidden := <-core.flowVisibility:
+		if !hidden {
+			t.Fatal("hidden = false, want true")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("숨김 알림이 막힌 입력 뒤에 줄을 섰다")
+	}
+}
+
 // 배차는 무슨 일이 있어도 막히지 않아야 한다(읽기 고루틴이 곧 그 배차다).
 func TestRouterNeverBlocksTheReader(t *testing.T) {
 	core := &stubCoreRuntime{

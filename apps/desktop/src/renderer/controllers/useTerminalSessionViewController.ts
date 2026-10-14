@@ -64,6 +64,7 @@ import {
   installTerminalShellIntegration,
   noteTerminalCommandCount,
   reinjectTerminalShellIntegration,
+  setTerminalOutputHidden,
   startTerminalOutputFlow,
   stopTerminalOutputFlow,
   writeTerminalBinaryInput,
@@ -1733,6 +1734,7 @@ export function useTerminalSessionViewController({
         return pending;
       },
       isVisible: () => document.visibilityState !== 'hidden',
+      setHidden: (hidden) => setTerminalOutputHidden(sessionId, hidden),
     });
     outputFlowRef.current = outputFlow;
     const settleOutputFlow = () => outputFlow.settle();

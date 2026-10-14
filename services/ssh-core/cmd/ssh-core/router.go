@@ -76,7 +76,8 @@ func (router *frameRouter) route(frame protocol.Frame) {
 	// 서면 출력이 영영 다시 흐르지 않는다(교착). 처리는 카운터를 바꾸는 것뿐이다(internal/flowcontrol).
 	if command == protocol.CommandFlowStart ||
 		command == protocol.CommandFlowStop ||
-		command == protocol.CommandFlowAck {
+		command == protocol.CommandFlowAck ||
+		command == protocol.CommandFlowVisibility {
 		router.run(frame)
 		return
 	}

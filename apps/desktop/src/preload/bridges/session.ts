@@ -39,6 +39,8 @@ export function buildSshBridge(ipcRenderer: IpcRenderer): DesktopApi["ssh"] {
       ipcRenderer.send(ipcChannels.ssh.flowAck, sessionId, bytes),
     flowStop: (sessionId: string) =>
       ipcRenderer.send(ipcChannels.ssh.flowStop, sessionId),
+    flowVisibility: (sessionId: string, hidden: boolean) =>
+      ipcRenderer.send(ipcChannels.ssh.flowVisibility, sessionId, hidden),
     disconnect: (sessionId: string) =>
       ipcRenderer.invoke(ipcChannels.ssh.disconnect, sessionId),
     prepareAutocomplete: (sessionId: string) =>

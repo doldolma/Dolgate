@@ -22,10 +22,12 @@ const (
 	CommandControlSignal       CommandType = "controlSignal"
 	CommandResize              CommandType = "resize"
 	// CommandFlowStart·Stop·Ack 는 출력 흐름 제어다(internal/flowcontrol). 렌더러가 세션 출력을
-	// 구독하면 Start, 처리한 만큼 Ack, 구독을 끊으면 Stop 이 온다.
+	// 구독하면 Start, 처리한 만큼 Ack, 구독을 끊으면 Stop 이 온다. 구독한 창이 숨거나 다시 보이면
+	// Visibility 가 온다.
 	CommandFlowStart                   CommandType = "flowStart"
 	CommandFlowStop                    CommandType = "flowStop"
 	CommandFlowAck                     CommandType = "flowAck"
+	CommandFlowVisibility              CommandType = "flowVisibility"
 	CommandDisconnect                  CommandType = "disconnect"
 	CommandProbeHostKey                CommandType = "probeHostKey"
 	CommandInspectCertificate          CommandType = "inspectCertificate"
@@ -1005,6 +1007,11 @@ type ResizePayload struct {
 // FlowAckPayload 는 렌더러가 처리를 마친 출력 바이트 수다. 0 은 "아직 살아서 처리 중" 이라는 뜻이다.
 type FlowAckPayload struct {
 	Bytes int64 `json:"bytes"`
+}
+
+// FlowVisibilityPayload 는 세션을 구독한 창이 안 보이는지(hidden)다.
+type FlowVisibilityPayload struct {
+	Hidden bool `json:"hidden"`
 }
 
 type SFTPListPayload struct {

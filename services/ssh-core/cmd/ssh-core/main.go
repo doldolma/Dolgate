@@ -51,6 +51,7 @@ type coreRuntime interface {
 	FlowStart(sessionID string)
 	FlowStop(sessionID string)
 	FlowAck(sessionID string, bytes int64)
+	FlowVisibility(sessionID string, hidden bool)
 	DisconnectSession(sessionID string) error
 	PrepareAutocomplete(sessionID, requestID string) error
 	RefreshAutocomplete(sessionID, requestID string) error
@@ -380,6 +381,14 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 			return nil
 		}
 		core.FlowAck(request.SessionID, payload.Bytes)
+		return nil
+	case protocol.CommandFlowVisibility:
+		var payload protocol.FlowVisibilityPayload
+		// 깨진 알림은 버린다(ack 와 같다).
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return nil
+		}
+		core.FlowVisibility(request.SessionID, payload.Hidden)
 		return nil
 	case protocol.CommandDisconnect:
 		return core.DisconnectSession(request.SessionID)

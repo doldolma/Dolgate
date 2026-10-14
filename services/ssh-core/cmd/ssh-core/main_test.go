@@ -45,6 +45,8 @@ type stubCoreRuntime struct {
 	inputGateUsed bool
 	// flowAcks 가 있으면 코어에 닿은 흐름 제어 ack 바이트 수를 넣는다.
 	flowAcks chan int64
+	// flowVisibility 가 있으면 코어에 닿은 창 숨김 알림을 넣는다.
+	flowVisibility chan bool
 	// 포워딩 시작이 사람을 기다리는 상태를 흉내낸다.
 	forwardStarted     chan struct{}
 	forwardRelease     chan struct{}
@@ -150,6 +152,11 @@ func (stub *stubCoreRuntime) FlowStop(sessionID string)  {}
 func (stub *stubCoreRuntime) FlowAck(sessionID string, bytes int64) {
 	if stub.flowAcks != nil {
 		stub.flowAcks <- bytes
+	}
+}
+func (stub *stubCoreRuntime) FlowVisibility(sessionID string, hidden bool) {
+	if stub.flowVisibility != nil {
+		stub.flowVisibility <- hidden
 	}
 }
 func (stub *stubCoreRuntime) DisconnectSession(sessionID string) error              { return nil }

@@ -14,6 +14,7 @@ function setup(options: { pending?: number; visible?: boolean } = {}) {
     stop: vi.fn(),
     pendingBytes: () => state.pending,
     isVisible: () => state.visible,
+    setHidden: vi.fn(),
     now: () => state.now,
   };
   const flow = createOutputFlowControl(deps);
@@ -122,6 +123,34 @@ describe('출력 흐름 제어(렌더러)', () => {
     state.now = OUTPUT_HEARTBEAT_MS * 2;
     flow.settle();
     expect(deps.ack).toHaveBeenLastCalledWith(0);
+  });
+
+  // 숨은 창은 타이머가 1분에 한 번으로 줄어 위의 살아 있음 알림도 그만큼 뜸해진다. 코어가 그 사이
+  // 렌더러가 사라진 것으로 보고 풀지 않게, 숨고 보이는 것을 따로 알린다.
+  it('보이는 창은 만들 때 숨김을 알리지 않는다', () => {
+    const { deps } = setup();
+    expect(deps.setHidden).not.toHaveBeenCalled();
+  });
+
+  it('숨은 창은 만들 때 알리고, 바뀔 때만 다시 알린다', () => {
+    const { flow, deps, state } = setup({ visible: false });
+    // 코어는 구독(start) 때 보이는 창으로 시작하므로 숨김은 그 뒤에 알려야 한다.
+    expect(deps.start.mock.invocationCallOrder[0]).toBeLessThan(deps.setHidden.mock.invocationCallOrder[0]);
+    expect(deps.setHidden).toHaveBeenCalledTimes(1);
+    expect(deps.setHidden).toHaveBeenLastCalledWith(true);
+
+    flow.settle();
+    expect(deps.setHidden).toHaveBeenCalledTimes(1);
+
+    state.visible = true;
+    flow.settle();
+    expect(deps.setHidden).toHaveBeenCalledTimes(2);
+    expect(deps.setHidden).toHaveBeenLastCalledWith(false);
+
+    state.visible = false;
+    flow.settle();
+    expect(deps.setHidden).toHaveBeenLastCalledWith(true);
+    expect(deps.setHidden).toHaveBeenCalledTimes(3);
   });
 
   it('버린 뒤에는 세지도 알리지도 않는다', () => {

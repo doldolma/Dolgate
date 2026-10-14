@@ -4309,8 +4309,13 @@ export class CoreManager {
     this.sendFlowControl("flowStop", sessionId, {});
   }
 
+  /** 구독한 창이 숨었다(hidden)·다시 보인다. 숨은 동안 코어는 렌더러의 답이 뜸해도 멈춘 채 기다린다. */
+  flowVisibility(sessionId: string, hidden: boolean): void {
+    this.sendFlowControl("flowVisibility", sessionId, { hidden });
+  }
+
   private sendFlowControl(
-    type: "flowStart" | "flowAck" | "flowStop",
+    type: "flowStart" | "flowAck" | "flowStop" | "flowVisibility",
     sessionId: string,
     payload: Record<string, unknown>,
   ): void {

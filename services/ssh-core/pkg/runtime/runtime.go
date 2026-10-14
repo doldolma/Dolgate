@@ -607,6 +607,12 @@ func (runtime *Runtime) FlowAck(sessionID string, bytes int64) {
 	runtime.flow.Ack(sessionID, bytes)
 }
 
+// FlowVisibility 는 세션을 구독한 창이 숨었는지(hidden) 다시 보이는지다. 숨은 동안은 렌더러의 답이
+// 뜸해도 멈춘 채 기다린다(internal/flowcontrol 의 SetHidden).
+func (runtime *Runtime) FlowVisibility(sessionID string, hidden bool) {
+	runtime.flow.SetHidden(sessionID, hidden)
+}
+
 func (runtime *Runtime) DisconnectSession(sessionID string) error {
 	runtime.StopAutocomplete(sessionID)
 	switch {

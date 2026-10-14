@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -102,8 +103,36 @@ vi.mock("electron", () => {
 });
 
 import { constants as zlibConstants, gunzipSync, gzipSync } from "node:zlib";
+import type { SessionReplayEntry } from "@shared";
 import { SessionReplayService } from "./session-replay-service";
 import { resolveLocalHistoryScope } from "./local-history-scope";
+
+/** 녹화를 재생 창처럼 읽는다: 구간 목록을 받고, 구간마다 항목을 녹화 파일의 꼴로 되돌린다. */
+async function readRecording(service: SessionReplayService, recordingId: string) {
+  const index = await service.load(recordingId);
+  const entries: SessionReplayEntry[] = [];
+  for (let segmentIndex = 0; segmentIndex < index.segments.length; segmentIndex += 1) {
+    const segment = await service.readSegment(recordingId, segmentIndex);
+    for (let entry = 0; entry < segment.atMs.length; entry += 1) {
+      if (segment.cols[entry]! > 0) {
+        entries.push({
+          type: "resize",
+          atMs: segment.atMs[entry]!,
+          cols: segment.cols[entry]!,
+          rows: segment.rows[entry]!,
+        });
+        continue;
+      }
+      const start = entry === 0 ? 0 : segment.dataEnd[entry - 1]!;
+      entries.push({
+        type: "output",
+        atMs: segment.atMs[entry]!,
+        dataBase64: Buffer.from(segment.data.subarray(start, segment.dataEnd[entry]!)).toString("base64"),
+      });
+    }
+  }
+  return { ...index, entries };
+}
 
 const TEST_HISTORY_OWNER = {
   userId: "user-1",
@@ -197,7 +226,7 @@ describe("SessionReplayService", () => {
       payload: { message: "closed" },
     } as never);
 
-    const replay = await service.get(recordingId);
+    const replay = await readRecording(service, recordingId);
     expect(replay.entries).toHaveLength(501);
     const lastOutput = replay.entries[499];
     expect(
@@ -291,7 +320,7 @@ describe("SessionReplayService", () => {
       gzipSync(`${lines}\n`, { finishFlush: zlibConstants.Z_SYNC_FLUSH }),
     );
 
-    expect((await service.get(recordingId)).entries).toHaveLength(50);
+    expect((await readRecording(service, recordingId)).entries).toHaveLength(50);
   });
 
   it("records remote session output and resize events, then persists a replay on close", async () => {
@@ -335,7 +364,7 @@ describe("SessionReplayService", () => {
       payload: { message: "closed" },
     } as never);
 
-    const replay = await service.get(recordingId);
+    const replay = await readRecording(service, recordingId);
     expect(replay).toMatchObject({
       recordingId,
       sessionId: "session-1",
@@ -406,7 +435,7 @@ describe("SessionReplayService", () => {
         payload: { message: "closed" },
       } as never);
 
-      expect(await service.get(recordingId)).toMatchObject({
+      expect(await readRecording(service, recordingId)).toMatchObject({
         recordingId,
         hostLabel,
         title,
@@ -602,7 +631,7 @@ describe("SessionReplayService", () => {
 
     service.shutdown();
 
-    const replay = await service.get(recordingId);
+    const replay = await readRecording(service, recordingId);
     expect(replay).toMatchObject({
       recordingId,
       sessionId: "session-1",
@@ -650,9 +679,9 @@ describe("SessionReplayService", () => {
       payload: { message: "closed" },
     } as never);
 
-    await expect(service.get(recordingId)).rejects.toThrow();
+    await expect(readRecording(service, recordingId)).rejects.toThrow();
     service.activate(TEST_HISTORY_OWNER);
-    expect(await service.get(recordingId)).toMatchObject({
+    expect(await readRecording(service, recordingId)).toMatchObject({
       recordingId,
       sessionId: "session-1",
     });
@@ -700,7 +729,7 @@ describe("SessionReplayService", () => {
       ),
     );
 
-    expect(await service.get(recordingId)).toMatchObject({
+    expect(await readRecording(service, recordingId)).toMatchObject({
       recordingId,
       sessionId: "legacy-session",
       entries: [expect.objectContaining({ type: "output", atMs: 100 })],
@@ -751,7 +780,7 @@ describe("SessionReplayService", () => {
       ),
     );
 
-    expect((await service.get(recordingId)).sessionId).toBe("scoped-session");
+    expect((await readRecording(service, recordingId)).sessionId).toBe("scoped-session");
     expect(existsSync(scope.legacyReplayDirectoryPath)).toBe(false);
   });
 
@@ -787,7 +816,7 @@ describe("SessionReplayService", () => {
     service.deactivate();
 
     expect(browserWindowInstances[0]?.close).toHaveBeenCalledTimes(1);
-    await expect(service.get(recordingId)).rejects.toThrow(
+    await expect(readRecording(service, recordingId)).rejects.toThrow(
       "로그인된 계정의 Replay만 열 수 있습니다.",
     );
   });
@@ -826,7 +855,7 @@ describe("SessionReplayService", () => {
       sessionId: "session-1",
       payload: { message: "closed" },
     } as never);
-    expect((await service.get(recordingId)).sessionId).toBe("session-1");
+    expect((await readRecording(service, recordingId)).sessionId).toBe("session-1");
 
     const scope = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
     await service.purgeAllRecordings();
@@ -834,6 +863,132 @@ describe("SessionReplayService", () => {
     expect(readdirSync(scope.replayDirectoryPath)).toEqual([]);
     expect(service.listExistingRecordingIds().size).toBe(0);
     expect(onRecordingsPruned).toHaveBeenCalled();
-    await expect(service.get(recordingId)).rejects.toThrow();
+    await expect(readRecording(service, recordingId)).rejects.toThrow();
+  });
+  // 재생 창은 녹화를 통째로 받지 않고 구간 단위로 받는다. 출력이 많으면 구간 여럿으로 나뉘어 따로 읽혀야 한다.
+  it("splits a long recording into segments the replay window reads one at a time", async () => {
+    const coreManager = {
+      getSessionLifecycleState: vi.fn(() => createLifecycleState()),
+      attachSessionRecording: vi.fn(),
+    };
+    const service = activateService(
+      new SessionReplayService(
+        { get: () => ({ sessionReplayRetentionCount: 100 }) } as never,
+        coreManager as never,
+      ),
+    );
+    service.handleTerminalEvent({
+      type: "connected",
+      sessionId: "session-1",
+      payload: { status: "connected" },
+    } as never);
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1];
+    const chunk = new Uint8Array(64 * 1024).map((_, index) => 32 + (index % 90));
+    for (let index = 0; index < 48; index += 1) {
+      vi.setSystemTime(new Date(Date.UTC(2026, 2, 29, 0, 0, 0, index * 10)));
+      service.handleTerminalStream("session-1", chunk);
+    }
+    service.handleTerminalEvent({
+      type: "closed",
+      sessionId: "session-1",
+      payload: { message: "closed" },
+    } as never);
+
+    const index = await service.load(recordingId);
+    expect(index).not.toHaveProperty("entries");
+    expect(index.segments.length).toBeGreaterThanOrEqual(3);
+    expect(index.segments.reduce((sum, segment) => sum + segment.outputBytes, 0)).toBe(
+      48 * chunk.length,
+    );
+    const second = await service.readSegment(recordingId, 1);
+    expect(second.data.length).toBe(index.segments[1]!.outputBytes);
+    expect(second.atMs[0]).toBe(index.segments[1]!.startAtMs);
+    expect(Array.from(second.data.subarray(0, 4))).toEqual(Array.from(chunk.subarray(0, 4)));
+    await expect(service.readSegment(recordingId, index.segments.length)).rejects.toThrow();
+    await expect(service.readSegment(recordingId, 0.5)).rejects.toThrow();
+  });
+
+  // 녹화 중 시스템 시계가 뒤로 가도 항목 시각은 줄지 않는다(재생은 시각 순서를 믿는다).
+  it("keeps entry times in order when the system clock moves back", async () => {
+    const coreManager = {
+      getSessionLifecycleState: vi.fn(() => createLifecycleState()),
+      attachSessionRecording: vi.fn(),
+    };
+    const service = activateService(
+      new SessionReplayService(
+        { get: () => ({ sessionReplayRetentionCount: 100 }) } as never,
+        coreManager as never,
+      ),
+    );
+    service.handleTerminalEvent({
+      type: "connected",
+      sessionId: "session-1",
+      payload: { status: "connected" },
+    } as never);
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1];
+    for (const [time, text] of [
+      ["2026-03-29T00:00:05.000Z", "a"],
+      ["2026-03-29T00:00:02.000Z", "b"],
+      ["2026-03-29T00:00:06.000Z", "c"],
+    ] as const) {
+      vi.setSystemTime(new Date(time));
+      service.handleTerminalStream("session-1", new Uint8Array(Buffer.from(text)));
+    }
+    service.handleTerminalEvent({
+      type: "closed",
+      sessionId: "session-1",
+      payload: { message: "closed" },
+    } as never);
+
+    const replay = await readRecording(service, recordingId);
+    expect(replay.entries.map((entry) => entry.atMs)).toEqual([5000, 5000, 6000]);
+  });
+
+  it("counts and removes the segment index together with the rest of a recording", async () => {
+    const lifecycleStates = new Map<string, ReturnType<typeof createLifecycleState>>([
+      ["session-1", createLifecycleState({ connectedAt: "2026-03-29T00:00:00.000Z" })],
+      ["session-2", createLifecycleState({ connectedAt: "2026-03-29T00:01:00.000Z" })],
+    ]);
+    const coreManager = {
+      getSessionLifecycleState: vi.fn((sessionId: string) => lifecycleStates.get(sessionId) ?? null),
+      attachSessionRecording: vi.fn(),
+    };
+    const service = activateService(
+      new SessionReplayService(
+        { get: () => ({ sessionReplayRetentionCount: 1 }) } as never,
+        coreManager as never,
+      ),
+    );
+    const { replayDirectoryPath } = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+    const recordingIds: string[] = [];
+    for (const [sessionId, minute] of [
+      ["session-1", "00"],
+      ["session-2", "01"],
+    ] as const) {
+      vi.setSystemTime(new Date(`2026-03-29T00:${minute}:00.000Z`));
+      service.handleTerminalEvent({
+        type: "connected",
+        sessionId,
+        payload: { status: "connected" },
+      } as never);
+      recordingIds.push(coreManager.attachSessionRecording.mock.calls.at(-1)?.[1]);
+      service.handleTerminalStream(sessionId, new Uint8Array(Buffer.from(`${sessionId}\n`)));
+      vi.setSystemTime(new Date(`2026-03-29T00:${minute}:03.000Z`));
+      service.handleTerminalEvent({
+        type: "closed",
+        sessionId,
+        payload: { message: "closed" },
+      } as never);
+      // 색인은 녹화 파일이 다 쓰인 뒤에 마지막 줄이 붙는다.
+      await service.load(recordingIds.at(-1)!);
+    }
+
+    const [first, second] = recordingIds;
+    expect(existsSync(path.join(replayDirectoryPath, `${first}.index.jsonl`))).toBe(false);
+    expect(existsSync(path.join(replayDirectoryPath, `${second}.index.jsonl`))).toBe(true);
+    const expectedBytes = [".meta.json", ".events.jsonl.gz", ".index.jsonl"]
+      .map((suffix) => statSync(path.join(replayDirectoryPath, `${second}${suffix}`)).size)
+      .reduce((sum, size) => sum + size, 0);
+    expect(service.getStorageUsage()).toEqual({ totalBytes: expectedBytes, recordingCount: 1 });
   });
 });

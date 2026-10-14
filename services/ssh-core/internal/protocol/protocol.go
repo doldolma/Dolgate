@@ -36,6 +36,7 @@ const (
 	CommandFlowStart                   = coretypes.CommandFlowStart
 	CommandFlowStop                    = coretypes.CommandFlowStop
 	CommandFlowAck                     = coretypes.CommandFlowAck
+	CommandFlowVisibility              = coretypes.CommandFlowVisibility
 	CommandDisconnect                  = coretypes.CommandDisconnect
 	CommandProbeHostKey                = coretypes.CommandProbeHostKey
 	CommandInspectCertificate          = coretypes.CommandInspectCertificate
@@ -225,6 +226,7 @@ type SSHBannerPayload = coretypes.SSHBannerPayload
 type ControlSignalPayload = coretypes.ControlSignalPayload
 type ResizePayload = coretypes.ResizePayload
 type FlowAckPayload = coretypes.FlowAckPayload
+type FlowVisibilityPayload = coretypes.FlowVisibilityPayload
 type SFTPListPayload = coretypes.SFTPListPayload
 type SFTPMkdirPayload = coretypes.SFTPMkdirPayload
 type SFTPRenamePayload = coretypes.SFTPRenamePayload

@@ -31,7 +31,8 @@ export function writeTerminalBinaryInput(sessionId: string, data: Uint8Array) {
 
 /**
  * 출력 흐름 제어. 세션 출력을 구독하면 start, 처리한 만큼 ack,
- * 구독을 끊으면 stop. 보내고 잊는다 — 흐름 제어를 쓰지 않는 세션 종류는 메인·코어가 거른다.
+ * 구독을 끊으면 stop, 창이 숨거나 다시 보이면 visibility. 보내고 잊는다 — 흐름 제어를 쓰지 않는
+ * 세션 종류는 메인·코어가 거른다.
  */
 export function startTerminalOutputFlow(sessionId: string) {
   desktopApi.ssh.flowStart(sessionId);
@@ -43,6 +44,10 @@ export function ackTerminalOutput(sessionId: string, bytes: number) {
 
 export function stopTerminalOutputFlow(sessionId: string) {
   desktopApi.ssh.flowStop(sessionId);
+}
+
+export function setTerminalOutputHidden(sessionId: string, hidden: boolean) {
+  desktopApi.ssh.flowVisibility(sessionId, hidden);
 }
 
 export function prepareTerminalAutocomplete(sessionId: string) {

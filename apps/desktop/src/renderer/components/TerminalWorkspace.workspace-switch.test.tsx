@@ -430,7 +430,8 @@ describe('TerminalWorkspace workspace switching', () => {
           installShellIntegration: vi.fn().mockResolvedValue(undefined),
           flowStart: vi.fn(),
           flowAck: vi.fn(),
-          flowStop: vi.fn()
+          flowStop: vi.fn(),
+          flowVisibility: vi.fn()
         }
       }
     });

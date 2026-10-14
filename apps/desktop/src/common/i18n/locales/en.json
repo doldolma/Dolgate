@@ -3484,6 +3484,7 @@
   },
   "replaySvc": {
     "ownerOnly": "Only replays for the signed-in account can be opened.",
+    "damaged": "The recording file is damaged and cannot be opened.",
     "titleWith": "Session replay · {{title}}",
     "title": "Session replay"
   },

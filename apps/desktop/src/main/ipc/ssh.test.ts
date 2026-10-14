@@ -56,6 +56,7 @@ function createContext() {
       flowStart: vi.fn(),
       flowAck: vi.fn(),
       flowStop: vi.fn(),
+      flowVisibility: vi.fn(),
     },
     authService: {
       getServerUrl: vi.fn(() => "https://sync.example.com"),
@@ -193,12 +194,51 @@ describe("registerSshIpcHandlers", () => {
     expect(ctx.coreManager.flowAck).toHaveBeenCalledWith("session-1", 131072);
     expect(ctx.coreManager.flowStop).toHaveBeenCalledWith("session-1");
 
+    ipcListeners.get(ipcChannels.ssh.flowVisibility)?.(null, "session-1", true);
+    expect(ctx.coreManager.flowVisibility).toHaveBeenCalledWith("session-1", true);
+
     ipcListeners.get(ipcChannels.ssh.flowStart)?.(null, 42);
     ipcListeners.get(ipcChannels.ssh.flowAck)?.(null, "session-1", -1);
     ipcListeners.get(ipcChannels.ssh.flowAck)?.(null, "session-1", Number.NaN);
     ipcListeners.get(ipcChannels.ssh.flowAck)?.(null, "session-1", "131072");
+    ipcListeners.get(ipcChannels.ssh.flowVisibility)?.(null, "session-1", "true");
     expect(ctx.coreManager.flowStart).toHaveBeenCalledTimes(1);
     expect(ctx.coreManager.flowAck).toHaveBeenCalledTimes(1);
+    expect(ctx.coreManager.flowVisibility).toHaveBeenCalledTimes(1);
+  });
+
+  // 숨은 창의 세션은 코어가 안전망으로 풀지 않는다. 그 창이 닫히거나 렌더러가 죽으면 메인이 대신 끝낸다.
+  it("stops output flow control for every session of a renderer that goes away", () => {
+    const ctx = createContext();
+    registerSshIpcHandlers(ctx);
+    const handlers = new Map<string, Array<() => void>>();
+    const sender = {
+      on: vi.fn((name: string, handler: () => void) => {
+        handlers.set(name, [...(handlers.get(name) ?? []), handler]);
+      }),
+      once: vi.fn((name: string, handler: () => void) => {
+        handlers.set(name, [...(handlers.get(name) ?? []), handler]);
+      }),
+    };
+    const event = { sender };
+
+    ipcListeners.get(ipcChannels.ssh.flowStart)?.(event, "session-1");
+    ipcListeners.get(ipcChannels.ssh.flowStart)?.(event, "session-2");
+    ipcListeners.get(ipcChannels.ssh.flowStart)?.(event, "session-3");
+    // 직접 끊은 구독은 다시 끊지 않는다.
+    ipcListeners.get(ipcChannels.ssh.flowStop)?.(event, "session-3");
+    expect(sender.on).toHaveBeenCalledTimes(1);
+    expect(sender.once).toHaveBeenCalledTimes(1);
+    ctx.coreManager.flowStop.mockClear();
+
+    for (const handler of handlers.get("render-process-gone") ?? []) handler();
+    expect(ctx.coreManager.flowStop.mock.calls).toEqual([["session-1"], ["session-2"]]);
+
+    // 같은 창이 다시 구독한 뒤 닫히면 그 세션만 끝낸다.
+    ctx.coreManager.flowStop.mockClear();
+    ipcListeners.get(ipcChannels.ssh.flowStart)?.(event, "session-4");
+    for (const handler of handlers.get("destroyed") ?? []) handler();
+    expect(ctx.coreManager.flowStop.mock.calls).toEqual([["session-4"]]);
   });
 
   it("blocks certificate auth before connect when certificate inspection reports an error", async () => {

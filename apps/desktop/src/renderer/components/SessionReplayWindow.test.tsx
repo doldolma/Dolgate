@@ -1,5 +1,68 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { SessionReplayEntry, SessionReplayIndex } from "@shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { segmentReplayEntries } from "../lib/replay-segments.test-support";
+
+type RecordingFixture = Omit<SessionReplayIndex, "segments"> & {
+  entries: SessionReplayEntry[];
+};
+
+/** 녹화를 메인이 넘기는 꼴(정보 + 구간)로 나눠 sessionReplays API 로 꾸민다. */
+function replayApiFor(
+  recording: RecordingFixture,
+  entriesPerSegment = Number.POSITIVE_INFINITY,
+) {
+  const { entries, ...meta } = recording;
+  const { segments, readSegment } = segmentReplayEntries(entries, entriesPerSegment);
+  const index: SessionReplayIndex = { ...meta, segments };
+  return {
+    index,
+    load: vi.fn().mockResolvedValue(index),
+    readSegment: vi.fn((_recordingId: string, segmentIndex: number) =>
+      readSegment(segmentIndex),
+    ),
+  };
+}
+
+function useRecording(recording: RecordingFixture, entriesPerSegment?: number) {
+  const api = replayApiFor(recording, entriesPerSegment);
+  window.dolssh.sessionReplays.load = api.load;
+  window.dolssh.sessionReplays.readSegment = api.readSegment;
+  return api;
+}
+
+const DEFAULT_RECORDING: RecordingFixture = {
+  recordingId: "recording-1",
+  sessionId: "session-1",
+  hostId: "host-1",
+  hostLabel: "nas",
+  title: "NAS",
+  connectionDetails: "doldolma.com · 22 · doyoung",
+  connectionKind: "ssh",
+  connectedAt: "2026-03-29T00:00:00.000Z",
+  disconnectedAt: "2026-03-29T00:00:02.000Z",
+  durationMs: 2000,
+  initialCols: 80,
+  initialRows: 24,
+  entries: [
+    {
+      type: "output",
+      atMs: 100,
+      dataBase64: btoa("hello\n"),
+    },
+    {
+      type: "resize",
+      atMs: 500,
+      cols: 100,
+      rows: 40,
+    },
+    {
+      type: "output",
+      atMs: 1200,
+      dataBase64: btoa("world\n"),
+    },
+  ],
+};
 
 const mocks = vi.hoisted(() => ({
   runtimeRecords: [] as Array<{
@@ -10,6 +73,7 @@ const mocks = vi.hoisted(() => ({
       clear: ReturnType<typeof vi.fn>;
     };
     write: ReturnType<typeof vi.fn>;
+    pendingOutputSize: ReturnType<typeof vi.fn>;
     setAppearance: ReturnType<typeof vi.fn>;
     // 화면 전체 직렬화 — 재생 중 프레임마다 불리면 안 되므로 테스트에서 호출 여부를 본다.
     captureSnapshot: ReturnType<typeof vi.fn>;
@@ -35,6 +99,7 @@ vi.mock("../lib/terminal-runtime", () => ({
       },
       fitAddon: { fit: vi.fn() },
       write: vi.fn(),
+      pendingOutputSize: vi.fn(() => 0),
       scheduleAfterWriteDrain: vi.fn(),
       captureSnapshot: vi.fn(() => ""),
       // 패널 토글 등 레이아웃 변경 후 컨트롤러가 다시 그리게 한다.
@@ -110,46 +175,14 @@ describe("SessionReplayWindow", () => {
             updatedAt: "2026-03-29T00:00:00.000Z",
           }),
         },
-        sessionReplays: {
-          get: vi.fn().mockResolvedValue({
-            recordingId: "recording-1",
-            sessionId: "session-1",
-            hostId: "host-1",
-            hostLabel: "nas",
-            title: "NAS",
-            connectionDetails: "doldolma.com · 22 · doyoung",
-            connectionKind: "ssh",
-            connectedAt: "2026-03-29T00:00:00.000Z",
-            disconnectedAt: "2026-03-29T00:00:02.000Z",
-            durationMs: 2000,
-            initialCols: 80,
-            initialRows: 24,
-            entries: [
-              {
-                type: "output",
-                atMs: 100,
-                dataBase64: btoa("hello\n"),
-              },
-              {
-                type: "resize",
-                atMs: 500,
-                cols: 100,
-                rows: 40,
-              },
-              {
-                type: "output",
-                atMs: 1200,
-                dataBase64: btoa("world\n"),
-              },
-            ],
-          }),
-        },
+        sessionReplays: {},
       },
     });
+    useRecording(DEFAULT_RECORDING);
   });
 
   it("lists scanned commands and seeks to one when clicked", async () => {
-    window.dolssh.sessionReplays.get = vi.fn().mockResolvedValue({
+    useRecording({
       recordingId: "recording-cmds",
       sessionId: "session-cmds",
       hostId: "host-1",
@@ -283,7 +316,7 @@ describe("SessionReplayWindow", () => {
     ["local", "Local"],
     ["aws-ecs-exec", "AWS ECS Exec"],
   ] as const)("renders the %s replay connection kind label", async (connectionKind, label) => {
-    window.dolssh.sessionReplays.get = vi.fn().mockResolvedValue({
+    useRecording({
       recordingId: "recording-kind",
       sessionId: "session-kind",
       hostId: "host-kind",
@@ -332,6 +365,66 @@ describe("SessionReplayWindow", () => {
     ).toHaveValue("800");
   });
 
+  // 재생 루프를 React 상태(positionMs)로 다시 걸면, 그 상태가 이미 적용한 위치보다 늦게 반영될 때 위치가
+  // 뒤로 가서 터미널을 지우고 처음부터 다시 썼다(출력 77MB 녹화가 16초에 1.8GB 를 다시 씀, 실측).
+  it("never rewinds or rewrites while playing, even when frames and renders interleave", async () => {
+    render(<SessionReplayWindow recordingId="recording-1" />);
+
+    await waitFor(() => expect(mocks.runtimeRecords).toHaveLength(1));
+    const runtime = mocks.runtimeRecords[0]!;
+    await waitFor(() => expect(mocks.rafCallbacks.length).toBeGreaterThan(0));
+    runtime.terminal.reset.mockClear();
+    runtime.write.mockClear();
+
+    // 프레임을 돈 뒤 렌더·효과가 비워지기 전에 시간이 흐르게 한다. 취소된 프레임(여기서는
+    // cancelAnimationFrame 이 아무것도 안 한다)도 그대로 부른다 — 늦게 도는 옛 프레임이다.
+    for (let frame = 1; frame <= 45; frame += 1) {
+      await act(async () => {
+        mocks.currentNow = frame * 50;
+        for (const callback of mocks.rafCallbacks.splice(0)) {
+          callback(mocks.currentNow);
+        }
+        mocks.currentNow += 20;
+      });
+    }
+
+    expect(runtime.terminal.reset).not.toHaveBeenCalled();
+    // 출력 항목 둘이 한 번씩만 쓰인다.
+    expect(runtime.write).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+  });
+
+  // 재생 터미널이 다 그리지 못하면 시계를 세운다. 다 그리면 멈춘 자리에서 잇는다(건너뛰지 않는다).
+  it("holds the playback clock while the terminal has a backlog to draw", async () => {
+    render(<SessionReplayWindow recordingId="recording-1" />);
+
+    await waitFor(() => expect(mocks.runtimeRecords).toHaveLength(1));
+    const runtime = mocks.runtimeRecords[0]!;
+    await waitFor(() => expect(mocks.rafCallbacks.length).toBeGreaterThan(0));
+    runtime.write.mockClear();
+    runtime.pendingOutputSize.mockReturnValue(2 * 1024 * 1024);
+
+    const runFrame = async (now: number) => {
+      await act(async () => {
+        mocks.currentNow = now;
+        for (const callback of mocks.rafCallbacks.splice(0)) {
+          callback(now);
+        }
+      });
+    };
+    for (let now = 100; now <= 1500; now += 100) {
+      await runFrame(now);
+    }
+    expect(runtime.write).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Replay scrubber")).toHaveValue("0");
+
+    runtime.pendingOutputSize.mockReturnValue(0);
+    await runFrame(1600);
+    // 세운 동안의 1.5초를 건너뛰지 않고 멈춘 자리(0)에서 한 프레임(100ms)만 흘렀다.
+    expect(screen.getByLabelText("Replay scrubber")).toHaveValue("100");
+    expect(runtime.write).toHaveBeenCalledTimes(1);
+  });
+
   it("initializes replay even when terminal settings resolve after the recording", async () => {
     type ReplaySettingsPayload = {
       theme: "system" | "light" | "dark";
@@ -353,7 +446,7 @@ describe("SessionReplayWindow", () => {
     render(<SessionReplayWindow recordingId="recording-1" />);
 
     await waitFor(() =>
-      expect(window.dolssh.sessionReplays.get).toHaveBeenCalledWith("recording-1"),
+      expect(window.dolssh.sessionReplays.load).toHaveBeenCalledWith("recording-1"),
     );
     expect(mocks.runtimeRecords).toHaveLength(0);
 
@@ -391,32 +484,8 @@ describe("SessionReplayWindow", () => {
   });
 
   it("initializes replay when recording resolves after terminal settings", async () => {
-    let resolveRecording!: (value: Awaited<ReturnType<typeof window.dolssh.sessionReplays.get>>) => void;
-    const delayedRecording = new Promise<
-      Awaited<ReturnType<typeof window.dolssh.sessionReplays.get>>
-    >((resolve) => {
-      resolveRecording = resolve;
-    });
-    window.dolssh.sessionReplays.get = vi.fn().mockReturnValue(delayedRecording);
-
-    render(<SessionReplayWindow recordingId="recording-1" />);
-
-    await waitFor(() => expect(window.dolssh.settings.get).toHaveBeenCalled());
-    expect(mocks.runtimeRecords).toHaveLength(0);
-
-    resolveRecording({
-      recordingId: "recording-1",
-      sessionId: "session-1",
-      hostId: "host-1",
-      hostLabel: "nas",
-      title: "NAS",
-      connectionDetails: "doldolma.com · 22 · doyoung",
-      connectionKind: "ssh",
-      connectedAt: "2026-03-29T00:00:00.000Z",
-      disconnectedAt: "2026-03-29T00:00:02.000Z",
-      durationMs: 2000,
-      initialCols: 80,
-      initialRows: 24,
+    const api = useRecording({
+      ...DEFAULT_RECORDING,
       entries: [
         {
           type: "output",
@@ -425,6 +494,19 @@ describe("SessionReplayWindow", () => {
         },
       ],
     });
+    let resolveRecording!: (value: SessionReplayIndex) => void;
+    window.dolssh.sessionReplays.load = vi.fn().mockReturnValue(
+      new Promise<SessionReplayIndex>((resolve) => {
+        resolveRecording = resolve;
+      }),
+    );
+
+    render(<SessionReplayWindow recordingId="recording-1" />);
+
+    await waitFor(() => expect(window.dolssh.settings.get).toHaveBeenCalled());
+    expect(mocks.runtimeRecords).toHaveLength(0);
+
+    resolveRecording(api.index);
 
     await waitFor(() => expect(mocks.runtimeRecords).toHaveLength(1));
     await waitFor(() =>
@@ -541,5 +623,101 @@ describe("SessionReplayWindow", () => {
 
     // Zooming does not resume playback.
     expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+  });
+
+  // 녹화를 통째로 받지 않고 구간 단위로 받는다. 구간 경계를 지나도 출력이 빠짐없이 차례로 그려져야 한다.
+  it("plays a recording split into segments to the end, in order", async () => {
+    const outputs = Array.from({ length: 12 }, (_, index) => `line-${index}\n`);
+    useRecording(
+      {
+        ...DEFAULT_RECORDING,
+        durationMs: 1300,
+        entries: outputs.map((text, index) => ({
+          type: "output" as const,
+          atMs: 100 * (index + 1),
+          dataBase64: btoa(text),
+        })),
+      },
+      1,
+    );
+
+    render(<SessionReplayWindow recordingId="recording-1" />);
+    await waitFor(() => expect(mocks.runtimeRecords).toHaveLength(1));
+    await waitFor(() => expect(mocks.rafCallbacks.length).toBeGreaterThan(0));
+    const runtime = mocks.runtimeRecords[0]!;
+
+    for (let now = 50; now <= 1400; now += 50) {
+      await act(async () => {
+        mocks.currentNow = now;
+        for (const callback of mocks.rafCallbacks.splice(0)) {
+          callback(now);
+        }
+      });
+    }
+
+    const written = runtime.write.mock.calls
+      .map(([data]) => new TextDecoder().decode(data as Uint8Array))
+      .join("");
+    expect(written).toBe(outputs.join(""));
+    expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+  });
+
+  // 다음 구간을 받는 동안에는 재생 시계를 세운다. 받으면 멈춘 자리에서 잇는다(그 사이 출력을 건너뛰지 않는다).
+  it("holds the playback clock while the next segment is still loading", async () => {
+    const api = useRecording(
+      {
+        ...DEFAULT_RECORDING,
+        entries: [
+          { type: "output", atMs: 100, dataBase64: btoa("first\n") },
+          { type: "output", atMs: 200, dataBase64: btoa("second\n") },
+        ],
+      },
+      1,
+    );
+    let releaseSecond!: () => void;
+    const secondArrived = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    window.dolssh.sessionReplays.readSegment = vi.fn(
+      async (recordingId: string, segmentIndex: number) => {
+        if (segmentIndex === 1) {
+          await secondArrived;
+        }
+        return api.readSegment(recordingId, segmentIndex);
+      },
+    );
+
+    render(<SessionReplayWindow recordingId="recording-1" />);
+    await waitFor(() => expect(mocks.runtimeRecords).toHaveLength(1));
+    await waitFor(() => expect(mocks.rafCallbacks.length).toBeGreaterThan(0));
+    const runtime = mocks.runtimeRecords[0]!;
+
+    const runFrame = async (now: number) => {
+      await act(async () => {
+        mocks.currentNow = now;
+        for (const callback of mocks.rafCallbacks.splice(0)) {
+          callback(now);
+        }
+      });
+    };
+    await runFrame(150);
+    expect(runtime.write).toHaveBeenCalledTimes(1);
+    await runFrame(250);
+    await runFrame(400);
+    await runFrame(800);
+    // 둘째 구간이 없어서 250 에서 섰다.
+    expect(screen.getByLabelText("Replay scrubber")).toHaveValue("250");
+    expect(runtime.write).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      releaseSecond();
+    });
+    await runFrame(850);
+    expect(runtime.write).toHaveBeenCalledTimes(2);
+    expect(
+      new TextDecoder().decode(runtime.write.mock.calls[1]?.[0] as Uint8Array),
+    ).toBe("second\n");
+    // 멈춘 자리에서 한 프레임(50ms)만 흘렀다.
+    expect(screen.getByLabelText("Replay scrubber")).toHaveValue("300");
   });
 });

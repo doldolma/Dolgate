@@ -964,7 +964,8 @@ export function createMockApi(): DesktopApi {
     },
     sessionReplays: {
       open: vi.fn().mockResolvedValue(undefined),
-      get: vi.fn().mockRejectedValue(new Error("not implemented in test")),
+      load: vi.fn().mockRejectedValue(new Error("not implemented in test")),
+      readSegment: vi.fn().mockRejectedValue(new Error("not implemented in test")),
     },
     portForwards: {
       list: vi.fn().mockResolvedValue({

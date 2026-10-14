@@ -200,9 +200,15 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
   );
 
   ipcMain.handle(
-    ipcChannels.sessionReplays.get,
+    ipcChannels.sessionReplays.load,
     async (_event, recordingId: string) =>
-      ctx.sessionReplayService.get(recordingId),
+      ctx.sessionReplayService.load(recordingId),
+  );
+
+  ipcMain.handle(
+    ipcChannels.sessionReplays.readSegment,
+    async (_event, recordingId: string, segmentIndex: number) =>
+      ctx.sessionReplayService.readSegment(recordingId, segmentIndex),
   );
 
   ipcMain.handle(ipcChannels.sessionReplays.storageUsage, async () =>
