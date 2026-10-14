@@ -6,7 +6,7 @@ To run your own login and sync server, see the [self-hosting guide](./sync-api-s
 ## Prerequisites
 
 - Node.js 24.15.0 or later and npm 11 or later, as specified in the root [package.json](../package.json).
-- Go 1.26.5 or later for the SSH engine and sync server; see [go.mod](../services/ssh-core/go.mod).
+- Go 1.27.2 or later for the SSH engine and sync server; see [go.mod](../services/ssh-core/go.mod).
 - Rust installed through `rustup` for RDP/VNC. The repository selects the pinned version automatically through [rust-toolchain.toml](../services/rdp-core/rust-toolchain.toml).
 - A C/C++ toolchain, Make, and Perl for native dependencies: Xcode Command Line Tools on macOS, Visual Studio C++ Build Tools on Windows, or the compiler/build tools for your Linux distribution.
 - For Android: JDK 17, Android SDK, and NDK. Required SDK/NDK versions are listed in [android/build.gradle](../apps/mobile/android/build.gradle).

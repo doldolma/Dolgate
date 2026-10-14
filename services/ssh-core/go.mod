@@ -1,6 +1,6 @@
 module dolssh/services/ssh-core
 
-go 1.26.9
+go 1.27.2
 
 replace tailscale.com v1.102.1 => github.com/doldolma/tailscale v1.102.1-dolgate.1
 

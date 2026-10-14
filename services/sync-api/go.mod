@@ -1,6 +1,6 @@
 module dolssh/services/sync-api
 
-go 1.26.9
+go 1.27.2
 
 require (
 	dolssh/services/ssh-core v0.0.0
