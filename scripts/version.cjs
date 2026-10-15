@@ -128,13 +128,15 @@ function updateMetainfoReleases(contents, version, date) {
     return contents.slice(0, openAt) + entry + contents.slice(closeAt + 2);
   }
 
-  const openTag = contents.match(/([ \t]*)<releases>\n/u);
+  // 줄바꿈은 파일을 따른다 — Windows 에서는 git 이 CRLF 로 꺼내 둬서(core.autocrlf) <releases> 뒤가
+  // \r\n 이다. \n 만 찾던 때는 Windows 에서 버전을 올릴 때마다 여기서 실패했다.
+  const openTag = contents.match(/([ \t]*)<releases>(\r?\n)/u);
   if (!openTag) {
     throw new Error("metainfo 에 <releases> 블록이 없습니다.");
   }
   // 최신이 위인 목록이다(AppStream 규격). 지난 릴리스는 지우지 않는다 — 상점이 변경 이력으로 쓴다.
-  const indent = `${openTag[1]}  `;
-  return contents.replace(openTag[0], `${openTag[0]}${indent}${entry}\n`);
+  const [line, outerIndent, newline] = openTag;
+  return contents.replace(line, `${line}${outerIndent}  ${entry}${newline}`);
 }
 
 function setVersion(version) {
@@ -160,20 +162,21 @@ function setVersion(version) {
     lockfile.packages["apps/mobile"].version = version;
   }
 
+  // 새 내용을 다 만든 뒤에 쓴다. 중간에 실패하면(예: metainfo 에 <releases> 가 없다) 아무것도 쓰지
+  // 않는다 — 앞의 파일만 바뀐 채 멈추면, 다시 돌릴 때마다 버전이 한 칸씩 더 올라갔다.
+  const iosProject = updateIosMarketingVersion(fs.readFileSync(iosProjectPath, "utf8"), version);
+  const metainfo = updateMetainfoReleases(
+    fs.readFileSync(desktopMetainfoPath, "utf8"),
+    version,
+    process.env.DOLGATE_RELEASE_DATE || today(),
+  );
+
   writeJson(rootPackagePath, rootPackage);
   writeJson(desktopPackagePath, desktopPackage);
   writeJson(mobilePackagePath, mobilePackage);
   writeJson(lockfilePath, lockfile);
-
-  const iosProject = fs.readFileSync(iosProjectPath, "utf8");
-  fs.writeFileSync(iosProjectPath, updateIosMarketingVersion(iosProject, version), "utf8");
-
-  const metainfo = fs.readFileSync(desktopMetainfoPath, "utf8");
-  fs.writeFileSync(
-    desktopMetainfoPath,
-    updateMetainfoReleases(metainfo, version, process.env.DOLGATE_RELEASE_DATE || today()),
-    "utf8",
-  );
+  fs.writeFileSync(iosProjectPath, iosProject, "utf8");
+  fs.writeFileSync(desktopMetainfoPath, metainfo, "utf8");
 }
 
 function checkVersion() {
