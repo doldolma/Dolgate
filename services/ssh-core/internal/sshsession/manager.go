@@ -43,9 +43,11 @@ type sessionHandle struct {
 	// 동시 Write는 상류가 명시한 데이터 레이스다. 레이스가 아니어도 1KB짜리 통합 init
 	// 명령이 사용자 키 입력과 바이트 단위로 섞여 원격 PTY에 깨진 명령줄로 도착한다.
 	// Close(=CloseWrite)도 Write가 읽는 sentEOF를 건드리므로 같은 락으로 묶는다.
-	stdinMu   sync.Mutex
-	closed    chan struct{}
-	closer    sync.Once
+	stdinMu sync.Mutex
+	closed  chan struct{}
+	closer  sync.Once
+	// streams 는 stdout·stderr 읽기 루프다. 원격이 끝나면 이것이 받아 둔 출력을 다 내보낸 뒤에 닫는다.
+	streams   sync.WaitGroup
 	handshake autocomplete.Handshake
 
 	shellIntegrationMu             sync.Mutex
@@ -403,6 +405,7 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 		},
 	})
 
+	handle.streams.Add(2)
 	go m.stream(sessionID, handle, stdout)
 	go m.stream(sessionID, handle, stderr)
 	// Wait는 별도 goroutine에서 감시해 원격 종료를 이벤트로 전파한다.
@@ -907,6 +910,16 @@ func (m *Manager) waitForSession(sessionID string) {
 		return
 	}
 	waitErr := session.session.Wait()
+	// 원격이 끝났다. 흐름 제어로 멈춰 둔 읽기 루프에는 이미 받아 둔 출력(SSH 창, 최대 2MB)이 남아 있을
+	// 수 있다. closed 를 먼저 보내면 녹화·공유·탭이 그것을 버린다(실측: 출력이 쏟아지다 끝난 세션의
+	// 녹화에서 마지막 1.2~2.0MB 가 빠졌다). 멈춤을 풀고 다 내보낸 뒤에 닫는다.
+	//
+	// 받아 둔 것만 읽으므로 서버를 기다리지 않는다. 그래도 탭은 무슨 일이 있어도 닫혀야 하므로 상한을
+	// 둔다. 서버가 답 없이 사라진 경우는 keepalive 가 이미 닫았으므로 기다리지 않는다.
+	if m.HasSession(sessionID) {
+		m.config.FlowControl.Stop(sessionID)
+		waitUntilDone(&session.streams, streamDrainTimeout)
+	}
 	reason := classifyWaitError(waitErr)
 	message := ""
 	if reason == closeReasonTransport && waitErr != nil {
@@ -916,7 +929,28 @@ func (m *Manager) waitForSession(sessionID string) {
 	m.closeSession(sessionID, message, reason)
 }
 
+// streamDrainTimeout 은 원격이 끝난 뒤 읽기 루프가 받아 둔 출력을 다 내보내기를 기다리는 상한이다.
+const streamDrainTimeout = 3 * time.Second
+
+// waitUntilDone 은 group 이 끝나거나 timeout 이 지나면 돌아온다. 끝났으면 true.
+func waitUntilDone(group *sync.WaitGroup, timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		group.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
 func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Reader) {
+	defer handle.streams.Done()
 	// stdout/stderr 모두 동일한 raw stream frame으로 흘려 상위 레이어가 그대로 전달할 수 있게 한다.
 	buffer := make([]byte, 4096)
 	for {

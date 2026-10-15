@@ -287,6 +287,19 @@ describe("createZmodemController", () => {
     expect(session.start).not.toHaveBeenCalled();
   });
 
+  // 이스케이프 요청은 라이브러리 내부 메서드(_send_ZRINIT)를 덮어서 건다. 그 메서드가 없는 세션(판이 바뀜)은
+  // 덮지 않고 예전처럼 시작한다.
+  it("starts a session without library internals as before, without asking for escapes", () => {
+    const deps = makeDeps();
+    const controller = createZmodemController(deps);
+    const session = { type: "receive" as const, on: vi.fn(), start: vi.fn(), abort: vi.fn() };
+    controller.consume(new Uint8Array([1]));
+    captured?.options.on_detect({ confirm: () => session, deny: vi.fn() });
+    expect(session.start).toHaveBeenCalledTimes(1);
+    expect(session).not.toHaveProperty("_send_ZRINIT");
+    controller.dispose();
+  });
+
   it("aborts the active session on dispose", () => {
     const deps = makeDeps();
     const controller = createZmodemController(deps);
@@ -341,24 +354,91 @@ describe("createZmodemController", () => {
 
   // 전송 중 파싱이 깨지면 세션을 끊고 남은 이진 조각은 버린다. 그것이 그치고 셸 출력이 오면 다시 화면에
   // 보낸다 — 예전에는 격리가 끝나지 않아 그 탭이 굳었다.
-  it("lifts the quarantine once plain output resumes after a broken transfer", () => {
-    const deps = makeDeps();
-    const controller = createZmodemController(deps);
-    const session = { type: "receive" as const, on: vi.fn(), start: vi.fn(), abort: vi.fn() };
-    controller.consume(new Uint8Array([24]));
-    captured?.options.on_detect({ confirm: () => session, deny: vi.fn() });
+  describe("after a broken transfer (quarantine)", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
 
-    consumeShouldThrow = true;
-    controller.consume(new Uint8Array([24, 1, 2]));
-    expect(session.abort).toHaveBeenCalled();
-    vi.mocked(deps.writeToTerminal).mockClear();
+    function breakTransfer() {
+      const deps = makeDeps();
+      const controller = createZmodemController(deps);
+      const session = { type: "receive" as const, on: vi.fn(), start: vi.fn(), abort: vi.fn() };
+      controller.consume(new Uint8Array([24]));
+      captured?.options.on_detect({ confirm: () => session, deny: vi.fn() });
+      consumeShouldThrow = true;
+      controller.consume(new Uint8Array([24, 1, 2]));
+      expect(session.abort).toHaveBeenCalled();
+      vi.mocked(deps.writeToTerminal).mockClear();
+      return { deps, controller };
+    }
 
-    controller.consume(new Uint8Array([24, 9, 9]));
-    expect(deps.writeToTerminal).not.toHaveBeenCalled();
+    it("lifts the quarantine once plain output resumes", () => {
+      const { deps, controller } = breakTransfer();
 
-    const prompt = new TextEncoder().encode("$ ");
-    controller.consume(prompt);
-    expect(deps.writeToTerminal).toHaveBeenCalledWith(prompt);
+      controller.consume(new Uint8Array([24, 9, 9]));
+      expect(deps.writeToTerminal).not.toHaveBeenCalled();
+
+      // 바로 내보내지 않고 잠깐 붙잡아 둔다 — 아직 오는 전송 데이터일 수 있다.
+      const prompt = new TextEncoder().encode("$ ");
+      controller.consume(prompt);
+      expect(deps.writeToTerminal).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(300);
+      expect(deps.writeToTerminal).toHaveBeenCalledWith(prompt);
+
+      // 격리가 끝났으니 그 뒤 출력은 바로 간다.
+      const next = new TextEncoder().encode("ls\r\n");
+      controller.consume(next);
+      expect(deps.writeToTerminal).toHaveBeenLastCalledWith(next);
+    });
+
+    // 프레임이 큰 전송(sz -8)은 데이터 조각에도 ZDLE 가 없다. 첫 조각에서 바로 풀어 파일 내용이 화면에
+    // 쏟아졌다(실측).
+    it("drops plain-looking chunks when transfer data follows them", () => {
+      const { deps, controller } = breakTransfer();
+
+      controller.consume(new TextEncoder().encode("12345\n12346\n"));
+      vi.advanceTimersByTime(100);
+      controller.consume(new Uint8Array([0x31, 24, 0x68, 0x32]));
+      vi.advanceTimersByTime(1000);
+      expect(deps.writeToTerminal).not.toHaveBeenCalled();
+    });
+
+    // 셸 통합의 "명령 끝" 표시(OSC 133;D)부터는 셸 출력이다. 그 앞에 같이 온 전송 찌꺼기는 버린다(실측: 멈춘
+    // sz 를 끝낸 뒤 파일 데이터 조각이 프롬프트 앞에 풀려 나왔다).
+    it.each([
+      ["in one chunk", [[0x20, 0x3d, 0x7a, 0x5e, 0x2d, ...new TextEncoder().encode("\x1b]133;D;128\x07$ ")]]],
+      [
+        "with the marker split across chunks",
+        [[0x20, 0x3d, 0x7a, 0x5e, 0x2d, 0x1b, 0x5d, 0x31], [...new TextEncoder().encode("33;D;128\x07$ ")]],
+      ],
+    ])("drops transfer residue before the shell's command-finished marker (%s)", (_label, chunks) => {
+      const { deps, controller } = breakTransfer();
+
+      for (const chunk of chunks) {
+        controller.consume(Uint8Array.from(chunk));
+      }
+      vi.advanceTimersByTime(1000);
+      const written = vi.mocked(deps.writeToTerminal).mock.calls.map(([bytes]) => new TextDecoder().decode(bytes));
+      expect(written.join("")).toBe("\x1b]133;D;128\x07$ ");
+    });
+
+    // sz 는 취소를 받으면 CAN 10개 + BS 10개를 보내고 끝난다. 그 뒤는 셸 출력이다 — 같은 조각에 붙어 와도
+    // 버리지 않고 바로 보낸다(예전에는 조각째 버려 프롬프트가 사라졌다).
+    it.each([
+      ["in one chunk", [[...Array(10).fill(24), ...Array(10).fill(8), 0x24, 0x20]]],
+      ["split across chunks", [[0x31, 24, 0x32, ...Array(10).fill(24), 8, 8, 8], [...Array(7).fill(8), 0x24, 0x20]]],
+    ])("shows the shell output right after sz's cancel signal (%s)", (_label, chunks) => {
+      const { deps, controller } = breakTransfer();
+
+      for (const chunk of chunks) {
+        controller.consume(Uint8Array.from(chunk));
+      }
+      const written = vi.mocked(deps.writeToTerminal).mock.calls.map(([bytes]) => new TextDecoder().decode(bytes));
+      expect(written).toEqual(["$ "]);
+    });
   });
 
   it("falls back to a raw terminal write when consume throws", () => {

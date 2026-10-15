@@ -3497,7 +3497,8 @@
   },
   "zmodem": {
     "remoteAborted": "The remote sender aborted the file transfer.",
-    "cancelFailed": "The transfer could not be ended safely. Reconnect the SSH session.",
+    "dataCorrupted": "The transfer was stopped because its data was corrupted.",
+    "remoteStalled": "The transfer was stopped because the remote side stopped responding.",
     "tooLarge": "The file is too large (over 512MB). Use SFTP instead.",
     "downloadFailed": "The download failed."
   },

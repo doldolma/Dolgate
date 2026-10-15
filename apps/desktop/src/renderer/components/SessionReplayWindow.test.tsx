@@ -304,12 +304,55 @@ describe("SessionReplayWindow", () => {
     expect(runtime.terminal.clear).toHaveBeenCalledTimes(1);
     expect(runtime.terminal.resize).toHaveBeenCalledTimes(1);
     expect(runtime.terminal.resize).toHaveBeenNthCalledWith(1, 80, 24);
-    expect(runtime.write).toHaveBeenCalledTimes(1);
+    // 다시 그리기 전에 CAN 으로 파서를 바닥으로 돌린다 — reset() 은 이스케이프 중간 상태를 남겨, 다시 그리는
+    // 출력의 앞부분이 먹혔다. 바이트로 넣어야 UTF-8 해독기도 비운다.
+    expect(runtime.write).toHaveBeenCalledTimes(2);
+    expect(Array.from(runtime.write.mock.calls[0]?.[0] as Uint8Array)).toEqual([0x18]);
     expect(replayTerminal?.style.width).toBe(initialWidth);
     expect(replayTerminal?.style.height).toBe(initialHeight);
     expect(
-      new TextDecoder().decode(runtime.write.mock.calls[0]?.[0] as Uint8Array),
+      new TextDecoder().decode(runtime.write.mock.calls[1]?.[0] as Uint8Array),
     ).toBe("hello\n");
+  });
+
+  // 크기 바꿈은 앞 출력이 다 그려진 뒤에 한다(바로 하면 앞 출력이 바뀐 크기로 그려졌다). 다 그려졌다는
+  // 알림(scheduleAfterWriteDrain)을 받으면 프레임을 기다리지 않고 바로 잇는다.
+  it("applies a resize only after the output before it is drawn, then continues at once", async () => {
+    render(<SessionReplayWindow recordingId="recording-1" />);
+    await waitFor(() => expect(mocks.runtimeRecords).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument(),
+    );
+    const runtime = mocks.runtimeRecords[0]!;
+    const scheduleAfterWriteDrain = (
+      runtime as unknown as { scheduleAfterWriteDrain: ReturnType<typeof vi.fn> }
+    ).scheduleAfterWriteDrain;
+    let pending = 0;
+    runtime.pendingOutputSize.mockImplementation(() => pending);
+    runtime.write.mockImplementation(() => {
+      pending = 1;
+    });
+    runtime.write.mockClear();
+    runtime.terminal.resize.mockClear();
+    scheduleAfterWriteDrain.mockClear();
+    const written = () =>
+      runtime.write.mock.calls.map(([data]) => new TextDecoder().decode(data as Uint8Array));
+
+    fireEvent.change(screen.getByLabelText("Replay scrubber"), {
+      target: { value: "1250" },
+    });
+
+    // hello 를 넘기고 크기 바꿈 앞에서 섰다.
+    expect(written()).toEqual(["hello\n"]);
+    expect(runtime.terminal.resize).not.toHaveBeenCalled();
+    expect(scheduleAfterWriteDrain).toHaveBeenCalledTimes(1);
+
+    pending = 0;
+    act(() => {
+      (scheduleAfterWriteDrain.mock.calls[0]![0] as () => void)();
+    });
+    expect(runtime.terminal.resize).toHaveBeenCalledWith(100, 40);
+    expect(written()).toEqual(["hello\n", "world\n"]);
   });
 
   it.each([
@@ -658,7 +701,8 @@ describe("SessionReplayWindow", () => {
     const written = runtime.write.mock.calls
       .map(([data]) => new TextDecoder().decode(data as Uint8Array))
       .join("");
-    expect(written).toBe(outputs.join(""));
+    // 처음 그리기 전에 파서를 비우는 CAN 하나, 그 뒤로 출력이 차례로.
+    expect(written).toBe(`\x18${outputs.join("")}`);
     expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
   });
 
@@ -701,21 +745,22 @@ describe("SessionReplayWindow", () => {
       });
     };
     await runFrame(150);
-    expect(runtime.write).toHaveBeenCalledTimes(1);
+    // 처음 그리기 전의 CAN(파서 비우기) + first.
+    expect(runtime.write).toHaveBeenCalledTimes(2);
     await runFrame(250);
     await runFrame(400);
     await runFrame(800);
     // 둘째 구간이 없어서 250 에서 섰다.
     expect(screen.getByLabelText("Replay scrubber")).toHaveValue("250");
-    expect(runtime.write).toHaveBeenCalledTimes(1);
+    expect(runtime.write).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       releaseSecond();
     });
     await runFrame(850);
-    expect(runtime.write).toHaveBeenCalledTimes(2);
+    expect(runtime.write).toHaveBeenCalledTimes(3);
     expect(
-      new TextDecoder().decode(runtime.write.mock.calls[1]?.[0] as Uint8Array),
+      new TextDecoder().decode(runtime.write.mock.calls[2]?.[0] as Uint8Array),
     ).toBe("second\n");
     // 멈춘 자리에서 한 프레임(50ms)만 흘렀다.
     expect(screen.getByLabelText("Replay scrubber")).toHaveValue("300");

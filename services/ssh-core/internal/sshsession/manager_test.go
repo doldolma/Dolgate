@@ -55,6 +55,8 @@ type sshTestServer struct {
 	// floodingShell 이면 셸이 끝없이 출력하고(`yes` 처럼), 실제로 써 보낸 양을 floodWritten 에 센다.
 	floodingShell bool
 	floodWritten  atomic.Int64
+	// finiteShellBytes 가 0 보다 크면 셸이 그만큼 쓰고 끝난다(`seq …; exit` 처럼).
+	finiteShellBytes int
 }
 
 func TestManagerPasswordFlow(t *testing.T) {
@@ -732,6 +734,10 @@ func handleConnection(raw net.Conn, config *ssh.ServerConfig, server *sshTestSer
 					_ = req.Reply(true, nil)
 					if server.floodingShell {
 						go floodShell(ch, server)
+						continue
+					}
+					if server.finiteShellBytes > 0 {
+						go finiteShell(ch, server.finiteShellBytes)
 						continue
 					}
 					_, _ = ch.Write([]byte("welcome\n"))

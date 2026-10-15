@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -15,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionReplayEntry, SessionReplaySegment } from "@shared";
 import {
   decodeReplaySegment,
+  indexPlainReplayEvents,
   loadReplaySegments,
   parseReplayIndex,
   readReplaySegment,
@@ -203,6 +205,57 @@ describe("session replay events", () => {
     expect(await readAllTexts(files)).toEqual(["legacy", "resize:90x20"]);
     expect(existsSync(files.legacyEvents)).toBe(false);
     expect(existsSync(files.events)).toBe(true);
+  });
+
+  // 폴더에 쓸 수 없으면(권한·디스크 공간) 옛 녹화를 바꿔 쓰지 못한다. 그래도 원래 파일을 그대로 읽어 연다 —
+  // 바꿔 써야만 열게 되면서 원문 오류(EACCES·ENOSPC)로 열리지 않았다(실측).
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "reads a legacy recording in place when the folder cannot be written",
+    async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const lines = [
+        outputLine(5, "가나다"),
+        JSON.stringify({ type: "resize", atMs: 7, cols: 90, rows: 20 }),
+        "not json",
+        outputLine(3, "back"),
+        outputLine(9, "last"),
+      ];
+      writeFileSync(files.legacyEvents, `${lines.join("\n")}\n`);
+      chmodSync(tempDir, 0o555);
+      try {
+        const records = await loadReplaySegments(files);
+        expect(records.every((record) => record.plain === true)).toBe(true);
+        const texts: string[] = [];
+        const times: number[] = [];
+        for (const record of records) {
+          const segment = await readReplaySegment(files.legacyEvents, record);
+          texts.push(...segmentTexts(segment));
+          times.push(...Array.from(segment.atMs));
+        }
+        expect(texts).toEqual(["가나다", "resize:90x20", "back", "last"]);
+        // 시각은 바꿔 쓸 때와 같이 앞보다 작아지지 않는다.
+        expect(times).toEqual([5, 7, 7, 9]);
+      } finally {
+        chmodSync(tempDir, 0o755);
+      }
+      expect(existsSync(files.legacyEvents)).toBe(true);
+      expect(existsSync(`${files.events}.tmp`)).toBe(false);
+      expect(existsSync(files.events)).toBe(false);
+    },
+  );
+
+  // 구간은 새 녹화와 같은 기준(JSON 줄의 양)으로 나뉘고, 각 구간은 그 파일의 줄 경계에서 읽힌다.
+  it("indexes a plain legacy recording into line-aligned segments", async () => {
+    const lines = Array.from({ length: 50 }, (_, index) => outputLine(index * 10, `line-${index}\n`));
+    writeFileSync(files.legacyEvents, lines.join("\n"));
+    const records = await indexPlainReplayEvents(files.legacyEvents, 400);
+    expect(records.length).toBeGreaterThan(1);
+    expect(records.reduce((sum, record) => sum + record.entryCount, 0)).toBe(50);
+    const texts: string[] = [];
+    for (const record of records) {
+      texts.push(...segmentTexts(await readReplaySegment(files.legacyEvents, record)));
+    }
+    expect(texts).toEqual(lines.map((_, index) => `line-${index}\n`));
   });
 
   // 푸는 중에 압축 오류가 나면 거기까지 풀린 것도 쓰지 않는다 — 깨진 데이터는 오류 전에 가짜 줄로 풀려 나온다.

@@ -40,6 +40,10 @@ declare module "nora-zmodemjs" {
     type: "send" | "receive";
     on(event: "offer", handler: (offer: ZmodemOffer) => void): void;
     on(event: "session_end", handler: () => void): void;
+    /** 헤더나 데이터 조각 하나를 해석했다. */
+    on(event: "receive", handler: () => void): void;
+    /** 헤더를 기다리다 헤더가 아니라서 버린 바이트. */
+    on(event: "garbage", handler: (octets: number[]) => void): void;
     start(): void;
     abort(): void;
     aborted?(): boolean;

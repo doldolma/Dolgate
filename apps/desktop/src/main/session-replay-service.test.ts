@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -991,4 +992,192 @@ describe("SessionReplayService", () => {
       .reduce((sum, size) => sum + size, 0);
     expect(service.getStorageUsage()).toEqual({ totalBytes: expectedBytes, recordingCount: 1 });
   });
+
+  // 녹화 중 시계가 뒤로 가고 그 시간이 다 지나기 전에 세션이 끝나면, 벽시계로 잰 길이가 마지막 항목보다
+  // 짧았다. 재생은 길이 너머를 그리지 않아 끝부분이 안 보였다(시계가 세션 길이보다 많이 가면 길이 0 —
+  // 녹화 전체가 빈 화면). 쓸 때도 읽을 때도 마지막 항목까지를 길이로 본다.
+  it("plays up to the last entry when the clock moved back before the session ended", async () => {
+    const coreManager = {
+      getSessionLifecycleState: vi.fn(() => createLifecycleState()),
+      attachSessionRecording: vi.fn(),
+    };
+    const service = activateService(
+      new SessionReplayService(
+        { get: () => ({ sessionReplayRetentionCount: 100 }) } as never,
+        coreManager as never,
+      ),
+    );
+    service.handleTerminalEvent({
+      type: "connected",
+      sessionId: "session-1",
+      payload: { status: "connected" },
+    } as never);
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1];
+    vi.setSystemTime(new Date("2026-03-29T00:00:05.000Z"));
+    service.handleTerminalStream("session-1", new Uint8Array(Buffer.from("a")));
+    vi.setSystemTime(new Date("2026-03-29T00:00:02.000Z"));
+    service.handleTerminalStream("session-1", new Uint8Array(Buffer.from("b")));
+    vi.setSystemTime(new Date("2026-03-29T00:00:03.000Z"));
+    service.handleTerminalEvent({
+      type: "closed",
+      sessionId: "session-1",
+      payload: { message: "closed" },
+    } as never);
+
+    expect((await service.load(recordingId)).durationMs).toBe(5000);
+
+    // 이 수정 전에 만든 녹화(메타의 길이가 짧은 것)도 읽을 때 맞춘다.
+    const { replayDirectoryPath } = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+    const metaPath = path.join(replayDirectoryPath, `${recordingId}.meta.json`);
+    writeFileSync(metaPath, JSON.stringify({ ...JSON.parse(readFileSync(metaPath, "utf8")), durationMs: 0 }));
+    expect((await service.load(recordingId)).durationMs).toBe(5000);
+  });
+
+  // 재생기는 구간을 그때그때 읽는다. 재생 창을 연 채 보존 한도 밖으로 밀린 녹화를 지우면 그 창이 엉뚱한
+  // 화면에서 멈췄다(실측). 창이 열려 있는 동안은 남기고, 창을 닫으면 지운다.
+  it("keeps a recording open in a replay window out of pruning until the window closes", async () => {
+    const lifecycleStates = new Map<string, ReturnType<typeof createLifecycleState>>([
+      ["session-1", createLifecycleState({ connectedAt: "2026-03-29T00:00:00.000Z" })],
+      ["session-2", createLifecycleState({ connectedAt: "2026-03-29T00:01:00.000Z" })],
+    ]);
+    const coreManager = {
+      getSessionLifecycleState: vi.fn((sessionId: string) => lifecycleStates.get(sessionId) ?? null),
+      attachSessionRecording: vi.fn(),
+    };
+    const service = activateService(
+      new SessionReplayService(
+        { get: () => ({ sessionReplayRetentionCount: 1 }) } as never,
+        coreManager as never,
+      ),
+    );
+    const { replayDirectoryPath } = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+    const record = (sessionId: string, minute: string) => {
+      vi.setSystemTime(new Date(`2026-03-29T00:${minute}:00.000Z`));
+      service.handleTerminalEvent({
+        type: "connected",
+        sessionId,
+        payload: { status: "connected" },
+      } as never);
+      const recordingId = coreManager.attachSessionRecording.mock.calls.at(-1)?.[1] as string;
+      service.handleTerminalStream(sessionId, new Uint8Array(Buffer.from(`${sessionId}\n`)));
+      vi.setSystemTime(new Date(`2026-03-29T00:${minute}:03.000Z`));
+      service.handleTerminalEvent({
+        type: "closed",
+        sessionId,
+        payload: { message: "closed" },
+      } as never);
+      return recordingId;
+    };
+
+    const first = record("session-1", "00");
+    await service.openReplayWindow(first, {} as never);
+    record("session-2", "01");
+    const firstMeta = path.join(replayDirectoryPath, `${first}.meta.json`);
+    expect(existsSync(firstMeta)).toBe(true);
+    expect((await readRecording(service, first)).entries).toHaveLength(1);
+
+    browserWindowInstances[0]!.close();
+    expect(existsSync(firstMeta)).toBe(false);
+    expect(existsSync(path.join(replayDirectoryPath, `${first}.events.jsonl.gz`))).toBe(false);
+  });
+
+  // 옛 녹화를 바꿔 쓰는 동안 로그아웃했다 다시 들어와 같은 녹화를 열면, 두 번째 변환이 같은 임시 파일로
+  // 시작해 하나가 "ENOENT … rename" 으로 실패했다(실측). 진행 중인 변환을 기다려야 한다.
+  it("waits for an old recording's rewrite across logout and login instead of starting a second one", async () => {
+    const service = activateService(
+      new SessionReplayService(
+        { get: () => ({ sessionReplayRetentionCount: 100 }) } as never,
+        { getSessionLifecycleState: vi.fn(), attachSessionRecording: vi.fn() } as never,
+      ),
+    );
+    const { replayDirectoryPath } = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+    const recordingId = "00000000-0000-4000-8000-000000000001";
+    writeLegacyRecording(
+      replayDirectoryPath,
+      recordingId,
+      Array.from({ length: 4000 }, (_, index) => ({
+        type: "output",
+        atMs: index,
+        dataBase64: Buffer.from(`${index} `.repeat(200)).toString("base64"),
+      })),
+    );
+
+    const first = service.load(recordingId);
+    // 첫 load 가 변환을 시작할 때까지(색인을 기다리는 await 하나를 넘긴다).
+    for (let tick = 0; tick < 5; tick += 1) {
+      await Promise.resolve();
+    }
+    service.deactivate();
+    service.activate(TEST_HISTORY_OWNER);
+    const second = service.load(recordingId);
+
+    const [firstIndex, secondIndex] = await Promise.all([first, second]);
+    expect(secondIndex.segments).toEqual(firstIndex.segments);
+    expect(readdirSync(replayDirectoryPath).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    expect(existsSync(path.join(replayDirectoryPath, `${recordingId}.events.jsonl`))).toBe(false);
+    expect((await readRecording(service, recordingId)).entries).toHaveLength(4000);
+  });
+
+  // 폴더에 쓸 수 없으면 옛 녹화를 바꿔 쓰지 못한다. 그래도 원래 파일에서 읽어 연다 — 서비스가 그 구간을
+  // 옛 파일에서 읽는지(경로 고르기)까지 본다.
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "opens an old recording in place when its folder cannot be written",
+    async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const service = activateService(
+        new SessionReplayService(
+          { get: () => ({ sessionReplayRetentionCount: 100 }) } as never,
+          { getSessionLifecycleState: vi.fn(), attachSessionRecording: vi.fn() } as never,
+        ),
+      );
+      const { replayDirectoryPath } = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+      const recordingId = "00000000-0000-4000-8000-000000000002";
+      writeLegacyRecording(replayDirectoryPath, recordingId, [
+        { type: "output", atMs: 5, dataBase64: Buffer.from("legacy").toString("base64") },
+        { type: "resize", atMs: 7, cols: 90, rows: 20 },
+      ]);
+      chmodSync(replayDirectoryPath, 0o555);
+      try {
+        const replay = await readRecording(service, recordingId);
+        expect(replay.entries).toEqual([
+          { type: "output", atMs: 5, dataBase64: Buffer.from("legacy").toString("base64") },
+          { type: "resize", atMs: 7, cols: 90, rows: 20 },
+        ]);
+      } finally {
+        chmodSync(replayDirectoryPath, 0o755);
+      }
+      expect(existsSync(path.join(replayDirectoryPath, `${recordingId}.events.jsonl`))).toBe(true);
+      expect(readdirSync(replayDirectoryPath).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    },
+  );
 });
+
+/** 이 형식 전의 녹화(.events.jsonl, 압축·색인 없음)를 만든다. */
+function writeLegacyRecording(
+  replayDirectoryPath: string,
+  recordingId: string,
+  entries: SessionReplayEntry[],
+): void {
+  mkdirSync(replayDirectoryPath, { recursive: true });
+  writeFileSync(
+    path.join(replayDirectoryPath, `${recordingId}.events.jsonl`),
+    `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+  );
+  writeFileSync(
+    path.join(replayDirectoryPath, `${recordingId}.meta.json`),
+    JSON.stringify({
+      recordingId,
+      sessionId: "session-legacy",
+      hostId: "host-1",
+      hostLabel: "nas",
+      title: "NAS",
+      connectionDetails: null,
+      connectionKind: "ssh",
+      connectedAt: "2026-03-28T00:00:00.000Z",
+      disconnectedAt: "2026-03-28T00:01:00.000Z",
+      durationMs: 60_000,
+      initialCols: 120,
+      initialRows: 32,
+    }),
+  );
+}

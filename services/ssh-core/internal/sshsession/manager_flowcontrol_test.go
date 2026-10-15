@@ -2,6 +2,7 @@ package sshsession_test
 
 import (
 	"bytes"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,6 +24,24 @@ func floodShell(ch ssh.Channel, server *sshTestServer) {
 			return
 		}
 	}
+}
+
+// finiteShell 은 n 바이트를 쓰고 끝난다 — exit-status 0 을 보내고 채널을 닫는다(`seq …; exit` 처럼).
+func finiteShell(ch ssh.Channel, n int) {
+	block := bytes.Repeat([]byte("0123456789012345678901234567890\n"), 1024)
+	for written := 0; written < n; {
+		chunk := block
+		if rest := n - written; rest < len(chunk) {
+			chunk = chunk[:rest]
+		}
+		count, err := ch.Write(chunk)
+		written += count
+		if err != nil {
+			return
+		}
+	}
+	_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
+	_ = ch.Close()
 }
 
 // settle 은 값이 quiet 동안 더 늘지 않을 때까지 기다려 그 값을 준다.
@@ -96,5 +115,69 @@ func TestManagerPausesRemoteOutputUntilAcked(t *testing.T) {
 	resumed := settle(t, &received, 300*time.Millisecond, 5*time.Second)
 	if resumed < paused+high {
 		t.Fatalf("처리했다고 알렸는데 더 흐르지 않았다(%d → %d)", paused, resumed)
+	}
+}
+
+// 원격이 끝날 때, 화면이 못 따라가 멈춰 둔 출력(받아 두었지만 아직 읽지 않은 것)이 closed 보다 먼저
+// 나가야 한다. 녹화·공유·탭은 closed 에서 닫히므로 그 뒤에 나간 출력은 버려진다.
+func TestManagerEmitsBufferedOutputBeforeClosed(t *testing.T) {
+	const high = 256 << 10
+	// 읽기를 멈춘 뒤에도 서버가 창(2MB) 안에서 마저 다 쓰고 끝낼 수 있는 양.
+	const total = high + 1<<20
+	server, _, cleanup := newSSHTestServer(t, func(s *sshTestServer) { s.finiteShellBytes = total })
+	defer cleanup()
+
+	flow := flowcontrol.NewWithLimits(high, 64<<10, time.Minute)
+	var mu sync.Mutex
+	received := 0
+	receivedAtClose := -1
+	closed := make(chan struct{})
+	events := make(chan protocol.Event, 16)
+	manager := sshsession.NewManagerWithConfig(func(event protocol.Event) {
+		if event.Type == protocol.EventClosed {
+			mu.Lock()
+			if receivedAtClose < 0 {
+				receivedAtClose = received
+				close(closed)
+			}
+			mu.Unlock()
+		}
+		select {
+		case events <- event:
+		default:
+		}
+	}, func(frame protocol.StreamFrame, payload []byte) {
+		flow.Sent(frame.SessionID, len(payload))
+		mu.Lock()
+		received += len(payload)
+		mu.Unlock()
+	}, sshsession.ManagerConfig{FlowControl: flow})
+
+	flow.Start("session-1")
+	if err := manager.Connect("session-1", "req-1", protocol.ConnectPayload{
+		Host:                 "127.0.0.1",
+		Port:                 server.port(),
+		Username:             "tester",
+		AuthType:             "password",
+		Password:             "s3cret",
+		TrustedHostKeyBase64: server.hostKeyBase64,
+		Cols:                 80,
+		Rows:                 24,
+	}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	waitForEvent(t, events, protocol.EventConnected)
+
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("원격이 끝났는데 closed 가 오지 않았다")
+	}
+	// closed 뒤에 출력이 더 오는지 본다.
+	time.Sleep(300 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if receivedAtClose != total || received != total {
+		t.Fatalf("closed 때까지 받은 양 %d, 끝까지 받은 양 %d — 둘 다 %d 여야 한다", receivedAtClose, received, total)
 	}
 }

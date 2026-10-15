@@ -47,7 +47,7 @@ export interface OutputFlowControlDeps {
    * 채 10초 동안 답이 없으면 렌더러가 사라진 것으로 보고 푸는데, 숨은 창에서 그게 일어나 쏟아지는
    * 출력이 끝없이 쌓였다(최소화 7분에 2.3GB). 알려 주면 숨은 동안은 풀지 않고 기다린다.
    */
-  setHidden?: (hidden: boolean) => void;
+  setHidden: (hidden: boolean) => void;
   now?: () => number;
 }
 
@@ -70,7 +70,7 @@ export function createOutputFlowControl(deps: OutputFlowControlDeps): OutputFlow
   const reportVisibility = (visible: boolean) => {
     if (reportedHidden !== !visible) {
       reportedHidden = !visible;
-      deps.setHidden?.(reportedHidden);
+      deps.setHidden(reportedHidden);
     }
   };
 

@@ -112,6 +112,8 @@ export interface ReplayTerminal {
   reset: () => void;
   /** 넘겼지만 아직 그리지 못한 출력. */
   pendingOutputSize: () => number;
+  /** 넘긴 출력을 다 그리면 callback 을 부른다(크기 바꿈을 그 뒤로 미룰 때 프레임을 기다리지 않으려고). */
+  afterWrites?: (callback: () => void) => void;
 }
 
 export interface ReplayPlayerOptions {
@@ -121,6 +123,8 @@ export interface ReplayPlayerOptions {
   terminal: ReplayTerminal;
   /** 크기 바꿈 항목이나 스냅샷으로 터미널 크기가 바뀌었다. */
   onViewport: (cols: number, rows: number) => void;
+  /** 크기 바꿈 앞에서 멈췄다가 앞 출력이 다 그려졌다. advance 를 다시 부르면 이어 간다. */
+  onWritesDrained?: () => void;
 }
 
 type RestartPoint = ReplaySnapshot | 'start';
@@ -215,6 +219,7 @@ export class ReplayPlayer {
       const count = segment.atMs.length;
       let index = this.entry;
       let runStart = index === 0 ? 0 : segment.dataEnd[index - 1];
+      let waitingForWrites = false;
       for (; index < count && segment.atMs[index] <= targetMs; index += 1) {
         if (segment.cols[index] === 0) {
           continue;
@@ -222,19 +227,38 @@ export class ReplayPlayer {
         const runEnd = index === 0 ? 0 : segment.dataEnd[index - 1];
         if (runEnd > runStart) {
           terminal.write(segment.data.subarray(runStart, runEnd));
+          runStart = runEnd;
+        }
+        // 크기는 앞 출력이 다 그려진 뒤에 바꾼다. write 는 큐에 넣기만 해서 바로 바꾸면 앞 출력이 바뀐 크기로
+        // 그려졌다(실측: 120→60칸 녹화를 건너뛰면 8~31줄이 다름). 다 그려지면 이 항목부터 잇는다.
+        if (terminal.pendingOutputSize() > 0) {
+          waitingForWrites = true;
+          break;
         }
         terminal.resize(segment.cols[index], segment.rows[index]);
         viewport = { cols: segment.cols[index], rows: segment.rows[index] };
         runStart = segment.dataEnd[index];
       }
-      const runEnd = index === 0 ? 0 : segment.dataEnd[index - 1];
-      if (runEnd > runStart) {
-        terminal.write(segment.data.subarray(runStart, runEnd));
+      if (!waitingForWrites) {
+        const runEnd = index === 0 ? 0 : segment.dataEnd[index - 1];
+        if (runEnd > runStart) {
+          terminal.write(segment.data.subarray(runStart, runEnd));
+        }
       }
       if (index > this.entry) {
         this.drawnAtMs = segment.atMs[index - 1];
       }
       this.entry = index;
+      if (waitingForWrites) {
+        // 프레임을 기다리지 않고, 다 그리는 대로 다시 불리게 한다. 크기 바꿈이 수백 개인 구간(창을 끌어 크기를
+        // 바꾼 곳)도 한 번에 건너뛸 수 있게.
+        terminal.afterWrites?.(() => {
+          if (!this.disposed) {
+            this.options.onWritesDrained?.();
+          }
+        });
+        break;
+      }
       if (index < count) {
         caughtUp = true;
         break;

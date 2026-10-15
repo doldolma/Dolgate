@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createZmodemController } from './zmodem-controller';
+import {
+  fromBase64,
+  LRZSZ_FILE_A,
+  LRZSZ_FILE_B,
+  LRZSZ_SZ_A_PTY,
+  LRZSZ_SZ_B,
+} from './lrzsz-capture.test-support';
 
 // 실제 라이브러리(nora-zmodemjs)를 컨트롤러에 그대로 물려 본다 — zmodem-controller.test.ts 는 가짜
 // Sentry 를 쓴다.
@@ -61,5 +68,70 @@ describe('ZMODEM 시작 감지 (실제 라이브러리)', () => {
       expect(new TextDecoder().decode(Uint8Array.from(output)), `split ${split}`).toBe(preamble);
       controller.dispose();
     }
+  });
+});
+
+// 실제 lrzsz(0.12.21) 가 보낸 바이트로 돌린다(lrzsz-capture.test-support).
+describe('실제 lrzsz 전송', () => {
+  function receiver() {
+    const output: number[] = [];
+    const replies: number[][] = [];
+    const saved: Array<{ name: string; bytes: Uint8Array }> = [];
+    const upsertJob = vi.fn();
+    const controller = createZmodemController({
+      sessionId: 's1',
+      hostLabel: 'host',
+      writeToTerminal: (bytes) => output.push(...bytes),
+      sendToRemote: (bytes) => replies.push(Array.from(bytes)),
+      saveDownload: vi.fn(async (input: { name: string; bytes: Uint8Array }) => {
+        saved.push(input);
+        return { savedPath: `/dl/${input.name}` };
+      }),
+      upsertJob,
+      registerAbort: vi.fn(),
+      clearAbort: vi.fn(),
+    });
+    return { controller, output, replies, saved, upsertJob };
+  }
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const text = (bytes: number[]) => new TextDecoder().decode(Uint8Array.from(bytes));
+
+  // PTY 로 돈 lrzsz 는 "OO" 없이 끝나고 곧바로 셸 프롬프트가 온다. 라이브러리가 지운 0x93 까지 되살려야
+  // '드'(EB 93 9C)가 깨지지 않는다(실측: `~/다운로$`).
+  it('OO 없이 끝난 sz 뒤의 한글 프롬프트를 깨뜨리지 않는다', async () => {
+    const receive = receiver();
+    for (const chunk of LRZSZ_SZ_A_PTY) {
+      receive.controller.consume(fromBase64(chunk));
+    }
+    receive.controller.consume(new TextEncoder().encode('tester@host:~/다운로드$ '));
+    await flush();
+
+    expect(receive.saved).toEqual([{ name: 'a.bin', bytes: fromBase64(LRZSZ_FILE_A) }]);
+    expect(receive.upsertJob.mock.lastCall?.[0].status).toBe('completed');
+    // sz 가 시작할 때 찍는 "rz\r", 끝날 때 stderr 로 찍는 "\r"(PTY 라 같이 온다), 그 뒤에 프롬프트가 그대로.
+    expect(text(receive.output)).toBe('rz\r\rtester@host:~/다운로드$ ');
+    receive.controller.dispose();
+  });
+
+  // `sz a.bin; sz b.bin`: 첫 sz 가 OO 없이 끝난 바로 뒤에 둘째 sz 의 시작 신호가 온다. 그것을 바로 감지해야
+  // 한다 — 화면으로 보내 둘째 sz 가 다시 알릴 때까지 약 10초씩 기다렸다(실측: 둘째 파일 20초).
+  it('잇달아 실행한 sz 의 둘째 전송을 바로 시작한다', async () => {
+    const receive = receiver();
+    for (const chunk of LRZSZ_SZ_A_PTY) {
+      receive.controller.consume(fromBase64(chunk));
+    }
+    const repliesAfterFirst = receive.replies.length;
+    const [startOfSecond, ...restOfSecond] = LRZSZ_SZ_B;
+    receive.controller.consume(fromBase64(startOfSecond!));
+    // 둘째 sz 의 시작 신호에 곧바로 답했다.
+    expect(receive.replies.length).toBeGreaterThan(repliesAfterFirst);
+    for (const chunk of restOfSecond) {
+      receive.controller.consume(fromBase64(chunk));
+    }
+    await flush();
+
+    expect(receive.saved.map((file) => file.name)).toEqual(['a.bin', 'b.bin']);
+    expect(receive.saved[1]!.bytes).toEqual(fromBase64(LRZSZ_FILE_B));
+    receive.controller.dispose();
   });
 });

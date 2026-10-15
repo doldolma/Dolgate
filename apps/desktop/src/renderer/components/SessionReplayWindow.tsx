@@ -497,13 +497,19 @@ export function SessionReplayWindow({
         resize: (cols, rows) => runtime.terminal.resize(cols, rows),
         reset: () => {
           runtime.terminal.reset();
+          // reset() 은 파서를 되돌리지 않는다. 이스케이프나 UTF-8 글자 중간에서 멈춘 채 되감으면 다시 그리는
+          // 출력의 앞부분이 그 나머지로 먹혔다(실측: OSC 중간이면 처음 12줄이 사라짐). CAN 은 어느 상태든
+          // 바닥으로 돌리고 바닥에서는 아무것도 그리지 않는다. 바이트로 넣어야 UTF-8 해독기도 비운다.
+          runtime.write(Uint8Array.of(0x18));
           runtime.terminal.resize(recording.initialCols, recording.initialRows);
           runtime.terminal.clear();
           syncTerminalViewport(recording.initialCols, recording.initialRows);
         },
         pendingOutputSize: () => runtime.pendingOutputSize(),
+        afterWrites: (callback) => runtime.scheduleAfterWriteDrain(callback),
       },
       onViewport: syncTerminalViewport,
+      onWritesDrained: () => runFrameRef.current(),
     });
     playerRef.current = player;
     goalRef.current = 0;

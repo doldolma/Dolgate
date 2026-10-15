@@ -24,6 +24,11 @@ import type { SessionReplaySegment, SessionReplaySegmentInfo } from '@shared';
 import { classifyCommandExit } from '@shared';
 import type { ReplaySnapshotStore } from './replay-player';
 import {
+  buildCharsetDesignators,
+  isAtRestBoundary,
+  serializeHiddenState,
+} from './replay-terminal-state';
+import {
   readCommandTextFromBuffer,
   unescapeReportedCommand,
 } from './terminal-command-blocks';
@@ -235,6 +240,8 @@ export async function scanReplayCommands(
 
     const { segments } = source;
     const snapshots = options.snapshots;
+    // 스냅샷에 문자셋을 되살릴 때 쓰는 표. 못 만들면 스냅샷을 뜨지 않는다(처음부터 그려 맞는다).
+    const charsetDesignators = snapshots && serializer ? await buildCharsetDesignators() : null;
     currentAtMs = segments[0]?.startAtMs ?? 0;
     let queuedBytes = 0;
     let bytesSinceSnapshot = 0;
@@ -242,7 +249,15 @@ export async function scanReplayCommands(
       if (options.isCancelled?.()) {
         return { blocks: [], shellIntegrationDetected: false };
       }
-      const segment = await source.readSegment(segmentIndex);
+      let segment: SessionReplaySegment;
+      try {
+        segment = await source.readSegment(segmentIndex);
+      } catch (error) {
+        // 구간 하나를 못 읽어도 나머지는 훑는다. 재생기도 그 구간을 빈 것으로 보고 그리므로 그 뒤 스냅샷도
+        // 같은 화면이다. 예전에는 스캔 전체가 실패해 명령 목록이 통째로 사라졌다(실측).
+        console.warn('[replay-scan] could not read a recording segment', segmentIndex, error);
+        continue;
+      }
       const count = segment.atMs.length;
       for (let index = 0; index < count; index += 1) {
         if (options.isCancelled?.()) {
@@ -279,6 +294,7 @@ export async function scanReplayCommands(
       if (
         snapshots &&
         serializer &&
+        charsetDesignators &&
         count > 0 &&
         segmentIndex + 1 < segments.length &&
         bytesSinceSnapshot >= snapshots.spacingBytes
@@ -286,19 +302,27 @@ export async function scanReplayCommands(
         // 이 구간까지 다 반영된 화면을 뜬다. 재생기는 다음 구간의 첫 항목부터 이어 그린다.
         await writeAsync(activeTerminal, new Uint8Array());
         queuedBytes = 0;
-        bytesSinceSnapshot = 0;
-        snapshots.add({
-          segment: segmentIndex + 1,
-          atMs: segment.atMs[count - 1],
-          cols: activeTerminal.cols,
-          rows: activeTerminal.rows,
-          data: serializer.serialize({
-            scrollback: Math.max(
-              0,
-              options.snapshotScrollback?.() ?? DEFAULT_SNAPSHOT_SCROLLBACK_LINES,
-            ),
-          }),
-        });
+        // 이스케이프·글자 중간이나 줄 끝 줄바꿈 대기에서는 뜨지 않고 다음 구간 끝에서 다시 본다.
+        // SerializeAddon 이 잃는 상태(스크롤 영역·문자셋·저장 커서 등)는 덧붙인다.
+        const hiddenState = isAtRestBoundary(activeTerminal)
+          ? serializeHiddenState(activeTerminal, charsetDesignators)
+          : null;
+        if (hiddenState !== null) {
+          bytesSinceSnapshot = 0;
+          snapshots.add({
+            segment: segmentIndex + 1,
+            atMs: segment.atMs[count - 1],
+            cols: activeTerminal.cols,
+            rows: activeTerminal.rows,
+            data:
+              serializer.serialize({
+                scrollback: Math.max(
+                  0,
+                  options.snapshotScrollback?.() ?? DEFAULT_SNAPSHOT_SCROLLBACK_LINES,
+                ),
+              }) + hiddenState,
+          });
+        }
       }
     }
 

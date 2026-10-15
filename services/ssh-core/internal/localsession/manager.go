@@ -38,9 +38,15 @@ type StreamEmitter func(protocol.StreamFrame, []byte)
 type runnerFactory func(protocol.LocalConnectPayload) (sessionRunner, error)
 
 type sessionHandle struct {
-	runner              sessionRunner
-	closed              chan struct{}
-	streams             sync.WaitGroup
+	runner  sessionRunner
+	closed  chan struct{}
+	streams sync.WaitGroup
+	// lastRead 는 읽기 루프가 마지막으로 출력을 읽은 시각(UnixNano)이다. 프로그램이 끝난 뒤 받아 둔
+	// 출력을 다 읽었는지 가늠한다(drainStreams).
+	lastRead atomic.Int64
+	// exited 는 프로그램이 끝났다는 뜻이다. 그 뒤의 읽기 오류(PTY 가 닫혀서 나는 EIO 등)는 세션 오류가
+	// 아니다 — 끝난 뒤에 남은 출력을 마저 읽으므로 그 오류를 보게 된다.
+	exited              atomic.Bool
 	disconnectRequested bool
 	errorNotified       bool
 	handshake           autocomplete.Handshake
@@ -481,6 +487,12 @@ func (m *Manager) waitForSession(sessionID string) {
 		return
 	}
 
+	// 프로그램이 끝났다. 흐름 제어로 멈춰 둔 읽기 루프에 PTY 가 받아 둔 출력이 남아 있을 수 있다.
+	// closed 를 먼저 보내면 녹화·공유·탭이 그것을 버리므로, 멈춤을 풀고 다 읽은 뒤에 닫는다.
+	session.exited.Store(true)
+	m.flow.Stop(sessionID)
+	drainStreams(session, localStreamQuiet, localStreamDrainLimit)
+
 	disconnectRequested, _ := m.sessionFlags(sessionID)
 	message := describeExit(exit, waitErr)
 	if disconnectRequested {
@@ -494,6 +506,43 @@ func (m *Manager) waitForSession(sessionID string) {
 	m.closeSession(sessionID, message)
 }
 
+// drainStreams 는 프로그램이 끝난 뒤 읽기 루프가 받아 둔 출력을 다 읽기를 기다린다.
+//
+// 끝(EOF)을 기다리지 않는다. Windows ConPTY 는 의사 콘솔을 닫기 전에는 출력이 끝나지 않고, macOS 의
+// PTY 도 닫기 전까지 읽기가 막혀 있을 수 있다. 받아 둔 출력은 바로 읽히므로 quiet 동안 더 읽은 게
+// 없으면 다 읽은 것으로 본다. 무슨 일이 있어도 탭은 닫혀야 하므로 limit 을 넘기지 않는다.
+func drainStreams(handle *sessionHandle, quiet, limit time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		handle.streams.Wait()
+		close(done)
+	}()
+	start := time.Now()
+	ticker := time.NewTicker(quiet / 5)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case now := <-ticker.C:
+			last := time.Unix(0, handle.lastRead.Load())
+			if last.Before(start) {
+				last = start
+			}
+			if now.Sub(last) >= quiet || now.Sub(start) >= limit {
+				return
+			}
+		}
+	}
+}
+
+const (
+	// localStreamQuiet 동안 더 읽은 출력이 없으면 받아 둔 것을 다 읽은 것으로 본다.
+	localStreamQuiet = 50 * time.Millisecond
+	// localStreamDrainLimit 은 프로그램이 끝난 뒤 남은 출력을 기다리는 상한이다.
+	localStreamDrainLimit = time.Second
+)
+
 func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Reader) {
 	defer handle.streams.Done()
 
@@ -502,6 +551,7 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 		m.flow.Wait(sessionID, handle.closed)
 		n, err := reader.Read(buffer)
 		if n > 0 {
+			handle.lastRead.Store(time.Now().UnixNano())
 			chunk := make([]byte, n)
 			copy(chunk, buffer[:n])
 			// 주입 대기 중이면 raw 출력으로 프롬프트 안착을 감지한다(필터 전 관찰). 접속 직후
@@ -527,7 +577,7 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 		}
 
 		if err != nil {
-			if err != io.EOF && m.HasSession(sessionID) {
+			if err != io.EOF && !handle.exited.Load() && m.HasSession(sessionID) {
 				m.emitSessionError(sessionID, err.Error())
 			}
 			return

@@ -329,6 +329,49 @@ describe('ReplayPlayer', () => {
     expect(consoleError).toHaveBeenCalled();
   });
 
+  // 크기는 앞 출력이 다 그려진 뒤에 바꾼다. write 는 큐에 넣기만 해서 바로 바꾸면 앞 출력이 바뀐 크기로
+  // 그려졌다(실측: 120→60칸 녹화를 건너뛰면 8~31줄이 다름). 다 그려지면 프레임을 기다리지 않고 잇는다.
+  it('applies a resize only after the output before it has been drawn', async () => {
+    const { segments, readSegment } = segmentReplayEntries([
+      output(0, 'a'),
+      { type: 'resize', atMs: 10, cols: 100, rows: 30 },
+      output(20, 'b'),
+    ]);
+    const fake = createTerminal();
+    let drained: (() => void) | null = null;
+    const onWritesDrained = vi.fn();
+    const onViewport = vi.fn();
+    const player = new ReplayPlayer({
+      segments,
+      readSegment,
+      snapshots: new ReplaySnapshotStore(),
+      terminal: {
+        ...fake.terminal,
+        write: (data) => {
+          fake.terminal.write(data);
+          fake.setPending(1);
+        },
+        afterWrites: (callback) => {
+          drained = callback;
+        },
+      },
+      onViewport,
+      onWritesDrained,
+    });
+    await player.whenReady();
+
+    expect(player.advance(25)).toBe(false);
+    expect(fake.events).toEqual(['reset', 'write:a']);
+    expect(onViewport).not.toHaveBeenCalled();
+
+    fake.setPending(0);
+    drained!();
+    expect(onWritesDrained).toHaveBeenCalledTimes(1);
+    expect(player.advance(25)).toBe(true);
+    expect(fake.events).toEqual(['reset', 'write:a', 'resize:100x30', 'write:b']);
+    expect(onViewport).toHaveBeenCalledWith(100, 30);
+  });
+
   it('ignores segments that arrive after it was disposed', async () => {
     const { player, events } = createPlayer([output(0, 'a')]);
     player.dispose();

@@ -116,7 +116,7 @@
     "html-to-text": "^10.0.1",
     "i18next": "^26.3.6",
     "lucide-react": "^1.21.0",
-    "nora-zmodemjs": "^1.1.1",
+    "nora-zmodemjs": "1.1.1",
     "openai": "^6.45.0",
     "react-i18next": "^17.0.11",
     "react-markdown": "^10.1.0",

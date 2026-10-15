@@ -73,6 +73,11 @@ export interface ReplaySegmentRecord extends SessionReplaySegmentInfo {
    * 가짜 출력이 나온다.
    */
   cutOff?: boolean;
+  /**
+   * 압축하지 않은 옛 녹화(.events.jsonl)의 범위다. 옛 녹화를 바꿔 쓰지 못했을 때(쓰기 권한·디스크 공간)
+   * 그 파일을 그대로 읽는다. offset·length 는 그 파일의 줄 경계다.
+   */
+  plain?: boolean;
 }
 
 export interface ReplayEventFiles {
@@ -423,6 +428,7 @@ async function readSegmentText(
   offset: number,
   length: number,
   cutOff: boolean,
+  compressed = true,
 ): Promise<string> {
   const handle = await open(eventsPath, "r");
   try {
@@ -439,6 +445,9 @@ async function readSegmentText(
         break;
       }
       filled += bytesRead;
+    }
+    if (!compressed) {
+      return buffer.subarray(0, filled).toString("utf8");
     }
     // 비정상 종료로 마무리 없이 끊긴 끝부분은 마지막으로 비운 지점까지 읽는다.
     const content = await gunzipAsync(
@@ -457,7 +466,13 @@ export async function readReplaySegment(
   record: ReplaySegmentRecord,
 ): Promise<SessionReplaySegment> {
   return decodeReplaySegment(
-    await readSegmentText(eventsPath, record.offset, record.length, record.cutOff === true),
+    await readSegmentText(
+      eventsPath,
+      record.offset,
+      record.length,
+      record.cutOff === true,
+      record.plain !== true,
+    ),
     record.startAtMs,
   );
 }
@@ -684,9 +699,99 @@ export async function loadReplaySegments(
     return convertReplayEvents(files.events, true, files);
   }
   if (existsSync(files.legacyEvents)) {
-    const records = await convertReplayEvents(files.legacyEvents, false, files);
+    let records: ReplaySegmentRecord[];
+    try {
+      records = await convertReplayEvents(files.legacyEvents, false, files);
+    } catch (error) {
+      if (!isWriteFailure(error)) {
+        throw error;
+      }
+      // 폴더에 쓸 수 없으면(권한·디스크 공간) 바꿔 쓰지 않고 원래 파일을 그대로 읽는다. 바꿔 써야만 열게
+      // 되면서 원문 오류(EACCES·ENOSPC)로 열리지 않았다(실측). 다음에 열 때 쓸 수 있으면 그때 바꿔 쓴다.
+      console.warn("[session-replay] could not rewrite an old recording, reading it in place", error);
+      return indexPlainReplayEvents(files.legacyEvents);
+    }
     rmSync(files.legacyEvents, { force: true });
     return records;
   }
   return [];
+}
+
+/** 녹화 폴더에 쓰지 못한 경우(권한·디스크 공간)인가. */
+function isWriteFailure(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return (
+    code === "EACCES" ||
+    code === "EPERM" ||
+    code === "EROFS" ||
+    code === "ENOSPC" ||
+    code === "EDQUOT"
+  );
+}
+
+/**
+ * 압축하지 않은 옛 녹화를 바꿔 쓰지 않고 읽을 수 있게, 구간 표만 만든다. 파일을 한 번 훑어 줄 경계 위치로
+ * 구간을 나눈다(나누는 기준은 새 녹화와 같다). 쓰는 파일은 없고 메모리에는 표만 남는다.
+ */
+export async function indexPlainReplayEvents(
+  sourcePath: string,
+  segmentBytes = REPLAY_SEGMENT_BYTES,
+): Promise<ReplaySegmentRecord[]> {
+  const records: ReplaySegmentRecord[] = [];
+  let current: ReplaySegmentRecord | null = null;
+  let currentTextBytes = 0;
+  let clock = 0;
+  // 줄 하나: [start, end) 는 줄바꿈까지 포함한 파일 위치.
+  const take = (line: Buffer, start: number, end: number) => {
+    const entry = parseReplayEntry(line.toString("utf8"));
+    if (!entry) {
+      return;
+    }
+    clock = Math.max(clock, entry.atMs);
+    current ??= {
+      offset: start,
+      length: 0,
+      startAtMs: clock,
+      endAtMs: clock,
+      entryCount: 0,
+      outputBytes: 0,
+      plain: true,
+    };
+    current.length = end - current.offset;
+    current.endAtMs = clock;
+    current.entryCount += 1;
+    current.outputBytes += outputBytesOf(entry);
+    currentTextBytes += end - start;
+    if (currentTextBytes >= segmentBytes) {
+      records.push(current);
+      current = null;
+      currentTextBytes = 0;
+    }
+  };
+
+  let position = 0;
+  let lineStart = 0;
+  let carry: Buffer[] = [];
+  for await (const chunk of createReadStream(sourcePath) as AsyncIterable<Buffer>) {
+    let from = 0;
+    for (let newline = chunk.indexOf(0x0a); newline !== -1; newline = chunk.indexOf(0x0a, from)) {
+      const piece = chunk.subarray(from, newline);
+      const end = position + newline + 1;
+      take(carry.length > 0 ? Buffer.concat([...carry, piece]) : piece, lineStart, end);
+      carry = [];
+      lineStart = end;
+      from = newline + 1;
+    }
+    if (from < chunk.length) {
+      carry.push(chunk.subarray(from));
+    }
+    position += chunk.length;
+  }
+  if (carry.length > 0) {
+    take(Buffer.concat(carry), lineStart, position);
+  }
+  if (current) {
+    records.push(current);
+  }
+  return records;
 }

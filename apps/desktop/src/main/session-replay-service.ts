@@ -131,6 +131,8 @@ export class SessionReplayService {
    * 쓰므로, 같은 녹화를 두 번 바꿔 쓰지 않게 약속을 나눠 쓴다.
    */
   private readonly segmentLoads = new Map<string, Promise<ReplaySegmentRecord[]>>();
+  /** segmentLoads 가운데 아직 끝나지 않은 것(옛 녹화를 바꿔 쓰는 중일 수 있다). */
+  private readonly inFlightLoads = new Set<string>();
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private activeScope: LocalHistoryScope | null = null;
   private onRecordingsPruned: (() => void) | null = null;
@@ -156,7 +158,14 @@ export class SessionReplayService {
     this.closeReplayWindows();
     this.activeScope = null;
     this.initialSizeBySession.clear();
-    this.segmentLoads.clear();
+    // 옛 녹화를 바꿔 쓰는 중인 것은 남긴다. 지우면 다시 들어와 같은 녹화를 열 때 두 번째 변환이 같은 임시
+    // 파일로 시작해, 먼저 끝난 쪽이 이름을 바꾼 뒤 나중 쪽이 ENOENT 로 실패했다(실측). 남겨 두면 그 변환을
+    // 기다린다. 경로가 계정마다 달라 다른 계정과 섞이지 않는다.
+    for (const key of this.segmentLoads.keys()) {
+      if (!this.inFlightLoads.has(key)) {
+        this.segmentLoads.delete(key);
+      }
+    }
   }
 
   // 회원 탈퇴 — 현재 scope의 녹화 파일(meta/events/색인)을 전부 삭제한다. 진행 중 녹화와
@@ -306,6 +315,8 @@ export class SessionReplayService {
     replayWindow.on("closed", () => {
       if (this.replayWindows.get(recordingId) === replayWindow) {
         this.replayWindows.delete(recordingId);
+        // 열려 있는 동안 보존 한도 밖이라 남겨 둔 녹화면 이제 지운다(pruneDirectory).
+        this.prune();
       }
     });
     replayWindow.once("ready-to-show", () => {
@@ -334,6 +345,10 @@ export class SessionReplayService {
     const segments = await this.loadSegments(recordingId, scope.replayDirectoryPath);
     return {
       ...meta,
+      // 길이는 벽시계로 쟀고 항목 시각은 앞보다 작아지지 않게 보정한다. 녹화 중 시계가 뒤로 가면 길이가
+      // 마지막 항목보다 짧아져 끝부분이 재생 범위 밖으로 밀렸다(시계가 세션보다 많이 가면 녹화 전체가 빈
+      // 화면). 이미 만든 녹화도 고쳐지도록 읽을 때 맞춘다.
+      durationMs: Math.max(meta.durationMs, segments[segments.length - 1]?.endAtMs ?? 0),
       segments: segments.map(({ startAtMs, endAtMs, entryCount, outputBytes }) => ({
         startAtMs,
         endAtMs,
@@ -354,7 +369,10 @@ export class SessionReplayService {
       throw new Error(`Replay segment ${segmentIndex} does not exist`);
     }
     return readReplaySegment(
-      this.getEventsGzipPath(recordingId, scope.replayDirectoryPath),
+      // 바꿔 쓰지 못한 옛 녹화는 원래 파일에서 읽는다(loadReplaySegments).
+      record.plain
+        ? this.getEventsPath(recordingId, scope.replayDirectoryPath)
+        : this.getEventsGzipPath(recordingId, scope.replayDirectoryPath),
       record,
     );
   }
@@ -372,21 +390,25 @@ export class SessionReplayService {
     };
     let pending = this.segmentLoads.get(files.events);
     if (!pending) {
-      const load: Promise<ReplaySegmentRecord[]> = loadReplaySegments(files).catch(
-        (error: unknown) => {
+      const key = files.events;
+      this.inFlightLoads.add(key);
+      const load: Promise<ReplaySegmentRecord[]> = loadReplaySegments(files)
+        .catch((error: unknown) => {
           // 실패하면 다음에 다시 시도하게 지운다.
-          if (this.segmentLoads.get(files.events) === load) {
-            this.segmentLoads.delete(files.events);
+          if (this.segmentLoads.get(key) === load) {
+            this.segmentLoads.delete(key);
           }
           if (isReplayDataError(error)) {
             console.warn("[session-replay] a recording is damaged", error);
             throw new Error(t('replaySvc.damaged'));
           }
           throw error;
-        },
-      );
+        })
+        .finally(() => {
+          this.inFlightLoads.delete(key);
+        });
       pending = load;
-      this.segmentLoads.set(files.events, load);
+      this.segmentLoads.set(key, load);
     }
     return pending;
   }
@@ -410,14 +432,14 @@ export class SessionReplayService {
     );
 
     for (const stale of recordings.slice(retentionCount)) {
-      const eventsGzipPath = this.getEventsGzipPath(stale.recordingId, replayDirectoryPath);
-      this.segmentLoads.delete(eventsGzipPath);
-      for (const filePath of [
-        this.getMetaPath(stale.recordingId, replayDirectoryPath),
-        this.getEventsPath(stale.recordingId, replayDirectoryPath),
-        eventsGzipPath,
-        this.getIndexPath(stale.recordingId, replayDirectoryPath),
-      ]) {
+      // 재생 창이 열린 녹화는 남긴다. 재생기는 구간을 그때그때 읽어서, 지우면 그 창이 엉뚱한 화면에서
+      // 멈췄다(실측). 그동안은 보존 한도를 넘기고, 창이 닫히면 다시 정리한다(openReplayWindow).
+      if (this.replayWindows.has(stale.recordingId)) {
+        continue;
+      }
+      this.segmentLoads.delete(this.getEventsGzipPath(stale.recordingId, replayDirectoryPath));
+      for (const suffix of REPLAY_FILE_SUFFIXES) {
+        const filePath = path.join(replayDirectoryPath, `${stale.recordingId}${suffix}`);
         rmSync(filePath, { force: true });
         rmSync(`${filePath}${REPLAY_TEMP_SUFFIX}`, { force: true });
       }
@@ -562,9 +584,12 @@ export class SessionReplayService {
     }
 
     const disconnectedAt = nowIso();
+    // 시계가 뒤로 갔으면 벽시계로 잰 길이가 마지막 항목 시각보다 짧다. 그 너머는 재생되지 않으므로
+    // 마지막 항목까지를 길이로 남긴다(load 도 같은 값으로 맞춘다).
     const durationMs = Math.max(
       0,
       new Date(disconnectedAt).getTime() - active.connectedAtMs,
+      active.lastAtMs,
     );
 
     const meta: SessionReplayRecording = {

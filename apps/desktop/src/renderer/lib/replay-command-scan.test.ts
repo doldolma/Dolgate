@@ -1,6 +1,6 @@
 import type { SessionReplayEntry } from '@shared';
 import { Terminal } from '@xterm/headless';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { scanReplayCommands, type ReplayScanSource } from './replay-command-scan';
 import { ReplaySnapshotStore } from './replay-player';
 import { segmentReplayEntries } from './replay-segments.test-support';
@@ -274,6 +274,46 @@ function writeAll(terminal: Terminal, data: string | Uint8Array): Promise<void> 
   return new Promise((resolve) => terminal.write(data, resolve));
 }
 
+/** 녹화 항목의 출력 바이트(재생기가 터미널에 넘기는 꼴). */
+function bytesOf(entry: SessionReplayEntry): Uint8Array {
+  if (entry.type !== 'output') {
+    throw new Error('output 항목이 아니다');
+  }
+  return Uint8Array.from(atob(entry.dataBase64), (character) => character.charCodeAt(0));
+}
+
+// 구간 하나를 못 읽어도 나머지 구간은 훑는다. 예전에는 스캔 전체가 실패해 명령 목록이 통째로 사라졌다(실측).
+describe('scanReplayCommands 구간 읽기 실패', () => {
+  it('못 읽은 구간만 비우고 나머지 구간의 명령을 뽑는다', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const parts = segmentReplayEntries(
+      [
+        output(0, 'user@host:~$ \x1b]133;B\x07'),
+        output(100, 'ls\r\n\x1b]133;C\x07'),
+        output(400, '\x1b]133;D;0\x07'),
+        output(410, 'lost\r\n'),
+        output(500, 'user@host:~$ \x1b]133;B\x07'),
+        output(600, 'pwd\r\n\x1b]133;C\x07'),
+        output(700, '\x1b]133;D;0\x07'),
+      ],
+      1,
+    );
+
+    const result = await scanReplayCommands({
+      initialCols: 80,
+      initialRows: 24,
+      segments: parts.segments,
+      readSegment: (index) =>
+        index === 3 ? Promise.reject(new Error('broken')) : parts.readSegment(index),
+    });
+
+    expect(result.shellIntegrationDetected).toBe(true);
+    expect(result.blocks.map((block) => block.command)).toEqual(['ls', 'pwd']);
+    expect(consoleWarn).toHaveBeenCalled();
+    consoleWarn.mockRestore();
+  });
+});
+
 describe('scanReplayCommands snapshots', () => {
   // 재생 창은 되감거나 멀리 건너뛸 때 이 화면부터 그린다. 새 터미널에 쓰면 그 시점까지 그린 화면과 같아야 한다.
   it('구간 경계에서 그때까지의 화면을 떠 둔다', async () => {
@@ -314,6 +354,67 @@ describe('scanReplayCommands snapshots', () => {
     expect(screenLines(restored)).toEqual(screenLines(expected));
     expect(restored.buffer.active.cursorY).toBe(expected.buffer.active.cursorY);
     expect(restored.buffer.active.cursorX).toBe(expected.buffer.active.cursorX);
+    expected.dispose();
+    restored.dispose();
+  });
+
+  // 이스케이프나 UTF-8 글자 중간에서 끝난 구간 경계에서 뜨면, 다음 구간이 그 나머지로 시작해 글자로 찍혔다
+  // (실측: `가m나다`). 그런 경계는 건너뛰고 다음 경계에서 뜬다.
+  it('이스케이프·글자 중간인 구간 경계에서는 스냅샷을 뜨지 않는다', async () => {
+    const entries: SessionReplayEntry[] = [
+      output(0, 'one\r\n\x1b[3'),
+      output(10, '1mred\x1b[0m\r\n\xea'),
+      output(20, '\xb0\x80\r\n'),
+      output(30, 'end\r\n'),
+    ];
+    const snapshots = new ReplaySnapshotStore(Number.POSITIVE_INFINITY, 1);
+
+    await scanReplayCommands(sourceOf(entries, 1), {
+      snapshots,
+      snapshotScrollback: () => 100,
+    });
+
+    expect(snapshots.size).toBe(1);
+    const snapshot = snapshots.latest(Number.POSITIVE_INFINITY)!;
+    expect(snapshot.segment).toBe(3);
+    const expected = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+    for (const entry of entries) {
+      await writeAll(expected, bytesOf(entry));
+    }
+    const restored = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+    await writeAll(restored, snapshot.data);
+    await writeAll(restored, bytesOf(entries[3]!));
+    expect(screenLines(restored)).toEqual(['one', 'red', '가', 'end']);
+    expect(screenLines(restored)).toEqual(screenLines(expected));
+    expected.dispose();
+    restored.dispose();
+  });
+
+  // SerializeAddon 은 스크롤 영역을 쓰지 않아, 그 스냅샷에서 이어 그리면 상태줄이 밀려 사라졌다(실측).
+  it('SerializeAddon 이 잃는 상태(스크롤 영역)를 되살려 뒤 출력이 같게 그려진다', async () => {
+    const entries: SessionReplayEntry[] = [
+      output(0, `\x1b[1;1Hstatus\x1b[2;11r\x1b[11;1H${'line\r\n'.repeat(15)}`),
+      output(10, 'more\r\n'.repeat(5)),
+    ];
+    const snapshots = new ReplaySnapshotStore(Number.POSITIVE_INFINITY, 1);
+
+    await scanReplayCommands(sourceOf(entries, 1), {
+      snapshots,
+      snapshotScrollback: () => 100,
+    });
+
+    const snapshot = snapshots.latest(10)!;
+    expect(snapshot.segment).toBe(1);
+    const expected = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+    for (const entry of entries) {
+      await writeAll(expected, bytesOf(entry));
+    }
+    const restored = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+    await writeAll(restored, snapshot.data);
+    await writeAll(restored, bytesOf(entries[1]!));
+    expect(screenLines(restored)[0]).toBe('status');
+    expect(screenLines(restored)).toEqual(screenLines(expected));
+    expect(restored.buffer.active.cursorY).toBe(expected.buffer.active.cursorY);
     expected.dispose();
     restored.dispose();
   });
