@@ -28,6 +28,8 @@ func main() {
 			continue
 		case "__REPORT_SIZE__":
 			printTerminalSize(output)
+		case "__EXIT__":
+			return
 		default:
 			writeLine(output, "ECHO:"+line)
 		}

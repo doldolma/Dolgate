@@ -33,10 +33,13 @@ type windowsConPTYRunner struct {
 	// 주입을 건너뛴다.
 	shellIntegrationPreinstalled bool
 	process                      windows.Handle
-	pseudoConsole                windows.Handle
-	inputWriter                  *os.File
-	outputReader                 *os.File
-	closeOnce                    sync.Once
+	// consoleMu 는 pseudoConsole 을 지킨다. 세션을 정리하며 콘솔을 닫는(ReleaseConsole) 동안 크기 변경이
+	// 겹치면, 이미 닫힌 콘솔에 ResizePseudoConsole 을 부르게 된다.
+	consoleMu     sync.Mutex
+	pseudoConsole windows.Handle
+	inputWriter   *os.File
+	outputReader  *os.File
+	closeOnce     sync.Once
 }
 
 type windowsShellRuntime struct {
@@ -588,7 +591,25 @@ func (r *windowsConPTYRunner) Write(data []byte) error {
 
 func (r *windowsConPTYRunner) Resize(cols, rows int) error {
 	cols, rows = normalizedSize(cols, rows)
+	r.consoleMu.Lock()
+	defer r.consoleMu.Unlock()
+	if r.pseudoConsole == 0 {
+		// 세션을 정리하며 콘솔을 닫았다. 크기를 바꿀 화면이 없다.
+		return nil
+	}
 	return windows.ResizePseudoConsole(r.pseudoConsole, windows.Coord{X: int16(cols), Y: int16(rows)})
+}
+
+// ReleaseConsole 은 의사 콘솔을 닫는다. conhost 가 남은 출력을 내보내고 끝나면서 출력 파이프에 끝(EOF)이
+// 온다. 읽기 루프는 그때까지 계속 읽으므로 받아 둔 출력은 잃지 않는다. Close 도 이것을 부른다.
+func (r *windowsConPTYRunner) ReleaseConsole() {
+	r.consoleMu.Lock()
+	defer r.consoleMu.Unlock()
+	if r.pseudoConsole == 0 {
+		return
+	}
+	windows.ClosePseudoConsole(r.pseudoConsole)
+	r.pseudoConsole = 0
 }
 
 func (r *windowsConPTYRunner) Kill() error {
@@ -616,10 +637,7 @@ func (r *windowsConPTYRunner) Close() error {
 				firstErr = err
 			}
 		}
-		if r.pseudoConsole != 0 {
-			windows.ClosePseudoConsole(r.pseudoConsole)
-			r.pseudoConsole = 0
-		}
+		r.ReleaseConsole()
 		if r.process != 0 {
 			if err := windows.CloseHandle(r.process); err != nil && firstErr == nil {
 				firstErr = err

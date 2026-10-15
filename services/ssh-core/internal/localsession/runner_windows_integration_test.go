@@ -100,6 +100,85 @@ func TestWindowsConPTYRunnerRoutesOutputInputAndResize(t *testing.T) {
 	<-copyDone
 }
 
+// 셸이 끝나거나 탭을 닫으면 읽기 루프도 끝나야 한다. ConPTY 는 의사 콘솔을 닫아야 출력에 끝(EOF)이
+// 오는데, 정리가 읽기 루프부터 기다려 콘솔을 닫지 못했다 — 닫은 탭마다 conhost 와 읽기 루프가 코어가
+// 끝날 때까지 남았다(실측). 콘솔을 닫을 때 conhost 가 내보내는 것은 closed 뒤라 흘리지 않는다.
+func TestLocalSessionReleasesConPTYWhenSessionEnds(t *testing.T) {
+	fixturePath := buildConPTYFixtureBinary(t)
+
+	for _, tc := range []struct {
+		name string
+		end  func(manager *Manager, sessionID string) error
+	}{
+		{"셸이 스스로 끝남", func(manager *Manager, sessionID string) error {
+			return manager.WriteBytes(sessionID, []byte("__EXIT__\r\n"))
+		}},
+		{"탭을 닫음", func(manager *Manager, sessionID string) error {
+			return manager.Disconnect(sessionID)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			output := &capturedOutput{}
+			closed := make(chan struct{})
+			var closedOnce sync.Once
+			outputAtClose := -1
+			manager := NewManagerWithRunnerFactory(func(event protocol.Event) {
+				if event.Type == protocol.EventClosed {
+					closedOnce.Do(func() {
+						outputAtClose = len(output.snapshot())
+						close(closed)
+					})
+				}
+			}, func(_ protocol.StreamFrame, data []byte) {
+				output.append(data)
+			}, func(payload protocol.LocalConnectPayload) (sessionRunner, error) {
+				return startPlatformLocalRunner(payload, localCommandRuntime{
+					shellKind:        "fixture",
+					executablePath:   fixturePath,
+					env:              os.Environ(),
+					workingDirectory: t.TempDir(),
+				})
+			})
+			if err := manager.Connect("s1", "r1", protocol.LocalConnectPayload{Cols: 120, Rows: 32}); err != nil {
+				t.Fatalf("connect failed: %v", err)
+			}
+			manager.mu.RLock()
+			handle := manager.sessions["s1"]
+			manager.mu.RUnlock()
+
+			deadline := time.Now().Add(promptStartupTimeout)
+			for !strings.Contains(output.snapshot(), "FAKE LOCAL SHELL READY") {
+				if time.Now().After(deadline) {
+					t.Fatalf("fixture did not start: %q", output.snapshot())
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			if err := tc.end(manager, "s1"); err != nil {
+				t.Fatalf("end session failed: %v", err)
+			}
+			select {
+			case <-closed:
+			case <-time.After(10 * time.Second):
+				t.Fatal("closed 가 오지 않았다")
+			}
+
+			streamsDone := make(chan struct{})
+			go func() {
+				handle.streams.Wait()
+				close(streamsDone)
+			}()
+			select {
+			case <-streamsDone:
+			case <-time.After(5 * time.Second):
+				t.Fatal("세션이 닫혔는데 읽기 루프가 끝나지 않았다 — 의사 콘솔이 닫히지 않아 conhost 가 남는다")
+			}
+			if got := len(output.snapshot()); got != outputAtClose {
+				t.Fatalf("closed 뒤에 출력 %d 바이트를 흘렸다: %q", got-outputAtClose, output.snapshot()[outputAtClose:])
+			}
+		})
+	}
+}
+
 func TestResolveWindowsShellRuntimeWithLookupPrefersPwshThenPowerShellThenCmd(t *testing.T) {
 	resolved, err := resolveWindowsShellRuntimeWithLookup([]windowsShellCandidate{
 		{

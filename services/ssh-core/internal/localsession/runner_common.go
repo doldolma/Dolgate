@@ -23,6 +23,14 @@ type shellIntegrationPreinstaller interface {
 	ShellIntegrationPreinstalled() bool
 }
 
+// consoleReleaser 는 출력의 끝(EOF)이 콘솔을 닫아야 오는 러너다. Windows ConPTY 가 그렇다 — 셸이 끝나도
+// 의사 콘솔(conhost)이 살아 있는 동안은 출력 파이프 읽기가 끝나지 않는다. 세션을 정리할 때 이것을 먼저
+// 불러야 읽기 루프가 남은 출력을 다 읽고 끝나고, 그다음에 Close 로 핸들을 닫을 수 있다. 선택적
+// 인터페이스로 둔 이유는 shellIntegrationPreinstaller 와 같다.
+type consoleReleaser interface {
+	ReleaseConsole()
+}
+
 type sessionRunner interface {
 	Write(data []byte) error
 	Resize(cols, rows int) error

@@ -568,7 +568,9 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 				handle.shellIntegrationUnsupported.Store(false)
 			}
 			chunk = handle.handshake.Filter(chunk)
-			if len(chunk) > 0 {
+			// closed 를 보낸 뒤에 읽힌 것은 흘리지 않는다 — 받는 쪽(녹화·공유·탭)은 이미 닫았다. Windows 는
+			// 정리하며 콘솔을 닫을 때 conhost 가 모드 해제 시퀀스(ESC[?9001l ESC[?1004l)를 내보낸다(실측).
+			if len(chunk) > 0 && m.HasSession(sessionID) {
 				m.emitStream(protocol.StreamFrame{
 					Type:      protocol.StreamTypeData,
 					SessionID: sessionID,
@@ -633,6 +635,12 @@ func (m *Manager) closeSession(sessionID string, message string) {
 	})
 
 	go func() {
+		// 읽기 루프가 끝나야 핸들을 닫을 수 있는데, Windows ConPTY 는 의사 콘솔을 닫기 전에는 출력이
+		// 끝나지 않는다. 콘솔부터 닫지 않으면 둘이 서로를 기다려, 닫은 탭마다 conhost·읽기 루프·핸들이
+		// 코어가 끝날 때까지 남았다(실측).
+		if releaser, ok := session.runner.(consoleReleaser); ok {
+			releaser.ReleaseConsole()
+		}
 		session.streams.Wait()
 		_ = session.runner.Close()
 	}()

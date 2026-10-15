@@ -3,6 +3,7 @@ package localsession
 import (
 	"bytes"
 	"io"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -119,5 +120,124 @@ func TestLocalSessionEmitsBufferedOutputBeforeClosed(t *testing.T) {
 	defer mu.Unlock()
 	if receivedAtClose != total || received != total {
 		t.Fatalf("closed 때까지 받은 양 %d, 끝까지 받은 양 %d — 둘 다 %d 여야 한다", receivedAtClose, received, total)
+	}
+}
+
+// conhostTeardown 은 의사 콘솔을 닫을 때 conhost 가 내보내는 모드 해제 시퀀스다(Windows 실측).
+const conhostTeardown = "\x1b[?9001l\x1b[?1004l"
+
+// consoleBoundRunner 는 Windows ConPTY 처럼 콘솔을 닫아야(ReleaseConsole) 출력에 끝(EOF)이 오는 러너다.
+// 닫을 때 conhost 처럼 conhostTeardown 을 한 번 내보낸다.
+type consoleBoundRunner struct {
+	exited       chan struct{}
+	exitOnce     sync.Once
+	released     chan struct{}
+	releaseOnce  sync.Once
+	closed       chan struct{}
+	closeOnce    sync.Once
+	mu           sync.Mutex
+	calls        []string
+	teardownSent bool
+}
+
+func newConsoleBoundRunner() *consoleBoundRunner {
+	return &consoleBoundRunner{
+		exited:   make(chan struct{}),
+		released: make(chan struct{}),
+		closed:   make(chan struct{}),
+	}
+}
+
+func (r *consoleBoundRunner) note(call string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, call)
+}
+
+func (r *consoleBoundRunner) ReleaseConsole() {
+	r.releaseOnce.Do(func() {
+		r.note("release")
+		close(r.released)
+	})
+}
+
+func (r *consoleBoundRunner) exit() { r.exitOnce.Do(func() { close(r.exited) }) }
+
+func (r *consoleBoundRunner) Read(p []byte) (int, error) {
+	<-r.released
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.teardownSent {
+		r.teardownSent = true
+		return copy(p, conhostTeardown), nil
+	}
+	return 0, io.EOF
+}
+
+func (r *consoleBoundRunner) Write([]byte) error         { return nil }
+func (r *consoleBoundRunner) Resize(int, int) error      { return nil }
+func (r *consoleBoundRunner) Kill() error                { r.exit(); return nil }
+func (r *consoleBoundRunner) Streams() []io.Reader       { return []io.Reader{readerFunc(r.Read)} }
+func (r *consoleBoundRunner) ShellKind() string          { return "" }
+func (r *consoleBoundRunner) Wait() (sessionExit, error) { <-r.exited; return sessionExit{}, nil }
+func (r *consoleBoundRunner) Close() error {
+	r.closeOnce.Do(func() {
+		r.note("close")
+		r.ReleaseConsole()
+		close(r.closed)
+	})
+	return nil
+}
+
+// 세션이 끝나면 콘솔을 먼저 닫아야 읽기 루프가 끝나고 핸들이 닫힌다. 읽기 루프부터 기다리면 끝(EOF)이
+// 오지 않아 정리가 영영 멈춘다 — Windows 에서 닫은 탭마다 conhost 가 코어가 끝날 때까지 남았다(실측).
+// 콘솔을 닫으며 나온 출력은 closed 뒤라 흘리지 않는다.
+func TestLocalSessionReleasesConsoleBeforeWaitingForStreams(t *testing.T) {
+	runner := newConsoleBoundRunner()
+	t.Cleanup(func() { _ = runner.Close() })
+
+	closed := make(chan struct{})
+	var closedOnce sync.Once
+	var streamMu sync.Mutex
+	afterClosed := 0
+	manager := NewManagerWithRunnerFactory(func(event protocol.Event) {
+		if event.Type == protocol.EventClosed {
+			closedOnce.Do(func() { close(closed) })
+		}
+	}, func(_ protocol.StreamFrame, data []byte) {
+		select {
+		case <-closed:
+			streamMu.Lock()
+			afterClosed += len(data)
+			streamMu.Unlock()
+		default:
+		}
+	}, func(protocol.LocalConnectPayload) (sessionRunner, error) { return runner, nil })
+
+	if err := manager.Connect("s1", "r1", protocol.LocalConnectPayload{Cols: 80, Rows: 24}); err != nil {
+		t.Fatal(err)
+	}
+	runner.exit()
+
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("프로그램이 끝났는데 closed 가 오지 않았다")
+	}
+	select {
+	case <-runner.closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("세션이 닫혔는데 러너가 닫히지 않았다 — 콘솔을 먼저 닫지 않아 읽기 루프가 끝나지 않는다")
+	}
+	runner.mu.Lock()
+	calls := slices.Clone(runner.calls)
+	runner.mu.Unlock()
+	if !slices.Equal(calls, []string{"release", "close"}) {
+		t.Fatalf("정리 순서 = %v — 콘솔을 먼저 닫고(release) 핸들은 그다음에 닫아야(close) 한다", calls)
+	}
+	streamMu.Lock()
+	defer streamMu.Unlock()
+	if afterClosed != 0 {
+		t.Fatalf("closed 뒤에 출력 %d 바이트를 흘렸다 — 받는 쪽은 이미 닫았다", afterClosed)
 	}
 }
