@@ -703,9 +703,9 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
             }
             const { items, warnings } =
               await resolveLocalTransferItemsFromPaths(droppedPaths);
-            if (warnings.length > 0) {
-              setSftpPaneWarnings(set, targetPaneId, warnings);
-            }
+            // 앞 드롭의 경고는 이번 드롭 결과로 바꾼다. 경고가 없을 때 그대로 두면, 다음에 잘 놓아도 폴더를 옮기거나
+            // 새로고침하기 전까지 예전 경고가 떠 있었다.
+            setSftpPaneWarnings(set, targetPaneId, warnings);
             if (items.length === 0) {
               if (warnings.length === 0) {
                 setSftpPaneWarnings(set, targetPaneId, [

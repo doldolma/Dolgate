@@ -433,6 +433,59 @@ describe("createAppStore sftp", () => {
     );
   });
 
+  // 앞 드롭의 경고는 다음 드롭 결과로 바뀐다. 예전에는 다음에 잘 놓아도 폴더를 옮기거나 새로고침하기 전까지
+  // "드롭한 항목 경로를 읽지 못했습니다" 가 그대로 떠 있었다.
+  it("replaces the previous drop's warning with the next drop's result", async () => {
+    const api = createMockApi();
+    const droppedPath = "/Users/tester/Drop/report.txt";
+    api.files.getParentPath = vi.fn().mockResolvedValue("/Users/tester/Drop");
+    api.files.list = vi.fn().mockResolvedValue({
+      path: "/Users/tester/Drop",
+      entries: [
+        {
+          name: "report.txt",
+          path: droppedPath,
+          isDirectory: false,
+          size: 42,
+          mtime: "2025-01-01T00:00:00.000Z",
+          kind: "file",
+          permissions: "rw-r--r--",
+        },
+      ],
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      sftp: {
+        ...state.sftp,
+        rightPane: {
+          ...state.sftp.rightPane,
+          sourceKind: "host",
+          endpoint: {
+            id: "endpoint-1",
+            kind: "remote",
+            hostId: "host-1",
+            title: "Prod",
+            path: "/remote",
+            connectedAt: "2025-01-01T00:00:00.000Z",
+          },
+          currentPath: "/remote",
+          history: ["/remote"],
+          historyIndex: 0,
+          warningMessages: ["드롭한 항목 경로를 읽지 못했습니다."],
+        },
+      },
+    }));
+
+    await store
+      .getState()
+      .prepareSftpExternalTransfer("right", "/remote", [droppedPath]);
+
+    expect(store.getState().sftp.rightPane.warningMessages).toEqual([]);
+    expect(api.sftp.startTransfer).toHaveBeenCalled();
+  });
+
   it("does not persist sudo password from SFTP owner changes into store state", async () => {
     const api = createMockApi();
     api.sftp.list = vi.fn().mockResolvedValue({

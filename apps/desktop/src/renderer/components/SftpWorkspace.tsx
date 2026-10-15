@@ -54,10 +54,13 @@ import { useResponsiveCardGrid } from "../lib/useResponsiveCardGrid";
 import {
   buildTransferCardTitle,
   buildTransferDirection,
+  buildTransferPathTooltip,
   formatEta,
   formatSize,
+  formatTransferFolderPath,
   formatTransferSpeed,
   getTransferFailureDisplayMessage,
+  getTransferTargetFolder,
 } from "../lib/transfer-format";
 import {
   extractDroppedAbsolutePaths,
@@ -81,7 +84,7 @@ import { ConnectionHopSteps } from "./ConnectionHopSteps";
 import { ConnectionStatusOverlay } from "./ConnectionStatusOverlay";
 import { useAppStore } from "../store/appStore";
 import { resolveConnectionStages } from "./terminal-workspace/connectionStages";
-import { ArrowLeft, ArrowRight, ArrowUp } from "../ui/icons";
+import { ArrowLeft, ArrowRight, ArrowUp, Folder } from "../ui/icons";
 import { TerminalInteractiveAuthOverlay } from "./terminal-workspace/TerminalInteractiveAuthOverlay";
 import {
   Button,
@@ -100,6 +103,7 @@ import {
   TabButton,
   Tabs,
   Toolbar,
+  Tooltip,
 } from "../ui";
 import { cn } from "../lib/cn";
 import { resolveHostTailnetId } from "../lib/host-tailnet";
@@ -1003,6 +1007,17 @@ export function parseInternalTransferPayload(
   }
 }
 
+/**
+ * 지금 이 창들에서 끌고 있는 항목. dragover 에서는 dataTransfer 의 내용을 읽을 수 없어(보안상 getData 가 빈 값)
+ * 끌기를 시작할 때 적어 두고 끝나면 지운다. 끄는 항목 자신이나 같은 폴더를 대상으로 삼지 않는 데 쓴다.
+ */
+let activeInternalDrag: InternalTransferPayload | null = null;
+
+/** 다른 앱이 아니라 이 창들에서 시작한 끌기인가(우리 형식이 실려 있다). */
+function carriesOwnTransfer(dataTransfer: Pick<DataTransfer, "types">): boolean {
+  return Array.from(dataTransfer.types ?? []).includes("application/x-dolssh-transfer");
+}
+
 export function hasInternalTransferData(
   dataTransfer: Pick<DataTransfer, "types">,
 ): boolean {
@@ -1109,7 +1124,9 @@ function PaneBrowser({
   const { t: translate } = useTranslation();
   const entries = useMemo(() => visibleEntries(pane), [pane]);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [isDropTargetActive, setIsDropTargetActive] = useState(false);
+  // 끄는 동안 놓을 곳. 폴더 줄 위면 그 폴더, 그 밖이면 열린 폴더(창 테두리를 켠다). 예전에는 폴더 줄 위에서도
+  // 창 테두리를 켜서 열린 폴더에 놓는 것처럼 보였는데, 놓으면 그 폴더 안으로 들어갔다.
+  const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
   const [isLocalRootsMenuOpen, setIsLocalRootsMenuOpen] = useState(false);
   const [localRoots, setLocalRoots] = useState<FileSystemRoot[] | null>(null);
   const [isLoadingLocalRoots, setIsLoadingLocalRoots] = useState(false);
@@ -1247,15 +1264,24 @@ function PaneBrowser({
     if (!parsed) {
       return false;
     }
-    if (parsed.sourcePaneId === pane.id && targetPath === pane.currentPath) {
-      return false;
+    // 같은 창에서 끌어 같은 폴더나 끌던 폴더 자신에 놓으면 할 일이 없다. 처리한 것으로 끝낸다 — 예전에는 여기서
+    // OS 파일 드롭으로 넘어가, 실려 온 파일이 없으니 "드롭한 항목 경로를 읽지 못했습니다" 가 떴다.
+    if (
+      parsed.sourcePaneId === pane.id &&
+      (targetPath === pane.currentPath || targetPath === parsed.draggedPath)
+    ) {
+      return true;
     }
     void onPrepareTransfer(parsed.sourcePaneId, targetPath, parsed.draggedPath);
     return true;
   };
 
   const handleExternalDrop = (event: DragEvent, targetPath: string) => {
-    if (pane.sourceKind !== "host" || !pane.endpoint) {
+    if (
+      pane.sourceKind !== "host" ||
+      !pane.endpoint ||
+      !hasExternalFileDrop(event.dataTransfer)
+    ) {
       return false;
     }
     const droppedFiles = Array.from(event.dataTransfer.files);
@@ -1507,7 +1533,8 @@ function PaneBrowser({
         className={cn(
           "relative min-h-0 flex-1 overflow-auto rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_95%,transparent_5%)] transition-[opacity,border-color,box-shadow]",
           pane.isLoading && "opacity-[0.82]",
-          isDropTargetActive &&
+          dropTargetPath !== null &&
+            dropTargetPath === pane.currentPath &&
             "border-[color-mix(in_srgb,var(--accent-strong)_62%,var(--border)_38%)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_38%,transparent_62%)]",
         )}
         data-pane-id={pane.id}
@@ -1526,9 +1553,17 @@ function PaneBrowser({
           if (!hasInternal && !hasExternalFiles) {
             return;
           }
+          // 같은 창에서 끈 항목을 열린 폴더(이미 있는 곳)에 놓을 수는 없다. 받지 않으면 놓기도 일어나지 않는다.
+          if (
+            carriesOwnTransfer(event.dataTransfer) &&
+            activeInternalDrag?.sourcePaneId === pane.id
+          ) {
+            setDropTargetPath(null);
+            return;
+          }
           event.preventDefault();
           event.dataTransfer.dropEffect = "copy";
-          setIsDropTargetActive(true);
+          setDropTargetPath(pane.currentPath);
         }}
         onDragLeave={(event) => {
           if (
@@ -1536,10 +1571,10 @@ function PaneBrowser({
           ) {
             return;
           }
-          setIsDropTargetActive(false);
+          setDropTargetPath(null);
         }}
         onDrop={(event) => {
-          setIsDropTargetActive(false);
+          setDropTargetPath(null);
           const hasInternal = handleInternalDrop(event, pane.currentPath);
           if (!hasInternal) {
             const handledExternal = handleExternalDrop(event, pane.currentPath);
@@ -1606,9 +1641,16 @@ function PaneBrowser({
                   "cursor-default transition-colors hover:bg-[color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)]",
                   pane.selectedPaths.includes(entry.path) &&
                     "bg-[color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)]",
+                  dropTargetPath === entry.path &&
+                    "bg-[color-mix(in_srgb,var(--accent-strong)_24%,transparent_76%)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_24%,transparent_76%)]",
                 )}
+                data-drop-target={dropTargetPath === entry.path ? "" : undefined}
                 draggable
                 onDragStart={(event) => {
+                  activeInternalDrag = {
+                    sourcePaneId: pane.id,
+                    draggedPath: entry.path,
+                  };
                   const payload = JSON.stringify({
                     sourcePaneId: pane.id,
                     draggedPath: entry.path,
@@ -1625,6 +1667,9 @@ function PaneBrowser({
                     }),
                   );
                   event.dataTransfer.effectAllowed = "copyMove";
+                }}
+                onDragEnd={() => {
+                  activeInternalDrag = null;
                 }}
                 onClick={(event) =>
                   onSelectEntry({
@@ -1658,18 +1703,26 @@ function PaneBrowser({
                     hasExternalFileDrop(event.dataTransfer) &&
                     pane.sourceKind === "host" &&
                     Boolean(pane.endpoint);
+                  // 끄는 폴더 자기 자신은 대상이 아니다(자기 안으로 넣지 않는다). 받지 않으면 창으로 올라간다.
+                  const isDraggedEntry =
+                    carriesOwnTransfer(event.dataTransfer) &&
+                    activeInternalDrag?.sourcePaneId === pane.id &&
+                    activeInternalDrag.draggedPath === entry.path;
                   if (
                     !entry.isDirectory ||
-                    (!hasInternal && !hasExternalFiles)
+                    (!hasInternal && !hasExternalFiles) ||
+                    isDraggedEntry
                   ) {
                     return;
                   }
                   event.preventDefault();
+                  // 창이 대상을 열린 폴더로 덮어쓰지 않게 한다.
+                  event.stopPropagation();
                   event.dataTransfer.dropEffect = "copy";
-                  setIsDropTargetActive(true);
+                  setDropTargetPath(entry.path);
                 }}
                 onDrop={(event) => {
-                  setIsDropTargetActive(false);
+                  setDropTargetPath(null);
                   if (!entry.isDirectory) {
                     return;
                   }
@@ -2386,6 +2439,7 @@ function HostPicker({
 
 function TransferBar({
   transfers,
+  localHomePath,
   onCancelTransfer,
   onPauseTransfer,
   onResumeTransfer,
@@ -2393,6 +2447,8 @@ function TransferBar({
   onDismissTransfer,
 }: {
   transfers: TransferJob[];
+  /** 받는 폴더를 `~` 로 줄여 보일 때 쓴다. */
+  localHomePath: string;
   onCancelTransfer: (jobId: string) => Promise<void>;
   onPauseTransfer: (jobId: string) => Promise<void>;
   onResumeTransfer: (jobId: string) => Promise<void>;
@@ -2441,6 +2497,7 @@ function TransferBar({
             : 0;
         const failureDetailLines = buildTransferFailureDetailLines(job);
         const isFailureDetailOpen = Boolean(expandedFailureDetails[job.id]);
+        const targetFolder = getTransferTargetFolder(job);
         return (
           <Card
             key={job.id}
@@ -2467,17 +2524,28 @@ function TransferBar({
                 {getTransferStatusLabel(job.status)}
               </span>
             </div>
-            <div className="mt-[0.4rem] grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[0.7rem] text-[0.82rem] text-[var(--text-soft)]">
-              <span
-                className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
-                title={buildTransferDirection(job)}
-              >
-                {buildTransferDirection(job)}
+            <Tooltip
+              label={buildTransferPathTooltip(job) ?? buildTransferDirection(job)}
+              multiline
+              className="mt-[0.4rem] flex min-w-0 flex-col gap-[0.15rem] text-[0.82rem] text-[var(--text-soft)]"
+            >
+              <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-[0.7rem]">
+                <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                  {buildTransferDirection(job)}
+                </span>
+                <span className="min-w-0 justify-self-end whitespace-nowrap text-right">
+                  {job.bytesTotal > 0 ? `${progress}%` : "--"}
+                </span>
               </span>
-              <span className="min-w-0 justify-self-end whitespace-nowrap text-right">
-                {job.bytesTotal > 0 ? `${progress}%` : "--"}
-              </span>
-            </div>
+              {targetFolder ? (
+                <span className="flex min-w-0 items-center gap-[0.35rem]">
+                  <Folder className="h-[0.85rem] w-[0.85rem] flex-none" aria-hidden="true" />
+                  <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                    {formatTransferFolderPath(targetFolder, localHomePath)}
+                  </span>
+                </span>
+              ) : null}
+            </Tooltip>
             <div className="mt-[0.55rem] h-2 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_90%,transparent_10%)]">
               <div
                 className="h-full rounded-full"
@@ -3790,6 +3858,7 @@ export function SftpWorkspace({
 
       <TransferBar
         transfers={transfers}
+        localHomePath={props.sftp.localHomePath}
         onCancelTransfer={onCancelTransfer}
         onPauseTransfer={onPauseTransfer}
         onResumeTransfer={onResumeTransfer}

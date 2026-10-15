@@ -3114,7 +3114,9 @@
     "etaHoursMinutes": "{{hours}}h {{minutes}}m left",
     "etaHours": "{{hours}}h left",
     "andMore": "{{name}} and {{count}} more",
-    "failedItems": "{{count}} items failed to transfer."
+    "failedItems": "{{count}} items failed to transfer.",
+    "pathFrom": "From",
+    "pathTo": "To"
   },
   "tmuxBar": {
     "aria": "tmux windows",

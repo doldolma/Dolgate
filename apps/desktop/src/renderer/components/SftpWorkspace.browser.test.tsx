@@ -6,6 +6,7 @@ import type {
   FileEntry,
   GroupRecord,
   HostRecord,
+  TransferJob,
 } from "@shared";
 import type {
   PendingSftpInteractiveAuth,
@@ -1750,5 +1751,176 @@ describe("SftpWorkspace column resizing", () => {
 
     expect(onDismissConflict).not.toHaveBeenCalled();
     expect(screen.getByText("dup.txt")).toBeTruthy();
+  });
+});
+
+// 끌어 놓는 대상은 Finder·탐색기처럼: 폴더 줄 위면 그 폴더, 그 밖이면 열린 폴더. 끄는 동안 강조가 그 대상과
+// 맞아야 한다 — 예전에는 폴더 줄 위에서도 창 테두리를 켜서, 열린 폴더에 놓는 줄 알았는데 그 폴더 안으로 들어갔다.
+describe("SftpWorkspace drop targets", () => {
+  function setup() {
+    const sftp = createSftpState();
+    sftp.leftPane = {
+      ...sftp.leftPane,
+      entries: [
+        { ...createEntry("abc", "/left"), isDirectory: true, kind: "folder" } as FileEntry,
+        createEntry("note.txt", "/left"),
+      ],
+    };
+    sftp.rightPane = createHostPickerPane({
+      sourceKind: "host",
+      endpoint: {
+        id: "endpoint-1",
+        kind: "remote",
+        hostId: "ssh-1",
+        title: "nas",
+        path: "/remote",
+        connectedAt: "2026-03-26T10:00:00.000Z",
+      },
+      currentPath: "/remote",
+      history: ["/remote"],
+      historyIndex: 0,
+      entries: [createEntry("doc.pdf", "/remote")],
+      selectedHostId: "ssh-1",
+    });
+    const onPrepareTransfer = vi.fn().mockResolvedValue(undefined);
+    const view = renderWorkspace({ sftp, onPrepareTransfer });
+    const leftPane = view.container.querySelector('[data-pane-id="left"]') as HTMLElement;
+    const rightPane = view.container.querySelector('[data-pane-id="right"]') as HTMLElement;
+    const rowOf = (pane: HTMLElement, name: string) => within(pane).getByText(name).closest("tr") as HTMLElement;
+    return { ...view, onPrepareTransfer, leftPane, rightPane, rowOf };
+  }
+
+  // 이 창들에서 시작한 끌기. dragStart 가 실어 보내는 값을 그대로 담는다.
+  function startDrag(row: HTMLElement) {
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      types: [] as string[],
+      files: [] as File[],
+      setData: (type: string, value: string) => {
+        data.set(type, value);
+        dataTransfer.types = [...data.keys()];
+      },
+      getData: (type: string) => data.get(type) ?? "",
+      dropEffect: "none",
+      effectAllowed: "all",
+    };
+    fireEvent.dragStart(row, { dataTransfer });
+    return dataTransfer;
+  }
+
+  const paneHighlighted = (pane: HTMLElement) => pane.className.includes("shadow-[inset");
+
+  it("highlights only the folder row under the cursor and drops into that folder", () => {
+    const { leftPane, rightPane, rowOf, onPrepareTransfer } = setup();
+    const source = rowOf(rightPane, "doc.pdf");
+    const dataTransfer = startDrag(source);
+    const folderRow = rowOf(leftPane, "abc");
+
+    fireEvent.dragOver(folderRow, { dataTransfer });
+    expect(folderRow).toHaveAttribute("data-drop-target");
+    expect(paneHighlighted(leftPane)).toBe(false);
+
+    fireEvent.drop(folderRow, { dataTransfer });
+    fireEvent.dragEnd(source);
+    expect(onPrepareTransfer).toHaveBeenCalledWith("right", "left", "/left/abc", "/remote/doc.pdf");
+    expect(folderRow).not.toHaveAttribute("data-drop-target");
+  });
+
+  it("targets the open folder anywhere outside a folder row", () => {
+    const { leftPane, rightPane, rowOf, onPrepareTransfer } = setup();
+    const source = rowOf(rightPane, "doc.pdf");
+    const dataTransfer = startDrag(source);
+    const fileRow = rowOf(leftPane, "note.txt");
+
+    fireEvent.dragOver(fileRow, { dataTransfer });
+    expect(paneHighlighted(leftPane)).toBe(true);
+    expect(leftPane.querySelector("[data-drop-target]")).toBeNull();
+
+    fireEvent.drop(fileRow, { dataTransfer });
+    fireEvent.dragEnd(source);
+    expect(onPrepareTransfer).toHaveBeenCalledWith("right", "left", "/left", "/remote/doc.pdf");
+  });
+
+  it("never offers the dragged folder itself or the folder it already sits in", () => {
+    const { leftPane, rowOf, onPrepareTransfer, onPrepareExternalTransfer } = setup();
+    const folderRow = rowOf(leftPane, "abc");
+    const dataTransfer = startDrag(folderRow);
+
+    fireEvent.dragOver(folderRow, { dataTransfer });
+    expect(folderRow).not.toHaveAttribute("data-drop-target");
+    expect(paneHighlighted(leftPane)).toBe(false);
+
+    fireEvent.drop(leftPane, { dataTransfer });
+    fireEvent.dragEnd(folderRow);
+    expect(onPrepareTransfer).not.toHaveBeenCalled();
+    expect(onPrepareExternalTransfer).not.toHaveBeenCalled();
+  });
+
+  // 자기 창에 도로 놓으면 할 일이 없다. 예전에는 OS 파일 드롭으로 넘어가 "드롭한 항목 경로를 읽지 못했습니다" 가
+  // 떴고, 그 경고는 폴더를 옮기거나 새로고침할 때까지 남았다.
+  it("does nothing when a file is dropped back on its own pane", async () => {
+    const { rightPane, rowOf, onPrepareTransfer, onPrepareExternalTransfer } = setup();
+    const source = rowOf(rightPane, "doc.pdf");
+    const dataTransfer = startDrag(source);
+
+    fireEvent.dragOver(rightPane, { dataTransfer });
+    expect(paneHighlighted(rightPane)).toBe(false);
+    fireEvent.drop(rightPane, { dataTransfer });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(onPrepareTransfer).not.toHaveBeenCalled();
+    expect(onPrepareExternalTransfer).not.toHaveBeenCalled();
+
+    // 끌기가 끝났다는 알림(dragEnd)을 놓쳐도 Finder 에서 놓는 파일은 그대로 받는다.
+    const uploadFile = new File(["payload"], "upload.txt");
+    const finderDrop = { types: ["Files"], files: [uploadFile], getData: () => "", dropEffect: "none" };
+    fireEvent.dragOver(rightPane, { dataTransfer: finderDrop });
+    expect(paneHighlighted(rightPane)).toBe(true);
+    fireEvent.drop(rightPane, { dataTransfer: finderDrop });
+    await waitFor(() => {
+      expect(onPrepareExternalTransfer).toHaveBeenCalledWith("right", "/remote", ["/Users/tester/Drop/upload.txt"]);
+    });
+    fireEvent.dragEnd(source);
+  });
+});
+
+// 전송 카드에 받는 폴더를 보이고, 커서를 올리면 보낸 곳·받는 곳 전체 경로를 보인다.
+describe("SftpWorkspace transfer card paths", () => {
+  function createTransfer(overrides: Partial<TransferJob> = {}): TransferJob {
+    return {
+      id: "transfer-1",
+      sourceLabel: "nas",
+      targetLabel: "Local",
+      itemCount: 1,
+      bytesTotal: 100,
+      bytesCompleted: 100,
+      status: "completed",
+      startedAt: "2026-10-15T00:00:00.000Z",
+      updatedAt: "2026-10-15T00:00:01.000Z",
+      request: {
+        source: { kind: "remote", path: "/home/Drive/스터디/최적화", endpointId: "endpoint-1" },
+        target: { kind: "local", path: "/Users/tester/Downloads/abc" },
+        items: [{ name: "파이썬 최적화 자료.pdf", path: "/home/Drive/스터디/최적화/파이썬 최적화 자료.pdf", isDirectory: false, size: 100 }],
+        conflictResolution: "overwrite",
+      },
+      ...overrides,
+    };
+  }
+
+  it("shows the destination folder, and both full paths on hover", () => {
+    renderWorkspace({ transfers: [createTransfer()] });
+
+    expect(screen.getByText("~/Downloads/abc")).toBeInTheDocument();
+    fireEvent.mouseEnter(screen.getByText("nas -> Local"));
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip).toHaveTextContent("보낸 곳 nas:/home/Drive/스터디/최적화");
+    expect(tooltip).toHaveTextContent("받는 곳 /Users/tester/Downloads/abc");
+  });
+
+  it("keeps the old card for a job without its request", () => {
+    renderWorkspace({ transfers: [createTransfer({ request: undefined, activeItemName: "old.bin" })] });
+
+    expect(screen.getByText("nas -> Local")).toBeInTheDocument();
+    expect(screen.queryByText(/~\/Downloads/)).toBeNull();
   });
 });

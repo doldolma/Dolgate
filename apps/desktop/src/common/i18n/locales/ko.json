@@ -3114,7 +3114,9 @@
     "etaHoursMinutes": "남은 시간 {{hours}}시간 {{minutes}}분",
     "etaHours": "남은 시간 {{hours}}시간",
     "andMore": "{{name}} 외 {{count}}개",
-    "failedItems": "{{count}}개 항목 전송에 실패했습니다."
+    "failedItems": "{{count}}개 항목 전송에 실패했습니다.",
+    "pathFrom": "보낸 곳",
+    "pathTo": "받는 곳"
   },
   "tmuxBar": {
     "aria": "tmux 윈도우",
