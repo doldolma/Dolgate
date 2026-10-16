@@ -265,6 +265,11 @@ export function useTerminalBlockOverlay({
   );
 
   // 스크롤·리렌더로 행 위치가 바뀌면 하이라이트와 스티키 헤더도 따라가야 한다.
+  //
+  // 위치는 한 프레임에 한 번만 잰다. onScroll 은 줄이 스크롤될 때마다 와서, 짧은 줄이 쏟아지면(`yes`)
+  // 초당 백만 번 넘게 위치를 재고 상태를 바꿨다 — 화면 처리가 21 → 2.4MB/s 로 떨어지고 Ctrl+C 뒤
+  // 프롬프트가 1초 넘게 늦었다(실측, 셸 통합이 붙은 SSH 세션). onRender 는 원래 프레임마다 한 번이라
+  // 바로 재고, 그 프레임에 예약해 둔 측정은 지운다.
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!enabled) {
@@ -274,14 +279,27 @@ export function useTerminalBlockOverlay({
     if (!terminal) {
       return;
     }
+    let frame: number | null = null;
     const update = () => {
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+        frame = null;
+      }
       recompute();
       recomputeSticky();
     };
+    const scheduleUpdate = () => {
+      if (frame === null) {
+        frame = requestAnimationFrame(update);
+      }
+    };
     update();
     const renderDisposable = terminal.onRender(update);
-    const scrollDisposable = terminal.onScroll(update);
+    const scrollDisposable = terminal.onScroll(scheduleUpdate);
     return () => {
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+      }
       renderDisposable.dispose();
       scrollDisposable.dispose();
     };
