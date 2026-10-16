@@ -629,7 +629,11 @@ if (termiusHelperArgIndex >= 0) {
         // forge + vite 출력에서는 main.js와 preload.js가 같은 build 디렉터리에 놓인다.
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true,
-        nodeIntegration: false
+        nodeIntegration: false,
+        // 창을 내리거나 가려도(macOS) 타이머를 늦추지 않는다. 늦추면 터미널 처리가 초당 1MB 아래로 떨어져
+        // 출력 흐름 제어가 그 속도에 묶이고, 백그라운드 빌드와 공유 뷰어가 함께 멈춘다. 숨은 창도 보이는
+        // 창과 같은 규칙으로 돈다 — 대가는 숨은 동안의 출력도 그린다는 것(숨겨 둔 창은 보통 출력이 없다).
+        backgroundThrottling: false
       }
     });
 
