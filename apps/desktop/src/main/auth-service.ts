@@ -539,6 +539,11 @@ export class AuthService {
   private offlineRetryTimer: NodeJS.Timeout | null = null;
   private offlineLeaseExpiryTimer: NodeJS.Timeout | null = null;
   private offlineRetryDelayMs = OFFLINE_RETRY_INITIAL_DELAY_MS;
+  // 서버를 기다리는 중인가(enterServerWait). 로그인 화면을 보여 주되 리프레시 토큰은 남겨 두고,
+  // 뒤에서 다시 물어보다 서버가 받아 주면 저절로 로그인 상태로 돌아온다.
+  private awaitingServer = false;
+  private serverWaitTimer: NodeJS.Timeout | null = null;
+  private serverWaitDelayMs = OFFLINE_RETRY_INITIAL_DELAY_MS;
   private refreshPromise: Promise<AuthState> | null = null;
   private pendingBrowserLoginState: string | null = null;
   private pendingBrowserLoginUrl: string | null = null;
@@ -678,6 +683,12 @@ export class AuthService {
    * 아니라 로그인 화면을 본다.
    */
   async startLocalOnly(): Promise<AuthState> {
+    // 서버를 기다리던 중이면 그만 기다린다. 남겨 둔 리프레시 토큰도 지운다 — 계정 없이 쓰는
+    // 기기에는 토큰이 없다는 것을 bootstrap 이 전제한다.
+    if (this.awaitingServer) {
+      this.cancelServerWait();
+      await this.secretStore.remove(REFRESH_TOKEN_ACCOUNT).catch(() => undefined);
+    }
     // 계정이 없어도 기록은 쌓인다(bootstrap 의 같은 분기와 짝).
     await this.notifySessionActivated(LOCAL_ONLY_HISTORY_OWNER);
     this.stateStorage.updateAuthStatus("local-only");
@@ -761,13 +772,28 @@ export class AuthService {
               message: error.message,
             })
           : null;
-      if (this.isTransientSessionError(error)) {
-        const restoredOffline = await this.restoreOfflineSession(
-          normalizedAuthErrorMessage ?? toErrorMessage(error, fallbackMessage),
-        );
+      const errorMessage =
+        normalizedAuthErrorMessage ?? toErrorMessage(error, fallbackMessage);
+      // 서버가 이 토큰을 거절한 것(401·403)만 로그아웃 사유다. 연결 실패·5xx·프록시의 429·404 같은
+      // 것은 서버의 판정이 아니어서, 토큰을 지우면 서버가 돌아와도 다시 로그인해야 했다(실측).
+      // 단, 남은 토큰이 예전 서버의 것이면 지금 서버를 기다리며 그 토큰을 보내면 안 된다 — 예전처럼
+      // 정리한다(아래 clearSession).
+      if (
+        this.isUnconfirmedSessionError(error) &&
+        !(await this.storedSessionBelongsToAnotherServer())
+      ) {
+        if (this.isClientOutdatedError(error)) {
+          // 이 앱 버전으로는 세션을 못 준다는 답(426)이다. 오프라인으로 넘기면 동기화가 조용히
+          // 멈추므로 로그인 화면에 안내를 그대로 보여 준다 — 업데이트하면 남긴 토큰으로 이어진다.
+          return this.enterServerWait(errorMessage, "auth-invalid", {
+            retry: false,
+          });
+        }
+        const restoredOffline = await this.restoreOfflineSession(errorMessage);
         if (restoredOffline) {
           return restoredOffline;
         }
+        return this.enterServerWait(errorMessage, "auth-invalid");
       }
 
       await this.clearSession(
@@ -1986,7 +2012,17 @@ export class AuthService {
       );
     }
 
-    const json = (await response.json()) as unknown;
+    let json: unknown;
+    try {
+      json = await response.json();
+    } catch {
+      // 앞단 프록시·포털이 HTML 같은 것을 200 으로 돌려준 경우다. 서버가 세션을 거절한 것이 아니다.
+      throw new SessionRequestError(
+        t("auth.authResponseInvalid"),
+        "invalid-response",
+        response.status,
+      );
+    }
     const session = normalizeAuthSession(json);
     if (!session) {
       throw new SessionRequestError(
@@ -1998,6 +2034,7 @@ export class AuthService {
   }
 
   private async persistSession(session: AuthSession): Promise<void> {
+    this.cancelServerWait();
     const normalizedServerUrl = normalizeServerUrl(this.getServerUrl());
     const owner = this.stateStorage.getSyncDataOwner();
     const ownerChanged =
@@ -2341,6 +2378,7 @@ export class AuthService {
   ): Promise<void> {
     this.clearRefreshTimer();
     this.clearOfflineTimers();
+    this.cancelServerWait();
     await this.closeLoopbackCallbackServer();
     if (options.removeRefreshToken) {
       await this.secretStore
@@ -2410,11 +2448,161 @@ export class AuthService {
     this.broadcast(this.state);
   }
 
-  private isTransientSessionError(error: unknown): boolean {
-    return (
-      error instanceof SessionRequestError &&
-      (error.kind === "network" || error.kind === "server")
+  /**
+   * 서버가 세션을 확인해 주지 못한 실패인가 — 연결 실패, 5xx, 그리고 401·403 이 아닌 응답(앞단
+   * 프록시의 429·404, 깨진 응답 등). 이때는 리프레시 토큰을 지우지 않는다. 401·403 만 서버가 이
+   * 토큰을 거절한 것이다.
+   */
+  private isUnconfirmedSessionError(error: unknown): boolean {
+    return error instanceof SessionRequestError && error.kind !== "auth";
+  }
+
+  private isClientOutdatedError(error: unknown): boolean {
+    return error instanceof SessionRequestError && error.status === 426;
+  }
+
+  /**
+   * 남아 있는 리프레시 토큰이 지금 설정된 서버가 아닌 다른 서버의 것인가. 서버 주소를 바꿔도 토큰은
+   * 그대로 남는데, 그 토큰을 새 서버로 보내면 다른 서버에 토큰을 넘기는 셈이다. 토큰의 서버는
+   * 동기화 데이터의 주인 기록과 오프라인 캐시가 알고 있다.
+   */
+  private async storedSessionBelongsToAnotherServer(): Promise<boolean> {
+    const currentServerUrl = normalizeServerUrl(this.getServerUrl());
+    const owner = this.stateStorage.getSyncDataOwner();
+    if (owner.serverUrl && owner.serverUrl !== currentServerUrl) {
+      return true;
+    }
+    const raw = await this.secretStore
+      .load(OFFLINE_SESSION_CACHE_ACCOUNT)
+      .catch(() => null);
+    if (!raw) {
+      return false;
+    }
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return isOfflineSessionCache(parsed) && parsed.serverUrl !== currentServerUrl;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 서버가 세션을 확인해 주지 못했고 오프라인으로도 열 수 없다. 서버가 토큰을 거절한 것은 아니므로
+   * 리프레시 토큰은 남긴다 — 예전에는 여기서 지워서, 서버가 돌아와도 다시 로그인해야 했다. 로그인
+   * 화면을 보여 주되 뒤에서 다시 물어보다가, 서버가 받아 주면 저절로 로그인 상태로 돌아온다.
+   */
+  private async enterServerWait(
+    errorMessage: string,
+    reason: SessionInvalidationContext["reason"],
+    options: { retry: boolean } = { retry: true },
+  ): Promise<AuthState> {
+    await this.clearSession(
+      {
+        status: "unauthenticated",
+        errorMessage,
+      },
+      {
+        reason,
+        purgeSyncedCache: false,
+        removeRefreshToken: false,
+        // 남긴 토큰이 어느 서버의 것인지 이 캐시가 기억한다(storedSessionBelongsToAnotherServer).
+        // 임대가 끝난 캐시로는 오프라인으로 열리지 않으므로 남겨도 된다.
+        removeOfflineCache: false,
+      },
     );
+    if (options.retry) {
+      this.awaitingServer = true;
+      this.serverWaitDelayMs = OFFLINE_RETRY_INITIAL_DELAY_MS;
+      this.scheduleServerWaitRetry();
+    }
+    return this.state;
+  }
+
+  private cancelServerWait(): void {
+    this.awaitingServer = false;
+    if (this.serverWaitTimer) {
+      clearTimeout(this.serverWaitTimer);
+      this.serverWaitTimer = null;
+    }
+  }
+
+  private scheduleServerWaitRetry(): void {
+    if (this.serverWaitTimer) {
+      clearTimeout(this.serverWaitTimer);
+    }
+    this.serverWaitTimer = setTimeout(() => {
+      this.serverWaitTimer = null;
+      void this.retryWhileAwaitingServer();
+    }, this.serverWaitDelayMs);
+  }
+
+  /**
+   * 서버를 기다리는 동안 남겨 둔 리프레시 토큰으로 조용히 다시 묻는다. refreshSession 을 거치지
+   * 않는 것은 로그인 화면을 매번 "불러오는 중" 으로 바꾸지 않고, 결과가 나올 때만 상태를 바꾸기
+   * 위해서다.
+   */
+  private async retryWhileAwaitingServer(): Promise<void> {
+    if (!this.awaitingServer) {
+      return;
+    }
+    // 사용자가 브라우저 로그인을 시작했거나 다른 갱신이 도는 중이면 이번 차례는 건너뛴다.
+    if (
+      this.state.status !== "unauthenticated" ||
+      this.pendingBrowserLoginState ||
+      this.refreshPromise
+    ) {
+      this.scheduleServerWaitRetry();
+      return;
+    }
+    const refreshToken = await this.secretStore.load(REFRESH_TOKEN_ACCOUNT);
+    if (!refreshToken) {
+      this.cancelServerWait();
+      return;
+    }
+    // 기다리는 사이에 서버 주소를 바꿨다. 이 토큰은 예전 서버의 것이라 새 서버로 보내지 않는다.
+    if (await this.storedSessionBelongsToAnotherServer()) {
+      this.cancelServerWait();
+      await this.secretStore.remove(REFRESH_TOKEN_ACCOUNT).catch(() => undefined);
+      return;
+    }
+
+    let session: AuthSession;
+    try {
+      session = await this.requestSessionWithClassification("/auth/refresh", {
+        refreshToken,
+      });
+    } catch (error) {
+      if (!this.awaitingServer) {
+        return;
+      }
+      if (error instanceof SessionRequestError && error.kind === "auth") {
+        // 이제 서버가 이 토큰을 거절했다 — 그때 비로소 다시 로그인해야 한다.
+        this.cancelServerWait();
+        await this.secretStore
+          .remove(REFRESH_TOKEN_ACCOUNT)
+          .catch(() => undefined);
+        if (this.state.status === "unauthenticated") {
+          this.patchState({ errorMessage: error.message });
+        }
+        return;
+      }
+      this.serverWaitDelayMs = Math.min(
+        this.serverWaitDelayMs * 2,
+        OFFLINE_RETRY_MAX_DELAY_MS,
+      );
+      this.scheduleServerWaitRetry();
+      return;
+    }
+
+    // 묻는 사이에 로그아웃했거나 다른 길로 로그인을 시작했다. 이 결과는 쓰지 않는다.
+    if (
+      !this.awaitingServer ||
+      this.state.status !== "unauthenticated" ||
+      this.pendingBrowserLoginState
+    ) {
+      return;
+    }
+    await this.persistSession(session);
   }
 
   private async restoreOfflineSession(
@@ -2427,6 +2615,12 @@ export class AuthService {
 
     const verification = verifyOfflineLease(cache, this.getServerUrl());
     if (!verification.ok) {
+      // 임대가 끝났을 뿐이면 서버는 아직 이 토큰을 받아 줄 수 있다(서버의 idle 기간이 더 길다).
+      // 오프라인으로는 열지 않고, 토큰은 남긴 채 서버를 기다린다. 다른 서버의 캐시이거나 서명이
+      // 맞지 않는 것은 예전처럼 정리한다.
+      if (verification.expired) {
+        return this.enterServerWait(t("auth.offlineLeaseExpired"), "offline-expired");
+      }
       await this.clearSession(
         {
           status: "unauthenticated",
@@ -2580,19 +2774,8 @@ export class AuthService {
 
     const delay = Math.max(0, new Date(expiresAt).getTime() - Date.now());
     this.offlineLeaseExpiryTimer = setTimeout(() => {
-      void this.clearSession(
-        {
-          status: "unauthenticated",
-          errorMessage:
-            t("auth.offlineLeaseExpired"),
-        },
-        {
-          reason: "offline-expired",
-          purgeSyncedCache: false,
-          removeRefreshToken: true,
-          removeOfflineCache: true,
-        },
-      );
+      // 오프라인으로 쓸 수 있는 시간만 끝났다. 토큰은 남기고 서버를 기다린다(enterServerWait).
+      void this.enterServerWait(t("auth.offlineLeaseExpired"), "offline-expired");
     }, delay);
   }
 

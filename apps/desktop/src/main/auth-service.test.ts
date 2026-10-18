@@ -165,6 +165,7 @@ async function createService(serverUrl = "https://ssh.doldolma.com") {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   delete process.env.DOLSSH_USER_DATA_DIR;
@@ -477,6 +478,8 @@ describe("AuthService offline bootstrap", () => {
     expect(state.errorMessage).toBe(
       "세션이 만료되었거나 로그인 정보가 유효하지 않습니다. 다시 로그인해 주세요.",
     );
+    // 서버가 토큰을 거절한 것이므로 지운다.
+    await expect(secretStore.load("auth:refresh-token")).resolves.toBeNull();
   });
 
   it("keeps network refresh failures using the existing error message", async () => {
@@ -486,6 +489,8 @@ describe("AuthService offline bootstrap", () => {
 
     await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
 
+    // 서버를 기다리는 재시도 타이머가 실제 네트워크로 나가지 않게 한다.
+    vi.useFakeTimers();
     vi.stubGlobal(
       "fetch",
       vi.fn().mockRejectedValue(new Error("network down")),
@@ -495,6 +500,10 @@ describe("AuthService offline bootstrap", () => {
 
     expect(state.status).toBe("unauthenticated");
     expect(state.errorMessage).toBe("network down");
+    // 서버에 닿지 못한 것이지 거절당한 것이 아니므로 토큰은 남는다.
+    await expect(secretStore.load("auth:refresh-token")).resolves.toBe(
+      session.tokens.refreshToken,
+    );
   });
 
   it("enters loading while retrying refresh from the unauthenticated login gate", async () => {
@@ -2297,5 +2306,180 @@ describe("AuthService 로컬 전용", () => {
 
     const { service: restarted } = await createService(serverUrl);
     expect((await restarted.bootstrap()).status).toBe("local-only");
+  });
+});
+
+// 서버가 세션을 확인해 주지 못한 것(연결 실패·5xx·프록시의 429·404·깨진 응답)은 로그아웃 사유가
+// 아니다. 예전에는 오프라인 임대(72시간)가 끝난 채 서버에 닿지 못하면 리프레시 토큰까지 지워서,
+// 서버의 idle 기간(14일) 안이어도 서버가 돌아온 뒤 다시 로그인해야 했다(실측).
+describe("AuthService 서버가 세션을 확인해 주지 못할 때", () => {
+  const serverUrl = "https://ssh.doldolma.com";
+  const leaseExpired = "서버에 연결되지 않은 채 오프라인으로 쓸 수 있는 시간이 지났습니다. 서버에 연결되면 자동으로 다시 로그인합니다.";
+
+  function sessionWithLease(expiresAt: Date): AuthSession {
+    return {
+      ...createSession(serverUrl),
+      offlineLease: signOfflineLease(serverUrl, "user-1", expiresAt),
+    };
+  }
+
+  async function prepare(lease: Date | null) {
+    const created = await createService(serverUrl);
+    const session = sessionWithLease(lease ?? new Date(Date.now() + 60_000));
+    await created.secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    if (lease) {
+      await created.secretStore.save(
+        "auth:offline-session-cache",
+        JSON.stringify({
+          serverUrl: `${serverUrl}/`,
+          user: session.user,
+          vaultBootstrap: session.vaultBootstrap,
+          offlineLease: session.offlineLease,
+          lastOnlineAt: session.syncServerTime,
+        }),
+      );
+    }
+    return { ...created, session };
+  }
+
+  function sessionResponse(session: AuthSession): Response {
+    return new Response(JSON.stringify(session), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
+    ["응답이 없을 때", () => Promise.reject(new Error("network down"))],
+    ["503 일 때", () => Promise.resolve(new Response("down", { status: 503 }))],
+  ])("임대가 끝났고 서버가 %s 토큰을 남기고, 서버가 돌아오면 저절로 다시 로그인한다", async (_label, failure) => {
+    const { service, secretStore, session } = await prepare(new Date(Date.now() - 60_000));
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockImplementationOnce(failure);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const state = await service.bootstrap();
+
+    expect(state.status).toBe("unauthenticated");
+    expect(state.errorMessage).toBe(leaseExpired);
+    await expect(secretStore.load("auth:refresh-token")).resolves.toBe(session.tokens.refreshToken);
+
+    fetchMock.mockResolvedValue(sessionResponse(createSession(serverUrl)));
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(service.getState().status).toBe("authenticated");
+  });
+
+  it("켜 둔 채 임대가 끝나도 토큰을 남기고, 서버가 돌아오면 다시 로그인한다", async () => {
+    const { service, secretStore, session } = await prepare(new Date(Date.now() + 120_000));
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect((await service.bootstrap()).status).toBe("offline-authenticated");
+    await vi.advanceTimersByTimeAsync(121_000);
+
+    expect(service.getState().status).toBe("unauthenticated");
+    expect(service.getState().errorMessage).toBe(leaseExpired);
+    await expect(secretStore.load("auth:refresh-token")).resolves.toBe(session.tokens.refreshToken);
+
+    fetchMock.mockResolvedValue(sessionResponse(createSession(serverUrl)));
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(service.getState().status).toBe("authenticated");
+  });
+
+  it.each([
+    ["429", () => new Response("slow down", { status: 429 })],
+    ["404", () => new Response("not found", { status: 404 })],
+    ["깨진 200 응답", () => new Response("<html>portal</html>", { status: 200, headers: { "content-type": "text/html" } })],
+  ])("서버가 %s 을 주면 임대가 남았을 때 오프라인으로 열고 토큰을 지우지 않는다", async (_label, response) => {
+    const { service, secretStore, session } = await prepare(new Date(Date.now() + 60 * 60_000));
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(response()));
+
+    const state = await service.bootstrap();
+
+    expect(state.status).toBe("offline-authenticated");
+    await expect(secretStore.load("auth:refresh-token")).resolves.toBe(session.tokens.refreshToken);
+  });
+
+  it("앱이 너무 오래됐다는 426 은 로그인 화면에 안내하되 토큰은 남긴다", async () => {
+    const { service, secretStore, session } = await prepare(new Date(Date.now() + 60 * 60_000));
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "앱을 최신 버전으로 업데이트해 주세요." }), {
+          status: 426,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    const state = await service.bootstrap();
+
+    // 오프라인으로 넘기면 동기화가 조용히 멈춘다 — 로그인 화면에 안내가 그대로 떠야 한다.
+    expect(state.status).toBe("unauthenticated");
+    expect(state.errorMessage).toContain("업데이트");
+    await expect(secretStore.load("auth:refresh-token")).resolves.toBe(session.tokens.refreshToken);
+  });
+
+  it("서버를 기다리다 서버가 토큰을 거절하면(401) 그때 토큰을 지우고 더 묻지 않는다", async () => {
+    const { service, secretStore } = await prepare(new Date(Date.now() - 60_000));
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockRejectedValueOnce(new Error("network down"));
+    vi.stubGlobal("fetch", fetchMock);
+    await service.bootstrap();
+
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: "인증에 실패했습니다." }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(service.getState().status).toBe("unauthenticated");
+    expect(service.getState().errorMessage).toContain("다시 로그인");
+    await expect(secretStore.load("auth:refresh-token")).resolves.toBeNull();
+    const callsAfterRejection = fetchMock.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(fetchMock.mock.calls.length).toBe(callsAfterRejection);
+  });
+
+  it("서버를 기다리는 사이에 서버 주소를 바꾸면 예전 서버의 토큰을 새 서버로 보내지 않고 지운다", async () => {
+    const { service, secretStore, setServerUrl } = await prepare(new Date(Date.now() - 60_000));
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockRejectedValueOnce(new Error("network down"));
+    vi.stubGlobal("fetch", fetchMock);
+    await service.bootstrap();
+
+    setServerUrl("https://self.hosted.example.com");
+    fetchMock.mockResolvedValue(sessionResponse(createSession("https://self.hosted.example.com")));
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(service.getState().status).toBe("unauthenticated");
+    await expect(secretStore.load("auth:refresh-token")).resolves.toBeNull();
+  });
+
+  it("서버를 기다리는 중에 계정 없이 쓰기로 하면 더 묻지 않고 남긴 토큰도 지운다", async () => {
+    const { service, secretStore } = await prepare(new Date(Date.now() - 60_000));
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockRejectedValueOnce(new Error("network down"));
+    vi.stubGlobal("fetch", fetchMock);
+    await service.bootstrap();
+
+    await service.startLocalOnly();
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+
+    expect(service.getState().status).toBe("local-only");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(secretStore.load("auth:refresh-token")).resolves.toBeNull();
   });
 });

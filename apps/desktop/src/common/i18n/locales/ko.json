@@ -1193,7 +1193,7 @@
     "authRequestFailed": "인증 요청에 실패했습니다.",
     "authResponseInvalid": "인증 응답 형식이 올바르지 않습니다.",
     "vaultStateRestoreFailed": "동기화 볼트 상태를 복원할 수 없습니다.",
-    "offlineLeaseExpired": "오프라인 사용 가능 시간이 만료되어 다시 로그인이 필요합니다.",
+    "offlineLeaseExpired": "서버에 연결되지 않은 채 오프라인으로 쓸 수 있는 시간이 지났습니다. 서버에 연결되면 자동으로 다시 로그인합니다.",
     "passkeyRegisterUnavailable": "패스키 등록을 시작할 수 없습니다.",
     "registrationLinkInvalid": "등록 링크가 올바르지 않습니다.",
     "callbackPortFailed": "로컬 로그인 콜백 포트를 열지 못했습니다.",
