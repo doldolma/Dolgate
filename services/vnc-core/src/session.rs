@@ -596,8 +596,12 @@ fn connect_and_run(
     if let Ok(mut slot) = handle.shutdown.lock() {
         *slot = socket.try_clone().ok();
     }
-    // 사본을 넣기 전에 닫혔을 수 있다. 여기서 한 번 더 본다.
-    ensure!(!handle.is_closed(), Cancelled);
+    // 사본을 넣기 전에 닫혔을 수 있다. 그때 close() 는 빈 칸을 봤으므로 여기서 끊는다 — 안 끊으면
+    // 칸에 남은 사본이 연결을 붙잡아, 세션은 끝났는데 상대는 끊긴 줄 모른다.
+    if handle.is_closed() {
+        let _ = socket.shutdown(std::net::Shutdown::Both);
+        bail!(Cancelled);
+    }
 
     let mut transport = Transport::Plain(socket);
     let version = rfb::negotiate_version(&mut transport).context("RFB 버전 협상")?;
