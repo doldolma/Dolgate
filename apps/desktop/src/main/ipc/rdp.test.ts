@@ -200,6 +200,17 @@ function createHarness(
 }
 
 describe("registerRdpIpcHandlers certificate trust", () => {
+  // 팀 호스트의 핀은 그 팀 레코드에 둔다 — 카탈로그가 그 호스트의 볼트로 보낸다.
+  it("pins the certificate through the vault that holds the host", async () => {
+    const harness = createHarness(null);
+    const vaults = (harness.ctx as unknown as { vaults: { writeHost: (...args: unknown[]) => unknown } }).vaults;
+    const writeHost = vi.spyOn(vaults, "writeHost");
+
+    await harness.connectAndVerify();
+
+    expect(writeHost).toHaveBeenCalledWith("rdp-1", expect.any(Function));
+  });
+
   it("queues a sync after pinning so the next pull cannot wipe it", async () => {
     const harness = createHarness(null);
 
@@ -661,6 +672,27 @@ describe("registerRdpIpcHandlers monitor layout", () => {
     // 채워 넣은 값은 동기화돼야 한다 — 다른 기기의 같은 레코드도 이름에서 벗어난다.
     expect(harness.ctx.queueSync).toHaveBeenCalled();
     // 그리고 그 id 로 되찾은 현재 이름으로 터널을 연다.
+    expect(harness.ctx.coreManager.startSsmTunnel).toHaveBeenCalledWith(
+      expect.objectContaining({ profileName: "renamed-admin" }),
+    );
+  });
+
+  // 내 개인 프로필의 id 를 팀 레코드에 적으면 팀원에게는 없는 프로필을 가리킨다(팀 AWS 프로필은 작업 3).
+  it("팀 호스트에는 내 개인 프로필 id 를 채워 넣지 않는다", async () => {
+    const harness = createHarness("AA:BB:CC", null, {
+      awsSsm: {
+        profileName: "gw-prod",
+        region: "ap-northeast-2",
+        instanceId: "i-legacy",
+      },
+    });
+    const vaults = (harness.ctx as unknown as { vaults: { scopeOfHost: (id: string) => unknown } }).vaults;
+    vi.spyOn(vaults, "scopeOfHost").mockReturnValue({ id: "team-1" });
+
+    await harness.connectAndVerify();
+
+    expect(harness.ctx.hosts.fillRdpAwsSsmProfileId).not.toHaveBeenCalled();
+    // 접속은 그대로 된다 — 지금 찾은 이름으로 연다.
     expect(harness.ctx.coreManager.startSsmTunnel).toHaveBeenCalledWith(
       expect.objectContaining({ profileName: "renamed-admin" }),
     );

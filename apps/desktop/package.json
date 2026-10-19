@@ -58,6 +58,7 @@
     "test:desktop:main": "vitest run --config vite.main.config.ts",
     "test:desktop:preload": "vitest run --config vite.preload.config.ts",
     "test:desktop:renderer": "vitest run --config vite.renderer.config.ts",
+    "test:desktop:team-e2e": "cross-env DOLGATE_TEAM_E2E=1 vitest run --config vite.main.config.ts src/main/team-sync.e2e.test.ts",
     "test:desktop:e2e-helpers": "node --test e2e/*.unit.cjs",
     "ensure:smoke-package": "node ./scripts/ensure-smoke-package.cjs",
     "ensure:smoke-package:fresh": "node ./scripts/ensure-smoke-package.cjs --fresh",

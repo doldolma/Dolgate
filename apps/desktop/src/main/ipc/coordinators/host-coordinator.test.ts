@@ -258,3 +258,25 @@ describe("resolveTailnetRoute", () => {
     );
   });
 });
+
+describe("jump hosts", () => {
+  // 팀 호스트가 개인 호스트를(또는 그 반대를) 점프로 쓰면 팀원은 그 점프 호스트가 없다.
+  it("looks a jump host up only in the target's own vault", async () => {
+    const { deps } = createCoordinator();
+    deps.vaults = { ...deps.vaults, getHostInSameVault: vi.fn(() => null) };
+    const coordinator = createHostCoordinator(deps);
+    const target = {
+      id: "team-target",
+      kind: "ssh",
+      label: "Shared",
+      hostname: "target.internal",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      jumpHostIds: ["personal-bastion"],
+    } as never;
+
+    await expect(coordinator.resolveJumpHostTarget(target)).rejects.toThrow();
+    expect(deps.vaults.getHostInSameVault).toHaveBeenCalledWith("team-target", "personal-bastion");
+  });
+});

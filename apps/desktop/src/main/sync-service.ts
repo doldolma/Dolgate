@@ -126,7 +126,7 @@ interface GroupPathRename {
  * delete-subtree 였는지 reparent 였는지 스냅샷으로는 복원할 수 없고, pull 이 사용자 데이터를
  * 지우거나 말없이 옮기는 것보다 눈에 보이는 채로 두는 편이 안전하다.
  */
-function collectRenamedGroupPaths(
+export function collectRenamedGroupPaths(
   previousGroups: readonly GroupRecord[],
   nextGroups: readonly GroupRecord[]
 ): GroupPathRename[] {
@@ -157,7 +157,7 @@ function collectRenamedGroupPaths(
  * 옛 경로를 다시 설치하는데 그때는 rename diff 가 이미 사라져 되돌릴 방법이 없다(pull 이 로컬을
  * 고쳤으니 되올려야 한다는 점에서 AWS 프로필 이름 충돌 해소와 같은 처리다).
  */
-function rebaseSavedWorkspaceGroups(
+export function rebaseSavedWorkspaceGroups(
   workspaces: readonly SavedWorkspaceRecord[],
   renames: readonly GroupPathRename[],
   survivingGroupPaths: ReadonlySet<string>,
@@ -221,7 +221,7 @@ function totalRecordCount(payload: SyncPayloadV2): number {
   );
 }
 
-function normalizeSyncPayload(
+export function normalizeSyncPayload(
   payload: Partial<SyncPayloadV2> | null | undefined,
   options?: { includeAwsProfiles?: boolean }
 ): SyncPayloadV2 {
@@ -308,7 +308,7 @@ function resolveManagedAwsProfileNameConflicts(
   };
 }
 
-function encodeEncryptedPayload(plaintext: string, keyBase64: string): string {
+export function encodeEncryptedPayload(plaintext: string, keyBase64: string): string {
   const key = Buffer.from(keyBase64, 'base64');
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
@@ -322,7 +322,7 @@ function encodeEncryptedPayload(plaintext: string, keyBase64: string): string {
   });
 }
 
-function decodeEncryptedPayload<T>(payload: string, keyBase64: string): T {
+export function decodeEncryptedPayload<T>(payload: string, keyBase64: string): T {
   try {
     const envelope = JSON.parse(payload) as {
       v: number;
@@ -343,7 +343,7 @@ function decodeEncryptedPayload<T>(payload: string, keyBase64: string): T {
   }
 }
 
-async function toApiErrorMessage(response: Response, fallback: string): Promise<string> {
+export async function toApiErrorMessage(response: Response, fallback: string): Promise<string> {
   const contentType = response.headers.get('content-type') ?? '';
   const text = (await response.text()).trim();
   const looksLikeHtml =
@@ -367,7 +367,7 @@ async function toApiErrorMessage(response: Response, fallback: string): Promise<
   return normalizedAuthMessage || extracted || `${fallback} (${response.status})`;
 }
 
-function isLikelyAuthError(response: Response, message: string): boolean {
+export function isLikelyAuthError(response: Response, message: string): boolean {
   if (response.status === 401 || response.status === 403) {
     return true;
   }

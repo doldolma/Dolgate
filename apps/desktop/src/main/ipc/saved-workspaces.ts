@@ -14,8 +14,9 @@ import type { MainIpcContext } from "./context";
  * 잠긴 세션은 앱을 다시 켤 때까지 낫지 않았다(hosts-groups.ts 의 모든 변경 핸들러가 이 짝을 지킨다).
  */
 export function registerSavedWorkspacesIpcHandlers(ctx: MainIpcContext): void {
+  // 목록·즐겨찾기·열기는 팀 워크스페이스까지 본다(팀 것은 즐겨찾기·연 시각이 내 칸에 있다).
   ipcMain.handle(ipcChannels.savedWorkspaces.list, async () =>
-    ctx.savedWorkspaces.list(),
+    ctx.vaults.listWorkspaces(),
   );
 
   ipcMain.handle(
@@ -51,7 +52,7 @@ export function registerSavedWorkspacesIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.savedWorkspaces.setFavorite,
     async (event, id: string, favorite: boolean) => {
-      const record = ctx.savedWorkspaces.setFavorite(id, favorite);
+      const record = ctx.vaults.setWorkspaceFavorite(id, favorite);
       ctx.queueSync();
       ctx.emitWorkspaceChanged?.(event?.sender);
       return record;
@@ -61,7 +62,7 @@ export function registerSavedWorkspacesIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.savedWorkspaces.touchOpened,
     async (event, id: string) => {
-      const record = ctx.savedWorkspaces.touchOpened(id);
+      const record = ctx.vaults.touchWorkspaceOpened(id);
       ctx.emitWorkspaceChanged?.(event?.sender);
       return record;
     },

@@ -88,7 +88,8 @@ function buildTailnetConfigs(ctx: MainIpcContext): TailnetConfig[] {
   // 다음에 만들어질 때 쓴다 — 그래서 연결이 끊기지도, 새 연결이 막히지도 않는다. 노드키는
   // 그대로라 재인증도 없고 컨트롤 플레인에서도 같은 노드다.
   const hostname = resolveTailnetHostname(ctx);
-  return ctx.tailnets.listPayloads().map((payload) => {
+  // 팀 tailnet 도 싣는다 — 팀 호스트가 그 tailnet 으로 붙는다.
+  return ctx.vaults.listTailnetPayloads().map((payload) => {
     const authKey = payload.authKey?.trim() || undefined;
     return {
       id: payload.id,

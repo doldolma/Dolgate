@@ -50,6 +50,7 @@ import { isSecureStorageUsable, SecretStore } from './secret-store';
 import { SessionShareService } from './session-share-service';
 import { SessionReplayService } from './session-replay-service';
 import { SyncService } from './sync-service';
+import { TeamSyncService } from './team-sync-service';
 import { matchCloseActiveTab, matchTabCommand } from './tab-shortcuts';
 import {
   forgetRdpKeyboardCapture,
@@ -410,6 +411,22 @@ if (termiusHelperArgIndex >= 0) {
     }
   };
 
+  // 팀 볼트 동기화. 팀 목록이 바뀌거나 팀 데이터를 받으면 화면을 다시 읽히고 코어에 tailnet 설정을
+  // 다시 알린다(개인 pull 을 적용했을 때와 같다).
+  const teamSyncService = new TeamSyncService({
+    auth: authService,
+    secretStore,
+    onChanged: () => {
+      coreManager.pushTailnetConfigs();
+      broadcastWorkspaceChanged();
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+          window.webContents.send(ipcChannels.teams.changed);
+        }
+      }
+    },
+  });
+
   const rewriteDnsOverridesForCurrentState = async () => {
     const overrides = dnsOverrideRepository.list();
     hostsOverrideManager.pruneStaticOverrideStates(
@@ -457,6 +474,9 @@ if (termiusHelperArgIndex >= 0) {
     // 그 tailnet 을 쓰는 호스트가 "is not configured" 로 실패한다.
     coreManager.pushTailnetConfigs();
     broadcastWorkspaceChanged();
+    // 팀 목록이 바뀌면 서버가 개인 리비전을 올린다 — 개인 pull 이 적용될 때마다 팀 목록을 다시 읽는다.
+    // 앱을 켤 때와 볼트를 열 때도 첫 개인 pull 이 여기로 온다.
+    void teamSyncService.refreshTeams().catch(() => undefined);
   });
   syncService.setOnPurgedSyncedCache(() =>
     awsService.purgeManagedProfileArtifacts()
@@ -795,9 +815,12 @@ if (termiusHelperArgIndex >= 0) {
     sessionReplayService.deactivate();
     activityLogRepository.deactivate();
     if (context.purgeSyncedCache) {
+      // 개인 캐시와 함께 모든 팀의 로컬 데이터도 지운다. 원본은 서버에 있다.
+      await teamSyncService.purgeAll();
       await syncService.purgeSyncedCache();
       return;
     }
+    teamSyncService.stop();
     syncService.pause(null);
   });
 
@@ -862,6 +885,8 @@ if (termiusHelperArgIndex >= 0) {
       tailnetRepository,
       rdpManager,
       vncManager,
+      awsProfileRepository,
+      teamSyncService,
       {
         openWindow: async (intent) => {
           await createWindow(intent);
@@ -934,6 +959,7 @@ if (termiusHelperArgIndex >= 0) {
     // 바로 다시 붙어, 잠든 사이 다른 기기에서 바뀐 것을 곧장 받는다.
     const notifyResume = () => {
       syncService.interruptWatch();
+      teamSyncService.interruptWatches();
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.isDestroyed()) {
           window.webContents.send(ipcChannels.system.resume);

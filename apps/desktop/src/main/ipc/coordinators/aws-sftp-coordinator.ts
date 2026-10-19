@@ -341,7 +341,7 @@ export function createAwsSftpCoordinator(deps: {
       return host;
     }
 
-    const nextHost = hosts.update(
+    const nextHost = vaults.updateHost(
       host.id,
       toAwsHostDraft(host, {
         awsAvailabilityZone:
@@ -369,7 +369,7 @@ export function createAwsSftpCoordinator(deps: {
     host: AwsEc2HostRecord,
   ): Promise<AwsEc2HostRecord> => {
     const currentHost = shouldLoadAwsHostSshMetadata(host)
-      ? (hosts.update(
+      ? (vaults.updateHost(
           host.id,
           toAwsHostDraft(host, {
             awsSshMetadataStatus: "loading",
@@ -397,7 +397,7 @@ export function createAwsSftpCoordinator(deps: {
       const nextError = nextUsername
         ? null
         : t("aws.ssh.noUserCandidates");
-      const nextHost = hosts.update(
+      const nextHost = vaults.updateHost(
         hydratedHost.id,
         toAwsHostDraft(hydratedHost, {
           awsSshUsername: nextUsername,
@@ -413,7 +413,7 @@ export function createAwsSftpCoordinator(deps: {
       if (!latestHost || !isAwsEc2HostRecord(latestHost)) {
         throw new Error("Host not found");
       }
-      const nextHost = hosts.update(
+      const nextHost = vaults.updateHost(
         latestHost.id,
         toAwsHostDraft(latestHost, {
           awsSshMetadataStatus: "error",

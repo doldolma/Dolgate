@@ -55,6 +55,76 @@ describe("registerHostsGroupsIpcHandlers", () => {
     vi.mocked(ipcMain.handle).mockReset();
   });
 
+  // 팀 호스트의 비밀값은 그 팀 볼트에 둔다. 개인에 두면 팀원은 못 쓰고 내 개인 동기화로 올라간다.
+  it("creates a host in a team vault and keeps its password in that team", async () => {
+    const ctx = createContext();
+    const teamScope = {
+      id: "team-1",
+      secrets: {},
+      secretMetadata: { getBySecretRef: vi.fn(() => null) },
+    };
+    ctx.vaults = {
+      ...ctx.vaults,
+      getScope: vi.fn((vaultId: string) => (vaultId === "team-1" ? teamScope : null)),
+      createHost: vi.fn((vaultId: string, id: string, draft: object) => ({ id, ...draft, vaultId })),
+    };
+    ctx.persistSecret.mockResolvedValue("secret:team-pw");
+    ctx.resolveManagedPrivateKeyPem.mockResolvedValue(undefined);
+    ctx.resolveManagedCertificateText.mockResolvedValue(undefined);
+    registerHostsGroupsIpcHandlers(ctx);
+    const create = getRegisteredHandler(ipcChannels.hosts.create);
+    const draft = { kind: "ssh", label: "Prod", hostname: "prod.example.com", port: 22, username: "ubuntu", authType: "password" };
+
+    await create({}, draft, { password: "pw" }, "team-1");
+
+    expect(ctx.persistSecret).toHaveBeenCalledWith("Test Host", expect.objectContaining({ password: "pw" }), teamScope);
+    expect(ctx.vaults.createHost).toHaveBeenCalledWith(
+      "team-1",
+      expect.any(String),
+      expect.objectContaining({ label: "Prod", secretRef: "secret:team-pw" }),
+      "secret:team-pw",
+    );
+    expect(ctx.hosts.create).not.toHaveBeenCalled();
+
+    // 저장해 둔 내 자격 증명은 팀 호스트에 걸 수 없다.
+    await expect(create({}, { ...draft, secretRef: "secret:mine" }, undefined, "team-1")).rejects.toThrow(
+      /credentials saved in that team/,
+    );
+    await expect(create({}, draft, undefined, "missing-team")).rejects.toThrow(/Vault not found/);
+  });
+
+  it("edits and removes a team host in its own vault", async () => {
+    const ctx = createContext();
+    const current = { id: "team-host", kind: "ssh", label: "Prod", hostname: "prod", port: 22, username: "ubuntu", authType: "password", secretRef: "secret:team" };
+    const teamScope = { id: "team-1", secretMetadata: { getBySecretRef: vi.fn(() => null) } };
+    ctx.vaults = {
+      ...ctx.vaults,
+      getHost: vi.fn(() => current),
+      scopeOfHost: vi.fn(() => teamScope),
+      updateHost: vi.fn((id: string, draft: object) => ({ id, ...draft })),
+      removeHost: vi.fn(),
+    };
+    ctx.persistSecret.mockResolvedValue("secret:team-new");
+    ctx.resolveManagedPrivateKeyPem.mockResolvedValue(undefined);
+    ctx.resolveManagedCertificateText.mockResolvedValue(undefined);
+    registerHostsGroupsIpcHandlers(ctx);
+    const draft = { kind: "ssh", label: "Prod", hostname: "prod", port: 22, username: "ubuntu", authType: "password" };
+
+    await getRegisteredHandler(ipcChannels.hosts.update)({}, "team-host", draft, { password: "new" });
+    expect(ctx.persistSecret).toHaveBeenCalledWith("Test Host", expect.objectContaining({ password: "new" }), teamScope);
+    expect(ctx.vaults.updateHost).toHaveBeenCalledWith("team-host", expect.any(Object), "secret:team-new");
+
+    // 저장해 둔 내 자격 증명으로는 바꿀 수 없다.
+    await expect(
+      getRegisteredHandler(ipcChannels.hosts.update)({}, "team-host", { ...draft, secretRef: "secret:mine" }),
+    ).rejects.toThrow(/credentials saved in that team/);
+
+    await getRegisteredHandler(ipcChannels.hosts.remove)({}, "team-host");
+    expect(ctx.vaults.removeHost).toHaveBeenCalledWith("team-host");
+    expect(ctx.hosts.remove).not.toHaveBeenCalled();
+    expect(ctx.syncOutbox.upsertDeletion).not.toHaveBeenCalled();
+  });
+
   it("keeps an explicitly selected saved secret when creating a host", async () => {
     const ctx = createContext();
     const draft = {

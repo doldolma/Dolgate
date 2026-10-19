@@ -8,7 +8,7 @@ import type {
   SshKeyMaterialResult,
 } from "@shared";
 import type { HostRepository } from "../../database";
-import type { VaultCatalog } from "../../vault-catalog";
+import { PERSONAL_VAULT_ID, type VaultCatalog } from "../../vault-catalog";
 import { fingerprintSha256FromPublicKey } from "../../ssh-key-material";
 import type {
   ResolvedAuthorizedKeyInstallPayload,
@@ -248,6 +248,11 @@ export function createSshKeyCoordinator(deps: {
     mode: SshKeyInstallInput["mode"],
     passphraseOverride?: string | null,
   ): Promise<SshKeyInstallResult["results"][number]> => {
+    // 팀 호스트의 인증을 내 개인 키로 바꾸면 팀원은 그 키가 없어 못 붙는다. 내 자격 증명을 따로 두는
+    // 칸(작업 3)이 생기기 전까지 팀 호스트에는 설치만 한다.
+    if (mode === "installAndUse" && vaults.scopeOfHost(host.id).id !== PERSONAL_VAULT_ID) {
+      throw new Error("A team host keeps its shared login; install the key only");
+    }
     const currentSecrets = await loadSecrets(host.secretRef);
     await ensureCertificateAuthReady(host, currentSecrets);
     const installResult = await installAuthorizedKey(

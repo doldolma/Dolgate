@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TailnetConfig, TailnetRecord, TailnetStatus } from '@shared';
 import { ipcChannels } from '../../common/ipc-channels';
+import { withVaults } from '../vault-catalog.test-support';
 
 const electronMocks = vi.hoisted(() => ({
   ipcHandlers: new Map<string, (...args: any[]) => any>(),
@@ -38,7 +39,8 @@ function record(overrides: Partial<TailnetRecord> = {}): TailnetRecord {
 }
 
 function createContext() {
-  return {
+  // 팀이 없는 카탈로그를 붙인다 — 코어에 넘기는 tailnet 설정은 이 tailnets 목에서 나온다.
+  return withVaults({
     tailnets: {
       list: vi.fn(() => [record({ hasAuthKey: true })]),
       listPayloads: vi.fn(() => [{ ...record({ hasAuthKey: true }), authKey: 'tskey-secret' }]),
@@ -68,7 +70,7 @@ function createContext() {
       setTailnetConfigProvider: vi.fn<(provider: () => TailnetConfig[]) => void>(),
       pushTailnetConfigs: vi.fn(),
     },
-  };
+  });
 }
 
 type Context = ReturnType<typeof createContext>;
@@ -343,6 +345,23 @@ describe('tailnet config push', () => {
         // 설정하지 않으면 비운다 — 코어가 기본값 `dolgate-<기기이름>` 을 쓴다.
         hostname: undefined,
       },
+    ]);
+  });
+
+  // 팀 호스트는 팀 tailnet 으로 붙는다 — 코어에 그 설정도 넘겨야 한다.
+  it('hands the core the tailnets of every vault', () => {
+    const ctx = createContext();
+    const teamTailnet = { ...record({ hasAuthKey: true }), id: 'net-team', authKey: 'tskey-team' };
+    vi.spyOn(ctx.vaults, 'listTailnetPayloads').mockReturnValue([
+      ...ctx.tailnets.listPayloads(),
+      teamTailnet,
+    ]);
+    registerTailnetIpcHandlers(ctx as never);
+
+    const provider = ctx.coreManager.setTailnetConfigProvider.mock.calls[0]?.[0];
+    expect(provider?.().map((config) => [config.id, config.authKey])).toEqual([
+      ['net-1', 'tskey-secret'],
+      ['net-team', 'tskey-team'],
     ]);
   });
 

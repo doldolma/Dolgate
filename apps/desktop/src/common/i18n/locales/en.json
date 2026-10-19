@@ -2849,6 +2849,27 @@
     "uploadFailed": "The sync upload failed.",
     "fetchFailed": "Fetching the sync data failed."
   },
+  "teams": {
+    "nameRequired": "Enter a team name.",
+    "inviteDaysRange": "Invite links can last 1 to {{max}} days.",
+    "needsRejoin": "This device doesn't have this team's key. Join again with an invite link.",
+    "inviteOtherServer": "This invite link is for a different sync server.",
+    "inviteOtherTeam": "This invite link is for a different team.",
+    "needsUnlockedVault": "Sign in and enter your sync passphrase to use teams.",
+    "notOnDevice": "This team isn't on this device.",
+    "contextChanged": "The team operation was cancelled because the account or server changed.",
+    "api": {
+      "inviteInvalid": "This invite link has expired or is invalid.",
+      "notFound": "Team not found.",
+      "ownerOnly": "Only the team owner can do this.",
+      "ownerMustTransfer": "While other members remain, transfer ownership before leaving.",
+      "vaultRequired": "Only accounts with a sync passphrase can use teams.",
+      "clientOutdated": "This team has items added in a newer version. Update the app and try again.",
+      "memberNotFound": "Not a member of this team.",
+      "alreadyMember": "Already a member of this team.",
+      "exists": "This team already exists."
+    }
+  },
   "shareChat": {
     "titleWith": "Chat history · {{title}}",
     "title": "Chat history",

@@ -143,6 +143,10 @@ export interface ServerInfoResponse {
     auth?: {
       webauthn: boolean;
     };
+    // 팀 볼트 API(/teams, /invite)가 있는가. 도입 이전 서버 응답에는 없다.
+    teams?: {
+      enabled: boolean;
+    };
   };
 }
 

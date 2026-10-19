@@ -5,12 +5,13 @@ import { describe, expect, it } from "vitest";
 
 const mainDir = path.dirname(fileURLToPath(import.meta.url));
 
-// 저장소(HostRepository)는 개인 볼트만 본다. 호스트를 읽는 곳이 저장소를 바로 부르면 팀 볼트가
-// 생겼을 때 그 호스트를 못 찾는다 — 그래서 읽기는 VaultCatalog 한 곳으로 모았고, 여기서 지킨다.
+// 저장소(HostRepository) 하나는 볼트 하나만 본다(기본은 개인). 호스트를 읽는 곳이 저장소를 바로
+// 부르면 다른 볼트의 호스트를 못 찾는다 — 그래서 읽기는 VaultCatalog 한 곳으로 모았고, 여기서 지킨다.
 const REPOSITORY_READ_ALLOWED = new Set([
   "vault-catalog.ts", // 입구 자신
   "database.ts", // 저장소 자신
   "sync-service.ts", // 개인 동기화 — 개인 볼트만 올려야 한다
+  "team-sync-service.ts", // 팀 동기화 — 그 팀 볼트만, 내 값을 얹지 않은 팀 레코드로 올려야 한다
 ]);
 
 // 상태 파일을 바로 읽는 것도 저장소를 건너뛰는 길이다.
@@ -22,6 +23,11 @@ const STATE_READ_ALLOWED = new Set([
   // 데이터 하나를 받게 바꾼다.
   "host-transfer-service.ts",
 ]);
+
+// 팀 볼트의 로컬 사본(state.teams)은 볼트 뿌리(vault-root.ts)와 상태 저장소만 만진다. 나머지는 팀
+// 볼트의 저장소 묶음(VaultCatalog 의 팀 scope)으로 읽고 쓴다 — 그래야 개인 쪽 코드가 팀 것을 섞지
+// 못한다.
+const TEAM_STATE_ALLOWED = new Set(["state-storage.ts", "vault-root.ts"]);
 
 function collectMainSources(dir: string): string[] {
   const found: string[] = [];
@@ -86,6 +92,15 @@ function findStateReads(content: string): Array<{ line: number; text: string }> 
   }));
 }
 
+function findTeamStateAccess(content: string): Array<{ line: number; text: string }> {
+  const code = stripComments(content);
+  const pattern = /(?<![\w$])(?:state|draft|nextState|getState\s*\(\s*\))\s*\.\s*teams(?![\w$])/g;
+  return [...code.matchAll(pattern)].map((match) => ({
+    line: lineOf(code, match.index ?? 0),
+    text: match[0].replace(/\s+/g, ""),
+  }));
+}
+
 describe("vault catalog boundary", () => {
   it("recognizes direct repository and state reads, but not explicit personal reads", () => {
     const sample = [
@@ -97,6 +112,10 @@ describe("vault catalog boundary", () => {
       "const trusted = knownHosts.list();",
       "// ctx.hosts.getById(id) 는 주석이라 세지 않는다",
       "const raw = state.data.hosts;",
+      "const team = state.teams[teamId];",
+      "storage.getState()",
+      "  .teams;",
+      "const ids = storage.listTeamIds();",
     ].join("\n");
 
     expect(findRepositoryReads(sample)).toEqual([
@@ -104,6 +123,10 @@ describe("vault catalog boundary", () => {
       { line: 2, text: "this.hosts.list(" },
     ]);
     expect(findStateReads(sample)).toEqual([{ line: 8, text: "data.hosts" }]);
+    expect(findTeamStateAccess(sample)).toEqual([
+      { line: 9, text: "state.teams" },
+      { line: 10, text: "getState().teams" },
+    ]);
   });
 
   it("reads hosts only through the vault catalog", () => {
@@ -120,6 +143,21 @@ describe("vault catalog boundary", () => {
         for (const read of findStateReads(content)) {
           offenders.push(`${relativePath}:${read.line} ${read.text}`);
         }
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("touches team vault state only in the storage layer", () => {
+    const offenders: string[] = [];
+    for (const file of collectMainSources(mainDir)) {
+      const relativePath = path.relative(mainDir, file);
+      if (TEAM_STATE_ALLOWED.has(relativePath)) {
+        continue;
+      }
+      for (const access of findTeamStateAccess(fs.readFileSync(file, "utf8"))) {
+        offenders.push(`${relativePath}:${access.line} ${access.text}`);
       }
     }
 

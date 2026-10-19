@@ -234,6 +234,31 @@ describe("ssh key coordinator", () => {
     );
   });
 
+  it("installs onto a team host but never switches it to my personal key", async () => {
+    const { deps } = createCoordinator();
+    deps.vaults = {
+      ...deps.vaults,
+      scopeOfHost: (hostId: string) => (hostId === "host-1" ? { id: "team-1" } : deps.vaults.personal),
+    };
+    const coordinator = createSshKeyCoordinator(deps);
+
+    const useResult = await coordinator.installSshPublicKey({
+      secretRef: "key-ref",
+      hostIds: ["host-1"],
+      mode: "installAndUse",
+    });
+    expect(useResult.results).toEqual([
+      expect.objectContaining({ hostId: "host-1", status: "failed", message: expect.stringMatching(/install the key only/) }),
+    ]);
+    expect(deps.installAuthorizedKey).not.toHaveBeenCalled();
+    expect(deps.hosts.updateSshAuthSecret).not.toHaveBeenCalled();
+
+    await expect(
+      coordinator.installSshPublicKey({ secretRef: "key-ref", hostIds: ["host-1"], mode: "installOnly" }),
+    ).resolves.toMatchObject({ results: [{ hostId: "host-1", status: "installed" }] });
+    expect(deps.installAuthorizedKey).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the existing host auth when installAndUse verification fails", async () => {
     const installAuthorizedKey = vi
       .fn()

@@ -386,6 +386,34 @@ describe('known host trust scope', () => {
   });
 
   // 교체(호스트키 변경 수락)도 같은 경계를 지나야 한다.
+  // 팀 호스트의 키는 팀원 모두가 믿는다 — 신뢰는 그 호스트의 볼트에 둔다.
+  it("stores trust in the host's own vault", async () => {
+    ipcHandlers.clear();
+    const ctx = createContext();
+    const teamKnownHosts = { trust: vi.fn((input: unknown) => input) };
+    ctx.vaults = {
+      ...ctx.vaults,
+      getHost: vi.fn(() => ({ id: 'team-host', kind: 'ssh', hostname: 'server', port: 22 })),
+      scopeOfHost: vi.fn((hostId: string) =>
+        hostId === 'team-host' ? { id: 'team-1', knownHosts: teamKnownHosts } : ctx.vaults.personal,
+      ),
+    };
+    registerKnownHostsLogsKeychainIpcHandlers(ctx as never);
+
+    await ipcHandlers.get(ipcChannels.knownHosts.trust)!({}, {
+      hostId: 'team-host',
+      hostLabel: 'Shared',
+      host: 'server',
+      port: 22,
+      algorithm: 'ssh-ed25519',
+      publicKeyBase64: 'AAA',
+      fingerprintSha256: 'SHA256:x',
+    });
+
+    expect(teamKnownHosts.trust).toHaveBeenCalledWith(expect.objectContaining({ hostId: 'team-host' }));
+    expect(ctx.knownHosts.trust).not.toHaveBeenCalled();
+  });
+
   it('applies the same scope rule when replacing a key', async () => {
     ipcHandlers.clear();
     const ctx = createContext();

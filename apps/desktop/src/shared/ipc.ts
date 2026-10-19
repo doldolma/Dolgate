@@ -1275,6 +1275,70 @@ export type TabCommandPayload =
   | { kind: "last" }
   | { kind: "reopen" };
 
+/** 팀 볼트에서의 역할. 소유자만 이름 바꾸기·멤버 제거·소유권 넘기기·팀 삭제를 한다. */
+export type TeamRole = "owner" | "member";
+
+/**
+ * 팀 볼트 동기화 상태.
+ * - idle: 아직 돌지 않는다(막 생겼거나 볼트가 잠겼다)
+ * - ready: 돌고 있다
+ * - needs-rejoin: 팀 키를 열지 못했다 — 새 링크로 다시 들어와야 한다
+ * - outdated: 이 팀에 이 앱이 모르는 것이 있다 — 업데이트해야 한다
+ * - error: 마지막 동기화가 실패했다(다음 변경 때 다시 시도한다)
+ */
+export type TeamSyncStateName = "idle" | "ready" | "needs-rejoin" | "outdated" | "error";
+
+/** 이 기기에 있는 팀 하나. */
+export interface TeamListItem {
+  id: string;
+  name: string;
+  role: TeamRole;
+  syncState: TeamSyncStateName;
+  syncError: string | null;
+}
+
+export interface TeamMember {
+  userId: string;
+  email: string;
+  role: TeamRole;
+  /** 팀 키 사본을 올렸다(링크로 들어와 끝까지 마쳤다). */
+  hasKey: boolean;
+  addedBy: string;
+  addedByEmail: string;
+  addedAt: string;
+}
+
+export interface TeamInvite {
+  code: string;
+  createdBy: string;
+  createdByEmail: string;
+  expiresAt: string;
+  useCount: number;
+  createdAt: string;
+  active: boolean;
+  revokedAt: string | null;
+}
+
+/**
+ * 만든 초대 링크. 링크의 # 뒤(비밀값)는 서버에도 이 기기에도 남지 않는다 — 이때 한 번만 보여 줄 수 있고,
+ * 잃으면 새로 만든다.
+ */
+export interface TeamInviteCreated {
+  link: string;
+  invite: TeamInvite;
+}
+
+/** 링크를 열었을 때 참여 카드에 보일 것. */
+export interface TeamInviteInfo {
+  teamId: string;
+  teamName: string;
+  inviterEmail: string;
+  memberCount: number;
+  expiresAt: string;
+  /** 이 기기에 이미 그 팀이 있다. */
+  alreadyJoined: boolean;
+}
+
 export interface DesktopApi {
   auth: {
     getState: () => Promise<AuthState>;
@@ -1326,9 +1390,11 @@ export interface DesktopApi {
   };
   hosts: {
     list: () => Promise<HostRecord[]>;
+    /** vaultId 는 만들 볼트다. 없으면 개인, 팀 ID 면 그 팀 볼트(비밀값도 그 팀에 둔다). */
     create: (
       draft: HostDraft,
       secrets?: HostSecretInput,
+      vaultId?: string | null,
     ) => Promise<HostRecord>;
     update: (
       id: string,
@@ -1835,6 +1901,32 @@ export interface DesktopApi {
     create: (draft: SnippetDraft) => Promise<SnippetRecord>;
     update: (id: string, draft: SnippetDraft) => Promise<SnippetRecord>;
     remove: (id: string) => Promise<void>;
+  };
+  teams: {
+    /** 이 기기에 있는 팀들. */
+    list: () => Promise<TeamListItem[]>;
+    /** 서버에서 팀 목록을 다시 읽은 뒤의 목록. */
+    refresh: () => Promise<TeamListItem[]>;
+    create: (name: string) => Promise<TeamListItem>;
+    /** 소유자만. */
+    rename: (teamId: string, name: string) => Promise<void>;
+    /** 팀을 지운다. 소유자만, 다른 멤버가 남아 있어도 된다. */
+    remove: (teamId: string) => Promise<void>;
+    /** 소유자만. */
+    transferOwnership: (teamId: string, userId: string) => Promise<void>;
+    listMembers: (teamId: string) => Promise<TeamMember[]>;
+    /** 소유자만. 그 멤버의 접근이 끊기고 이 팀의 초대 링크가 모두 취소된다. */
+    removeMember: (teamId: string, userId: string) => Promise<void>;
+    /** 다른 멤버가 남은 소유자는 소유권을 넘긴 뒤에 나갈 수 있다. */
+    leave: (teamId: string) => Promise<void>;
+    /** 기한은 1~30일, 없으면 7일. */
+    createInvite: (teamId: string, options?: { expiresInDays?: number }) => Promise<TeamInviteCreated>;
+    listInvites: (teamId: string) => Promise<TeamInvite[]>;
+    revokeInvite: (teamId: string, code: string) => Promise<void>;
+    getInviteInfo: (link: string) => Promise<TeamInviteInfo>;
+    join: (link: string) => Promise<TeamListItem>;
+    /** 팀 목록이 바뀌었다(참여·빠짐·이름·역할). */
+    onChanged: (listener: () => void) => () => void;
   };
   savedWorkspaces: {
     list: () => Promise<SavedWorkspaceRecord[]>;

@@ -13,6 +13,7 @@ import type {
   SecretMetadataRepository,
 } from "../../database";
 import type { SecretStore } from "../../secret-store";
+import { PERSONAL_VAULT_ID, type VaultCatalog, type VaultScope } from "../../vault-catalog";
 import type { SshHostRecord } from "../context";
 import { t } from '../../i18n';
 import { logMessage } from "../../activity-log-message";
@@ -67,6 +68,7 @@ export interface SecretCoordinator {
   persistSecret: (
     label: string,
     secrets?: HostSecretInput,
+    target?: Pick<VaultScope, "secrets" | "secretMetadata">,
   ) => Promise<string | null>;
   persistImportedSecret: (
     label: string,
@@ -115,6 +117,8 @@ export function createSecretCoordinator(deps: {
   secretStore: SecretStore;
   secretMetadata: SecretMetadataRepository;
   hosts: HostRepository;
+  /** 비밀값은 모든 볼트에서 찾고(secretRef 는 볼트를 넘어 겹치지 않는다), 팀 호스트를 가린다. */
+  vaults: Pick<VaultCatalog, "loadSecret" | "scopeOfHost">;
   activityLogs: ActivityLogRepository;
   queueSync: () => void;
   inspectCertificate: (certificateText: string) => Promise<SshCertificateInfo>;
@@ -123,6 +127,7 @@ export function createSecretCoordinator(deps: {
     secretStore,
     secretMetadata,
     hosts,
+    vaults,
     activityLogs,
     queueSync,
     inspectCertificate,
@@ -185,9 +190,12 @@ export function createSecretCoordinator(deps: {
         : current.generatedByApp,
   });
 
+  // target 이 없으면 개인 볼트다. 팀 호스트의 비밀값은 그 팀 볼트에 둔다 — 개인에 두면 팀원이 못 쓰고
+  // 내 개인 동기화로 올라간다.
   const persistSecret = async (
     label: string,
     secrets?: HostSecretInput,
+    target?: Pick<VaultScope, "secrets" | "secretMetadata">,
   ): Promise<string | null> => {
     if (!secrets || !hasSecretValue(secrets)) {
       return null;
@@ -195,7 +203,7 @@ export function createSecretCoordinator(deps: {
 
     const secretRef = `secret:${randomUUID()}`;
     const updatedAt = new Date().toISOString();
-    await secretStore.save(
+    await (target?.secrets ?? secretStore).save(
       secretRef,
       JSON.stringify({
         secretRef,
@@ -220,7 +228,7 @@ export function createSecretCoordinator(deps: {
         updatedAt,
       } satisfies ManagedSecretPayload),
     );
-    secretMetadata.upsert({
+    (target?.secretMetadata ?? secretMetadata).upsert({
       secretRef,
       label,
       kind: secrets.kind,
@@ -249,7 +257,7 @@ export function createSecretCoordinator(deps: {
     if (!secretRef) {
       return {};
     }
-    const secretJson = await secretStore.load(secretRef);
+    const secretJson = await vaults.loadSecret(secretRef);
     if (!secretJson) {
       return {};
     }
@@ -328,6 +336,13 @@ export function createSecretCoordinator(deps: {
     secrets: HostSecretInput,
   ): Promise<string | null> => {
     if (!hasSecretValue(secrets)) {
+      return null;
+    }
+
+    // 팀 호스트에 접속하며 요청 창에 넣은 값은 저장하지 않는다(그 세션과 재연결 캐시에만 쓴다).
+    // 저장하면 내 비밀번호가 팀 호스트의 비밀값이 되어 팀 전체에 공유된다. 내 자격 증명을 따로 두는
+    // 칸은 작업 3 이다.
+    if (vaults.scopeOfHost(hostId).id !== PERSONAL_VAULT_ID) {
       return null;
     }
 

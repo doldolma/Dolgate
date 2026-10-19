@@ -16,6 +16,7 @@ vi.mock("electron", () => ({
 }));
 
 import { registerSavedWorkspacesIpcHandlers } from "./saved-workspaces";
+import { withVaults } from "../vault-catalog.test-support";
 
 describe("saved workspace IPC", () => {
   beforeEach(() => {
@@ -23,7 +24,7 @@ describe("saved workspace IPC", () => {
   });
 
   it("removes the local record, writes a workspace tombstone, and queues sync", async () => {
-    const ctx = {
+    const ctx = withVaults({
       savedWorkspaces: {
         list: vi.fn(),
         create: vi.fn(),
@@ -37,7 +38,7 @@ describe("saved workspace IPC", () => {
         upsertDeletion: vi.fn(),
       },
       queueSync: vi.fn(),
-    } as any;
+    } as any);
     registerSavedWorkspacesIpcHandlers(ctx);
 
     await electronMocks.handlers.get(ipcChannels.savedWorkspaces.remove)?.(
@@ -55,7 +56,7 @@ describe("saved workspace IPC", () => {
 
   it("moves a Workspace to a group and queues sync", async () => {
     const record = { id: "workspace-1", groupName: "Clients" };
-    const ctx = {
+    const ctx = withVaults({
       savedWorkspaces: {
         list: vi.fn(),
         create: vi.fn(),
@@ -67,7 +68,7 @@ describe("saved workspace IPC", () => {
       },
       syncOutbox: { upsertDeletion: vi.fn() },
       queueSync: vi.fn(),
-    } as any;
+    } as any);
     registerSavedWorkspacesIpcHandlers(ctx);
 
     const result = await electronMocks.handlers.get(
@@ -87,7 +88,7 @@ describe("saved workspace IPC", () => {
   // 세션은 30초 폴링으로 낫지만 그 폴링은 계정이 있어야 돌고 Workspace 는 계정이 필요 없다.
   it("모든 변경을 다른 창에 알린다", async () => {
     const record = { id: "workspace-1" };
-    const ctx = {
+    const ctx = withVaults({
       savedWorkspaces: {
         list: vi.fn(),
         create: vi.fn().mockReturnValue(record),
@@ -100,7 +101,7 @@ describe("saved workspace IPC", () => {
       syncOutbox: { upsertDeletion: vi.fn() },
       queueSync: vi.fn(),
       emitWorkspaceChanged: vi.fn(),
-    } as any;
+    } as any);
     registerSavedWorkspacesIpcHandlers(ctx);
 
     const sender = { id: 7 };
@@ -125,12 +126,12 @@ describe("saved workspace IPC", () => {
   });
 
   it("목록 조회는 알리지 않는다", async () => {
-    const ctx = {
+    const ctx = withVaults({
       savedWorkspaces: { list: vi.fn().mockReturnValue([]) },
       syncOutbox: { upsertDeletion: vi.fn() },
       queueSync: vi.fn(),
       emitWorkspaceChanged: vi.fn(),
-    } as any;
+    } as any);
     registerSavedWorkspacesIpcHandlers(ctx);
 
     const handler = electronMocks.handlers.get(ipcChannels.savedWorkspaces.list);

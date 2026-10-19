@@ -50,6 +50,7 @@ import {
   emitWarpgateImportEvent,
   emitWindowState,
   emitWorkspaceChanged,
+  emitTeamsChanged,
   setRdpFrameWatchNotifier,
 } from "./state";
 
@@ -169,6 +170,10 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
 
   ipcRenderer.on(ipcChannels.bootstrap.workspaceChanged, () => {
     emitWorkspaceChanged();
+  });
+
+  ipcRenderer.on(ipcChannels.teams.changed, () => {
+    emitTeamsChanged();
   });
 
   ipcRenderer.on(

@@ -45,6 +45,7 @@ import {
 import { buildAiBridge } from "./bridges/ai";
 import { buildRdpBridge } from "./bridges/rdp";
 import { buildVncBridge } from "./bridges/vnc";
+import { buildTeamsBridge } from "./bridges/teams";
 
 export function createDesktopApi(ipcRenderer: IpcRenderer): DesktopApi {
   return {
@@ -74,6 +75,7 @@ export function createDesktopApi(ipcRenderer: IpcRenderer): DesktopApi {
     portForwards: buildPortForwardsBridge(ipcRenderer),
     dnsOverrides: buildDnsOverridesBridge(ipcRenderer),
     snippets: buildSnippetsBridge(ipcRenderer),
+    teams: buildTeamsBridge(ipcRenderer),
     savedWorkspaces: buildSavedWorkspacesBridge(ipcRenderer),
     notifications: buildNotificationsBridge(ipcRenderer),
     knownHosts: buildKnownHostsBridge(ipcRenderer),

@@ -55,9 +55,10 @@ import type { SecretStore } from "../secret-store";
 import type { SessionReplayService } from "../session-replay-service";
 import type { SessionShareService } from "../session-share-service";
 import type { SyncService } from "../sync-service";
+import type { TeamService } from "../team-service";
 import type { TermiusImportService } from "../termius-import-service";
 import type { UpdateService } from "../update-service";
-import type { VaultCatalog } from "../vault-catalog";
+import type { VaultCatalog, VaultScope } from "../vault-catalog";
 import type { WarpgateService } from "../warpgate-service";
 import type { XshellImportService } from "../xshell-import-service";
 
@@ -131,6 +132,8 @@ export interface MainIpcContext {
   updater: UpdateService;
   authService: AuthService;
   syncService: SyncService;
+  /** 팀 볼트 관리(만들기·멤버·초대 링크·참여). */
+  teams: TeamService;
   termiusImportService: TermiusImportService;
   opensshImportService: OpenSshImportService;
   xshellImportService: XshellImportService;
@@ -235,9 +238,11 @@ export interface MainIpcContext {
   resolveWindowFromSender: (sender: WebContents) => BrowserWindow;
   buildWindowState: (window: BrowserWindow) => DesktopWindowState;
   emitWorkspaceChanged: (sender?: WebContents) => void;
+  /** target 은 비밀값을 둘 볼트다(없으면 개인). 팀 호스트의 비밀값은 그 팀 볼트에 둔다. */
   persistSecret: (
     label: string,
     secrets?: HostSecretInput,
+    target?: Pick<VaultScope, "secrets" | "secretMetadata">,
   ) => Promise<string | null>;
   persistImportedSecret: (
     label: string,

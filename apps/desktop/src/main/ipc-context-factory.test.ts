@@ -56,6 +56,9 @@ function createDependencies(): RegisterIpcDependencies {
       upsert: vi.fn(),
     } as any,
     syncOutbox: {} as any,
+    awsProfiles: {} as any,
+    teamSync: { pushDirty: vi.fn() } as any,
+    teams: {} as any,
     secretStore: {
       save: vi.fn(),
       load: vi.fn(),

@@ -138,7 +138,8 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
     ipcChannels.knownHosts.trust,
     async (_event, rawInput: KnownHostTrustInput) => {
       const input = resolveTrustScope(rawInput);
-      const record = ctx.knownHosts.trust(input);
+      // 신뢰는 그 호스트의 볼트에 둔다 — 팀 호스트의 키는 팀원 모두가 믿는다.
+      const record = ctx.vaults.scopeOfHost(input.hostId).knownHosts.trust(input);
       ctx.activityLogs.append(
         "info",
         "audit",
@@ -158,7 +159,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
     ipcChannels.knownHosts.replace,
     async (_event, rawInput: KnownHostTrustInput) => {
       const input = resolveTrustScope(rawInput);
-      const record = ctx.knownHosts.trust(input);
+      const record = ctx.vaults.scopeOfHost(input.hostId).knownHosts.trust(input);
       ctx.activityLogs.append("warn", "audit", logMessage('knownHostsIpc.hostKeyReplaced'), {
         host: input.host,
         port: input.port,
@@ -386,15 +387,18 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
         throw new Error(validationError);
       }
 
-      const nextSecretRef = await ctx.persistSecret(
-        input.label?.trim() ? input.label.trim() : ctx.describeHostLabel(sshHost),
-        replacementSecrets,
-      );
+      // 새 비밀값은 그 호스트의 볼트에 둔다(팀 호스트면 그 팀).
+      const vault = ctx.vaults.scopeOfHost(sshHost.id);
+      const label = input.label?.trim() ? input.label.trim() : ctx.describeHostLabel(sshHost);
+      const nextSecretRef =
+        vault === ctx.vaults.personal
+          ? await ctx.persistSecret(label, replacementSecrets)
+          : await ctx.persistSecret(label, replacementSecrets, vault);
       if (!nextSecretRef) {
         throw new Error(t('knownHostsIpc.secretCreateFailed'));
       }
 
-      ctx.hosts.updateSecretRef(sshHost.id, nextSecretRef);
+      ctx.vaults.writeHost(sshHost.id, (hosts) => hosts.updateSecretRef(sshHost.id, nextSecretRef));
       ctx.activityLogs.append(
         "info",
         "audit",

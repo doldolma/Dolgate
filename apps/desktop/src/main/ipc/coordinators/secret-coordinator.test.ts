@@ -21,6 +21,11 @@ function createCoordinator(overrides: Record<string, unknown> = {}) {
     inspectCertificate: vi.fn().mockResolvedValue({ status: "valid" }),
     ...overrides,
   } as any;
+  // 팀이 없는 카탈로그 — 비밀값은 개인 저장소에서 읽는다.
+  deps.vaults ??= {
+    loadSecret: (secretRef: string) => deps.secretStore.load(secretRef),
+    scopeOfHost: () => ({ id: "personal" }),
+  };
 
   return {
     deps,
@@ -36,6 +41,53 @@ describe("secret coordinator", () => {
 
     expect(deps.secretStore.save).not.toHaveBeenCalled();
     expect(deps.secretMetadata.upsert).not.toHaveBeenCalled();
+  });
+
+  it("saves a team host's secret in that team's vault, not the personal one", async () => {
+    const { deps, coordinator } = createCoordinator();
+    const team = {
+      secrets: { save: vi.fn().mockResolvedValue(undefined) },
+      secretMetadata: { upsert: vi.fn() },
+    };
+
+    const secretRef = await coordinator.persistSecret("Prod", { password: "pw" }, team as any);
+
+    expect(secretRef).toMatch(/^secret:/);
+    expect(team.secrets.save).toHaveBeenCalledWith(secretRef, expect.stringContaining('"password":"pw"'));
+    expect(team.secretMetadata.upsert).toHaveBeenCalledWith(expect.objectContaining({ secretRef, hasPassword: true }));
+    expect(deps.secretStore.save).not.toHaveBeenCalled();
+    expect(deps.secretMetadata.upsert).not.toHaveBeenCalled();
+  });
+
+  // 저장하면 내 비밀번호가 팀 호스트의 비밀값이 되어 팀 전체에 공유된다.
+  it("does not save what was typed into a prompt for a team host", async () => {
+    const { deps, coordinator } = createCoordinator({
+      vaults: {
+        loadSecret: vi.fn(async () => null),
+        scopeOfHost: vi.fn(() => ({ id: "team-1" })),
+      },
+    });
+
+    await expect(coordinator.persistHostSpecificSecret("team-host", "Shared", { password: "mine" })).resolves.toBeNull();
+
+    expect(deps.secretStore.save).not.toHaveBeenCalled();
+    expect(deps.secretMetadata.upsert).not.toHaveBeenCalled();
+    expect(deps.hosts.updateSecretRef).not.toHaveBeenCalled();
+  });
+
+  it("reads a host's secret from whichever vault holds it", async () => {
+    const { deps, coordinator } = createCoordinator({
+      vaults: {
+        loadSecret: vi.fn(async (secretRef: string) =>
+          secretRef === "secret:team" ? JSON.stringify({ secretRef, label: "db", password: "team-pw" }) : null,
+        ),
+        scopeOfHost: vi.fn(() => ({ id: "personal" })),
+      },
+    });
+
+    await expect(coordinator.loadSecrets("secret:team")).resolves.toMatchObject({ password: "team-pw" });
+    expect(deps.vaults.loadSecret).toHaveBeenCalledWith("secret:team");
+    expect(deps.secretStore.load).not.toHaveBeenCalled();
   });
 
   it("merges runtime secret patches without erasing omitted values", () => {

@@ -15,8 +15,8 @@ export function buildHostsBridge(
 ): DesktopApi["hosts"] {
   return {
     list: () => ipcRenderer.invoke(ipcChannels.hosts.list),
-    create: (draft: HostDraft, secrets?: HostSecretInput) =>
-      ipcRenderer.invoke(ipcChannels.hosts.create, draft, secrets),
+    create: (draft: HostDraft, secrets?: HostSecretInput, vaultId?: string | null) =>
+      ipcRenderer.invoke(ipcChannels.hosts.create, draft, secrets, vaultId),
     update: (id: string, draft: HostDraft, secrets?: HostSecretInput) =>
       ipcRenderer.invoke(ipcChannels.hosts.update, id, draft, secrets),
     remove: (id: string) => ipcRenderer.invoke(ipcChannels.hosts.remove, id),

@@ -4,6 +4,7 @@ import type { AwsService } from "./aws-service";
 import type { CoreManager } from "./core-manager";
 import type {
   ActivityLogRepository,
+  AwsProfileRepository,
   DnsOverrideRepository,
   GroupRepository,
   HostRepository,
@@ -24,9 +25,15 @@ import type { SecretStore } from "./secret-store";
 import type { SessionReplayService } from "./session-replay-service";
 import type { SessionShareService } from "./session-share-service";
 import type { SyncService } from "./sync-service";
+import type { TeamService } from "./team-service";
+import type { TeamSyncService } from "./team-sync-service";
 import type { TermiusImportService } from "./termius-import-service";
 import type { UpdateService } from "./update-service";
-import { createVaultCatalog } from "./vault-catalog";
+import {
+  createVaultCatalog,
+  pickVaultRepositories,
+  type TeamVaultSource,
+} from "./vault-catalog";
 import type { WarpgateService } from "./warpgate-service";
 import type { XshellImportService } from "./xshell-import-service";
 import type { AwsConnectionProgressEmitter, MainIpcContext } from "./ipc/context";
@@ -55,6 +62,11 @@ export interface RegisterIpcDependencies {
   activityLogs: ActivityLogRepository;
   secretMetadata: SecretMetadataRepository;
   syncOutbox: SyncOutboxRepository;
+  awsProfiles: AwsProfileRepository;
+  /** 이 기기의 팀 볼트들. 없으면 개인 볼트만 본다(시험). */
+  teamVaults?: TeamVaultSource;
+  teamSync: TeamSyncService;
+  teams: TeamService;
   secretStore: SecretStore;
   awsService: AwsService;
   awsSsmTunnelService: AwsSsmTunnelService;
@@ -78,7 +90,6 @@ export function createMainIpcContext(
     hosts,
     groups,
     settings,
-    tailnets,
     portForwards,
     dnsOverrides,
     snippets,
@@ -87,6 +98,8 @@ export function createMainIpcContext(
     activityLogs,
     secretMetadata,
     syncOutbox,
+    teamVaults,
+    teamSync,
     secretStore,
     awsService,
     awsSsmTunnelService,
@@ -103,7 +116,10 @@ export function createMainIpcContext(
     sessionReplayService,
   } = deps;
 
-  const vaults = createVaultCatalog({ hosts, knownHosts, tailnets });
+  const vaults = createVaultCatalog(
+    pickVaultRepositories(deps, secretStore),
+    teamVaults,
+  );
   const localFiles = new LocalFileService();
   const aiService = new AiService(
     settings,
@@ -112,6 +128,8 @@ export function createMainIpcContext(
   );
   const queueSync = () => {
     void syncService.pushDirty().catch(() => undefined);
+    // 팀 볼트에 쓴 것(팀 호스트 편집·팀 호스트의 내 즐겨찾기 등)은 그 팀으로 올린다.
+    void teamSync.pushDirty();
   };
   const portForwardLifecycleLogger = new PortForwardLifecycleLogger(
     activityLogs,
@@ -123,6 +141,7 @@ export function createMainIpcContext(
     secretStore,
     secretMetadata,
     hosts,
+    vaults,
     activityLogs,
     queueSync,
     inspectCertificate: (certificateText) =>

@@ -130,6 +130,8 @@ function createDependencySet() {
     activityLogs: {} as any,
     secretMetadata: {} as any,
     syncOutbox: {} as any,
+    awsProfiles: {} as any,
+    teamSync: { pushDirty: vi.fn() } as any,
     secretStore: {} as any,
     awsService: {} as any,
     awsSsmTunnelService: {} as any,
@@ -194,6 +196,8 @@ describe("registerIpcHandlers", () => {
       deps.tailnets,
       deps.rdpManager,
       deps.vncManager,
+      deps.awsProfiles,
+      deps.teamSync,
     );
 
     expect(deps.coreManager.setTerminalEventHandler).toHaveBeenCalledTimes(1);

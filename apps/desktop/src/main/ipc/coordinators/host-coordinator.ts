@@ -150,6 +150,7 @@ export function createHostCoordinator(deps: {
    * 버리면 멀쩡하던 연결이 끊긴다.
    */
   const resolveEntryHopTailnetId = (host: {
+    id: string;
     jumpHostId?: string | null;
     jumpHostIds?: string[] | null;
   }): string | undefined => {
@@ -165,7 +166,7 @@ export function createHostCoordinator(deps: {
     if (!entryJumpId) {
       return undefined;
     }
-    const entryJump = vaults.getHost(entryJumpId);
+    const entryJump = vaults.getHostInSameVault(host.id, entryJumpId);
     return entryJump && isSshHostRecord(entryJump)
       ? entryJump.tailnetId?.trim() || undefined
       : undefined;
@@ -648,7 +649,8 @@ export function createHostCoordinator(deps: {
 
     let resolved: ResolvedJumpHost | undefined;
     for (const jumpHostId of chain) {
-      const jumpHost = vaults.getHost(jumpHostId);
+      // 같은 볼트 안에서만 찾는다 — 팀 호스트가 개인 호스트를(또는 그 반대를) 점프로 쓰지 못한다.
+      const jumpHost = vaults.getHostInSameVault(host.id, jumpHostId);
       if (!jumpHost) {
         throw new Error(
           t("hostIpc.jumpHostMissing"),

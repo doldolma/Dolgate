@@ -27,6 +27,7 @@ import {
 } from "../rdp-monitor-layout";
 import { RdpMonitorWindows } from "../rdp-monitor-windows";
 import type { MainIpcContext } from "./context";
+import { PERSONAL_VAULT_ID } from "../vault-catalog";
 
 // 렌더러는 hostId 만 넘긴다. 호스트 레코드 조회와 비밀번호 해석은 여기서 한다 —
 // 자격증명은 메인 프로세스 밖으로 나가지 않는다(SSH/serial 과 같은 규칙).
@@ -78,7 +79,7 @@ export function registerRdpIpcHandlers(
           if (!host || !isRdpHostRecord(host)) {
             return;
           }
-          ctx.hosts.updateRdpCertificateFingerprint(hostId, fingerprint);
+          ctx.vaults.writeHost(hostId, (hosts) => hosts.updateRdpCertificateFingerprint(hostId, fingerprint));
           ctx.activityLogs.append("info", "audit", "RDP certificate trusted", {
             hostId,
             fingerprint,
@@ -115,7 +116,7 @@ export function registerRdpIpcHandlers(
         // 이미 없다. 감사 로그에 빈 해제를 남기지 않는다.
         return host;
       }
-      const next = ctx.hosts.updateRdpCertificateFingerprint(hostId, null);
+      const next = ctx.vaults.writeHost(hostId, (hosts) => hosts.updateRdpCertificateFingerprint(hostId, null));
       ctx.activityLogs.append("warn", "audit", logMessage('rdpIpc.certificateTrustRevoked'), {
         hostId,
         label: host.label,
@@ -195,7 +196,8 @@ export function registerRdpIpcHandlers(
         // 이름만 갖고 있던 옛 레코드다. 지금 한 번 찾아 적어 두면 다음부터는 이름에 의존하지
         // 않는다 — 폴백은 그 레코드들이 남아 있는 동안만 필요한 것이고, 여기서 스스로 사라진다.
         profileId = ctx.awsService.resolveManagedProfileId(awsSsm.profileName);
-        if (profileId) {
+        // 내 개인 프로필의 id 를 팀 레코드에 적으면 팀원에게는 없는 프로필을 가리킨다(팀 AWS 프로필은 작업 3).
+        if (profileId && ctx.vaults.scopeOfHost(host.id).id === PERSONAL_VAULT_ID) {
           ctx.hosts.fillRdpAwsSsmProfileId(host.id, profileId);
           ctx.queueSync();
         }

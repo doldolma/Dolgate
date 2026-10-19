@@ -320,6 +320,24 @@ export const ipcChannels = {
     update: 'snippets:update',
     remove: 'snippets:remove'
   },
+  teams: {
+    list: 'teams:list',
+    refresh: 'teams:refresh',
+    create: 'teams:create',
+    rename: 'teams:rename',
+    remove: 'teams:remove',
+    transferOwnership: 'teams:transfer-ownership',
+    listMembers: 'teams:list-members',
+    removeMember: 'teams:remove-member',
+    leave: 'teams:leave',
+    createInvite: 'teams:create-invite',
+    listInvites: 'teams:list-invites',
+    revokeInvite: 'teams:revoke-invite',
+    getInviteInfo: 'teams:get-invite-info',
+    join: 'teams:join',
+    // 팀 목록이 바뀌었을 때 메인이 렌더러로 보낸다.
+    changed: 'teams:changed'
+  },
   savedWorkspaces: {
     list: 'saved-workspaces:list',
     create: 'saved-workspaces:create',

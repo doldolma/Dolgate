@@ -118,6 +118,7 @@ import {
   type SyncDeletionRecord,
 } from './state-storage';
 import type { LocalHistoryOwner } from './local-history-scope';
+import { PERSONAL_VAULT_ROOT, type VaultRoot } from './vault-root';
 import { decodeSecretFromStorage, encodeSecretForStorage } from './secret-store';
 import { getServerUrlValidationMessage } from '../common/shared-messages';
 
@@ -1011,14 +1012,15 @@ const stateStorage = {
   getState: () => getDesktopStateStorage().getState(),
   updateState: (updater: Parameters<ReturnType<typeof getDesktopStateStorage>["updateState"]>[0]) =>
     getDesktopStateStorage().updateState(updater),
-  readManagedAwsProfileValue: (profileId: string) =>
-    getDesktopStateStorage().readManagedAwsProfileValue(profileId),
+  readManagedAwsProfileValue: (profileId: string, teamId: string | null) =>
+    getDesktopStateStorage().readManagedAwsProfileValue(profileId, teamId),
   writeManagedAwsProfileValue: (
     profileId: string,
-    record: Parameters<ReturnType<typeof getDesktopStateStorage>["writeManagedAwsProfileValue"]>[1]
-  ) => getDesktopStateStorage().writeManagedAwsProfileValue(profileId, record),
-  deleteManagedAwsProfileValue: (profileId: string) =>
-    getDesktopStateStorage().deleteManagedAwsProfileValue(profileId),
+    record: Parameters<ReturnType<typeof getDesktopStateStorage>["writeManagedAwsProfileValue"]>[1],
+    teamId: string | null
+  ) => getDesktopStateStorage().writeManagedAwsProfileValue(profileId, record, teamId),
+  deleteManagedAwsProfileValue: (profileId: string, teamId: string | null) =>
+    getDesktopStateStorage().deleteManagedAwsProfileValue(profileId, teamId),
   appendActivityLog: (
     record: Parameters<ReturnType<typeof getDesktopStateStorage>["appendActivityLog"]>[0]
   ) => getDesktopStateStorage().appendActivityLog(record),
@@ -1040,19 +1042,21 @@ function clampNumber(value: number, min: number, max: number): number {
 }
 
 export class HostRepository {
+  constructor(private readonly root: VaultRoot = PERSONAL_VAULT_ROOT) {}
+
   list(): HostRecord[] {
-    return stateStorage.getState().data.hosts.sort(compareHosts);
+    return this.root.data(stateStorage.getState()).hosts.sort(compareHosts);
   }
 
   getById(id: string): HostRecord | null {
-    return stateStorage.getState().data.hosts.find((record) => record.id === id) ?? null;
+    return this.root.data(stateStorage.getState()).hosts.find((record) => record.id === id) ?? null;
   }
 
   create(id: string, draft: HostDraft, secretRef?: string | null): HostRecord {
     const timestamp = nowIso();
     const record = toHostRecord(id, draft, secretRef ?? null, timestamp);
     stateStorage.updateState((state) => {
-      state.data.hosts.push(record);
+      this.root.data(state).hosts.push(record);
     });
     return record;
   }
@@ -1065,7 +1069,7 @@ export class HostRepository {
 
     const record = toHostRecord(id, draft, secretRef ?? null, nowIso(), current);
     stateStorage.updateState((state) => {
-      state.data.hosts = state.data.hosts.map((entry) => (entry.id === id ? record : entry));
+      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => (entry.id === id ? record : entry));
     });
     return record;
   }
@@ -1079,7 +1083,7 @@ export class HostRepository {
   setDetectedOs(id: string, detectedOs: HostDetectedOs | null): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
-      state.data.hosts = state.data.hosts.map((entry) => {
+      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
         if (entry.id !== id) {
           return entry;
         }
@@ -1097,7 +1101,7 @@ export class HostRepository {
   setTerminalTheme(id: string, terminalThemeId: TerminalThemeId | null): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
-      state.data.hosts = state.data.hosts.map((entry) => {
+      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
         if (entry.id !== id) {
           return entry;
         }
@@ -1111,7 +1115,7 @@ export class HostRepository {
   setFavorite(id: string, favorite: boolean): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
-      state.data.hosts = state.data.hosts.map((entry) => {
+      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
         if (entry.id !== id) {
           return entry;
         }
@@ -1131,7 +1135,7 @@ export class HostRepository {
   updateRdpCertificateFingerprint(id: string, fingerprint: string | null): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
-      state.data.hosts = state.data.hosts.map((entry) => {
+      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
         if (entry.id !== id || entry.kind !== 'rdp') {
           return entry;
         }
@@ -1156,7 +1160,7 @@ export class HostRepository {
   fillRdpAwsSsmProfileId(id: string, profileId: string): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
-      state.data.hosts = state.data.hosts.map((entry) => {
+      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
         if (entry.id !== id || entry.kind !== 'rdp' || !entry.awsSsm) {
           return entry;
         }
@@ -1176,7 +1180,7 @@ export class HostRepository {
   updateSecretRef(id: string, secretRef: string | null): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
-      state.data.hosts = state.data.hosts.map((entry) => {
+      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
         if (entry.id !== id || !isSshHostRecord(entry)) {
           return entry;
         }
@@ -1202,7 +1206,7 @@ export class HostRepository {
   ): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
-      state.data.hosts = state.data.hosts.map((entry) => {
+      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
         if (entry.id !== id || !isSshHostRecord(entry)) {
           return entry;
         }
@@ -1225,7 +1229,7 @@ export class HostRepository {
   clearSecretRef(secretRef: string): void {
     const timestamp = nowIso();
     stateStorage.updateState((state) => {
-      state.data.hosts = state.data.hosts.map((entry) => {
+      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
         if (!isSshHostRecord(entry) || entry.secretRef !== secretRef) {
           return entry;
         }
@@ -1244,7 +1248,7 @@ export class HostRepository {
     const updated: HostRecord[] = [];
     const timestamp = nowIso();
     stateStorage.updateState((state) => {
-      state.data.hosts = state.data.hosts.map((entry) => {
+      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
         if (
           (entry.kind !== 'ssh' && entry.kind !== 'aws-ec2' && entry.kind !== 'warpgate-ssh') ||
           entry.startupCommand?.type !== 'snippet' ||
@@ -1262,7 +1266,7 @@ export class HostRepository {
 
   remove(id: string): void {
     stateStorage.updateState((state) => {
-      state.data.hosts = state.data.hosts
+      this.root.data(state).hosts = this.root.data(state).hosts
         .filter((entry) => entry.id !== id)
         // Drop dangling jump-host references so a removed bastion doesn't leave
         // other hosts pointing at a host that no longer exists.
@@ -1290,7 +1294,7 @@ export class HostRepository {
 
   replaceAll(records: HostRecord[]): void {
     stateStorage.updateState((state) => {
-      state.data.hosts = records.map(normalizeIncomingHostRecord);
+      this.root.data(state).hosts = records.map(normalizeIncomingHostRecord);
     });
   }
 
@@ -1298,7 +1302,7 @@ export class HostRepository {
     const updatedHosts: HostRecord[] = [];
     const timestamp = nowIso();
     stateStorage.updateState((state) => {
-      state.data.hosts = state.data.hosts.map((entry) => {
+      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
         if (
           (entry.kind !== 'aws-ec2' && entry.kind !== 'aws-ecs') ||
           entry.awsProfileId !== profileId ||
@@ -1326,7 +1330,7 @@ export class HostRepository {
     const timestamp = nowIso();
 
     stateStorage.updateState((state) => {
-      state.data.hosts = state.data.hosts.map((entry) => {
+      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
         if (entry.kind !== 'aws-ec2' && entry.kind !== 'aws-ecs') {
           return entry;
         }
@@ -1378,18 +1382,20 @@ function hasSavedWorkspaceWithinGroup(
 }
 
 export class GroupRepository {
+  constructor(private readonly root: VaultRoot = PERSONAL_VAULT_ROOT) {}
+
   list(): GroupRecord[] {
-    return stateStorage
-      .getState()
-      .data.groups.sort((left, right) => left.path.localeCompare(right.path));
+    return this.root
+      .data(stateStorage.getState())
+      .groups.sort((left, right) => left.path.localeCompare(right.path));
   }
 
   getByPath(targetPath: string): GroupRecord | null {
-    return stateStorage.getState().data.groups.find((record) => record.path === targetPath) ?? null;
+    return this.root.data(stateStorage.getState()).groups.find((record) => record.path === targetPath) ?? null;
   }
 
   create(id: string, name: string, parentPath?: string | null): GroupRecord {
-    const { created } = createGroupIn(stateStorage.getState().data.groups, {
+    const { created } = createGroupIn(this.root.data(stateStorage.getState()).groups, {
       id,
       name,
       parentPath,
@@ -1397,7 +1403,7 @@ export class GroupRepository {
     });
 
     stateStorage.updateState((state) => {
-      state.data.groups.push(created);
+      this.root.data(state).groups.push(created);
     });
     return created;
   }
@@ -1435,18 +1441,18 @@ export class GroupRepository {
     let nextPath = '';
     const timestamp = nowIso();
     const nextState = stateStorage.updateState((state) => {
-      const result = mutate(state.data.groups, state.data.hosts, {
+      const result = mutate(this.root.data(state).groups, this.root.data(state).hosts, {
         timestamp,
         normalizeHost: normalizeIncomingHostRecord,
         // 이름 변경·이동도 Workspace 만 남은 경로에서 거부됐다(삭제와 같은 원인).
         pathAlsoOccupied: hasSavedWorkspaceWithinGroup(
-          state.data.savedWorkspaces,
+          this.root.data(state).savedWorkspaces,
           normalizeGroupPath(targetPath)
         )
       });
-      state.data.groups = result.groups;
-      state.data.hosts = result.hosts;
-      state.data.savedWorkspaces = state.data.savedWorkspaces.map((workspace) => {
+      this.root.data(state).groups = result.groups;
+      this.root.data(state).hosts = result.hosts;
+      this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.map((workspace) => {
         const groupName = rebaseGroupPath(
           normalizeGroupPath(workspace.groupName),
           targetPath,
@@ -1460,9 +1466,9 @@ export class GroupRepository {
     });
 
     return {
-      groups: nextState.data.groups.sort((left, right) => left.path.localeCompare(right.path)),
-      hosts: nextState.data.hosts.sort(compareHosts),
-      savedWorkspaces: nextState.data.savedWorkspaces.slice().sort(compareSavedWorkspaces),
+      groups: this.root.data(nextState).groups.sort((left, right) => left.path.localeCompare(right.path)),
+      hosts: this.root.data(nextState).hosts.sort(compareHosts),
+      savedWorkspaces: this.root.data(nextState).savedWorkspaces.slice().sort(compareSavedWorkspaces),
       nextPath
     };
   }
@@ -1481,19 +1487,19 @@ export class GroupRepository {
     const normalizedTargetPath = normalizeGroupPath(targetPath);
     const timestamp = nowIso();
     const nextState = stateStorage.updateState((state) => {
-      const result = removeGroupFrom(state.data.groups, state.data.hosts, targetPath, mode, {
+      const result = removeGroupFrom(this.root.data(state).groups, this.root.data(state).hosts, targetPath, mode, {
         timestamp,
         normalizeHost: normalizeIncomingHostRecord,
         // 저장된 Workspace 만 남은 경로도 점유된 것으로 알려 준다(pathAlsoOccupied 주석 참고).
         pathAlsoOccupied: hasSavedWorkspaceWithinGroup(
-          state.data.savedWorkspaces,
+          this.root.data(state).savedWorkspaces,
           normalizedTargetPath
         )
       });
-      state.data.groups = result.groups;
-      state.data.hosts = result.hosts;
+      this.root.data(state).groups = result.groups;
+      this.root.data(state).hosts = result.hosts;
       if (normalizedTargetPath && mode === 'delete-subtree') {
-        const removed = state.data.savedWorkspaces.filter((workspace) =>
+        const removed = this.root.data(state).savedWorkspaces.filter((workspace) =>
           isGroupWithinPath(
             normalizeGroupPath(workspace.groupName),
             normalizedTargetPath,
@@ -1501,11 +1507,11 @@ export class GroupRepository {
         );
         removedWorkspaceIds = removed.map((workspace) => workspace.id);
         const removedWorkspaceIdSet = new Set(removedWorkspaceIds);
-        state.data.savedWorkspaces = state.data.savedWorkspaces.filter(
+        this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.filter(
           (workspace) => !removedWorkspaceIdSet.has(workspace.id),
         );
       } else if (normalizedTargetPath) {
-        state.data.savedWorkspaces = state.data.savedWorkspaces.map((workspace) => {
+        this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.map((workspace) => {
           const currentGroupName = normalizeGroupPath(workspace.groupName);
           const groupName = stripRemovedGroupSegment(
             currentGroupName,
@@ -1521,9 +1527,9 @@ export class GroupRepository {
     });
 
     return {
-      groups: nextState.data.groups.sort((left, right) => left.path.localeCompare(right.path)),
-      hosts: nextState.data.hosts.sort(compareHosts),
-      savedWorkspaces: nextState.data.savedWorkspaces.slice().sort(compareSavedWorkspaces),
+      groups: this.root.data(nextState).groups.sort((left, right) => left.path.localeCompare(right.path)),
+      hosts: this.root.data(nextState).hosts.sort(compareHosts),
+      savedWorkspaces: this.root.data(nextState).savedWorkspaces.slice().sort(compareSavedWorkspaces),
       removedGroupIds,
       removedHostIds,
       removedWorkspaceIds
@@ -1538,12 +1544,12 @@ export class GroupRepository {
    */
   setSortRanks(assignments: Array<{ id: string; sortRank: number }>): GroupRecord[] {
     if (assignments.length === 0) {
-      return stateStorage.getState().data.groups;
+      return this.root.data(stateStorage.getState()).groups;
     }
     const rankById = new Map(assignments.map((entry) => [entry.id, entry.sortRank]));
     const timestamp = nowIso();
     const nextState = stateStorage.updateState((state) => {
-      state.data.groups = state.data.groups.map((record) => {
+      this.root.data(state).groups = this.root.data(state).groups.map((record) => {
         const nextRank = rankById.get(record.id);
         if (nextRank === undefined || record.sortRank === nextRank) {
           return record;
@@ -1551,12 +1557,12 @@ export class GroupRepository {
         return { ...record, sortRank: nextRank, updatedAt: timestamp };
       });
     });
-    return nextState.data.groups;
+    return this.root.data(nextState).groups;
   }
 
   replaceAll(records: GroupRecord[]): void {
     stateStorage.updateState((state) => {
-      state.data.groups = records.map((record) => ({
+      this.root.data(state).groups = records.map((record) => ({
         ...record,
         parentPath: normalizeGroupPath(record.parentPath)
       }));
@@ -1570,8 +1576,10 @@ export class GroupRepository {
  * 따라가지 않는다.
  */
 export class TailnetRepository {
+  constructor(private readonly root: VaultRoot = PERSONAL_VAULT_ROOT) {}
+
   list(): TailnetRecord[] {
-    return stateStorage.getState().data.tailnets;
+    return this.root.data(stateStorage.getState()).tailnets;
   }
 
   /** 설정을 저장한다. authKey 가 undefined 면 기존 키를 그대로 둔다(빈 문자열은 삭제). */
@@ -1580,15 +1588,15 @@ export class TailnetRepository {
     stateStorage.updateState((state) => {
       if (authKey !== undefined) {
         if (authKey.length > 0) {
-          state.secure.tailnetAuthKeysById[record.id] =
+          this.root.secure(state).tailnetAuthKeysById[record.id] =
             encodeSecretForStorage(authKey);
         } else {
-          delete state.secure.tailnetAuthKeysById[record.id];
+          delete this.root.secure(state).tailnetAuthKeysById[record.id];
         }
       }
 
-      const hasAuthKey = Boolean(state.secure.tailnetAuthKeysById[record.id]);
-      const existing = state.data.tailnets.find((item) => item.id === record.id);
+      const hasAuthKey = Boolean(this.root.secure(state).tailnetAuthKeysById[record.id]);
+      const existing = this.root.data(state).tailnets.find((item) => item.id === record.id);
       const next: TailnetRecord = {
         ...record,
         hasAuthKey,
@@ -1606,9 +1614,9 @@ export class TailnetRepository {
         updatedAt: now,
       };
 
-      state.data.tailnets = existing
-        ? state.data.tailnets.map((item) => (item.id === record.id ? next : item))
-        : [...state.data.tailnets, next];
+      this.root.data(state).tailnets = existing
+        ? this.root.data(state).tailnets.map((item) => (item.id === record.id ? next : item))
+        : [...this.root.data(state).tailnets, next];
     });
 
     return this.list().find((item) => item.id === record.id) ?? record;
@@ -1617,12 +1625,12 @@ export class TailnetRepository {
   remove(id: string): void {
     const timestamp = nowIso();
     stateStorage.updateState((state) => {
-      state.data.tailnets = state.data.tailnets.filter((item) => item.id !== id);
-      delete state.secure.tailnetAuthKeysById[id];
+      this.root.data(state).tailnets = this.root.data(state).tailnets.filter((item) => item.id !== id);
+      delete this.root.secure(state).tailnetAuthKeysById[id];
       // Tailnet 설정과 호스트의 경유 설정은 하나의 관계다. 설정만 지우면 호스트가 존재하지
       // 않는 id 를 계속 가리켜 연결할 수 없으므로, 같은 저장 트랜잭션에서 일반 네트워크로
       // 되돌린다. updatedAt 도 움직여야 이 변경이 다른 기기로 동기화된다.
-      state.data.hosts = state.data.hosts.map((host) => {
+      this.root.data(state).hosts = this.root.data(state).hosts.map((host) => {
         // SSH 와 RDP 가 같은 필드를 쓴다. 한쪽만 정리하면 그 종류만 없는 tailnet 을 가리킨 채
         // 남아 연결할 수 없다.
         if (
@@ -1662,7 +1670,7 @@ export class TailnetRepository {
   replaceAll(payloads: TailnetPayload[]): void {
     stateStorage.updateState((state) => {
       const keys: Record<string, StoredEncryptedValue> = {};
-      state.data.tailnets = payloads.map((payload) => {
+      this.root.data(state).tailnets = payloads.map((payload) => {
         const record = normalizeTailnetPayloadForStorage(payload);
         const { authKey } = payload;
         if (authKey) {
@@ -1670,13 +1678,13 @@ export class TailnetRepository {
         }
         return record;
       });
-      state.secure.tailnetAuthKeysById = keys;
+      this.root.secure(state).tailnetAuthKeysById = keys;
     });
   }
 
   /** 연결할 때만 읽는다. 렌더러로는 절대 내보내지 않는다. */
   readAuthKey(id: string): string | null {
-    const record = stateStorage.getState().secure.tailnetAuthKeysById[id];
+    const record = this.root.secure(stateStorage.getState()).tailnetAuthKeysById[id];
     if (!record) {
       return null;
     }
@@ -2125,10 +2133,12 @@ export class SettingsRepository {
 }
 
 export class PortForwardRepository {
+  constructor(private readonly root: VaultRoot = PERSONAL_VAULT_ROOT) {}
+
   list(): PortForwardRuleRecord[] {
-    return stateStorage
-      .getState()
-      .data.portForwards.sort((left, right) => {
+    return this.root
+      .data(stateStorage.getState())
+      .portForwards.sort((left, right) => {
         const updatedCompare = right.updatedAt.localeCompare(left.updatedAt);
         if (updatedCompare !== 0) {
           return updatedCompare;
@@ -2138,14 +2148,14 @@ export class PortForwardRepository {
   }
 
   getById(id: string): PortForwardRuleRecord | null {
-    return stateStorage.getState().data.portForwards.find((record) => record.id === id) ?? null;
+    return this.root.data(stateStorage.getState()).portForwards.find((record) => record.id === id) ?? null;
   }
 
   create(draft: PortForwardDraft): PortForwardRuleRecord {
     const timestamp = nowIso();
     const record = this.toRecord(randomUUID(), draft, timestamp, timestamp);
     stateStorage.updateState((state) => {
-      state.data.portForwards.push(record);
+      this.root.data(state).portForwards.push(record);
     });
     return record;
   }
@@ -2159,20 +2169,20 @@ export class PortForwardRepository {
     const record = this.toRecord(id, draft, current.createdAt, nowIso());
 
     stateStorage.updateState((state) => {
-      state.data.portForwards = state.data.portForwards.map((entry) => (entry.id === id ? record : entry));
+      this.root.data(state).portForwards = this.root.data(state).portForwards.map((entry) => (entry.id === id ? record : entry));
     });
     return record;
   }
 
   remove(id: string): void {
     stateStorage.updateState((state) => {
-      state.data.portForwards = state.data.portForwards.filter((entry) => entry.id !== id);
+      this.root.data(state).portForwards = this.root.data(state).portForwards.filter((entry) => entry.id !== id);
     });
   }
 
   replaceAll(records: PortForwardRuleRecord[]): void {
     stateStorage.updateState((state) => {
-      state.data.portForwards = records.map((record) => ({ ...record }));
+      this.root.data(state).portForwards = records.map((record) => ({ ...record }));
     });
   }
 
@@ -2243,19 +2253,21 @@ export class PortForwardRepository {
 }
 
 export class DnsOverrideRepository {
+  constructor(private readonly root: VaultRoot = PERSONAL_VAULT_ROOT) {}
+
   list(): DnsOverrideRecord[] {
-    return stateStorage.getState().data.dnsOverrides.sort(compareDnsOverrides);
+    return this.root.data(stateStorage.getState()).dnsOverrides.sort(compareDnsOverrides);
   }
 
   getById(id: string): DnsOverrideRecord | null {
-    return stateStorage.getState().data.dnsOverrides.find((record) => record.id === id) ?? null;
+    return this.root.data(stateStorage.getState()).dnsOverrides.find((record) => record.id === id) ?? null;
   }
 
   create(draft: DnsOverrideDraft, portForwards: PortForwardRepository): DnsOverrideRecord {
     const timestamp = nowIso();
     const record = this.toRecord(randomUUID(), draft, timestamp, timestamp, portForwards);
     stateStorage.updateState((state) => {
-      state.data.dnsOverrides.push(record);
+      this.root.data(state).dnsOverrides.push(record);
     });
     return record;
   }
@@ -2268,20 +2280,20 @@ export class DnsOverrideRepository {
 
     const record = this.toRecord(id, draft, current.createdAt, nowIso(), portForwards);
     stateStorage.updateState((state) => {
-      state.data.dnsOverrides = state.data.dnsOverrides.map((entry) => (entry.id === id ? record : entry));
+      this.root.data(state).dnsOverrides = this.root.data(state).dnsOverrides.map((entry) => (entry.id === id ? record : entry));
     });
     return record;
   }
 
   remove(id: string): void {
     stateStorage.updateState((state) => {
-      state.data.dnsOverrides = state.data.dnsOverrides.filter((entry) => entry.id !== id);
+      this.root.data(state).dnsOverrides = this.root.data(state).dnsOverrides.filter((entry) => entry.id !== id);
     });
   }
 
   replaceAll(records: DnsOverrideRecord[]): void {
     stateStorage.updateState((state) => {
-      state.data.dnsOverrides = records
+      this.root.data(state).dnsOverrides = records
         .map(normalizeIncomingDnsOverrideRecord)
         .filter((record): record is DnsOverrideRecord => record !== null)
         .sort(compareDnsOverrides);
@@ -2300,9 +2312,9 @@ export class DnsOverrideRepository {
       throw new Error('DNS override hostname is invalid');
     }
 
-    const duplicate = stateStorage
-      .getState()
-      .data.dnsOverrides.find((record) => record.hostname === hostname && record.id !== id);
+    const duplicate = this.root
+      .data(stateStorage.getState())
+      .dnsOverrides.find((record) => record.hostname === hostname && record.id !== id);
     if (duplicate) {
       throw new Error('DNS override hostname already exists');
     }
@@ -2381,19 +2393,21 @@ function compareSnippets(left: SnippetRecord, right: SnippetRecord): number {
 }
 
 export class SnippetRepository {
+  constructor(private readonly root: VaultRoot = PERSONAL_VAULT_ROOT) {}
+
   list(): SnippetRecord[] {
-    return stateStorage.getState().data.snippets.slice().sort(compareSnippets);
+    return this.root.data(stateStorage.getState()).snippets.slice().sort(compareSnippets);
   }
 
   getById(id: string): SnippetRecord | null {
-    return stateStorage.getState().data.snippets.find((record) => record.id === id) ?? null;
+    return this.root.data(stateStorage.getState()).snippets.find((record) => record.id === id) ?? null;
   }
 
   create(draft: SnippetDraft): SnippetRecord {
     const timestamp = nowIso();
     const record = toSnippetRecord(randomUUID(), draft, timestamp, timestamp);
     stateStorage.updateState((state) => {
-      state.data.snippets.push(record);
+      this.root.data(state).snippets.push(record);
     });
     return record;
   }
@@ -2405,20 +2419,20 @@ export class SnippetRepository {
     }
     const record = toSnippetRecord(id, draft, current.createdAt, nowIso());
     stateStorage.updateState((state) => {
-      state.data.snippets = state.data.snippets.map((entry) => (entry.id === id ? record : entry));
+      this.root.data(state).snippets = this.root.data(state).snippets.map((entry) => (entry.id === id ? record : entry));
     });
     return record;
   }
 
   remove(id: string): void {
     stateStorage.updateState((state) => {
-      state.data.snippets = state.data.snippets.filter((entry) => entry.id !== id);
+      this.root.data(state).snippets = this.root.data(state).snippets.filter((entry) => entry.id !== id);
     });
   }
 
   replaceAll(records: SnippetRecord[]): void {
     stateStorage.updateState((state) => {
-      state.data.snippets = records.map(normalizeIncomingSnippetRecord).sort(compareSnippets);
+      this.root.data(state).snippets = records.map(normalizeIncomingSnippetRecord).sort(compareSnippets);
     });
   }
 }
@@ -2435,12 +2449,14 @@ function compareSavedWorkspaces(
 }
 
 export class SavedWorkspaceRepository {
+  constructor(private readonly root: VaultRoot = PERSONAL_VAULT_ROOT) {}
+
   list(): SavedWorkspaceRecord[] {
-    return stateStorage.getState().data.savedWorkspaces.slice().sort(compareSavedWorkspaces);
+    return this.root.data(stateStorage.getState()).savedWorkspaces.slice().sort(compareSavedWorkspaces);
   }
 
   getById(id: string): SavedWorkspaceRecord | null {
-    return stateStorage.getState().data.savedWorkspaces.find((record) => record.id === id) ?? null;
+    return this.root.data(stateStorage.getState()).savedWorkspaces.find((record) => record.id === id) ?? null;
   }
 
   create(draft: SavedWorkspaceDraft): SavedWorkspaceRecord {
@@ -2460,7 +2476,7 @@ export class SavedWorkspaceRepository {
       throw new Error('Invalid saved workspace');
     }
     stateStorage.updateState((state) => {
-      state.data.savedWorkspaces.push(record);
+      this.root.data(state).savedWorkspaces.push(record);
     });
     return record;
   }
@@ -2480,7 +2496,7 @@ export class SavedWorkspaceRepository {
       updatedAt: nowIso(),
     };
     stateStorage.updateState((state) => {
-      state.data.savedWorkspaces = state.data.savedWorkspaces.map((entry) =>
+      this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.map((entry) =>
         entry.id === id ? record : entry,
       );
     });
@@ -2498,7 +2514,7 @@ export class SavedWorkspaceRepository {
       updatedAt: nowIso(),
     };
     stateStorage.updateState((state) => {
-      state.data.savedWorkspaces = state.data.savedWorkspaces.map((entry) =>
+      this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.map((entry) =>
         entry.id === id ? record : entry,
       );
     });
@@ -2516,7 +2532,7 @@ export class SavedWorkspaceRepository {
       updatedAt: nowIso(),
     };
     stateStorage.updateState((state) => {
-      state.data.savedWorkspaces = state.data.savedWorkspaces.map((entry) =>
+      this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.map((entry) =>
         entry.id === id ? record : entry,
       );
     });
@@ -2535,7 +2551,7 @@ export class SavedWorkspaceRepository {
       // 기기별 사용 기록은 Workspace 내용의 LWW 수정 시각을 올리지 않는다.
     };
     stateStorage.updateState((state) => {
-      state.data.savedWorkspaces = state.data.savedWorkspaces.map((entry) =>
+      this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.map((entry) =>
         entry.id === id ? record : entry,
       );
     });
@@ -2544,13 +2560,13 @@ export class SavedWorkspaceRepository {
 
   remove(id: string): void {
     stateStorage.updateState((state) => {
-      state.data.savedWorkspaces = state.data.savedWorkspaces.filter((entry) => entry.id !== id);
+      this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.filter((entry) => entry.id !== id);
     });
   }
 
   replaceAll(records: SavedWorkspaceRecord[]): void {
     stateStorage.updateState((state) => {
-      state.data.savedWorkspaces = records
+      this.root.data(state).savedWorkspaces = records
         .map(normalizeSavedWorkspaceRecord)
         .filter((entry): entry is SavedWorkspaceRecord => entry !== null)
         .sort(compareSavedWorkspaces);
@@ -2569,10 +2585,12 @@ function normalizeTailnetScope(tailnetId?: string | null): string {
 }
 
 export class KnownHostRepository {
+  constructor(private readonly root: VaultRoot = PERSONAL_VAULT_ROOT) {}
+
   list(): KnownHostRecord[] {
-    return stateStorage
-      .getState()
-      .data.knownHosts.sort((left, right) => {
+    return this.root
+      .data(stateStorage.getState())
+      .knownHosts.sort((left, right) => {
         const hostCompare = left.host.localeCompare(right.host);
         if (hostCompare !== 0) {
           return hostCompare;
@@ -2586,7 +2604,7 @@ export class KnownHostRepository {
   }
 
   getByHostPort(host: string, port: number): KnownHostRecord | null {
-    return stateStorage.getState().data.knownHosts.find((record) => record.host === host && record.port === port) ?? null;
+    return this.root.data(stateStorage.getState()).knownHosts.find((record) => record.host === host && record.port === port) ?? null;
   }
 
   getByHostPortAlgorithm(
@@ -2597,9 +2615,9 @@ export class KnownHostRepository {
   ): KnownHostRecord | null {
     const scope = normalizeTailnetScope(tailnetId);
     return (
-      stateStorage
-        .getState()
-        .data.knownHosts.find(
+      this.root
+        .data(stateStorage.getState())
+        .knownHosts.find(
           (record) =>
             normalizeTailnetScope(record.tailnetId) === scope &&
             record.host === host &&
@@ -2611,9 +2629,9 @@ export class KnownHostRepository {
 
   listByHostPort(host: string, port: number, tailnetId?: string): KnownHostRecord[] {
     const scope = normalizeTailnetScope(tailnetId);
-    return stateStorage
-      .getState()
-      .data.knownHosts.filter(
+    return this.root
+      .data(stateStorage.getState())
+      .knownHosts.filter(
         (record) =>
           normalizeTailnetScope(record.tailnetId) === scope &&
           record.host === host &&
@@ -2646,10 +2664,10 @@ export class KnownHostRepository {
 
     stateStorage.updateState((state) => {
       if (current) {
-        state.data.knownHosts = state.data.knownHosts.map((entry) => (entry.id === current.id ? record : entry));
+        this.root.data(state).knownHosts = this.root.data(state).knownHosts.map((entry) => (entry.id === current.id ? record : entry));
         return;
       }
-      state.data.knownHosts.push(record);
+      this.root.data(state).knownHosts.push(record);
     });
     return record;
   }
@@ -2658,7 +2676,7 @@ export class KnownHostRepository {
     const timestamp = nowIso();
     const scope = normalizeTailnetScope(tailnetId);
     stateStorage.updateState((state) => {
-      state.data.knownHosts = state.data.knownHosts.map((entry) => {
+      this.root.data(state).knownHosts = this.root.data(state).knownHosts.map((entry) => {
         if (
           normalizeTailnetScope(entry.tailnetId) !== scope ||
           entry.host !== host ||
@@ -2678,13 +2696,13 @@ export class KnownHostRepository {
 
   remove(id: string): void {
     stateStorage.updateState((state) => {
-      state.data.knownHosts = state.data.knownHosts.filter((entry) => entry.id !== id);
+      this.root.data(state).knownHosts = this.root.data(state).knownHosts.filter((entry) => entry.id !== id);
     });
   }
 
   replaceAll(records: KnownHostRecord[]): void {
     stateStorage.updateState((state) => {
-      state.data.knownHosts = records.map((record) => ({ ...record }));
+      this.root.data(state).knownHosts = records.map((record) => ({ ...record }));
     });
   }
 }
@@ -2745,6 +2763,8 @@ export class ActivityLogRepository {
 }
 
 export class SecretMetadataRepository {
+  constructor(private readonly root: VaultRoot = PERSONAL_VAULT_ROOT) {}
+
   upsert(input: {
     secretRef: string;
     label: string;
@@ -2787,33 +2807,33 @@ export class SecretMetadataRepository {
         updatedAt: timestamp
       };
 
-      const currentIndex = state.data.secretMetadata.findIndex((record) => record.secretRef === input.secretRef);
+      const currentIndex = this.root.data(state).secretMetadata.findIndex((record) => record.secretRef === input.secretRef);
       if (currentIndex >= 0) {
-        state.data.secretMetadata[currentIndex] = {
-          ...state.data.secretMetadata[currentIndex],
+        this.root.data(state).secretMetadata[currentIndex] = {
+          ...this.root.data(state).secretMetadata[currentIndex],
           ...nextRecord
         };
         return;
       }
-      state.data.secretMetadata.push(nextRecord);
+      this.root.data(state).secretMetadata.push(nextRecord);
     });
   }
 
   remove(secretRef: string): void {
     stateStorage.updateState((state) => {
-      state.data.secretMetadata = state.data.secretMetadata.filter((record) => record.secretRef !== secretRef);
+      this.root.data(state).secretMetadata = this.root.data(state).secretMetadata.filter((record) => record.secretRef !== secretRef);
     });
   }
 
   getBySecretRef(secretRef: string): SecretMetadataRecord | null {
     const state = stateStorage.getState();
-    const record = state.data.secretMetadata.find((entry) => entry.secretRef === secretRef);
-    return record ? withLinkedHostCount(record, state.data.hosts) : null;
+    const record = this.root.data(state).secretMetadata.find((entry) => entry.secretRef === secretRef);
+    return record ? withLinkedHostCount(record, this.root.data(state).hosts) : null;
   }
 
   list(): SecretMetadataRecord[] {
     const state = stateStorage.getState();
-    return state.data.secretMetadata.map((record) => withLinkedHostCount(record, state.data.hosts)).sort(compareLabels);
+    return this.root.data(state).secretMetadata.map((record) => withLinkedHostCount(record, this.root.data(state).hosts)).sort(compareLabels);
   }
 
   replaceAll(records: SecretMetadataRecord[]): void {
@@ -2822,14 +2842,16 @@ export class SecretMetadataRepository {
         ...record,
         linkedHostCount: 0
       }));
-      state.data.secretMetadata = nextRecords;
+      this.root.data(state).secretMetadata = nextRecords;
     });
   }
 }
 
 export class AwsProfileRepository {
+  constructor(private readonly root: VaultRoot = PERSONAL_VAULT_ROOT) {}
+
   listMetadata(): AwsProfileMetadataRecord[] {
-    return stateStorage.getState().data.awsProfiles.sort(compareAwsProfileMetadata);
+    return this.root.data(stateStorage.getState()).awsProfiles.sort(compareAwsProfileMetadata);
   }
 
   listPayloads(): ManagedAwsProfilePayload[] {
@@ -2840,11 +2862,11 @@ export class AwsProfileRepository {
   }
 
   getMetadataById(id: string): AwsProfileMetadataRecord | null {
-    return stateStorage.getState().data.awsProfiles.find((record) => record.id === id) ?? null;
+    return this.root.data(stateStorage.getState()).awsProfiles.find((record) => record.id === id) ?? null;
   }
 
   getMetadataByName(name: string): AwsProfileMetadataRecord | null {
-    return stateStorage.getState().data.awsProfiles.find((record) => record.name === name) ?? null;
+    return this.root.data(stateStorage.getState()).awsProfiles.find((record) => record.name === name) ?? null;
   }
 
   getPayloadById(id: string): ManagedAwsProfilePayload | null {
@@ -2852,7 +2874,7 @@ export class AwsProfileRepository {
     if (!metadata) {
       return null;
     }
-    const record = stateStorage.readManagedAwsProfileValue(id);
+    const record = stateStorage.readManagedAwsProfileValue(id, this.root.teamId);
     if (!record) {
       return null;
     }
@@ -2891,25 +2913,26 @@ export class AwsProfileRepository {
     const nextMetadata = this.toMetadata(nextPayload);
 
     stateStorage.updateState((state) => {
-      const currentIndex = state.data.awsProfiles.findIndex((record) => record.id === nextMetadata.id);
+      const currentIndex = this.root.data(state).awsProfiles.findIndex((record) => record.id === nextMetadata.id);
       if (currentIndex >= 0) {
-        state.data.awsProfiles[currentIndex] = nextMetadata;
+        this.root.data(state).awsProfiles[currentIndex] = nextMetadata;
       } else {
-        state.data.awsProfiles.push(nextMetadata);
+        this.root.data(state).awsProfiles.push(nextMetadata);
       }
     });
     stateStorage.writeManagedAwsProfileValue(
       nextPayload.id,
-      encodeSecretForStorage(JSON.stringify(nextPayload))
+      encodeSecretForStorage(JSON.stringify(nextPayload)),
+      this.root.teamId
     );
     return nextPayload;
   }
 
   remove(id: string): void {
     stateStorage.updateState((state) => {
-      state.data.awsProfiles = state.data.awsProfiles.filter((record) => record.id !== id);
+      this.root.data(state).awsProfiles = this.root.data(state).awsProfiles.filter((record) => record.id !== id);
     });
-    stateStorage.deleteManagedAwsProfileValue(id);
+    stateStorage.deleteManagedAwsProfileValue(id, this.root.teamId);
   }
 
   replaceAll(payloads: ManagedAwsProfilePayload[]): void {
@@ -2921,14 +2944,14 @@ export class AwsProfileRepository {
     const nextIds = new Set(nextMetadata.map((record) => record.id));
 
     stateStorage.updateState((state) => {
-      state.data.awsProfiles = nextMetadata;
-      for (const profileId of Object.keys(state.secure.managedAwsProfilesById)) {
+      this.root.data(state).awsProfiles = nextMetadata;
+      for (const profileId of Object.keys(this.root.secure(state).managedAwsProfilesById)) {
         if (!nextIds.has(profileId)) {
-          delete state.secure.managedAwsProfilesById[profileId];
+          delete this.root.secure(state).managedAwsProfilesById[profileId];
         }
       }
       for (const payload of nextPayloads) {
-        state.secure.managedAwsProfilesById[payload.id] = encodeSecretForStorage(JSON.stringify(payload));
+        this.root.secure(state).managedAwsProfilesById[payload.id] = encodeSecretForStorage(JSON.stringify(payload));
       }
     });
   }
@@ -2946,29 +2969,31 @@ export class AwsProfileRepository {
 export { SyncDeletionRecord };
 
 export class SyncOutboxRepository {
+  constructor(private readonly root: VaultRoot = PERSONAL_VAULT_ROOT) {}
+
   list(): SyncDeletionRecord[] {
-    return stateStorage.getState().data.syncOutbox.sort(compareDeletedAtDesc);
+    return this.root.data(stateStorage.getState()).syncOutbox.sort(compareDeletedAtDesc);
   }
 
   upsertDeletion(kind: SyncKind, recordId: string, deletedAt: string = nowIso()): void {
     stateStorage.updateState((state) => {
-      const currentIndex = state.data.syncOutbox.findIndex((entry) => entry.kind === kind && entry.recordId === recordId);
+      const currentIndex = this.root.data(state).syncOutbox.findIndex((entry) => entry.kind === kind && entry.recordId === recordId);
       const nextRecord: SyncDeletionRecord = {
         kind,
         recordId,
         deletedAt
       };
       if (currentIndex >= 0) {
-        state.data.syncOutbox[currentIndex] = nextRecord;
+        this.root.data(state).syncOutbox[currentIndex] = nextRecord;
         return;
       }
-      state.data.syncOutbox.push(nextRecord);
+      this.root.data(state).syncOutbox.push(nextRecord);
     });
   }
 
   clear(kind: SyncKind, recordId: string): void {
     stateStorage.updateState((state) => {
-      state.data.syncOutbox = state.data.syncOutbox.filter((entry) => !(entry.kind === kind && entry.recordId === recordId));
+      this.root.data(state).syncOutbox = this.root.data(state).syncOutbox.filter((entry) => !(entry.kind === kind && entry.recordId === recordId));
     });
   }
 
@@ -2984,7 +3009,7 @@ export class SyncOutboxRepository {
         .map((record) => `${record.kind}:${record.recordId}`)
     );
     stateStorage.updateState((state) => {
-      state.data.syncOutbox = state.data.syncOutbox.filter((entry) => {
+      this.root.data(state).syncOutbox = this.root.data(state).syncOutbox.filter((entry) => {
         if (exactKeys.has(`${entry.kind}:${entry.recordId}:${entry.deletedAt}`)) {
           return false;
         }
@@ -2998,7 +3023,7 @@ export class SyncOutboxRepository {
 
   clearAll(): void {
     stateStorage.updateState((state) => {
-      state.data.syncOutbox = [];
+      this.root.data(state).syncOutbox = [];
     });
   }
 }

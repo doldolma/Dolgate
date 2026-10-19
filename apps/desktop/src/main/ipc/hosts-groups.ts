@@ -64,7 +64,23 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.hosts.create,
-    async (event, draft: HostDraft, secrets?: HostSecretInput) => {
+    async (
+      event,
+      draft: HostDraft,
+      secrets?: HostSecretInput,
+      vaultId?: string | null,
+    ) => {
+      // 만들 볼트(없으면 개인). 팀이면 비밀값도 그 팀 볼트에 둔다 — 개인에 두면 팀원이 못 쓰고
+      // 내 개인 동기화로 올라간다.
+      const scope = vaultId ? ctx.vaults.getScope(vaultId) : ctx.vaults.personal;
+      if (!scope) {
+        throw new Error("Vault not found");
+      }
+      const teamScope = scope === ctx.vaults.personal ? null : scope;
+      const persist = (label: string, value: HostSecretInput) =>
+        teamScope
+          ? ctx.persistSecret(label, value, teamScope)
+          : ctx.persistSecret(label, value);
       const hostId = randomUUID();
       // RDP 도 비밀번호를 시크릿 저장소에 둔다. SSH 처럼 키/인증서까지 다루지는 않으므로
       // 관리형 키 해석 없이 비밀번호만 넣는다.
@@ -79,6 +95,14 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         isSshHostDraft(draft) || isRdpDraft || isVncDraft
           ? (draft.secretRef ?? null)
           : null;
+      if (
+        teamScope &&
+        existingSecretRef &&
+        !teamScope.secretMetadata.getBySecretRef(existingSecretRef)
+      ) {
+        // 저장해 둔 내 자격 증명을 팀 호스트에 걸면 팀원은 못 쓰고, 팀 쪽에 개인 참조가 남는다.
+        throw new Error("A team host can only use credentials saved in that team");
+      }
       const resolvedSecrets: HostSecretInput = isSshHostDraft(draft)
         ? {
             ...secrets,
@@ -87,12 +111,9 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
           }
         : {};
       const createdSecretRef = isSshHostDraft(draft)
-        ? await ctx.persistSecret(
-            ctx.describeHostLabel(draft),
-            resolvedSecrets,
-          )
+        ? await persist(ctx.describeHostLabel(draft), resolvedSecrets)
         : passwordKind && secrets?.password
-          ? await ctx.persistSecret(
+          ? await persist(
               ctx.describeHostLabel(draft),
               passwordSecrets(passwordKind, secrets),
             )
@@ -105,7 +126,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         });
       }
       const persistedDraft = normalizeSshDraftForPersistence(draft, secretRef);
-      const record = ctx.hosts.create(hostId, persistedDraft, secretRef);
+      const record = ctx.vaults.createHost(scope.id, hostId, persistedDraft, secretRef);
       ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.hostCreated'), {
         hostId: record.id,
         label: record.label,
@@ -126,6 +147,13 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
       if (!current) {
         throw new Error("Host not found");
       }
+      // 팀 호스트의 비밀값은 그 팀 볼트에 둔다(만들 때와 같다).
+      const vault = ctx.vaults.scopeOfHost(id);
+      const teamScope = vault === ctx.vaults.personal ? null : vault;
+      const persist = (label: string, value: HostSecretInput) =>
+        teamScope
+          ? ctx.persistSecret(label, value, teamScope)
+          : ctx.persistSecret(label, value);
       const isRdpUpdate = isRdpHostDraft(draft) && isRdpHostRecord(current);
       const isVncUpdate = isVncHostDraft(draft) && isVncHostRecord(current);
       const passwordUpdateKind = isRdpUpdate
@@ -139,6 +167,14 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
             ? draft.secretRef
             : (current.secretRef ?? null)
           : null;
+      if (
+        teamScope &&
+        secretRef &&
+        secretRef !== (("secretRef" in current ? current.secretRef : null) ?? null) &&
+        !teamScope.secretMetadata.getBySecretRef(secretRef)
+      ) {
+        throw new Error("A team host can only use credentials saved in that team");
+      }
       const shouldReuseCurrentSecretMaterial =
         Boolean(
           secrets &&
@@ -173,10 +209,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
           resolvedSecrets.privateKeyPem ||
           resolvedSecrets.certificateText)
       ) {
-        secretRef = await ctx.persistSecret(
-          ctx.describeHostLabel(draft),
-          resolvedSecrets,
-        );
+        secretRef = await persist(ctx.describeHostLabel(draft), resolvedSecrets);
         ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.secretUpdated'), {
           hostId: id,
           secretRef,
@@ -185,7 +218,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         secretRef = isSshHostRecord(current) ? (current.secretRef ?? null) : null;
       } else if (passwordUpdateKind && secrets?.password) {
         // 새 비밀번호를 받은 경우에만 다시 저장한다. 비워 두면 기존 ref 를 그대로 유지한다.
-        secretRef = await ctx.persistSecret(
+        secretRef = await persist(
           ctx.describeHostLabel(draft),
           passwordSecrets(passwordUpdateKind, secrets),
         );
@@ -195,7 +228,8 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         });
       }
       const persistedDraft = normalizeSshDraftForPersistence(draft, secretRef);
-      const record = ctx.hosts.update(id, persistedDraft, secretRef);
+      // 팀 호스트면 agent forwarding·테마는 내 칸으로 가고 나머지만 팀 레코드로 저장된다.
+      const record = ctx.vaults.updateHost(id, persistedDraft, secretRef);
       ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.hostUpdated'), {
         hostId: record.id,
         label: record.label,
@@ -211,8 +245,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(ipcChannels.hosts.remove, async (event, id: string) => {
     const current = ctx.vaults.getHost(id);
-    ctx.syncOutbox.upsertDeletion("hosts", id);
-    ctx.hosts.remove(id);
+    ctx.vaults.removeHost(id);
     if (current) {
       ctx.activityLogs.append("warn", "audit", logMessage('hostsIpc.hostDeleted'), {
         hostId: current.id,
@@ -228,7 +261,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.hosts.setFavorite,
     async (event, id: string, favorite: boolean) => {
-      const record = ctx.hosts.setFavorite(id, favorite);
+      const record = ctx.vaults.setHostFavorite(id, favorite);
       ctx.queueSync();
       ctx.emitWorkspaceChanged?.(event?.sender);
       return record;
@@ -238,7 +271,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.hosts.setTerminalTheme,
     async (event, id: string, terminalThemeId: TerminalThemeId | null) => {
-      const record = ctx.hosts.setTerminalTheme(id, terminalThemeId);
+      const record = ctx.vaults.setHostTerminalTheme(id, terminalThemeId);
       ctx.queueSync();
       ctx.emitWorkspaceChanged?.(event?.sender);
       return record;
@@ -248,7 +281,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.hosts.setDetectedOs,
     async (event, id: string, detectedOs: HostDetectedOs | null) => {
-      const record = ctx.hosts.setDetectedOs(id, detectedOs);
+      const record = ctx.vaults.writeHost(id, (hosts) => hosts.setDetectedOs(id, detectedOs));
       ctx.queueSync();
       ctx.emitWorkspaceChanged?.(event?.sender);
       return record;

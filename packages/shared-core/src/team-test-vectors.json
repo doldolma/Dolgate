@@ -1,0 +1,47 @@
+{
+  "_comment": "팀 볼트 암호 고정 벡터. Node 내장 crypto 로 따로 만들었다(noble 구현과 교차 검증). 값을 바꾸면 이미 나간 사본·링크가 안 열린다.",
+  "wrap": [
+    {
+      "teamId": "3f2c8a9e-4b1d-4c6e-9a7b-1d2e3f405162",
+      "teamDekBase64": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+      "personalDekBase64": "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM=",
+      "ivBase64": "RERERERERERERERE",
+      "wrappedBase64": "REREREREREREREREErPmsOgkrUmCoIaw1L/oUziuM6hC/Z1px2zwUTzDIKWxXa/sMokabXHJE6/iAEKw"
+    },
+    {
+      "teamId": "00000000-0000-4000-8000-000000000001",
+      "teamDekBase64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+      "personalDekBase64": "//79/Pv6+fj39vX08/Lx8O/u7ezr6uno5+bl5OPi4eA=",
+      "ivBase64": "AAcOFRwjKjE4P0ZN",
+      "wrappedBase64": "AAcOFRwjKjE4P0ZNzxaJSCLPnF5UUgUO5jLMGrL46psgjg+vmvLnbQoR7+dvezU3wpqrU4ojzSeojgWQ"
+    }
+  ],
+  "invite": [
+    {
+      "secretBase64": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU=",
+      "teamId": "3f2c8a9e-4b1d-4c6e-9a7b-1d2e3f405162",
+      "teamDekBase64": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+      "expiresAt": "2026-10-26T00:00:00.000Z",
+      "ivBase64": "ZmZmZmZmZmZmZmZm",
+      "joinToken": "niW4zXW15TvmTPPDH-Hnoetgp88rc7WrPwJBKlPfS90",
+      "joinTokenHash": "d31e33e9bd8d435dd2c58894717d8c3d9f6e12f2245b98ebbd5234b37e70727e",
+      "boxBase64": "ZmZmZmZmZmZmZmZmmz5nF04/35P3roEsxJJm9mP84ED6JcGrS+EiQ0/X0VkoGMqyKTWSx+3yhHHvMkcYZW5ZJmzcEqBHh8VfouupUlGX8Mq6jYTE7MSQf7kOtdJgPNRzuFzoefzHuFZfALzV0e/P8rYnkj1jvV5hFLJejJ+c2vrO/cOOxN/YdwBoto75zmU+FmTABDRIZZzbhIBup6UFNnK1VENfUQTin5qBPq8D+INa/Us=",
+      "serverUrl": "https://sync.example.com",
+      "code": "AbCdEfGhIjKlMnOpQrStUv",
+      "link": "https://sync.example.com/invite/AbCdEfGhIjKlMnOpQrStUv#v1.VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU"
+    },
+    {
+      "secretBase64": "AQ4bKDVCT1xpdoOQnaq3xNHe6/gFEh8sOUZTYG16h5Q=",
+      "teamId": "00000000-0000-4000-8000-000000000001",
+      "teamDekBase64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+      "expiresAt": "2027-01-01T12:34:56.789Z",
+      "ivBase64": "yMfGxcTDwsHAv769",
+      "joinToken": "0GCat1lR4azx2g5U4n5pe5rSKw2qMM1pWdZghn6Hjng",
+      "joinTokenHash": "00c9a7a7ce9dccf5c23d52621b16aca3bcafcd6185b8aebfb87aa0319bb5345e",
+      "boxBase64": "yMfGxcTDwsHAv769cHbVvtCKoajY3v1E5xHbJHtfw4fTzSFlKmkRsBUX/ly+TXB9jaPbCN620n+z5EwwulxEzWg7EdK1R50hGN58c+F3wwX19ORACHB6mzYYob3eWBRFyeUTMI/Zn+QtDwVt8ACqiHraW25ywe8eO+QpgHjbNUysud7OC3/pbcspITKq+yoynKuwDSeoQGdFRVL1uEl3FzeFHSK5/l3QrUPnoIHeJ1osGDk=",
+      "serverUrl": "https://dolgate.example.org/sync",
+      "code": "Zz09_-ab",
+      "link": "https://dolgate.example.org/sync/invite/Zz09_-ab#v1.AQ4bKDVCT1xpdoOQnaq3xNHe6_gFEh8sOUZTYG16h5Q"
+    }
+  ]
+}

@@ -74,6 +74,7 @@ import {
   resolveLocalHistoryScope,
   type LocalHistoryOwner
 } from './local-history-scope';
+import { TeamVaultNotFoundError } from './vault-root';
 
 const STORAGE_DIRNAME = 'storage';
 const STATE_FILE_NAME = 'state.json';
@@ -92,6 +93,90 @@ export type StoredEncryptedValue = {
   encrypted: boolean;
   value: string;
 };
+
+/** 팀 개인 칸의 레코드 종류. 서버에는 이 이름 그대로 올라간다. */
+export type TeamPrivateKind = 'hostPrefs' | 'workspacePrefs';
+
+/**
+ * 팀 호스트에 대한 내 설정(멤버 개인 칸). 사람마다 다른 값이라 팀 레코드에는 넣지 않고, 내 개인
+ * DEK 로 잠가 내 기기끼리만 맞춘다. 테마는 여기도 아니고 이 기기에만 둔다(DesktopTeamState.local).
+ */
+export interface TeamHostPrefsRecord {
+  /** 호스트 ID. */
+  id: string;
+  favorite: boolean | null;
+  agentForwarding: boolean | null;
+  updatedAt: string;
+}
+
+/** 팀 워크스페이스에 대한 내 설정(멤버 개인 칸). */
+export interface TeamWorkspacePrefsRecord {
+  /** 워크스페이스 ID. */
+  id: string;
+  favorite: boolean;
+  lastOpenedAt: string | null;
+  updatedAt: string;
+}
+
+export interface TeamPrivateDeletionRecord {
+  kind: TeamPrivateKind;
+  recordId: string;
+  deletedAt: string;
+}
+
+/** 팀 호스트에 대한 내 설정을 고칠 때 넘기는 값. 빠진 칸은 그대로 둔다. */
+export interface TeamHostPrefsPatch {
+  favorite?: boolean | null;
+  agentForwarding?: boolean | null;
+}
+
+/** 팀 워크스페이스에 대한 내 설정을 고칠 때 넘기는 값. 빠진 칸은 그대로 둔다. */
+export interface TeamWorkspacePrefsPatch {
+  favorite?: boolean;
+  lastOpenedAt?: string | null;
+}
+
+/** 팀 볼트에서 사람마다 다른 값 전부 — 멤버 개인 칸과 이 기기의 테마. */
+export interface TeamMemberPrefsSnapshot {
+  hostPrefs: TeamHostPrefsRecord[];
+  workspacePrefs: TeamWorkspacePrefsRecord[];
+  terminalThemeByHostId: Record<string, TerminalThemeId>;
+}
+
+/**
+ * 팀 볼트 하나의 로컬 사본. 원본은 서버에 있어서, 지워져도(팀에서 빠짐·옛 버전으로 되돌림) 다시 받는다.
+ *
+ * 레코드(data)와 비밀값(secure)을 개인 것과 **따로** 둔다. 개인 pull 은 `data` 와 `secure` 의 비밀값
+ * 맵을 통째로 갈아 끼우므로, 섞으면 팀 것이 지워지거나 개인 볼트로 올라간다.
+ */
+export interface DesktopTeamState {
+  info: {
+    name: string;
+    role: 'owner' | 'member';
+    /** 내 개인 DEK 로 감싼 팀 키(서버 GET /teams 값). 링크로 들어와 아직 안 올렸으면 null. */
+    wrappedTeamDek: string | null;
+    dataFloor: number;
+    updatedAt: string;
+  };
+  data: DesktopVaultData;
+  secure: DesktopVaultSecure;
+  private: {
+    hostPrefs: TeamHostPrefsRecord[];
+    workspacePrefs: TeamWorkspacePrefsRecord[];
+    syncOutbox: TeamPrivateDeletionRecord[];
+  };
+  /** 이 기기에만 두는 것. 동기화하지 않는다. */
+  local: {
+    terminalThemeByHostId: Record<string, TerminalThemeId>;
+  };
+  sync: {
+    /** 올리지 못한 팀 레코드 변경이 있다(오프라인 등). 다음에 붙으면 올린다. */
+    pendingPush: boolean;
+    /** 올리지 못한 개인 칸 변경이 있다. */
+    privatePendingPush: boolean;
+    updatedAt: string;
+  };
+}
 
 export interface DesktopStateFile {
   schemaVersion: number;
@@ -208,7 +293,35 @@ export interface DesktopStateFile {
      */
     tailnetAuthKeysById: Record<string, StoredEncryptedValue>;
   };
+  /** 팀 ID → 그 팀 볼트의 로컬 사본(DesktopTeamState 주석 참고). */
+  teams: Record<string, DesktopTeamState>;
 }
+
+/** 볼트 하나의 레코드. 개인 볼트는 `data`, 팀 볼트는 `teams[팀 ID].data` 이고 모양이 같다. */
+export type DesktopVaultData = DesktopStateFile['data'];
+
+/** 볼트의 레코드 종류(삭제 대기열 빼고). */
+export const VAULT_RECORD_KEYS = [
+  'groups',
+  'hosts',
+  'knownHosts',
+  'portForwards',
+  'dnsOverrides',
+  'secretMetadata',
+  'awsProfiles',
+  'tailnets',
+  'snippets',
+  'savedWorkspaces'
+] as const satisfies ReadonlyArray<Exclude<keyof DesktopVaultData, 'syncOutbox'>>;
+
+/** 종류별 레코드 ID. 비밀값(secretMetadata)은 secretRef 다. */
+export type VaultRecordIdSets = Record<(typeof VAULT_RECORD_KEYS)[number], Set<string>>;
+
+/** 볼트 하나에 딸린 비밀값. 개인 볼트는 `secure` 의 세 맵, 팀 볼트는 `teams[팀 ID].secure` 다. */
+export type DesktopVaultSecure = Pick<
+  DesktopStateFile['secure'],
+  'managedSecretsByRef' | 'managedAwsProfilesById' | 'tailnetAuthKeysById'
+>;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -619,27 +732,63 @@ function createDefaultStateFile(): DesktopStateFile {
       ownerServerUrl: null,
       updatedAt: timestamp
     },
-    data: {
-      groups: [],
-      hosts: [],
-      knownHosts: [],
-      portForwards: [],
-      dnsOverrides: [],
-      secretMetadata: [],
-      awsProfiles: [],
-      tailnets: [],
-      snippets: [],
-      savedWorkspaces: [],
-      syncOutbox: []
-    },
+    data: createEmptyVaultData(),
     secure: {
       refreshToken: null,
       appSecretsByAccount: {},
-      managedSecretsByRef: {},
-      managedAwsProfilesById: {},
-      tailnetAuthKeysById: {}
-    }
+      ...createEmptyVaultSecure()
+    },
+    teams: {}
   };
+}
+
+export function createEmptyVaultData(): DesktopVaultData {
+  return {
+    groups: [],
+    hosts: [],
+    knownHosts: [],
+    portForwards: [],
+    dnsOverrides: [],
+    secretMetadata: [],
+    awsProfiles: [],
+    tailnets: [],
+    snippets: [],
+    savedWorkspaces: [],
+    syncOutbox: []
+  };
+}
+
+function createEmptyVaultSecure(): DesktopVaultSecure {
+  return {
+    managedSecretsByRef: {},
+    managedAwsProfilesById: {},
+    tailnetAuthKeysById: {}
+  };
+}
+
+/** 새로 알게 된 팀의 빈 로컬 사본. */
+export function createTeamState(info: DesktopTeamState['info']): DesktopTeamState {
+  const timestamp = nowIso();
+  return {
+    info: { ...info },
+    data: createEmptyVaultData(),
+    secure: createEmptyVaultSecure(),
+    private: { hostPrefs: [], workspacePrefs: [], syncOutbox: [] },
+    local: { terminalThemeByHostId: {} },
+    sync: { pendingPush: false, privatePendingPush: false, updatedAt: timestamp }
+  };
+}
+
+/** 쓸 볼트의 비밀값 맵. teamId 가 null 이면 개인이고, 이 기기에 없는 팀이면 던진다. */
+function vaultSecureDraft(state: DesktopStateFile, teamId: string | null): DesktopVaultSecure {
+  if (teamId === null) {
+    return state.secure;
+  }
+  const team = state.teams[teamId];
+  if (!team) {
+    throw new TeamVaultNotFoundError(teamId);
+  }
+  return team.secure;
 }
 
 function normalizeStoredEncryptedValue(value: unknown): StoredEncryptedValue | null {
@@ -1254,20 +1403,8 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
     }
     normalizedManagedSecrets[secretRef] = normalized;
   }
-  const normalizedManagedAwsProfiles: Record<string, StoredEncryptedValue> = {};
-  for (const [profileId, record] of Object.entries(managedAwsProfiles)) {
-    const normalized = normalizeStoredEncryptedValue(record);
-    if (normalized) {
-      normalizedManagedAwsProfiles[profileId] = normalized;
-    }
-  }
-  const normalizedTailnetAuthKeys: Record<string, StoredEncryptedValue> = {};
-  for (const [tailnetId, record] of Object.entries(tailnetAuthKeys)) {
-    const normalized = normalizeStoredEncryptedValue(record);
-    if (normalized) {
-      normalizedTailnetAuthKeys[tailnetId] = normalized;
-    }
-  }
+  const normalizedManagedAwsProfiles = normalizeEncryptedValueMap(managedAwsProfiles);
+  const normalizedTailnetAuthKeys = normalizeEncryptedValueMap(tailnetAuthKeys);
 
   return {
     schemaVersion: DESKTOP_STATE_SCHEMA_VERSION,
@@ -1407,42 +1544,175 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
       ownerServerUrl: typeof sync.ownerServerUrl === 'string' ? sync.ownerServerUrl : null,
       updatedAt: typeof sync.updatedAt === 'string' ? sync.updatedAt : fallback.sync.updatedAt
     },
-    data: {
-      groups: Array.isArray(data.groups) ? (data.groups as GroupRecord[]) : [],
-      hosts: Array.isArray(data.hosts) ? data.hosts.map(normalizeHostRecord).filter((entry): entry is HostRecord => entry !== null) : [],
-      knownHosts: Array.isArray(data.knownHosts) ? (data.knownHosts as KnownHostRecord[]) : [],
-      portForwards: Array.isArray(data.portForwards)
-        ? data.portForwards
-            .map(normalizePortForwardRule)
-            .filter((entry): entry is PortForwardRuleRecord => entry !== null)
-        : [],
-      dnsOverrides: Array.isArray(data.dnsOverrides)
-        ? data.dnsOverrides
-            .map(normalizeDnsOverrideRecord)
-            .filter((entry): entry is DnsOverrideRecord => entry !== null)
-        : [],
-      secretMetadata: Array.isArray(data.secretMetadata)
-        ? data.secretMetadata
-            .map(normalizeSecretMetadataRecord)
-            .filter((entry): entry is SecretMetadataRecord => entry !== null)
-        : [],
-      snippets: Array.isArray(data.snippets) ? (data.snippets as SnippetRecord[]) : [],
-      savedWorkspaces: Array.isArray(data.savedWorkspaces)
-        ? data.savedWorkspaces
-            .map(normalizeSavedWorkspaceRecord)
-            .filter((entry): entry is SavedWorkspaceRecord => entry !== null)
-        : [],
-      awsProfiles: Array.isArray(data.awsProfiles) ? (data.awsProfiles as AwsProfileMetadataRecord[]) : [],
-      tailnets: Array.isArray(data.tailnets) ? (data.tailnets as TailnetRecord[]) : [],
-      syncOutbox: Array.isArray(data.syncOutbox) ? (data.syncOutbox as SyncDeletionRecord[]) : []
-    },
+    data: normalizeVaultData(data),
     secure: {
       refreshToken: normalizeStoredEncryptedValue(secure.refreshToken),
       appSecretsByAccount: normalizedAppSecrets,
       managedSecretsByRef: normalizedManagedSecrets,
       managedAwsProfilesById: normalizedManagedAwsProfiles,
       tailnetAuthKeysById: normalizedTailnetAuthKeys
+    },
+    teams: normalizeTeams(value.teams)
+  };
+}
+
+/** 볼트 하나의 레코드를 정규화한다. 개인과 팀이 같은 규칙을 쓴다. */
+function normalizeVaultData(data: Record<string, unknown>): DesktopVaultData {
+  return {
+    groups: Array.isArray(data.groups) ? (data.groups as GroupRecord[]) : [],
+    hosts: Array.isArray(data.hosts) ? data.hosts.map(normalizeHostRecord).filter((entry): entry is HostRecord => entry !== null) : [],
+    knownHosts: Array.isArray(data.knownHosts) ? (data.knownHosts as KnownHostRecord[]) : [],
+    portForwards: Array.isArray(data.portForwards)
+      ? data.portForwards
+          .map(normalizePortForwardRule)
+          .filter((entry): entry is PortForwardRuleRecord => entry !== null)
+      : [],
+    dnsOverrides: Array.isArray(data.dnsOverrides)
+      ? data.dnsOverrides
+          .map(normalizeDnsOverrideRecord)
+          .filter((entry): entry is DnsOverrideRecord => entry !== null)
+      : [],
+    secretMetadata: Array.isArray(data.secretMetadata)
+      ? data.secretMetadata
+          .map(normalizeSecretMetadataRecord)
+          .filter((entry): entry is SecretMetadataRecord => entry !== null)
+      : [],
+    snippets: Array.isArray(data.snippets) ? (data.snippets as SnippetRecord[]) : [],
+    savedWorkspaces: Array.isArray(data.savedWorkspaces)
+      ? data.savedWorkspaces
+          .map(normalizeSavedWorkspaceRecord)
+          .filter((entry): entry is SavedWorkspaceRecord => entry !== null)
+      : [],
+    awsProfiles: Array.isArray(data.awsProfiles) ? (data.awsProfiles as AwsProfileMetadataRecord[]) : [],
+    tailnets: Array.isArray(data.tailnets) ? (data.tailnets as TailnetRecord[]) : [],
+    syncOutbox: Array.isArray(data.syncOutbox) ? (data.syncOutbox as SyncDeletionRecord[]) : []
+  };
+}
+
+function normalizeEncryptedValueMap(value: unknown): Record<string, StoredEncryptedValue> {
+  const normalized: Record<string, StoredEncryptedValue> = {};
+  if (!isObject(value)) {
+    return normalized;
+  }
+  for (const [key, record] of Object.entries(value)) {
+    const entry = normalizeStoredEncryptedValue(record);
+    if (entry) {
+      normalized[key] = entry;
     }
+  }
+  return normalized;
+}
+
+function normalizeTeams(value: unknown): Record<string, DesktopTeamState> {
+  const teams: Record<string, DesktopTeamState> = {};
+  if (!isObject(value)) {
+    return teams;
+  }
+  for (const [teamId, raw] of Object.entries(value)) {
+    if (!teamId.trim()) {
+      continue;
+    }
+    const team = normalizeTeamState(raw);
+    if (team) {
+      teams[teamId] = team;
+    }
+  }
+  return teams;
+}
+
+function normalizeTeamState(value: unknown): DesktopTeamState | null {
+  if (!isObject(value) || !isObject(value.info)) {
+    return null;
+  }
+  const info = value.info;
+  if (typeof info.name !== 'string') {
+    return null;
+  }
+  const secure = isObject(value.secure) ? value.secure : {};
+  const managedSecrets = normalizeEncryptedValueMap(secure.managedSecretsByRef);
+  for (const secretRef of Object.keys(managedSecrets)) {
+    // 팀 비밀값은 secretRef 형식만 둔다(앱 시크릿이 섞일 길이 없다).
+    if (!secretRef.startsWith('secret:')) {
+      delete managedSecrets[secretRef];
+    }
+  }
+  const privateSection = isObject(value.private) ? value.private : {};
+  const local = isObject(value.local) ? value.local : {};
+  const sync = isObject(value.sync) ? value.sync : {};
+  const fallbackTimestamp = nowIso();
+  const themes: Record<string, TerminalThemeId> = {};
+  if (isObject(local.terminalThemeByHostId)) {
+    for (const [hostId, themeId] of Object.entries(local.terminalThemeByHostId)) {
+      if (isTerminalThemeId(themeId)) {
+        themes[hostId] = themeId;
+      }
+    }
+  }
+  return {
+    info: {
+      name: info.name,
+      role: info.role === 'owner' ? 'owner' : 'member',
+      wrappedTeamDek: typeof info.wrappedTeamDek === 'string' && info.wrappedTeamDek ? info.wrappedTeamDek : null,
+      dataFloor: typeof info.dataFloor === 'number' && Number.isSafeInteger(info.dataFloor) && info.dataFloor > 0 ? info.dataFloor : 0,
+      updatedAt: typeof info.updatedAt === 'string' ? info.updatedAt : fallbackTimestamp
+    },
+    data: normalizeVaultData(isObject(value.data) ? value.data : {}),
+    secure: {
+      managedSecretsByRef: managedSecrets,
+      managedAwsProfilesById: normalizeEncryptedValueMap(secure.managedAwsProfilesById),
+      tailnetAuthKeysById: normalizeEncryptedValueMap(secure.tailnetAuthKeysById)
+    },
+    private: {
+      hostPrefs: Array.isArray(privateSection.hostPrefs)
+        ? privateSection.hostPrefs
+            .map(normalizeTeamHostPrefsRecord)
+            .filter((entry): entry is TeamHostPrefsRecord => entry !== null)
+        : [],
+      workspacePrefs: Array.isArray(privateSection.workspacePrefs)
+        ? privateSection.workspacePrefs
+            .map(normalizeTeamWorkspacePrefsRecord)
+            .filter((entry): entry is TeamWorkspacePrefsRecord => entry !== null)
+        : [],
+      syncOutbox: Array.isArray(privateSection.syncOutbox)
+        ? privateSection.syncOutbox.filter(
+            (entry): entry is TeamPrivateDeletionRecord =>
+              isObject(entry) &&
+              (entry.kind === 'hostPrefs' || entry.kind === 'workspacePrefs') &&
+              typeof entry.recordId === 'string' &&
+              typeof entry.deletedAt === 'string'
+          )
+        : []
+    },
+    local: { terminalThemeByHostId: themes },
+    sync: {
+      pendingPush: sync.pendingPush === true,
+      privatePendingPush: sync.privatePendingPush === true,
+      updatedAt: typeof sync.updatedAt === 'string' ? sync.updatedAt : fallbackTimestamp
+    }
+  };
+}
+
+export function normalizeTeamHostPrefsRecord(value: unknown): TeamHostPrefsRecord | null {
+  if (!isObject(value) || typeof value.id !== 'string' || !value.id || typeof value.updatedAt !== 'string') {
+    return null;
+  }
+  return {
+    id: value.id,
+    favorite: value.favorite === true ? true : null,
+    agentForwarding: value.agentForwarding === true ? true : null,
+    updatedAt: value.updatedAt
+  };
+}
+
+export function normalizeTeamWorkspacePrefsRecord(value: unknown): TeamWorkspacePrefsRecord | null {
+  if (!isObject(value) || typeof value.id !== 'string' || !value.id || typeof value.updatedAt !== 'string') {
+    return null;
+  }
+  return {
+    id: value.id,
+    favorite: value.favorite === true,
+    lastOpenedAt: typeof value.lastOpenedAt === 'string' ? value.lastOpenedAt : null,
+    updatedAt: value.updatedAt
   };
 }
 
@@ -1494,6 +1764,9 @@ function normalizeActivityLogRecord(value: unknown): ActivityLogRecord | null {
 }
 
 class DesktopStateStorage {
+  // 데이터 폴더는 만들어질 때 한 번 정한다. 앱에서는 이 값이 바뀌지 않는다. 시험은 기기마다 저장소를
+  // 따로 만들어 한 프로세스에 여럿을 두는데, 쓸 때마다 환경 변수를 다시 읽으면 서로의 폴더에 쓴다.
+  private readonly userDataPath = resolveUserDataPath();
   private loaded = false;
   private state = createDefaultStateFile();
   private activityLogs: ActivityLogRecord[] = [];
@@ -1533,6 +1806,17 @@ class DesktopStateStorage {
     this.activityLogScopeId = null;
     this.activityLogFilePath = null;
     this.activityLogs = [];
+  }
+
+  /** 팀 볼트 하나의 로컬 사본. 모르는 팀이면 null. */
+  getTeamState(teamId: string): DesktopTeamState | null {
+    this.ensureLoaded();
+    return this.state.teams[teamId] ?? null;
+  }
+
+  listTeamIds(): string[] {
+    this.ensureLoaded();
+    return Object.keys(this.state.teams);
   }
 
   getState(): DesktopStateFile {
@@ -1675,22 +1959,317 @@ class DesktopStateStorage {
     });
   }
 
-  readManagedAwsProfileValue(profileId: string): StoredEncryptedValue | null {
+  // teamId 가 null 이면 개인 볼트, 아니면 그 팀 볼트의 값이다.
+  readManagedAwsProfileValue(profileId: string, teamId: string | null = null): StoredEncryptedValue | null {
     this.ensureLoaded();
-    const record = this.state.secure.managedAwsProfilesById[profileId];
+    const secure = teamId === null ? this.state.secure : this.state.teams[teamId]?.secure;
+    const record = secure?.managedAwsProfilesById[profileId];
     return record ? { ...record } : null;
   }
 
-  writeManagedAwsProfileValue(profileId: string, record: StoredEncryptedValue): void {
+  writeManagedAwsProfileValue(
+    profileId: string,
+    record: StoredEncryptedValue,
+    teamId: string | null = null
+  ): void {
     this.updateState((draft) => {
-      draft.secure.managedAwsProfilesById[profileId] = { ...record };
+      vaultSecureDraft(draft, teamId).managedAwsProfilesById[profileId] = { ...record };
     });
   }
 
-  deleteManagedAwsProfileValue(profileId: string): void {
+  deleteManagedAwsProfileValue(profileId: string, teamId: string | null = null): void {
     this.updateState((draft) => {
-      delete draft.secure.managedAwsProfilesById[profileId];
+      delete vaultSecureDraft(draft, teamId).managedAwsProfilesById[profileId];
     });
+  }
+
+  // 팀 볼트의 비밀값(secret:*). 개인 비밀값은 위의 read/write/deleteSecureValue 로만 다룬다 —
+  // 개인 동기화가 그 길로 읽고 지우므로 팀 것이 섞이면 안 된다.
+  readTeamSecret(teamId: string, secretRef: string): StoredEncryptedValue | null {
+    this.ensureLoaded();
+    const record = this.state.teams[teamId]?.secure.managedSecretsByRef[secretRef];
+    return record ? { ...record } : null;
+  }
+
+  writeTeamSecret(teamId: string, secretRef: string, record: StoredEncryptedValue): void {
+    // 팀 볼트에는 동기화되는 비밀값만 둔다. 다른 계정은 다시 읽을 때 normalizeTeamState 가 버린다.
+    if (!secretRef.startsWith('secret:')) {
+      throw new Error(`team vault secrets must be secret:* refs: ${secretRef}`);
+    }
+    this.updateState((draft) => {
+      vaultSecureDraft(draft, teamId).managedSecretsByRef[secretRef] = { ...record };
+    });
+  }
+
+  deleteTeamSecret(teamId: string, secretRef: string): void {
+    this.updateState((draft) => {
+      delete vaultSecureDraft(draft, teamId).managedSecretsByRef[secretRef];
+    });
+  }
+
+  /** 팀 볼트에서 사람마다 다른 값. 모르는 팀이면 null. */
+  readTeamMemberPrefs(teamId: string): TeamMemberPrefsSnapshot | null {
+    this.ensureLoaded();
+    const team = this.state.teams[teamId];
+    if (!team) {
+      return null;
+    }
+    return deepClone({
+      hostPrefs: team.private.hostPrefs,
+      workspacePrefs: team.private.workspacePrefs,
+      terminalThemeByHostId: team.local.terminalThemeByHostId
+    });
+  }
+
+  // 멤버 개인 칸은 내 기기끼리 맞추는 값이라, 바뀌면 올릴 대상으로 표시한다. 값이 그대로면
+  // 아무것도 쓰지 않는다 — 편집 창을 저장할 때마다 같은 값이 들어온다.
+  updateTeamHostPrefs(teamId: string, hostId: string, patch: TeamHostPrefsPatch): void {
+    const current = this.requireTeam(teamId).private.hostPrefs.find((record) => record.id === hostId) ?? null;
+    const favorite =
+      patch.favorite === undefined ? (current?.favorite ?? null) : patch.favorite === true ? true : null;
+    const agentForwarding =
+      patch.agentForwarding === undefined
+        ? (current?.agentForwarding ?? null)
+        : patch.agentForwarding === true
+          ? true
+          : null;
+    if ((current?.favorite ?? null) === favorite && (current?.agentForwarding ?? null) === agentForwarding) {
+      return;
+    }
+    this.updateState((draft) => {
+      const team = this.requireTeam(teamId, draft);
+      team.private.hostPrefs = [
+        ...team.private.hostPrefs.filter((record) => record.id !== hostId),
+        { id: hostId, favorite, agentForwarding, updatedAt: nowIso() }
+      ];
+      this.markTeamPrivateChanged(team, 'hostPrefs', hostId);
+    });
+  }
+
+  updateTeamWorkspacePrefs(teamId: string, workspaceId: string, patch: TeamWorkspacePrefsPatch): void {
+    const current =
+      this.requireTeam(teamId).private.workspacePrefs.find((record) => record.id === workspaceId) ?? null;
+    const favorite = patch.favorite === undefined ? (current?.favorite ?? false) : patch.favorite === true;
+    const lastOpenedAt =
+      patch.lastOpenedAt === undefined ? (current?.lastOpenedAt ?? null) : patch.lastOpenedAt;
+    if ((current?.favorite ?? false) === favorite && (current?.lastOpenedAt ?? null) === lastOpenedAt) {
+      return;
+    }
+    this.updateState((draft) => {
+      const team = this.requireTeam(teamId, draft);
+      team.private.workspacePrefs = [
+        ...team.private.workspacePrefs.filter((record) => record.id !== workspaceId),
+        { id: workspaceId, favorite, lastOpenedAt, updatedAt: nowIso() }
+      ];
+      this.markTeamPrivateChanged(team, 'workspacePrefs', workspaceId);
+    });
+  }
+
+  /** 팀 호스트의 테마. 이 기기에만 둔다(동기화하지 않는다). null 이면 기본 테마로 돌린다. */
+  setTeamHostTerminalTheme(teamId: string, hostId: string, terminalThemeId: TerminalThemeId | null): void {
+    if ((this.requireTeam(teamId).local.terminalThemeByHostId[hostId] ?? null) === terminalThemeId) {
+      return;
+    }
+    this.updateState((draft) => {
+      const themes = this.requireTeam(teamId, draft).local.terminalThemeByHostId;
+      if (terminalThemeId === null) {
+        delete themes[hostId];
+      } else {
+        themes[hostId] = terminalThemeId;
+      }
+    });
+  }
+
+  /**
+   * 서버(GET /teams)에서 읽은 팀 정보를 담는다. 처음 보는 팀이면 빈 로컬 사본을 만든다.
+   * 바뀐 것이 있으면 true.
+   */
+  upsertTeamInfo(teamId: string, info: DesktopTeamState['info']): boolean {
+    this.ensureLoaded();
+    const current = this.state.teams[teamId]?.info;
+    if (
+      current &&
+      current.name === info.name &&
+      current.role === info.role &&
+      current.wrappedTeamDek === info.wrappedTeamDek &&
+      current.dataFloor === info.dataFloor
+    ) {
+      return false;
+    }
+    this.updateState((draft) => {
+      const team = draft.teams[teamId];
+      if (team) {
+        team.info = { ...info };
+      } else {
+        draft.teams[teamId] = createTeamState(info);
+      }
+    });
+    return true;
+  }
+
+  /** 팀 볼트 하나를 이 기기에서 통째로 지운다 — 레코드·비밀값·개인 칸·이 기기의 값. 있었으면 true. */
+  removeTeam(teamId: string): boolean {
+    this.ensureLoaded();
+    if (!this.state.teams[teamId]) {
+      return false;
+    }
+    this.updateState((draft) => {
+      delete draft.teams[teamId];
+    });
+    return true;
+  }
+
+  /**
+   * 팀 레코드를 받아 그 팀 볼트의 레코드와 비밀값을 한 번에 갈아 끼운다. 삭제 대기열은 그대로 둔다 —
+   * 아직 올리지 못한 지움이 거기 있다.
+   */
+  replaceTeamVault(teamId: string, records: Omit<DesktopVaultData, 'syncOutbox'>, secure: DesktopVaultSecure): void {
+    this.updateState((draft) => {
+      const team = this.requireTeam(teamId, draft);
+      team.data = { ...records, syncOutbox: team.data.syncOutbox };
+      team.secure = {
+        managedSecretsByRef: { ...secure.managedSecretsByRef },
+        managedAwsProfilesById: { ...secure.managedAwsProfilesById },
+        tailnetAuthKeysById: { ...secure.tailnetAuthKeysById }
+      };
+    });
+  }
+
+  /**
+   * 그 팀 볼트의 레코드·비밀값을 한 문자열로. 받은 것을 담기 직전에 다시 견주어, 그 사이 로컬에서
+   * 고친 것을 덮지 않게 한다. 삭제 대기열은 빼고 본다 — 동기화가 스스로 비우는 칸이다.
+   */
+  teamVaultFingerprint(teamId: string): string | null {
+    this.ensureLoaded();
+    const team = this.state.teams[teamId];
+    if (!team) {
+      return null;
+    }
+    return JSON.stringify([{ ...team.data, syncOutbox: null }, team.secure]);
+  }
+
+  /** 그 팀 말고 다른 볼트(개인·다른 팀)에 있는 레코드 ID. 팀 레코드를 받을 때 겹치는 것을 버리는 데 쓴다. */
+  collectRecordIdsOutsideTeam(teamId: string): VaultRecordIdSets {
+    this.ensureLoaded();
+    const sets = Object.fromEntries(VAULT_RECORD_KEYS.map((key) => [key, new Set<string>()])) as VaultRecordIdSets;
+    const collect = (data: DesktopVaultData) => {
+      for (const key of VAULT_RECORD_KEYS) {
+        for (const record of data[key] as Array<{ id?: string; secretRef?: string }>) {
+          const id = key === 'secretMetadata' ? record.secretRef : record.id;
+          if (id) {
+            sets[key].add(id);
+          }
+        }
+      }
+    };
+    collect(this.state.data);
+    for (const [otherTeamId, team] of Object.entries(this.state.teams)) {
+      if (otherTeamId !== teamId) {
+        collect(team.data);
+      }
+    }
+    return sets;
+  }
+
+  /** 아직 올리지 못한 개인 칸 지움 표시. */
+  listTeamPrivateDeletions(teamId: string): TeamPrivateDeletionRecord[] {
+    this.ensureLoaded();
+    return deepClone(this.state.teams[teamId]?.private.syncOutbox ?? []);
+  }
+
+  /** 개인 칸을 받아 내 설정을 갈아 끼운다. 이 기기의 테마는 그대로다. */
+  replaceTeamMemberPrefs(
+    teamId: string,
+    prefs: { hostPrefs: TeamHostPrefsRecord[]; workspacePrefs: TeamWorkspacePrefsRecord[] }
+  ): void {
+    this.updateState((draft) => {
+      const team = this.requireTeam(teamId, draft);
+      team.private.hostPrefs = prefs.hostPrefs.map((record) => ({ ...record }));
+      team.private.workspacePrefs = prefs.workspacePrefs.map((record) => ({ ...record }));
+    });
+  }
+
+  /**
+   * 팀 레코드에서 사라진 호스트·워크스페이스의 내 값을 지운다. 개인 칸은 지움 표시를 남겨 내 다른
+   * 기기도 지우게 한다. 지운 것이 있으면 true.
+   */
+  pruneTeamMemberPrefs(teamId: string): boolean {
+    this.ensureLoaded();
+    const team = this.state.teams[teamId];
+    if (!team) {
+      return false;
+    }
+    const hostIds = new Set(team.data.hosts.map((host) => host.id));
+    const workspaceIds = new Set(team.data.savedWorkspaces.map((workspace) => workspace.id));
+    const goneHostPrefs = team.private.hostPrefs.filter((record) => !hostIds.has(record.id));
+    const goneWorkspacePrefs = team.private.workspacePrefs.filter((record) => !workspaceIds.has(record.id));
+    const goneThemes = Object.keys(team.local.terminalThemeByHostId).filter((hostId) => !hostIds.has(hostId));
+    if (goneHostPrefs.length === 0 && goneWorkspacePrefs.length === 0 && goneThemes.length === 0) {
+      return false;
+    }
+    this.updateState((draft) => {
+      const target = this.requireTeam(teamId, draft);
+      const deletedAt = nowIso();
+      target.private.hostPrefs = target.private.hostPrefs.filter((record) => hostIds.has(record.id));
+      target.private.workspacePrefs = target.private.workspacePrefs.filter((record) => workspaceIds.has(record.id));
+      for (const hostId of goneThemes) {
+        delete target.local.terminalThemeByHostId[hostId];
+      }
+      const tombstones: TeamPrivateDeletionRecord[] = [
+        ...goneHostPrefs.map((record) => ({ kind: 'hostPrefs' as const, recordId: record.id, deletedAt })),
+        ...goneWorkspacePrefs.map((record) => ({ kind: 'workspacePrefs' as const, recordId: record.id, deletedAt }))
+      ];
+      if (tombstones.length > 0) {
+        target.private.syncOutbox = [
+          ...target.private.syncOutbox.filter(
+            (entry) => !tombstones.some((tombstone) => tombstone.kind === entry.kind && tombstone.recordId === entry.recordId)
+          ),
+          ...tombstones
+        ];
+        target.sync.privatePendingPush = true;
+      }
+    });
+    return true;
+  }
+
+  /**
+   * 개인 칸을 올렸다. 올린 지움 표시를 거두고(그 뒤에 새로 생긴 것은 남긴다), 남은 것이 없으면
+   * 올릴 것 없음으로 둔다.
+   */
+  settleTeamPrivatePush(teamId: string, sentDeletions: TeamPrivateDeletionRecord[]): void {
+    this.ensureLoaded();
+    if (!this.state.teams[teamId]) {
+      return;
+    }
+    this.updateState((draft) => {
+      const team = this.requireTeam(teamId, draft);
+      team.private.syncOutbox = team.private.syncOutbox.filter(
+        (entry) =>
+          !sentDeletions.some(
+            (sent) => sent.kind === entry.kind && sent.recordId === entry.recordId && sent.deletedAt === entry.deletedAt
+          )
+      );
+      team.sync.privatePendingPush = team.private.syncOutbox.length > 0;
+    });
+  }
+
+  private requireTeam(teamId: string, state?: DesktopStateFile): DesktopTeamState {
+    if (!state) {
+      this.ensureLoaded();
+    }
+    const team = (state ?? this.state).teams[teamId];
+    if (!team) {
+      throw new TeamVaultNotFoundError(teamId);
+    }
+    return team;
+  }
+
+  private markTeamPrivateChanged(team: DesktopTeamState, kind: TeamPrivateKind, recordId: string): void {
+    // 다시 살아난 칸이면 지움 표시를 거둔다 — 남겨 두면 다음 올리기가 방금 쓴 값을 지운다.
+    team.private.syncOutbox = team.private.syncOutbox.filter(
+      (entry) => !(entry.kind === kind && entry.recordId === recordId)
+    );
+    team.sync.privatePendingPush = true;
   }
 
   updateAuthStatus(status: DesktopStateFile['auth']['status']): void {
@@ -1872,7 +2451,7 @@ class DesktopStateStorage {
   }
 
   private storageDirectoryPath(): string {
-    return path.join(resolveUserDataPath(), STORAGE_DIRNAME);
+    return path.join(this.userDataPath, STORAGE_DIRNAME);
   }
 
   private stateFilePath(): string {

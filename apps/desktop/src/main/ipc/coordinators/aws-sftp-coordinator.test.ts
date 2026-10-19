@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createAwsSftpCoordinator } from "./aws-sftp-coordinator";
+import { withVaults } from "../../vault-catalog.test-support";
 
 function createAwsHost(overrides: Record<string, unknown> = {}) {
   return {
@@ -31,7 +32,8 @@ function createCoordinator(
   hostOverrides: Record<string, unknown> = {},
 ) {
   const host = createAwsHost(hostOverrides);
-  const deps = {
+  // 팀이 없는 카탈로그를 붙인다 — 호스트 쓰기는 이 hosts 목으로 간다.
+  const deps = withVaults({
     hosts: {
       update: vi.fn((_id, draft) => ({ ...host, ...draft })),
       getById: vi.fn(() => host),
@@ -52,7 +54,7 @@ function createCoordinator(
     emitSftpConnectionProgress: vi.fn(),
     isLocalOnly: () => false,
     ...overrides,
-  } as any;
+  } as any);
 
   return {
     deps,
@@ -101,6 +103,16 @@ describe("AWS SFTP coordinator", () => {
         reasonCode: "not-managed-instance",
       }),
     );
+  });
+
+  // 팀 EC2 호스트의 메타데이터는 그 팀 레코드에 쓴다 — 카탈로그가 그 호스트의 볼트로 보낸다.
+  it("writes refreshed SSH metadata through the vault that holds the host", async () => {
+    const { deps, coordinator, host } = createCoordinator({}, { awsSshUsername: null, awsSshMetadataStatus: "idle" });
+    const updateHost = vi.spyOn(deps.vaults, "updateHost");
+
+    await coordinator.resolvePreflight({ endpointId: "endpoint-1", host, allowBrowserLogin: true });
+
+    expect(updateHost).toHaveBeenCalledWith("host-1", expect.objectContaining({ awsSshMetadataStatus: "ready" }));
   });
 
   it("preserves the AWS SSM server proxy flag while refreshing SSH metadata", async () => {

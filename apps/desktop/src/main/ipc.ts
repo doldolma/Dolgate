@@ -6,6 +6,7 @@ import type { RdpManager } from "./rdp-manager";
 import type { VncManager } from "./vnc-manager";
 import type {
   ActivityLogRepository,
+  AwsProfileRepository,
   DnsOverrideRepository,
   GroupRepository,
   HostRepository,
@@ -24,6 +25,9 @@ import type { SecretStore } from "./secret-store";
 import type { SessionReplayService } from "./session-replay-service";
 import type { SessionShareService } from "./session-share-service";
 import type { SyncService } from "./sync-service";
+import { TeamService } from "./team-service";
+import type { TeamSyncService } from "./team-sync-service";
+import { createStoredTeamVaults } from "./team-vault-scope";
 import type { TermiusImportService } from "./termius-import-service";
 import type { UpdateService } from "./update-service";
 import type { WarpgateService } from "./warpgate-service";
@@ -48,6 +52,7 @@ import { registerSftpIpcHandlers } from "./ipc/sftp";
 import { registerSshKeyIpcHandlers } from "./ipc/ssh-keys";
 import { registerSshIpcHandlers } from "./ipc/ssh";
 import { registerSyncIpcHandlers } from "./ipc/sync";
+import { registerTeamsIpcHandlers } from "./ipc/teams";
 import {
   registerWindowUpdaterSettingsFilesIpcHandlers,
   type DesktopWindowIpcRuntime,
@@ -82,6 +87,8 @@ export function registerIpcHandlers(
   tailnets: TailnetRepository,
   rdpManager: RdpManager,
   vncManager: VncManager,
+  awsProfiles: AwsProfileRepository,
+  teamSync: TeamSyncService,
   windowRuntime?: DesktopWindowIpcRuntime,
 ): void {
   const ctx = createMainIpcContext({
@@ -97,6 +104,10 @@ export function registerIpcHandlers(
     activityLogs,
     secretMetadata,
     syncOutbox,
+    awsProfiles,
+    teamVaults: createStoredTeamVaults(),
+    teamSync,
+    teams: new TeamService({ auth: authService, teamSync }),
     secretStore,
     awsService,
     awsSsmTunnelService,
@@ -116,6 +127,7 @@ export function registerIpcHandlers(
   registerAiIpcHandlers(ctx);
   registerAuthIpcHandlers(ctx);
   registerSyncIpcHandlers(ctx);
+  registerTeamsIpcHandlers(ctx);
   registerSessionShareIpcHandlers(ctx);
   registerHostsGroupsIpcHandlers(ctx);
   registerAwsIpcHandlers(ctx);

@@ -16,6 +16,39 @@ describe("createDesktopApi", () => {
     electronMocks.getPathForFile.mockReset();
   });
 
+  it("maps the teams bridge to its IPC channels and passes teams:changed on to listeners", async () => {
+    const { createDesktopApi } = await import("./api");
+    const { registerPreloadEventBindings } = await import("./events/register");
+    const { ipcChannels } = await import("../common/ipc-channels");
+    const listeners = new Map<string, () => void>();
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue(undefined),
+      on: vi.fn((channel: string, listener: () => void) => {
+        listeners.set(channel, listener);
+      }),
+    } as any;
+    registerPreloadEventBindings(ipcRenderer);
+    const api = createDesktopApi(ipcRenderer);
+
+    await api.teams.list();
+    await api.teams.createInvite("t1", { expiresInDays: 3 });
+    await api.teams.join("https://sync.example.com/invite/c#v1.x");
+    await api.hosts.create({ kind: "ssh" } as never, undefined, "t1");
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(ipcChannels.teams.list);
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(ipcChannels.teams.createInvite, "t1", { expiresInDays: 3 });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(ipcChannels.teams.join, "https://sync.example.com/invite/c#v1.x");
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(ipcChannels.hosts.create, { kind: "ssh" }, undefined, "t1");
+
+    // 메인이 teams:changed 를 보내면 구독한 화면이 듣는다.
+    const listener = vi.fn();
+    const unsubscribe = api.teams.onChanged(listener);
+    listeners.get(ipcChannels.teams.changed)?.();
+    unsubscribe();
+    listeners.get(ipcChannels.teams.changed)?.();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
   it("maps DesktopApi invoke calls to the expected IPC channels", async () => {
     const { createDesktopApi } = await import("./api");
     const { ipcChannels } = await import("../common/ipc-channels");
