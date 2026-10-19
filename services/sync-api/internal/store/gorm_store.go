@@ -209,6 +209,8 @@ type GormStore struct {
 	// 차지해 exchange code 는 사실상 정리되지 않는다.
 	sweepMu     sync.Mutex
 	lastSweptAt map[string]time.Time
+	// teamHistoryRetention 은 팀 레코드의 이전 판을 남겨 두는 기간이다(0 이면 기본값). sweepMu 로 보호한다.
+	teamHistoryRetention time.Duration
 }
 
 // 만료 행 청소 간격.
@@ -363,6 +365,12 @@ func (s *GormStore) migrate() error {
 		&syncRecordRow{},
 		&webauthnCredentialRow{},
 		&webauthnCeremonyRow{},
+		&teamRow{},
+		&teamMemberRow{},
+		&teamInviteRow{},
+		&teamMemberPrivateRow{},
+		&teamSyncRecordRow{},
+		&teamRecordHistoryRow{},
 	); err != nil {
 		return err
 	}
@@ -1208,6 +1216,11 @@ func (s *GormStore) ResetUserVault(ctx context.Context, userID string, expectedE
 		if meta.Epoch != expectedEpoch {
 			return ErrVaultEpochMismatch
 		}
+		// 개인 DEK 가 바뀌면 팀 키 사본도 개인 칸도 열 수 없다 — 모든 팀에서 뺀다(다시 들어오려면
+		// 다른 멤버의 링크로). 사용자 행을 잡은 뒤라 잠금 순서(users → teams)를 지킨다.
+		if err := s.leaveAllTeamsTx(tx, userID); err != nil {
+			return err
+		}
 		if err := tx.Where("user_id = ?", userID).Delete(&syncRecordRow{}).Error; err != nil {
 			return err
 		}
@@ -1399,8 +1412,8 @@ func (s *GormStore) UpsertSyncRecords(ctx context.Context, userID string, kind s
 // "아직 존재하지 않는 행"(동시 신규 생성)을 잠글 수 없어 LWW 경쟁이 남지만, 사용자 행
 // 잠금은 push 두 개가 같은 새 ID 를 만들며 서로의 읽기를 앞지르는 것까지 막는다.
 //
-// 잠금 순서 전역 규칙: users → sync_records → user_vault_keys. push/reset/create 가
-// 모두 이 순서를 지켜야 교차 데드락이 없다.
+// 잠금 순서 전역 규칙: users → teams → sync_records → user_vault_keys. push/reset/create 와
+// 팀 쓰기가 모두 이 순서를 지켜야 교차 데드락이 없다(팀 쪽은 TeamStore 주석 참고).
 //
 // SQLite 는 FOR UPDATE 문법이 없고 pool=1 이 모든 접근을 직렬화하므로 잠그지 않는다.
 func (s *GormStore) lockUserRowTx(tx *gorm.DB, userID string) error {
@@ -1720,6 +1733,11 @@ func (s *GormStore) DeleteUserData(ctx context.Context, userID string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// push/reset/setup 과 같은 users 선잠금 순서를 지켜 반대 순서의 교착을 막는다.
 		if err := s.lockUserRowTx(tx, userID); err != nil {
+			return err
+		}
+		// 탈퇴도 모든 팀에서 빠진다 — 소유자였으면 가장 먼저 들어온 멤버가 잇고, 마지막 한 명이었으면
+		// 팀째 지운다. 빼먹으면 소유자 없는 팀과 주인 없는 사본이 남는다.
+		if err := s.leaveAllTeamsTx(tx, userID); err != nil {
 			return err
 		}
 		targets := []struct {

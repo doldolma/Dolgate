@@ -6,13 +6,55 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"dolssh/services/sync-api/internal/store"
 )
 
 type fakeSyncRevisionReader struct {
-	mu        sync.Mutex
-	revisions map[string]int64
-	err       error
-	calls     int
+	mu         sync.Mutex
+	revisions  map[string]int64
+	teamValues map[store.TeamWatchKey]int64
+	err        error
+	calls      int
+	teamCalls  int
+}
+
+func (f *fakeSyncRevisionReader) GetTeamWatchRevisions(_ context.Context, teamIDs []string) (map[store.TeamWatchKey]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.teamCalls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	wanted := make(map[string]bool, len(teamIDs))
+	for _, teamID := range teamIDs {
+		wanted[teamID] = true
+	}
+	result := make(map[store.TeamWatchKey]int64)
+	for key, value := range f.teamValues {
+		if wanted[key.TeamID] {
+			result[key] = value
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeSyncRevisionReader) setTeam(teamID string, userID string, value int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.teamValues[store.TeamWatchKey{TeamID: teamID, UserID: userID}] = value
+}
+
+func (f *fakeSyncRevisionReader) dropTeam(teamID string, userID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.teamValues, store.TeamWatchKey{TeamID: teamID, UserID: userID})
+}
+
+func (f *fakeSyncRevisionReader) teamCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.teamCalls
 }
 
 func (f *fakeSyncRevisionReader) GetSyncRevisions(_ context.Context, userIDs []string) (map[string]int64, error) {
@@ -241,5 +283,80 @@ func TestJitterSyncWatchHoldStaysWithinTwentyPercent(t *testing.T) {
 		if hold < 20*time.Second || hold > 30*time.Second {
 			t.Fatalf("hold %v outside 20s..30s", hold)
 		}
+	}
+}
+
+// 팀 알림은 그 팀을 기다리는 멤버를 모두 깨우고, 다른 팀과 개인 볼트 대기자는 그대로 둔다.
+func TestSyncWatchHubTeamNotifyWakesOnlyThatTeam(t *testing.T) {
+	hub := NewSyncWatchHub(&fakeSyncRevisionReader{revisions: map[string]int64{}, teamValues: map[store.TeamWatchKey]int64{}}, time.Hour)
+	defer hub.Close()
+
+	alice, releaseAlice := hub.subscribeTeam("team-a", "alice", 3)
+	defer releaseAlice()
+	bob, releaseBob := hub.subscribeTeam("team-a", "bob", 3)
+	defer releaseBob()
+	other, releaseOther := hub.subscribeTeam("team-b", "alice", 1)
+	defer releaseOther()
+	personal, releasePersonal := hub.subscribe("alice", 7)
+	defer releasePersonal()
+
+	hub.notifyTeam("team-a")
+	if !isClosed(alice) || !isClosed(bob) {
+		t.Fatal("team members were not woken")
+	}
+	if isClosed(other) || isClosed(personal) {
+		t.Fatal("a team notification woke another vault")
+	}
+}
+
+// 개인 칸 알림은 그 팀을 기다리는 그 멤버만 깨운다.
+func TestSyncWatchHubTeamMemberNotifyWakesOnlyThatMember(t *testing.T) {
+	hub := NewSyncWatchHub(&fakeSyncRevisionReader{revisions: map[string]int64{}, teamValues: map[store.TeamWatchKey]int64{}}, time.Hour)
+	defer hub.Close()
+
+	alice, releaseAlice := hub.subscribeTeam("team-a", "alice", 3)
+	defer releaseAlice()
+	bob, releaseBob := hub.subscribeTeam("team-a", "bob", 3)
+	defer releaseBob()
+
+	hub.notifyTeamMember("team-a", "alice")
+	if !isClosed(alice) {
+		t.Fatal("the member was not woken")
+	}
+	if isClosed(bob) {
+		t.Fatal("another member was woken by someone else's private slot")
+	}
+}
+
+// 묶음 확인은 값이 바뀐 팀 대기자와 멤버가 아니게 된 대기자를 깨운다. 팀 대기자가 없으면 팀 값을 읽지 않는다.
+func TestSyncWatchHubCheckWakesChangedTeamWaitersAndFormerMembers(t *testing.T) {
+	reader := &fakeSyncRevisionReader{revisions: map[string]int64{"carol": 5}, teamValues: map[store.TeamWatchKey]int64{}}
+	reader.setTeam("team-a", "alice", 3)
+	reader.setTeam("team-a", "bob", 3)
+	reader.setTeam("team-b", "dave", 9)
+	hub := NewSyncWatchHub(reader, 10*time.Millisecond)
+	defer hub.Close()
+
+	personal, releasePersonal := hub.subscribe("carol", 5)
+	defer releasePersonal()
+	time.Sleep(50 * time.Millisecond)
+	if calls := reader.teamCallCount(); calls != 0 {
+		t.Fatalf("team values were read %d times with no team waiter", calls)
+	}
+
+	alice, releaseAlice := hub.subscribeTeam("team-a", "alice", 3)
+	defer releaseAlice()
+	bob, releaseBob := hub.subscribeTeam("team-a", "bob", 3)
+	defer releaseBob()
+	dave, releaseDave := hub.subscribeTeam("team-b", "dave", 9)
+	defer releaseDave()
+
+	reader.setTeam("team-a", "alice", 4)
+	reader.dropTeam("team-a", "bob")
+	waitClosed(t, alice, time.Second, "changed team waiter")
+	waitClosed(t, bob, time.Second, "former member")
+	time.Sleep(50 * time.Millisecond)
+	if isClosed(dave) || isClosed(personal) {
+		t.Fatal("an unchanged waiter was woken")
 	}
 }

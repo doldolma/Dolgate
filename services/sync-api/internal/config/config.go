@@ -12,6 +12,14 @@ type AppConfig struct {
 	Server   ServerConfig   `json:"server"`
 	Database DatabaseConfig `json:"database"`
 	Auth     AuthConfig     `json:"auth"`
+	Teams    TeamsConfig    `json:"teams"`
+}
+
+// TeamsConfig 는 팀 볼트의 보존 한도다. 녹화·기록 한도는 그 기능을 만들 때 여기에 더한다.
+type TeamsConfig struct {
+	// HistoryRetentionDays 는 바뀌거나 지워진 팀 레코드의 이전 판을 남겨 두는 날 수다. 소유자는 이
+	// 기간 안의 판으로 되돌릴 수 있고, 지나면 서버가 지운다.
+	HistoryRetentionDays int `json:"historyRetentionDays"`
 }
 
 type ServerConfig struct {
@@ -130,6 +138,9 @@ func defaultConfig() AppConfig {
 				RPDisplayName: "Dolgate",
 			},
 		},
+		Teams: TeamsConfig{
+			HistoryRetentionDays: 90,
+		},
 	}
 }
 
@@ -212,6 +223,7 @@ func applyEnvOverrides(cfg *AppConfig) {
 	cfg.Auth.WebAuthn.RPID = getenv("WEBAUTHN_RP_ID", cfg.Auth.WebAuthn.RPID)
 	cfg.Auth.WebAuthn.RPDisplayName = getenv("WEBAUTHN_RP_DISPLAY_NAME", cfg.Auth.WebAuthn.RPDisplayName)
 	cfg.Auth.WebAuthn.Origins = getenvCSV("WEBAUTHN_ORIGINS", cfg.Auth.WebAuthn.Origins)
+	cfg.Teams.HistoryRetentionDays = getenvInt("TEAM_HISTORY_RETENTION_DAYS", cfg.Teams.HistoryRetentionDays)
 }
 
 func validateConfig(cfg AppConfig) error {
@@ -223,6 +235,9 @@ func validateConfig(cfg AppConfig) error {
 	}
 	if strings.TrimSpace(cfg.Auth.SigningPrivateKeyPEM) == "" && strings.TrimSpace(cfg.Auth.SigningPrivateKeyPath) == "" {
 		return errors.New("auth.signingPrivateKeyPem or auth.signingPrivateKeyPath is required")
+	}
+	if cfg.Teams.HistoryRetentionDays < 1 {
+		return errors.New("teams.historyRetentionDays must be at least 1")
 	}
 	return nil
 }

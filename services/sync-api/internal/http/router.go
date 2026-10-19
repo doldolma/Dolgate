@@ -87,6 +87,13 @@ type serverInfoCapabilities struct {
 	Sessions serverInfoSessionCapabilities `json:"sessions"`
 	Vault    serverInfoVaultCapabilities   `json:"vault"`
 	Auth     serverInfoAuthCapabilities    `json:"auth"`
+	Teams    serverInfoTeamsCapabilities   `json:"teams"`
+}
+
+// serverInfoTeamsCapabilities: 팀 볼트 API(/teams, /invite)가 있는가. 없으면 앱은 팀 메뉴를 숨긴다 —
+// 자체 호스팅 서버가 옛것일 때다.
+type serverInfoTeamsCapabilities struct {
+	Enabled bool `json:"enabled"`
 }
 
 type serverInfoAuthCapabilities struct {
@@ -627,6 +634,9 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 				Auth: serverInfoAuthCapabilities{
 					WebAuthn: webAuthnEnabled,
 				},
+				Teams: serverInfoTeamsCapabilities{
+					Enabled: true,
+				},
 			},
 		})
 	})
@@ -1146,12 +1156,17 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	// 다른 기기는 다음 토큰 갱신(401)에서 로그아웃된다.
 	router.DELETE("/auth/account", authMiddleware(authService), func(ctx *gin.Context) {
 		userID := ctx.GetString("userId")
+		// 탈퇴는 그 사람을 모든 팀에서 뺀다. 남은 멤버들을 바로 깨울 수 있게 팀 목록을 먼저 읽어 둔다.
+		teamIDs := teamIDsForWake(ctx, store, userID)
 		if err := authService.DeleteAccount(ctx.Request.Context(), userID); err != nil {
 			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
 		// 기다리던 다른 기기를 깨워 401 을 받게 한다 — 그래야 바로 로그아웃된다.
 		syncWatch.notify(userID)
+		for _, teamID := range teamIDs {
+			syncWatch.notifyTeam(teamID)
+		}
 		ctx.Status(http.StatusNoContent)
 	})
 
@@ -1625,6 +1640,8 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "볼트 세대 정보가 누락되었습니다. 앱을 최신 버전으로 업데이트해 주세요."})
 			return
 		}
+		// 초기화는 그 사람을 모든 팀에서 뺀다. 남은 멤버들을 바로 깨울 수 있게 팀 목록을 먼저 읽어 둔다.
+		teamIDs := teamIDsForWake(ctx, store, userID)
 		epoch, err := store.ResetUserVault(ctx.Request.Context(), userID, *request.ExpectedEpoch)
 		if err != nil {
 			if errors.Is(err, storepkg.ErrVaultEpochMismatch) {
@@ -1635,6 +1652,9 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		syncWatch.notify(userID)
+		for _, teamID := range teamIDs {
+			syncWatch.notifyTeam(teamID)
+		}
 		ctx.JSON(http.StatusOK, gin.H{"epoch": epoch})
 	})
 
@@ -1865,6 +1885,8 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		// 새 revision 을 돌려줘 push 한 기기가 자기 push 를 다시 pull 하지 않게 한다.
 		ctx.JSON(http.StatusAccepted, gin.H{"revision": revision})
 	})
+
+	registerTeamRoutes(router, store, authService, syncWatch, syncWatchHold, requireExistingUser)
 
 	return router, nil
 }

@@ -6,6 +6,8 @@ import (
 	"math/rand/v2"
 	"sync"
 	"time"
+
+	"dolssh/services/sync-api/internal/store"
 )
 
 const (
@@ -24,9 +26,18 @@ const (
 // syncRevisionReader 는 묶음 확인이 쓰는 저장소 기능이다.
 type syncRevisionReader interface {
 	GetSyncRevisions(ctx context.Context, userIDs []string) (map[string]int64, error)
+	GetTeamWatchRevisions(ctx context.Context, teamIDs []string) (map[store.TeamWatchKey]int64, error)
 }
 
-// SyncWatchHub 는 동기화 롱폴링(GET /sync/watch)의 대기자를 사용자별로 묶어 깨운다.
+// syncWatchKey 는 대기자 묶음 하나다. 개인 볼트는 teamID 가 비어 있고, 팀 볼트는 (팀, 기다리는 멤버)다 —
+// 팀을 멤버마다 따로 묶어야 개인 칸이 바뀌었을 때 그 멤버의 기기만 깨울 수 있다.
+type syncWatchKey struct {
+	teamID string
+	userID string
+}
+
+// SyncWatchHub 는 동기화 롱폴링(GET /sync/watch, GET /teams/:id/sync/watch)의 대기자를 볼트별로 묶어
+// 깨운다. 개인 볼트는 사용자별, 팀 볼트는 (팀, 멤버)별이다.
 //
 // 깨우는 길은 둘이다.
 //   - notify: 이 서버로 들어온 push 등이 커밋된 뒤 핸들러가 바로 부른다(즉시).
@@ -42,13 +53,13 @@ type SyncWatchHub struct {
 	checkInterval time.Duration
 
 	mu       sync.Mutex
-	users    map[string]*syncWatchUser
+	entries  map[syncWatchKey]*syncWatchEntry
 	checking bool
 	closed   bool
 	closedCh chan struct{}
 }
 
-type syncWatchUser struct {
+type syncWatchEntry struct {
 	// changed 는 깨울 때 닫힌다. 닫힌 채널은 다시 쓰지 않는다 — 그 뒤에 오는 대기자는 새 항목을 받는다.
 	changed chan struct{}
 	waiters int
@@ -66,23 +77,33 @@ func NewSyncWatchHub(revisions syncRevisionReader, checkInterval time.Duration) 
 	return &SyncWatchHub{
 		revisions:     revisions,
 		checkInterval: checkInterval,
-		users:         make(map[string]*syncWatchUser),
+		entries:       make(map[syncWatchKey]*syncWatchEntry),
 		closedCh:      make(chan struct{}),
 	}
 }
 
-// subscribe 는 userID 의 다음 변경 신호를 기다릴 채널을 준다. 기다림을 마치면(신호를 받았든
+// subscribe 는 userID 개인 볼트의 다음 변경 신호를 기다릴 채널을 준다. 기다림을 마치면(신호를 받았든
 // 아니든) 반드시 release 를 불러야 한다.
 func (h *SyncWatchHub) subscribe(userID string, since int64) (<-chan struct{}, func()) {
+	return h.subscribeKey(syncWatchKey{userID: userID}, since)
+}
+
+// subscribeTeam 은 팀 볼트를 기다리는 그 멤버의 다음 변경 신호를 준다. since 는 팀 감시 값
+// (store.TeamGate.WatchValue)이다.
+func (h *SyncWatchHub) subscribeTeam(teamID string, userID string, since int64) (<-chan struct{}, func()) {
+	return h.subscribeKey(syncWatchKey{teamID: teamID, userID: userID}, since)
+}
+
+func (h *SyncWatchHub) subscribeKey(key syncWatchKey, since int64) (<-chan struct{}, func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
 		return h.closedCh, func() {}
 	}
-	entry := h.users[userID]
+	entry := h.entries[key]
 	if entry == nil {
-		entry = &syncWatchUser{changed: make(chan struct{}), since: since}
-		h.users[userID] = entry
+		entry = &syncWatchEntry{changed: make(chan struct{}), since: since}
+		h.entries[key] = entry
 	} else if since < entry.since {
 		entry.since = since
 	}
@@ -91,30 +112,52 @@ func (h *SyncWatchHub) subscribe(userID string, since int64) (<-chan struct{}, f
 		h.checking = true
 		go h.checkLoop()
 	}
-	return entry.changed, func() { h.release(userID, entry) }
+	return entry.changed, func() { h.release(key, entry) }
 }
 
-func (h *SyncWatchHub) release(userID string, entry *syncWatchUser) {
+func (h *SyncWatchHub) release(key syncWatchKey, entry *syncWatchEntry) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	entry.waiters--
-	// 이미 깨워져 빠진 항목이면 같은 사용자의 새 항목을 지우면 안 된다.
-	if entry.waiters <= 0 && h.users[userID] == entry {
-		delete(h.users, userID)
+	// 이미 깨워져 빠진 항목이면 같은 키의 새 항목을 지우면 안 된다.
+	if entry.waiters <= 0 && h.entries[key] == entry {
+		delete(h.entries, key)
 	}
 }
 
-// notify 는 userID 의 대기자를 모두 깨운다. 리비전이 커밋된 **뒤에** 불러야 한다 — 먼저 부르면
-// 깨어난 대기자가 옛 리비전을 읽고 도로 잠든다.
+// notify 는 userID 개인 볼트의 대기자를 모두 깨운다. 리비전이 커밋된 **뒤에** 불러야 한다 — 먼저
+// 부르면 깨어난 대기자가 옛 리비전을 읽고 도로 잠든다.
 func (h *SyncWatchHub) notify(userID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	entry := h.users[userID]
+	h.wakeLocked(syncWatchKey{userID: userID})
+}
+
+// notifyTeam 은 그 팀을 기다리는 모든 멤버를 깨운다(팀 레코드·팀 정보가 바뀐 뒤).
+func (h *SyncWatchHub) notifyTeam(teamID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for key := range h.entries {
+		if key.teamID == teamID {
+			h.wakeLocked(key)
+		}
+	}
+}
+
+// notifyTeamMember 는 그 팀을 기다리는 그 멤버의 기기만 깨운다(개인 칸이 바뀐 뒤).
+func (h *SyncWatchHub) notifyTeamMember(teamID string, userID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.wakeLocked(syncWatchKey{teamID: teamID, userID: userID})
+}
+
+func (h *SyncWatchHub) wakeLocked(key syncWatchKey) {
+	entry := h.entries[key]
 	if entry == nil {
 		return
 	}
 	close(entry.changed)
-	delete(h.users, userID)
+	delete(h.entries, key)
 }
 
 // done 은 Close 되면 닫힌다.
@@ -154,38 +197,78 @@ func (h *SyncWatchHub) checkLoop() {
 	}
 }
 
-// waitingSince 는 지금 기다리는 사용자와 그 기준 리비전을 복사해 준다. 아무도 없으면 nil 을
-// 주고 확인 고루틴을 끝낸 것으로 표시한다 — 다음 대기자가 새로 띄운다.
-func (h *SyncWatchHub) waitingSince() map[string]int64 {
+// waitingSince 는 지금 기다리는 묶음과 그 기준 값을 복사해 준다. 아무도 없으면 nil 을 주고 확인
+// 고루틴을 끝낸 것으로 표시한다 — 다음 대기자가 새로 띄운다.
+func (h *SyncWatchHub) waitingSince() map[syncWatchKey]int64 {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if len(h.users) == 0 {
+	if len(h.entries) == 0 {
 		h.checking = false
 		return nil
 	}
-	waiting := make(map[string]int64, len(h.users))
-	for userID, entry := range h.users {
-		waiting[userID] = entry.since
+	waiting := make(map[syncWatchKey]int64, len(h.entries))
+	for key, entry := range h.entries {
+		waiting[key] = entry.since
 	}
 	return waiting
 }
 
-func (h *SyncWatchHub) checkOnce(waiting map[string]int64) {
+func (h *SyncWatchHub) checkOnce(waiting map[syncWatchKey]int64) {
 	userIDs := make([]string, 0, len(waiting))
-	for userID := range waiting {
-		userIDs = append(userIDs, userID)
+	teamSet := make(map[string]struct{})
+	for key := range waiting {
+		if key.teamID == "" {
+			userIDs = append(userIDs, key.userID)
+		} else {
+			teamSet[key.teamID] = struct{}{}
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if len(userIDs) > 0 {
+		h.checkUsers(ctx, waiting, userIDs)
+	}
+	if len(teamSet) > 0 {
+		teamIDs := make([]string, 0, len(teamSet))
+		for teamID := range teamSet {
+			teamIDs = append(teamIDs, teamID)
+		}
+		h.checkTeams(ctx, waiting, teamIDs)
+	}
+}
+
+func (h *SyncWatchHub) checkUsers(ctx context.Context, waiting map[syncWatchKey]int64, userIDs []string) {
 	current, err := h.revisions.GetSyncRevisions(ctx, userIDs)
 	if err != nil {
 		log.Printf("sync watch: revision check failed: %v", err)
 		return
 	}
-	for userID, since := range waiting {
+	for _, userID := range userIDs {
+		key := syncWatchKey{userID: userID}
 		// 행이 없으면 탈퇴한 사용자다 — 깨워서 401 을 받게 한다.
-		if revision, ok := current[userID]; !ok || revision != since {
-			h.notify(userID)
+		if revision, ok := current[userID]; !ok || revision != waiting[key] {
+			h.mu.Lock()
+			h.wakeLocked(key)
+			h.mu.Unlock()
+		}
+	}
+}
+
+func (h *SyncWatchHub) checkTeams(ctx context.Context, waiting map[syncWatchKey]int64, teamIDs []string) {
+	current, err := h.revisions.GetTeamWatchRevisions(ctx, teamIDs)
+	if err != nil {
+		log.Printf("sync watch: team revision check failed: %v", err)
+		return
+	}
+	for key, since := range waiting {
+		if key.teamID == "" {
+			continue
+		}
+		// 값이 없으면 멤버가 아니게 됐거나 팀이 사라진 것이다 — 깨워서 404 를 받게 한다.
+		if value, ok := current[store.TeamWatchKey{TeamID: key.teamID, UserID: key.userID}]; !ok || value != since {
+			h.mu.Lock()
+			h.wakeLocked(key)
+			h.mu.Unlock()
 		}
 	}
 }

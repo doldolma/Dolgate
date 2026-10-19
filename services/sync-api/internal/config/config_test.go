@@ -253,3 +253,25 @@ func chdir(t *testing.T, dir string) {
 		}
 	})
 }
+
+func TestLoadTeamsHistoryRetention(t *testing.T) {
+	t.Setenv("AUTH_SIGNING_PRIVATE_KEY_PATH", "/secure/key.pem")
+	cfg, _, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Teams.HistoryRetentionDays != 90 {
+		t.Fatalf("default history retention = %d, want 90", cfg.Teams.HistoryRetentionDays)
+	}
+
+	t.Setenv("TEAM_HISTORY_RETENTION_DAYS", "30")
+	cfg, _, err = Load()
+	if err != nil || cfg.Teams.HistoryRetentionDays != 30 {
+		t.Fatalf("env history retention = %d, %v, want 30", cfg.Teams.HistoryRetentionDays, err)
+	}
+
+	t.Setenv("TEAM_HISTORY_RETENTION_DAYS", "0")
+	if _, _, err := Load(); err == nil || !strings.Contains(err.Error(), "historyRetentionDays") {
+		t.Fatalf("zero retention error = %v, want a historyRetentionDays error", err)
+	}
+}

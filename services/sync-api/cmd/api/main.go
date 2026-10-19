@@ -44,6 +44,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("open store: %v", err)
 	}
+	dbStore.SetTeamHistoryRetention(time.Duration(cfg.Teams.HistoryRetentionDays) * 24 * time.Hour)
 	defer func() {
 		if err := dbStore.Close(); err != nil {
 			log.Printf("close store: %v", err)

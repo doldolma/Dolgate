@@ -6,8 +6,16 @@ func (h *SyncWatchHub) WaitersForTest() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	total := 0
-	for _, entry := range h.users {
+	for _, entry := range h.entries {
 		total += entry.waiters
 	}
 	return total
+}
+
+// SetTeamDataFloorMinimumVersionsForTest 는 팀 데이터 수준 표를 잠시 바꾼다. 돌려준 함수로 되돌린다.
+// 지금은 형식이 하나뿐이라 표가 비어 있어, 게이트를 시험하려면 수준을 하나 정의해야 한다.
+func SetTeamDataFloorMinimumVersionsForTest(levels map[int]map[string]string) func() {
+	previous := teamDataFloorMinimumVersions
+	teamDataFloorMinimumVersions = levels
+	return func() { teamDataFloorMinimumVersions = previous }
 }
