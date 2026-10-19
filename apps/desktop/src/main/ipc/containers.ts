@@ -85,7 +85,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.containers.beginLifecycle,
     async (event, hostId: string) => {
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       if (!host) {
         throw new Error(t('containersIpc.hostNotFound'));
       }
@@ -116,7 +116,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.containers.list,
     async (event, hostId: string) => {
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       ctx.assertSftpCompatibleHost(host);
       registerContainerSubscriber(ctx, event, hostId);
       const typedHost = host as SftpCompatibleHostRecord;
@@ -168,7 +168,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.containers.inspect,
     async (event, hostId: string, containerId: string) => {
       assertContainerSubscriber(ctx, event, hostId);
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
       const runtimeInfo = await ctx.ensureContainersEndpoint(typedHost);
@@ -186,7 +186,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.containers.logs,
     async (event, input: HostContainersLogsInput) => {
       assertContainerSubscriber(ctx, event, input.hostId);
-      const host = ctx.hosts.getById(input.hostId);
+      const host = ctx.vaults.getHost(input.hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
       const runtimeInfo = await ctx.ensureContainersEndpoint(typedHost);
@@ -214,7 +214,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       // 그 화면에는 컨테이너 탭이 없다. 터널은 자기 전용 엔드포인트를 새로 만들므로(ruleId 로
       // 키를 잡는다) 남의 구독을 건드리지도 않는다. 대신 아래에서 주인을 등록해 창·세션이
       // 끝날 때 메인이 회수한다.
-      const host = ctx.hosts.getById(input.hostId);
+      const host = ctx.vaults.getHost(input.hostId);
       ctx.assertSftpCompatibleHost(host);
       const ruleId = `container-service-tunnel:${randomUUID()}`;
       // 주인을 먼저 적는다 — 시작 도중에 창이 닫혀도 회수 대상에 들어 있어야 한다.
@@ -269,7 +269,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.containers.start,
     async (event, hostId: string, containerId: string) => {
       assertContainerSubscriber(ctx, event, hostId);
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
       const runtimeInfo = await ctx.ensureContainersEndpoint(typedHost);
@@ -287,7 +287,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.containers.stop,
     async (event, hostId: string, containerId: string) => {
       assertContainerSubscriber(ctx, event, hostId);
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
       const runtimeInfo = await ctx.ensureContainersEndpoint(typedHost);
@@ -305,7 +305,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.containers.restart,
     async (event, hostId: string, containerId: string) => {
       assertContainerSubscriber(ctx, event, hostId);
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
       const runtimeInfo = await ctx.ensureContainersEndpoint(typedHost);
@@ -323,7 +323,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.containers.remove,
     async (event, hostId: string, containerId: string) => {
       assertContainerSubscriber(ctx, event, hostId);
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
       const runtimeInfo = await ctx.ensureContainersEndpoint(typedHost);
@@ -341,7 +341,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.containers.stats,
     async (event, input: HostContainersStatsInput) => {
       assertContainerSubscriber(ctx, event, input.hostId);
-      const host = ctx.hosts.getById(input.hostId);
+      const host = ctx.vaults.getHost(input.hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
       const runtimeInfo = await ctx.ensureContainersEndpoint(typedHost);
@@ -359,7 +359,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.containers.searchLogs,
     async (event, input: HostContainersSearchLogsInput) => {
       assertContainerSubscriber(ctx, event, input.hostId);
-      const host = ctx.hosts.getById(input.hostId);
+      const host = ctx.vaults.getHost(input.hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
       const runtimeInfo = await ctx.ensureContainersEndpoint(typedHost);
@@ -383,7 +383,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.containers.release,
     async (event, hostId: string, lifecycleId?: string) => {
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       const endpointId = ctx.buildContainersEndpointId(hostId);
       const ownerWebContentsId = resolveOwnerWebContentsId(event);
       if (ownerWebContentsId !== undefined) {
@@ -414,7 +414,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
     async (event, hostId: string, containerId: string) =>
       runWithIpcSessionOwner(ctx, event, async () => {
       assertContainerSubscriber(ctx, event, hostId);
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
       const runtimeInfo = await ctx.ensureContainersEndpoint(typedHost);
@@ -442,6 +442,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
         );
         const sshPort = getAwsEc2HostSshPort(hydratedHost);
         const trustedHostKeysBase64 = ctx.requireTrustedHostKeys({
+          id: hydratedHost.id,
           hostname: buildAwsSsmKnownHostIdentity({
             profileName,
             region: hydratedHost.awsRegion,
@@ -565,6 +566,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
       if (isWarpgateSshHostRecord(typedHost)) {
         const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys({
+          id: typedHost.id,
           hostname: typedHost.warpgateSshHost,
           port: typedHost.warpgateSshPort,
         });

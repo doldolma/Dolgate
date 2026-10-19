@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ipcChannels } from "../../common/ipc-channels";
 import { registerSerialIpcHandlers } from "./serial";
+import { withVaults } from "../vault-catalog.test-support";
 
 const electronSpies = vi.hoisted(() => ({
   ipcMainHandle: vi.fn(),
@@ -26,7 +27,7 @@ describe("registerSerialIpcHandlers", () => {
     const connectSerialSession = vi.fn().mockResolvedValue({ sessionId: "serial-session-1" });
     const noteSessionConfigured = vi.fn();
 
-    registerSerialIpcHandlers({
+    registerSerialIpcHandlers(withVaults({
       hosts: {
         getById: vi.fn().mockReturnValue({
           id: "serial-1",
@@ -52,7 +53,7 @@ describe("registerSerialIpcHandlers", () => {
       sessionReplayService: {
         noteSessionConfigured,
       },
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.serial.connect);
     expect(handler).toBeTypeOf("function");
@@ -99,11 +100,11 @@ describe("registerSerialIpcHandlers", () => {
       },
     ]);
 
-    registerSerialIpcHandlers({
+    registerSerialIpcHandlers(withVaults({
       coreManager: {
         listSerialPorts,
       },
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.serial.listPorts);
     expect(handler).toBeTypeOf("function");
@@ -131,11 +132,11 @@ describe("registerSerialIpcHandlers", () => {
 
     const controlSerialSession = vi.fn().mockResolvedValue(undefined);
 
-    registerSerialIpcHandlers({
+    registerSerialIpcHandlers(withVaults({
       coreManager: {
         controlSerialSession,
       },
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.serial.control);
     expect(handler).toBeTypeOf("function");

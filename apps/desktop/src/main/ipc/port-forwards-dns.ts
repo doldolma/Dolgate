@@ -216,7 +216,7 @@ export function registerPortForwardAndDnsIpcHandlers(
   ipcMain.handle(
     ipcChannels.portForwards.create,
     async (_event, draft: PortForwardDraft) => {
-      const host = ctx.hosts.getById(draft.hostId);
+      const host = ctx.vaults.getHost(draft.hostId);
       if (draft.transport === "aws-ssm") {
         ctx.assertAwsEc2Host(host);
       } else if (draft.transport === "ecs-task") {
@@ -249,7 +249,7 @@ export function registerPortForwardAndDnsIpcHandlers(
   ipcMain.handle(
     ipcChannels.portForwards.update,
     async (_event, id: string, draft: PortForwardDraft) => {
-      const host = ctx.hosts.getById(draft.hostId);
+      const host = ctx.vaults.getHost(draft.hostId);
       if (draft.transport === "aws-ssm") {
         ctx.assertAwsEc2Host(host);
       } else if (draft.transport === "ecs-task") {
@@ -326,7 +326,7 @@ export function registerPortForwardAndDnsIpcHandlers(
       if (!rule) {
         throw new Error("Port forward rule not found");
       }
-      const host = ctx.hosts.getById(rule.hostId);
+      const host = ctx.vaults.getHost(rule.hostId);
       if (rule.transport === "container") {
         ctx.assertSftpCompatibleHost(host);
         return ctx.startContainerTunnelRuntime({
@@ -496,6 +496,7 @@ export function registerPortForwardAndDnsIpcHandlers(
             const sshPort = getAwsEc2HostSshPort(hydratedHost);
             const proxyProfileName = resolveHostProfileName(hydratedHost);
             const trustedHostKeysBase64 = ctx.requireTrustedHostKeys({
+              id: hydratedHost.id,
               hostname: buildAwsSsmKnownHostIdentity({
                 profileName: proxyProfileName,
                 region: hydratedHost.awsRegion,

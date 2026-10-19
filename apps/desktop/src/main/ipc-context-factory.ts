@@ -26,6 +26,7 @@ import type { SessionShareService } from "./session-share-service";
 import type { SyncService } from "./sync-service";
 import type { TermiusImportService } from "./termius-import-service";
 import type { UpdateService } from "./update-service";
+import { createVaultCatalog } from "./vault-catalog";
 import type { WarpgateService } from "./warpgate-service";
 import type { XshellImportService } from "./xshell-import-service";
 import type { AwsConnectionProgressEmitter, MainIpcContext } from "./ipc/context";
@@ -102,6 +103,7 @@ export function createMainIpcContext(
     sessionReplayService,
   } = deps;
 
+  const vaults = createVaultCatalog({ hosts, knownHosts, tailnets });
   const localFiles = new LocalFileService();
   const aiService = new AiService(
     settings,
@@ -114,7 +116,7 @@ export function createMainIpcContext(
   const portForwardLifecycleLogger = new PortForwardLifecycleLogger(
     activityLogs,
     portForwards,
-    hosts,
+    vaults,
   );
 
   const secretCoordinator = createSecretCoordinator({
@@ -137,6 +139,7 @@ export function createMainIpcContext(
   let emitSftpConnectionProgress: AwsConnectionProgressEmitter = () => undefined;
   const awsSftpCoordinator = createAwsSftpCoordinator({
     hosts,
+    vaults,
     awsService,
     queueSync,
     emitSftpConnectionProgress: (event) => emitSftpConnectionProgress(event),
@@ -155,21 +158,18 @@ export function createMainIpcContext(
   emitSftpConnectionProgress = coreEventBridge.emitSftpConnectionProgress;
 
   const hostCoordinator = createHostCoordinator({
-    hosts,
-    knownHosts,
+    vaults,
     coreManager,
     awsService,
     authService,
     awsSsmTunnelService,
     awsSftpCoordinator,
-    tailnets,
     resolveRuntimeSshSecrets: secretCoordinator.resolveRuntimeSshSecrets,
     ensureCertificateAuthReady: secretCoordinator.ensureCertificateAuthReady,
   });
 
   const containerRuntimeCoordinator = createContainerRuntimeCoordinator({
     coreManager,
-    knownHosts,
     awsService,
     authService,
     awsSsmTunnelService,
@@ -182,7 +182,7 @@ export function createMainIpcContext(
       coreEventBridge.emitContainersConnectionProgress,
   });
   const snapshotCoordinator = createSnapshotCoordinator({
-    hosts,
+    vaults,
     groups,
     settings,
     knownHosts,
@@ -194,6 +194,7 @@ export function createMainIpcContext(
   });
   const sshKeyCoordinator = createSshKeyCoordinator({
     hosts,
+    vaults,
     persistSecret: secretCoordinator.persistSecret,
     loadSecrets: secretCoordinator.loadSecrets,
     resolveTrustedHostKeys: hostCoordinator.resolveTrustedHostKeys,
@@ -213,6 +214,7 @@ export function createMainIpcContext(
 
   return {
     ...deps,
+    vaults,
     resolveJumpHostTarget: hostCoordinator.resolveJumpHostTarget,
     localFiles,
     aiService,

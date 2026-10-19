@@ -62,7 +62,7 @@ export function registerRdpIpcHandlers(
           if (!hostId) {
             return null;
           }
-          const host = ctx.hosts.getById(hostId);
+          const host = ctx.vaults.getHost(hostId);
           if (!host || !isRdpHostRecord(host)) {
             return null;
           }
@@ -74,7 +74,7 @@ export function registerRdpIpcHandlers(
         },
         ask: runtime.askCertificate,
         persist: (hostId, fingerprint) => {
-          const host = ctx.hosts.getById(hostId);
+          const host = ctx.vaults.getHost(hostId);
           if (!host || !isRdpHostRecord(host)) {
             return;
           }
@@ -106,7 +106,7 @@ export function registerRdpIpcHandlers(
   ipcMain.handle(
     ipcChannels.rdp.revokeCertificateTrust,
     async (event, hostId: string) => {
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       if (!host || !isRdpHostRecord(host)) {
         return null;
       }
@@ -511,7 +511,7 @@ export function registerRdpIpcHandlers(
       hostId: string,
       viewport?: { width: number; height: number },
     ) => {
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       if (!host) {
         throw new Error("Host not found");
       }

@@ -107,7 +107,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.sftp.connect,
     async (event, input: DesktopSftpConnectInput) => runWithSftpEndpointOwner(ctx, event, input.endpointId, async () => {
-      const host = ctx.hosts.getById(input.hostId);
+      const host = ctx.vaults.getHost(input.hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
 
@@ -128,6 +128,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
         let trustedHostKeysBase64: string[];
         try {
           trustedHostKeysBase64 = ctx.requireTrustedHostKeys({
+            id: hydratedHost.id,
             hostname: buildAwsSsmKnownHostIdentity({
               profileName,
               region: hydratedHost.awsRegion,
@@ -319,6 +320,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
 
       if (isWarpgateSshHostRecord(typedHost)) {
         const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys({
+          id: typedHost.id,
           hostname: typedHost.warpgateSshHost,
           port: typedHost.warpgateSshPort,
         });

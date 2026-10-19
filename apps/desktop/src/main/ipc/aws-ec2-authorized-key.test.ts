@@ -3,6 +3,7 @@ import {
   installAwsEc2AuthorizedKeyOverSsm,
   installSshPublicKeyWithAwsSupport,
 } from "./aws-ec2-authorized-key";
+import { withVaults } from "../vault-catalog.test-support";
 
 vi.mock("../aws-ws-proxy", () => ({
   buildAwsServerProxyStartMessage: vi.fn().mockResolvedValue({ kind: "start" }),
@@ -166,7 +167,7 @@ describe("installSshPublicKeyWithAwsSupport", () => {
       resolveSshPublicKey,
     };
 
-    const result = await installSshPublicKeyWithAwsSupport(fullCtx as any, {
+    const result = await installSshPublicKeyWithAwsSupport(withVaults(fullCtx) as any, {
       secretRef: "key-ref",
       hostIds: ["ssh-1", "aws-host-1"],
       mode: "installAndUse",
@@ -206,7 +207,7 @@ describe("installSshPublicKeyWithAwsSupport", () => {
       mode: "installAndUse" as const,
     };
 
-    const result = await installSshPublicKeyWithAwsSupport(fullCtx as any, input);
+    const result = await installSshPublicKeyWithAwsSupport(withVaults(fullCtx) as any, input);
 
     expect(installSshPublicKey).toHaveBeenCalledWith(input);
     expect(result.results).toHaveLength(1);
@@ -231,7 +232,7 @@ describe("installSshPublicKeyWithAwsSupport", () => {
       resolveSshPublicKey,
     };
 
-    const result = await installSshPublicKeyWithAwsSupport(fullCtx as any, {
+    const result = await installSshPublicKeyWithAwsSupport(withVaults(fullCtx) as any, {
       secretRef: "key-ref",
       hostIds: ["aws-host-1"],
       mode: "installOnly",

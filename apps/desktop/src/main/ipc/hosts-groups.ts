@@ -60,7 +60,7 @@ function normalizeSshDraftForPersistence(
 }
 
 export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
-  ipcMain.handle(ipcChannels.hosts.list, async () => ctx.hosts.list());
+  ipcMain.handle(ipcChannels.hosts.list, async () => ctx.vaults.listHosts());
 
   ipcMain.handle(
     ipcChannels.hosts.create,
@@ -122,7 +122,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.hosts.update,
     async (event, id: string, draft: HostDraft, secrets?: HostSecretInput) => {
-      const current = ctx.hosts.getById(id);
+      const current = ctx.vaults.getHost(id);
       if (!current) {
         throw new Error("Host not found");
       }
@@ -210,7 +210,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
   );
 
   ipcMain.handle(ipcChannels.hosts.remove, async (event, id: string) => {
-    const current = ctx.hosts.getById(id);
+    const current = ctx.vaults.getHost(id);
     ctx.syncOutbox.upsertDeletion("hosts", id);
     ctx.hosts.remove(id);
     if (current) {

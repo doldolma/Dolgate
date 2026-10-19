@@ -38,7 +38,7 @@ export function registerVncIpcHandlers(
    */
   const openForward = async (
     sessionId: string,
-    host: ReturnType<typeof ctx.hosts.getById> & { kind: "vnc" },
+    host: ReturnType<typeof ctx.vaults.getHost> & { kind: "vnc" },
   ): Promise<{ host: string; port: number } | null> => {
     const tailnetId = host.tailnetId?.trim();
     if (tailnetId) {
@@ -57,7 +57,7 @@ export function registerVncIpcHandlers(
       return null;
     }
 
-    const jumpTarget = ctx.hosts.getById(tunnelHostId);
+    const jumpTarget = ctx.vaults.getHost(tunnelHostId);
     if (!jumpTarget || !isSshHostRecord(jumpTarget)) {
       // 지웠거나 종류가 바뀐 호스트다. 조용히 직접 붙으면 "왜 안 되지" 가 되므로 이유를 말한다.
       throw new Error(
@@ -146,7 +146,7 @@ export function registerVncIpcHandlers(
   ipcMain.handle(
     ipcChannels.vnc.connect,
     async (event, sessionId: string, hostId: string) => {
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       if (!host) {
         throw new Error("Host not found");
       }

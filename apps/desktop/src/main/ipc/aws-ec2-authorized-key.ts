@@ -48,6 +48,7 @@ export async function installAwsEc2AuthorizedKeyOverSsm(
   );
   const sshPort = getAwsEc2HostSshPort(hydratedHost);
   const trustedHostKeysBase64 = ctx.requireTrustedHostKeys({
+    id: hydratedHost.id,
     hostname: buildAwsSsmKnownHostIdentity({
       profileName,
       region: hydratedHost.awsRegion,
@@ -152,7 +153,7 @@ export async function installSshPublicKeyWithAwsSupport(
 ): Promise<SshKeyInstallResult> {
   const hostIds = [...new Set(input.hostIds.filter(Boolean))];
   const isEc2 = (id: string) => {
-    const host = ctx.hosts.getById(id);
+    const host = ctx.vaults.getHost(id);
     return host ? isAwsEc2HostRecord(host) : false;
   };
   const ec2Ids = hostIds.filter(isEc2);
@@ -184,7 +185,7 @@ export async function installSshPublicKeyWithAwsSupport(
     input.passphraseOverride,
   );
   for (const hostId of ec2Ids) {
-    const host = ctx.hosts.getById(hostId);
+    const host = ctx.vaults.getHost(hostId);
     if (!host || !isAwsEc2HostRecord(host)) {
       resultsById.set(hostId, {
         hostId,

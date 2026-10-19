@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcChannels } from '../../common/ipc-channels';
 import { HostsOverrideError } from '../hosts-override-manager';
 import { registerPortForwardAndDnsIpcHandlers } from './port-forwards-dns';
+import { withVaults } from '../vault-catalog.test-support';
 
 const electronSpies = vi.hoisted(() => ({
   ipcMainHandle: vi.fn(),
@@ -36,7 +37,7 @@ describe('registerPortForwardAndDnsIpcHandlers', () => {
     const setStaticOverrideActive = vi.fn();
     const appendActivityLog = vi.fn();
 
-    registerPortForwardAndDnsIpcHandlers({
+    registerPortForwardAndDnsIpcHandlers(withVaults({
       listPortForwardSnapshot: vi.fn(() => ({ rules: [], runtimes: [] })),
       listResolvedDnsOverrides: vi.fn(() => []),
       rewriteActiveDnsOverrides: vi.fn(async () => {
@@ -57,7 +58,7 @@ describe('registerPortForwardAndDnsIpcHandlers', () => {
         append: appendActivityLog,
       },
       queueSync: vi.fn(),
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.dnsOverrides.setStaticActive);
     expect(handler).toBeTypeOf('function');
@@ -101,7 +102,7 @@ describe('registerPortForwardAndDnsIpcHandlers', () => {
       updatedAt: '2025-01-01T00:00:00.000Z',
     } as const;
 
-    registerPortForwardAndDnsIpcHandlers({
+    registerPortForwardAndDnsIpcHandlers(withVaults({
       listPortForwardSnapshot: vi.fn(() => ({ rules: [], runtimes: [] })),
       listResolvedDnsOverrides: vi.fn(() => []),
       rewriteActiveDnsOverrides: vi.fn(async () => {
@@ -122,7 +123,7 @@ describe('registerPortForwardAndDnsIpcHandlers', () => {
         append: vi.fn(),
       },
       queueSync: vi.fn(),
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.dnsOverrides.setStaticActive);
     expect(handler).toBeTypeOf('function');
@@ -168,7 +169,7 @@ describe('registerPortForwardAndDnsIpcHandlers', () => {
       .mockResolvedValue({ ruleId: 'rule-1', status: 'running' });
     const startSsmPortForward = vi.fn();
 
-    registerPortForwardAndDnsIpcHandlers({
+    registerPortForwardAndDnsIpcHandlers(withVaults({
       portForwards: { getById: vi.fn(() => rule) },
       hosts: { getById: vi.fn(() => awsHost) },
       assertAwsEc2Host: vi.fn(),
@@ -201,7 +202,7 @@ describe('registerPortForwardAndDnsIpcHandlers', () => {
         startSsmPortForward,
       },
       rewriteActiveDnsOverrides: vi.fn().mockResolvedValue(undefined),
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.portForwards.start);
     expect(handler).toBeTypeOf('function');

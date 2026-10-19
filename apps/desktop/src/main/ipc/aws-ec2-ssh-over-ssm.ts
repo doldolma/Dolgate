@@ -78,6 +78,7 @@ export async function connectAwsEc2OverSsm(
     hydratedHost.id,
   );
   const trustedHostKeysBase64 = ctx.requireTrustedHostKeys({
+    id: hydratedHost.id,
     hostname: buildAwsSsmKnownHostIdentity({
       profileName,
       region: hydratedHost.awsRegion,

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ipcChannels } from "../../common/ipc-channels";
 import { registerAwsIpcHandlers } from "./aws";
+import { withVaults } from "../vault-catalog.test-support";
 
 const electronSpies = vi.hoisted(() => ({
   ipcMainHandle: vi.fn(),
@@ -33,7 +34,7 @@ describe("registerAwsIpcHandlers", () => {
     const upsertDeletion = vi.fn();
     const queueSync = vi.fn();
 
-    registerAwsIpcHandlers({
+    registerAwsIpcHandlers(withVaults({
       awsService: {
         listProfiles,
         listExternalProfiles: vi.fn(),
@@ -70,7 +71,7 @@ describe("registerAwsIpcHandlers", () => {
       coreManager: {
         connectAwsSession: vi.fn(),
       },
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.aws.deleteProfile);
     expect(handler).toBeTypeOf("function");
@@ -102,13 +103,13 @@ describe("registerAwsIpcHandlers", () => {
     });
     const login = vi.fn().mockResolvedValue(undefined);
 
-    registerAwsIpcHandlers({
+    registerAwsIpcHandlers(withVaults({
       awsService: {
         requireManagedProfileName,
         getProfileStatus,
         login,
       },
-    } as any);
+    }) as any);
 
     await handlers.get(ipcChannels.aws.getProfileStatusById)?.(
       {},
@@ -139,13 +140,13 @@ describe("registerAwsIpcHandlers", () => {
     const updateProfileRegion = vi.fn().mockResolvedValue(undefined);
     const queueSync = vi.fn();
 
-    registerAwsIpcHandlers({
+    registerAwsIpcHandlers(withVaults({
       awsService: {
         requireManagedProfileName: vi.fn(),
         updateProfileRegion,
       },
       queueSync,
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.aws.updateProfileRegion);
     expect(handler).toBeTypeOf("function");
@@ -194,7 +195,7 @@ describe("registerAwsIpcHandlers", () => {
       (_ownerWebContentsId: number, action: () => Promise<unknown>) => action(),
     );
 
-    registerAwsIpcHandlers({
+    registerAwsIpcHandlers(withVaults({
       awsService: {
         requireManagedProfileName: vi.fn().mockReturnValue("default"),
         startEcsExecSession,
@@ -219,7 +220,7 @@ describe("registerAwsIpcHandlers", () => {
         noteSessionConfigured,
       },
       normalizeEcsExecPermissionError: vi.fn((error) => error as Error),
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.aws.openEcsExecShell);
     expect(handler).toBeTypeOf("function");
@@ -286,7 +287,7 @@ describe("registerAwsIpcHandlers", () => {
     const connectAwsSession = vi.fn().mockResolvedValue({ sessionId: "session-1" });
     const noteSessionConfigured = vi.fn();
 
-    registerAwsIpcHandlers({
+    registerAwsIpcHandlers(withVaults({
       awsService: {
         requireManagedProfileName: vi.fn().mockReturnValue("default"),
         ensureAwsCliAvailable,
@@ -312,7 +313,7 @@ describe("registerAwsIpcHandlers", () => {
         noteSessionConfigured,
       },
       normalizeEcsExecPermissionError: vi.fn((error) => error as Error),
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.aws.openEcsExecShell);
     if (!handler) {
@@ -371,7 +372,7 @@ describe("registerAwsIpcHandlers", () => {
       .mockRejectedValueOnce(new Error("stale target"))
       .mockResolvedValueOnce({ ruleId: "runtime-1" });
 
-    registerAwsIpcHandlers({
+    registerAwsIpcHandlers(withVaults({
       awsService: {
         requireManagedProfileName: vi.fn().mockReturnValue("default"),
         ensureAwsCliAvailable: vi.fn().mockResolvedValue(undefined),
@@ -391,7 +392,7 @@ describe("registerAwsIpcHandlers", () => {
       coreManager: {
         startSsmPortForward,
       },
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.aws.startEcsServiceTunnel);
     expect(handler).toBeTypeOf("function");

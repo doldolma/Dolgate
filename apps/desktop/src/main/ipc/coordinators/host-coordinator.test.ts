@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { withVaults } from "../../vault-catalog.test-support";
 import { createHostCoordinator } from "./host-coordinator";
 
 function createAwsHost() {
@@ -114,7 +115,7 @@ function createCoordinator(
   return {
     deps,
     host,
-    coordinator: createHostCoordinator(deps),
+    coordinator: createHostCoordinator(withVaults(deps)),
   };
 }
 
@@ -218,7 +219,7 @@ describe("resolveTailnetRoute", () => {
   it("carries the expected tailnet name from the settings record", () => {
     const { coordinator } = createCoordinator();
 
-    expect(coordinator.resolveTailnetRoute({ tailnetId: "net-a" })).toEqual({
+    expect(coordinator.resolveTailnetRoute({ id: "host-1", tailnetId: "net-a" })).toEqual({
       tailnetId: "net-a",
       tailnetName: "acme-corp.com",
     });
@@ -227,9 +228,9 @@ describe("resolveTailnetRoute", () => {
   it("returns no route when the host does not use a tailnet", () => {
     const { coordinator } = createCoordinator();
 
-    expect(coordinator.resolveTailnetRoute({})).toEqual({});
-    expect(coordinator.resolveTailnetRoute({ tailnetId: null })).toEqual({});
-    expect(coordinator.resolveTailnetRoute({ tailnetId: "  " })).toEqual({});
+    expect(coordinator.resolveTailnetRoute({ id: "host-1" })).toEqual({});
+    expect(coordinator.resolveTailnetRoute({ id: "host-1", tailnetId: null })).toEqual({});
+    expect(coordinator.resolveTailnetRoute({ id: "host-1", tailnetId: "  " })).toEqual({});
   });
 
   // 저장소의 신뢰 범위 정규화(normalizeTailnetScope)와 같은 규칙이어야 한다. 여기서 안
@@ -237,7 +238,7 @@ describe("resolveTailnetRoute", () => {
   it("trims the id so a padded value still resolves", () => {
     const { coordinator } = createCoordinator();
 
-    expect(coordinator.resolveTailnetRoute({ tailnetId: " net-a " })).toEqual({
+    expect(coordinator.resolveTailnetRoute({ id: "host-1", tailnetId: " net-a " })).toEqual({
       tailnetId: "net-a",
       tailnetName: "acme-corp.com",
     });
@@ -252,7 +253,7 @@ describe("resolveTailnetRoute", () => {
   it("refuses to connect when the tailnet setting is gone", () => {
     const { coordinator } = createCoordinator();
 
-    expect(() => coordinator.resolveTailnetRoute({ tailnetId: "net-deleted" })).toThrow(
+    expect(() => coordinator.resolveTailnetRoute({ id: "host-1", tailnetId: "net-deleted" })).toThrow(
       /tailnet/i,
     );
   });

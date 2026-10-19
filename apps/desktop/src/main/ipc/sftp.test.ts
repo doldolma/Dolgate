@@ -13,6 +13,7 @@ vi.mock("electron", () => ({
 }));
 
 import { registerSftpIpcHandlers } from "./sftp";
+import { withVaults } from "../vault-catalog.test-support";
 
 function createAwsHost(overrides = {}) {
   return {
@@ -42,7 +43,7 @@ function createAwsHost(overrides = {}) {
 
 function createContext(host = createAwsHost()) {
   const emitSftpConnectionProgress = vi.fn();
-  return {
+  return withVaults({
     hosts: {
       getById: vi.fn().mockReturnValue(host),
     },
@@ -111,7 +112,7 @@ function createContext(host = createAwsHost()) {
     },
     trackAwsSftpTunnelRuntime: vi.fn(),
     clearAwsSftpPreflight: vi.fn(),
-  } as any;
+  }) as any;
 }
 
 describe("registerSftpIpcHandlers", () => {

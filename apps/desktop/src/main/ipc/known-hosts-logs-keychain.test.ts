@@ -23,9 +23,10 @@ vi.mock('electron', () => ({
 }));
 
 import { registerKnownHostsLogsKeychainIpcHandlers } from './known-hosts-logs-keychain';
+import { withVaults } from '../vault-catalog.test-support';
 
 function createContext() {
-  return {
+  return withVaults({
     knownHosts: {
       list: vi.fn(),
       trust: vi.fn(),
@@ -76,7 +77,7 @@ function createContext() {
     persistSecret: vi.fn(),
     describeHostLabel: vi.fn(),
     queueSync: vi.fn(),
-  } as any;
+  }) as any;
 }
 
 describe('registerKnownHostsLogsKeychainIpcHandlers', () => {

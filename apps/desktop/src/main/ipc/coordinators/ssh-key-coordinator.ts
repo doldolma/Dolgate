@@ -8,6 +8,7 @@ import type {
   SshKeyMaterialResult,
 } from "@shared";
 import type { HostRepository } from "../../database";
+import type { VaultCatalog } from "../../vault-catalog";
 import { fingerprintSha256FromPublicKey } from "../../ssh-key-material";
 import type {
   ResolvedAuthorizedKeyInstallPayload,
@@ -17,6 +18,7 @@ import type {
 } from "@shared";
 import type {
   SshHostRecord,
+  TrustedHostKeyTarget,
 } from "../context";
 import { t } from '../../i18n';
 import { logMessage } from "../../activity-log-message";
@@ -63,6 +65,7 @@ function normalizeAlgorithm(input: SshKeyGenerateInput): NonNullable<SshKeyGener
 
 export function createSshKeyCoordinator(deps: {
   hosts: HostRepository;
+  vaults: VaultCatalog;
   persistSecret: (
     label: string,
     secrets?: HostSecretInput,
@@ -75,16 +78,12 @@ export function createSshKeyCoordinator(deps: {
    * tailnetId 를 함께 넘긴다: 신뢰는 tailnet 범위 안에서만 유효해서, 빼면 다른 tailnet 의
    * 동명 호스트 키를 신뢰된 것으로 볼 수 있다.
    */
-  resolveTrustedHostKeys: (host: {
-    hostname: string;
-    port: number;
-    tailnetId?: string | null;
-  }) => string[];
+  resolveTrustedHostKeys: (host: TrustedHostKeyTarget) => string[];
   /**
    * 호스트를 어느 tailnet 으로 보낼지. 이것을 payload 에 싣지 않으면 코어가 일반 네트워크로
    * 나가서, tailnet 안에만 있는 호스트에는 키를 설치할 수 없다.
    */
-  resolveTailnetRoute: (host: { tailnetId?: string | null }) => {
+  resolveTailnetRoute: (host: { id: string; tailnetId?: string | null }) => {
     tailnetId?: string;
     tailnetName?: string;
   };
@@ -113,6 +112,7 @@ export function createSshKeyCoordinator(deps: {
 }): SshKeyCoordinator {
   const {
     hosts,
+    vaults,
     persistSecret,
     loadSecrets,
     resolveTrustedHostKeys,
@@ -302,7 +302,7 @@ export function createSshKeyCoordinator(deps: {
     const results: SshKeyInstallResult["results"] = [];
 
     for (const hostId of hostIds) {
-      const host = hosts.getById(hostId);
+      const host = vaults.getHost(hostId);
       if (!host || host.kind !== "ssh") {
         results.push({
           hostId,

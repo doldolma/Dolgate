@@ -5,13 +5,13 @@ import type {
 import type {
   ActivityLogRepository,
   GroupRepository,
-  HostRepository,
   KnownHostRepository,
   SecretMetadataRepository,
   SettingsRepository,
 } from "../../database";
 import type { LocalFileService } from "../../file-service";
 import type { CoreManager } from "../../core-manager";
+import type { VaultCatalog } from "../../vault-catalog";
 import type { DnsPortForwardCoordinator } from "./dns-port-forward-coordinator";
 
 export interface SnapshotCoordinator {
@@ -22,7 +22,7 @@ export interface SnapshotCoordinator {
 }
 
 export function createSnapshotCoordinator(deps: {
-  hosts: HostRepository;
+  vaults: VaultCatalog;
   groups: GroupRepository;
   settings: SettingsRepository;
   knownHosts: KnownHostRepository;
@@ -33,7 +33,7 @@ export function createSnapshotCoordinator(deps: {
   dnsPortForwardCoordinator: DnsPortForwardCoordinator;
 }): SnapshotCoordinator {
   const {
-    hosts,
+    vaults,
     groups,
     settings,
     knownHosts,
@@ -58,7 +58,7 @@ export function createSnapshotCoordinator(deps: {
         nextActivityLogs,
         nextKeychainEntries,
       ] = await Promise.all([
-        hosts.list(),
+        vaults.listHosts(),
         groups.list(),
         coreManager.listTabs(ownerWebContentsId),
         settings.get(),
@@ -87,7 +87,7 @@ export function createSnapshotCoordinator(deps: {
 
   const getSyncedWorkspaceSnapshot =
     async (): Promise<DesktopSyncedWorkspaceSnapshot> => ({
-      hosts: hosts.list(),
+      hosts: vaults.listHosts(),
       groups: groups.list(),
       settings: settings.get(),
       portForwardSnapshot: dnsPortForwardCoordinator.listPortForwardSnapshot(),

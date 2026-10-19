@@ -189,7 +189,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.aws.loadEcsClusterSnapshot,
     async (_event, hostId: string) => {
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       if (!host || !isAwsEcsHostRecord(host)) {
         throw new Error(t('awsIpc.ecsOnly'));
       }
@@ -230,7 +230,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.aws.loadEcsClusterUtilization,
     async (_event, hostId: string) => {
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       if (!host || !isAwsEcsHostRecord(host)) {
         throw new Error(t('awsIpc.ecsOnly'));
       }
@@ -245,7 +245,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.aws.loadEcsServiceActionContext,
     async (_event, hostId: string, serviceName: string) => {
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       ctx.assertAwsEcsHost(host);
       const ecsHost = host as AwsEcsHostRecord;
       return ctx.awsService.describeEcsServiceActionContext(
@@ -269,7 +269,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
       endTime?: string | null;
       limit?: number;
     }) => {
-      const host = ctx.hosts.getById(input.hostId);
+      const host = ctx.vaults.getHost(input.hostId);
       ctx.assertAwsEcsHost(host);
       const ecsHost = host as AwsEcsHostRecord;
       return ctx.awsService.loadEcsServiceLogs({
@@ -299,7 +299,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
       command?: string;
     }) => runWithIpcSessionOwner(ctx, event, async () => {
       try {
-        const host = ctx.hosts.getById(input.hostId);
+        const host = ctx.vaults.getHost(input.hostId);
         ctx.assertAwsEcsHost(host);
         const ecsHost = host as AwsEcsHostRecord;
         const profileName = resolveHostProfileName(ecsHost);
@@ -391,7 +391,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
       bindAddress: string;
       bindPort: number;
     }) => {
-      const host = ctx.hosts.getById(input.hostId);
+      const host = ctx.vaults.getHost(input.hostId);
       ctx.assertAwsEcsHost(host);
       const ecsHost = host as AwsEcsHostRecord;
       const profileName = resolveHostProfileName(ecsHost);
@@ -444,7 +444,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.aws.listEcsTaskTunnelServices,
     async (_event, hostId: string) => {
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       ctx.assertAwsEcsHost(host);
       const ecsHost = host as AwsEcsHostRecord;
       return ctx.awsService.listEcsTaskTunnelServices(
@@ -458,7 +458,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.aws.loadEcsTaskTunnelService,
     async (_event, hostId: string, serviceName: string) => {
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       ctx.assertAwsEcsHost(host);
       const ecsHost = host as AwsEcsHostRecord;
       return ctx.awsService.describeEcsTaskTunnelService(
@@ -486,7 +486,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.aws.loadHostSshMetadata,
     async (_event, hostId: string) => {
-      const host = ctx.hosts.getById(hostId);
+      const host = ctx.vaults.getHost(hostId);
       ctx.assertAwsEc2Host(host);
       return ctx.loadAwsHostSshMetadataRecord(host as AwsEc2HostRecord);
     },

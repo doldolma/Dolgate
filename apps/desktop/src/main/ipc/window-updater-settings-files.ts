@@ -26,7 +26,7 @@ export function registerWindowUpdaterSettingsFilesIpcHandlers(
   ipcMain.handle(
     ipcChannels.window.openHost,
     async (_event, hostId: string) => {
-      if (typeof hostId !== "string" || !ctx.hosts.getById(hostId)) {
+      if (typeof hostId !== "string" || !ctx.vaults.getHost(hostId)) {
         throw new Error("Host not found");
       }
       await windowRuntime?.openWindow({ type: "connect-host", hostId });

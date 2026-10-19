@@ -27,6 +27,7 @@ import {
   resolveAgentForwardingEndpoint,
 } from "./ssh";
 import { connectAwsEc2OverSsm } from "./aws-ec2-ssh-over-ssm";
+import { withVaults } from "../vault-catalog.test-support";
 
 const connectAwsEc2OverSsmMock = vi.mocked(connectAwsEc2OverSsm);
 
@@ -34,7 +35,7 @@ function createContext() {
   // 신뢰 키 조회는 두 이름으로 불린다(엄격/관대). 테스트는 값 하나만 세우면 되도록 같은 mock 을
   // 공유한다 — ssh-core 가 붙는 경로는 관대한 쪽을, AWS SSM·키 설치는 엄격한 쪽을 쓴다.
   const trustedHostKeys = vi.fn();
-  return {
+  return withVaults({
     hosts: {
       getById: vi.fn(),
     },
@@ -76,7 +77,7 @@ function createContext() {
     resolveJumpHostTarget: vi.fn().mockResolvedValue(undefined),
     ensureCertificateAuthReady: vi.fn(),
     pendingSessionSecrets: new Map(),
-  } as any;
+  }) as any;
 }
 
 describe("registerSshIpcHandlers", () => {

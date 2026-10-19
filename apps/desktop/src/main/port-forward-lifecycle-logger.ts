@@ -11,12 +11,13 @@ import type {
 // 연결의 전송 계층으로 우리가 여는 터널 판정. **렌더러의 사이드바 배지와 같은 것을 써야 한다** —
 // 목록이 갈라지면 로그에 안 남는 터널이 배지에는 세어진다(shared-core/port-forward-internal).
 import { isInternalTransportTunnel } from '@shared';
-import type { ActivityLogRepository, HostRepository, PortForwardRepository } from './database';
+import type { ActivityLogRepository, PortForwardRepository } from './database';
 import { t } from './i18n';
 import { logMessage } from "./activity-log-message";
+import type { VaultCatalog } from "./vault-catalog";
 
 type ActivityLogWriter = Pick<ActivityLogRepository, 'upsert'>;
-type HostLookup = Pick<HostRepository, 'getById'>;
+type HostLookup = Pick<VaultCatalog, 'getHost'>;
 type PortForwardLookup = Pick<PortForwardRepository, 'getById'>;
 
 // 세션·SFTP·컨테이너 연결의 전송 계층으로 잠깐 열렸다 닫히는 내부 SSM 터널들의 runtimeId
@@ -84,7 +85,7 @@ export class PortForwardLifecycleLogger {
     }
 
     const rule = this.portForwards.getById(runtime.ruleId);
-    const host = this.hosts.getById(runtime.hostId);
+    const host = this.hosts.getHost(runtime.hostId);
     const attempt: ActivePortForwardLifecycleAttempt = {
       logId: `port-forward:${runtime.ruleId}:${randomUUID()}`,
       ruleId: runtime.ruleId,
@@ -107,7 +108,7 @@ export class PortForwardLifecycleLogger {
     runtime: PortForwardRuntimeRecord,
   ): ActivePortForwardLifecycleAttempt {
     const rule = this.portForwards.getById(runtime.ruleId);
-    const host = this.hosts.getById(runtime.hostId);
+    const host = this.hosts.getHost(runtime.hostId);
     return {
       ...attempt,
       ruleLabel: rule?.label ?? runtime.label ?? attempt.ruleLabel,

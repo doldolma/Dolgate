@@ -27,11 +27,8 @@ import {
 } from "../../aws-ws-proxy";
 import type { AwsSsmTunnelService } from "../../aws-ssm-tunnel-service";
 import type { CoreManager } from "../../core-manager";
-import type {
-  HostRepository,
-  KnownHostRepository,
-  TailnetRepository,
-} from "../../database";
+import type { HostRepository } from "../../database";
+import type { VaultCatalog } from "../../vault-catalog";
 import type { AwsSftpCoordinator } from "./aws-sftp-coordinator";
 import {
   isTransientAwsSsmSshError,
@@ -44,23 +41,16 @@ import type {
   AwsSftpProgressStage,
   SftpCompatibleHostRecord,
   SshHostRecord,
+  TrustedHostKeyTarget,
 } from "../context";
 import { t } from "../../i18n";
 import { getAwsSftpDiagnosticMessage } from "../../../common/aws-diagnostics";
 
 export interface HostCoordinator {
-  requireTrustedHostKey: (host: { hostname: string; port: number }) => string;
+  requireTrustedHostKey: (host: TrustedHostKeyTarget) => string;
   /** 신뢰 중인 키들(없으면 빈 배열). 연결 중 신뢰를 묻는 경로가 쓴다. */
-  resolveTrustedHostKeys: (host: {
-    hostname: string;
-    port: number;
-    tailnetId?: string | null;
-  }) => string[];
-  requireTrustedHostKeys: (host: {
-    hostname: string;
-    port: number;
-    tailnetId?: string | null;
-  }) => string[];
+  resolveTrustedHostKeys: (host: TrustedHostKeyTarget) => string[];
+  requireTrustedHostKeys: (host: TrustedHostKeyTarget) => string[];
   requireConfiguredSshUsername: (host: SshHostRecord) => string;
   buildKnownSshDuplicateKeys: () => Set<string>;
   assertSshHost: (host: ReturnType<HostRepository["getById"]>) => void;
@@ -81,21 +71,19 @@ export interface HostCoordinator {
   resolveJumpHostTarget: (
     host: SshHostRecord,
   ) => Promise<ResolvedJumpHost | undefined>;
-  resolveTailnetRoute: (host: { tailnetId?: string | null }) => {
+  resolveTailnetRoute: (host: { id: string; tailnetId?: string | null }) => {
     tailnetId?: string;
     tailnetName?: string;
   };
 }
 
 export function createHostCoordinator(deps: {
-  hosts: HostRepository;
-  knownHosts: KnownHostRepository;
+  vaults: VaultCatalog;
   coreManager: CoreManager;
   awsService: AwsService;
   authService: AuthService;
   awsSsmTunnelService: AwsSsmTunnelService;
   awsSftpCoordinator: AwsSftpCoordinator;
-  tailnets: TailnetRepository;
   resolveRuntimeSshSecrets: (
     host: SshHostRecord,
     secrets?: HostSecretInput,
@@ -106,14 +94,12 @@ export function createHostCoordinator(deps: {
   ) => Promise<SshCertificateInfo | null>;
 }): HostCoordinator {
   const {
-    hosts,
-    knownHosts,
+    vaults,
     coreManager,
     awsService,
     authService,
     awsSsmTunnelService,
     awsSftpCoordinator,
-    tailnets,
     resolveRuntimeSshSecrets,
     ensureCertificateAuthReady,
   } = deps;
@@ -127,14 +113,11 @@ export function createHostCoordinator(deps: {
    *
    * 코어가 묻지 못하는 경로(원격 키 설치 등)는 아래 requireTrustedHostKeys 를 그대로 쓴다.
    */
-  const resolveTrustedHostKeys = (host: {
-    hostname: string;
-    port: number;
+  const resolveTrustedHostKeys = (host: TrustedHostKeyTarget): string[] => {
     // 신뢰는 tailnet 범위 안에서만 유효하다. 이것을 안 넘기면 다른 tailnet(또는 일반
     // 네트워크)의 같은 이름 호스트 키를 신뢰한 것으로 착각한다.
-    tailnetId?: string | null;
-  }): string[] => {
     const tailnetId = host.tailnetId ?? undefined;
+    const { knownHosts } = vaults.scopeOfHost(host.id);
     const trusted = knownHosts.listByHostPort(host.hostname, host.port, tailnetId);
     if (trusted.length === 0) {
       return [];
@@ -152,11 +135,7 @@ export function createHostCoordinator(deps: {
    * 그 밖의 모든 연결은 resolveTrustedHostKeys 로 통과시키고 처음 보는 키는 연결 안에서 묻는다 —
    * 세션·SFTP·컨테이너·포워딩·원격 키 설치가 전부 같은 규칙이다.
    */
-  const requireTrustedHostKeys = (host: {
-    hostname: string;
-    port: number;
-    tailnetId?: string | null;
-  }): string[] => {
+  const requireTrustedHostKeys = (host: TrustedHostKeyTarget): string[] => {
     const trusted = resolveTrustedHostKeys(host);
     if (trusted.length === 0) {
       throw new Error("Host key is not trusted yet.");
@@ -186,7 +165,7 @@ export function createHostCoordinator(deps: {
     if (!entryJumpId) {
       return undefined;
     }
-    const entryJump = hosts.getById(entryJumpId);
+    const entryJump = vaults.getHost(entryJumpId);
     return entryJump && isSshHostRecord(entryJump)
       ? entryJump.tailnetId?.trim() || undefined
       : undefined;
@@ -207,6 +186,7 @@ export function createHostCoordinator(deps: {
    * 불완전한 스냅샷, 호스트 전송 번들 가져오기(번들은 tailnets 를 담지 않는다).
    */
   const resolveTailnetRoute = (host: {
+    id: string;
     tailnetId?: string | null;
     jumpHostId?: string | null;
     jumpHostIds?: string[] | null;
@@ -225,7 +205,10 @@ export function createHostCoordinator(deps: {
     if (!tailnetId) {
       return {};
     }
-    const record = tailnets.list().find((entry) => entry.id === tailnetId);
+    const record = vaults
+      .scopeOfHost(host.id)
+      .tailnets.list()
+      .find((entry) => entry.id === tailnetId);
     if (!record) {
       throw new Error(t("hostIpc.tailnetMissing"));
     }
@@ -350,9 +333,10 @@ export function createHostCoordinator(deps: {
     return host.warpgateTargetId;
   };
 
+  // 가져오기는 개인 볼트로 들어가므로, 이미 있는지도 개인 볼트 안에서 본다.
   const buildKnownSshDuplicateKeys = (): Set<string> =>
     new Set(
-      hosts
+      vaults.personal.hosts
         .list()
         .filter(isSshHostRecord)
         .map((host) => `${host.hostname}\u0000${host.port}\u0000${host.username}`),
@@ -365,7 +349,7 @@ export function createHostCoordinator(deps: {
     // 직접 닿지 않는 타깃도 지문을 확인/신뢰할 수 있게 한다(SSH 호스트에만 해당).
     jump?: ResolvedJumpHost,
   ): Promise<HostKeyProbeResult> => {
-    const host = hosts.getById(input.hostId);
+    const host = vaults.getHost(input.hostId);
     if (!host) {
       throw new Error("Host not found");
     }
@@ -496,6 +480,7 @@ export function createHostCoordinator(deps: {
           region: hydratedHost.awsRegion,
           instanceId: hydratedHost.awsInstanceId,
         });
+        const { knownHosts } = vaults.scopeOfHost(hydratedHost.id);
         const existing = knownHosts.getByHostPortAlgorithm(
           knownHost,
           knownHostPort,
@@ -600,7 +585,7 @@ export function createHostCoordinator(deps: {
         endpointId: input.endpointId ?? undefined,
         // 프로브도 실연결과 같은 tailnet 을 타야 한다. 다른 통로로 읽으면 tailnet 밖의
         // 동명 호스트 키를 이 호스트의 것으로 저장하게 된다.
-        ...resolveTailnetRoute(isSshHostRecord(host) ? host : {}),
+        ...(isSshHostRecord(host) ? resolveTailnetRoute(host) : {}),
       }),
     );
     // 신뢰 조회는 이 호스트가 속한 tailnet 안에서만 해야 한다. 범위를 빼면 다른 tailnet 의
@@ -608,6 +593,7 @@ export function createHostCoordinator(deps: {
     const probeTailnetId = isSshHostRecord(host)
       ? (host.tailnetId ?? undefined)
       : undefined;
+    const { knownHosts } = vaults.scopeOfHost(host.id);
     const existing = knownHosts.getByHostPortAlgorithm(
       probeHost,
       probePort,
@@ -662,7 +648,7 @@ export function createHostCoordinator(deps: {
 
     let resolved: ResolvedJumpHost | undefined;
     for (const jumpHostId of chain) {
-      const jumpHost = hosts.getById(jumpHostId);
+      const jumpHost = vaults.getHost(jumpHostId);
       if (!jumpHost) {
         throw new Error(
           t("hostIpc.jumpHostMissing"),

@@ -13,6 +13,7 @@ import type {
 } from "@shared";
 import type { AwsService } from "../../aws-service";
 import type { HostRepository } from "../../database";
+import type { VaultCatalog } from "../../vault-catalog";
 import { createEd25519SshKeyPair } from "../../ssh-key-material";
 import type {
   AwsConnectionProgressEmitter,
@@ -89,6 +90,7 @@ export interface AwsSftpCoordinator {
 
 export function createAwsSftpCoordinator(deps: {
   hosts: HostRepository;
+  vaults: VaultCatalog;
   awsService: AwsService;
   queueSync: () => void;
   emitSftpConnectionProgress: AwsConnectionProgressEmitter;
@@ -97,6 +99,7 @@ export function createAwsSftpCoordinator(deps: {
 }): AwsSftpCoordinator {
   const {
     hosts,
+    vaults,
     awsService,
     queueSync,
     emitSftpConnectionProgress,
@@ -406,7 +409,7 @@ export function createAwsSftpCoordinator(deps: {
       queueSync();
       return nextHost;
     } catch (error) {
-      const latestHost = hosts.getById(host.id);
+      const latestHost = vaults.getHost(host.id);
       if (!latestHost || !isAwsEc2HostRecord(latestHost)) {
         throw new Error("Host not found");
       }

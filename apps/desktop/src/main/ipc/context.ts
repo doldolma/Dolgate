@@ -57,6 +57,7 @@ import type { SessionShareService } from "../session-share-service";
 import type { SyncService } from "../sync-service";
 import type { TermiusImportService } from "../termius-import-service";
 import type { UpdateService } from "../update-service";
+import type { VaultCatalog } from "../vault-catalog";
 import type { WarpgateService } from "../warpgate-service";
 import type { XshellImportService } from "../xshell-import-service";
 
@@ -67,6 +68,19 @@ export type SftpCompatibleHostRecord = Extract<
 >;
 export type AwsEc2HostRecord = Extract<HostRecord, { kind: "aws-ec2" }>;
 export type AwsEcsHostRecord = Extract<HostRecord, { kind: "aws-ecs" }>;
+
+/**
+ * 신뢰 키를 찾을 대상.
+ *
+ * known hosts 는 주소로 찾지만, 어느 볼트의 known hosts 에서 찾을지는 호스트가 정한다 — 같은 주소가
+ * 개인과 팀에 따로 있을 수 있다. 그래서 그 호스트의 id 가 함께 와야 한다.
+ */
+export interface TrustedHostKeyTarget {
+  id: string;
+  hostname: string;
+  port: number;
+  tailnetId?: string | null;
+}
 
 export type AwsSftpProgressStage =
   | "loading-instance-metadata"
@@ -94,6 +108,8 @@ export type AwsConnectionProgressEmitter = (event: {
 }) => void;
 
 export interface MainIpcContext {
+  /** 호스트를 읽을 때는 이것을 쓴다(쓰기는 아직 hosts). */
+  vaults: VaultCatalog;
   hosts: HostRepository;
   groups: GroupRepository;
   settings: SettingsRepository;
@@ -272,17 +288,9 @@ export interface MainIpcContext {
     host: SshHostRecord,
     secrets: HostSecretInput,
   ) => Promise<SshCertificateInfo | null>;
-  requireTrustedHostKey: (host: { hostname: string; port: number }) => string;
-  resolveTrustedHostKeys: (host: {
-    hostname: string;
-    port: number;
-    tailnetId?: string | null;
-  }) => string[];
-  requireTrustedHostKeys: (host: {
-    hostname: string;
-    port: number;
-    tailnetId?: string | null;
-  }) => string[];
+  requireTrustedHostKey: (host: TrustedHostKeyTarget) => string;
+  resolveTrustedHostKeys: (host: TrustedHostKeyTarget) => string[];
+  requireTrustedHostKeys: (host: TrustedHostKeyTarget) => string[];
   /**
    * 이 호스트를 어느 tailnet 으로 보낼지. tailnet 이 없으면 빈 객체다.
    *
@@ -290,7 +298,7 @@ export interface MainIpcContext {
    * 다르면 연결을 거부해야 하기 때문이다 — 다른 계정으로 로그인해 엉뚱한 tailnet 의 동명
    * 머신에 붙는 것을 막는다. 그 이름은 tailnet 설정에만 있으므로 여기서 읽어 넣는다.
    */
-  resolveTailnetRoute: (host: { tailnetId?: string | null }) => {
+  resolveTailnetRoute: (host: { id: string; tailnetId?: string | null }) => {
     tailnetId?: string;
     tailnetName?: string;
   };

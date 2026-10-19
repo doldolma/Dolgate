@@ -64,7 +64,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
           : ctx.emitSftpConnectionProgress;
       // 베스천 뒤의(직접 닿지 않는) 타깃이면 점프 호스트를 해석해 그 경유로 키를 읽는다.
       // 점프 호스트 자신을 probe할 땐 jumpHostId가 없어 jump는 undefined → 직접 probe된다.
-      const host = ctx.hosts.getById(input.hostId);
+      const host = ctx.vaults.getHost(input.hostId);
       const jump =
         host && isSshHostRecord(host)
           ? await ctx.resolveJumpHostTarget(host)
@@ -128,7 +128,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
    * 쪽이다(runtimeEventSlice: 탭의 호스트를 먼저 본다).
    */
   const resolveTrustScope = (input: KnownHostTrustInput): KnownHostTrustInput => {
-    const host = ctx.hosts.getById(input.hostId);
+    const host = ctx.vaults.getHost(input.hostId);
     const tailnetId =
       host && isSshHostRecord(host) ? (host.tailnetId ?? undefined) : undefined;
     return { ...input, tailnetId };
@@ -373,7 +373,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
   ipcMain.handle(
     ipcChannels.keychain.cloneForHost,
     async (_event, input: KeychainSecretCloneInput) => {
-      const host = ctx.hosts.getById(input.hostId);
+      const host = ctx.vaults.getHost(input.hostId);
       ctx.assertSshHost(host);
       const sshHost = host as SshHostRecord;
       if (!sshHost.secretRef || sshHost.secretRef !== input.sourceSecretRef) {

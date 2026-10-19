@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import { registerHostsGroupsIpcHandlers } from "./hosts-groups";
+import { withVaults } from "../vault-catalog.test-support";
 
 vi.mock("electron", () => ({
   ipcMain: {
@@ -19,7 +20,7 @@ function getRegisteredHandler(channel: string) {
 }
 
 function createContext() {
-  return {
+  return withVaults({
     hosts: {
       list: vi.fn(),
       getById: vi.fn(),
@@ -46,7 +47,7 @@ function createContext() {
       upsertDeletion: vi.fn(),
     },
     queueSync: vi.fn(),
-  } as any;
+  }) as any;
 }
 
 describe("registerHostsGroupsIpcHandlers", () => {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipcChannels } from "../../common/ipc-channels";
 import { registerContainersIpcHandlers } from "./containers";
+import { withVaults } from "../vault-catalog.test-support";
 
 const electronSpies = vi.hoisted(() => ({
   ipcMainHandle: vi.fn(),
@@ -56,7 +57,7 @@ describe("registerContainersIpcHandlers", () => {
       lifecycleId: "lifecycle-1",
     });
 
-    registerContainersIpcHandlers({
+    registerContainersIpcHandlers(withVaults({
       hosts: {
         getById: vi.fn().mockReturnValue({
           id: "host-1",
@@ -69,7 +70,7 @@ describe("registerContainersIpcHandlers", () => {
         registerContainerSubscriber,
         beginContainerLifecycle,
       },
-    } as any);
+    }) as any);
 
     await handlers
       .get(ipcChannels.containers.beginLifecycle)?.(
@@ -99,7 +100,7 @@ describe("registerContainersIpcHandlers", () => {
       .mockResolvedValue(undefined);
     const finalizeContainerLifecycleForScope = vi.fn();
 
-    registerContainersIpcHandlers({
+    registerContainersIpcHandlers(withVaults({
       hosts: {
         getById: vi.fn().mockReturnValue({ id: "host-1", kind: "ssh" }),
       },
@@ -110,7 +111,7 @@ describe("registerContainersIpcHandlers", () => {
         finalizeContainerLifecycleForScope,
       },
       stopAwsContainersTunnelForEndpoint,
-    } as any);
+    }) as any);
 
     const release = handlers.get(ipcChannels.containers.release);
     await release?.({ sender: { id: 91 } }, "host-1", "lifecycle-1");
@@ -156,7 +157,7 @@ describe("registerContainersIpcHandlers", () => {
       (_ownerWebContentsId: number, action: () => Promise<unknown>) => action(),
     );
 
-    registerContainersIpcHandlers({
+    registerContainersIpcHandlers(withVaults({
       hosts: {
         getById: vi.fn().mockReturnValue(host),
       },
@@ -192,7 +193,7 @@ describe("registerContainersIpcHandlers", () => {
         assertContainerSubscriber: vi.fn(),
       },
       trackAwsContainerShellTunnelRuntime,
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.containers.openShell);
     expect(handler).toBeTypeOf("function");
@@ -248,7 +249,7 @@ describe("registerContainersIpcHandlers", () => {
     const resolveAwsSftpPreflight = vi.fn().mockResolvedValue(host);
     const connect = vi.fn().mockResolvedValue({ sessionId: "session-1" });
 
-    registerContainersIpcHandlers({
+    registerContainersIpcHandlers(withVaults({
       hosts: {
         getById: vi.fn().mockReturnValue(host),
       },
@@ -283,7 +284,7 @@ describe("registerContainersIpcHandlers", () => {
         connect,
       },
       trackAwsContainerShellTunnelRuntime: vi.fn(),
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.containers.openShell);
     expect(handler).toBeTypeOf("function");
@@ -318,7 +319,7 @@ describe("registerContainersIpcHandlers", () => {
       .mockRejectedValueOnce(new Error("ssh handshake failed: EOF"))
       .mockResolvedValueOnce({ sessionId: "session-1" });
 
-    registerContainersIpcHandlers({
+    registerContainersIpcHandlers(withVaults({
       hosts: {
         getById: vi.fn().mockReturnValue(host),
       },
@@ -356,7 +357,7 @@ describe("registerContainersIpcHandlers", () => {
         connect,
       },
       trackAwsContainerShellTunnelRuntime: vi.fn(),
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.containers.openShell);
     const shellPromise = handler?.({}, "aws-host-1", "container-1");
@@ -376,11 +377,11 @@ describe("registerContainersIpcHandlers", () => {
       .fn()
       .mockReturnValue({ lifecycleId: "lifecycle-1" });
 
-    registerContainersIpcHandlers({
+    registerContainersIpcHandlers(withVaults({
       hosts: { getById: vi.fn(() => host) },
       coreManager: { beginContainerLifecycle },
       buildContainersEndpointId: vi.fn(() => "containers:host-1"),
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.containers.beginLifecycle);
     await expect(handler?.({}, "host-1")).resolves.toEqual({
@@ -404,7 +405,7 @@ describe("registerContainersIpcHandlers", () => {
     const containersDisconnect = vi.fn().mockResolvedValue(undefined);
     const stopAwsContainersTunnelForEndpoint = vi.fn().mockResolvedValue(undefined);
 
-    registerContainersIpcHandlers({
+    registerContainersIpcHandlers(withVaults({
       hosts: {
         getById: vi.fn(() => ({ id: "aws-host-1", kind: "ssh" })),
       },
@@ -416,7 +417,7 @@ describe("registerContainersIpcHandlers", () => {
         .fn()
         .mockImplementation((hostId: string) => `containers:${hostId}`),
       stopAwsContainersTunnelForEndpoint,
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.containers.release);
     expect(handler).toBeTypeOf("function");
@@ -458,7 +459,7 @@ describe("registerContainersIpcHandlers", () => {
     });
     const resolveTrustedHostKeys = vi.fn().mockReturnValue(["AAAATEST"]);
 
-    registerContainersIpcHandlers({
+    registerContainersIpcHandlers(withVaults({
       hosts: { getById: vi.fn().mockReturnValue(host) },
       assertSftpCompatibleHost: vi.fn(),
       buildContainersEndpointId: vi.fn(
@@ -492,7 +493,7 @@ describe("registerContainersIpcHandlers", () => {
         assertContainerSubscriber: vi.fn(),
       },
       pendingSessionSecrets: new Map(),
-    } as any);
+    }) as any);
 
     const handler = handlers.get(ipcChannels.containers.openShell);
     expect(handler).toBeTypeOf("function");
@@ -531,7 +532,7 @@ describe("임시 컨테이너 터널 정지", () => {
     });
     const stopPortForward = vi.fn().mockResolvedValue(undefined);
     const releaseContainerTunnelOwner = vi.fn();
-    registerContainersIpcHandlers({
+    registerContainersIpcHandlers(withVaults({
       hosts: { getById: vi.fn() },
       buildContainersEndpointId: vi.fn(() => "containers:host-1"),
       coreManager: {
@@ -539,7 +540,7 @@ describe("임시 컨테이너 터널 정지", () => {
         releaseContainerTunnelOwner,
         stopPortForward,
       },
-    } as any);
+    }) as any);
     return {
       stop: handlers.get(ipcChannels.containers.stopTunnel),
       stopPortForward,

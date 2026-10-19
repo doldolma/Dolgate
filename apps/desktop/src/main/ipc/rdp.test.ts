@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RdpCertificateInfo } from "@shared";
+import { withVaults } from "../vault-catalog.test-support";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const listeners = new Map<string, (...args: unknown[]) => unknown>();
@@ -176,7 +177,7 @@ function createHarness(
 
   const askCertificate = vi.fn(async () => true);
 
-  registerRdpIpcHandlers(ctx as never, rdpManager as never, { askCertificate });
+  registerRdpIpcHandlers(withVaults(ctx) as never, rdpManager as never, { askCertificate });
 
   return {
     ctx,
@@ -873,7 +874,7 @@ describe("registerRdpIpcHandlers monitor spread", () => {
     };
 
     monitorWindowsInstances.length = 0;
-    registerRdpIpcHandlers(ctx as never, rdpManager as never, {
+    registerRdpIpcHandlers(withVaults(ctx) as never, rdpManager as never, {
       askCertificate: vi.fn(async () => true),
     });
     const monitorWindows = monitorWindowsInstances.at(-1)!;

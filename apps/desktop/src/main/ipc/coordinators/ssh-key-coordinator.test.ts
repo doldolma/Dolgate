@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { HostSecretInput, SshHostRecord } from "@shared";
+import { withVaults } from "../../vault-catalog.test-support";
 import { createSshKeyCoordinator } from "./ssh-key-coordinator";
 import { createSshKeyPair } from "../../ssh-key-material";
 
@@ -83,7 +84,7 @@ function createCoordinator(options: {
 
   return {
     deps,
-    coordinator: createSshKeyCoordinator(deps),
+    coordinator: createSshKeyCoordinator(withVaults(deps)),
   };
 }
 

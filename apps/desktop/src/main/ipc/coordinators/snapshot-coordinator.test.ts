@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import { withVaults } from "../../vault-catalog.test-support";
 import { createSnapshotCoordinator } from "./snapshot-coordinator";
 
 describe("snapshot coordinator", () => {
   it("builds bootstrap and synced workspace snapshots from repositories", async () => {
-    const coordinator = createSnapshotCoordinator({
+    const coordinator = createSnapshotCoordinator(withVaults({
       hosts: { list: vi.fn(() => [{ id: "host-1" }]) } as any,
       groups: { list: vi.fn(() => [{ id: "group-1" }]) } as any,
       settings: { get: vi.fn(() => ({ theme: "system" })) } as any,
@@ -19,7 +20,7 @@ describe("snapshot coordinator", () => {
         listPortForwardSnapshot: vi.fn(() => ({ rules: [], runtimes: [] })),
         listResolvedDnsOverrides: vi.fn(() => []),
       } as any,
-    });
+    }));
 
     await expect(coordinator.getInitialBootstrapSnapshot()).resolves.toMatchObject({
       hosts: [{ id: "host-1" }],

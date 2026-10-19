@@ -14,7 +14,7 @@ export function registerSerialIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.serial.connect,
     async (event, input: DesktopSerialConnectInput) =>
       runWithIpcSessionOwner(ctx, event, async () => {
-      const host = ctx.hosts.getById(input.hostId);
+      const host = ctx.vaults.getHost(input.hostId);
       if (!host) {
         throw new Error("Host not found");
       }

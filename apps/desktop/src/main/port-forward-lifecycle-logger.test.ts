@@ -60,7 +60,7 @@ describe('PortForwardLifecycleLogger', () => {
     const logger = new PortForwardLifecycleLogger(
       { upsert },
       { getById: vi.fn(() => createRule()) },
-      { getById: vi.fn(() => createHost({ kind: 'aws-ec2', label: 'bastion' })) },
+      { getHost: vi.fn(() => createHost({ kind: 'aws-ec2', label: 'bastion' })) },
       () => '2026-04-03T00:00:00.000Z',
     );
 
@@ -99,7 +99,7 @@ describe('PortForwardLifecycleLogger', () => {
     const logger = new PortForwardLifecycleLogger(
       { upsert },
       { getById: vi.fn(() => createRule({ transport: 'ssh', mode: 'dynamic', bindPort: 1080 })) },
-      { getById: vi.fn(() => createHost({ label: 'ssh-host' })) },
+      { getHost: vi.fn(() => createHost({ label: 'ssh-host' })) },
       () => '2026-04-03T00:00:00.000Z',
     );
 
@@ -140,7 +140,7 @@ describe('PortForwardLifecycleLogger', () => {
     const logger = new PortForwardLifecycleLogger(
       { upsert },
       { getById: vi.fn(() => createRule({ transport: 'container', containerName: 'web', containerRuntime: 'docker', networkName: 'bridge', targetPort: 8080 })) },
-      { getById: vi.fn(() => createHost({ label: 'docker-host' })) },
+      { getHost: vi.fn(() => createHost({ label: 'docker-host' })) },
       () => '2026-04-03T00:00:00.000Z',
     );
 
@@ -166,7 +166,7 @@ describe('PortForwardLifecycleLogger', () => {
     const logger = new PortForwardLifecycleLogger(
       { upsert },
       { getById: vi.fn() },
-      { getById: vi.fn(() => createHost({ label: 'docker-host' })) },
+      { getHost: vi.fn(() => createHost({ label: 'docker-host' })) },
       () => '2026-04-03T00:00:00.000Z',
     );
     const tunnelEvent = (
@@ -203,7 +203,7 @@ describe('PortForwardLifecycleLogger', () => {
     const logger = new PortForwardLifecycleLogger(
       { upsert },
       { getById: vi.fn(() => createRule({ transport: 'ssh', mode: 'local' })) },
-      { getById: vi.fn(() => createHost({ label: 'ssh-host' })) },
+      { getHost: vi.fn(() => createHost({ label: 'ssh-host' })) },
       () => '2026-04-03T00:00:00.000Z',
     );
 
@@ -242,7 +242,7 @@ describe('PortForwardLifecycleLogger', () => {
     const logger = new PortForwardLifecycleLogger(
       { upsert },
       { getById: vi.fn(() => null) },
-      { getById: vi.fn(() => createHost({ kind: 'aws-ec2', label: 'bastion' })) },
+      { getHost: vi.fn(() => createHost({ kind: 'aws-ec2', label: 'bastion' })) },
       () => '2026-04-03T00:00:00.000Z',
     );
 
@@ -272,7 +272,7 @@ describe('PortForwardLifecycleLogger', () => {
     const logger = new PortForwardLifecycleLogger(
       { upsert },
       { getById: vi.fn(() => null) },
-      { getById: vi.fn(() => createHost()) },
+      { getHost: vi.fn(() => createHost()) },
       () => '2026-04-03T00:00:00.000Z',
     );
 

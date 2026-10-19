@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { app, dialog, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import { registerWindowUpdaterSettingsFilesIpcHandlers } from "./window-updater-settings-files";
+import { withVaults } from "../vault-catalog.test-support";
 
 vi.mock("electron", () => ({
   app: {
@@ -31,7 +32,7 @@ function getRegisteredHandler(channel: string) {
 }
 
 function createContext() {
-  return {
+  return withVaults({
     buildWindowState: vi.fn(),
     resolveWindowFromSender: vi.fn(),
     coreManager: {
@@ -72,7 +73,7 @@ function createContext() {
       chmod: vi.fn(),
       delete: vi.fn(),
     },
-  } as any;
+  }) as any;
 }
 
 describe("registerWindowUpdaterSettingsFilesIpcHandlers", () => {

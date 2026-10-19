@@ -20,7 +20,6 @@ import {
 import type { CoreManager } from "../../core-manager";
 import { resolveLocalAgentEndpoint } from "../agent-endpoint";
 import { pickContainerTunnelHost, resolveContainerTunnelTarget } from "../../container-port-forward-target";
-import type { KnownHostRepository } from "../../database";
 import type { AwsSftpCoordinator } from "./aws-sftp-coordinator";
 import { retryAwsSsmSshOperation } from "./aws-ssm-ssh-retry";
 import type { HostCoordinator } from "./host-coordinator";
@@ -73,7 +72,6 @@ export interface ContainerRuntimeCoordinator {
 
 export function createContainerRuntimeCoordinator(deps: {
   coreManager: CoreManager;
-  knownHosts: KnownHostRepository;
   awsService: AwsService;
   authService: AuthService;
   awsSsmTunnelService: AwsSsmTunnelService;
@@ -88,7 +86,6 @@ export function createContainerRuntimeCoordinator(deps: {
 }): ContainerRuntimeCoordinator {
   const {
     coreManager,
-    knownHosts,
     awsService,
     authService,
     awsSsmTunnelService,
@@ -157,6 +154,7 @@ export function createContainerRuntimeCoordinator(deps: {
         }));
       const sshPort = getAwsEc2HostSshPort(hydratedHost);
       const trustedHostKeysBase64 = hostCoordinator.requireTrustedHostKeys({
+        id: hydratedHost.id,
         hostname: buildAwsSsmKnownHostIdentity({
           profileName: awsService.requireManagedProfileName(
             hydratedHost.awsProfileId,
@@ -317,6 +315,7 @@ export function createContainerRuntimeCoordinator(deps: {
 
     if (isWarpgateSshHostRecord(host)) {
       const trustedHostKeysBase64 = hostCoordinator.resolveTrustedHostKeys({
+        id: host.id,
         hostname: host.warpgateSshHost,
         port: host.warpgateSshPort,
       });

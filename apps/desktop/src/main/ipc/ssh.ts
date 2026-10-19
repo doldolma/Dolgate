@@ -169,7 +169,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
     reason: string,
     remembered: boolean,
   ): AwsSessionFallback => {
-    const current = ctx.hosts.getById(host.id);
+    const current = ctx.vaults.getHost(host.id);
     const latest = current && isAwsEc2HostRecord(current) ? current : host;
     const unverified = (latest.awsSshMetadataError ?? "").trim() !== "";
     const username = (latest.awsSshUsername ?? "").trim();
@@ -184,7 +184,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.ssh.connect,
     async (event, input: DesktopConnectInput) =>
       runWithIpcSessionOwner(ctx, event, async () => {
-      const host = ctx.hosts.getById(input.hostId);
+      const host = ctx.vaults.getHost(input.hostId);
       if (!host) {
         throw new Error("Host not found");
       }
@@ -299,7 +299,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
               if (isHostKeySecurityError(error)) {
                 throw error;
               }
-              const latestHost = ctx.hosts.getById(host.id);
+              const latestHost = ctx.vaults.getHost(host.id);
               failedSshOverSsm = {
                 error,
                 signature:
@@ -358,6 +358,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
 
       if (isWarpgateSshHostRecord(host)) {
         const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys({
+          id: host.id,
           hostname: host.warpgateSshHost,
           port: host.warpgateSshPort,
         });
