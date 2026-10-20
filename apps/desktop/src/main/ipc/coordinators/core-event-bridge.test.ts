@@ -1,4 +1,6 @@
+import { BrowserWindow } from "electron";
 import { describe, expect, it, vi } from "vitest";
+import { ipcChannels } from "../../../common/ipc-channels";
 import { createCoreEventBridge } from "./core-event-bridge";
 
 vi.mock("electron", () => ({
@@ -102,8 +104,35 @@ describe("core event bridge", () => {
       "host-1",
       "Prod",
       { password: "secret" },
+      undefined,
     );
     expect(bridge.pendingSessionSecrets.has("session-1")).toBe(false);
+  });
+
+  // 요청 창에서 바꾼 사용자 이름은 붙은 뒤에 저장되고(개인 호스트는 레코드, 팀 호스트는 내 칸), 화면이 호스트
+  // 목록을 다시 읽는다.
+  it("saves the username typed into the prompt once connected and has the windows reload hosts", async () => {
+    const send = vi.fn();
+    vi.mocked(BrowserWindow.getAllWindows).mockReturnValueOnce([
+      { isDestroyed: () => false, webContents: { send } },
+    ] as never);
+    const { deps, bridge, terminalHandler } = createBridge();
+    bridge.pendingSessionSecrets.set("session-1", {
+      hostId: "host-1",
+      label: "Prod",
+      secrets: { password: "secret" },
+      username: "bob",
+    });
+
+    await terminalHandler()({ type: "connected", sessionId: "session-1" });
+
+    expect(deps.secretCoordinator.persistHostSpecificSecret).toHaveBeenCalledWith(
+      "host-1",
+      "Prod",
+      { password: "secret" },
+      "bob",
+    );
+    expect(send).toHaveBeenCalledWith(ipcChannels.bootstrap.workspaceChanged);
   });
 
   it("clears pending secrets and shell tunnels on closed events", async () => {

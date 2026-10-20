@@ -269,6 +269,16 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
   );
 
   ipcMain.handle(
+    ipcChannels.hosts.setLoginUsername,
+    async (event, id: string, username: string) => {
+      const record = ctx.vaults.setHostLoginUsername(id, username);
+      ctx.queueSync();
+      ctx.emitWorkspaceChanged?.(event?.sender);
+      return record;
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.hosts.setTerminalTheme,
     async (event, id: string, terminalThemeId: TerminalThemeId | null) => {
       const record = ctx.vaults.setHostTerminalTheme(id, terminalThemeId);

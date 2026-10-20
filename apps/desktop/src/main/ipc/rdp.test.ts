@@ -151,7 +151,10 @@ function createHarness(
         profileName === "gw-prod" ? "profile-1" : null,
       ),
     },
-    loadSecrets: vi.fn(async () => ({ password: "secret" })),
+    loadSecrets: vi.fn(async (_secretRef?: string | null) => ({ password: "secret" })),
+    loadHostSecrets(host: { secretRef?: string | null }) {
+      return this.loadSecrets(host.secretRef);
+    },
     activityLogs: { append: vi.fn() },
     queueSync: vi.fn(),
   };
@@ -888,7 +891,10 @@ describe("registerRdpIpcHandlers monitor spread", () => {
         getById: vi.fn(() => host),
         updateRdpCertificateFingerprint: vi.fn(),
       },
-      loadSecrets: vi.fn(async () => ({ password: "secret" })),
+      loadSecrets: vi.fn(async (_secretRef?: string | null) => ({ password: "secret" })),
+      loadHostSecrets(host: { secretRef?: string | null }) {
+        return this.loadSecrets(host.secretRef);
+      },
       activityLogs: { append: vi.fn() },
       queueSync: vi.fn(),
     };

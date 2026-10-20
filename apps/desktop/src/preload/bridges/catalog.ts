@@ -22,6 +22,8 @@ export function buildHostsBridge(
     remove: (id: string) => ipcRenderer.invoke(ipcChannels.hosts.remove, id),
     setFavorite: (id: string, favorite: boolean) =>
       ipcRenderer.invoke(ipcChannels.hosts.setFavorite, id, favorite),
+    setLoginUsername: (id: string, username: string) =>
+      ipcRenderer.invoke(ipcChannels.hosts.setLoginUsername, id, username),
     setTerminalTheme: (id: string, terminalThemeId: TerminalThemeId | null) =>
       ipcRenderer.invoke(ipcChannels.hosts.setTerminalTheme, id, terminalThemeId),
     setDetectedOs: (id: string, detectedOs: HostDetectedOs | null) =>

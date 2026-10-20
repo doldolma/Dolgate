@@ -20,6 +20,12 @@ export function buildTeamsBridge(ipcRenderer: IpcRenderer): DesktopApi["teams"] 
     revokeInvite: (teamId, code) => ipcRenderer.invoke(ipcChannels.teams.revokeInvite, teamId, code),
     getInviteInfo: (link) => ipcRenderer.invoke(ipcChannels.teams.getInviteInfo, link),
     join: (link) => ipcRenderer.invoke(ipcChannels.teams.join, link),
+    previewCopy: (request) => ipcRenderer.invoke(ipcChannels.teams.previewCopy, request),
+    copy: (request) => ipcRenderer.invoke(ipcChannels.teams.copy, request),
+    getMyCredentials: (hostId) => ipcRenderer.invoke(ipcChannels.teams.getMyCredentials, hostId),
+    setMyCredentials: (hostId, credentials) =>
+      ipcRenderer.invoke(ipcChannels.teams.setMyCredentials, hostId, credentials),
+    clearMyCredentials: (hostId) => ipcRenderer.invoke(ipcChannels.teams.clearMyCredentials, hostId),
     onChanged: (listener) => subscribeTeamsChanged(listener),
   };
 }

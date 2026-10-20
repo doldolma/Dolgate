@@ -56,6 +56,22 @@ describe("registerHostsGroupsIpcHandlers", () => {
   });
 
   // 팀 호스트의 비밀값은 그 팀 볼트에 둔다. 개인에 두면 팀원은 못 쓰고 내 개인 동기화로 올라간다.
+  // 사용자 이름이 없을 때 묻는 창: 어디에 둘지는 카탈로그가 정한다(개인=레코드, 팀=내 자격 증명).
+  it("sets a login username through the catalog and lets sync and the windows know", async () => {
+    const ctx = createContext();
+    ctx.vaults = { ...ctx.vaults, setHostLoginUsername: vi.fn(() => ({ id: "host-1", username: "bob" })) };
+    ctx.emitWorkspaceChanged = vi.fn();
+    registerHostsGroupsIpcHandlers(ctx);
+
+    const result = await getRegisteredHandler(ipcChannels.hosts.setLoginUsername)({ sender: "window" }, "host-1", "bob");
+
+    expect(ctx.vaults.setHostLoginUsername).toHaveBeenCalledWith("host-1", "bob");
+    expect(result).toEqual({ id: "host-1", username: "bob" });
+    expect(ctx.queueSync).toHaveBeenCalled();
+    expect(ctx.emitWorkspaceChanged).toHaveBeenCalledWith("window");
+    expect(ctx.hosts.update).not.toHaveBeenCalled();
+  });
+
   it("creates a host in a team vault and keeps its password in that team", async () => {
     const ctx = createContext();
     const teamScope = {

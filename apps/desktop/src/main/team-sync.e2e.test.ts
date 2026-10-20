@@ -153,6 +153,7 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
     const { TeamSyncService } = await import("./team-sync-service");
     const { TeamService } = await import("./team-service");
     const { SecretStore } = await import("./secret-store");
+    const { VaultCopyService } = await import("./vault-copy-service");
 
     const context = {
       userId: account.userId,
@@ -211,6 +212,8 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
       ),
       teamVaultScope.createStoredTeamVaults(),
     );
+    // 복사하는 IPC 가 하는 일 그대로 — 쓰고 나서 동기화는 시험이 직접 건다.
+    const copies = new VaultCopyService({ vaults: catalog, onCopied: () => undefined });
     /** 살아 있는 감시 루프를 한 바퀴씩. 바뀐 것이 있을 때만 부른다. */
     const tick = async () => {
       for (const entry of loops.filter((candidate) => !candidate.stopped)) {
@@ -227,6 +230,8 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
       service,
       teams,
       catalog,
+      copies,
+      secretStore,
       database,
       vaultRoot,
       tick,
@@ -425,6 +430,206 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
     await deviceB.service.pushDirty();
     const after = await api(accountA.accessToken, "GET", `/teams/${teamId}/sync`);
     expect(after.etag).toBe(before.etag);
+  }, 60_000);
+
+  it("A copies a personal host and its jump host into the team, and B connects with the copied password", async () => {
+    // A1 의 개인 볼트: 점프 호스트를 거치는 호스트, 둘이 함께 쓰는 비밀번호.
+    await deviceA1.secretStore.save(
+      "secret:a-personal",
+      JSON.stringify({ secretRef: "secret:a-personal", label: "mine", password: "a-personal-pw", updatedAt: new Date().toISOString() }),
+    );
+    const personalHosts = new deviceA1.database.HostRepository();
+    const draft = (label: string) => ({
+      kind: "ssh" as const,
+      label,
+      hostname: `${label}.internal`,
+      port: 22,
+      username: "ops",
+      authType: "password" as const,
+    });
+    personalHosts.create("copy-bastion", draft("bastion"), "secret:a-personal");
+    personalHosts.create("copy-web", { ...draft("web"), jumpHostIds: ["copy-bastion"] }, "secret:a-personal");
+
+    const result = deviceA1.copies.copy({
+      sourceVaultId: "personal",
+      targetVaultId: teamId,
+      selection: { kind: "hosts", hostIds: ["copy-web"] },
+      targetGroupPath: "Shared",
+    });
+    await deviceA1.service.pushDirty();
+    await deviceB.tick();
+
+    // B 는 팀 볼트에서 복사본을 받고, 점프 호스트도 복사본끼리 이어져 있으며, 비밀번호를 연다.
+    const webOnB = deviceB.catalog.getHost(result.hostIds["copy-web"]) as Record<string, unknown> | null;
+    expect(webOnB).toMatchObject({
+      label: "web",
+      groupName: "Shared",
+      jumpHostIds: [result.hostIds["copy-bastion"]],
+    });
+    expect(deviceB.catalog.scopeOfHost(result.hostIds["copy-web"]).id).toBe(teamId);
+    expect(deviceB.catalog.getHostInSameVault(result.hostIds["copy-web"], result.hostIds["copy-bastion"])).not.toBeNull();
+    await expect(deviceB.catalog.loadSecret(String(webOnB?.secretRef))).resolves.toContain("a-personal-pw");
+    // A 의 개인 원본은 그대로이고, B 의 개인 볼트에는 아무것도 오지 않는다.
+    expect(deviceA1.storage.getState().data.hosts.map((host) => host.id).sort()).toEqual(["copy-bastion", "copy-web"]);
+    expect(deviceB.storage.getState().data.hosts).toEqual([]);
+  }, 60_000);
+
+  it("A's own login to a team host follows A to A2, locked with A's key, and never reaches B", async () => {
+    deviceA1.catalog.setMyHostCredentials("team-host", { username: "alice", authType: "password", password: "a-own-pw" });
+    await deviceA1.service.pushDirty();
+    await deviceA2.tick();
+    expect(deviceA2.catalog.getMyHostCredentials("team-host")).toMatchObject({ username: "alice", password: "a-own-pw" });
+
+    // 서버에는 A 의 개인 칸에만, A 의 개인 DEK 로 잠겨 있다 — 팀 키로는 안 열린다.
+    const { unwrapTeamDek } = await import("@shared");
+    const wrapped = deviceA1.storage.getTeamState(teamId)!.info.wrappedTeamDek!;
+    const teamKey = Buffer.from(unwrapTeamDek(wrapped, Buffer.from(accountA.dekBase64, "base64"), teamId)).toString("base64");
+    const mine = await api(accountA.accessToken, "GET", `/teams/${teamId}/me`);
+    const records = mine.body.hostCredentials as Array<{ id: string; encrypted_payload: string }>;
+    expect(records.map((record) => record.id)).toEqual(["team-host"]);
+    expect(decrypt(records[0].encrypted_payload, accountA.dekBase64)).toMatchObject({
+      credentials: { username: "alice", password: "a-own-pw" },
+    });
+    expect(() => decrypt(records[0].encrypted_payload, teamKey)).toThrow();
+    // B 의 개인 칸에도, 팀 레코드에도 없다.
+    const theirs = await api(accountB.accessToken, "GET", `/teams/${teamId}/me`);
+    expect(theirs.body.hostCredentials ?? []).toEqual([]);
+    const team = await api(accountB.accessToken, "GET", `/teams/${teamId}/sync`);
+    expect(team.body.hostCredentials ?? []).toEqual([]);
+    expect(JSON.stringify(team.body)).not.toContain("a-own-pw");
+    expect(deviceB.catalog.getMyHostCredentials("team-host")).toBeNull();
+
+    // 지우면 A2 에서도 지워진다.
+    deviceA1.catalog.setMyHostCredentials("team-host", null);
+    await deviceA1.service.pushDirty();
+    await deviceA2.tick();
+    expect(deviceA2.catalog.getMyHostCredentials("team-host")).toBeNull();
+  }, 60_000);
+
+  it("A shares a host without its password: B gets the host only, while A and A2 connect with A's own", async () => {
+    await deviceA1.secretStore.save(
+      "secret:a-quiet",
+      JSON.stringify({ secretRef: "secret:a-quiet", label: "quiet", password: "a-quiet-pw", updatedAt: new Date().toISOString() }),
+    );
+    new deviceA1.database.HostRepository().create(
+      "quiet",
+      { kind: "ssh", label: "quiet", hostname: "quiet.internal", port: 22, username: "ops", authType: "password" },
+      "secret:a-quiet",
+    );
+
+    const result = deviceA1.copies.copy({
+      sourceVaultId: "personal",
+      targetVaultId: teamId,
+      selection: { kind: "hosts", hostIds: ["quiet"] },
+      shareSecrets: false,
+    });
+    await deviceA1.service.pushDirty();
+    await deviceB.tick();
+    await deviceA2.tick();
+
+    const copyId = result.hostIds.quiet;
+    // B 는 호스트만 받는다 — 비밀값도 A 의 자격 증명도 없어서, 처음 접속할 때 자기 것을 넣는다.
+    expect(deviceB.catalog.getHost(copyId)).toMatchObject({ label: "quiet", username: "ops", secretRef: null });
+    expect(deviceB.catalog.getMyHostCredentials(copyId)).toBeNull();
+    // A 의 두 기기는 A 의 자격 증명으로 그대로 붙는다.
+    expect(deviceA1.catalog.getMyHostCredentials(copyId)).toEqual({ password: "a-quiet-pw" });
+    expect(deviceA2.catalog.getMyHostCredentials(copyId)).toEqual({ password: "a-quiet-pw" });
+    // 서버의 팀 레코드에는 어디에도 없다.
+    const { unwrapTeamDek } = await import("@shared");
+    const wrapped = deviceA1.storage.getTeamState(teamId)!.info.wrappedTeamDek!;
+    const teamKey = Buffer.from(unwrapTeamDek(wrapped, Buffer.from(accountA.dekBase64, "base64"), teamId)).toString("base64");
+    const snapshot = await api(accountB.accessToken, "GET", `/teams/${teamId}/sync`);
+    const opened = Object.values(snapshot.body)
+      .filter((records): records is Array<{ encrypted_payload: string }> => Array.isArray(records))
+      .flat()
+      .filter((record) => typeof record?.encrypted_payload === "string")
+      .map((record) => JSON.stringify(decrypt(record.encrypted_payload, teamKey)));
+    expect(opened.some((text) => text.includes(copyId))).toBe(true);
+    expect(opened.join("\n")).not.toContain("a-quiet-pw");
+  }, 60_000);
+
+  // AWS 정적 키와 tailnet auth key 는 사람의 인증 정보라 함께 공유여도 팀에 가지 않는다 — 팀에는 설정만.
+  it("A shares an EC2 host and a tailnet host: the team gets the settings, the keys stay A's own", async () => {
+    const at = new Date().toISOString();
+    new deviceA1.database.AwsProfileRepository().upsert({
+      id: "a-static",
+      kind: "static",
+      name: "a-prod",
+      region: "ap-northeast-2",
+      accessKeyId: "AKIAAONLY",
+      secretAccessKey: "a-only-secret",
+      updatedAt: at,
+    });
+    new deviceA1.database.TailnetRepository().save({ id: "a-tailnet", label: "corp", createdAt: at, updatedAt: at }, "tskey-a-only");
+    const personalHosts = new deviceA1.database.HostRepository();
+    personalHosts.create("a-ec2", {
+      kind: "aws-ec2",
+      label: "a-ec2",
+      awsProfileId: "a-static",
+      awsProfileName: "a-prod",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-0e2e000000000001",
+    });
+    personalHosts.create("a-tn", {
+      kind: "ssh",
+      label: "a-tn",
+      hostname: "tn.internal",
+      port: 22,
+      username: "ops",
+      authType: "password",
+      tailnetId: "a-tailnet",
+    });
+
+    // 함께 공유(기본)로 복사한다.
+    const result = deviceA1.copies.copy({
+      sourceVaultId: "personal",
+      targetVaultId: teamId,
+      selection: { kind: "hosts", hostIds: ["a-ec2", "a-tn"] },
+    });
+    await deviceA1.service.pushDirty();
+    await deviceB.tick();
+    await deviceA2.tick();
+
+    const ec2OnB = deviceB.catalog.getHost(result.hostIds["a-ec2"]) as Record<string, unknown> | null;
+    const tnOnB = deviceB.catalog.getHost(result.hostIds["a-tn"]) as Record<string, unknown> | null;
+    const profileId = String(ec2OnB?.awsProfileId);
+    const tailnetId = String(tnOnB?.tailnetId);
+    expect(ec2OnB).toMatchObject({ awsProfileName: "a-prod" });
+
+    // 서버의 팀 레코드에는 설정만 있다.
+    const { unwrapTeamDek } = await import("@shared");
+    const wrapped = deviceA1.storage.getTeamState(teamId)!.info.wrappedTeamDek!;
+    const teamKey = Buffer.from(unwrapTeamDek(wrapped, Buffer.from(accountA.dekBase64, "base64"), teamId)).toString("base64");
+    const snapshot = await api(accountB.accessToken, "GET", `/teams/${teamId}/sync`);
+    const opened = Object.values(snapshot.body)
+      .filter((records): records is Array<{ encrypted_payload: string }> => Array.isArray(records))
+      .flat()
+      .filter((record) => typeof record?.encrypted_payload === "string")
+      .map((record) => JSON.stringify(decrypt(record.encrypted_payload, teamKey)));
+    expect(opened.some((text) => text.includes(profileId) && text.includes("a-prod"))).toBe(true);
+    expect(opened.some((text) => text.includes(tailnetId) && text.includes("corp"))).toBe(true);
+    expect(opened.join("\n")).not.toMatch(/AKIAAONLY|a-only-secret|tskey-a-only/);
+
+    // 키는 A 의 개인 칸에만, A 의 개인 DEK 로 잠겨 있다.
+    const mine = await api(accountA.accessToken, "GET", `/teams/${teamId}/me`);
+    const sealed = (kind: string) =>
+      (mine.body[kind] as Array<{ id: string; encrypted_payload: string }>).find((record) => record.id === (kind === "tailnetCredentials" ? tailnetId : profileId))!;
+    expect(decrypt(sealed("awsProfileCredentials").encrypted_payload, accountA.dekBase64)).toMatchObject({
+      credentials: { accessKeyId: "AKIAAONLY", secretAccessKey: "a-only-secret" },
+    });
+    expect(decrypt(sealed("tailnetCredentials").encrypted_payload, accountA.dekBase64)).toMatchObject({
+      credentials: { authKey: "tskey-a-only" },
+    });
+    expect(() => decrypt(sealed("tailnetCredentials").encrypted_payload, teamKey)).toThrow();
+
+    // A2 는 받아 코어에 자기 키로 넘기고, B 는 키가 없다(Tailscale 은 브라우저 로그인, 정적 키는 자기 것을 넣는다).
+    expect(deviceA2.catalog.getScope(teamId)!.memberPrefs!.readAwsProfileCredentials(profileId)).toEqual({
+      accessKeyId: "AKIAAONLY",
+      secretAccessKey: "a-only-secret",
+    });
+    expect(deviceA2.catalog.listTailnetPayloads().find((tailnet) => tailnet.id === tailnetId)?.authKey).toBe("tskey-a-only");
+    expect(deviceB.catalog.getScope(teamId)!.memberPrefs!.readAwsProfileCredentials(profileId)).toBeNull();
+    expect(deviceB.catalog.listTailnetPayloads().find((tailnet) => tailnet.id === tailnetId)?.authKey).toBeUndefined();
   }, 60_000);
 
   it("removing B wipes B's copy and the old link stops working", async () => {

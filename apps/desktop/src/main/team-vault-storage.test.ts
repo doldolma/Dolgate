@@ -249,6 +249,9 @@ describe("values that differ per member", () => {
     expect(again.storage.readTeamMemberPrefs(TEAM_ID)).toEqual({
       hostPrefs: team.private.hostPrefs,
       workspacePrefs: [],
+      hostCredentials: [],
+      awsProfileCredentials: [],
+      tailnetCredentials: [],
       terminalThemeByHostId: { "team-host": "kanagawa-wave" },
     });
   });
@@ -349,16 +352,281 @@ describe("writes that follow the host's vault", () => {
     expect(state.data.syncOutbox).toEqual([]);
   });
 
-  it("hands the core every vault's tailnet, team ones included", async () => {
-    const { database, vaultRoot, addTeam, createCatalog } = await load();
+  // 팀 tailnet 에 붙는 auth key 는 내 것이다 — 팀 쪽에 키가 남아 있어도(옛 데이터) 코어에 넘기지 않는다.
+  it("hands the core every vault's tailnet, a team one with my own auth key", async () => {
+    const { storage, database, vaultRoot, addTeam, createCatalog } = await load();
     addTeam(TEAM_ID);
     new database.TailnetRepository().save({ ...TEAM_TAILNET, id: "tailnet-mine", label: "Mine" }, "tskey-mine");
-    new database.TailnetRepository(vaultRoot.teamVaultRoot(TEAM_ID)).save(TEAM_TAILNET, "tskey-team");
+    new database.TailnetRepository(vaultRoot.teamVaultRoot(TEAM_ID)).save(TEAM_TAILNET, "tskey-left-in-team");
+    expect(createCatalog().listTailnetPayloads().map((tailnet) => [tailnet.id, tailnet.authKey])).toEqual([
+      ["tailnet-mine", "tskey-mine"],
+      ["tailnet-team", undefined],
+    ]);
+
+    createCatalog().getScope(TEAM_ID)!.tailnets.save(TEAM_TAILNET, "tskey-team-mine");
 
     expect(createCatalog().listTailnetPayloads().map((tailnet) => [tailnet.id, tailnet.authKey])).toEqual([
       ["tailnet-mine", "tskey-mine"],
-      ["tailnet-team", "tskey-team"],
+      ["tailnet-team", "tskey-team-mine"],
     ]);
+    expect(storage.getState().teams[TEAM_ID].secure.tailnetAuthKeysById).toEqual({});
+  });
+
+  it("keeps my credentials for a team host in my own place, locked on this device", async () => {
+    const { stateStorage, storage, database, vaultRoot, addTeam, createCatalog } = await load();
+    addTeam(TEAM_ID);
+    new database.HostRepository(vaultRoot.teamVaultRoot(TEAM_ID)).create("team-host", sshDraft("shared"));
+    new database.HostRepository().create("personal-host", sshDraft("mine"));
+    const catalog = createCatalog();
+    const mine = { username: "alice", authType: "privateKey" as const, privateKeyPem: "PEM-OF-ALICE", privateKeyPath: "/Users/alice/.ssh/id" };
+
+    catalog.setMyHostCredentials("team-host", mine);
+
+    const team = storage.getState().teams[TEAM_ID];
+    expect(team.private.hostCredentials).toEqual([
+      expect.objectContaining({ id: "team-host", value: expect.objectContaining({ encrypted: true }) }),
+    ]);
+    expect(JSON.stringify(team.private)).not.toContain("PEM-OF-ALICE");
+    expect(team.sync.privatePendingPush).toBe(true);
+    expect(catalog.getMyHostCredentials("team-host")).toEqual(mine);
+    // 팀 레코드와 팀 비밀값에는 아무것도 들어가지 않는다.
+    expect(JSON.stringify([team.data, team.secure])).not.toContain("alice");
+    // 개인 호스트에는 둘 곳이 없다 — 호스트의 비밀값을 쓴다.
+    expect(catalog.getMyHostCredentials("personal-host")).toBeNull();
+    expect(() => catalog.setMyHostCredentials("personal-host", mine)).toThrow("내 자격 증명은 팀 호스트에만 둘 수 있습니다.");
+
+    // 다시 읽어도 남는다.
+    stateStorage.resetDesktopStateStorageForTests();
+    expect(createCatalog().getMyHostCredentials("team-host")).toEqual(mine);
+
+    // 지우면 내 다른 기기에도 지움 표시가 간다.
+    createCatalog().setMyHostCredentials("team-host", null);
+    const cleared = stateStorage.getDesktopStateStorage().getState().teams[TEAM_ID];
+    expect(cleared.private.hostCredentials).toEqual([]);
+    expect(cleared.private.syncOutbox).toEqual([expect.objectContaining({ kind: "hostCredentials", recordId: "team-host" })]);
+
+    // 팀 호스트가 사라지면 내 자격 증명도 정리한다.
+    createCatalog().setMyHostCredentials("team-host", mine);
+    new database.HostRepository(vaultRoot.teamVaultRoot(TEAM_ID)).remove("team-host");
+    expect(stateStorage.getDesktopStateStorage().pruneTeamMemberPrefs(TEAM_ID)).toBe(true);
+    const pruned = stateStorage.getDesktopStateStorage().getState().teams[TEAM_ID];
+    expect(pruned.private.hostCredentials).toEqual([]);
+    // 내 다른 기기에서도 지우도록 지움 표시를 남긴다.
+    expect(pruned.private.syncOutbox).toContainEqual(
+      expect.objectContaining({ kind: "hostCredentials", recordId: "team-host" }),
+    );
+  });
+
+  it("keeps my AWS keys and tailnet auth key for team records in my own slot, used here but never sent to the team", async () => {
+    const { stateStorage, storage, database, vaultRoot, teamVaultScope, addTeam, createCatalog } = await load();
+    addTeam(TEAM_ID);
+    const scope = createCatalog().getScope(TEAM_ID)!;
+    // 키 없이 공유된 팀 정적 프로필과 tailnet(팀에는 설정만 있다).
+    scope.awsProfiles.upsert({
+      id: "aws-team",
+      kind: "static",
+      name: "team",
+      region: null,
+      accessKeyId: "",
+      secretAccessKey: "",
+      updatedAt: "2026-10-19T00:00:00.000Z",
+    });
+    scope.tailnets.save(TEAM_TAILNET);
+
+    scope.memberPrefs!.writeAwsProfileCredentials("aws-team", { accessKeyId: "AKIAMINE", secretAccessKey: "mine-secret" });
+    scope.memberPrefs!.writeTailnetCredentials(TEAM_TAILNET.id, { authKey: "tskey-mine" });
+
+    // 이 기기에서 펼치고 코어에 넘길 때는 내 것이 먼저다.
+    expect(teamVaultScope.listStoredTeamAwsProfiles()).toEqual([
+      {
+        teamId: TEAM_ID,
+        payloads: [expect.objectContaining({ id: "aws-team", accessKeyId: "AKIAMINE", secretAccessKey: "mine-secret" })],
+      },
+    ]);
+    expect(createCatalog().listTailnetPayloads()).toEqual([
+      expect.objectContaining({ id: TEAM_TAILNET.id, authKey: "tskey-mine" }),
+    ]);
+    // 팀에 올리는 것(팀 저장소의 listPayloads)과 팀 레코드에는 없다.
+    expect(scope.awsProfiles.listPayloads()).toEqual([expect.objectContaining({ accessKeyId: "", secretAccessKey: "" })]);
+    expect(scope.tailnets.listPayloads()).toEqual([expect.objectContaining({ id: TEAM_TAILNET.id, hasAuthKey: false })]);
+    expect(scope.tailnets.listPayloads()[0]).not.toHaveProperty("authKey");
+    const team = storage.getState().teams[TEAM_ID];
+    expect(team.private.awsProfileCredentials).toEqual([
+      expect.objectContaining({ id: "aws-team", value: expect.objectContaining({ encrypted: true }) }),
+    ]);
+    expect(team.private.tailnetCredentials).toEqual([expect.objectContaining({ id: TEAM_TAILNET.id })]);
+    expect(JSON.stringify([team.data, team.secure])).not.toMatch(/AKIAMINE|tskey-mine/);
+    expect(team.sync.privatePendingPush).toBe(true);
+    // 다시 읽어도 남는다.
+    stateStorage.resetDesktopStateStorageForTests();
+    expect(createCatalog().getScope(TEAM_ID)!.memberPrefs!.readTailnetCredentials(TEAM_TAILNET.id)).toEqual({
+      authKey: "tskey-mine",
+    });
+    // 지운 표시도 올리기 전에 앱을 다시 켜도 남는다 — 남지 않으면 내 다른 기기에 지운 것이 안 간다.
+    createCatalog().getScope(TEAM_ID)!.memberPrefs!.writeAwsProfileCredentials("aws-team", null);
+    stateStorage.resetDesktopStateStorageForTests();
+    expect(stateStorage.getDesktopStateStorage().listTeamPrivateDeletions(TEAM_ID)).toEqual([
+      expect.objectContaining({ kind: "awsProfileCredentials", recordId: "aws-team" }),
+    ]);
+
+    // 팀 프로필·tailnet 이 사라지면(다른 멤버가 지워 동기화로 빠짐) 내 키도 지우고, 내 다른 기기도 지우게 지움
+    // 표시를 남긴다.
+    const again = createCatalog().getScope(TEAM_ID)!;
+    again.memberPrefs!.writeAwsProfileCredentials("aws-team", { accessKeyId: "AKIAMINE", secretAccessKey: "mine-secret" });
+    const teamRoot = vaultRoot.teamVaultRoot(TEAM_ID);
+    new database.AwsProfileRepository(teamRoot).remove("aws-team");
+    new database.TailnetRepository(teamRoot).remove(TEAM_TAILNET.id);
+    expect(stateStorage.getDesktopStateStorage().pruneTeamMemberPrefs(TEAM_ID)).toBe(true);
+    const pruned = stateStorage.getDesktopStateStorage().getState().teams[TEAM_ID];
+    expect(pruned.private.awsProfileCredentials).toEqual([]);
+    expect(pruned.private.tailnetCredentials).toEqual([]);
+    expect(pruned.private.syncOutbox).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "awsProfileCredentials", recordId: "aws-team" }),
+        expect.objectContaining({ kind: "tailnetCredentials", recordId: TEAM_TAILNET.id }),
+      ]),
+    );
+  });
+
+  // 화면이 팀 볼트에 직접 쓸 때(작업 4)도 같은 규칙 — 팀 저장소가 키를 받으면 팀 쪽에 두지 않고 내 칸에 둔다.
+  it("keeps AWS static keys and a tailnet auth key written straight into a team in my own slot", async () => {
+    const { stateStorage, storage, database, vaultRoot, teamVaultScope, addTeam, createCatalog } = await load();
+    addTeam(TEAM_ID);
+    const scope = createCatalog().getScope(TEAM_ID)!;
+    const team = () => storage.getState().teams[TEAM_ID];
+
+    // 팀 쪽에 키가 남아 있어도(옛 데이터) 팀 저장소는 키를 빼고 읽는다 — 올리지도, 펼치지도 않는다.
+    new database.AwsProfileRepository(vaultRoot.teamVaultRoot(TEAM_ID)).upsert({
+      id: "aws-old",
+      kind: "static",
+      name: "old",
+      region: null,
+      accessKeyId: "AKIAOLDTEAM",
+      secretAccessKey: "old-team-secret",
+      updatedAt: "2026-10-19T00:00:00.000Z",
+    });
+    expect(scope.awsProfiles.listPayloads()).toEqual([
+      expect.objectContaining({ id: "aws-old", accessKeyId: "", secretAccessKey: "" }),
+    ]);
+    expect(teamVaultScope.listStoredTeamAwsProfiles()[0].payloads).toEqual([
+      expect.objectContaining({ id: "aws-old", accessKeyId: "", secretAccessKey: "" }),
+    ]);
+
+    scope.awsProfiles.upsert({
+      id: "aws-team",
+      kind: "static",
+      name: "team",
+      region: "ap-northeast-2",
+      accessKeyId: "AKIAWRITER",
+      secretAccessKey: "writer-secret",
+      updatedAt: "2026-10-19T00:00:00.000Z",
+    });
+    scope.tailnets.save(TEAM_TAILNET, "tskey-writer");
+
+    // 팀 쪽에는 설정만 있다 — 저장된 원본(키를 빼지 않는 기본 저장소로 읽은 것)에도 키가 없다.
+    expect(scope.awsProfiles.getPayloadById("aws-team")).toMatchObject({ name: "team", accessKeyId: "", secretAccessKey: "" });
+    expect(new database.AwsProfileRepository(vaultRoot.teamVaultRoot(TEAM_ID)).getPayloadById("aws-team")).toMatchObject({
+      accessKeyId: "",
+      secretAccessKey: "",
+    });
+    expect(team().data.tailnets).toEqual([expect.objectContaining({ id: TEAM_TAILNET.id, hasAuthKey: false })]);
+    expect(team().secure.tailnetAuthKeysById).toEqual({});
+    expect(JSON.stringify([team().data, team().secure])).not.toMatch(/AKIAWRITER|writer-secret|tskey-writer/);
+    // 키는 쓴 사람의 내 칸에 있다.
+    expect(scope.memberPrefs!.readAwsProfileCredentials("aws-team")).toEqual({
+      accessKeyId: "AKIAWRITER",
+      secretAccessKey: "writer-secret",
+    });
+    expect(scope.memberPrefs!.readTailnetCredentials(TEAM_TAILNET.id)).toEqual({ authKey: "tskey-writer" });
+
+    // 키 없이 다시 저장하면 내 것은 그대로, 빈 키를 주면 내 칸에서 지운다(개인 저장소와 같은 뜻).
+    scope.tailnets.save({ ...TEAM_TAILNET, label: "renamed" });
+    expect(scope.memberPrefs!.readTailnetCredentials(TEAM_TAILNET.id)).toEqual({ authKey: "tskey-writer" });
+    scope.tailnets.save(TEAM_TAILNET, "");
+    expect(scope.memberPrefs!.readTailnetCredentials(TEAM_TAILNET.id)).toBeNull();
+
+    // 팀 tailnet 을 지우면 내 auth key 도 지운다.
+    scope.tailnets.save(TEAM_TAILNET, "tskey-writer");
+    scope.tailnets.remove(TEAM_TAILNET.id);
+    expect(scope.memberPrefs!.readTailnetCredentials(TEAM_TAILNET.id)).toBeNull();
+
+    // 팀 것을 지우면 내 키도 지우고, 내 다른 기기도 지우게 지움 표시를 남긴다.
+    scope.awsProfiles.remove("aws-team");
+    expect(scope.memberPrefs!.readAwsProfileCredentials("aws-team")).toBeNull();
+    expect(stateStorage.getDesktopStateStorage().listTeamPrivateDeletions(TEAM_ID)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "awsProfileCredentials", recordId: "aws-team" })]),
+    );
+  });
+
+  // 요청 창·이름 묻는 창에서 넣은 사용자 이름. 팀 레코드에 쓰면 팀 모두의 사용자 이름이 바뀐다(3-6 의 F4).
+  it("puts a login username where it belongs: the record for a personal host, my own slot for a team host", async () => {
+    const { storage, database, addTeam, createCatalog } = await load();
+    addTeam(TEAM_ID);
+    const catalog = createCatalog();
+    new database.HostRepository().create("personal-host", sshDraft("mine"));
+    catalog.createHost(TEAM_ID, "team-host", sshDraft("shared"));
+    catalog.createHost(TEAM_ID, "team-blank", { ...sshDraft("blank"), username: "" });
+    const teamRecord = (id: string) =>
+      storage.getState().teams[TEAM_ID].data.hosts.find((host) => host.id === id) as unknown as Record<string, unknown>;
+
+    // 개인 호스트는 레코드에.
+    expect(catalog.setHostLoginUsername("personal-host", "alice")).toMatchObject({ username: "alice" });
+    const personalRecord = () => storage.getState().data.hosts.find((host) => host.id === "personal-host");
+    expect(personalRecord()).toMatchObject({ username: "alice" });
+    // 같은 이름이면 다시 쓰지 않는다 — 쓰면 동기화가 괜히 깨어난다.
+    const savedAt = personalRecord()?.updatedAt;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    catalog.setHostLoginUsername("personal-host", "alice");
+    expect(personalRecord()?.updatedAt).toBe(savedAt);
+    vi.useRealTimers();
+
+    // 팀 호스트는 내 칸에 — 팀 레코드는 그대로다. 팀 것과 같은 이름이면 내 칸에서 뺀다.
+    catalog.setHostLoginUsername("team-host", "bob");
+    expect(teamRecord("team-host")).toMatchObject({ username: "ubuntu" });
+    expect(catalog.getMyHostCredentials("team-host")).toEqual({ username: "bob" });
+    catalog.setHostLoginUsername("team-host", "ubuntu");
+    expect(catalog.getMyHostCredentials("team-host")).toBeNull();
+
+    // 팀 레코드에 이름이 없으면 화면에 내 이름을 채워 보낸다 — 화면은 레코드의 이름을 보고 묻는 창을 띄운다.
+    expect(catalog.setHostLoginUsername("team-blank", "carol")).toMatchObject({ username: "carol" });
+    expect(catalog.getHost("team-blank")).toMatchObject({ username: "carol" });
+    expect(catalog.listHosts().find((host) => host.id === "team-blank")).toMatchObject({ username: "carol" });
+    expect(teamRecord("team-blank")).toMatchObject({ username: "" });
+    // 편집 창이 채워 받은 이름을 그대로 돌려보내도 팀 레코드에 쓰지 않는다.
+    catalog.updateHost("team-blank", { ...sshDraft("blank renamed"), username: "carol" });
+    expect(teamRecord("team-blank")).toMatchObject({ label: "blank renamed", username: "" });
+    // 다른 이름으로 고치면 팀 호스트를 고친 것이다.
+    catalog.updateHost("team-blank", { ...sshDraft("blank renamed"), username: "deploy" });
+    expect(teamRecord("team-blank")).toMatchObject({ username: "deploy" });
+  });
+
+  it("keeps a team tailnet's signed-in account on this device only", async () => {
+    const { stateStorage, storage, addTeam, createCatalog } = await load();
+    addTeam(TEAM_ID);
+    const scope = createCatalog().getScope(TEAM_ID)!;
+
+    scope.tailnets.save({ ...TEAM_TAILNET, loginName: "me@example.com" }, "tskey-team");
+
+    // 팀 레코드에는 없고 이 기기 칸에만 있다. 이 기기의 목록에는 얹혀 보인다.
+    const team = storage.getState().teams[TEAM_ID];
+    expect(team.data.tailnets[0]).not.toHaveProperty("loginName");
+    expect(team.local.tailnetLoginNameById).toEqual({ [TEAM_TAILNET.id]: "me@example.com" });
+    expect(scope.tailnets.list()[0]).toMatchObject({ id: TEAM_TAILNET.id, loginName: "me@example.com" });
+    // 올리는 것과 코어에 넘기는 것에는 싣지 않는다. auth key 는 팀에 올리지 않고 내 칸에 있다가 코어에만 간다.
+    expect(scope.tailnets.listPayloads()).toEqual([expect.objectContaining({ id: TEAM_TAILNET.id })]);
+    expect(scope.tailnets.listPayloads()[0]).not.toHaveProperty("loginName");
+    expect(scope.tailnets.listPayloads()[0]).not.toHaveProperty("authKey");
+    expect(createCatalog().listTailnetPayloads()[0]).not.toHaveProperty("loginName");
+    expect(createCatalog().listTailnetPayloads()[0]).toMatchObject({ authKey: "tskey-team" });
+
+    // 다시 읽어도 남고, tailnet 을 지우면 함께 지워진다.
+    stateStorage.resetDesktopStateStorageForTests();
+    expect(stateStorage.getDesktopStateStorage().readTeamTailnetLoginNames(TEAM_ID)).toEqual({
+      [TEAM_TAILNET.id]: "me@example.com",
+    });
+    createCatalog().getScope(TEAM_ID)!.tailnets.remove(TEAM_TAILNET.id);
+    expect(stateStorage.getDesktopStateStorage().readTeamTailnetLoginNames(TEAM_ID)).toEqual({});
   });
 
   it("does not rewrite a team host key when a connection only confirms it", async () => {

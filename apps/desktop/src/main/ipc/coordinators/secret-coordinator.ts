@@ -14,7 +14,8 @@ import type {
 } from "../../database";
 import type { SecretStore } from "../../secret-store";
 import { PERSONAL_VAULT_ID, type VaultCatalog, type VaultScope } from "../../vault-catalog";
-import type { SshHostRecord } from "../context";
+import { hasCredentialSecret, type TeamHostCredentials } from "../../team-member-prefs";
+import type { ResolvedSshAuth, SshHostRecord } from "../context";
 import { t } from '../../i18n';
 import { logMessage } from "../../activity-log-message";
 
@@ -74,12 +75,19 @@ export interface SecretCoordinator {
     label: string,
     secrets: HostSecretInput,
   ) => Promise<string | null>;
+  /**
+   * 요청 창 값을 붙은 뒤에 저장한다. 사용자 이름(typedUsername)은 개인 호스트면 레코드에, 팀 호스트면 내 자격
+   * 증명에 둔다 — 팀 레코드에 쓰면 팀 모두의 사용자 이름이 바뀐다.
+   */
   persistHostSpecificSecret: (
     hostId: string,
     label: string,
     secrets: HostSecretInput,
+    typedUsername?: string | null,
   ) => Promise<string | null>;
   loadSecrets: (secretRef?: string | null) => Promise<HostSecretInput>;
+  /** RDP·VNC 처럼 비밀값만 읽는 접속. 팀 호스트는 내 자격 증명이 먼저다. */
+  loadHostSecrets: (host: { id: string; secretRef?: string | null }) => Promise<HostSecretInput>;
   hasSecretValue: (secrets: HostSecretInput) => boolean;
   mergeSecrets: (
     current: HostSecretInput,
@@ -92,6 +100,15 @@ export interface SecretCoordinator {
     secrets: HostSecretInput;
     shouldPersistHostSecret: boolean;
   }>;
+  /**
+   * SSH 로 붙을 자격 증명 — 사용자 이름·인증 방식·비밀값을 한 곳에서 정한다. SSH 계열 접속 경로는 모두
+   * 이것을 거친다. includeRuntimeCache 를 끄면 이 실행 중 요청 창에 넣었던 값을 쓰지 않는다(키 설치).
+   */
+  resolveSshAuth: (
+    host: SshHostRecord,
+    secrets?: HostSecretInput,
+    options?: { includeRuntimeCache?: boolean },
+  ) => Promise<ResolvedSshAuth>;
   resolveManagedPrivateKeyPem: (
     draft: HostDraft,
     nextSecrets: HostSecretInput | undefined,
@@ -110,15 +127,38 @@ export interface SecretCoordinator {
   ensureCertificateAuthReady: (
     host: SshHostRecord,
     secrets: HostSecretInput,
+    authType?: SshHostRecord["authType"],
   ) => Promise<SshCertificateInfo | null>;
+}
+
+/** 내 자격 증명의 비밀값 칸을 접속에 넘기는 모양으로. 빈 칸은 넣지 않는다(합칠 때 팀 것을 지우지 않게). */
+function toHostSecretInput(credentials: TeamHostCredentials): HostSecretInput {
+  const secrets: HostSecretInput = {};
+  for (const field of ["username", "domain", "password", "passphrase", "privateKeyPem", "certificateText"] as const) {
+    if (credentials[field]) {
+      secrets[field] = credentials[field];
+    }
+  }
+  return secrets;
 }
 
 export function createSecretCoordinator(deps: {
   secretStore: SecretStore;
   secretMetadata: SecretMetadataRepository;
   hosts: HostRepository;
-  /** 비밀값은 모든 볼트에서 찾고(secretRef 는 볼트를 넘어 겹치지 않는다), 팀 호스트를 가린다. */
-  vaults: Pick<VaultCatalog, "loadSecret" | "scopeOfHost">;
+  /**
+   * 비밀값은 모든 볼트에서 찾고(secretRef 는 볼트를 넘어 겹치지 않는다), 팀 호스트를 가린다. 팀 호스트는 내
+   * 자격 증명(멤버 개인 칸)이 먼저다.
+   */
+  vaults: Pick<
+    VaultCatalog,
+    | "loadSecret"
+    | "scopeOfHost"
+    | "getHost"
+    | "getMyHostCredentials"
+    | "setMyHostCredentials"
+    | "setHostLoginUsername"
+  >;
   activityLogs: ActivityLogRepository;
   queueSync: () => void;
   inspectCertificate: (certificateText: string) => Promise<SshCertificateInfo>;
@@ -330,19 +370,48 @@ export function createSecretCoordinator(deps: {
     return persistSecret(label, secrets);
   };
 
+  /**
+   * 요청 창 값을 내 자격 증명으로. 넘어온 값은 팀 비밀값과 합쳐진 것이라, 팀 것과 같은 칸은 옮기지 않는다 —
+   * 옮기면 팀이 키를 바꿔도 내 낡은 사본이 먼저 쓰인다.
+   */
+  const persistMyHostCredentials = async (hostId: string, secrets: HostSecretInput): Promise<void> => {
+    const host = vaults.getHost(hostId);
+    const team = host && "secretRef" in host ? await loadSecrets(host.secretRef) : {};
+    const typed: TeamHostCredentials = {};
+    // 사용자 이름은 여기서 옮기지 않는다 — 요청 창에서 넣은 것만 따로 저장한다(setHostLoginUsername).
+    for (const field of ["domain", "password", "passphrase", "privateKeyPem", "certificateText"] as const) {
+      const value = secrets[field];
+      if (typeof value === "string" && value && value !== team[field]) {
+        typed[field] = value;
+      }
+    }
+    if (Object.keys(typed).length === 0) {
+      return;
+    }
+    vaults.setMyHostCredentials(hostId, { ...(vaults.getMyHostCredentials(hostId) ?? {}), ...typed });
+    activityLogs.append("info", "audit", logMessage("teams.myCredentialsSaved"), { hostId });
+    queueSync();
+  };
+
   const persistHostSpecificSecret = async (
     hostId: string,
     label: string,
     secrets: HostSecretInput,
+    typedUsername?: string | null,
   ): Promise<string | null> => {
+    // 사용자 이름을 먼저 둔다(기다리는 것 없이) — 화면은 "붙었다"를 받자마자 호스트 목록을 다시 읽는다.
+    if (typedUsername?.trim()) {
+      vaults.setHostLoginUsername(hostId, typedUsername);
+      queueSync();
+    }
     if (!hasSecretValue(secrets)) {
       return null;
     }
 
-    // 팀 호스트에 접속하며 요청 창에 넣은 값은 저장하지 않는다(그 세션과 재연결 캐시에만 쓴다).
-    // 저장하면 내 비밀번호가 팀 호스트의 비밀값이 되어 팀 전체에 공유된다. 내 자격 증명을 따로 두는
-    // 칸은 작업 3 이다.
+    // 팀 호스트에서 요청 창에 넣은 값은 내 자격 증명(멤버 개인 칸)에 둔다. 팀 호스트의 비밀값은 팀 모두의
+    // 것이라 건드리지 않는다.
     if (vaults.scopeOfHost(hostId).id !== PERSONAL_VAULT_ID) {
+      await persistMyHostCredentials(hostId, secrets);
       return null;
     }
 
@@ -401,6 +470,50 @@ export function createSecretCoordinator(deps: {
       secrets: resolvedSecrets,
       shouldPersistHostSecret,
     };
+  };
+
+  const resolveSshAuth = async (
+    host: SshHostRecord,
+    provided?: HostSecretInput,
+    options: { includeRuntimeCache?: boolean } = {},
+  ): Promise<ResolvedSshAuth> => {
+    // 팀 호스트는 내 자격 증명이 먼저다(내 것 → 팀 것 → 요청 창). 비운 칸은 호스트 것을 쓴다. 요청 창에 넣은
+    // 사용자 이름은 이번 시도의 것이고, 붙으면 저장된다(persistHostSpecificSecret).
+    const mine = vaults.getMyHostCredentials(host.id);
+    const typedUsername = provided?.username?.trim() || null;
+    const username = (typedUsername ?? mine?.username ?? host.username).trim();
+    if (!username) {
+      throw new Error(t("hostIpc.usernameRequired"));
+    }
+    const authType = mine?.authType ?? host.authType;
+    const persistTyped = (hasTypedSecret: boolean) => hasTypedSecret || typedUsername !== null;
+    if (mine && hasCredentialSecret(mine)) {
+      return {
+        username,
+        authType,
+        secrets: mergeSecrets(toHostSecretInput(mine), provided ?? {}),
+        shouldPersistHostSecret: persistTyped(Boolean(provided && hasSecretValue(provided))),
+        typedUsername,
+      };
+    }
+    const { secrets, shouldPersistHostSecret } =
+      options.includeRuntimeCache === false
+        ? {
+            secrets: mergeSecrets(await loadSecrets(host.secretRef), provided ?? {}),
+            shouldPersistHostSecret: Boolean(provided && hasSecretValue(provided)),
+          }
+        : await resolveRuntimeSshSecrets(host, provided);
+    return { username, authType, secrets, shouldPersistHostSecret: persistTyped(shouldPersistHostSecret), typedUsername };
+  };
+
+  const loadHostSecrets = async (host: { id: string; secretRef?: string | null }): Promise<HostSecretInput> => {
+    const mine = vaults.getMyHostCredentials(host.id);
+    if (mine && hasCredentialSecret(mine)) {
+      return toHostSecretInput(mine);
+    }
+    const shared = await loadSecrets(host.secretRef);
+    // 계정 이름·도메인만 내 것으로 둔 경우(비밀번호는 팀 것).
+    return mine ? mergeSecrets(shared, { username: mine.username, domain: mine.domain }) : shared;
   };
 
   const resolveManagedPrivateKeyPem = async (
@@ -488,8 +601,9 @@ export function createSecretCoordinator(deps: {
   const ensureCertificateAuthReady = async (
     host: SshHostRecord,
     secrets: HostSecretInput,
+    authType: SshHostRecord["authType"] = host.authType,
   ): Promise<SshCertificateInfo | null> => {
-    if (host.authType !== "certificate") {
+    if (authType !== "certificate") {
       return null;
     }
 
@@ -533,9 +647,11 @@ export function createSecretCoordinator(deps: {
     persistImportedSecret,
     persistHostSpecificSecret,
     loadSecrets,
+    loadHostSecrets,
     hasSecretValue,
     mergeSecrets,
     resolveRuntimeSshSecrets,
+    resolveSshAuth,
     resolveManagedPrivateKeyPem,
     resolveManagedCertificateText,
     inspectCertificate,

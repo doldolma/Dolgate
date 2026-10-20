@@ -706,12 +706,9 @@ describe("createAppStore sessions and auth recovery", () => {
       updatedAt: "2025-01-01T00:00:00.000Z",
     };
     api.hosts.list = vi.fn().mockResolvedValue([initialHost]);
-    api.hosts.update = vi.fn().mockImplementation(async (_id, draft) => ({
+    api.hosts.setLoginUsername = vi.fn().mockImplementation(async (_id, username) => ({
       ...initialHost,
-      ...draft,
-      kind: "ssh",
-      id: initialHost.id,
-      createdAt: initialHost.createdAt,
+      username,
       updatedAt: "2025-01-02T00:00:00.000Z",
     }));
     const store = createAppStore(api);
@@ -720,13 +717,10 @@ describe("createAppStore sessions and auth recovery", () => {
     await store.getState().connectHost("host-1", 120, 32);
     await store.getState().submitMissingUsernamePrompt({ username: "ubuntu" });
 
-    expect(api.hosts.update).toHaveBeenCalledWith(
-      "host-1",
-      expect.objectContaining({
-        kind: "ssh",
-        username: "ubuntu",
-      }),
-    );
+    // 어디에 둘지는 메인이 정한다(개인 호스트는 레코드, 팀 호스트는 내 자격 증명) — 호스트 레코드를 통째로
+    // 고치지 않는다.
+    expect(api.hosts.setLoginUsername).toHaveBeenCalledWith("host-1", "ubuntu");
+    expect(api.hosts.update).not.toHaveBeenCalled();
     expect(api.ssh.connect).toHaveBeenCalledTimes(1);
     expect(store.getState().pendingMissingUsernamePrompt).toBeNull();
     const updatedHost = store
@@ -855,14 +849,14 @@ describe("createAppStore sessions and auth recovery", () => {
       passphrase: "secret",
     });
 
-    expect(api.hosts.update).toHaveBeenCalledWith(
-      "host-1",
+    // 바꾼 사용자 이름은 이번 시도의 값으로 넘기고, 호스트 레코드에는 쓰지 않는다 — 붙으면 메인이 제자리에
+    // 저장한다. 팀 호스트의 레코드에 쓰면 팀 모두의 이름이 바뀐다.
+    expect(api.ssh.connect).toHaveBeenCalledTimes(2);
+    expect(api.ssh.connect).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        kind: "ssh",
-        username: "test11",
+        secrets: expect.objectContaining({ username: "test11", privateKeyPem: "PRIVATE KEY" }),
       }),
     );
-    expect(api.ssh.connect).toHaveBeenCalledTimes(2);
     expect(store.getState().pendingCredentialRetry).toBeNull();
 
     store.getState().handleCoreEvent({
@@ -874,13 +868,8 @@ describe("createAppStore sessions and auth recovery", () => {
     });
     await flushMicrotasks();
 
-    expect(api.hosts.update).toHaveBeenLastCalledWith(
-      "host-1",
-      expect.objectContaining({
-        kind: "ssh",
-        username: "ubuntu",
-      }),
-    );
+    // 실패해도 되돌릴 것이 없다(쓴 적이 없다). 다시 뜨는 요청 창은 시도한 이름을 보여 준다.
+    expect(api.hosts.update).not.toHaveBeenCalled();
     expect(store.getState().pendingCredentialRetry).toMatchObject({
       hostId: "host-1",
       authType: "certificate",

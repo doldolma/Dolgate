@@ -63,6 +63,17 @@ import type { WarpgateService } from "../warpgate-service";
 import type { XshellImportService } from "../xshell-import-service";
 
 export type SshHostRecord = Extract<HostRecord, { kind: "ssh" }>;
+
+/** SSH 로 붙을 때 쓸 자격 증명 — 사용자 이름·인증 방식·비밀값. SSH 계열 접속 경로는 모두 이것을 쓴다. */
+export interface ResolvedSshAuth {
+  username: string;
+  authType: SshHostRecord["authType"];
+  secrets: HostSecretInput;
+  /** 요청 창에서 넣은 값이 들어왔다 — 접속에 성공하면 저장한다. */
+  shouldPersistHostSecret: boolean;
+  /** 요청 창에서 넣은 사용자 이름(이번 시도에 쓴다). 넣지 않았으면 null. */
+  typedUsername: string | null;
+}
 export type SftpCompatibleHostRecord = Extract<
   HostRecord,
   { kind: "ssh" | "warpgate-ssh" | "aws-ec2" }
@@ -169,6 +180,8 @@ export interface MainIpcContext {
       hostId: string;
       label: string;
       secrets: HostSecretInput;
+      /** 요청 창에서 넣은 사용자 이름. 붙으면 그 자리(개인=호스트, 팀=내 칸)에 저장한다. */
+      username?: string | null;
     }
   >;
   trackAwsSftpTunnelRuntime: (endpointId: string, runtimeId: string) => void;
@@ -205,6 +218,7 @@ export interface MainIpcContext {
     hostId: string,
     label: string,
     secrets: HostSecretInput,
+    typedUsername?: string | null,
   ) => Promise<string | null>;
   resolveAwsSftpPreflight: (input: {
     endpointId: string;
@@ -249,18 +263,18 @@ export interface MainIpcContext {
     secrets: HostSecretInput,
   ) => Promise<string | null>;
   loadSecrets: (secretRef?: string | null) => Promise<HostSecretInput>;
+  /** RDP·VNC 처럼 비밀값만 읽는 접속. 팀 호스트는 내 자격 증명이 먼저다. */
+  loadHostSecrets: (host: { id: string; secretRef?: string | null }) => Promise<HostSecretInput>;
   hasSecretValue: (secrets: HostSecretInput) => boolean;
   mergeSecrets: (
     current: HostSecretInput,
     patch: HostSecretInput,
   ) => HostSecretInput;
-  resolveRuntimeSshSecrets: (
-    host: SshHostRecord,
-    secrets?: HostSecretInput,
-  ) => Promise<{
-    secrets: HostSecretInput;
-    shouldPersistHostSecret: boolean;
-  }>;
+  /**
+   * SSH 로 붙을 자격 증명. 호스트의 사용자 이름·인증 방식·비밀값을 따로 읽지 말고 이것을 쓴다 — 팀
+   * 호스트는 내 자격 증명이 먼저다(작업 3).
+   */
+  resolveSshAuth: (host: SshHostRecord, secrets?: HostSecretInput) => Promise<ResolvedSshAuth>;
   // host.jumpHostId가 있으면 그 점프 호스트를 해석한 ResolvedJumpHost, 없으면
   // undefined를 돌려준다. 4개 connect 핸들러가 payload.jump로 실어 보낸다.
   resolveJumpHostTarget: (
@@ -292,6 +306,7 @@ export interface MainIpcContext {
   ensureCertificateAuthReady: (
     host: SshHostRecord,
     secrets: HostSecretInput,
+    authType?: SshHostRecord["authType"],
   ) => Promise<SshCertificateInfo | null>;
   requireTrustedHostKey: (host: TrustedHostKeyTarget) => string;
   resolveTrustedHostKeys: (host: TrustedHostKeyTarget) => string[];
@@ -307,7 +322,6 @@ export interface MainIpcContext {
     tailnetId?: string;
     tailnetName?: string;
   };
-  requireConfiguredSshUsername: (host: SshHostRecord) => string;
   buildKnownSshDuplicateKeys: () => Set<string>;
   assertSshHost: (host: ReturnType<HostRepository["getById"]>) => void;
   assertSftpCompatibleHost: (

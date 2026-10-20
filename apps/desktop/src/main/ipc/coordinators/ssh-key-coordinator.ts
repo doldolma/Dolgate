@@ -17,6 +17,7 @@ import type {
   ResolvedPrivateKeyGenerateResult,
 } from "@shared";
 import type {
+  ResolvedSshAuth,
   SshHostRecord,
   TrustedHostKeyTarget,
 } from "../context";
@@ -87,11 +88,17 @@ export function createSshKeyCoordinator(deps: {
     tailnetId?: string;
     tailnetName?: string;
   };
-  requireConfiguredSshUsername: (host: SshHostRecord) => string;
+  /** 설치하러 붙을 자격 증명. 이 실행 중 요청 창에 넣었던 값은 쓰지 않는다(지금까지와 같다). */
+  resolveSshAuth: (
+    host: SshHostRecord,
+    secrets?: HostSecretInput,
+    options?: { includeRuntimeCache?: boolean },
+  ) => Promise<ResolvedSshAuth>;
   resolveJumpHostTarget: (host: SshHostRecord) => Promise<ResolvedAuthorizedKeyInstallPayload["jump"]>;
   ensureCertificateAuthReady: (
     host: SshHostRecord,
     secrets: HostSecretInput,
+    authType?: SshHostRecord["authType"],
   ) => Promise<unknown>;
   inspectPrivateKey: (
     privateKeyPem: string,
@@ -117,7 +124,7 @@ export function createSshKeyCoordinator(deps: {
     loadSecrets,
     resolveTrustedHostKeys,
     resolveTailnetRoute,
-    requireConfiguredSshUsername,
+    resolveSshAuth,
     resolveJumpHostTarget,
     ensureCertificateAuthReady,
     inspectPrivateKey,
@@ -209,6 +216,7 @@ export function createSshKeyCoordinator(deps: {
 
   const buildInstallPayload = async (
     host: SshHostRecord,
+    username: string,
     publicKey: string,
     authType: AuthType,
     secrets: HostSecretInput,
@@ -225,7 +233,7 @@ export function createSshKeyCoordinator(deps: {
     return {
       host: host.hostname,
       port: host.port,
-      username: requireConfiguredSshUsername(host),
+      username,
       authType,
       password: secrets.password,
       privateKeyPem: secrets.privateKeyPem,
@@ -248,19 +256,15 @@ export function createSshKeyCoordinator(deps: {
     mode: SshKeyInstallInput["mode"],
     passphraseOverride?: string | null,
   ): Promise<SshKeyInstallResult["results"][number]> => {
-    // 팀 호스트의 인증을 내 개인 키로 바꾸면 팀원은 그 키가 없어 못 붙는다. 내 자격 증명을 따로 두는
-    // 칸(작업 3)이 생기기 전까지 팀 호스트에는 설치만 한다.
-    if (mode === "installAndUse" && vaults.scopeOfHost(host.id).id !== PERSONAL_VAULT_ID) {
-      throw new Error("A team host keeps its shared login; install the key only");
-    }
-    const currentSecrets = await loadSecrets(host.secretRef);
-    await ensureCertificateAuthReady(host, currentSecrets);
+    const auth = await resolveSshAuth(host, undefined, { includeRuntimeCache: false });
+    await ensureCertificateAuthReady(host, auth.secrets, auth.authType);
     const installResult = await installAuthorizedKey(
       await buildInstallPayload(
         host,
+        auth.username,
         keyMaterial.publicKey,
-        host.authType,
-        currentSecrets,
+        auth.authType,
+        auth.secrets,
         host.secretRef === keyMaterial.secretRef ? passphraseOverride : undefined,
       ),
       // 이 값으로 코어의 인증 물음이 설치 대화상자에 붙는다(없으면 코어가 묻지 못한다).
@@ -272,6 +276,7 @@ export function createSshKeyCoordinator(deps: {
       await installAuthorizedKey(
         await buildInstallPayload(
           host,
+          auth.username,
           keyMaterial.publicKey,
           "privateKey",
           keySecrets,
@@ -279,7 +284,19 @@ export function createSshKeyCoordinator(deps: {
         ),
         keyInstallCorrelationId(host.id),
       );
-      hosts.updateSshAuthSecret(host.id, "privateKey", keyMaterial.secretRef);
+      if (vaults.scopeOfHost(host.id).id === PERSONAL_VAULT_ID) {
+        hosts.updateSshAuthSecret(host.id, "privateKey", keyMaterial.secretRef);
+      } else {
+        // 팀 호스트의 인증을 내 키로 바꾸면 팀원은 그 키가 없어 못 붙는다 — 내 자격 증명(멤버 개인 칸)을
+        // 이 키로 바꾸고, 팀 호스트의 인증은 그대로 둔다. 개인 호스트처럼 전에 쓰던 비밀값은 버린다.
+        const username = vaults.getMyHostCredentials(host.id)?.username;
+        vaults.setMyHostCredentials(host.id, {
+          ...(username ? { username } : {}),
+          authType: "privateKey",
+          privateKeyPem: keySecrets.privateKeyPem,
+          passphrase: passphraseOverride?.trim() || keySecrets.passphrase,
+        });
+      }
     }
 
     return {

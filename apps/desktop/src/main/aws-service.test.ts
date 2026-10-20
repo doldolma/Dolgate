@@ -3,9 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AwsProfileDetails, ManagedAwsProfilePayload } from '@shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fromIni } from '@aws-sdk/credential-provider-ini';
 import {
   AwsService,
   buildSshMetadataProbeCommands,
+  teamAwsProfileName,
 } from './aws-service';
 import { AwsProfileRepository } from './database';
 import { resetDesktopStateStorageForTests } from './state-storage';
@@ -2608,6 +2610,112 @@ describe('AwsService.startSsmPortForwardSession', () => {
         localPortNumber: ['15432'],
         host: ['db.internal'],
       },
+    });
+  });
+});
+
+// 팀 볼트의 프로필은 개인 것과 같은 관리 설정 파일에 펼친다. 개인 프로필은 이름 그대로라, 팀 것은 팀 ID 를
+// 붙인 이름으로 펼쳐 겹치지 않게 하고, 팀 호스트는 프로필 id 로 그 이름을 찾아 접속한다.
+describe('AwsService team vault profiles', () => {
+  const TEAM_ID = '0f8e4c1a-2b3d-4e5f-8a9b-0c1d2e3f4a5b';
+  const personalProfiles = () => [
+    managedStaticProfile('prod', { region: 'ap-northeast-2' }),
+    managedSsoProfile('corp'),
+    managedRoleProfile('ops', 'profile:prod'),
+  ];
+  const teamProfiles = () => [
+    managedStaticProfile('prod', { id: 'team:prod', accessKeyId: 'AKIATEAMPROD', secretAccessKey: 'team-secret' }),
+    managedSsoProfile('corp', { id: 'team:corp', ssoAccountId: '210987654321' }),
+    managedRoleProfile('ops', 'team:prod', { id: 'team:ops' }),
+    // 원본이 개인 프로필 id 인 팀 role 은 잇지 않는다(볼트를 넘는 참조).
+    managedRoleProfile('stray', 'profile:prod', { id: 'team:stray' }),
+  ];
+
+  it('writes team profiles after the personal ones under names that never collide', async () => {
+    const rootDir = await createTempAwsProfileDir();
+    const service = createManagedAwsService(rootDir, personalProfiles());
+    await service.materializeManagedProfiles();
+    const personalConfig = await readFile(path.join(rootDir, 'config'), 'utf8');
+    const personalCredentials = await readFile(path.join(rootDir, 'credentials'), 'utf8');
+
+    service.setTeamProfileSource(() => [{ teamId: TEAM_ID, payloads: teamProfiles() }]);
+    await service.materializeManagedProfiles();
+    const config = await readFile(path.join(rootDir, 'config'), 'utf8');
+    const credentials = await readFile(path.join(rootDir, 'credentials'), 'utf8');
+
+    // 개인 섹션은 글자까지 그대로이고, 팀 섹션이 뒤에 붙는다.
+    expect(config.startsWith(personalConfig.trimEnd())).toBe(true);
+    expect(credentials.startsWith(personalCredentials.trimEnd())).toBe(true);
+    const teamProd = teamAwsProfileName(TEAM_ID, 'prod');
+    expect(teamProd).toBe(`prod@team-${TEAM_ID}`);
+    expect(config).toContain(
+      [`[profile ${teamAwsProfileName(TEAM_ID, 'ops')}]`, 'role_arn = arn:aws:iam::123456789012:role/Admin', `source_profile = ${teamProd}`].join('\n'),
+    );
+    expect(config).toContain(`[profile ${teamAwsProfileName(TEAM_ID, 'corp')}]`);
+    expect(config).not.toContain(teamAwsProfileName(TEAM_ID, 'stray'));
+    // 같은 SSO 는 세션 섹션 하나를 함께 쓴다.
+    expect(config.match(/\[sso-session /g)).toHaveLength(1);
+
+    // SDK 가 그 이름으로 팀 키를 읽고, 같은 이름의 개인 프로필과 섞지 않는다.
+    const read = (profile: string) =>
+      fromIni({
+        profile,
+        configFilepath: path.join(rootDir, 'config'),
+        filepath: path.join(rootDir, 'credentials'),
+        ignoreCache: true,
+      })();
+    await expect(read(teamProd)).resolves.toMatchObject({ accessKeyId: 'AKIATEAMPROD', secretAccessKey: 'team-secret' });
+    await expect(read('prod')).resolves.toMatchObject({ secretAccessKey: 'prod-secret' });
+
+    // 팀에서 빠지면 다시 펼칠 때 팀 섹션이 사라진다.
+    service.setTeamProfileSource(() => []);
+    await service.materializeManagedProfiles();
+    await expect(readFile(path.join(rootDir, 'config'), 'utf8')).resolves.toBe(personalConfig);
+    await expect(readFile(path.join(rootDir, 'credentials'), 'utf8')).resolves.toBe(personalCredentials);
+  });
+
+  // 키를 빼고 공유한 팀 정적 프로필에 내 키도 없으면 키 줄을 쓰지 않는다 — 빈 키로 붙으려 하지 않게.
+  it('writes no key lines for a team static profile that was shared without keys', async () => {
+    const rootDir = await createTempAwsProfileDir();
+    const service = createManagedAwsService(rootDir, []);
+    service.setTeamProfileSource(() => [
+      {
+        teamId: TEAM_ID,
+        payloads: [
+          managedStaticProfile('keyless', { id: 'team:keyless', accessKeyId: '', secretAccessKey: '', region: 'us-east-1' }),
+        ],
+      },
+    ]);
+
+    await service.materializeManagedProfiles();
+
+    const name = teamAwsProfileName(TEAM_ID, 'keyless');
+    await expect(readFile(path.join(rootDir, 'credentials'), 'utf8')).resolves.not.toContain(name);
+    await expect(readFile(path.join(rootDir, 'config'), 'utf8')).resolves.toContain(`[profile ${name}]`);
+  });
+
+  it('connects a team host through the team profile, found by id, and checks it as a managed profile', async () => {
+    const rootDir = await createTempAwsProfileDir();
+    const service = createManagedAwsService(rootDir, personalProfiles());
+    service.setTeamProfileSource(() => [{ teamId: TEAM_ID, payloads: teamProfiles() }]);
+
+    expect(service.requireManagedProfileName('team:prod', 'prod')).toBe(teamAwsProfileName(TEAM_ID, 'prod'));
+    expect(service.requireManagedProfileName('profile:prod', 'prod')).toBe('prod');
+    expect(service.resolveManagedProfileName('team:missing')).toBeNull();
+    expect(() => service.requireManagedProfileName('team:missing', 'gone')).toThrow();
+
+    // 팀 이름도 관리 프로필로 본다 — 개인 프로필이 있다고 "관리 프로필 아님"으로 막지 않는다.
+    const probe = service as unknown as {
+      stsGetCallerIdentityFromRoot: ReturnType<typeof vi.fn>;
+      getProfileStatus: (profileName: string) => Promise<{ id: string | null; isAuthenticated: boolean }>;
+    };
+    probe.stsGetCallerIdentityFromRoot = vi.fn().mockResolvedValue({
+      account: '123456789012',
+      arn: 'arn:aws:iam::123456789012:user/test',
+    });
+    await expect(probe.getProfileStatus(teamAwsProfileName(TEAM_ID, 'prod'))).resolves.toMatchObject({
+      id: 'team:prod',
+      isAuthenticated: true,
     });
   });
 });

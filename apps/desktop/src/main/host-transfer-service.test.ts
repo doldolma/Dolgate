@@ -248,6 +248,31 @@ describe("buildDolgateHostBundle", () => {
     }
   });
 
+  // 비밀번호·키를 빼고 팀에 공유한 정적 프로필은 키가 둘 다 비어 있다. 복사·내보내기·가져오기가 그것에
+  // 막히면 안 된다 — 키 하나만 빈 것은 여전히 깨진 파일이다.
+  it("carries a static profile whose keys were left out, but not one missing only one key", () => {
+    const record = awsHost("host-aws", "Production EC2", "keyless");
+    const state = stateWithHosts([record]);
+    addAwsProfile(state, {
+      id: "keyless",
+      name: "team",
+      kind: "static",
+      region: null,
+      accessKeyId: "",
+      secretAccessKey: "",
+      updatedAt: timestamp,
+    });
+
+    const bundle = buildDolgateHostBundle(state, [record.id]);
+    expect(bundle.awsProfiles).toEqual([expect.objectContaining({ id: "keyless", accessKeyId: "", secretAccessKey: "" })]);
+    expect(parseDolgateBundle(JSON.parse(JSON.stringify(bundle))).bundle.awsProfiles).toEqual([
+      expect.objectContaining({ id: "keyless", accessKeyId: "", secretAccessKey: "" }),
+    ]);
+
+    const halfKey = { ...bundle, awsProfiles: [{ ...bundle.awsProfiles[0], accessKeyId: "AKIAEXAMPLE" }] };
+    expect(() => parseDolgateBundle(JSON.parse(JSON.stringify(halfKey)))).toThrow(/AWS access key|AWS secret key/);
+  });
+
   it("exports an AWS host without a profile reference when the profile is missing", () => {
     const record = awsHost("host-aws", "Production EC2", "missing-profile");
 

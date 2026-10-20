@@ -390,10 +390,9 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
       ctx.assertSshHost(host);
       const sshHost = host as SshHostRecord;
       const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys(sshHost);
-      const username = ctx.requireConfiguredSshUsername(sshHost);
-      const { secrets, shouldPersistHostSecret } =
-        await ctx.resolveRuntimeSshSecrets(sshHost, input.secrets);
-      await ctx.ensureCertificateAuthReady(sshHost, secrets);
+      const { username, authType, secrets, shouldPersistHostSecret, typedUsername } =
+        await ctx.resolveSshAuth(sshHost, input.secrets);
+      await ctx.ensureCertificateAuthReady(sshHost, secrets, authType);
       const jump = await ctx.resolveJumpHostTarget(sshHost);
       const title = input.title?.trim() || sshHost.label;
       const useMosh = jump ? false : sshHost.useMosh === true;
@@ -404,12 +403,12 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         : null;
       // authType이 "agent"면 로컬 ssh-agent 엔드포인트를 해석해 코어에 전달(서명 위임).
       const authAgentEndpoint =
-        sshHost.authType === "agent" ? await resolveLocalAgentEndpoint() : null;
+        authType === "agent" ? await resolveLocalAgentEndpoint() : null;
       const connection = await ctx.coreManager.connect({
         host: sshHost.hostname,
         port: sshHost.port,
         username,
-        authType: sshHost.authType,
+        authType,
         password: secrets.password,
         privateKeyPem: secrets.privateKeyPem,
         certificateText: secrets.certificateText,
@@ -460,6 +459,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           hostId: sshHost.id,
           label: title,
           secrets,
+          username: typedUsername,
         });
       }
 

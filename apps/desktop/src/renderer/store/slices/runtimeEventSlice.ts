@@ -171,7 +171,6 @@ import {
 import { resolveHostTailnetId } from "../../lib/host-tailnet";
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
 import { createTrustAuthServices } from "../services/trust-auth";
-import { updateStoredSshUsername } from "../services/credential-retry";
 import { createRuntimeEventServices } from "../services/runtime-events";
 import {
   cancelReconnect,
@@ -2277,18 +2276,6 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
             isEcsExecTab &&
             currentTab?.status === "error" &&
             !hasKnownShellLaunchFailureState;
-          if (
-            activeRetryAttemptBeforeUpdate?.source === "ssh" &&
-            activeRetryAttemptBeforeUpdate.sessionId === sessionId &&
-            activeRetryAttemptBeforeUpdate.originalUsername !==
-              activeRetryAttemptBeforeUpdate.attemptedUsername
-          ) {
-            void updateStoredSshUsername(
-              { api, get, set },
-              activeRetryAttemptBeforeUpdate.hostId,
-              activeRetryAttemptBeforeUpdate.originalUsername,
-            ).catch(() => undefined);
-          }
           if (isContainerShellLaunchFailure) {
             return nextContainerShellFailureState(true);
           }
@@ -2529,19 +2516,6 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
         ) {
           void refreshHostAndKeychainState(set);
         }
-      }
-      if (
-        event.type === "error" &&
-        activeRetryAttemptBeforeUpdate?.source === "ssh" &&
-        activeRetryAttemptBeforeUpdate.sessionId === sessionId &&
-        activeRetryAttemptBeforeUpdate.originalUsername !==
-          activeRetryAttemptBeforeUpdate.attemptedUsername
-      ) {
-        void updateStoredSshUsername(
-          { api, get, set },
-          activeRetryAttemptBeforeUpdate.hostId,
-          activeRetryAttemptBeforeUpdate.originalUsername,
-        ).catch(() => undefined);
       }
     },
     handleSessionShareEvent: (event) => {

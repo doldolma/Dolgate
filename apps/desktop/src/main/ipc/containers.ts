@@ -593,18 +593,17 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
       const sshHost = typedHost as SshHostRecord;
       const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys(sshHost);
-      const username = ctx.requireConfiguredSshUsername(sshHost);
-      const { secrets, shouldPersistHostSecret } =
-        await ctx.resolveRuntimeSshSecrets(sshHost);
-      await ctx.ensureCertificateAuthReady(sshHost, secrets);
+      const { username, authType, secrets, shouldPersistHostSecret } =
+        await ctx.resolveSshAuth(sshHost);
+      await ctx.ensureCertificateAuthReady(sshHost, secrets, authType);
       const jump = await ctx.resolveJumpHostTarget(sshHost);
       const authAgentEndpoint =
-        sshHost.authType === "agent" ? await resolveLocalAgentEndpoint() : null;
+        authType === "agent" ? await resolveLocalAgentEndpoint() : null;
       const connection = await ctx.coreManager.connect({
         host: sshHost.hostname,
         port: sshHost.port,
         username,
-        authType: sshHost.authType,
+        authType,
         password: secrets.password,
         privateKeyPem: secrets.privateKeyPem,
         certificateText: secrets.certificateText,

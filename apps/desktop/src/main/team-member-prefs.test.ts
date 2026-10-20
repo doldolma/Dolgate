@@ -1,6 +1,8 @@
 import type { HostDraft, HostRecord, SavedWorkspaceRecord } from "@shared";
 import { describe, expect, it } from "vitest";
 import {
+  normalizeTeamAwsProfileCredentials,
+  normalizeTeamTailnetCredentials,
   overlayHostMemberPrefs,
   overlayWorkspaceMemberPrefs,
   splitHostDraftMemberPrefs,
@@ -109,5 +111,17 @@ describe("team member prefs", () => {
         workspaces: new Map([["ws", { id: "ws", favorite: true, lastOpenedAt: "2026-10-19T05:00:00.000Z", updatedAt: "t" }]]),
       }),
     ).toMatchObject({ favorite: true, lastOpenedAt: "2026-10-19T05:00:00.000Z" });
+  });
+
+  // 내 키는 정적 프로필의 키를 통째로 갈아 끼운다 — 한쪽만 있는 것을 받으면 팀 키를 반쪽으로 덮어 못 붙는다.
+  it("takes my AWS keys only as a full pair and my auth key only when it is there", () => {
+    expect(normalizeTeamAwsProfileCredentials({ accessKeyId: " AKIAMINE ", secretAccessKey: " mine " })).toEqual({
+      accessKeyId: "AKIAMINE",
+      secretAccessKey: "mine",
+    });
+    expect(normalizeTeamAwsProfileCredentials({ accessKeyId: "AKIAMINE", secretAccessKey: "" })).toBeNull();
+    expect(normalizeTeamAwsProfileCredentials({ accessKeyId: "", secretAccessKey: "mine" })).toBeNull();
+    expect(normalizeTeamTailnetCredentials({ authKey: " tskey-mine " })).toEqual({ authKey: "tskey-mine" });
+    expect(normalizeTeamTailnetCredentials({ authKey: "  " })).toBeNull();
   });
 });

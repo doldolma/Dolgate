@@ -124,6 +124,42 @@ describe("registerSftpIpcHandlers", () => {
     vi.useRealTimers();
   });
 
+  // SFTP 는 붙은 뒤 바로 저장한다 — 요청 창에서 바꾼 사용자 이름도 함께(개인=레코드, 팀=내 칸).
+  it("saves the username typed into the prompt once an SSH host's SFTP connects", async () => {
+    const sshHost = {
+      id: "ssh-host-1",
+      kind: "ssh",
+      label: "Files",
+      hostname: "files.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+    };
+    const ctx = createContext(sshHost as never);
+    ctx.resolveSshAuth = vi.fn().mockResolvedValue({
+      username: "bob",
+      authType: "password",
+      secrets: { password: "pw" },
+      shouldPersistHostSecret: true,
+      typedUsername: "bob",
+    });
+    ctx.ensureCertificateAuthReady = vi.fn();
+    ctx.resolveJumpHostTarget = vi.fn().mockResolvedValue(undefined);
+    ctx.resolveTailnetRoute = vi.fn(() => ({}));
+    ctx.persistHostSpecificSecret = vi.fn().mockResolvedValue(null);
+    ctx.emitWorkspaceChanged = vi.fn();
+    registerSftpIpcHandlers(ctx);
+
+    await ipcHandlers.get(ipcChannels.sftp.connect)?.(
+      { sender: { id: 41 } },
+      { hostId: "ssh-host-1", endpointId: "endpoint-ssh", secrets: { username: "bob", password: "pw" } },
+    );
+
+    expect(ctx.coreManager.sftpConnect).toHaveBeenCalledWith(expect.objectContaining({ username: "bob" }));
+    expect(ctx.persistHostSpecificSecret).toHaveBeenCalledWith("ssh-host-1", "Files", { password: "pw" }, "bob");
+    expect(ctx.emitWorkspaceChanged).toHaveBeenCalled();
+  });
+
   it("registers endpoint ownership before emitting connection progress", async () => {
     const ctx = createContext(createAwsHost({ awsSshUsername: null }));
     registerSftpIpcHandlers(ctx);

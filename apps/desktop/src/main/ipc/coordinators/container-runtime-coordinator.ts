@@ -339,18 +339,17 @@ export function createContainerRuntimeCoordinator(deps: {
     }
 
     const trustedHostKeysBase64 = hostCoordinator.resolveTrustedHostKeys(host);
-    const username = hostCoordinator.requireConfiguredSshUsername(host);
-    const { secrets, shouldPersistHostSecret } =
-      await secretCoordinator.resolveRuntimeSshSecrets(host);
+    const { username, authType, secrets, shouldPersistHostSecret } =
+      await secretCoordinator.resolveSshAuth(host);
     const jump = await resolveJumpHostTarget(host);
     const authAgentEndpoint =
-      host.authType === "agent" ? await resolveLocalAgentEndpoint() : null;
+      authType === "agent" ? await resolveLocalAgentEndpoint() : null;
     const result = await coreManager.containersConnect({
       endpointId,
       host: host.hostname,
       port: host.port,
       username,
-      authType: host.authType,
+      authType,
       password: secrets.password,
       privateKeyPem: secrets.privateKeyPem,
       certificateText: secrets.certificateText,
@@ -546,7 +545,8 @@ export function createContainerRuntimeCoordinator(deps: {
       }
 
       publishRuntime("starting", "Starting container tunnel");
-      const username = hostCoordinator.requireConfiguredSshUsername(host);
+      // 엔드포인트의 연결을 그대로 넘겨받으므로 비밀값은 싣지 않지만, 사용자 이름·인증 방식은 같은 곳에서 얻는다.
+      const { username, authType } = await secretCoordinator.resolveSshAuth(host);
       // **await 없이 돌려주면 안 된다.** try/finally 에서 `return promise` 는 finally 를
       // 곧바로 실행한다 — 그 finally 가 컨테이너 엔드포인트를 끊어 버려서, 코어가 그 연결을
       // 가져가려는 순간(sourceEndpointId → TakeClient) 이미 사라진 상태가 됐다. 실기기에서
@@ -557,7 +557,7 @@ export function createContainerRuntimeCoordinator(deps: {
         host: host.hostname,
         port: host.port,
         username,
-        authType: host.authType,
+        authType,
         trustedHostKeyBase64: "",
         mode: "local",
         bindAddress,

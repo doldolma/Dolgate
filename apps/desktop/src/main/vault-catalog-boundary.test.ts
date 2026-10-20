@@ -19,9 +19,11 @@ const STATE_READ_ALLOWED = new Set([
   "database.ts",
   "state-storage.ts",
   "sync-service.ts",
-  // 호스트 가져오기·내보내기: 개인 볼트를 통째로 다루는 일괄 작업이다. 팀에서 쓰게 되면 볼트
-  // 데이터 하나를 받게 바꾼다.
+  // 호스트 가져오기·내보내기: 볼트 하나를 통째로 다루는 일괄 작업이다. 모으기는 볼트 내용 하나를
+  // 받는다(내보내기는 개인, 볼트 사이 복사는 원본 볼트).
   "host-transfer-service.ts",
+  // 볼트 사이 복사: 원본·대상 볼트의 내용을 하나씩 통째로 받아 계획을 세운다. 내 값은 따로 받아 얹는다.
+  "vault-copy.ts",
 ]);
 
 // 팀 볼트의 로컬 사본(state.teams)은 볼트 뿌리(vault-root.ts)와 상태 저장소만 만진다. 나머지는 팀

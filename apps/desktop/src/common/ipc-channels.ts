@@ -38,6 +38,7 @@ export const ipcChannels = {
     update: 'hosts:update',
     remove: 'hosts:remove',
     setFavorite: 'hosts:set-favorite',
+    setLoginUsername: 'hosts:set-login-username',
     setTerminalTheme: 'hosts:set-terminal-theme',
     setDetectedOs: 'hosts:set-detected-os'
   },
@@ -335,6 +336,11 @@ export const ipcChannels = {
     revokeInvite: 'teams:revoke-invite',
     getInviteInfo: 'teams:get-invite-info',
     join: 'teams:join',
+    previewCopy: 'teams:preview-copy',
+    copy: 'teams:copy',
+    getMyCredentials: 'teams:get-my-credentials',
+    setMyCredentials: 'teams:set-my-credentials',
+    clearMyCredentials: 'teams:clear-my-credentials',
     // 팀 목록이 바뀌었을 때 메인이 렌더러로 보낸다.
     changed: 'teams:changed'
   },

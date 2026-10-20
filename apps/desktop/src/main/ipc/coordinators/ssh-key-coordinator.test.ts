@@ -61,7 +61,12 @@ function createCoordinator(options: {
     ),
     resolveTrustedHostKeys: vi.fn(() => ["trusted-host-key"]),
     resolveTailnetRoute: vi.fn(() => ({})),
-    requireConfiguredSshUsername: vi.fn((host: SshHostRecord) => host.username),
+    resolveSshAuth: vi.fn(async (host: SshHostRecord) => ({
+      username: host.username,
+      authType: host.authType,
+      secrets: host.secretRef ? (secretsByRef[host.secretRef] ?? {}) : {},
+      shouldPersistHostSecret: false,
+    })),
     resolveJumpHostTarget: vi.fn().mockResolvedValue(null),
     ensureCertificateAuthReady: vi.fn().mockResolvedValue(null),
     inspectPrivateKey: vi.fn().mockResolvedValue({
@@ -234,11 +239,14 @@ describe("ssh key coordinator", () => {
     );
   });
 
-  it("installs onto a team host but never switches it to my personal key", async () => {
+  it("keeps the key as my own credentials on a team host instead of switching the team's login", async () => {
     const { deps } = createCoordinator();
+    const setMyHostCredentials = vi.fn();
     deps.vaults = {
       ...deps.vaults,
       scopeOfHost: (hostId: string) => (hostId === "host-1" ? { id: "team-1" } : deps.vaults.personal),
+      getMyHostCredentials: vi.fn(() => ({ username: "alice", authType: "password", password: "old-pw" })),
+      setMyHostCredentials,
     };
     const coordinator = createSshKeyCoordinator(deps);
 
@@ -247,16 +255,18 @@ describe("ssh key coordinator", () => {
       hostIds: ["host-1"],
       mode: "installAndUse",
     });
-    expect(useResult.results).toEqual([
-      expect.objectContaining({ hostId: "host-1", status: "failed", message: expect.stringMatching(/install the key only/) }),
-    ]);
-    expect(deps.installAuthorizedKey).not.toHaveBeenCalled();
-    expect(deps.hosts.updateSshAuthSecret).not.toHaveBeenCalled();
 
-    await expect(
-      coordinator.installSshPublicKey({ secretRef: "key-ref", hostIds: ["host-1"], mode: "installOnly" }),
-    ).resolves.toMatchObject({ results: [{ hostId: "host-1", status: "installed" }] });
-    expect(deps.installAuthorizedKey).toHaveBeenCalledTimes(1);
+    // 지금 로그인으로 설치하고 새 키로 붙는지 확인한 뒤, 팀 호스트의 로그인은 그대로 두고 내 칸을 이 키로
+    // 바꾼다(전에 쓰던 내 비밀번호는 버린다).
+    expect(useResult.results).toEqual([expect.objectContaining({ hostId: "host-1", status: "installed" })]);
+    expect(deps.installAuthorizedKey).toHaveBeenCalledTimes(2);
+    expect(deps.hosts.updateSshAuthSecret).not.toHaveBeenCalled();
+    expect(setMyHostCredentials).toHaveBeenCalledWith("host-1", {
+      username: "alice",
+      authType: "privateKey",
+      privateKeyPem: "-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----",
+      passphrase: undefined,
+    });
   });
 
   it("keeps the existing host auth when installAndUse verification fails", async () => {

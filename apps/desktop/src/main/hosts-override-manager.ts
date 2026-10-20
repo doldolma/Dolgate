@@ -180,6 +180,39 @@ export function collectActiveDnsOverrideEntries(
   return entries.sort((left, right) => left.hostname.localeCompare(right.hostname) || left.address.localeCompare(right.address));
 }
 
+/** DNS 덮어쓰기를 가진 볼트 하나 — 그 볼트의 덮어쓰기와 포트 포워딩 규칙. */
+export interface DnsOverrideVault {
+  overrides: DnsOverrideRecord[];
+  rules: PortForwardRuleRecord[];
+}
+
+/**
+ * 볼트 여럿(개인이 먼저)에서 지금 적용할 항목. 연결된 덮어쓰기는 같은 볼트의 규칙만 본다. 같은 이름이
+ * 여러 볼트에서 켜져 있으면 앞 볼트(개인)의 것만 남긴다. 볼트가 하나면 collectActiveDnsOverrideEntries
+ * 와 같다.
+ */
+export function collectActiveDnsOverrideEntriesAcrossVaults(
+  vaults: DnsOverrideVault[],
+  runtimes: PortForwardRuntimeRecord[],
+  activeStaticOverrideIds: ReadonlySet<string> = new Set(),
+): ActiveDnsOverrideEntry[] {
+  const takenHostnames = new Set<string>();
+  const entries: ActiveDnsOverrideEntry[] = [];
+  for (const vault of vaults) {
+    const vaultEntries = collectActiveDnsOverrideEntries(vault.overrides, vault.rules, runtimes, activeStaticOverrideIds);
+    entries.push(...vaultEntries.filter((entry) => !takenHostnames.has(entry.hostname)));
+    for (const entry of vaultEntries) {
+      takenHostnames.add(entry.hostname);
+    }
+  }
+  return entries.sort((left, right) => left.hostname.localeCompare(right.hostname) || left.address.localeCompare(right.address));
+}
+
+/** 모든 볼트의 정적 덮어쓰기 id. 켜 둔 상태를 정리할 때 다른 볼트 것을 지우지 않게 함께 넘긴다. */
+export function listStaticDnsOverrideIds(vaults: DnsOverrideVault[]): string[] {
+  return vaults.flatMap((vault) => vault.overrides.filter(isStaticDnsOverrideRecord).map((record) => record.id));
+}
+
 export function resolveDnsOverrideRecords(
   overrides: DnsOverrideRecord[],
   rules: PortForwardRuleRecord[],

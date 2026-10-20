@@ -1304,6 +1304,20 @@ export function buildSshMetadataProbeCommands(): string[] {
   ];
 }
 
+/** 팀 볼트 하나의 관리 프로필. 볼트를 아는 쪽(main)이 채워 준다. */
+export interface TeamManagedAwsProfiles {
+  teamId: string;
+  payloads: ManagedAwsProfilePayload[];
+}
+
+/**
+ * 팀 프로필을 관리 설정 파일에 펼칠 때의 이름. 개인 프로필은 이름 그대로 펼치므로, 팀 것은 팀 ID 를
+ * 붙여 겹치지 않게 한다 — SDK 가 프로필 이름으로 받는 글자(`@`·`-`)만 쓴다. 화면에는 원래 이름을 보인다.
+ */
+export function teamAwsProfileName(teamId: string, name: string): string {
+  return `${name.trim()}@team-${teamId}`;
+}
+
 export class AwsService {
   private static readonly ECS_SERVICE_LIST_CACHE_TTL_MS = 5 * 60_000;
   private static readonly ECS_TASK_DEFINITION_CACHE_TTL_MS = 5 * 60_000;
@@ -1352,6 +1366,7 @@ export class AwsService {
   >();
   private managedProfilesReadyTask: Promise<void> | null = null;
   private hasBackfilledManagedSsoCache = false;
+  private teamProfileSource: () => TeamManagedAwsProfiles[] = () => [];
   private readonly profileRepository: AwsProfileRepository;
   private readonly awsProfileRootDir: string;
   private readonly externalAwsProfileRootDir: string;
@@ -1381,8 +1396,39 @@ export class AwsService {
     this.externalAwsProfileRootDir = externalAwsProfileRootDir;
   }
 
+  /**
+   * 팀 볼트의 관리 프로필을 어디서 읽을지. 펼치기와 접속 때의 id·이름 찾기가 개인 것 다음으로 본다.
+   * 프로필 관리(만들기·이름 바꾸기·지우기)는 지금처럼 개인 것만 다룬다.
+   */
+  setTeamProfileSource(source: () => TeamManagedAwsProfiles[]): void {
+    this.teamProfileSource = source;
+  }
+
   private getManagedProfilePayloads(): ManagedAwsProfilePayload[] {
     return this.profileRepository.listPayloads();
+  }
+
+  private findTeamManagedProfile(
+    matches: (payload: ManagedAwsProfilePayload, profileName: string) => boolean,
+  ): { payload: ManagedAwsProfilePayload; profileName: string } | null {
+    for (const team of this.teamProfileSource()) {
+      for (const payload of team.payloads) {
+        const profileName = teamAwsProfileName(team.teamId, payload.name);
+        if (matches(payload, profileName)) {
+          return { payload, profileName };
+        }
+      }
+    }
+    return null;
+  }
+
+  /** 펼친 이름으로 관리 프로필을 찾는다 — 개인 것은 이름 그대로, 팀 것은 `teamAwsProfileName`. */
+  private findManagedProfileByProfileName(profileName: string): ManagedAwsProfilePayload | null {
+    return (
+      this.getManagedProfileByName(profileName) ??
+      this.findTeamManagedProfile((_payload, name) => name === profileName)?.payload ??
+      null
+    );
   }
 
   private isCacheEntryFresh(expiresAt: number): boolean {
@@ -1764,7 +1810,12 @@ export class AwsService {
   }
 
   resolveManagedProfileName(profileId: string | null | undefined): string | null {
-    return this.profileRepository.resolveNameById(profileId);
+    const personalName = this.profileRepository.resolveNameById(profileId);
+    if (personalName || !profileId) {
+      return personalName;
+    }
+    // id 는 볼트를 넘어 겹치지 않는다 — 개인에 없으면 팀 프로필이고, 펼친 이름으로 접속한다.
+    return this.findTeamManagedProfile((payload) => payload.id === profileId)?.profileName ?? null;
   }
 
   /**
@@ -1806,72 +1857,93 @@ export class AwsService {
   }
 
   async materializeManagedProfiles(): Promise<void> {
-    const payloads = this.getManagedProfilePayloads();
-    const sortedPayloads = [...payloads].sort((left, right) =>
-      left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
-    );
-    const profileNameById = new Map(
-      sortedPayloads.map((payload) => [payload.id, payload.name]),
-    );
     const configSections: string[] = [];
     const credentialSections: string[] = [];
     const writtenSsoSessions = new Set<string>();
 
-    for (const payload of sortedPayloads) {
-      if (payload.kind === "static") {
-        credentialSections.push(
-          `[${payload.name}]`,
-          `aws_access_key_id = ${payload.accessKeyId}`,
-          `aws_secret_access_key = ${payload.secretAccessKey}`,
-          "",
-        );
-        if (payload.region?.trim()) {
-          configSections.push(
-            payload.name === "default" ? "[default]" : `[profile ${payload.name}]`,
-            `region = ${payload.region.trim()}`,
-            "",
-          );
-        }
-        continue;
-      }
+    // 볼트 하나의 프로필을 펼친다. role 의 원본은 같은 볼트 안에서만 잇는다 — 팀 프로필이 개인 것을
+    // 원본으로 삼거나 그 반대가 되지 않게.
+    const appendVault = (
+      payloads: ManagedAwsProfilePayload[],
+      nameOf: (payload: ManagedAwsProfilePayload) => string,
+    ) => {
+      const sortedPayloads = [...payloads].sort((left, right) =>
+        left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
+      );
+      const profileNameById = new Map(
+        sortedPayloads.map((payload) => [payload.id, nameOf(payload)]),
+      );
 
-      if (payload.kind === "role") {
-        const sourceProfileName = profileNameById.get(payload.sourceProfileId);
-        if (!sourceProfileName) {
+      for (const payload of sortedPayloads) {
+        const name = nameOf(payload);
+        if (payload.kind === "static") {
+          // 키를 빼고 공유한 팀 프로필에 내 키도 없으면 키 줄을 쓰지 않는다(빈 키로 붙지 않게).
+          if (payload.accessKeyId.trim() && payload.secretAccessKey.trim()) {
+            credentialSections.push(
+              `[${name}]`,
+              `aws_access_key_id = ${payload.accessKeyId}`,
+              `aws_secret_access_key = ${payload.secretAccessKey}`,
+              "",
+            );
+          }
+          if (payload.region?.trim()) {
+            configSections.push(
+              name === "default" ? "[default]" : `[profile ${name}]`,
+              `region = ${payload.region.trim()}`,
+              "",
+            );
+          }
           continue;
         }
+
+        if (payload.kind === "role") {
+          const sourceProfileName = profileNameById.get(payload.sourceProfileId);
+          if (!sourceProfileName) {
+            continue;
+          }
+          configSections.push(
+            name === "default" ? "[default]" : `[profile ${name}]`,
+            `role_arn = ${payload.roleArn}`,
+            `source_profile = ${sourceProfileName}`,
+            ...(payload.region?.trim() ? [`region = ${payload.region.trim()}`] : []),
+            "",
+          );
+          continue;
+        }
+
+        const ssoSessionName = this.buildManagedSsoSessionKey(
+          payload.ssoStartUrl,
+          payload.ssoRegion,
+        );
         configSections.push(
-          payload.name === "default" ? "[default]" : `[profile ${payload.name}]`,
-          `role_arn = ${payload.roleArn}`,
-          `source_profile = ${sourceProfileName}`,
+          name === "default" ? "[default]" : `[profile ${name}]`,
+          `sso_session = ${ssoSessionName}`,
+          `sso_account_id = ${payload.ssoAccountId}`,
+          `sso_role_name = ${payload.ssoRoleName}`,
           ...(payload.region?.trim() ? [`region = ${payload.region.trim()}`] : []),
           "",
         );
-        continue;
+        if (!writtenSsoSessions.has(ssoSessionName)) {
+          configSections.push(
+            `[sso-session ${ssoSessionName}]`,
+            `sso_region = ${payload.ssoRegion}`,
+            `sso_start_url = ${payload.ssoStartUrl}`,
+            `sso_registration_scopes = ${AWS_SSO_REGISTRATION_SCOPES}`,
+            "",
+          );
+          writtenSsoSessions.add(ssoSessionName);
+        }
       }
+    };
 
-      const ssoSessionName = this.buildManagedSsoSessionKey(
-        payload.ssoStartUrl,
-        payload.ssoRegion,
-      );
-      configSections.push(
-        payload.name === "default" ? "[default]" : `[profile ${payload.name}]`,
-        `sso_session = ${ssoSessionName}`,
-        `sso_account_id = ${payload.ssoAccountId}`,
-        `sso_role_name = ${payload.ssoRoleName}`,
-        ...(payload.region?.trim() ? [`region = ${payload.region.trim()}`] : []),
-        "",
-      );
-      if (!writtenSsoSessions.has(ssoSessionName)) {
-        configSections.push(
-          `[sso-session ${ssoSessionName}]`,
-          `sso_region = ${payload.ssoRegion}`,
-          `sso_start_url = ${payload.ssoStartUrl}`,
-          `sso_registration_scopes = ${AWS_SSO_REGISTRATION_SCOPES}`,
-          "",
-        );
-        writtenSsoSessions.add(ssoSessionName);
-      }
+    appendVault(this.getManagedProfilePayloads(), (payload) => payload.name);
+    // 팀 프로필은 개인 것 뒤에, 팀마다 겹치지 않는 이름으로 펼친다. SSO 세션은 시작 주소로 묶이므로
+    // 같은 SSO 를 쓰는 개인 프로필과 로그인을 함께 쓴다(로그인은 원래 사람마다다).
+    const teams = [...this.teamProfileSource()].sort((left, right) =>
+      left.teamId.localeCompare(right.teamId),
+    );
+    for (const team of teams) {
+      appendVault(team.payloads, (payload) => teamAwsProfileName(team.teamId, payload.name));
     }
 
     await mkdir(this.awsProfileRootDir, { recursive: true });
@@ -3134,7 +3206,7 @@ export class AwsService {
   ): Promise<AwsProfileStatus> {
     const profileId =
       awsRootDir === this.awsProfileRootDir
-        ? this.profileRepository.getMetadataByName(profileName)?.id ?? null
+        ? this.findManagedProfileByProfileName(profileName)?.id ?? null
         : null;
     if (
       awsRootDir === this.awsProfileRootDir &&
@@ -3219,7 +3291,7 @@ export class AwsService {
 
     if (isE2EFakeAwsSessionEnabled()) {
       return {
-        id: this.profileRepository.getMetadataByName(normalizedProfileName)?.id ?? null,
+        id: this.findManagedProfileByProfileName(normalizedProfileName)?.id ?? null,
         profileName: normalizedProfileName,
         available: true,
         isSsoProfile: false,
@@ -3256,7 +3328,7 @@ export class AwsService {
     const values = snapshot.mergedValues;
     const managedProfile =
       awsRootDir === this.awsProfileRootDir
-        ? this.getManagedProfileByName(normalizedProfileName)
+        ? this.findManagedProfileByProfileName(normalizedProfileName)
         : null;
     const ssoSession = values.sso_session?.trim() || null;
     const ssoSessionValues = ssoSession

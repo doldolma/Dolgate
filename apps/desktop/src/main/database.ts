@@ -1112,6 +1112,27 @@ export class HostRepository {
     return nextRecord;
   }
 
+  /**
+   * SSH 호스트에 붙을 사용자 이름만 바꾼다(요청 창·이름 묻는 창). 같으면 쓰지 않는다 — 쓰면 동기화가 깨어난다.
+   */
+  setSshUsername(id: string, username: string): HostRecord | null {
+    const current = this.getById(id);
+    if (!current || current.kind !== 'ssh' || current.username === username) {
+      return current;
+    }
+    let nextRecord: HostRecord | null = null;
+    stateStorage.updateState((state) => {
+      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
+        if (entry.id !== id || entry.kind !== 'ssh') {
+          return entry;
+        }
+        nextRecord = { ...entry, username, updatedAt: nowIso() };
+        return nextRecord;
+      });
+    });
+    return nextRecord;
+  }
+
   setFavorite(id: string, favorite: boolean): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {

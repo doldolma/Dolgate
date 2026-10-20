@@ -39,6 +39,7 @@ import type {
   AwsEc2HostRecord,
   AwsEcsHostRecord,
   AwsSftpProgressStage,
+  ResolvedSshAuth,
   SftpCompatibleHostRecord,
   SshHostRecord,
   TrustedHostKeyTarget,
@@ -51,7 +52,6 @@ export interface HostCoordinator {
   /** 신뢰 중인 키들(없으면 빈 배열). 연결 중 신뢰를 묻는 경로가 쓴다. */
   resolveTrustedHostKeys: (host: TrustedHostKeyTarget) => string[];
   requireTrustedHostKeys: (host: TrustedHostKeyTarget) => string[];
-  requireConfiguredSshUsername: (host: SshHostRecord) => string;
   buildKnownSshDuplicateKeys: () => Set<string>;
   assertSshHost: (host: ReturnType<HostRepository["getById"]>) => void;
   assertSftpCompatibleHost: (
@@ -84,13 +84,11 @@ export function createHostCoordinator(deps: {
   authService: AuthService;
   awsSsmTunnelService: AwsSsmTunnelService;
   awsSftpCoordinator: AwsSftpCoordinator;
-  resolveRuntimeSshSecrets: (
-    host: SshHostRecord,
-    secrets?: HostSecretInput,
-  ) => Promise<{ secrets: HostSecretInput; shouldPersistHostSecret: boolean }>;
+  resolveSshAuth: (host: SshHostRecord, secrets?: HostSecretInput) => Promise<ResolvedSshAuth>;
   ensureCertificateAuthReady: (
     host: SshHostRecord,
     secrets: HostSecretInput,
+    authType?: SshHostRecord["authType"],
   ) => Promise<SshCertificateInfo | null>;
 }): HostCoordinator {
   const {
@@ -100,7 +98,7 @@ export function createHostCoordinator(deps: {
     authService,
     awsSsmTunnelService,
     awsSftpCoordinator,
-    resolveRuntimeSshSecrets,
+    resolveSshAuth,
     ensureCertificateAuthReady,
   } = deps;
 
@@ -214,14 +212,6 @@ export function createHostCoordinator(deps: {
       throw new Error(t("hostIpc.tailnetMissing"));
     }
     return { tailnetId, tailnetName: record.tailnetName };
-  };
-
-  const requireConfiguredSshUsername = (host: SshHostRecord): string => {
-    const username = host.username.trim();
-    if (!username) {
-      throw new Error(t("hostIpc.usernameRequired"));
-    }
-    return username;
   };
 
   const assertSshHost = (
@@ -660,18 +650,17 @@ export function createHostCoordinator(deps: {
         throw new Error(t("hostIpc.jumpHostMustBeSsh"));
       }
       const trustedHostKeysBase64 = resolveTrustedHostKeys(jumpHost);
-      const username = requireConfiguredSshUsername(jumpHost);
-      const { secrets } = await resolveRuntimeSshSecrets(jumpHost);
-      await ensureCertificateAuthReady(jumpHost, secrets);
+      const auth = await resolveSshAuth(jumpHost);
+      await ensureCertificateAuthReady(jumpHost, auth.secrets, auth.authType);
       resolved = {
         host: jumpHost.hostname,
         port: jumpHost.port,
-        username,
-        authType: jumpHost.authType,
-        password: secrets.password,
-        privateKeyPem: secrets.privateKeyPem,
-        certificateText: secrets.certificateText,
-        passphrase: secrets.passphrase,
+        username: auth.username,
+        authType: auth.authType,
+        password: auth.secrets.password,
+        privateKeyPem: auth.secrets.privateKeyPem,
+        certificateText: auth.secrets.certificateText,
+        passphrase: auth.secrets.passphrase,
         trustedHostKeyBase64: trustedHostKeysBase64[0],
         trustedHostKeysBase64,
         jump: resolved,
@@ -684,7 +673,6 @@ export function createHostCoordinator(deps: {
     requireTrustedHostKey: (host) => requireTrustedHostKeys(host)[0],
     requireTrustedHostKeys,
     resolveTrustedHostKeys,
-    requireConfiguredSshUsername,
     buildKnownSshDuplicateKeys,
     assertSshHost,
     assertSftpCompatibleHost,

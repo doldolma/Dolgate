@@ -312,6 +312,7 @@ export function createMockApi(): DesktopApi {
       })),
       remove: vi.fn().mockResolvedValue(undefined),
       setFavorite: vi.fn().mockResolvedValue(null),
+      setLoginUsername: vi.fn().mockResolvedValue(null),
       setTerminalTheme: vi.fn().mockResolvedValue(null),
     },
     aws: {

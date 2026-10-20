@@ -43,6 +43,7 @@ import {
   normalizeHostRecord,
   normalizePortForwardRule,
   type DesktopStateFile,
+  type DesktopVaultContents,
   type StoredEncryptedValue,
 } from "./state-storage";
 import {
@@ -228,11 +229,13 @@ function parseAwsProfile(value: unknown): ManagedAwsProfilePayload {
     updatedAt: requireString(value.updatedAt, "transfer.field.awsProfileUpdatedAt"),
   };
   if (value.kind === "static") {
+    // 키를 빼고 팀에 공유한 정적 프로필은 키가 둘 다 비어 있다(멤버마다 자기 키를 둔다). 하나만 빈 것은 깨진 것이다.
+    const keyless = value.accessKeyId === "" && value.secretAccessKey === "";
     return {
       ...base,
       kind: "static",
-      accessKeyId: requireString(value.accessKeyId, "AWS access key"),
-      secretAccessKey: requireString(value.secretAccessKey, "AWS secret key"),
+      accessKeyId: keyless ? "" : requireString(value.accessKeyId, "AWS access key"),
+      secretAccessKey: keyless ? "" : requireString(value.secretAccessKey, "AWS secret key"),
     };
   }
   if (value.kind === "sso") {
@@ -655,9 +658,15 @@ function getSavedWorkspaceHostIds(workspace: SavedWorkspaceRecord): string[] {
   return [...ids];
 }
 
+/**
+ * 고른 호스트·워크스페이스와 그것이 쓰는 것(점프 호스트·비밀값·AWS 프로필·스니펫·그룹·포트 포워딩·DNS·
+ * tailnet)을 한 묶음으로. 볼트 하나에서 모은다 — 내보내기는 개인 볼트, 볼트 사이 복사는 원본 볼트다.
+ * 복사는 RDP 의 SSM 대상 프로필도 함께 모은다(내보내기 결과는 그대로 둔다).
+ */
 export function buildDolgateHostBundle(
-  state: DesktopStateFile,
+  state: DesktopVaultContents,
   requestedSelection: HostExportAssetSelection | string[],
+  options: { includeRdpAwsSsmProfiles?: boolean } = {},
 ): DolgateHostBundleV1 {
   const selection = normalizeExportSelection(requestedSelection);
   const rootHostIds = [...new Set(selection.hostIds)];
@@ -733,6 +742,14 @@ export function buildDolgateHostBundle(
         profileIds.add(host.awsProfileId);
         availableProfileIdsByHostId.set(host.id, host.awsProfileId);
       }
+    }
+    if (
+      options.includeRdpAwsSsmProfiles &&
+      host.kind === "rdp" &&
+      host.awsSsm?.profileId &&
+      profileMetadataById.has(host.awsSsm.profileId)
+    ) {
+      profileIds.add(host.awsSsm.profileId);
     }
     if (
       "startupCommand" in host &&

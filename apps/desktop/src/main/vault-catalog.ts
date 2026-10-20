@@ -1,4 +1,11 @@
-import type { HostDraft, HostRecord, SavedWorkspaceRecord, TailnetPayload, TerminalThemeId } from "@shared";
+import type {
+  HostDraft,
+  HostRecord,
+  PortForwardRuleRecord,
+  SavedWorkspaceRecord,
+  TailnetPayload,
+  TerminalThemeId,
+} from "@shared";
 import type {
   AwsProfileRepository,
   DnsOverrideRepository,
@@ -16,6 +23,7 @@ import {
   overlayHostMemberPrefs,
   overlayWorkspaceMemberPrefs,
   splitHostDraftMemberPrefs,
+  type TeamHostCredentials,
   type TeamMemberPrefs,
   type TeamMemberPrefsStore,
 } from "./team-member-prefs";
@@ -153,8 +161,19 @@ export interface VaultCatalog {
    * — 점프로 가리켜도 따라가지 않는다.
    */
   getHostInSameVault(anchorHostId: string, id: string): HostRecord | null;
-  /** 모든 볼트의 tailnet 설정(auth key 포함). 코어에 넘길 때 쓴다. */
+  /** 모든 볼트의 tailnet 설정(auth key 포함 — 팀 것은 내 auth key 가 먼저다). 코어에 넘길 때 쓴다. */
   listTailnetPayloads(): TailnetPayload[];
+  /** 모든 볼트에서 포트 포워딩 규칙을 id 로 찾는다(켜고 끌 때). */
+  getPortForward(id: string): PortForwardRuleRecord | null;
+  /** 팀 호스트에 둔 내 자격 증명(멤버 개인 칸). 개인 호스트거나 없으면 null. */
+  getMyHostCredentials(hostId: string): TeamHostCredentials | null;
+  /** 팀 호스트에 내 자격 증명을 둔다(null 이면 지운다). 개인 호스트는 호스트의 비밀값을 쓰므로 던진다. */
+  setMyHostCredentials(hostId: string, credentials: TeamHostCredentials | null): void;
+  /**
+   * SSH 로 붙을 사용자 이름을 둔다(요청 창·이름 묻는 창). 개인 호스트는 레코드에, 팀 호스트는 내 자격 증명에
+   * 둔다 — 팀 레코드에 쓰면 팀 모두의 사용자 이름이 바뀐다. 팀 것과 같으면 내 칸에서 뺀다.
+   */
+  setHostLoginUsername(hostId: string, username: string): HostRecord | null;
   /** 팀 호스트면 내 개인 칸에만 둔다. */
   setHostFavorite(id: string, favorite: boolean): HostRecord | null;
   /** 팀 호스트면 이 기기에만 둔다. */
@@ -169,6 +188,11 @@ export interface VaultCatalog {
   setWorkspaceFavorite(id: string, favorite: boolean): SavedWorkspaceRecord;
   /** 팀 워크스페이스면 내 개인 칸에만 둔다. */
   touchWorkspaceOpened(id: string): SavedWorkspaceRecord;
+}
+
+/** SSH 호스트의 사용자 이름(앞뒤 공백 없이). 칸이 없으면 빈 글. */
+function sshUsernameOf(host: HostRecord): string {
+  return host.kind === "ssh" && typeof host.username === "string" ? host.username.trim() : "";
 }
 
 export function createVaultCatalog(
@@ -216,7 +240,7 @@ export function createVaultCatalog(
   // 볼트 순서대로 합친다. id 가 겹치면 앞의 것(개인 → 먼저 있는 팀)만 남긴다.
   const listAcrossVaults = <T extends { id: string }>(
     list: (scope: VaultScope) => T[],
-    overlay: (record: T, prefs: TeamMemberPrefs) => T,
+    overlay: (record: T, prefs: TeamMemberPrefs, scope: TeamVaultScope) => T,
   ): T[] => {
     const candidates = listTeamScopes();
     const personalRecords = list(personalScope);
@@ -230,7 +254,7 @@ export function createVaultCatalog(
       for (const record of list(scope)) {
         if (!seen.has(record.id)) {
           seen.add(record.id);
-          merged.push(overlay(record, prefs));
+          merged.push(overlay(record, prefs, scope));
         }
       }
     }
@@ -238,6 +262,24 @@ export function createVaultCatalog(
   };
 
   const findHostInTeam = (id: string) => findInTeam((scope) => scope.hosts.getById(id));
+
+  /**
+   * 팀 호스트에 내 값을 얹는다(즐겨찾기·agent forwarding·테마). 팀 레코드에 사용자 이름이 비어 있으면 내
+   * 자격 증명의 사용자 이름을 채운다 — 화면은 레코드의 사용자 이름을 보고 묻는 창을 띄우므로, 안 채우면 내
+   * 칸에 둔 이름이 있어도 붙을 때마다 다시 묻는다.
+   */
+  const overlayTeamHost = (
+    scope: TeamVaultScope,
+    record: HostRecord,
+    prefs: TeamMemberPrefs = scope.memberPrefs.read(),
+  ): HostRecord => {
+    const host = overlayHostMemberPrefs(record, prefs);
+    if (host.kind !== "ssh" || sshUsernameOf(host)) {
+      return host;
+    }
+    const mine = scope.memberPrefs.readHostCredentials(host.id)?.username?.trim();
+    return mine ? { ...host, username: mine } : host;
+  };
   const findWorkspaceInTeam = (id: string) => findInTeam((scope) => scope.savedWorkspaces.getById(id));
 
   return {
@@ -253,12 +295,16 @@ export function createVaultCatalog(
       for (const scope of listScopes()) {
         const host = scope.hosts.getById(id);
         if (host) {
-          return scope.memberPrefs ? overlayHostMemberPrefs(host, scope.memberPrefs.read()) : host;
+          return scope.memberPrefs ? overlayTeamHost(scope as TeamVaultScope, host) : host;
         }
       }
       return null;
     },
-    listHosts: () => listAcrossVaults((scope) => scope.hosts.list(), overlayHostMemberPrefs),
+    listHosts: () =>
+      listAcrossVaults(
+        (scope) => scope.hosts.list(),
+        (record, prefs, scope) => overlayTeamHost(scope, record, prefs),
+      ),
     scopeOfHost: (hostId) => findHostInTeam(hostId)?.scope ?? personalScope,
     loadSecret: async (secretRef) => {
       for (const scope of listScopes()) {
@@ -275,7 +321,7 @@ export function createVaultCatalog(
         return write(personalScope.hosts);
       }
       const record = write(team.scope.hosts);
-      return (record ? overlayHostMemberPrefs(record, team.scope.memberPrefs.read()) : record) as typeof record;
+      return (record ? overlayTeamHost(team.scope, record) : record) as typeof record;
     },
     removeHost: (id) => {
       const scope = findHostInTeam(id)?.scope ?? personalScope;
@@ -288,16 +334,61 @@ export function createVaultCatalog(
         return personalScope.hosts.getById(id);
       }
       const host = team.scope.hosts.getById(id);
-      return host ? overlayHostMemberPrefs(host, team.scope.memberPrefs.read()) : null;
+      return host ? overlayTeamHost(team.scope, host) : null;
     },
-    listTailnetPayloads: () => listAcrossVaults((scope) => scope.tailnets.listPayloads(), (record) => record),
+    getMyHostCredentials: (hostId) => findHostInTeam(hostId)?.scope.memberPrefs.readHostCredentials(hostId) ?? null,
+    setMyHostCredentials: (hostId, credentials) => {
+      const team = findHostInTeam(hostId);
+      if (!team) {
+        throw new Error(t("teams.myCredentialsTeamOnly"));
+      }
+      team.scope.memberPrefs.writeHostCredentials(hostId, credentials);
+    },
+    setHostLoginUsername: (hostId, username) => {
+      const trimmed = username.trim();
+      const team = findHostInTeam(hostId);
+      if (!team) {
+        return personalScope.hosts.setSshUsername(hostId, trimmed);
+      }
+      if (team.record.kind !== "ssh") {
+        return overlayTeamHost(team.scope, team.record);
+      }
+      const current = team.scope.memberPrefs.readHostCredentials(hostId);
+      const { username: _previous, ...rest } = current ?? {};
+      const next: TeamHostCredentials =
+        trimmed && trimmed !== sshUsernameOf(team.record) ? { ...rest, username: trimmed } : rest;
+      if ((current?.username ?? "") !== (next.username ?? "")) {
+        team.scope.memberPrefs.writeHostCredentials(hostId, Object.keys(next).length > 0 ? next : null);
+      }
+      return overlayTeamHost(team.scope, team.record);
+    },
+    getPortForward: (id) => {
+      for (const scope of listScopes()) {
+        const rule = scope.portForwards.getById(id);
+        if (rule) {
+          return rule;
+        }
+      }
+      return null;
+    },
+    // 팀 tailnet 은 내 auth key 가 있으면 그것을 쓴다(내 것 → 팀 것). 이 목록은 코어에 넘기는 데만 쓴다 — 팀에
+    // 올리는 것은 팀 저장소의 listPayloads() 라 내 키가 실리지 않는다.
+    listTailnetPayloads: () =>
+      listAcrossVaults(
+        (scope) =>
+          scope.tailnets.listPayloads().map((payload) => {
+            const mine = scope.memberPrefs?.readTailnetCredentials(payload.id);
+            return mine ? { ...payload, authKey: mine.authKey } : payload;
+          }),
+        (record) => record,
+      ),
     setHostFavorite: (id, favorite) => {
       const team = findHostInTeam(id);
       if (!team) {
         return personalScope.hosts.setFavorite(id, favorite);
       }
       team.scope.memberPrefs.updateHost(id, { favorite });
-      return overlayHostMemberPrefs(team.record, team.scope.memberPrefs.read());
+      return overlayTeamHost(team.scope, team.record);
     },
     setHostTerminalTheme: (id, terminalThemeId) => {
       const team = findHostInTeam(id);
@@ -305,7 +396,7 @@ export function createVaultCatalog(
         return personalScope.hosts.setTerminalTheme(id, terminalThemeId);
       }
       team.scope.memberPrefs.setHostTerminalTheme(id, terminalThemeId);
-      return overlayHostMemberPrefs(team.record, team.scope.memberPrefs.read());
+      return overlayTeamHost(team.scope, team.record);
     },
     updateHost: (...args) => {
       const [id, draft, secretRef] = args;
@@ -315,10 +406,23 @@ export function createVaultCatalog(
         return personalScope.hosts.update(...args);
       }
       const { teamDraft, hostPrefs, terminalThemeId } = splitHostDraftMemberPrefs(draft);
-      const record = team.scope.hosts.update(id, teamDraft, secretRef);
+      // 팀 레코드에 사용자 이름이 비어 있으면 화면은 내 사용자 이름으로 채워 받는다(overlayTeamHost). 편집 창이
+      // 그 값을 그대로 돌려보내도 팀 레코드에 쓰지 않는다 — 쓰면 내 이름이 팀 모두의 이름이 된다.
+      const myUsername = team.scope.memberPrefs.readHostCredentials(id)?.username?.trim();
+      const keepTeamUsername =
+        teamDraft.kind === "ssh" &&
+        team.record.kind === "ssh" &&
+        !sshUsernameOf(team.record) &&
+        Boolean(myUsername) &&
+        teamDraft.username.trim() === myUsername;
+      const record = team.scope.hosts.update(
+        id,
+        keepTeamUsername ? { ...teamDraft, username: "" } : teamDraft,
+        secretRef,
+      );
       team.scope.memberPrefs.updateHost(id, hostPrefs);
       team.scope.memberPrefs.setHostTerminalTheme(id, terminalThemeId);
-      return overlayHostMemberPrefs(record, team.scope.memberPrefs.read());
+      return overlayTeamHost(team.scope, record);
     },
     createHost: (vaultId, id, draft, secretRef) => {
       if (vaultId === PERSONAL_VAULT_ID) {
@@ -332,7 +436,7 @@ export function createVaultCatalog(
       const record = scope.hosts.create(id, teamDraft, secretRef);
       scope.memberPrefs.updateHost(id, hostPrefs);
       scope.memberPrefs.setHostTerminalTheme(id, terminalThemeId);
-      return overlayHostMemberPrefs(record, scope.memberPrefs.read());
+      return overlayTeamHost(scope, record);
     },
     listWorkspaces: () =>
       listAcrossVaults((scope) => scope.savedWorkspaces.list(), overlayWorkspaceMemberPrefs),

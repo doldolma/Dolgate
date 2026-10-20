@@ -152,6 +152,8 @@ export class FakeTeamServer {
   userId = "user-1";
   /** 팀 레코드를 200 으로 답하기 직전에 한 번 부른다 — 시험이 그 사이 로컬 편집을 끼워 넣는다. */
   beforeRecordsResponse: (() => void) | null = null;
+  /** 내 개인 칸을 200 으로 답하기 직전에 한 번 부른다(위와 같은 쓰임). */
+  beforePrivateResponse: (() => void) | null = null;
   failNextKeyUpload = false;
   failNextList = false;
   /** 이 팀들의 데이터 경로는 "앱을 업데이트하세요"(426)로 답한다 — 팀 데이터 수준을 못 따라오는 앱. */
@@ -419,6 +421,9 @@ export class FakeTeamServer {
         if (ifNoneMatch === etag) {
           return new Response(null, { status: 304, headers: { etag } });
         }
+        const hook = this.beforePrivateResponse;
+        this.beforePrivateResponse = null;
+        hook?.();
         return json(snapshot(member.private), 200, { etag });
       }
       case "PUT me":

@@ -524,7 +524,7 @@ export function registerRdpIpcHandlers(
       // 시크릿을 읽기 전에 등록한다. await 뒤로 미루면 그 사이에 인증서 판정이 도착했을 때
       // 세션이 어느 호스트인지 몰라 저장된 핀을 못 찾고, 신뢰한 서버를 다시 묻게 된다.
       hostBySession.set(sessionId, hostId);
-      const secrets = await ctx.loadSecrets(host.secretRef);
+      const secrets = await ctx.loadHostSecrets(host);
 
       // 어느 화면을 빌려줄지 정하는 순서:
       //   1. 이 기기에서 골라 둔 선택이 있으면 그것 (호스트가 아니라 기기 로컬 설정이다 —

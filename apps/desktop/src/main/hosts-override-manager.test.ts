@@ -34,7 +34,9 @@ import {
   buildPosixElevationCommand,
   buildWindowsElevationCommand,
   collectActiveDnsOverrideEntries,
+  collectActiveDnsOverrideEntriesAcrossVaults,
   hasManagedHostsBlock,
+  listStaticDnsOverrideIds,
   resolveDnsOverrideRecords,
   resolveHelperTempDirectory,
   resolveHostsFilePath,
@@ -148,6 +150,72 @@ describe('hosts override manager helpers', () => {
         ruleId: 'dns-3',
       },
     ]);
+  });
+
+  it('applies every vault but keeps the first vault when two turn on the same name', () => {
+    const at = '2025-01-01T00:00:00.000Z';
+    const localRule = (id: string, bindAddress: string): PortForwardRuleRecord => ({
+      id,
+      transport: 'ssh',
+      label: id,
+      hostId: `host-${id}`,
+      mode: 'local',
+      bindAddress,
+      bindPort: 5432,
+      targetHost: 'db.internal',
+      targetPort: 5432,
+      createdAt: at,
+      updatedAt: at,
+    });
+    const linked = (id: string, hostname: string, ruleId: string): DnsOverrideRecord => ({
+      id,
+      type: 'linked',
+      hostname,
+      portForwardRuleId: ruleId,
+      createdAt: at,
+      updatedAt: at,
+    });
+    const running = (rule: PortForwardRuleRecord): PortForwardRuntimeRecord => ({
+      ruleId: rule.id,
+      hostId: rule.hostId,
+      transport: 'ssh',
+      mode: 'local',
+      bindAddress: rule.bindAddress,
+      bindPort: rule.bindPort,
+      status: 'running',
+      updatedAt: at,
+    });
+    const personalRule = localRule('mine', '127.0.0.1');
+    const teamRules = [localRule('team-db', '127.0.0.2'), localRule('team-api', '127.0.0.3')];
+    const personal = { overrides: [linked('dns-mine', 'db.internal', 'mine')], rules: [personalRule] };
+    const team = {
+      overrides: [
+        linked('dns-team-db', 'db.internal', 'team-db'),
+        linked('dns-team-api', 'api.internal', 'team-api'),
+        // 연결된 덮어쓰기는 같은 볼트의 규칙만 본다 — 개인 규칙 id 를 가리켜도 켜지지 않는다.
+        linked('dns-team-stray', 'stray.internal', 'mine'),
+        { id: 'dns-team-static', type: 'static', hostname: 'static.internal', address: '10.0.0.9', createdAt: at, updatedAt: at },
+      ] satisfies DnsOverrideRecord[],
+      rules: teamRules,
+    };
+    const runtimes = [running(personalRule), ...teamRules.map(running)];
+
+    expect(
+      collectActiveDnsOverrideEntriesAcrossVaults([personal, team], runtimes, new Set(['dns-team-static'])),
+    ).toEqual([
+      { hostname: 'api.internal', address: '127.0.0.3', ruleId: 'team-api' },
+      { hostname: 'db.internal', address: '127.0.0.1', ruleId: 'mine' },
+      { hostname: 'static.internal', address: '10.0.0.9', ruleId: 'dns-team-static' },
+    ]);
+    // 개인 것이 꺼져 있으면 팀 것이 들어간다.
+    expect(
+      collectActiveDnsOverrideEntriesAcrossVaults([personal, team], runtimes.slice(1)).map((entry) => entry.address),
+    ).toEqual(['127.0.0.3', '127.0.0.2']);
+    // 볼트가 하나면 지금과 같다.
+    expect(collectActiveDnsOverrideEntriesAcrossVaults([personal], runtimes)).toEqual(
+      collectActiveDnsOverrideEntries(personal.overrides, personal.rules, runtimes),
+    );
+    expect(listStaticDnsOverrideIds([personal, team])).toEqual(['dns-team-static']);
   });
 
   it('builds the helper payload in base64 JSON', () => {

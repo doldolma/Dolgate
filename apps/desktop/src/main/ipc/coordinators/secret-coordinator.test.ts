@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { normalizeHostEnvVars } from "@shared";
-import { createSecretCoordinator } from "./secret-coordinator";
+import { clearRuntimeSecretCache, createSecretCoordinator } from "./secret-coordinator";
 
 function createCoordinator(overrides: Record<string, unknown> = {}) {
   const deps = {
@@ -60,19 +60,30 @@ describe("secret coordinator", () => {
   });
 
   // 저장하면 내 비밀번호가 팀 호스트의 비밀값이 되어 팀 전체에 공유된다.
-  it("does not save what was typed into a prompt for a team host", async () => {
+  it("keeps what was typed into a prompt for a team host as my own credentials, not the team's secret", async () => {
+    const setMyHostCredentials = vi.fn();
     const { deps, coordinator } = createCoordinator({
       vaults: {
-        loadSecret: vi.fn(async () => null),
+        loadSecret: vi.fn(async (secretRef: string) =>
+          secretRef === "secret:team" ? JSON.stringify({ secretRef, label: "shared", privateKeyPem: "TEAM-PEM" }) : null,
+        ),
         scopeOfHost: vi.fn(() => ({ id: "team-1" })),
+        getHost: vi.fn(() => ({ id: "team-host", kind: "ssh", secretRef: "secret:team" })),
+        getMyHostCredentials: vi.fn(() => ({ username: "alice" })),
+        setMyHostCredentials,
       },
     });
 
-    await expect(coordinator.persistHostSpecificSecret("team-host", "Shared", { password: "mine" })).resolves.toBeNull();
+    // 넘어온 값은 팀 키와 내가 넣은 패스프레이즈를 합친 것이다 — 팀 키는 옮기지 않는다.
+    await expect(
+      coordinator.persistHostSpecificSecret("team-host", "Shared", { privateKeyPem: "TEAM-PEM", passphrase: "mine" }),
+    ).resolves.toBeNull();
 
+    expect(setMyHostCredentials).toHaveBeenCalledWith("team-host", { username: "alice", passphrase: "mine" });
     expect(deps.secretStore.save).not.toHaveBeenCalled();
     expect(deps.secretMetadata.upsert).not.toHaveBeenCalled();
     expect(deps.hosts.updateSecretRef).not.toHaveBeenCalled();
+    expect(deps.queueSync).toHaveBeenCalledTimes(1);
   });
 
   it("reads a host's secret from whichever vault holds it", async () => {
@@ -186,6 +197,183 @@ describe("secret coordinator", () => {
     ).toMatchObject({ username: "Administrator", domain: "CORP", password: "new" });
   });
 
+});
+
+// 팀 호스트는 내 자격 증명 → 팀 것 → 요청 창 순서다. 개인 호스트는 카탈로그가 내 것을 늘 null 로 준다.
+describe("login to connect with", () => {
+  const teamHost = {
+    id: "team-host",
+    kind: "ssh",
+    label: "Shared",
+    hostname: "shared.example.com",
+    port: 22,
+    username: "deploy",
+    authType: "privateKey",
+    secretRef: "secret:team",
+  } as any;
+
+  function createTeamCoordinator(mine: Record<string, string> | null) {
+    clearRuntimeSecretCache();
+    const loadSecret = vi.fn(async (secretRef: string) =>
+      secretRef === "secret:team"
+        ? JSON.stringify({ secretRef, label: "shared", username: "deploy", privateKeyPem: "TEAM-PEM" })
+        : null,
+    );
+    const setMyHostCredentials = vi.fn();
+    const setHostLoginUsername = vi.fn();
+    const { coordinator, deps } = createCoordinator({
+      vaults: {
+        loadSecret,
+        scopeOfHost: vi.fn(() => ({ id: "team-1" })),
+        getHost: vi.fn(() => teamHost),
+        getMyHostCredentials: vi.fn(() => mine),
+        setMyHostCredentials,
+        setHostLoginUsername,
+      },
+    });
+    return { coordinator, loadSecret, setMyHostCredentials, setHostLoginUsername, deps };
+  }
+
+  it("connects with my own credentials first, without reading the team's secret", async () => {
+    const { coordinator, loadSecret } = createTeamCoordinator({
+      username: "alice",
+      authType: "password",
+      password: "mine",
+    });
+
+    await expect(coordinator.resolveSshAuth(teamHost)).resolves.toMatchObject({
+      username: "alice",
+      authType: "password",
+      secrets: { password: "mine" },
+      shouldPersistHostSecret: false,
+    });
+    expect(loadSecret).not.toHaveBeenCalled();
+  });
+
+  it("uses my account name with the team's key when that is all I set", async () => {
+    const { coordinator } = createTeamCoordinator({ username: "alice" });
+
+    const auth = await coordinator.resolveSshAuth(teamHost);
+
+    expect(auth).toMatchObject({ username: "alice", authType: "privateKey", secrets: { privateKeyPem: "TEAM-PEM" } });
+  });
+
+  it("uses the host's own login when I have none", async () => {
+    const { coordinator } = createTeamCoordinator(null);
+
+    await expect(coordinator.resolveSshAuth(teamHost)).resolves.toMatchObject({
+      username: "deploy",
+      authType: "privateKey",
+      secrets: { privateKeyPem: "TEAM-PEM" },
+    });
+    await expect(coordinator.resolveSshAuth({ ...teamHost, username: "  " })).rejects.toThrow("사용자명이 필요합니다.");
+  });
+
+  // 비밀번호·키를 빼고 공유된 호스트: 공유한 사람은 내 것으로 붙고, 내 것이 없는 멤버는 빈 로그인으로 가서
+  // 지금의 요청 창이 뜬다(넣은 값은 내 칸에 저장된다 — 위 시험).
+  it("connects a host shared without its password with mine, or with nothing so the prompt asks", async () => {
+    const shared = { ...teamHost, secretRef: null };
+    const sharer = createTeamCoordinator({ password: "sharer-pw" });
+    await expect(sharer.coordinator.resolveSshAuth(shared)).resolves.toMatchObject({
+      username: "deploy",
+      secrets: { password: "sharer-pw" },
+    });
+
+    const member = createTeamCoordinator(null);
+    const auth = await member.coordinator.resolveSshAuth(shared);
+    expect(auth).toMatchObject({ username: "deploy", authType: "privateKey" });
+    expect([auth.secrets.password, auth.secrets.privateKeyPem, auth.secrets.passphrase]).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(member.loadSecret).not.toHaveBeenCalled();
+  });
+
+  it("lets what was typed into the prompt win over mine, and marks it to be kept", async () => {
+    const { coordinator } = createTeamCoordinator({ username: "alice", authType: "password", password: "old" });
+
+    await expect(coordinator.resolveSshAuth(teamHost, { password: "new" })).resolves.toMatchObject({
+      username: "alice",
+      secrets: { password: "new" },
+      shouldPersistHostSecret: true,
+    });
+  });
+
+  // 요청 창에서 바꾼 사용자 이름은 이번 시도의 것이다 — 내 것·호스트 것보다 먼저 쓰고, 붙으면 저장하도록 알린다.
+  it("connects with the username typed into the prompt, even with nothing else typed", async () => {
+    const { coordinator } = createTeamCoordinator({ username: "alice", authType: "password", password: "mine" });
+
+    await expect(coordinator.resolveSshAuth(teamHost, { username: " bob ", password: "bob-pw" })).resolves.toMatchObject({
+      username: "bob",
+      typedUsername: "bob",
+      secrets: { password: "bob-pw" },
+      shouldPersistHostSecret: true,
+    });
+    // 사용자 이름만 바꿔도 저장할 것이 있다.
+    const nameOnly = createTeamCoordinator(null);
+    await expect(nameOnly.coordinator.resolveSshAuth(teamHost, { username: "bob" })).resolves.toMatchObject({
+      username: "bob",
+      typedUsername: "bob",
+      shouldPersistHostSecret: true,
+    });
+    // 넣지 않았으면 없다.
+    await expect(nameOnly.coordinator.resolveSshAuth(teamHost)).resolves.toMatchObject({
+      username: "deploy",
+      typedUsername: null,
+      shouldPersistHostSecret: false,
+    });
+  });
+
+  // 붙은 뒤 저장: 사용자 이름은 카탈로그가 제자리에 둔다(팀 호스트면 내 칸 — 팀 레코드에 쓰면 팀 모두의 이름이
+  // 바뀐다). 내 칸으로 옮기는 비밀값에 사용자 이름이 섞이지 않는다.
+  it("saves the typed username through the catalog, apart from the secrets that go to my own slot", async () => {
+    const team = createTeamCoordinator({ username: "alice" });
+    await team.coordinator.persistHostSpecificSecret("team-host", "Shared", { username: "secret-account", password: "bob-pw" }, "bob");
+    expect(team.setHostLoginUsername).toHaveBeenCalledWith("team-host", "bob");
+    expect(team.setMyHostCredentials).toHaveBeenCalledWith("team-host", { username: "alice", password: "bob-pw" });
+    expect(team.deps.hosts.updateSecretRef).not.toHaveBeenCalled();
+
+    // 사용자 이름만 바꾼 경우에도 저장한다.
+    const nameOnly = createTeamCoordinator(null);
+    await expect(nameOnly.coordinator.persistHostSpecificSecret("team-host", "Shared", {}, "bob")).resolves.toBeNull();
+    expect(nameOnly.setHostLoginUsername).toHaveBeenCalledWith("team-host", "bob");
+    expect(nameOnly.setMyHostCredentials).not.toHaveBeenCalled();
+    expect(nameOnly.deps.queueSync).toHaveBeenCalled();
+  });
+
+  // 키 설치는 이 실행 중 요청 창에 넣었던 값을 다시 쓰지 않는다(전과 같다).
+  it("leaves out the prompt values remembered for reconnecting when asked to", async () => {
+    const { coordinator } = createTeamCoordinator(null);
+    await coordinator.resolveSshAuth(teamHost, { passphrase: "typed" });
+
+    await expect(coordinator.resolveSshAuth(teamHost)).resolves.toMatchObject({ secrets: { passphrase: "typed" } });
+    const withoutCache = await coordinator.resolveSshAuth(teamHost, undefined, { includeRuntimeCache: false });
+    expect(withoutCache.secrets.passphrase).toBeUndefined();
+    clearRuntimeSecretCache();
+  });
+
+  it("gives RDP and VNC my credentials first, else the team's with my account name", async () => {
+    const withMine = createTeamCoordinator({ username: "alice", domain: "CORP", password: "mine" });
+    await expect(withMine.coordinator.loadHostSecrets(teamHost)).resolves.toEqual({
+      username: "alice",
+      domain: "CORP",
+      password: "mine",
+    });
+    expect(withMine.loadSecret).not.toHaveBeenCalled();
+
+    const nameOnly = createTeamCoordinator({ username: "alice" });
+    await expect(nameOnly.coordinator.loadHostSecrets(teamHost)).resolves.toMatchObject({
+      username: "alice",
+      privateKeyPem: "TEAM-PEM",
+    });
+
+    const none = createTeamCoordinator(null);
+    await expect(none.coordinator.loadHostSecrets(teamHost)).resolves.toMatchObject({
+      username: "deploy",
+      privateKeyPem: "TEAM-PEM",
+    });
+  });
 });
 
 describe("normalizeHostEnvVars", () => {

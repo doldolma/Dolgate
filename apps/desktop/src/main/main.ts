@@ -10,7 +10,6 @@ import {
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { isStaticDnsOverrideRecord } from '@shared';
 import type { DesktopWindowLaunchIntent, DesktopWindowState } from '@shared';
 import {
   ActivityLogRepository,
@@ -44,13 +43,18 @@ import { getMainLocale, initMainI18n, onMainLocaleChanged, t } from './i18n';
 import { registerIpcHandlers } from './ipc';
 import { RdpManager } from './rdp-manager';
 import { VncManager } from './vnc-manager';
-import { collectActiveDnsOverrideEntries, HostsOverrideManager } from './hosts-override-manager';
+import {
+  collectActiveDnsOverrideEntriesAcrossVaults,
+  HostsOverrideManager,
+  listStaticDnsOverrideIds,
+} from './hosts-override-manager';
 import { OpenSshImportService } from './openssh-import-service';
 import { isSecureStorageUsable, SecretStore } from './secret-store';
 import { SessionShareService } from './session-share-service';
 import { SessionReplayService } from './session-replay-service';
 import { SyncService } from './sync-service';
 import { TeamSyncService } from './team-sync-service';
+import { listStoredTeamAwsProfiles, listStoredTeamDnsOverrideVaults } from './team-vault-scope';
 import { matchCloseActiveTab, matchTabCommand } from './tab-shortcuts';
 import {
   forgetRdpKeyboardCapture,
@@ -293,6 +297,8 @@ if (termiusHelperArgIndex >= 0) {
   const syncOutboxRepository = new SyncOutboxRepository();
   const secretStore = new SecretStore();
   const awsService = new AwsService(awsProfileRepository);
+  // 팀 볼트의 AWS 프로필도 관리 설정 파일에 펼치고, 팀 호스트는 그것으로 접속한다.
+  awsService.setTeamProfileSource(listStoredTeamAwsProfiles);
   const awsSsmTunnelService = new AwsSsmTunnelService();
   const warpgateService = new WarpgateService(secretStore);
   const termiusImportService = new TermiusImportService();
@@ -418,6 +424,9 @@ if (termiusHelperArgIndex >= 0) {
     secretStore,
     onChanged: () => {
       coreManager.pushTailnetConfigs();
+      // 팀 AWS 프로필·DNS 덮어쓰기가 바뀌었을 수 있다 — 펼친 설정 파일과 hosts 를 다시 맞춘다.
+      void awsService.materializeManagedProfiles().catch(() => undefined);
+      void rewriteDnsOverridesForCurrentState().catch(() => undefined);
       broadcastWorkspaceChanged();
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.isDestroyed()) {
@@ -428,14 +437,15 @@ if (termiusHelperArgIndex >= 0) {
   });
 
   const rewriteDnsOverridesForCurrentState = async () => {
-    const overrides = dnsOverrideRepository.list();
-    hostsOverrideManager.pruneStaticOverrideStates(
-      overrides.filter(isStaticDnsOverrideRecord).map((record) => record.id),
-    );
+    // 팀 볼트의 덮어쓰기도 함께 적용한다(같은 이름이면 개인 것). 켜 둔 팀 정적 덮어쓰기를 지우지 않는다.
+    const dnsVaults = [
+      { overrides: dnsOverrideRepository.list(), rules: portForwardRepository.list() },
+      ...listStoredTeamDnsOverrideVaults(),
+    ];
+    hostsOverrideManager.pruneStaticOverrideStates(listStaticDnsOverrideIds(dnsVaults));
     await hostsOverrideManager.rewrite(
-      collectActiveDnsOverrideEntries(
-        overrides,
-        portForwardRepository.list(),
+      collectActiveDnsOverrideEntriesAcrossVaults(
+        dnsVaults,
         coreManager.listPortForwardRuntimes(),
         hostsOverrideManager.getActiveStaticOverrideIds(),
       )

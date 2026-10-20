@@ -476,11 +476,12 @@ describe("registerContainersIpcHandlers", () => {
         .fn()
         .mockReturnValue("/usr/bin/docker exec -it container-1 /bin/sh"),
       resolveTrustedHostKeys,
-      requireConfiguredSshUsername: vi.fn().mockReturnValue("deploy"),
-      resolveRuntimeSshSecrets: vi.fn().mockResolvedValue({
+      resolveSshAuth: vi.fn(async (host: { authType: string }) => ({
+        username: "deploy",
+        authType: host.authType,
         secrets: { password: "pw" },
         shouldPersistHostSecret: false,
-      }),
+      })),
       ensureCertificateAuthReady: vi.fn().mockResolvedValue(null),
       resolveJumpHostTarget: vi.fn().mockResolvedValue(undefined),
       resolveTailnetRoute,

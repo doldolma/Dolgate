@@ -139,6 +139,195 @@ describe("TeamSyncService", () => {
     expect(harness.server.requests.filter((request) => request.method !== "GET")).toEqual([]);
   });
 
+  it("keeps my credentials for a team host in my private slot, sealed with my personal key", async () => {
+    const harness = await createSyncedTeam();
+    const catalog = harness.catalog();
+
+    catalog.setMyHostCredentials("team-a", { username: "alice", password: "alice-secret" });
+    await harness.service.pushDirty();
+
+    const [put] = harness.server.requestsTo("PUT", `/teams/${TEAM_ID}/me`);
+    const sealed = put.body.hostCredentials[0].encrypted_payload;
+    expect(open(sealed, PERSONAL_KEY)).toMatchObject({
+      id: "team-a",
+      credentials: { username: "alice", password: "alice-secret" },
+    });
+    expect(() => open(sealed, harness.teamKey)).toThrow();
+    expect(harness.server.requestsTo("POST", `/teams/${TEAM_ID}/sync`)).toEqual([]);
+
+    // 내 다른 기기에서 둔 것은 감시로 받아 이 기기에서 잠근다.
+    harness.server.putPrivate(
+      TEAM_ID,
+      "hostCredentials",
+      "team-b",
+      { id: "team-b", updatedAt: "2026-10-19T05:00:00.000Z", credentials: { authType: "privateKey", privateKeyPem: "PEM" } },
+      "2026-10-19T05:00:00.000Z",
+    );
+    await harness.tickLoops();
+    expect(catalog.getMyHostCredentials("team-b")).toEqual({ authType: "privateKey", privateKeyPem: "PEM" });
+    expect(catalog.getMyHostCredentials("team-a")).toEqual({ username: "alice", password: "alice-secret" });
+
+    // 지우면 서버의 내 칸에서도 지운다.
+    harness.server.requests.length = 0;
+    catalog.setMyHostCredentials("team-a", null);
+    await harness.service.pushDirty();
+    const [cleared] = harness.server.requestsTo("PUT", `/teams/${TEAM_ID}/me`);
+    expect(cleared.body.hostCredentials).toEqual([expect.objectContaining({ id: "team-a", deleted_at: expect.any(String) })]);
+  });
+
+  it("keeps my AWS keys and tailnet auth key for a team in my private slot, while the team gets only its own", async () => {
+    const harness = await createSyncedTeam();
+    const scope = harness.catalog().getScope(TEAM_ID)!;
+    scope.awsProfiles.upsert({
+      id: "aws-team",
+      kind: "static",
+      name: "team",
+      region: null,
+      accessKeyId: "",
+      secretAccessKey: "",
+      updatedAt: T0,
+    });
+    scope.tailnets.save({ id: "tailnet-team", label: "Team", createdAt: T0, updatedAt: T0 }, "tskey-team");
+    scope.memberPrefs!.writeAwsProfileCredentials("aws-team", { accessKeyId: "AKIAMINE", secretAccessKey: "mine-secret" });
+    scope.memberPrefs!.writeTailnetCredentials("tailnet-team", { authKey: "tskey-mine" });
+
+    await harness.service.pushDirty();
+
+    const [put] = harness.server.requestsTo("PUT", `/teams/${TEAM_ID}/me`);
+    expect(open(put.body.awsProfileCredentials[0].encrypted_payload, PERSONAL_KEY)).toMatchObject({
+      id: "aws-team",
+      credentials: { accessKeyId: "AKIAMINE", secretAccessKey: "mine-secret" },
+    });
+    const sealedAuthKey = put.body.tailnetCredentials[0].encrypted_payload;
+    expect(open(sealedAuthKey, PERSONAL_KEY)).toMatchObject({ id: "tailnet-team", credentials: { authKey: "tskey-mine" } });
+    expect(() => open(sealedAuthKey, harness.teamKey)).toThrow();
+    // 팀에는 팀 것만 — 키 없는 프로필과 팀 auth key.
+    const [push] = harness.server.requestsTo("POST", `/teams/${TEAM_ID}/sync`);
+    const teamRecords = [...push.body.awsProfiles, ...push.body.tailnets].map((record) =>
+      open(record.encrypted_payload, harness.teamKey),
+    );
+    expect(teamRecords).toEqual([
+      expect.objectContaining({ id: "aws-team", accessKeyId: "", secretAccessKey: "" }),
+      expect.objectContaining({ id: "tailnet-team", hasAuthKey: false }),
+    ]);
+    expect(teamRecords[1]).not.toHaveProperty("authKey");
+    expect(JSON.stringify(teamRecords)).not.toMatch(/AKIAMINE|tskey-mine/);
+    // 올린 뒤 다시 받아도 이 기기의 내 것은 그대로다.
+    expect(scope.memberPrefs!.readAwsProfileCredentials("aws-team")).toEqual({
+      accessKeyId: "AKIAMINE",
+      secretAccessKey: "mine-secret",
+    });
+
+    // 내 다른 기기에서 바꾼 것은 감시로 받아 이 기기에서 잠그고, 코어에 넘길 때 쓴다.
+    harness.server.putPrivate(
+      TEAM_ID,
+      "tailnetCredentials",
+      "tailnet-team",
+      { id: "tailnet-team", updatedAt: "2099-01-01T00:00:00.000Z", credentials: { authKey: "tskey-other-device" } },
+      "2099-01-01T00:00:00.000Z",
+    );
+    await harness.tickLoops();
+    expect(harness.catalog().listTailnetPayloads()).toEqual([
+      expect.objectContaining({ id: "tailnet-team", authKey: "tskey-other-device" }),
+    ]);
+  });
+
+  // 같은 판이 돌아올 때 다시 잠그면 내용이 같아도 상태 파일이 바뀐다 — Windows(DPAPI)는 잠글 때마다 결과가 다르다.
+  it("leaves my credentials locked as they are when the same version comes back", async () => {
+    const harness = await createSyncedTeam();
+    const { safeStorage } = await import("electron");
+    let sealed = 0;
+    vi.spyOn(safeStorage, "encryptString").mockImplementation((value: string) =>
+      Buffer.from(`${sealed++}|${value}`, "utf8"),
+    );
+    vi.spyOn(safeStorage, "decryptString").mockImplementation((value: Buffer) =>
+      value.toString("utf8").replace(/^\d+\|/, ""),
+    );
+    const catalog = harness.catalog();
+    catalog.setMyHostCredentials("team-a", { username: "alice", password: "alice-secret" });
+    const lockedHere = harness.storage.getState().teams[TEAM_ID].private.hostCredentials[0].value;
+
+    await harness.service.pushDirty();
+
+    expect(harness.server.requestsTo("PUT", `/teams/${TEAM_ID}/me`)).toHaveLength(1);
+    expect(harness.storage.getState().teams[TEAM_ID].private.hostCredentials[0].value).toEqual(lockedHere);
+    expect(catalog.getMyHostCredentials("team-a")).toEqual({ username: "alice", password: "alice-secret" });
+  });
+
+  it("does not overwrite my credentials edited while my private slot was in flight", async () => {
+    const harness = await createSyncedTeam();
+    const catalog = harness.catalog();
+    // 두 편집이 같은 밀리초에 찍히면 나중 것이 더 새것이 아니게 된다 — 시계를 정해 둔다.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-19T06:00:00.000Z"));
+    catalog.setMyHostCredentials("team-a", { username: "alice", password: "first" });
+    // 첫 값을 올리고 내 칸을 다시 받는 사이에 또 고친다.
+    harness.server.beforePrivateResponse = () => {
+      vi.setSystemTime(new Date("2026-10-19T06:00:01.000Z"));
+      catalog.setMyHostCredentials("team-a", { username: "alice", password: "second" });
+    };
+
+    await harness.service.pushDirty();
+    await harness.service.pushDirty();
+
+    expect(catalog.getMyHostCredentials("team-a")).toEqual({ username: "alice", password: "second" });
+    const [latest] = harness.server.requestsTo("PUT", `/teams/${TEAM_ID}/me`).slice(-1);
+    expect(open(latest.body.hostCredentials[0].encrypted_payload, PERSONAL_KEY)).toMatchObject({
+      credentials: { password: "second" },
+    });
+  });
+
+  it("does not overwrite my tailnet auth key edited while my private slot was in flight", async () => {
+    const harness = await createSyncedTeam();
+    const scope = harness.catalog().getScope(TEAM_ID)!;
+    scope.tailnets.save({ id: "tailnet-team", label: "Team", createdAt: T0, updatedAt: T0 });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-19T06:00:00.000Z"));
+    scope.memberPrefs!.writeTailnetCredentials("tailnet-team", { authKey: "tskey-first" });
+    harness.server.beforePrivateResponse = () => {
+      vi.setSystemTime(new Date("2026-10-19T06:00:01.000Z"));
+      scope.memberPrefs!.writeTailnetCredentials("tailnet-team", { authKey: "tskey-second" });
+    };
+
+    await harness.service.pushDirty();
+    await harness.service.pushDirty();
+
+    expect(scope.memberPrefs!.readTailnetCredentials("tailnet-team")).toEqual({ authKey: "tskey-second" });
+    const [latest] = harness.server.requestsTo("PUT", `/teams/${TEAM_ID}/me`).slice(-1);
+    expect(open(latest.body.tailnetCredentials[0].encrypted_payload, PERSONAL_KEY)).toMatchObject({
+      credentials: { authKey: "tskey-second" },
+    });
+  });
+
+  it("never uploads a member's tailnet account and ignores one that arrives", async () => {
+    const harness = await createSyncedTeam();
+    const tailnet = { id: "tailnet-team", label: "Team", createdAt: T0, updatedAt: T0 };
+    harness.catalog().getScope(TEAM_ID)!.tailnets.save({ ...tailnet, loginName: "me@example.com" }, "tskey-team");
+
+    await harness.service.pushDirty();
+    const [push] = harness.server.requestsTo("POST", `/teams/${TEAM_ID}/sync`);
+    const pushed = open(push.body.tailnets[0].encrypted_payload, harness.teamKey);
+    expect(pushed).toMatchObject({ id: "tailnet-team" });
+    expect(pushed).not.toHaveProperty("loginName");
+    // auth key 도 사람 것이라 팀에 싣지 않는다 — 내 개인 칸으로 올라간다.
+    expect(pushed).not.toHaveProperty("authKey");
+
+    // 다른 멤버(옛 앱)가 계정을 실어 올렸어도 담지 않는다 — 내 계정은 이 기기 칸에 그대로다.
+    harness.server.putRecord(
+      TEAM_ID,
+      "tailnets",
+      "tailnet-team",
+      { ...tailnet, label: "Team renamed", loginName: "someone-else@example.com", updatedAt: "2099-01-01T00:00:00.000Z" },
+      harness.teamKey,
+      "2099-01-01T00:00:00.000Z",
+    );
+    await harness.tickLoops();
+    const team = harness.storage.getState().teams[TEAM_ID];
+    expect(team.data.tailnets).toEqual([expect.objectContaining({ id: "tailnet-team", label: "Team renamed" })]);
+    expect(team.data.tailnets[0]).not.toHaveProperty("loginName");
+    expect(team.local.tailnetLoginNameById).toEqual({ "tailnet-team": "me@example.com" });
+  });
+
   it("sends nothing when a connection only confirms a team host key", async () => {
     const harness = await createSyncedTeam();
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
@@ -437,7 +626,8 @@ describe("TeamSyncService feature paths", () => {
     expect(harness.server.teams.get(TEAM_ID)!.records.get("hosts")!.get("future")).toEqual(before);
   });
 
-  it("receives a team's tailnet auth key and AWS profile values into the team's own secure place", async () => {
+  // 팀에는 설정만 담는다. 키를 실어 보낸 멤버(옛 앱)가 있어도 tailnet auth key 와 AWS 정적 키는 사람 것이라 버린다.
+  it("receives a team's tailnet and AWS profile settings, dropping the keys someone sent along", async () => {
     const harness = await createSyncedTeam([]);
     harness.server.putRecord(
       TEAM_ID,
@@ -457,17 +647,24 @@ describe("TeamSyncService feature paths", () => {
     await harness.tickLoops();
 
     const root = harness.vaultRoot.teamVaultRoot(TEAM_ID);
-    expect(new harness.database.TailnetRepository(root).readAuthKey("tailnet-team")).toBe("tskey-team");
+    expect(new harness.database.TailnetRepository(root).readAuthKey("tailnet-team")).toBeNull();
     expect(new harness.database.AwsProfileRepository(root).getPayloadById("aws-team")).toMatchObject({
       name: "team-prod",
-      secretAccessKey: "team-secret",
+      accessKeyId: "",
+      secretAccessKey: "",
     });
     const state = harness.storage.getState();
-    // 키는 레코드에 남지 않고 팀의 비밀 칸에만 있다. 개인 쪽에는 아무것도 없다.
-    expect(state.teams[TEAM_ID].data.tailnets).toEqual([expect.objectContaining({ id: "tailnet-team", hasAuthKey: true })]);
-    expect(state.teams[TEAM_ID].data.tailnets[0]).not.toHaveProperty("authKey");
+    expect(state.teams[TEAM_ID].data.tailnets).toEqual([
+      expect.objectContaining({ id: "tailnet-team", label: "Team", hasAuthKey: false }),
+    ]);
+    expect(state.teams[TEAM_ID].data.awsProfiles).toEqual([expect.objectContaining({ id: "aws-team", name: "team-prod" })]);
+    expect(state.teams[TEAM_ID].secure.tailnetAuthKeysById).toEqual({});
+    expect(JSON.stringify(state)).not.toMatch(/tskey-team|AKIA-TEAM|team-secret/);
+    // 개인 쪽에도, 내 개인 칸에도 아무것도 들어오지 않는다(남이 보낸 키는 내 것이 아니다).
     expect(state.secure.tailnetAuthKeysById).toEqual({});
     expect(state.secure.managedAwsProfilesById).toEqual({});
+    expect(state.teams[TEAM_ID].private.tailnetCredentials).toEqual([]);
+    expect(state.teams[TEAM_ID].private.awsProfileCredentials).toEqual([]);
   });
 
   it("follows a rename and a role change made by someone else, reading only the team info", async () => {

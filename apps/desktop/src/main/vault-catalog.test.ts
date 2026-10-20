@@ -2,7 +2,12 @@ import type { HostDraft, HostRecord, SavedWorkspaceRecord, TerminalThemeId } fro
 import { describe, expect, it, vi } from "vitest";
 import type { HostRepository, SavedWorkspaceRepository } from "./database";
 import type { TeamHostPrefsRecord, TeamWorkspacePrefsRecord } from "./state-storage";
-import type { TeamMemberPrefsStore } from "./team-member-prefs";
+import type {
+  TeamAwsProfileCredentials,
+  TeamHostCredentials,
+  TeamMemberPrefsStore,
+  TeamTailnetCredentials,
+} from "./team-member-prefs";
 import {
   createVaultCatalog,
   PERSONAL_VAULT_ID,
@@ -60,6 +65,17 @@ function createMemberPrefs(
   const hosts = new Map((initial.hosts ?? []).map((record) => [record.id, record]));
   const workspaces = new Map((initial.workspaces ?? []).map((record) => [record.id, record]));
   const themes: Record<string, TerminalThemeId> = { ...initial.themes };
+  const credentials = new Map<string, TeamHostCredentials>();
+  const awsCredentials = new Map<string, TeamAwsProfileCredentials>();
+  const tailnetCredentials = new Map<string, TeamTailnetCredentials>();
+  const keep = <T>(map: Map<string, T>) =>
+    vi.fn((id: string, value: T | null) => {
+      if (value) {
+        map.set(id, value);
+      } else {
+        map.delete(id);
+      }
+    });
   const store = {
     read: vi.fn(() => ({ hosts: new Map(hosts), workspaces: new Map(workspaces), terminalThemeByHostId: { ...themes } })),
     updateHost: vi.fn((hostId: string, patch: { favorite?: boolean | null; agentForwarding?: boolean | null }) => {
@@ -88,6 +104,12 @@ function createMemberPrefs(
         themes[hostId] = themeId;
       }
     }),
+    readHostCredentials: vi.fn((hostId: string) => credentials.get(hostId) ?? null),
+    writeHostCredentials: keep(credentials),
+    readAwsProfileCredentials: vi.fn((profileId: string) => awsCredentials.get(profileId) ?? null),
+    writeAwsProfileCredentials: keep(awsCredentials),
+    readTailnetCredentials: vi.fn((tailnetId: string) => tailnetCredentials.get(tailnetId) ?? null),
+    writeTailnetCredentials: keep(tailnetCredentials),
   };
   return store satisfies TeamMemberPrefsStore;
 }
@@ -269,6 +291,24 @@ describe("createVaultCatalog", () => {
       await expect(catalog.loadSecret("secret:team")).resolves.toBe("team-value");
       await expect(catalog.loadSecret("secret:both")).resolves.toBe("personal-both");
       await expect(catalog.loadSecret("secret:none")).resolves.toBeNull();
+    });
+
+    it("finds a port forward rule in whichever vault holds it, personal first", () => {
+      const withRules = (repositories: object, rules: Array<{ id: string; label: string }>) => ({
+        ...repositories,
+        portForwards: { getById: vi.fn((id: string) => rules.find((rule) => rule.id === id) ?? null) },
+      });
+      const catalog = createVaultCatalog(
+        asScope(withRules(createRepositories([]), [{ id: "rule-mine", label: "mine" }, { id: "rule-both", label: "personal" }])),
+        createTeams({
+          "team-1": asTeam(withRules(createTeam([]), [{ id: "rule-team", label: "team" }, { id: "rule-both", label: "team" }])),
+        }),
+      );
+
+      expect(catalog.getPortForward("rule-mine")?.label).toBe("mine");
+      expect(catalog.getPortForward("rule-team")?.label).toBe("team");
+      expect(catalog.getPortForward("rule-both")?.label).toBe("personal");
+      expect(catalog.getPortForward("rule-none")).toBeNull();
     });
   });
 

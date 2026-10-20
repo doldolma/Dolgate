@@ -152,7 +152,6 @@ import {
   toTrustInput,
 } from "../utils";
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
-import { updateStoredSshUsername } from "../services/credential-retry";
 import {
   cancelReconnect,
   isReconnecting,
@@ -2486,7 +2485,11 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
         throw new Error(t("sessionStore.usernameRequired"));
       }
 
+      // 바꾼 사용자 이름은 호스트 레코드에 쓰지 않고 이번 시도의 값으로 넘긴다. 붙으면 메인이 제자리에
+      // 저장한다(개인 호스트는 레코드, 팀 호스트는 내 자격 증명) — 팀 레코드에 쓰면 팀 모두의 이름이 바뀐다.
+      const usernameChanged = username !== host.username.trim();
       const secrets = {
+        username: usernameChanged ? username : undefined,
         password:
           input.password !== undefined && input.password.length > 0
             ? input.password
@@ -2505,18 +2508,6 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             ? input.certificateText
             : undefined,
       };
-
-      const usernameChanged = username !== host.username.trim();
-      if (usernameChanged) {
-        const nextHost = await updateStoredSshUsername(
-          { api, get, set },
-          host.id,
-          username,
-        );
-        if (!nextHost || !isSshHostRecord(nextHost)) {
-          throw new Error(t("sessionStore.usernameUpdateFailed"));
-        }
-      }
 
       set({
         activeCredentialRetryAttempt: {
@@ -2567,13 +2558,6 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
           secrets,
         });
         if (!connected) {
-          if (usernameChanged) {
-            await updateStoredSshUsername(
-              { api, get, set },
-              host.id,
-              host.username,
-            );
-          }
           set({ activeCredentialRetryAttempt: null });
           return;
         }
@@ -2582,13 +2566,6 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
           activeCredentialRetryAttempt: null,
         });
       } catch (error) {
-        if (usernameChanged) {
-          await updateStoredSshUsername(
-            { api, get, set },
-            host.id,
-            host.username,
-          ).catch(() => undefined);
-        }
         set({ activeCredentialRetryAttempt: null });
         throw error;
       }
@@ -2614,16 +2591,16 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
         return;
       }
 
-      const currentDraft = toHostDraft(currentHost, currentHost.label);
-      if (!isSshHostDraft(currentDraft)) {
+      // 메인이 제자리에 둔다 — 개인 호스트는 레코드, 팀 호스트는 내 자격 증명(팀 레코드에 쓰면 팀 모두의 이름이
+      // 바뀐다). 돌아오는 호스트에는 그 이름이 얹혀 있다.
+      const nextHost = await api.hosts.setLoginUsername(
+        currentHost.id,
+        trimmedUsername,
+      );
+      if (!nextHost) {
         set({ pendingMissingUsernamePrompt: null });
         return;
       }
-
-      const nextHost = await api.hosts.update(currentHost.id, {
-        ...currentDraft,
-        username: trimmedUsername,
-      });
 
       set((state) => ({
         pendingMissingUsernamePrompt: null,

@@ -149,8 +149,7 @@ export function createMainIpcContext(
   });
   const tunnelRegistry = createTunnelRegistry({ awsSsmTunnelService });
   const dnsPortForwardCoordinator = createDnsPortForwardCoordinator({
-    dnsOverrides,
-    portForwards,
+    vaults,
     coreManager,
     hostsOverrideManager,
   });
@@ -183,7 +182,7 @@ export function createMainIpcContext(
     authService,
     awsSsmTunnelService,
     awsSftpCoordinator,
-    resolveRuntimeSshSecrets: secretCoordinator.resolveRuntimeSshSecrets,
+    resolveSshAuth: secretCoordinator.resolveSshAuth,
     ensureCertificateAuthReady: secretCoordinator.ensureCertificateAuthReady,
   });
 
@@ -218,7 +217,7 @@ export function createMainIpcContext(
     loadSecrets: secretCoordinator.loadSecrets,
     resolveTrustedHostKeys: hostCoordinator.resolveTrustedHostKeys,
     resolveTailnetRoute: hostCoordinator.resolveTailnetRoute,
-    requireConfiguredSshUsername: hostCoordinator.requireConfiguredSshUsername,
+    resolveSshAuth: secretCoordinator.resolveSshAuth,
     resolveJumpHostTarget: hostCoordinator.resolveJumpHostTarget,
     ensureCertificateAuthReady: secretCoordinator.ensureCertificateAuthReady,
     generatePrivateKey: (payload) => coreManager.generatePrivateKey(payload),
@@ -282,9 +281,10 @@ export function createMainIpcContext(
     persistSecret: secretCoordinator.persistSecret,
     persistImportedSecret: secretCoordinator.persistImportedSecret,
     loadSecrets: secretCoordinator.loadSecrets,
+    loadHostSecrets: secretCoordinator.loadHostSecrets,
     hasSecretValue: secretCoordinator.hasSecretValue,
     mergeSecrets: secretCoordinator.mergeSecrets,
-    resolveRuntimeSshSecrets: secretCoordinator.resolveRuntimeSshSecrets,
+    resolveSshAuth: secretCoordinator.resolveSshAuth,
     resolveManagedPrivateKeyPem: secretCoordinator.resolveManagedPrivateKeyPem,
     resolveManagedCertificateText:
       secretCoordinator.resolveManagedCertificateText,
@@ -298,7 +298,6 @@ export function createMainIpcContext(
     requireTrustedHostKeys: hostCoordinator.requireTrustedHostKeys,
     resolveTrustedHostKeys: hostCoordinator.resolveTrustedHostKeys,
     resolveTailnetRoute: hostCoordinator.resolveTailnetRoute,
-    requireConfiguredSshUsername: hostCoordinator.requireConfiguredSshUsername,
     buildKnownSshDuplicateKeys: hostCoordinator.buildKnownSshDuplicateKeys,
     assertSshHost: hostCoordinator.assertSshHost,
     assertSftpCompatibleHost: hostCoordinator.assertSftpCompatibleHost,

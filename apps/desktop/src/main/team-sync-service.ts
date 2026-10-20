@@ -30,13 +30,18 @@ import {
 import type { AuthSyncContext } from "./auth-service";
 import { normalizeTailnetPayloadForStorage } from "./database";
 import { t } from "./i18n";
-import { encodeSecretForStorage } from "./secret-store";
+import { decodeSecretFromStorage, encodeSecretForStorage } from "./secret-store";
 import {
   getDesktopStateStorage,
   normalizeTeamHostPrefsRecord,
   normalizeTeamWorkspacePrefsRecord,
+  TEAM_PRIVATE_SECRET_KINDS,
+  type StoredEncryptedValue,
   type SyncDeletionRecord,
   type TeamHostPrefsRecord,
+  type TeamMemberPrefsSnapshot,
+  type TeamPrivateSecretKind,
+  type TeamPrivateSecretRecord,
   type TeamWorkspacePrefsRecord,
 } from "./state-storage";
 import {
@@ -56,7 +61,12 @@ import {
   type TeamSyncPayload,
   type TeamWatchRevisions,
 } from "./team-api";
-import { stripHostMemberPrefs, stripWorkspaceMemberPrefs } from "./team-member-prefs";
+import {
+  stripAwsProfileKeys,
+  stripHostMemberPrefs,
+  stripWorkspaceMemberPrefs,
+  TEAM_MEMBER_CREDENTIAL_NORMALIZERS,
+} from "./team-member-prefs";
 import { createTeamVaultScope } from "./team-vault-scope";
 import type { TeamVaultScope, VaultSecretStore } from "./vault-catalog";
 import { TeamVaultNotFoundError } from "./vault-root";
@@ -853,7 +863,10 @@ export class TeamSyncService {
         dnsOverrides,
         snippets,
         savedWorkspaces,
-        tailnets: tailnets.map(normalizeTailnetPayloadForStorage),
+        // 로그인한 계정과 auth key 는 사람 것이다 — 섞여 와도 담지 않는다(내 것은 이 기기 칸과 내 개인 칸에 있다).
+        tailnets: tailnets.map(({ loginName: _theirs, authKey: _person, ...tailnet }) =>
+          normalizeTailnetPayloadForStorage(tailnet),
+        ),
         awsProfiles: awsProfiles.map((profile) => ({
           id: profile.id,
           name: profile.name,
@@ -866,13 +879,10 @@ export class TeamSyncService {
         managedSecretsByRef: Object.fromEntries(
           secrets.map((secret) => [secret.secretRef, encodeSecretForStorage(JSON.stringify(secret))]),
         ),
-        tailnetAuthKeysById: Object.fromEntries(
-          tailnets
-            .filter((tailnet) => Boolean(tailnet.authKey))
-            .map((tailnet) => [tailnet.id, encodeSecretForStorage(tailnet.authKey as string)]),
-        ),
+        tailnetAuthKeysById: {},
+        // 정적 프로필의 키도 사람 것이다 — 팀 쪽에는 키 없이 담는다.
         managedAwsProfilesById: Object.fromEntries(
-          awsProfiles.map((profile) => [profile.id, encodeSecretForStorage(JSON.stringify(profile))]),
+          awsProfiles.map((profile) => [profile.id, encodeSecretForStorage(JSON.stringify(stripAwsProfileKeys(profile)))]),
         ),
       },
     );
@@ -889,11 +899,20 @@ export class TeamSyncService {
     if (!local) {
       throw new TeamVaultNotFoundError(teamId);
     }
-    const before = JSON.stringify([local.hostPrefs, local.workspacePrefs]);
+    const before = JSON.stringify(memberPrefsToCompare(local));
     const deletions = this.storage.listTeamPrivateDeletions(teamId);
     const builder = new DeltaBuilder(baseline, key);
     for (const record of local.hostPrefs) builder.add("hostPrefs", record.id, record.updatedAt, record);
     for (const record of local.workspacePrefs) builder.add("workspacePrefs", record.id, record.updatedAt, record);
+    // 내 자격 증명은 이 기기에서 잠근 것을 풀어 내 개인 DEK 로 다시 잠가 올린다(팀 키로는 안 열린다).
+    for (const kind of TEAM_PRIVATE_SECRET_KINDS) {
+      for (const record of local[kind]) {
+        const credentials = readStoredCredentials(kind, record.value);
+        if (credentials) {
+          builder.add(kind, record.id, record.updatedAt, { id: record.id, updatedAt: record.updatedAt, credentials });
+        }
+      }
+    }
     for (const entry of deletions) builder.addDeletion(entry.kind, entry.recordId, entry.deletedAt);
     if (builder.count > 0) {
       await this.api.putPrivate(lease, teamId, builder.payload);
@@ -906,7 +925,7 @@ export class TeamSyncService {
       return false;
     }
     const current = this.storage.readTeamMemberPrefs(teamId);
-    if (!current || JSON.stringify([current.hostPrefs, current.workspacePrefs]) !== before) {
+    if (!current || JSON.stringify(memberPrefsToCompare(current)) !== before) {
       // 그 사이 내 설정을 고쳤다. 덮지 않고 다음 차례에 올린 뒤 받는다.
       this.pushDirty();
       return false;
@@ -916,12 +935,65 @@ export class TeamSyncService {
       liveRecords(payload, kind)
         .map((record) => normalize(decodeEncryptedPayload<unknown>(record.encrypted_payload, key)))
         .filter((record): record is T => record !== null);
+    const receiveCredentials = (kind: TeamPrivateSecretKind): TeamPrivateSecretRecord[] => {
+      const lockedHere = new Map(current[kind].map((record) => [record.id, record]));
+      return decode<RemoteCredentials>(kind, (value) => normalizeRemoteCredentials(kind, value)).map((record) => {
+        // 같은 판이면 이 기기에서 잠근 값을 그대로 둔다 — 다시 잠그면 내용이 같아도 상태 파일이 바뀐다.
+        const local = lockedHere.get(record.id);
+        return local && local.updatedAt === record.updatedAt
+          ? local
+          : {
+              id: record.id,
+              updatedAt: record.updatedAt,
+              value: encodeSecretForStorage(JSON.stringify(record.credentials)),
+            };
+      });
+    };
     this.storage.replaceTeamMemberPrefs(teamId, {
       hostPrefs: decode<TeamHostPrefsRecord>("hostPrefs", normalizeTeamHostPrefsRecord),
       workspacePrefs: decode<TeamWorkspacePrefsRecord>("workspacePrefs", normalizeTeamWorkspacePrefsRecord),
+      hostCredentials: receiveCredentials("hostCredentials"),
+      awsProfileCredentials: receiveCredentials("awsProfileCredentials"),
+      tailnetCredentials: receiveCredentials("tailnetCredentials"),
     });
     runtime.private = { etag: remote.etag, baseline: buildBaseline(payload) };
     return true;
+  }
+}
+
+/** 받기 전에 그 사이 내 설정을 고쳤는지 볼 몫(이 기기의 테마는 빼고). */
+function memberPrefsToCompare(prefs: TeamMemberPrefsSnapshot): unknown[] {
+  return [prefs.hostPrefs, prefs.workspacePrefs, ...TEAM_PRIVATE_SECRET_KINDS.map((kind) => prefs[kind])];
+}
+
+/** 내 개인 칸에 올린 자격 증명 한 건(호스트·AWS 프로필·tailnet). */
+interface RemoteCredentials {
+  id: string;
+  updatedAt: string;
+  credentials: object;
+}
+
+function normalizeRemoteCredentials(kind: TeamPrivateSecretKind, value: unknown): RemoteCredentials | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const credentials = TEAM_MEMBER_CREDENTIAL_NORMALIZERS[kind](record.credentials);
+  return typeof record.id === "string" && record.id && typeof record.updatedAt === "string" && credentials
+    ? { id: record.id, updatedAt: record.updatedAt, credentials }
+    : null;
+}
+
+/** 이 기기에서 safeStorage 로 잠근 자격 증명을 푼다. 못 풀면 null(올리지 않는다). */
+function readStoredCredentials(kind: TeamPrivateSecretKind, value: StoredEncryptedValue): object | null {
+  const json = decodeSecretFromStorage(value);
+  if (!json) {
+    return null;
+  }
+  try {
+    return TEAM_MEMBER_CREDENTIAL_NORMALIZERS[kind](JSON.parse(json));
+  } catch {
+    return null;
   }
 }
 

@@ -1339,6 +1339,75 @@ export interface TeamInviteInfo {
   alreadyJoined: boolean;
 }
 
+/** 볼트 사이 복사에서 고른 것 — 호스트 여럿, 또는 그룹 하나(하위 그룹과 호스트 통째로). */
+export type VaultCopySelection =
+  | { kind: 'hosts'; hostIds: string[] }
+  | { kind: 'group'; groupPath: string };
+
+/** 개인 ↔ 팀(또는 팀 ↔ 팀) 복사. 볼트 id 는 'personal' 이나 팀 id 다. */
+export interface VaultCopyRequest {
+  sourceVaultId: string;
+  targetVaultId: string;
+  selection: VaultCopySelection;
+  /** 대상 볼트에서 놓을 그룹 경로. 없으면 맨 위. */
+  targetGroupPath?: string | null;
+  /**
+   * 대상이 팀일 때 호스트의 비밀번호·SSH 키도 팀에 함께 넣는다. 기본 켬. 끄면 복사한 사람의 내 자격 증명에만
+   * 두고, 다른 멤버는 처음 접속할 때 자기 것을 넣는다. AWS 정적 프로필의 키와 tailnet auth key 는 사람의 인증
+   * 정보라 이 값과 상관없이 늘 복사한 사람의 내 칸에 간다(팀에는 설정만).
+   */
+  shareSecrets?: boolean;
+}
+
+/** 확인 창에 보일 종류별 개수. */
+export interface VaultCopyCounts {
+  groups: number;
+  hosts: number;
+  /** 고르지 않았는데 함께 오는 호스트(점프·VNC 터널). hosts 에 들어 있다. */
+  dependencyHosts: number;
+  /**
+   * 비밀번호와 키 — 대상 볼트에 들어가는 것만 센다. 팀으로 갈 때는 호스트 비밀값뿐이다(AWS 정적 키·tailnet auth
+   * key 는 늘 복사한 사람의 내 칸으로 간다). 개인으로 가져올 때는 그 둘도 센다.
+   */
+  secrets: number;
+  knownHosts: number;
+  portForwards: number;
+  dnsOverrides: number;
+  snippets: number;
+  awsProfiles: number;
+  tailnets: number;
+}
+
+/** 팀 호스트에 쓰는 내 자격 증명 — 넣을 때. 비운 칸은 호스트 것을 쓴다. */
+export interface MyHostCredentialsInput {
+  username?: string;
+  authType?: AuthType;
+  password?: string;
+  passphrase?: string;
+  privateKeyPem?: string;
+  certificateText?: string;
+  domain?: string;
+  privateKeyPath?: string;
+  certificatePath?: string;
+}
+
+/** 내 자격 증명이 무엇을 담았는지(비밀값은 돌려주지 않는다). */
+export interface MyHostCredentialsSummary {
+  username: string | null;
+  authType: AuthType | null;
+  domain: string | null;
+  hasPassword: boolean;
+  hasPrivateKey: boolean;
+  hasCertificate: boolean;
+  hasPassphrase: boolean;
+}
+
+export interface VaultCopyResult {
+  /** 원본 호스트 id → 복사본 id. */
+  hostIds: Record<string, string>;
+  counts: VaultCopyCounts;
+}
+
 export interface DesktopApi {
   auth: {
     getState: () => Promise<AuthState>;
@@ -1403,6 +1472,11 @@ export interface DesktopApi {
     ) => Promise<HostRecord>;
     remove: (id: string) => Promise<void>;
     setFavorite: (id: string, favorite: boolean) => Promise<HostRecord | null>;
+    /**
+     * SSH 로 붙을 사용자 이름을 둔다(사용자 이름이 없을 때 묻는 창). 개인 호스트는 레코드에, 팀 호스트는 내
+     * 자격 증명에 둔다 — 팀 레코드에 쓰면 팀 모두의 사용자 이름이 바뀐다.
+     */
+    setLoginUsername: (id: string, username: string) => Promise<HostRecord | null>;
     /**
      * 이 호스트의 터미널 테마만 바꾼다. null 은 앱 설정을 따른다는 뜻.
      *
@@ -1925,6 +1999,15 @@ export interface DesktopApi {
     revokeInvite: (teamId: string, code: string) => Promise<void>;
     getInviteInfo: (link: string) => Promise<TeamInviteInfo>;
     join: (link: string) => Promise<TeamListItem>;
+    /** 볼트 사이 복사를 하면 무엇이 몇 개 오는지(쓰지 않는다). */
+    previewCopy: (request: VaultCopyRequest) => Promise<VaultCopyCounts>;
+    /** 고른 것과 그것이 쓰는 것을 새 id 로 대상 볼트에 복사한다. 원본은 그대로다. */
+    copy: (request: VaultCopyRequest) => Promise<VaultCopyResult>;
+    /** 그 팀 호스트에 둔 내 자격 증명(비밀값 없이). 없으면 null. */
+    getMyCredentials: (hostId: string) => Promise<MyHostCredentialsSummary | null>;
+    /** 팀 호스트에 내 자격 증명을 둔다(통째로 바꾼다). 내 기기끼리만 맞춰진다. */
+    setMyCredentials: (hostId: string, credentials: MyHostCredentialsInput) => Promise<MyHostCredentialsSummary | null>;
+    clearMyCredentials: (hostId: string) => Promise<void>;
     /** 팀 목록이 바뀌었다(참여·빠짐·이름·역할). */
     onChanged: (listener: () => void) => () => void;
   };

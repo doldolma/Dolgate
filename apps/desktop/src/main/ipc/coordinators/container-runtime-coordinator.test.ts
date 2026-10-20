@@ -71,13 +71,17 @@ function createCoordinator(overrides: Record<string, unknown> = {}) {
       stopContainersTunnelForEndpoint: vi.fn().mockResolvedValue(undefined),
     },
     secretCoordinator: {
-      resolveRuntimeSshSecrets: vi.fn(),
+      resolveSshAuth: vi.fn(async (host: { authType: string }) => ({
+        username: "ubuntu",
+        authType: host.authType,
+        secrets: {},
+        shouldPersistHostSecret: false,
+      })),
       persistHostSpecificSecret: vi.fn(),
     },
     hostCoordinator: {
       requireTrustedHostKeys: vi.fn(() => ["trusted"]),
       resolveTrustedHostKeys: vi.fn(() => ["trusted"]),
-      requireConfiguredSshUsername: vi.fn(() => "ubuntu"),
     },
     resolveJumpHostTarget: vi.fn().mockResolvedValue(undefined),
     emitContainersConnectionProgress: vi.fn(),

@@ -322,7 +322,8 @@ export function registerPortForwardAndDnsIpcHandlers(
   ipcMain.handle(
     ipcChannels.portForwards.start,
     async (_event, ruleId: string) => {
-      const rule = ctx.portForwards.getById(ruleId);
+      // 팀 볼트의 규칙도 켠다 — 규칙 id 는 볼트를 넘어 겹치지 않는다.
+      const rule = ctx.vaults.getPortForward(ruleId);
       if (!rule) {
         throw new Error("Port forward rule not found");
       }
@@ -624,13 +625,12 @@ export function registerPortForwardAndDnsIpcHandlers(
       ctx.assertSshHost(host);
       const sshHost = host as SshHostRecord;
       const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys(sshHost);
-      const username = ctx.requireConfiguredSshUsername(sshHost);
-      const { secrets, shouldPersistHostSecret } =
-        await ctx.resolveRuntimeSshSecrets(sshHost);
-      await ctx.ensureCertificateAuthReady(sshHost, secrets);
+      const { username, authType, secrets, shouldPersistHostSecret } =
+        await ctx.resolveSshAuth(sshHost);
+      await ctx.ensureCertificateAuthReady(sshHost, secrets, authType);
       const jump = await ctx.resolveJumpHostTarget(sshHost);
       const authAgentEndpoint =
-        sshHost.authType === "agent" ? await resolveLocalAgentEndpoint() : null;
+        authType === "agent" ? await resolveLocalAgentEndpoint() : null;
 
       const runtime = await ctx.coreManager.startPortForward({
         ruleId: rule.id,
@@ -638,7 +638,7 @@ export function registerPortForwardAndDnsIpcHandlers(
         host: sshHost.hostname,
         port: sshHost.port,
         username,
-        authType: sshHost.authType,
+        authType,
         password: secrets.password,
         privateKeyPem: secrets.privateKeyPem,
         certificateText: secrets.certificateText,

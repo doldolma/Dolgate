@@ -76,12 +76,12 @@ export function registerVncIpcHandlers(
       }),
     );
     const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys(sshHost);
-    const username = ctx.requireConfiguredSshUsername(sshHost);
-    const { secrets } = await ctx.resolveRuntimeSshSecrets(sshHost);
-    await ctx.ensureCertificateAuthReady(sshHost, secrets);
+    const { username, authType, secrets } =
+      await ctx.resolveSshAuth(sshHost);
+    await ctx.ensureCertificateAuthReady(sshHost, secrets, authType);
     const jump = await ctx.resolveJumpHostTarget(sshHost);
     const authAgentEndpoint =
-      sshHost.authType === "agent" ? await resolveLocalAgentEndpoint() : null;
+      authType === "agent" ? await resolveLocalAgentEndpoint() : null;
 
     // bindPort 0 = 빈 포트를 OS 가 고른다. 고정 포트면 같은 대상에 두 번 붙을 때 충돌한다.
     //
@@ -97,7 +97,7 @@ export function registerVncIpcHandlers(
       host: sshHost.hostname,
       port: sshHost.port,
       username,
-      authType: sshHost.authType,
+      authType,
       password: secrets.password,
       privateKeyPem: secrets.privateKeyPem,
       certificateText: secrets.certificateText,
@@ -154,7 +154,7 @@ export function registerVncIpcHandlers(
         throw new Error("Not a VNC host");
       }
 
-      const secrets = await ctx.loadSecrets(host.secretRef);
+      const secrets = await ctx.loadHostSecrets(host);
       // 프레임을 보낼 창을 먼저 등록한다. 접속이 끝난 뒤에 등록하면 첫 화면을 놓친다 — 서버는
       // 우리가 요청한 전체 갱신을 곧바로 보낸다.
       vncManager.watchSession(sessionId, event.sender.id);

@@ -2858,6 +2858,10 @@
     "needsUnlockedVault": "Sign in and enter your sync passphrase to use teams.",
     "notOnDevice": "This team isn't on this device.",
     "contextChanged": "The team operation was cancelled because the account or server changed.",
+    "copied": "Copied {{hosts}} hosts to another vault.",
+    "myCredentialsTeamOnly": "My credentials are only for team hosts.",
+    "myCredentialsSaved": "Saved my credentials for a team host.",
+    "myCredentialsCleared": "Removed my credentials for a team host.",
     "api": {
       "inviteInvalid": "This invite link has expired or is invalid.",
       "notFound": "Team not found.",

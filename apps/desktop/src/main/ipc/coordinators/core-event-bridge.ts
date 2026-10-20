@@ -18,6 +18,8 @@ export interface CoreEventBridge {
       hostId: string;
       label: string;
       secrets: HostSecretInput;
+      /** 요청 창에서 넣은 사용자 이름. 붙으면 그 자리(개인=호스트, 팀=내 칸)에 저장한다. */
+      username?: string | null;
     }
   >;
   emitSftpConnectionProgress: AwsConnectionProgressEmitter;
@@ -55,6 +57,7 @@ export function createCoreEventBridge(deps: {
       hostId: string;
       label: string;
       secrets: HostSecretInput;
+      username?: string | null;
     }
   >();
 
@@ -147,7 +150,12 @@ export function createCoreEventBridge(deps: {
         pending.hostId,
         pending.label,
         pending.secrets,
+        pending.username,
       );
+      if (pending.username) {
+        // 개인 호스트면 레코드의 사용자 이름이 바뀌었다 — 화면이 호스트 목록을 다시 읽게 한다.
+        emitWorkspaceChanged();
+      }
       return;
     }
 

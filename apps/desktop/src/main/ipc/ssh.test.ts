@@ -72,8 +72,7 @@ function createContext() {
     resolveTailnetRoute: vi.fn(() => ({})),
     requireTrustedHostKeys: trustedHostKeys,
     resolveTrustedHostKeys: trustedHostKeys,
-    requireConfiguredSshUsername: vi.fn(),
-    resolveRuntimeSshSecrets: vi.fn(),
+    resolveSshAuth: vi.fn(),
     resolveJumpHostTarget: vi.fn().mockResolvedValue(undefined),
     ensureCertificateAuthReady: vi.fn(),
     pendingSessionSecrets: new Map(),
@@ -256,14 +255,15 @@ describe("registerSshIpcHandlers", () => {
     });
     ctx.requireTrustedHostKey.mockReturnValue("trusted");
     ctx.requireTrustedHostKeys.mockReturnValue(["trusted"]);
-    ctx.requireConfiguredSshUsername.mockReturnValue("ubuntu");
-    ctx.resolveRuntimeSshSecrets.mockResolvedValue({
+    ctx.resolveSshAuth.mockImplementation(async (host: { authType: string }) => ({
+      username: "ubuntu",
+      authType: host.authType,
       secrets: {
         privateKeyPem: "PRIVATE KEY",
         certificateText: "CERTIFICATE",
       },
       shouldPersistHostSecret: false,
-    });
+    }));
     ctx.ensureCertificateAuthReady.mockRejectedValue(
       new Error(
         "SSH 인증서가 만료되었습니다. 새 인증서를 가져와 다시 시도하세요.",
@@ -287,6 +287,45 @@ describe("registerSshIpcHandlers", () => {
     expect(ctx.coreManager.connect).not.toHaveBeenCalled();
   });
 
+  // 요청 창에서 바꾼 사용자 이름은 이번 시도에 쓰고, 붙으면 저장하도록 세션에 걸어 둔다(코어 이벤트 다리가 저장).
+  it("connects with the username typed into the prompt and keeps it until the session connects", async () => {
+    const ctx = createContext();
+    ctx.hosts.getById.mockReturnValue({
+      id: "host-1",
+      kind: "ssh",
+      label: "Prod",
+      hostname: "prod.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+    });
+    ctx.requireTrustedHostKeys.mockReturnValue(["trusted"]);
+    ctx.resolveSshAuth.mockResolvedValue({
+      username: "bob",
+      authType: "password",
+      secrets: { password: "pw" },
+      shouldPersistHostSecret: true,
+      typedUsername: "bob",
+    });
+    ctx.coreManager.connect.mockResolvedValue({ sessionId: "session-ssh" });
+    registerSshIpcHandlers(ctx);
+
+    await ipcHandlers.get(ipcChannels.ssh.connect)?.(null, {
+      hostId: "host-1",
+      cols: 120,
+      rows: 32,
+      secrets: { username: "bob", password: "pw" },
+    });
+
+    expect(ctx.coreManager.connect).toHaveBeenCalledWith(expect.objectContaining({ username: "bob" }));
+    expect(ctx.pendingSessionSecrets.get("session-ssh")).toEqual({
+      hostId: "host-1",
+      label: "Prod",
+      secrets: { password: "pw" },
+      username: "bob",
+    });
+  });
+
   it("forwards startup commands for direct SSH sessions", async () => {
     const ctx = createContext();
     ctx.hosts.getById.mockReturnValue({
@@ -299,11 +338,12 @@ describe("registerSshIpcHandlers", () => {
       authType: "password",
     });
     ctx.requireTrustedHostKeys.mockReturnValue(["trusted"]);
-    ctx.requireConfiguredSshUsername.mockReturnValue("ubuntu");
-    ctx.resolveRuntimeSshSecrets.mockResolvedValue({
+    ctx.resolveSshAuth.mockImplementation(async (host: { authType: string }) => ({
+      username: "ubuntu",
+      authType: host.authType,
       secrets: { password: "secret" },
       shouldPersistHostSecret: false,
-    });
+    }));
     ctx.coreManager.connect.mockResolvedValue({ sessionId: "session-ssh" });
     registerSshIpcHandlers(ctx);
 
@@ -336,11 +376,12 @@ describe("registerSshIpcHandlers", () => {
       agentForwarding: true,
     });
     ctx.requireTrustedHostKeys.mockReturnValue(["trusted"]);
-    ctx.requireConfiguredSshUsername.mockReturnValue("ubuntu");
-    ctx.resolveRuntimeSshSecrets.mockResolvedValue({
+    ctx.resolveSshAuth.mockImplementation(async (host: { authType: string }) => ({
+      username: "ubuntu",
+      authType: host.authType,
       secrets: { password: "secret" },
       shouldPersistHostSecret: false,
-    });
+    }));
     ctx.coreManager.connect.mockResolvedValue({ sessionId: "session-ssh" });
     vi.stubEnv("SSH_AUTH_SOCK", "/tmp/dolgate-agent.sock");
     registerSshIpcHandlers(ctx);

@@ -339,20 +339,19 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
 
       const sshHost = typedHost as SshHostRecord;
       const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys(sshHost);
-      const username = ctx.requireConfiguredSshUsername(sshHost);
-      const { secrets, shouldPersistHostSecret } =
-        await ctx.resolveRuntimeSshSecrets(sshHost, input.secrets);
-      await ctx.ensureCertificateAuthReady(sshHost, secrets);
+      const { username, authType, secrets, shouldPersistHostSecret, typedUsername } =
+        await ctx.resolveSshAuth(sshHost, input.secrets);
+      await ctx.ensureCertificateAuthReady(sshHost, secrets, authType);
       const jump = await ctx.resolveJumpHostTarget(sshHost);
       const authAgentEndpoint =
-        sshHost.authType === "agent" ? await resolveLocalAgentEndpoint() : null;
+        authType === "agent" ? await resolveLocalAgentEndpoint() : null;
 
       const endpoint = await ctx.coreManager.sftpConnect({
         endpointId: input.endpointId,
         host: sshHost.hostname,
         port: sshHost.port,
         username,
-        authType: sshHost.authType,
+        authType,
         password: secrets.password,
         privateKeyPem: secrets.privateKeyPem,
         certificateText: secrets.certificateText,
@@ -369,7 +368,11 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
       });
 
       if (shouldPersistHostSecret) {
-        await ctx.persistHostSpecificSecret(sshHost.id, sshHost.label, secrets);
+        await ctx.persistHostSpecificSecret(sshHost.id, sshHost.label, secrets, typedUsername);
+        if (typedUsername) {
+          // 개인 호스트면 레코드의 사용자 이름이 바뀌었다 — 화면이 호스트 목록을 다시 읽게 한다.
+          ctx.emitWorkspaceChanged?.();
+        }
       }
 
       return endpoint;

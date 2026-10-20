@@ -2858,6 +2858,10 @@
     "needsUnlockedVault": "로그인하고 동기화 암호를 입력한 뒤에 팀을 쓸 수 있습니다.",
     "notOnDevice": "이 기기에 없는 팀입니다.",
     "contextChanged": "로그인 계정 또는 서버가 변경되어 팀 작업을 취소했습니다.",
+    "copied": "{{hosts}}개 호스트를 다른 볼트로 복사했습니다.",
+    "myCredentialsTeamOnly": "내 자격 증명은 팀 호스트에만 둘 수 있습니다.",
+    "myCredentialsSaved": "팀 호스트에 쓸 내 자격 증명을 저장했습니다.",
+    "myCredentialsCleared": "팀 호스트에 쓰던 내 자격 증명을 지웠습니다.",
     "api": {
       "inviteInvalid": "초대 링크가 만료되었거나 올바르지 않습니다.",
       "notFound": "팀을 찾을 수 없습니다.",
