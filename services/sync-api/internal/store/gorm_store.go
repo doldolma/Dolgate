@@ -211,6 +211,8 @@ type GormStore struct {
 	lastSweptAt map[string]time.Time
 	// teamHistoryRetention 은 팀 레코드의 이전 판을 남겨 두는 기간이다(0 이면 기본값). sweepMu 로 보호한다.
 	teamHistoryRetention time.Duration
+	// teamHistoryLimits 는 팀 기록·녹화 한도다(0 인 값은 기본값). sweepMu 로 보호한다.
+	teamHistoryLimits TeamHistoryLimits
 }
 
 // 만료 행 청소 간격.
@@ -371,6 +373,10 @@ func (s *GormStore) migrate() error {
 		&teamMemberPrivateRow{},
 		&teamSyncRecordRow{},
 		&teamRecordHistoryRow{},
+		&teamEventRow{},
+		&teamReplayRow{},
+		&teamReplaySegmentRow{},
+		&teamReplayExtraRow{},
 	); err != nil {
 		return err
 	}
@@ -1218,7 +1224,7 @@ func (s *GormStore) ResetUserVault(ctx context.Context, userID string, expectedE
 		}
 		// 개인 DEK 가 바뀌면 팀 키 사본도 개인 칸도 열 수 없다 — 모든 팀에서 뺀다(다시 들어오려면
 		// 다른 멤버의 링크로). 사용자 행을 잡은 뒤라 잠금 순서(users → teams)를 지킨다.
-		if err := s.leaveAllTeamsTx(tx, userID); err != nil {
+		if err := s.leaveAllTeamsTx(tx, userID, teamEventReasonVaultReset); err != nil {
 			return err
 		}
 		if err := tx.Where("user_id = ?", userID).Delete(&syncRecordRow{}).Error; err != nil {
@@ -1737,7 +1743,7 @@ func (s *GormStore) DeleteUserData(ctx context.Context, userID string) error {
 		}
 		// 탈퇴도 모든 팀에서 빠진다 — 소유자였으면 가장 먼저 들어온 멤버가 잇고, 마지막 한 명이었으면
 		// 팀째 지운다. 빼먹으면 소유자 없는 팀과 주인 없는 사본이 남는다.
-		if err := s.leaveAllTeamsTx(tx, userID); err != nil {
+		if err := s.leaveAllTeamsTx(tx, userID, teamEventReasonAccountDeleted); err != nil {
 			return err
 		}
 		targets := []struct {

@@ -128,6 +128,11 @@ const config = {
         {
           entry: 'src/preload/preload.ts',
           config: 'vite.preload.config.ts'
+        },
+        {
+          // 팀 녹화 훑기 작업 스레드(src/main/replay-scan-host.ts 가 띄운다).
+          entry: 'src/main/replay-scan-worker.ts',
+          config: 'vite.main.config.ts'
         }
       ],
       renderer: [

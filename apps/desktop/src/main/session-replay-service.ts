@@ -16,7 +16,6 @@ import { BrowserWindow } from "electron";
 import type {
   CoreEvent,
   SessionReplayEntry,
-  SessionReplayIndex,
   SessionReplayRecording,
   SessionReplaySegment,
   SessionReplayStorageUsage,
@@ -26,8 +25,22 @@ import {
   MAX_SESSION_REPLAY_RETENTION_COUNT,
   MIN_SESSION_REPLAY_RETENTION_COUNT,
 } from "@shared";
+import type { SessionReplayView } from "../shared/ipc";
+import type { ReplaySnapshot } from "../common/replay/replay-command-scan";
 import type { SettingsRepository } from "./database";
 import type { CoreManager } from "./core-manager";
+import {
+  concatReplaySegments,
+  groupedSegmentInfo,
+  groupReplaySegments,
+  type ReplaySegmentGroup,
+} from "./replay-segment-groups";
+import type { TeamReplayViewer } from "./team-replay-viewer";
+import {
+  TEAM_REPLAY_SEGMENT_BYTES,
+  TEAM_REPLAY_SEGMENT_MAX_AGE_MS,
+  type TeamReplayUploads,
+} from "./team-replay-uploads";
 import {
   resolveLocalHistoryScope,
   type LocalHistoryOwner,
@@ -92,8 +105,17 @@ interface ActiveRecording {
    * 쓰지 않는다.
    */
   events: ReplayEventsWriter | null;
+  /** 팀 호스트 세션이면 그 팀. 녹화를 세션 동안 팀에 보낸다(team-replay-uploads). */
+  teamId: string | null;
+  /** 녹화 쓰기. events 는 실패하면 null 이 되지만 이것은 남아, 끝날 때 색인에 오른 구간 수를 본다. */
+  writer: ReplayEventsWriter | null;
   /** 마지막 항목의 시각. 시스템 시계가 뒤로 가도 항목 시각이 줄지 않게 한다 — 재생은 시각 순서를 믿는다. */
   lastAtMs: number;
+}
+
+/** 녹화 메타 파일. teamId 는 팀 호스트 세션의 녹화에만 있다(구간이 짧아 재생 창에 묶어 준다). */
+interface LocalRecordingMeta extends SessionReplayRecording {
+  teamId?: string;
 }
 
 function nowIso(): string {
@@ -136,11 +158,47 @@ export class SessionReplayService {
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private activeScope: LocalHistoryScope | null = null;
   private onRecordingsPruned: (() => void) | null = null;
+  private teamUploads: TeamReplayUploads | null = null;
+  /**
+   * 끝나는 중인 팀 호스트 녹화. 세션이 끝나도 녹화 파일이 다 쓰여야 끝(마지막 구간 번호)을 팀 올리기에 알린다 — 그
+   * 사이 올리기가 이 녹화를 "앱이 죽은 녹화"로 보고 끊김으로 끝내지 않게 그때까지는 녹화 중으로 본다.
+   */
+  private readonly finishingRecordings = new Set<string>();
+  private teamViewer: TeamReplayViewer | null = null;
+  private teamOfHost: (hostId: string) => string | null = () => null;
 
   constructor(
     private readonly settingsRepository: SettingsRepository,
     private readonly coreManager: CoreManager,
   ) {}
+
+  /** 팀 호스트 세션의 녹화를 세션 동안 팀에 보낸다. */
+  attachTeamUploads(uploads: TeamReplayUploads | null): void {
+    this.teamUploads = uploads;
+  }
+
+  /** 팀 녹화(서버)를 재생 창에 보인다. */
+  attachTeamViewer(viewer: TeamReplayViewer | null): void {
+    this.teamViewer = viewer;
+  }
+
+  /** 호스트의 팀(개인 호스트면 null). 볼트 카탈로그를 만드는 IPC 쪽이 넣는다. */
+  setTeamOfHost(resolver: (hostId: string) => string | null): void {
+    this.teamOfHost = resolver;
+  }
+
+  /** 그 녹화가 지금 녹화 중인가(팀 녹화 올리기가 앱이 죽었던 녹화를 가른다). 끝나는 중이면 아직 녹화 중이다. */
+  isRecordingActive(recordingId: string): boolean {
+    if (this.finishingRecordings.has(recordingId)) {
+      return true;
+    }
+    for (const active of this.activeRecordings.values()) {
+      if (active.recordingId === recordingId) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   activate(owner: LocalHistoryOwner): void {
     const scope = resolveLocalHistoryScope(owner);
@@ -276,9 +334,12 @@ export class SessionReplayService {
   async openReplayWindow(
     recordingId: string,
     _sourceWindow: BrowserWindow,
+    teamId: string | null = null,
   ): Promise<void> {
     const scope = this.requireActiveScope();
-    const existingWindow = this.replayWindows.get(recordingId);
+    // 녹화한 사람 기기에는 같은 녹화 ID 의 로컬 녹화도 있다 — 팀 녹화 창은 따로 센다.
+    const windowKey = teamId ? `team:${teamId}:${recordingId}` : recordingId;
+    const existingWindow = this.replayWindows.get(windowKey);
     if (existingWindow && !existingWindow.isDestroyed()) {
       if (existingWindow.isMinimized()) {
         existingWindow.restore();
@@ -288,8 +349,8 @@ export class SessionReplayService {
       return;
     }
 
-    // 창 제목만 필요하다. 출력 전체를 풀어 읽지 않는다.
-    const recording = this.loadRecordingMeta(recordingId, scope.replayDirectoryPath);
+    // 창 제목만 필요하다. 출력 전체를 풀어 읽지 않는다. 팀 녹화는 재생 창이 받은 뒤 제목을 바꾼다.
+    const title = teamId ? "" : this.loadRecordingMeta(recordingId, scope.replayDirectoryPath).title;
     const replayWindow = new BrowserWindow({
       width: 1040,
       height: 760,
@@ -303,7 +364,7 @@ export class SessionReplayService {
       acceptFirstMouse: true,
       autoHideMenuBar: true,
       backgroundColor: "#0d141a",
-      title: this.buildReplayWindowTitle(recording.title),
+      title: this.buildReplayWindowTitle(title),
       webPreferences: {
         preload: path.join(__dirname, "preload.js"),
         contextIsolation: true,
@@ -311,10 +372,10 @@ export class SessionReplayService {
       },
     });
 
-    this.replayWindows.set(recordingId, replayWindow);
+    this.replayWindows.set(windowKey, replayWindow);
     replayWindow.on("closed", () => {
-      if (this.replayWindows.get(recordingId) === replayWindow) {
-        this.replayWindows.delete(recordingId);
+      if (this.replayWindows.get(windowKey) === replayWindow) {
+        this.replayWindows.delete(windowKey);
         // 열려 있는 동안 보존 한도 밖이라 남겨 둔 녹화면 이제 지운다(pruneDirectory).
         this.prune();
       }
@@ -325,9 +386,9 @@ export class SessionReplayService {
     });
 
     try {
-      await this.loadReplayWindow(replayWindow, recordingId);
+      await this.loadReplayWindow(replayWindow, recordingId, teamId);
     } catch (error) {
-      this.replayWindows.delete(recordingId);
+      this.replayWindows.delete(windowKey);
       if (!replayWindow.isDestroyed()) {
         replayWindow.close();
       }
@@ -339,9 +400,12 @@ export class SessionReplayService {
    * 녹화 정보와 구간 목록. 출력은 담지 않는다 — 재생 창이 readSegment 로 필요한 구간만 받아 간다. 색인이
    * 없는 옛 녹화는 여기서 한 번 새 형식으로 바꿔 쓴다.
    */
-  async load(recordingId: string): Promise<SessionReplayIndex> {
+  async load(recordingId: string, teamId: string | null = null): Promise<SessionReplayView> {
     const scope = this.requireActiveScope();
-    const meta = this.loadRecordingMeta(recordingId, scope.replayDirectoryPath);
+    if (teamId) {
+      return this.requireTeamViewer().load(teamId, recordingId);
+    }
+    const { teamId: recordedTeamId, ...meta } = this.loadRecordingMeta(recordingId, scope.replayDirectoryPath);
     const segments = await this.loadSegments(recordingId, scope.replayDirectoryPath);
     return {
       ...meta,
@@ -349,32 +413,67 @@ export class SessionReplayService {
       // 마지막 항목보다 짧아져 끝부분이 재생 범위 밖으로 밀렸다(시계가 세션보다 많이 가면 녹화 전체가 빈
       // 화면). 이미 만든 녹화도 고쳐지도록 읽을 때 맞춘다.
       durationMs: Math.max(meta.durationMs, segments[segments.length - 1]?.endAtMs ?? 0),
-      segments: segments.map(({ startAtMs, endAtMs, entryCount, outputBytes }) => ({
-        startAtMs,
-        endAtMs,
-        entryCount,
-        outputBytes,
-      })),
+      segments: this.groupsOf(recordedTeamId, segments).map((group) => groupedSegmentInfo(segments, group)),
     };
   }
 
   async readSegment(
     recordingId: string,
     segmentIndex: number,
+    teamId: string | null = null,
   ): Promise<SessionReplaySegment> {
     const scope = this.requireActiveScope();
+    if (teamId) {
+      return this.requireTeamViewer().readSegment(teamId, recordingId, segmentIndex);
+    }
     const segments = await this.loadSegments(recordingId, scope.replayDirectoryPath);
-    const record = Number.isInteger(segmentIndex) ? segments[segmentIndex] : undefined;
-    if (!record) {
+    let recordedTeamId: string | undefined;
+    try {
+      recordedTeamId = this.loadRecordingMeta(recordingId, scope.replayDirectoryPath).teamId;
+    } catch {
+      // 메타가 없으면 묶지 않는다.
+    }
+    const group = Number.isInteger(segmentIndex) ? this.groupsOf(recordedTeamId, segments)[segmentIndex] : undefined;
+    if (!group) {
       throw new Error(`Replay segment ${segmentIndex} does not exist`);
     }
-    return readReplaySegment(
-      // 바꿔 쓰지 못한 옛 녹화는 원래 파일에서 읽는다(loadReplaySegments).
-      record.plain
-        ? this.getEventsPath(recordingId, scope.replayDirectoryPath)
-        : this.getEventsGzipPath(recordingId, scope.replayDirectoryPath),
-      record,
-    );
+    const parts: SessionReplaySegment[] = [];
+    for (let index = group.first; index <= group.last; index += 1) {
+      const record = segments[index];
+      parts.push(
+        await readReplaySegment(
+          // 바꿔 쓰지 못한 옛 녹화는 원래 파일에서 읽는다(loadReplaySegments).
+          record.plain
+            ? this.getEventsPath(recordingId, scope.replayDirectoryPath)
+            : this.getEventsGzipPath(recordingId, scope.replayDirectoryPath),
+          record,
+        ),
+      );
+    }
+    return concatReplaySegments(parts);
+  }
+
+  /** 팀 녹화의 스냅샷 하나(재생 창이 멀리 건너뛸 때). */
+  async readSnapshot(recordingId: string, segmentIndex: number, teamId: string): Promise<ReplaySnapshot | null> {
+    this.requireActiveScope();
+    return this.requireTeamViewer().readSnapshot(teamId, recordingId, segmentIndex);
+  }
+
+  /**
+   * 재생 창에 줄 구간(묶음). 팀 호스트 세션의 녹화는 구간이 짧아(5초) 이어 붙여 준다. 개인 호스트 녹화는 구간이
+   * 이미 커서 그대로다.
+   */
+  private groupsOf(recordedTeamId: string | undefined, segments: readonly ReplaySegmentRecord[]): ReplaySegmentGroup[] {
+    return recordedTeamId
+      ? groupReplaySegments(segments)
+      : segments.map((_segment, index) => ({ first: index, last: index }));
+  }
+
+  private requireTeamViewer(): TeamReplayViewer {
+    if (!this.teamViewer) {
+      throw new Error(t("teamReplay.teamNotOpen"));
+    }
+    return this.teamViewer;
   }
 
   private async loadSegments(
@@ -434,7 +533,8 @@ export class SessionReplayService {
     for (const stale of recordings.slice(retentionCount)) {
       // 재생 창이 열린 녹화는 남긴다. 재생기는 구간을 그때그때 읽어서, 지우면 그 창이 엉뚱한 화면에서
       // 멈췄다(실측). 그동안은 보존 한도를 넘기고, 창이 닫히면 다시 정리한다(openReplayWindow).
-      if (this.replayWindows.has(stale.recordingId)) {
+      // 팀에 다 보내기 전인 녹화도 남긴다 — 보낼 것이 이 파일이다. 다 보내면 다음 정리가 지운다.
+      if (this.replayWindows.has(stale.recordingId) || this.teamUploads?.isPending(stale.recordingId)) {
         continue;
       }
       this.segmentLoads.delete(this.getEventsGzipPath(stale.recordingId, replayDirectoryPath));
@@ -530,12 +630,33 @@ export class SessionReplayService {
       initialRows: initialSize.rows,
       replayDirectoryPath: scope.replayDirectoryPath,
       events: null,
+      teamId: this.teamUploads && lifecycle.hostId ? this.teamOfHost(lifecycle.hostId) : null,
+      writer: null,
       lastAtMs: 0,
     };
     active.events = this.openEventsStream(active);
+    active.writer = active.events;
 
     this.activeRecordings.set(sessionId, active);
     this.coreManager.attachSessionRecording(sessionId, recordingId);
+    if (active.teamId && this.teamUploads) {
+      this.teamUploads.onRecordingStarted({
+        recordingId,
+        teamId: active.teamId,
+        replayDirectoryPath: active.replayDirectoryPath,
+        startMeta: {
+          sessionId,
+          hostId: active.hostId,
+          hostLabel: active.hostLabel,
+          title: active.title,
+          connectionDetails: active.connectionDetails ?? null,
+          connectionKind: active.connectionKind,
+          connectedAt: active.connectedAt,
+          initialCols: active.initialCols,
+          initialRows: active.initialRows,
+        },
+      });
+    }
     if (!this.flushTimer) {
       this.flushTimer = setInterval(() => this.flushEventStreams(), EVENTS_FLUSH_INTERVAL_MS);
       this.flushTimer.unref?.();
@@ -543,10 +664,19 @@ export class SessionReplayService {
   }
 
   private openEventsStream(active: ActiveRecording): ReplayEventsWriter {
+    const uploads = active.teamId ? this.teamUploads : null;
     const events = new ReplayEventsWriter(
       this.getEventsGzipPath(active.recordingId, active.replayDirectoryPath),
       this.getIndexPath(active.recordingId, active.replayDirectoryPath),
       {
+        // 팀 호스트 세션은 구간을 짧게 끊어 끝나는 대로 팀에 보낸다(녹화 형식은 같다).
+        ...(uploads
+          ? {
+              segmentBytes: TEAM_REPLAY_SEGMENT_BYTES,
+              segmentMaxAgeMs: TEAM_REPLAY_SEGMENT_MAX_AGE_MS,
+              onSegment: (record, index, data) => uploads.onSegment(active.recordingId, index, record, data),
+            }
+          : {}),
         onError: (error) => {
           // 디스크가 가득 찼거나 파일을 쓸 수 없다. 출력 경로로 예외를 올리지 않고 이 녹화만 멈춘다.
           console.warn("[session-replay] stopped recording after a write failure", error);
@@ -592,7 +722,7 @@ export class SessionReplayService {
       active.lastAtMs,
     );
 
-    const meta: SessionReplayRecording = {
+    const meta: LocalRecordingMeta = {
       recordingId: active.recordingId,
       sessionId: active.sessionId,
       hostId: active.hostId,
@@ -605,6 +735,7 @@ export class SessionReplayService {
       durationMs,
       initialCols: active.initialCols,
       initialRows: active.initialRows,
+      ...(active.teamId ? { teamId: active.teamId } : {}),
     };
 
     this.closeEventsStream(active);
@@ -613,6 +744,22 @@ export class SessionReplayService {
       JSON.stringify(meta, null, 2),
       "utf8",
     );
+    const uploads = active.teamId ? this.teamUploads : null;
+    const writer = active.writer;
+    if (uploads && writer) {
+      // 마지막 구간은 녹화 파일이 다 쓰여야 색인에 오른다 — 그 뒤에 끝을 알린다. 그때까지는 녹화 중으로 둔다.
+      this.finishingRecordings.add(active.recordingId);
+      const ended = () => {
+        uploads.onRecordingEnded(active.recordingId, {
+          disconnectedAt,
+          durationMs,
+          lastSegment: writer.segments.length - 1,
+        });
+        this.finishingRecordings.delete(active.recordingId);
+      };
+      // 쓰다 실패해도 색인에 오른 데까지가 끝이다.
+      void writer.done.then(ended, ended);
+    }
 
     this.activeRecordings.delete(sessionId);
     this.initialSizeBySession.delete(sessionId);
@@ -662,10 +809,10 @@ export class SessionReplayService {
   private loadRecordingMeta(
     recordingId: string,
     replayDirectoryPath: string,
-  ): SessionReplayRecording {
+  ): LocalRecordingMeta {
     const raw = JSON.parse(
       readFileSync(this.getMetaPath(recordingId, replayDirectoryPath), "utf8"),
-    ) as SessionReplayRecording;
+    ) as LocalRecordingMeta;
     return raw;
   }
 
@@ -762,12 +909,16 @@ export class SessionReplayService {
   private async loadReplayWindow(
     replayWindow: BrowserWindow,
     recordingId: string,
+    teamId: string | null,
   ): Promise<void> {
     if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
       const targetUrl = new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
       targetUrl.searchParams.set("window", "session-replay");
       targetUrl.searchParams.set(APP_LOCALE_QUERY_PARAM, getMainLocale());
       targetUrl.searchParams.set("recordingId", recordingId);
+      if (teamId) {
+        targetUrl.searchParams.set("teamId", teamId);
+      }
       await replayWindow.loadURL(targetUrl.toString());
       return;
     }
@@ -778,6 +929,7 @@ export class SessionReplayService {
         query: {
           window: "session-replay",
           recordingId,
+          ...(teamId ? { teamId } : {}),
           [APP_LOCALE_QUERY_PARAM]: getMainLocale(),
         },
       },

@@ -3,8 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   REPLAY_PENDING_LIMIT_BYTES,
   ReplayPlayer,
+  ReplaySnapshotRefs,
   ReplaySnapshotStore,
   type ReplaySnapshot,
+  type ReplaySnapshotIndex,
+  type ReplaySnapshotRef,
 } from './replay-player';
 import { segmentReplayEntries } from './replay-segments.test-support';
 
@@ -52,7 +55,8 @@ function createPlayer(
   entries: SessionReplayEntry[],
   options: {
     entriesPerSegment?: number;
-    snapshots?: ReplaySnapshotStore;
+    snapshots?: ReplaySnapshotIndex;
+    loadSnapshot?: (ref: ReplaySnapshotRef) => Promise<ReplaySnapshot | null>;
     outputBytesPerSegment?: number;
   } = {},
 ) {
@@ -69,6 +73,7 @@ function createPlayer(
           })),
     readSegment,
     snapshots: options.snapshots ?? new ReplaySnapshotStore(),
+    loadSnapshot: options.loadSnapshot,
     terminal: fake.terminal,
     onViewport,
   });
@@ -304,6 +309,121 @@ describe('ReplayPlayer', () => {
       'write:FAR',
       'write:3;',
     ]);
+  });
+
+  // 팀 녹화는 스냅샷의 자리만 알고 화면은 그때 받는다 — 그 앞 구간은 받지 않는다.
+  it('jumps far to a snapshot it only knows the place of, fetching its screen first', async () => {
+    const entries = Array.from({ length: 12 }, (_, index) => output(index * 10, `${index};`));
+    const loadSnapshot = vi.fn(async (ref: ReplaySnapshotRef) => snapshotAt(ref.segment, ref.atMs, 'FAR'));
+    const { player, events, readSegment } = createPlayer(entries, {
+      entriesPerSegment: 1,
+      snapshots: new ReplaySnapshotRefs([{ segment: 9, atMs: 80 }]),
+      loadSnapshot,
+      outputBytesPerSegment: 3 * 1024 * 1024,
+    });
+    await player.whenReady();
+    player.advance(0);
+    events.length = 0;
+
+    player.seek(95);
+    expect(player.advance(95)).toBe(false);
+    await settle();
+    expect(player.advance(95)).toBe(true);
+    expect(events).toEqual(['reset', 'resize:90x20', 'write:FAR', 'write:9;']);
+    expect(loadSnapshot).toHaveBeenCalledTimes(1);
+    expect(loadSnapshot).toHaveBeenCalledWith({ segment: 9, atMs: 80 });
+    // 처음 재생하며 앞서 받아 둔 0~4 다음으로는 스냅샷 뒤 구간만 받았다 — 그 사이(5~8)는 받지 않는다.
+    expect(readSegment.mock.calls.map(([index]) => index).sort((left, right) => left - right)).toEqual([
+      0, 1, 2, 3, 4, 9, 10, 11,
+    ]);
+  });
+
+  it('draws from the start when a snapshot screen cannot be had, and does not try it again', async () => {
+    const entries = Array.from({ length: 6 }, (_, index) => output(index * 10, `${index};`));
+    const loadSnapshot = vi.fn(async () => null);
+    const { player, events } = createPlayer(entries, {
+      entriesPerSegment: 1,
+      snapshots: new ReplaySnapshotRefs([{ segment: 4, atMs: 30 }]),
+      loadSnapshot,
+      outputBytesPerSegment: 3 * 1024 * 1024,
+    });
+    await player.whenReady();
+    player.advance(0);
+    events.length = 0;
+
+    player.seek(45);
+    for (let round = 0; round < 10 && !player.advance(45); round += 1) {
+      await settle();
+    }
+    expect(events).toEqual(['reset', 'write:0;', 'write:1;', 'write:2;', 'write:3;', 'write:4;']);
+    player.seek(5);
+    for (let round = 0; round < 10 && !player.advance(5); round += 1) {
+      await settle();
+    }
+    player.seek(45);
+    for (let round = 0; round < 10 && !player.advance(45); round += 1) {
+      await settle();
+    }
+    expect(loadSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for a snapshot screen even when the segments after it are already here', async () => {
+    const entries = Array.from({ length: 6 }, (_, index) => output(index * 10, `${index};`));
+    let resolveScreen!: (snapshot: ReplaySnapshot | null) => void;
+    const loadSnapshot = vi.fn(
+      () =>
+        new Promise<ReplaySnapshot | null>((resolve) => {
+          resolveScreen = resolve;
+        }),
+    );
+    const { player, events } = createPlayer(entries, {
+      entriesPerSegment: 1,
+      snapshots: new ReplaySnapshotRefs([{ segment: 3, atMs: 20 }]),
+      loadSnapshot,
+      outputBytesPerSegment: 3 * 1024 * 1024,
+    });
+    await player.whenReady();
+    player.advance(0);
+    await settle();
+    events.length = 0;
+
+    player.seek(35);
+    // 구간 3·4 는 이미 받아 두었지만 스냅샷 화면은 오는 중이다 — 지우지도 그리지도 않는다.
+    expect(player.advance(35)).toBe(false);
+    expect(events).toEqual([]);
+    resolveScreen(snapshotAt(3, 20, 'FAR'));
+    await settle();
+    expect(player.advance(35)).toBe(true);
+    expect(events).toEqual(['reset', 'resize:90x20', 'write:FAR', 'write:3;']);
+  });
+
+  it('does not ask again for a snapshot it could not get, even after using another one', async () => {
+    const entries = Array.from({ length: 12 }, (_, index) => output(index * 10, `${index};`));
+    const loadSnapshot = vi.fn(async (ref: ReplaySnapshotRef) =>
+      ref.segment === 4 ? null : snapshotAt(ref.segment, ref.atMs, 'SNAP9'),
+    );
+    const { player } = createPlayer(entries, {
+      entriesPerSegment: 1,
+      snapshots: new ReplaySnapshotRefs([
+        { segment: 4, atMs: 30 },
+        { segment: 9, atMs: 80 },
+      ]),
+      loadSnapshot,
+      outputBytesPerSegment: 3 * 1024 * 1024,
+    });
+    const reach = async (target: number) => {
+      player.seek(target);
+      for (let round = 0; round < 20 && !player.advance(target); round += 1) {
+        await settle();
+      }
+    };
+    await player.whenReady();
+    player.advance(0);
+    await reach(45);
+    await reach(95);
+    // 되감기 — 받지 못한 4 번 스냅샷은 다시 묻지 않고 처음부터 그린다.
+    await reach(45);
+    expect(loadSnapshot.mock.calls.map(([ref]) => ref.segment)).toEqual([4, 9]);
   });
 
   it('treats a segment it cannot read as empty and keeps playing', async () => {

@@ -1,8 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ActivityLogCategory,
   ActivityLogLevel,
   ActivityLogRecord,
+  TeamActivityItem,
+  TeamMemberChange,
+  TeamReplayStatus,
   ContainerActionLogMetadata,
   ContainerLifecycleLogMetadata,
   PortForwardLifecycleLogMetadata,
@@ -21,19 +24,135 @@ import {
   PanelSection,
   SelectField,
   Toolbar,
+  Tooltip,
 } from '../ui';
-import { Play } from '../ui/icons';
+import { Play, User } from '../ui/icons';
 import { useTranslation } from 'react-i18next';
 import { getFormatLocale, t } from '../i18n';
 import { resolveLogMessage } from '../lib/activity-log-message';
 import { getKeyboardLayoutSearchQueries } from '../lib/keyboard-layout-search';
+import { useTeamActivity } from '../controllers/useTeamActivity';
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
 
 interface LogsPanelProps {
   logs: ActivityLogRecord[];
   onClear: () => Promise<void>;
-  onOpenReplay: (recordingId: string) => Promise<void>;
+  /** teamId 를 주면 그 팀의 녹화(서버)를 연다. */
+  onOpenReplay: (recordingId: string, teamId?: string | null) => Promise<void>;
+  /** 이 기기의 팀. 있으면 Vault 를 골라 팀 기록(서버)을 본다. */
+  teams?: ReadonlyArray<{ id: string; name: string }>;
+}
+
+const PERSONAL_VAULT = 'personal';
+
+/** 팀 기록 한 줄을 화면의 기록 카드로 — 앱 활동은 로컬 기록과 같은 모양이고, 그 밖의 것은 문구 카드다. */
+interface TeamLogRow {
+  log: ActivityLogRecord;
+  /** 그 줄을 남긴 멤버. 멤버 변화(서버가 남김)는 없다. */
+  author: string | null;
+  seq: number;
+}
+
+function describeMemberChange(change: TeamMemberChange, translate: Translate): string {
+  const email = change.email ?? change.userId;
+  const by = change.byEmail ?? change.byUserId ?? '';
+  if (change.type === 'member_joined') {
+    return translate('teamLogs.memberJoined', { email });
+  }
+  if (change.type === 'member_left') {
+    if (change.reason === 'vault_reset') {
+      return translate('teamLogs.memberLeftVaultReset', { email });
+    }
+    if (change.reason === 'account_deleted') {
+      return translate('teamLogs.memberLeftAccountDeleted', { email });
+    }
+    return translate('teamLogs.memberLeft', { email });
+  }
+  if (change.type === 'member_removed') {
+    return translate('teamLogs.memberRemoved', { email, by });
+  }
+  if (change.type === 'owner_changed') {
+    return change.reason === 'successor'
+      ? translate('teamLogs.ownerSucceeded', { email })
+      : translate('teamLogs.ownerChanged', { email, by });
+  }
+  return translate('teamLogs.membersChanged');
+}
+
+/**
+ * 서버의 팀 기록(최신부터)을 화면 줄로 만든다. 수명 줄(접속·SFTP 등)의 시작과 끝은 같은 기록이라 한 줄로
+ * 합친다 — 나중 것이 앞의 것을 대신한다. 줄은 그 기록의 시각(수명 줄은 시작 시각)으로 최신부터 놓는다.
+ */
+function buildTeamRows(items: readonly TeamActivityItem[], translate: Translate): TeamLogRow[] {
+  const rows: TeamLogRow[] = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    if (item.activity) {
+      const record = item.activity.record;
+      const id = `${item.authorUserId}:${record.id}`;
+      if (seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+      rows.push({ log: { ...record, id }, author: item.authorEmail, seq: item.seq });
+      continue;
+    }
+    const message = item.memberChange
+      ? describeMemberChange(item.memberChange, translate)
+      : item.unreadable === 'unsupported-version'
+        ? translate('teamReplay.unsupported')
+        : translate('teamLogs.unreadable');
+    rows.push({
+      log: {
+        id: `team-event:${item.seq}`,
+        level: 'info',
+        category: 'audit',
+        message,
+        metadata: null,
+        createdAt: item.createdAt,
+      } as ActivityLogRecord,
+      author: item.memberChange ? null : item.authorEmail,
+      seq: item.seq,
+    });
+  }
+  return rows.sort((left, right) => right.log.createdAt.localeCompare(left.log.createdAt) || right.seq - left.seq);
+}
+
+type ReplayAction =
+  | { kind: 'open'; recordingId: string; teamId: string | null }
+  | { kind: 'unavailable'; reason: string };
+
+/** 팀 기록 접속 줄의 Replay — 서버에 그 녹화의 구간이 있으면 연다. 진행 중인 접속도 연다. */
+function teamReplayAction(
+  metadata: SessionLifecycleLogMetadata,
+  teamId: string,
+  statuses: ReadonlyMap<string, TeamReplayStatus>,
+  checked: ReadonlySet<string>,
+  translate: Translate,
+): ReplayAction | null {
+  const recordingId = typeof metadata.recordingId === 'string' ? metadata.recordingId : null;
+  if (!recordingId || metadata.hasReplay === false) {
+    return null;
+  }
+  const status = statuses.get(recordingId);
+  if (status?.state === 'deleted') {
+    return { kind: 'unavailable', reason: translate('teamLogs.replayDeleted') };
+  }
+  if (status && status.segmentCount > 0) {
+    return { kind: 'open', recordingId, teamId };
+  }
+  return checked.has(recordingId) ? { kind: 'unavailable', reason: translate('teamLogs.replayPending') } : null;
+}
+
+/** 팀 기록 줄을 남긴 멤버. */
+function AuthorLine({ email }: { email: string }) {
+  return (
+    <div className="mt-[0.15rem] flex min-w-0 items-center gap-[0.3rem] text-[0.82rem] text-[var(--text-soft)]">
+      <User className="h-[0.8rem] w-[0.8rem] shrink-0" aria-hidden />
+      <span className="truncate">{email}</span>
+    </div>
+  );
 }
 
 function isSessionLifecycleMetadata(value: Record<string, unknown> | null): value is SessionLifecycleLogMetadata & Record<string, unknown> {
@@ -429,17 +548,37 @@ function getLogSearchText(log: ActivityLogRecord, translate: Translate): string 
     .toLocaleLowerCase();
 }
 
-export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
+export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanelProps) {
   const { t: translate } = useTranslation();
   const [category, setCategory] = useState<'all' | ActivityLogCategory>('all');
   const [level, setLevel] = useState<'all' | ActivityLogLevel>('all');
   const [search, setSearch] = useState('');
+  const [vault, setVault] = useState<string>(PERSONAL_VAULT);
+  // 고른 팀이 이 기기에서 없어지면(나감·지움) 개인 기록으로 돌아간다.
+  const teamId = vault !== PERSONAL_VAULT && teams.some((team) => team.id === vault) ? vault : null;
+  const teamActivity = useTeamActivity(teamId);
+  const teamRows = useMemo(
+    () => (teamId ? buildTeamRows(teamActivity.items, translate) : null),
+    [teamActivity.items, teamId, translate]
+  );
+  const shownLogs = useMemo(() => teamRows?.map((row) => row.log) ?? logs, [logs, teamRows]);
+  const authorById = useMemo(
+    () => new Map((teamRows ?? []).map((row) => [row.log.id, row.author])),
+    [teamRows]
+  );
 
   // 한 번만 뽑아 둔다. 최대 1만 건이라 글자마다 다시 만들면 입력이 끊긴다.
   // translate 가 바뀌는 때는 언어가 바뀌는 때이고, 그때는 다시 만드는 것이 맞다.
   const searchTextById = useMemo(
-    () => new Map(logs.map((log) => [log.id, getLogSearchText(log, translate)])),
-    [logs, translate]
+    () =>
+      new Map(
+        shownLogs.map((log) => {
+          const author = authorById.get(log.id);
+          const text = getLogSearchText(log, translate);
+          return [log.id, author ? `${text} ${author.toLocaleLowerCase()}` : text];
+        })
+      ),
+    [authorById, shownLogs, translate]
   );
   // 호스트 검색과 같은 규칙: `tjqj` 로도 `서버` 가 걸린다. 같은 앱에서 검색이 갈리면 안 된다.
   const searchQueries = useMemo(
@@ -449,7 +588,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
 
   const visibleLogs = useMemo(
     () =>
-      logs.filter((log) => {
+      shownLogs.filter((log) => {
         if (category !== 'all' && log.category !== category) {
           return false;
         }
@@ -464,14 +603,45 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
         }
         return true;
       }),
-    [category, level, logs, searchQueries, searchTextById]
+    [category, level, searchQueries, searchTextById, shownLogs]
   );
+
+  // 팀 기록은 목록 끝까지 내려오면 더 받는다(더 보기 단추는 두지 않는다).
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const { hasMore, loadMore } = teamActivity;
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!teamId || !hasMore || !sentinel || typeof IntersectionObserver === 'undefined') {
+      return undefined;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        loadMore();
+      }
+    });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadMore, teamId, visibleLogs.length]);
 
   return (
     <div className="flex flex-col gap-[1.1rem]">
       {/* 상단 브레드크럼(← Hosts · Logs)에 이미 제목이 있어 Diagnostics/Logs 헤더는 생략.
           Clear logs 버튼은 아래 필터 행 오른쪽으로 옮긴다. */}
       <Toolbar>
+        {teams.length > 0 ? (
+          <label className="flex w-full max-w-[220px] flex-col gap-[0.4rem]">
+            <span className="text-[0.9rem] text-[var(--text-soft)]">Vault</span>
+            <SelectField value={teamId ?? PERSONAL_VAULT} onChange={(event) => setVault(event.target.value)}>
+              <option value={PERSONAL_VAULT}>Personal</option>
+              {teams.map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.name}
+                </option>
+              ))}
+            </SelectField>
+          </label>
+        ) : null}
+
         <label className="flex w-full max-w-[220px] flex-col gap-[0.4rem]">
           <span className="text-[0.9rem] text-[var(--text-soft)]">Category</span>
           <SelectField
@@ -511,16 +681,23 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
           />
         </label>
 
-        <Button variant="secondary" className="ml-auto" onClick={() => void onClear()}>
-          Clear logs
-        </Button>
+        {/* 팀 기록은 서버의 것이라 이 기기에서 지우지 않는다. */}
+        {teamId ? null : (
+          <Button variant="secondary" className="ml-auto" onClick={() => void onClear()}>
+            Clear logs
+          </Button>
+        )}
       </Toolbar>
 
       <PanelSection>
-        {visibleLogs.length === 0 ? (
+        {teamId && teamActivity.error && visibleLogs.length === 0 ? (
+          <EmptyState title={translate('teamLogs.loadFailed')} description={teamActivity.error} />
+        ) : teamId && teamActivity.loading && visibleLogs.length === 0 ? (
+          <EmptyState title={translate('teamLogs.loading')} />
+        ) : visibleLogs.length === 0 ? (
           <EmptyState
             title={translate('logs.empty.title')}
-            description={translate('logs.empty.description')}
+            description={translate(teamId ? 'teamLogs.emptyDescription' : 'logs.empty.description')}
           />
         ) : (
           visibleLogs.map((log) => {
@@ -544,16 +721,25 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
               log.kind === 'container-action' && isContainerActionMetadata(log.metadata)
                 ? log.metadata
                 : null;
-            // 진행 중(connected) 세션은 녹화가 아직 finalize되지 않아 재생 불가 →
-            // 종료된 세션(closed/error)만 Replay 버튼을 노출한다.
-            const replayRecordingId =
-              sessionLifecycleMetadata != null &&
-              (sessionLifecycleMetadata.status === 'closed' ||
-                sessionLifecycleMetadata.status === 'error') &&
-              sessionLifecycleMetadata.hasReplay === true &&
-              typeof sessionLifecycleMetadata.recordingId === 'string'
-                ? sessionLifecycleMetadata.recordingId
-                : null;
+            // 이 기기의 녹화: 진행 중(connected) 세션은 녹화가 아직 finalize되지 않아 재생 불가 →
+            // 종료된 세션(closed/error)만 Replay 버튼을 노출한다. 팀 녹화는 서버에 구간이 있으면 진행 중에도 연다.
+            const replayAction: ReplayAction | null = !sessionLifecycleMetadata
+              ? null
+              : teamId
+                ? teamReplayAction(
+                    sessionLifecycleMetadata,
+                    teamId,
+                    teamActivity.replayStatuses,
+                    teamActivity.checkedRecordingIds,
+                    translate,
+                  )
+                : (sessionLifecycleMetadata.status === 'closed' ||
+                      sessionLifecycleMetadata.status === 'error') &&
+                    sessionLifecycleMetadata.hasReplay === true &&
+                    typeof sessionLifecycleMetadata.recordingId === 'string'
+                  ? { kind: 'open', recordingId: sessionLifecycleMetadata.recordingId, teamId: null }
+                  : null;
+            const author = authorById.get(log.id) ?? null;
 
             return containerLifecycleMetadata ? (
               <Card key={log.id} data-testid="logs-container-lifecycle-card">
@@ -564,6 +750,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       <div className="text-[0.9rem] text-[var(--text-soft)]">
                         {containerLifecycleMetadata.workspaceKind === 'ecs-cluster' ? 'ECS cluster' : 'Host containers'}
                       </div>
+                      {author ? <AuthorLine email={author} /> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-[0.55rem]">
                       <Badge tone={containerLifecycleMetadata.transport === 'aws-ecs' ? 'starting' : 'running'}>
@@ -632,6 +819,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       {containerActionMetadata.containerName ? (
                         <div className="text-[0.82rem] text-[var(--text-soft)]">{containerActionMetadata.containerId}</div>
                       ) : null}
+                      {author ? <AuthorLine email={author} /> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-[0.55rem]">
                       {containerActionMetadata.runtime ? (
@@ -669,6 +857,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       {getSessionLifecycleSubtitle(sessionLifecycleMetadata) ? (
                         <div className="text-[0.9rem] text-[var(--text-soft)]">{getSessionLifecycleSubtitle(sessionLifecycleMetadata)}</div>
                       ) : null}
+                      {author ? <AuthorLine email={author} /> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-[0.55rem]">
                       <Badge tone={getConnectionKindTone(sessionLifecycleMetadata.connectionKind)}>
@@ -684,16 +873,24 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                     </div>
                     {/* 유일하게 누를 수 있는 요소라 배지 사이에 끼워 두지 않는다 — 오른쪽 끝
                         액션 자리로 빼고 아이콘을 붙여야 배지와 구분된다(다크 테마에서 특히). */}
-                    {sessionLifecycleMetadata.status !== 'connected' && replayRecordingId ? (
+                    {replayAction?.kind === 'open' ? (
                       <Button
                         variant="secondary"
                         size="sm"
                         className="ml-auto"
-                        onClick={() => void onOpenReplay(replayRecordingId)}
+                        onClick={() => void onOpenReplay(replayAction.recordingId, replayAction.teamId)}
                       >
                         <Play className="h-[0.8rem] w-[0.8rem]" aria-hidden />
                         Replay
                       </Button>
+                    ) : replayAction?.kind === 'unavailable' ? (
+                      // 왜 못 여는지 말해 준다. 비활성 버튼만 두면 고장으로 읽는다.
+                      <Tooltip className="ml-auto cursor-not-allowed" label={replayAction.reason}>
+                        <Button variant="secondary" size="sm" disabled aria-label={`Replay — ${replayAction.reason}`}>
+                          <Play className="h-[0.8rem] w-[0.8rem]" aria-hidden />
+                          Replay
+                        </Button>
+                      </Tooltip>
                     ) : null}
                   </div>
                   <div className="mt-[0.9rem] grid gap-[0.7rem] md:grid-cols-3">
@@ -724,6 +921,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       {sftpLifecycleMetadata.title.trim() && sftpLifecycleMetadata.title.trim() !== sftpLifecycleMetadata.hostLabel.trim() ? (
                         <div className="text-[0.9rem] text-[var(--text-soft)]">{sftpLifecycleMetadata.title}</div>
                       ) : null}
+                      {author ? <AuthorLine email={author} /> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-[0.55rem]">
                       <Badge tone="running">SFTP</Badge>
@@ -779,6 +977,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       <div className="text-[0.9rem] text-[var(--text-soft)]">
                         {`${portForwardLifecycleMetadata.bindAddress}:${portForwardLifecycleMetadata.bindPort} -> ${portForwardLifecycleMetadata.targetSummary}`}
                       </div>
+                      {author ? <AuthorLine email={author} /> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-[0.55rem]">
                       <Badge tone={getPortForwardTransportTone(portForwardLifecycleMetadata.transport)}>
@@ -821,6 +1020,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                     <span>{log.category}</span>
                     <span>{formatLogTimestamp(log.createdAt)}</span>
                   </div>
+                  {author ? <AuthorLine email={author} /> : null}
                   {log.metadata ? (
                     <details className="mt-[0.7rem] rounded-[10px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <summary>Metadata</summary>
@@ -832,6 +1032,11 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
             );
           })
         )}
+        {teamId && teamActivity.hasMore && visibleLogs.length > 0 ? (
+          <div ref={loadMoreRef} className="py-3 text-center text-[0.85rem] text-[var(--text-soft)]">
+            {teamActivity.loading ? translate('teamLogs.loading') : null}
+          </div>
+        ) : null}
       </PanelSection>
     </div>
   );

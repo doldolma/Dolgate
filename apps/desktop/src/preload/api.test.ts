@@ -147,6 +147,28 @@ describe("createDesktopApi", () => {
     ]);
   });
 
+  // 팀 녹화(5-4) — 재생 창의 부름에 팀이 실려 가야 메인이 서버의 녹화를 연다.
+  it("passes the team of a team recording to the replay channels", async () => {
+    const { createDesktopApi } = await import("./api");
+    const { ipcChannels } = await import("../common/ipc-channels");
+    const ipcRenderer = { invoke: vi.fn().mockResolvedValue(null), on: vi.fn() } as any;
+    const api = createDesktopApi(ipcRenderer);
+
+    await api.sessionReplays.open("rec-1");
+    await api.sessionReplays.open("rec-1", "team-1");
+    await api.sessionReplays.load("rec-1", "team-1");
+    await api.sessionReplays.readSegment("rec-1", 2, "team-1");
+    await api.sessionReplays.readSnapshot("rec-1", 3, "team-1");
+
+    expect(ipcRenderer.invoke.mock.calls).toEqual([
+      [ipcChannels.sessionReplays.open, "rec-1", null],
+      [ipcChannels.sessionReplays.open, "rec-1", "team-1"],
+      [ipcChannels.sessionReplays.load, "rec-1", "team-1"],
+      [ipcChannels.sessionReplays.readSegment, "rec-1", 2, "team-1"],
+      [ipcChannels.sessionReplays.readSnapshot, "rec-1", 3, "team-1"],
+    ]);
+  });
+
   it("maps DesktopApi invoke calls to the expected IPC channels", async () => {
     const { createDesktopApi } = await import("./api");
     const { ipcChannels } = await import("../common/ipc-channels");

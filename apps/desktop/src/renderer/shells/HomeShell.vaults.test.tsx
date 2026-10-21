@@ -652,4 +652,54 @@ describe('HomeShell vault sections', () => {
     await waitFor(() => expect(within(sectionOf(TEAM)).getByText('team app')).toBeInTheDocument());
     expect(desktopApi.portForwards.create).toHaveBeenCalledWith(expect.objectContaining({ hostId: 'team-web', label: 'team app' }));
   });
+  // 기록 화면 — 홈이 볼트 표의 팀을 넘겨야 Vault 를 고를 수 있고, 팀 녹화는 팀과 함께 열린다.
+  it('shows a team\'s history in the logs screen and opens its recording from the team', async () => {
+    vi.mocked(desktopApi.teams.listActivity).mockResolvedValue([
+      {
+        seq: 1,
+        id: 'event-1',
+        source: 'app',
+        authorUserId: 'user-b',
+        authorEmail: 'b@acme.dev',
+        createdAt: '2026-10-21T01:00:00.000Z',
+        receivedAt: '2026-10-21T01:00:00.000Z',
+        activity: {
+          v: 1,
+          phase: 'end',
+          record: {
+            id: 'session:s1',
+            level: 'info',
+            category: 'session',
+            kind: 'session-lifecycle',
+            message: 'SSH',
+            metadata: {
+              sessionId: 's1',
+              hostId: 'team-web',
+              hostLabel: 'team-web',
+              title: 'team-web',
+              connectionKind: 'ssh',
+              connectedAt: '2026-10-21T01:00:00.000Z',
+              status: 'closed',
+              recordingId: 'rec-1',
+              hasReplay: true,
+            },
+            createdAt: '2026-10-21T01:00:00.000Z',
+          },
+        },
+        memberChange: null,
+        unreadable: null,
+      },
+    ]);
+    vi.mocked(desktopApi.teams.getReplayStatuses).mockResolvedValue([
+      { recordingId: 'rec-1', state: 'ended', authorEmail: 'b@acme.dev', segmentCount: 2 },
+    ]);
+    appStore.setState({ homeSection: 'logs' });
+    render(<Home />);
+
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Vault' }), { target: { value: TEAM } });
+    expect(await screen.findByText('b@acme.dev')).toBeInTheDocument();
+    expect(desktopApi.teams.listActivity).toHaveBeenCalledWith(TEAM, { limit: 100 });
+    fireEvent.click(await screen.findByRole('button', { name: 'Replay' }));
+    expect(desktopApi.sessionReplays.open).toHaveBeenCalledWith('rec-1', TEAM);
+  });
 });

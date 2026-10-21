@@ -61,10 +61,16 @@ type teamRow struct {
 	InfoRevision int64 `gorm:"column:info_revision;not null;default:0"`
 	// data_floor 는 이 팀 데이터를 다루려면 앱이 갖춰야 하는 수준이다. 계정의 sync_data_floor 와 같은
 	// 방식(push 헤더로 올리기만 한다)인데 팀 단위라, 못 따라오는 앱은 그 팀만 막힌다.
-	DataFloor int       `gorm:"column:data_floor;not null;default:0"`
-	CreatedBy string    `gorm:"column:created_by;not null;type:varchar(191)"`
-	CreatedAt time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
+	DataFloor int `gorm:"column:data_floor;not null;default:0"`
+	// event_seq 는 그 팀 기록의 마지막 순번이다. 기록을 쓰는 트랜잭션이 팀 행을 잠그고 올린다.
+	EventSeq int64 `gorm:"column:event_seq;not null;default:0"`
+	// replay_count·replay_bytes 는 지금 남아 있는 녹화(지워진 것은 빼고 진행 중인 것은 넣고)의 합계다.
+	// 녹화를 쓰는 트랜잭션이 팀 행을 잠그고 고친다 — 한도를 볼 때 녹화를 다 더하지 않으려고.
+	ReplayCount int64     `gorm:"column:replay_count;not null;default:0"`
+	ReplayBytes int64     `gorm:"column:replay_bytes;not null;default:0"`
+	CreatedBy   string    `gorm:"column:created_by;not null;type:varchar(191)"`
+	CreatedAt   time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (teamRow) TableName() string {
@@ -447,26 +453,31 @@ func removeTeamMemberTx(tx *gorm.DB, teamID string, userID string, now time.Time
 	return bumpTeamInfoRevisionTx(tx, teamID, nil)
 }
 
-// deleteTeamDataTx 는 팀과 그 팀의 모든 행을 지운다. 호출자가 팀 행을 잠근 뒤 부른다.
+// deleteTeamDataTx 는 팀과 그 팀의 모든 행을 지운다. 호출자가 팀 행을 잠근 뒤 부른다. 녹화는 "지워짐"으로만
+// 돌린다 — 큰 구간 행은 정리 작업이 나눠 지운다(markTeamReplaysDeletedTx).
 func deleteTeamDataTx(tx *gorm.DB, teamID string) error {
 	for _, model := range []any{
 		&teamRecordHistoryRow{},
 		&teamSyncRecordRow{},
 		&teamMemberPrivateRow{},
 		&teamInviteRow{},
+		&teamEventRow{},
 		&teamMemberRow{},
 	} {
 		if err := tx.Where("team_id = ?", teamID).Delete(model).Error; err != nil {
 			return err
 		}
 	}
+	if err := markTeamReplaysDeletedTx(tx, teamID); err != nil {
+		return err
+	}
 	return tx.Where("id = ?", teamID).Delete(&teamRow{}).Error
 }
 
 // leaveAllTeamsTx 는 볼트 초기화·회원 탈퇴 트랜잭션 안에서 그 사람을 모든 팀에서 뺀다. 호출자가
 // 사용자 행을 먼저 잠근다(잠금 순서 users → teams). 소유자였으면 가장 먼저 들어온 멤버가 잇고,
-// 마지막 한 명이었으면 팀째 지운다.
-func (s *GormStore) leaveAllTeamsTx(tx *gorm.DB, userID string) error {
+// 마지막 한 명이었으면 팀째 지운다. reason 은 팀 기록에 남는 까닭이다(teamEventReason*).
+func (s *GormStore) leaveAllTeamsTx(tx *gorm.DB, userID string, reason string) error {
 	var teamIDs []string
 	if err := tx.Model(&teamMemberRow{}).
 		Where("user_id = ?", userID).
@@ -511,6 +522,18 @@ func (s *GormStore) leaveAllTeamsTx(tx *gorm.DB, userID string) error {
 		}
 		if err := removeTeamMemberTx(tx, teamID, userID, now); err != nil {
 			return err
+		}
+		if err := s.appendServerTeamEventTx(tx, teamID, userID, teamServerEvent{
+			Type: teamEventMemberLeft, UserID: userID, Reason: reason,
+		}, now); err != nil {
+			return err
+		}
+		if member.Role == TeamRoleOwner {
+			if err := s.appendServerTeamEventTx(tx, teamID, userID, teamServerEvent{
+				Type: teamEventOwnerChanged, UserID: successor.UserID, ByUserID: userID, Reason: teamEventReasonSuccessor,
+			}, now); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -689,6 +712,11 @@ func (s *GormStore) TransferTeamOwnership(ctx context.Context, teamID string, ac
 			Update("role", TeamRoleOwner).Error; err != nil {
 			return err
 		}
+		if err := s.appendServerTeamEventTx(tx, teamID, actorID, teamServerEvent{
+			Type: teamEventOwnerChanged, UserID: newOwnerID, ByUserID: actorID,
+		}, time.Now().UTC()); err != nil {
+			return err
+		}
 		return bumpTeamInfoRevisionTx(tx, teamID, nil)
 	})
 }
@@ -769,7 +797,13 @@ func (s *GormStore) RemoveTeamMember(ctx context.Context, teamID string, actorID
 			}
 			return err
 		}
-		return removeTeamMemberTx(tx, teamID, targetID, time.Now().UTC())
+		now := time.Now().UTC()
+		if err := removeTeamMemberTx(tx, teamID, targetID, now); err != nil {
+			return err
+		}
+		return s.appendServerTeamEventTx(tx, teamID, actorID, teamServerEvent{
+			Type: teamEventMemberRemoved, UserID: targetID, ByUserID: actorID,
+		}, now)
 	})
 }
 
@@ -795,7 +829,13 @@ func (s *GormStore) LeaveTeam(ctx context.Context, teamID string, userID string)
 		if member.Role == TeamRoleOwner {
 			return ErrTeamOwnerMustTransfer
 		}
-		return removeTeamMemberTx(tx, teamID, userID, time.Now().UTC())
+		now := time.Now().UTC()
+		if err := removeTeamMemberTx(tx, teamID, userID, now); err != nil {
+			return err
+		}
+		return s.appendServerTeamEventTx(tx, teamID, userID, teamServerEvent{
+			Type: teamEventMemberLeft, UserID: userID,
+		}, now)
 	})
 	if err != nil {
 		return TeamLeaveResult{}, err
@@ -1082,6 +1122,12 @@ func (s *GormStore) JoinTeam(ctx context.Context, code string, joinToken string,
 		if err := tx.Model(&teamInviteRow{}).
 			Where("code = ?", invite.Code).
 			Update("use_count", gorm.Expr("use_count + 1")).Error; err != nil {
+			return err
+		}
+		// 링크로 들어온 사람은 반드시 팀 기록에 남는다 — 누구의 링크로 들어왔는지까지.
+		if err := s.appendServerTeamEventTx(tx, team.ID, userID, teamServerEvent{
+			Type: teamEventMemberJoined, UserID: userID, ByUserID: invite.CreatedBy,
+		}, now); err != nil {
 			return err
 		}
 		return bumpTeamInfoRevisionTx(tx, team.ID, nil)

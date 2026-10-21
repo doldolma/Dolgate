@@ -146,7 +146,7 @@ function createDependencySet() {
     opensshImportService: {} as any,
     xshellImportService: {} as any,
     sessionShareService: {} as any,
-    sessionReplayService: {} as any,
+    sessionReplayService: { setTeamOfHost: vi.fn() } as any,
     rdpManager: {
       setCertificateVerifier: vi.fn(),
       emitSessionEvent: vi.fn(),

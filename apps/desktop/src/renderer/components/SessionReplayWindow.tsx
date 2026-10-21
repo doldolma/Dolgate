@@ -9,10 +9,10 @@ import {
 } from "react";
 import type {
   AppTheme,
-  SessionReplayIndex,
   SessionReplayRecording,
   TerminalThemeId,
 } from "@shared";
+import type { SessionReplayView, TeamReplayState } from "@shared";
 import { useSessionReplayController } from "../controllers/useSessionReplayController";
 import {
   SessionReplayCommandPanel,
@@ -27,7 +27,9 @@ import {
 import {
   REPLAY_PENDING_LIMIT_BYTES,
   ReplayPlayer,
+  ReplaySnapshotRefs,
   ReplaySnapshotStore,
+  type ReplaySnapshotIndex,
 } from "../lib/replay-player";
 import { createTerminalRuntime, type TerminalRuntime } from "../lib/terminal-runtime";
 import { normalizeErrorMessage } from "../store/utils/errors-and-prompts";
@@ -36,8 +38,8 @@ import {
   getTerminalThemePreset,
   resolveGlobalTerminalThemeId,
 } from "../lib/terminal-presets";
-import { Badge, Button, EmptyState } from '../ui';
-import { ChevronDown, ChevronLeft, ChevronRight } from '../ui/icons';
+import { Badge, Button, EmptyState, Tooltip } from '../ui';
+import { ChevronDown, ChevronLeft, ChevronRight, User } from '../ui/icons';
 import { useTranslation } from "react-i18next";
 import { getFormatLocale, t } from '../i18n';
 
@@ -130,6 +132,22 @@ function getConnectionKindLabel(kind: SessionReplayRecording["connectionKind"]):
   return "SSH";
 }
 
+/** 팀 녹화의 상태 표시. 끝난 녹화는 표시하지 않는다. */
+function describeTeamReplayState(
+  state: TeamReplayState,
+): { label: string; tone: 'running' | 'error' | 'starting'; tooltip: string } | null {
+  if (state === 'live') {
+    return { label: 'Live', tone: 'running', tooltip: t('teamReplay.stateLive') };
+  }
+  if (state === 'cut') {
+    return { label: 'Cut off', tone: 'error', tooltip: t('teamReplay.stateCut') };
+  }
+  if (state === 'truncated') {
+    return { label: 'Partial', tone: 'starting', tooltip: t('teamReplay.statePartial') };
+  }
+  return null;
+}
+
 /**
  * detail 을 즉시 값이 아니라 팩토리로 받는다. 이 상태는 재생 중 매 프레임 갱신되는데,
  * detail 에 terminalText(captureSnapshot = 화면 전체 직렬화)가 들어 있어 값으로 받으면
@@ -154,14 +172,21 @@ function publishReplayE2EState(
 
 export function SessionReplayWindow({
   recordingId,
+  teamId = null,
 }: {
   recordingId: string;
+  /** 팀 녹화(서버)면 그 팀. 없으면 이 기기의 녹화다. */
+  teamId?: string | null;
 }) {
   const { t: translate } = useTranslation();
-  const { getDesktopSettings, loadSessionReplay, readSessionReplaySegment } =
-    useSessionReplayController();
+  const {
+    getDesktopSettings,
+    loadSessionReplay,
+    readSessionReplaySegment,
+    readSessionReplaySnapshot,
+  } = useSessionReplayController();
   // 녹화 정보와 구간 목록. 출력은 재생기가 구간 단위로 필요한 만큼만 받는다.
-  const [recording, setRecording] = useState<SessionReplayIndex | null>(null);
+  const [recording, setRecording] = useState<SessionReplayView | null>(null);
   // 명령 목록은 녹화 로드 직후 한 번의 사전 스캔으로 채운다(재생을 기다리지 않는다).
   const [commandScan, setCommandScan] = useState<ReplayCommandScanResult | null>(
     null,
@@ -222,6 +247,7 @@ export function SessionReplayWindow({
   const desktopPlatform = useMemo(() => detectDesktopPlatform(), []);
 
   const totalDurationMs = recording?.durationMs ?? 0;
+  const teamState = recording?.team ? describeTeamReplayState(recording.team.state) : null;
   const progressPercent =
     totalDurationMs > 0
       ? Math.max(0, Math.min(100, (Math.min(positionMs, totalDurationMs) / totalDurationMs) * 100))
@@ -317,11 +343,16 @@ export function SessionReplayWindow({
     };
   }, [prefersDark]);
 
-  // 명령 스캔이 떠 두는 화면. 재생기가 되감거나 멀리 건너뛸 때 여기서부터 그린다.
-  const snapshotStore = useMemo(
-    () => (recording ? new ReplaySnapshotStore() : null),
-    [recording],
-  );
+  // 명령 스캔이 떠 두는 화면. 재생기가 되감거나 멀리 건너뛸 때 여기서부터 그린다. 팀 녹화는 녹화한 쪽 앱이 떠
+  // 올린 스냅샷의 자리만 알고, 화면은 거기서 다시 그릴 때 받는다.
+  const snapshotStore = useMemo<ReplaySnapshotIndex | null>(() => {
+    if (!recording) {
+      return null;
+    }
+    return recording.team
+      ? new ReplaySnapshotRefs(recording.team.snapshots)
+      : new ReplaySnapshotStore();
+  }, [recording]);
   const commandBlocks = commandScan?.blocks ?? NO_COMMAND_BLOCKS;
   // 재생 위치로 "지금 그 명령"을 정하는 건 숫자 비교라 프레임마다 돌아도 싸다. 대신 결과가
   // 바뀔 때만 패널이 리렌더되도록 id 만 내려보낸다.
@@ -344,6 +375,13 @@ export function SessionReplayWindow({
   useEffect(() => {
     if (!recording || !snapshotStore) {
       setCommandScan(null);
+      return;
+    }
+    if (recording.team || !(snapshotStore instanceof ReplaySnapshotStore)) {
+      // 팀 녹화는 녹화한 쪽 앱이 세션 동안 만들어 올린 목록을 쓴다 — 훑으려면 녹화를 다 받아야 한다.
+      setCommandScan(
+        recording.team?.commands ?? { blocks: [], shellIntegrationDetected: false },
+      );
       return;
     }
     let disposed = false;
@@ -383,7 +421,7 @@ export function SessionReplayWindow({
 
   useEffect(() => {
     let disposed = false;
-    void loadSessionReplay(recordingId)
+    void loadSessionReplay(recordingId, teamId)
       .then((nextRecording) => {
         if (disposed) {
           return;
@@ -406,7 +444,7 @@ export function SessionReplayWindow({
     return () => {
       disposed = true;
     };
-  }, [recordingId]);
+  }, [recordingId, teamId]);
 
   useEffect(() => {
     const initialSettings = effectiveTerminalSettingsRef.current;
@@ -487,11 +525,15 @@ export function SessionReplayWindow({
     if (!recording || !runtime || !snapshotStore) {
       return;
     }
+    const team = recording.team;
     const player = new ReplayPlayer({
       segments: recording.segments,
       readSegment: (segmentIndex) =>
-        readSessionReplaySegment(recording.recordingId, segmentIndex),
+        readSessionReplaySegment(recording.recordingId, segmentIndex, team?.teamId),
       snapshots: snapshotStore,
+      loadSnapshot: team
+        ? (ref) => readSessionReplaySnapshot(recording.recordingId, ref.segment, team.teamId)
+        : undefined,
       terminal: {
         write: (data) => runtime.write(data),
         resize: (cols, rows) => runtime.terminal.resize(cols, rows),
@@ -721,9 +763,21 @@ export function SessionReplayWindow({
               {recording.connectionDetails}
             </div>
           ) : null}
+          {/* 팀 녹화 — 녹화한 멤버. */}
+          {recording?.team ? (
+            <div className="mt-[0.15rem] flex min-w-0 items-center gap-[0.3rem] text-[0.82rem] text-[var(--text-soft)]">
+              <User className="h-[0.8rem] w-[0.8rem] shrink-0" aria-hidden />
+              <span className="truncate">{recording.team.authorEmail}</span>
+            </div>
+          ) : null}
         </div>
         {recording ? (
           <div className="inline-flex flex-wrap items-center gap-2">
+            {teamState ? (
+              <Tooltip label={teamState.tooltip}>
+                <Badge tone={teamState.tone}>{teamState.label}</Badge>
+              </Tooltip>
+            ) : null}
             <Badge tone="paused">
               {getConnectionKindLabel(recording.connectionKind)}
             </Badge>
@@ -751,7 +805,13 @@ export function SessionReplayWindow({
           <section className="grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.6rem]">
             {[
               { label: translate('replay.connectStarted'), value: formatTimestamp(recording.connectedAt) },
-              { label: translate('replay.connectEnded'), value: formatTimestamp(recording.disconnectedAt) },
+              {
+                label: translate('replay.connectEnded'),
+                value:
+                  recording.team?.state === 'live'
+                    ? translate('teamReplay.inProgress')
+                    : formatTimestamp(recording.disconnectedAt),
+              },
             ].map((stat) => (
               <div
                 key={stat.label}
@@ -895,6 +955,11 @@ export function SessionReplayWindow({
                 scanning={commandScan === null}
                 shellIntegrationDetected={
                   commandScan?.shellIntegrationDetected ?? false
+                }
+                notice={
+                  recording.team && recording.team.commands === null
+                    ? translate('teamReplay.unsupported')
+                    : null
                 }
                 activeBlockId={activeCommandBlockId}
                 onSeek={handleSeek}

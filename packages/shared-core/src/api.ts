@@ -146,6 +146,15 @@ export interface ServerInfoResponse {
     // 팀 볼트 API(/teams, /invite)가 있는가. 도입 이전 서버 응답에는 없다.
     teams?: {
       enabled: boolean;
+      /**
+       * 팀 기록·녹화 API 와 그 한도(바이트). 없는 서버(옛 자체 호스팅)에서는 앱이 팀 기록·녹화를 올리지 않는다.
+       */
+      history?: {
+        replayMaxCount: number;
+        replayMaxBytes: number;
+        replayMaxBytesPerRecording: number;
+        segmentMaxBytes: number;
+      };
     };
   };
 }

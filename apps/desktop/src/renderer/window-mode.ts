@@ -9,6 +9,8 @@ export type RendererWindowMode =
   | {
       kind: 'session-replay';
       recordingId: string;
+      /** 팀 녹화(서버)를 볼 때 그 팀. 없으면 이 기기의 녹화다. */
+      teamId: string | null;
     }
   | {
       /** 원격 모니터 하나만 띄우는 전체화면 창. */
@@ -41,6 +43,7 @@ export function resolveRendererWindowMode(search: string): RendererWindowMode {
     return {
       kind: 'session-replay',
       recordingId,
+      teamId: params.get('teamId')?.trim() || null,
     };
   }
 

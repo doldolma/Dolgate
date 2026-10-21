@@ -54,6 +54,12 @@ import { SessionShareService } from './session-share-service';
 import { SessionReplayService } from './session-replay-service';
 import { SyncService } from './sync-service';
 import { TeamSyncService } from './team-sync-service';
+import { TeamApi } from './team-api';
+import { TeamHistoryService } from './team-history-service';
+import { TeamReplayUploads } from './team-replay-uploads';
+import { TeamReplayCache } from './team-replay-cache';
+import { TeamReplayViewer } from './team-replay-viewer';
+import { createWorkerScanHost, resolveReplayScanWorkerPath } from './replay-scan-host';
 import { getTeamInviteInbox } from './team-invite-inbox';
 import { classifyProtocolUrl, findProtocolUrl } from './protocol-links';
 import { listStoredTeamAwsProfiles, listStoredTeamDnsOverrideVaults } from './team-vault-scope';
@@ -69,7 +75,7 @@ import { registerNotificationsIpcHandlers } from './ipc/notifications';
 import { WarpgateService } from './warpgate-service';
 import { XshellImportService } from './xshell-import-service';
 import { shouldRequestSingleInstanceLock } from './app-runtime-policy';
-import type { ActivityLogMessage } from './activity-log-message';
+import { logMessage, type ActivityLogMessage } from './activity-log-message';
 
 // electron-builder.config.cjs 의 appId 와 반드시 같아야 한다 —
 // main.app-user-model-id.test.ts 가 두 값을 비교해 고정한다.
@@ -419,12 +425,52 @@ if (termiusHelperArgIndex >= 0) {
     }
   };
 
+  // 팀 기록 — 기록 저장소에 붙어 팀 볼트의 활동을 팀 서버에도 남긴다. 팀 키는 팀 동기화가 연 팀의 것을 빌린다.
+  const teamApi = new TeamApi(authService);
+  const teamHistoryService = new TeamHistoryService({
+    api: teamApi,
+    openTeamAccess: (teamId) => teamSyncService.openTeamAccess(teamId),
+  });
+  activityLogRepository.setObserver((record) => teamHistoryService.mirror(record));
+  // 팀 녹화 — 팀 호스트 세션의 녹화를 세션 동안 구간마다 팀에 보낸다. 명령 목록·스냅샷 훑기는 작업 스레드에서 돈다.
+  const teamReplayUploads = new TeamReplayUploads({
+    api: teamApi,
+    getHistoryLimits: (access) => teamHistoryService.getHistoryLimits(access.lease),
+    openTeamAccess: (teamId) => teamSyncService.openTeamAccess(teamId),
+    scanHost: createWorkerScanHost(resolveReplayScanWorkerPath(__dirname)),
+    isRecordingActive: (recordingId) => sessionReplayService.isRecordingActive(recordingId),
+    onTruncated: ({ recordingId, startMeta }) => {
+      activityLogRepository.append(
+        'warn',
+        'session',
+        logMessage('teamReplay.truncated', { host: startMeta.hostLabel }),
+        { hostId: startMeta.hostId, sessionId: startMeta.sessionId, recordingId },
+      );
+    },
+  });
+  sessionReplayService.attachTeamUploads(teamReplayUploads);
+  // 팀 녹화 보기 — 보는 만큼만 받고, 받은 것은 잠긴 채 캐시에 둔다.
+  const teamReplayViewer = new TeamReplayViewer({
+    api: teamApi,
+    openTeamAccess: (teamId) => teamSyncService.openTeamAccess(teamId),
+    cache: new TeamReplayCache(),
+  });
+  sessionReplayService.attachTeamViewer(teamReplayViewer);
+
   // 팀 볼트 동기화. 팀 목록이 바뀌거나 팀 데이터를 받으면 화면을 다시 읽히고 코어에 tailnet 설정을
   // 다시 알린다(개인 pull 을 적용했을 때와 같다).
   const teamSyncService = new TeamSyncService({
     auth: authService,
     secretStore,
+    onTeamForgotten: (teamId) => {
+      teamHistoryService.forgetTeam(teamId);
+      teamReplayUploads.forgetTeam(teamId);
+      teamReplayViewer.forgetTeam(teamId);
+    },
     onChanged: () => {
+      // 팀이 열렸을 수 있다 — 기다리던 팀 기록·녹화를 보내 본다.
+      teamHistoryService.kick();
+      teamReplayUploads.kick();
       coreManager.pushTailnetConfigs();
       // 팀 AWS 프로필·DNS 덮어쓰기가 바뀌었을 수 있다 — 펼친 설정 파일과 hosts 를 다시 맞춘다.
       void awsService.materializeManagedProfiles().catch(() => undefined);
@@ -528,6 +574,19 @@ if (termiusHelperArgIndex >= 0) {
     }
     activityLogRepository.activate(owner);
     sessionReplayService.activate(owner);
+    // 팀은 계정으로만 쓴다 — 계정 없이 쓰는 자리에는 팀 기록이 없다.
+    if (owner.kind !== 'local-only') {
+      teamHistoryService.activate(resolveLocalHistoryScope(owner).directoryPath);
+      const historyDirectory = teamHistoryService.stateDirectoryPath;
+      if (historyDirectory) {
+        teamReplayUploads.activate(historyDirectory);
+        teamReplayViewer.activate(historyDirectory);
+      }
+    } else {
+      teamHistoryService.deactivate();
+      teamReplayUploads.deactivate();
+      teamReplayViewer.deactivate();
+    }
   });
 
   type PatchedWriteStream = NodeJS.WriteStream & {
@@ -856,12 +915,19 @@ if (termiusHelperArgIndex >= 0) {
       // 아래 purgeSyncedCache 가 지운다.
       await sessionReplayService.purgeAllRecordings();
       activityLogRepository.clear();
+      // 팀 기록 대기열·녹화 올리기 상태·팀 녹화 캐시(팀 기록 폴더)도 지운다.
+      teamReplayUploads.deactivate();
+      teamReplayViewer.deactivate();
+      teamHistoryService.purgeLocalData();
       for (const account of AI_STORED_KEY_SECRET_ACCOUNTS) {
         await secretStore.remove(account).catch(() => undefined);
       }
     }
     sessionReplayService.deactivate();
     activityLogRepository.deactivate();
+    teamHistoryService.deactivate();
+    teamReplayUploads.deactivate();
+    teamReplayViewer.deactivate();
     if (context.purgeSyncedCache) {
       // 개인 캐시와 함께 모든 팀의 로컬 데이터도 지운다. 원본은 서버에 있다.
       await teamSyncService.purgeAll();
@@ -945,6 +1011,7 @@ if (termiusHelperArgIndex >= 0) {
           return intent;
         },
       },
+      teamHistoryService,
     );
     registerNotificationsIpcHandlers(notificationService);
     await awsService.initializeManagedProfiles();
@@ -1032,7 +1099,12 @@ if (termiusHelperArgIndex >= 0) {
     event.preventDefault();
     isQuitting = true;
     // 녹화를 끝낸다. 압축된 녹화 파일이 다 쓰일 때까지 아래 체인이 기다린다(안 그러면 끝부분을 잃는다).
-    const recordingsClosed = sessionReplayService.shutdown();
+    // 팀 기록도 남은 것을 보내 본다(못 보낸 것은 다음 실행 때 간다).
+    // 팀 녹화는 녹화 파일이 다 쓰인 뒤(마지막 구간이 색인에 오른 뒤) 남은 구간과 끝을 보낸다.
+    const recordingsClosed = Promise.all([
+      sessionReplayService.shutdown().then(() => teamReplayUploads.flushBeforeQuit(3000)),
+      teamHistoryService.flushBeforeQuit(3000),
+    ]);
     // 사이드카는 동기 종료라 비동기 정리 체인에 끼울 필요가 없다.
     rdpManager.shutdown();
     void Promise.all([recordingsClosed, sessionShareService.shutdown()]).finally(() => {

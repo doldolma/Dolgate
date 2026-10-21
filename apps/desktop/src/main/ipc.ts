@@ -27,6 +27,8 @@ import type { SessionShareService } from "./session-share-service";
 import type { SyncService } from "./sync-service";
 import { TeamService } from "./team-service";
 import type { TeamSyncService } from "./team-sync-service";
+import { resolveLogTeamId, type TeamHistoryService } from "./team-history-service";
+import { PERSONAL_VAULT_ID } from "./vault-root";
 import { createStoredTeamVaults } from "./team-vault-scope";
 import type { TermiusImportService } from "./termius-import-service";
 import type { UpdateService } from "./update-service";
@@ -90,8 +92,9 @@ export function registerIpcHandlers(
   awsProfiles: AwsProfileRepository,
   teamSync: TeamSyncService,
   windowRuntime?: DesktopWindowIpcRuntime,
+  teamHistory?: TeamHistoryService,
 ): void {
-  const ctx = createMainIpcContext({
+  const baseCtx = createMainIpcContext({
     hosts,
     groups,
     settings,
@@ -122,6 +125,14 @@ export function registerIpcHandlers(
     xshellImportService,
     sessionShareService,
     sessionReplayService,
+  });
+  // 팀 기록은 기록의 볼트를 여기서 만든 카탈로그로 찾는다.
+  const ctx = { ...baseCtx, teamHistory };
+  teamHistory?.setTeamResolver((metadata) => resolveLogTeamId(ctx.vaults, metadata));
+  // 팀 호스트 세션의 녹화는 그 팀으로도 간다(team-replay-uploads).
+  sessionReplayService.setTeamOfHost((hostId) => {
+    const vaultId = ctx.vaults.scopeOfHost(hostId).id;
+    return vaultId === PERSONAL_VAULT_ID ? null : vaultId;
   });
 
   registerAiIpcHandlers(ctx);

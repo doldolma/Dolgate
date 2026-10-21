@@ -23,6 +23,7 @@ export * from "./subshell-detect";
 export * from "./sync-watch";
 export * from "./terminal-autocomplete";
 export * from "./team-crypto";
+export * from "./team-history-crypto";
 export * from "./aux-path";
 export * from "./command-spec/dynamic";
 export * from "./command-spec/fig-runtime";

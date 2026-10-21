@@ -198,11 +198,22 @@ interface Member {
   outputBytes: number;
   /** 담은 JSON 줄의 양(압축 전). */
   textBytes: number;
+  /** 첫 항목을 받은 벽시계 시각(segmentMaxAgeMs 를 잰다). */
+  startedAtWallMs: number;
+  /** onSegment 가 있으면 이 멤버의 압축 결과를 모은다 — 파일이 다 쓰이기를 기다리지 않고 넘긴다. */
+  collected: Buffer[] | null;
 }
 
 export interface ReplayEventsWriterOptions {
   /** 구간 하나에 담을 JSON 줄의 양(압축 전). 넘으면 구간을 끊는다. */
   segmentBytes?: number;
+  /**
+   * 구간이 이만큼 오래되면(첫 항목부터 잰 시간) 다음 flush 에서 끊는다. 팀 호스트 녹화는 구간을 끝나는 대로 팀에
+   * 보내므로, 출력이 적은 세션도 몇 초마다 구간이 끝나야 한다. 0 이면 양으로만 끊는다.
+   */
+  segmentMaxAgeMs?: number;
+  /** 구간 하나가 끝나 색인에 오를 때마다 그 구간의 압축 바이트와 함께 불린다(파일에 다 쓰이기 전일 수 있다). */
+  onSegment?: (record: ReplaySegmentRecord, index: number, data: Buffer) => void;
   /** 쓰기에 실패하면 한 번 불린다. 그 뒤로 받는 항목은 버린다. */
   onError?: (error: Error) => void;
 }
@@ -220,6 +231,8 @@ export class ReplayEventsWriter {
   private readonly file: WriteStream;
   private readonly indexFd: number;
   private readonly segmentBytes: number;
+  private readonly segmentMaxAgeMs: number;
+  private readonly onSegment: ReplayEventsWriterOptions["onSegment"];
   private readonly onError: ((error: Error) => void) | undefined;
   /** 압축 중이거나 파일에 쓰이기를 기다리는 멤버. 맨 앞 멤버만 파일에 바로 쓴다. */
   private readonly members: Member[] = [];
@@ -240,6 +253,8 @@ export class ReplayEventsWriter {
     options: ReplayEventsWriterOptions = {},
   ) {
     this.segmentBytes = options.segmentBytes ?? REPLAY_SEGMENT_BYTES;
+    this.segmentMaxAgeMs = options.segmentMaxAgeMs ?? 0;
+    this.onSegment = options.onSegment;
     this.onError = options.onError;
     // 파일은 지금 연다. 스트림에 경로만 주면 다음 틱에야 열려서, 녹화가 시작된 직후에는 파일이 없고 그
     // 사이 폴더가 지워지면 늦게 실패한다.
@@ -296,7 +311,24 @@ export class ReplayEventsWriter {
    * 읽힌다.
    */
   flush(): void {
-    if (this.failedError || !this.dirty) {
+    if (this.failedError) {
+      return;
+    }
+    const aging = this.current;
+    if (
+      aging &&
+      this.segmentMaxAgeMs > 0 &&
+      aging.entryCount > 0 &&
+      Date.now() - aging.startedAtWallMs >= this.segmentMaxAgeMs
+    ) {
+      // 오래된 구간은 끊는다 — 끝난 구간만 색인에 오르고 팀으로 간다. 새 출력이 없어도 끊어야 마지막 몇 줄이
+      // 다음 출력이 올 때까지 기다리지 않는다.
+      this.dirty = false;
+      this.writeBatch();
+      this.endCurrent();
+      return;
+    }
+    if (!this.dirty) {
       return;
     }
     this.dirty = false;
@@ -332,12 +364,15 @@ export class ReplayEventsWriter {
       entryCount: 0,
       outputBytes: 0,
       textBytes: 0,
+      startedAtWallMs: Date.now(),
+      collected: this.onSegment ? [] : null,
     };
     gzip.on("data", (chunk: Buffer) => {
       if (this.failedError) {
         return;
       }
       member.length += chunk.length;
+      member.collected?.push(chunk);
       if (member.waiting) {
         member.waiting.push(chunk);
       } else {
@@ -393,6 +428,16 @@ export class ReplayEventsWriter {
           return;
         }
         this.segments.push(record);
+        if (this.onSegment) {
+          const data = Buffer.concat(member.collected ?? []);
+          member.collected = null;
+          try {
+            this.onSegment(record, this.segments.length - 1, data);
+          } catch (error) {
+            // 받는 쪽의 실패가 녹화를 멈추지 않는다.
+            console.warn("[session-replay] a segment listener failed", error);
+          }
+        }
       }
       const next = this.members[0];
       if (next?.waiting) {

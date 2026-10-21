@@ -23,6 +23,7 @@ import {
   REPLAY_SEGMENT_BYTES,
   ReplayEventsWriter,
   type ReplayEventFiles,
+  type ReplaySegmentRecord,
 } from "./session-replay-events";
 
 function outputLine(atMs: number, text: string): string {
@@ -70,6 +71,37 @@ describe("session replay events", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  // 팀 호스트 녹화는 구간을 짧게 끊어 끝나는 대로 팀에 보낸다. 넘긴 바이트는 파일 속 그 구간과 같아야 한다 —
+  // 서버의 구간을 이어 붙이면 로컬 녹화 파일이 된다.
+  it("cuts a segment once it is old enough and hands each finished segment over with its exact bytes", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const handed: Array<{ index: number; record: ReplaySegmentRecord; data: Buffer }> = [];
+    const writer = new ReplayEventsWriter(files.events, files.index, {
+      segmentMaxAgeMs: 5000,
+      onSegment: (record, index, data) => handed.push({ index, record, data }),
+    });
+    writer.append(outputLine(0, "first"), 0, 5);
+    now += 1000;
+    writer.flush();
+    writer.append(outputLine(1000, "second"), 1000, 6);
+    now += 4000;
+    // 첫 항목부터 5초 — 새 출력이 없어도 끊는다.
+    writer.flush();
+    writer.flush();
+    writer.append(outputLine(5000, "third"), 5000, 5);
+    await writer.end();
+
+    expect(handed.map((segment) => segment.index)).toEqual([0, 1]);
+    const file = readFileSync(files.events);
+    for (const { record, data } of handed) {
+      expect(data.equals(file.subarray(record.offset, record.offset + record.length))).toBe(true);
+    }
+    expect(Buffer.concat(handed.map((segment) => segment.data)).equals(file)).toBe(true);
+    expect(segmentTexts(decodeReplaySegment(gunzipSync(handed[0]!.data).toString(), 0))).toEqual(["first", "second"]);
+    expect(handed[1]!.record).toMatchObject({ startAtMs: 5000, entryCount: 1 });
   });
 
   // 구간마다 gzip 멤버를 새로 시작하고 색인에 위치를 적는다. 파일은 통째로도 풀리고, 구간만 따로도 풀린다.

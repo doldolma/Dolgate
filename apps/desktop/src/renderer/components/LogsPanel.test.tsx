@@ -273,7 +273,7 @@ describe('LogsPanel', () => {
     expect(screen.getByText('Local')).toBeInTheDocument();
     expect(screen.getByText('1분 0초')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Replay' }));
-    expect(onOpenReplay).toHaveBeenCalledWith('local-recording-1');
+    expect(onOpenReplay).toHaveBeenCalledWith('local-recording-1', null);
   });
 
   it('renders ECS Exec lifecycle metadata with the AWS ECS Exec badge', () => {
@@ -622,7 +622,7 @@ describe('LogsPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Replay' }));
 
-    expect(onOpenReplay).toHaveBeenCalledWith('recording-9');
+    expect(onOpenReplay).toHaveBeenCalledWith('recording-9', null);
     expect(screen.queryAllByRole('button', { name: 'Replay' })).toHaveLength(1);
   });
 

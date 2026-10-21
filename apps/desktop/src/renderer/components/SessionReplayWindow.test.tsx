@@ -18,7 +18,7 @@ function replayApiFor(
   return {
     index,
     load: vi.fn().mockResolvedValue(index),
-    readSegment: vi.fn((_recordingId: string, segmentIndex: number) =>
+    readSegment: vi.fn((_recordingId: string, segmentIndex: number, _teamId?: string | null) =>
       readSegment(segmentIndex),
     ),
   };
@@ -221,6 +221,84 @@ describe("SessionReplayWindow", () => {
     expect(
       (screen.getByLabelText("Replay scrubber") as HTMLInputElement).value,
     ).toBe("1000");
+  });
+
+  // 팀 녹화는 녹화를 다 받지 않는다 — 녹화한 쪽 앱이 올린 명령 목록을 쓰고 훑지 않는다.
+  it("shows a team recording's uploaded command list without scanning and reads segments from the team", async () => {
+    const api = useRecording({
+      ...DEFAULT_RECORDING,
+      recordingId: "rec-team",
+      entries: [
+        { type: "output", atMs: 0, dataBase64: btoa("$ \x1b]133;B\x07") },
+        { type: "output", atMs: 300, dataBase64: btoa("ls -la\r\n\x1b]133;C\x07") },
+        { type: "output", atMs: 800, dataBase64: btoa("out\r\n\x1b]133;D;0\x07") },
+      ],
+    });
+    api.load.mockResolvedValue({
+      ...api.index,
+      team: {
+        teamId: "team-1",
+        authorEmail: "a@example.com",
+        state: "ended",
+        commands: {
+          blocks: [
+            { id: 1, atMs: 300, endAtMs: 800, durationMs: 500, command: "deploy", exitCode: 0, cwd: null, state: "ok" },
+          ],
+          shellIntegrationDetected: true,
+        },
+        snapshots: [],
+      },
+    });
+
+    render(<SessionReplayWindow recordingId="rec-team" teamId="team-1" />);
+
+    expect(await screen.findByTitle("deploy")).toBeInTheDocument();
+    expect(api.load).toHaveBeenCalledWith("rec-team", "team-1");
+    await waitFor(() => expect(api.readSegment).toHaveBeenCalled());
+    expect(api.readSegment.mock.calls.every((call) => call[2] === "team-1")).toBe(true);
+    // 훑었다면 녹화 속 명령(ls -la)이 목록에 떴을 것이다.
+    expect(screen.queryByTitle("ls -la")).not.toBeInTheDocument();
+  });
+
+  it("asks for an update when a team recording's command list is in a newer format", async () => {
+    const api = useRecording({ ...DEFAULT_RECORDING, recordingId: "rec-team" });
+    api.load.mockResolvedValue({
+      ...api.index,
+      team: { teamId: "team-1", authorEmail: "a@example.com", state: "ended", commands: null, snapshots: [] },
+    });
+
+    render(<SessionReplayWindow recordingId="rec-team" teamId="team-1" />);
+
+    expect(await screen.findByText("앱을 업데이트하면 볼 수 있습니다.")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["live", "Live", "아직 녹화 중입니다"],
+    ["cut", "Cut off", "녹화한 사람의 앱이 끝을 알리지 못하고 끊겼습니다"],
+    ["truncated", "Partial", "앞부분만 팀에 있습니다"],
+  ] as const)("shows who recorded a %s team recording and what state it is in", async (state, label, tooltip) => {
+    const api = useRecording({ ...DEFAULT_RECORDING, recordingId: "rec-team" });
+    api.load.mockResolvedValue({
+      ...api.index,
+      team: { teamId: "team-1", authorEmail: "b@example.com", state, commands: null, snapshots: [] },
+    });
+
+    render(<SessionReplayWindow recordingId="rec-team" teamId="team-1" />);
+
+    expect(await screen.findByText("b@example.com")).toBeInTheDocument();
+    const badge = screen.getByText(label);
+    fireEvent.mouseEnter(badge.parentElement!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(tooltip);
+    // 진행 중이면 연결 종료 자리에 시각 대신 "진행 중".
+    expect(screen.queryByText("진행 중") !== null).toBe(state === "live");
+  });
+
+  it("shows no team marks for a recording on this device", async () => {
+    render(<SessionReplayWindow recordingId="recording-1" />);
+    expect(await screen.findByText("doldolma.com · 22 · doyoung")).toBeInTheDocument();
+    for (const label of ["Live", "Cut off", "Partial"]) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
   });
 
   it("does not serialize the terminal when E2E state publishing is off", async () => {
@@ -489,7 +567,7 @@ describe("SessionReplayWindow", () => {
     render(<SessionReplayWindow recordingId="recording-1" />);
 
     await waitFor(() =>
-      expect(window.dolssh.sessionReplays.load).toHaveBeenCalledWith("recording-1"),
+      expect(window.dolssh.sessionReplays.load).toHaveBeenCalledWith("recording-1", null),
     );
     expect(mocks.runtimeRecords).toHaveLength(0);
 

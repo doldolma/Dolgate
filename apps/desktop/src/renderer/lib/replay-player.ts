@@ -5,9 +5,11 @@
 // 재생됐다(실측).
 //
 // 터미널은 앞에서부터 차례로 그려야 그 시점의 화면이 나온다. 되감거나 멀리 건너뛸 때는 명령 스캔이 미리 떠 둔
-// 화면(스냅샷)에서 시작해 거기서부터 그린다. 그보다 앞이면 처음부터 그린다.
+// 화면(스냅샷)에서 시작해 거기서부터 그린다. 그보다 앞이면 처음부터 그린다. 팀 녹화는 스냅샷의 자리만 알고, 그
+// 화면은 거기서 다시 그릴 때 받는다(loadSnapshot).
 
 import type { SessionReplaySegment, SessionReplaySegmentInfo } from '@shared';
+import type { ReplaySnapshot } from '../../common/replay/replay-command-scan';
 
 /** 그릴 위치보다 앞서 받아 둘 구간 수. */
 const PREFETCH_SEGMENTS = 3;
@@ -33,16 +35,25 @@ const EMPTY_SEGMENT: SessionReplaySegment = {
   data: new Uint8Array(0),
 };
 
-/** 구간 경계에서 떠 둔 화면. */
-export interface ReplaySnapshot {
-  /** 이 구간의 첫 항목부터 이어 그린다 — 앞 구간은 모두 반영된 화면이다. */
+// 구간 경계에서 떠 둔 화면 — 훑기(common/replay)가 만든다.
+export type { ReplaySnapshot };
+
+/** 스냅샷의 자리 — 이 구간의 첫 항목부터 잇고, atMs 까지 반영된 화면이다. */
+export interface ReplaySnapshotRef {
   segment: number;
-  /** 반영된 마지막 항목의 시각. */
   atMs: number;
-  cols: number;
-  rows: number;
-  /** 이 화면을 다시 그리는 출력(직렬화한 터미널). */
-  data: string;
+}
+
+/** 재생기가 스냅샷을 찾는 곳. */
+export interface ReplaySnapshotIndex {
+  /** atMs 까지만 반영된 스냅샷 가운데 가장 늦은 것. 화면(data)이 없으면 재생기가 loadSnapshot 으로 받는다. */
+  latest(atMs: number): ReplaySnapshotRef | ReplaySnapshot | null;
+  /** 받지 못한 스냅샷 — 다시 고르지 않게 뺀다. */
+  drop?(ref: ReplaySnapshotRef): void;
+}
+
+function hasScreen(point: ReplaySnapshotRef | ReplaySnapshot): point is ReplaySnapshot {
+  return 'data' in point;
 }
 
 /**
@@ -57,7 +68,7 @@ function compactString(value: string): string {
  * 스냅샷을 모아 둔다. 녹화가 커도 메모리가 늘지 않도록 전체 양을 SNAPSHOT_BUDGET_CHARS 로 묶는다 — 넘으면
  * 하나 걸러 버리고, 다음부터는 두 배 간격으로 뜨게 한다.
  */
-export class ReplaySnapshotStore {
+export class ReplaySnapshotStore implements ReplaySnapshotIndex {
   private snapshots: ReplaySnapshot[] = [];
   private totalChars = 0;
   private spacing: number;
@@ -105,6 +116,28 @@ export class ReplaySnapshotStore {
   }
 }
 
+/** 자리만 아는 스냅샷 목록(팀 녹화) — 녹화한 쪽 앱이 떠 올린 것이다. */
+export class ReplaySnapshotRefs implements ReplaySnapshotIndex {
+  private refs: ReplaySnapshotRef[];
+
+  constructor(refs: readonly ReplaySnapshotRef[]) {
+    this.refs = [...refs].sort((left, right) => left.atMs - right.atMs);
+  }
+
+  latest(atMs: number): ReplaySnapshotRef | null {
+    for (let index = this.refs.length - 1; index >= 0; index -= 1) {
+      if (this.refs[index].atMs <= atMs) {
+        return this.refs[index];
+      }
+    }
+    return null;
+  }
+
+  drop(ref: ReplaySnapshotRef): void {
+    this.refs = this.refs.filter((entry) => entry !== ref);
+  }
+}
+
 export interface ReplayTerminal {
   write: (data: Uint8Array | string) => void;
   resize: (cols: number, rows: number) => void;
@@ -119,7 +152,9 @@ export interface ReplayTerminal {
 export interface ReplayPlayerOptions {
   segments: readonly SessionReplaySegmentInfo[];
   readSegment: (segmentIndex: number) => Promise<SessionReplaySegment>;
-  snapshots: ReplaySnapshotStore;
+  snapshots: ReplaySnapshotIndex;
+  /** 화면 없는 스냅샷의 화면을 받는다(팀 녹화). 못 받으면 null — 처음부터 그린다. */
+  loadSnapshot?: (ref: ReplaySnapshotRef) => Promise<ReplaySnapshot | null>;
   terminal: ReplayTerminal;
   /** 크기 바꿈 항목이나 스냅샷으로 터미널 크기가 바뀌었다. */
   onViewport: (cols: number, rows: number) => void;
@@ -127,7 +162,7 @@ export interface ReplayPlayerOptions {
   onWritesDrained?: () => void;
 }
 
-type RestartPoint = ReplaySnapshot | 'start';
+type RestartPoint = ReplaySnapshotRef | ReplaySnapshot | 'start';
 
 export class ReplayPlayer {
   private readonly cache = new Map<number, SessionReplaySegment>();
@@ -143,6 +178,8 @@ export class ReplayPlayer {
    * 지운다 — 그래야 빈 화면을 거치지 않고 한 번에 바뀐다.
    */
   private restartPoint: RestartPoint | null = 'start';
+  /** 받는 중이거나 마지막으로 받은 스냅샷 화면(snapshot 이 undefined 면 받는 중, null 이면 못 받음). */
+  private snapshotLoad: { ref: ReplaySnapshotRef; snapshot: ReplaySnapshot | null | undefined } | null = null;
   private disposed = false;
 
   constructor(private readonly options: ReplayPlayerOptions) {
@@ -191,12 +228,27 @@ export class ReplayPlayer {
       if (terminal.pendingOutputSize() > 0) {
         return false;
       }
+      const point = this.restartPoint;
+      let screen: ReplaySnapshot | 'start' = 'start';
+      if (point !== 'start') {
+        const snapshot = this.snapshotScreen(point);
+        if (snapshot === undefined) {
+          return false;
+        }
+        if (snapshot === null) {
+          // 스냅샷을 받지 못했다(모르는 형식 등) — 처음부터 그린다.
+          this.options.snapshots.drop?.(point);
+          this.scheduleRestart('start');
+          return false;
+        }
+        screen = snapshot;
+      }
       const first = segments[this.segment];
       if (first && first.startAtMs <= targetMs && !this.cache.has(this.segment)) {
         this.request(this.segment);
         return false;
       }
-      this.restart(this.restartPoint);
+      this.restart(screen);
       this.restartPoint = null;
     }
     let viewport: { cols: number; rows: number } | null = null;
@@ -286,9 +338,41 @@ export class ReplayPlayer {
     this.drawnAtMs = point === 'start' ? Number.NEGATIVE_INFINITY : point.atMs;
     this.evict();
     this.prefetch();
+    if (point !== 'start') {
+      // 화면을 받아야 하는 스냅샷이면 구간과 함께 미리 받기 시작한다.
+      this.snapshotScreen(point);
+    }
   }
 
-  private restart(point: RestartPoint): void {
+  /** 스냅샷의 화면. 받는 중이면 undefined, 못 받으면 null. */
+  private snapshotScreen(point: ReplaySnapshotRef | ReplaySnapshot): ReplaySnapshot | null | undefined {
+    if (hasScreen(point)) {
+      return point;
+    }
+    if (this.snapshotLoad?.ref === point) {
+      return this.snapshotLoad.snapshot;
+    }
+    const loadSnapshot = this.options.loadSnapshot;
+    if (!loadSnapshot) {
+      return null;
+    }
+    const entry: { ref: ReplaySnapshotRef; snapshot: ReplaySnapshot | null | undefined } = {
+      ref: point,
+      snapshot: undefined,
+    };
+    this.snapshotLoad = entry;
+    void loadSnapshot(point)
+      .catch((error: unknown) => {
+        console.error('[replay] could not read a snapshot', point.segment, error);
+        return null;
+      })
+      .then((snapshot) => {
+        entry.snapshot = snapshot;
+      });
+    return undefined;
+  }
+
+  private restart(point: ReplaySnapshot | 'start'): void {
     const { terminal } = this.options;
     terminal.reset();
     if (point !== 'start') {

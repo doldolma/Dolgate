@@ -107,6 +107,9 @@ import { constants as zlibConstants, gunzipSync, gzipSync } from "node:zlib";
 import type { SessionReplayEntry } from "@shared";
 import { SessionReplayService } from "./session-replay-service";
 import { resolveLocalHistoryScope } from "./local-history-scope";
+import { createInProcessScanHost } from "./replay-scan-host";
+import { TeamReplayUploads } from "./team-replay-uploads";
+import { createFakeTeamReplayServer, TEST_TEAM_ID, testTeamAccess } from "./team-replay.test-support";
 
 /** 녹화를 재생 창처럼 읽는다: 구간 목록을 받고, 구간마다 항목을 녹화 파일의 꼴로 되돌린다. */
 async function readRecording(service: SessionReplayService, recordingId: string) {
@@ -1150,6 +1153,260 @@ describe("SessionReplayService", () => {
       expect(readdirSync(replayDirectoryPath).filter((name) => name.endsWith(".tmp"))).toEqual([]);
     },
   );
+
+  // 팀 호스트 세션은 녹화하는 동안 구간을 짧게 끊어 끝나는 대로 팀 올리기에 넘긴다. 넘긴 구간을 이으면
+  // 로컬 녹화 파일과 바이트까지 같고, 개인 호스트 세션은 건드리지 않는다.
+  it("hands a team host's recording to the team uploads segment by segment while it records", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-03-29T00:00:00.000Z"));
+    const lifecycleStates = new Map<string, ReturnType<typeof createLifecycleState>>([
+      ["session-1", createLifecycleState({ hostId: "team-host", hostLabel: "web-1" })],
+      ["session-2", createLifecycleState({ hostId: "host-1" })],
+    ]);
+    const coreManager = {
+      getSessionLifecycleState: vi.fn((sessionId: string) => lifecycleStates.get(sessionId) ?? null),
+      attachSessionRecording: vi.fn(),
+    };
+    const uploads = {
+      onRecordingStarted: vi.fn(),
+      onSegment: vi.fn(),
+      onRecordingEnded: vi.fn(),
+      isPending: vi.fn(() => false),
+    };
+    const service = activateService(
+      new SessionReplayService({ get: () => ({ sessionReplayRetentionCount: 100 }) } as never, coreManager as never),
+    );
+    service.attachTeamUploads(uploads as never);
+    service.setTeamOfHost((hostId) => (hostId === "team-host" ? "team-1" : null));
+
+    for (const sessionId of ["session-1", "session-2"]) {
+      service.handleTerminalEvent({ type: "connected", sessionId, payload: { status: "connected" } } as never);
+    }
+    const [teamRecording, personalRecording] = coreManager.attachSessionRecording.mock.calls.map((call) => call[1] as string);
+    expect(uploads.onRecordingStarted).toHaveBeenCalledTimes(1);
+    expect(uploads.onRecordingStarted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recordingId: teamRecording,
+        teamId: "team-1",
+        startMeta: expect.objectContaining({ hostId: "team-host", hostLabel: "web-1", initialCols: 120, initialRows: 32 }),
+      }),
+    );
+
+    service.handleTerminalStream("session-1", new Uint8Array(Buffer.from("first\n")));
+    service.handleTerminalStream("session-2", new Uint8Array(Buffer.from("personal\n")));
+    // 5초가 지나 다음 비우기가 오면 그 구간을 끊어 넘긴다 — 세션은 아직 이어진다.
+    vi.setSystemTime(new Date("2026-03-29T00:00:06.000Z"));
+    vi.advanceTimersByTime(1000);
+    await vi.waitFor(() => expect(uploads.onSegment).toHaveBeenCalledTimes(1), { timeout: 3000, interval: 20 });
+    expect(uploads.onSegment.mock.calls[0]?.slice(0, 2)).toEqual([teamRecording, 0]);
+
+    service.handleTerminalStream("session-1", new Uint8Array(Buffer.from("second\n")));
+    service.handleTerminalEvent({ type: "closed", sessionId: "session-1", payload: { message: "closed" } } as never);
+    service.handleTerminalEvent({ type: "closed", sessionId: "session-2", payload: { message: "closed" } } as never);
+    await vi.waitFor(() => expect(uploads.onRecordingEnded).toHaveBeenCalledTimes(1), { timeout: 3000, interval: 20 });
+    expect(uploads.onRecordingEnded).toHaveBeenCalledWith(teamRecording, expect.objectContaining({ lastSegment: 1 }));
+
+    const handed = uploads.onSegment.mock.calls.map((call) => call as [string, number, unknown, Buffer]);
+    expect(handed.map(([recordingId, index]) => [recordingId, index])).toEqual([
+      [teamRecording, 0],
+      [teamRecording, 1],
+    ]);
+    const { replayDirectoryPath } = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+    const local = readFileSync(path.join(replayDirectoryPath, `${teamRecording}.events.jsonl.gz`));
+    expect(Buffer.concat(handed.map(([, , , data]) => data)).equals(local)).toBe(true);
+    expect((await readRecording(service, teamRecording)).entries).toHaveLength(2);
+    expect((await readRecording(service, personalRecording)).entries).toHaveLength(1);
+  });
+
+  // 팀 호스트 세션의 로컬 녹화는 구간이 짧다(5초) — 재생 창에는 이어 붙여 준다. 개인 호스트 녹화의 구간은
+  // 그대로다("splits a long recording into segments ..." 가 지킨다).
+  it("joins a team host recording's short segments for the replay window", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-03-29T00:00:00.000Z"));
+    const coreManager = {
+      getSessionLifecycleState: vi.fn(() => createLifecycleState({ hostId: "team-host" })),
+      attachSessionRecording: vi.fn(),
+    };
+    const uploads = { onRecordingStarted: vi.fn(), onSegment: vi.fn(), onRecordingEnded: vi.fn(), isPending: vi.fn(() => false) };
+    const service = activateService(
+      new SessionReplayService({ get: () => ({ sessionReplayRetentionCount: 100 }) } as never, coreManager as never),
+    );
+    service.attachTeamUploads(uploads as never);
+    service.setTeamOfHost(() => "team-1");
+    service.handleTerminalEvent({ type: "connected", sessionId: "session-1", payload: { status: "connected" } } as never);
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1] as string;
+    for (let step = 1; step <= 3; step += 1) {
+      service.handleTerminalStream("session-1", new Uint8Array(Buffer.from(`step ${step}\n`)));
+      // 5초가 지나 다음 비우기가 오면 구간을 끊는다.
+      vi.setSystemTime(new Date(Date.parse("2026-03-29T00:00:00.000Z") + step * 6000));
+      vi.advanceTimersByTime(1000);
+      await vi.waitFor(() => expect(uploads.onSegment).toHaveBeenCalledTimes(step), { timeout: 3000, interval: 20 });
+    }
+    service.handleTerminalEvent({ type: "closed", sessionId: "session-1", payload: { message: "closed" } } as never);
+    await vi.waitFor(() => expect(uploads.onRecordingEnded).toHaveBeenCalled(), { timeout: 3000, interval: 20 });
+
+    const replay = await service.load(recordingId);
+    expect(replay.segments).toHaveLength(1);
+    expect(replay.segments[0]).toMatchObject({ entryCount: 3, outputBytes: 21 });
+    expect(replay).not.toHaveProperty("teamId");
+    const segment = await service.readSegment(recordingId, 0);
+    expect(Buffer.from(segment.data).toString()).toBe("step 1\nstep 2\nstep 3\n");
+    await expect(service.readSegment(recordingId, 1)).rejects.toThrow();
+  });
+
+  it("opens a team recording in its own window and reads it through the team viewer", async () => {
+    const service = activateService(
+      new SessionReplayService(
+        { get: () => ({ sessionReplayRetentionCount: 100 }) } as never,
+        { getSessionLifecycleState: vi.fn(), attachSessionRecording: vi.fn() } as never,
+      ),
+    );
+    const viewer = {
+      load: vi.fn(async () => ({ recordingId: "rec-1", segments: [] })),
+      readSegment: vi.fn(async () => ({ atMs: new Float64Array(0) })),
+      readSnapshot: vi.fn(async () => null),
+    };
+    await expect(service.load("rec-1", "team-1")).rejects.toThrow();
+    service.attachTeamViewer(viewer as never);
+
+    // 녹화한 사람 기기에는 같은 ID 의 로컬 녹화가 없어도 열린다 — 메타는 재생 창이 서버에서 받는다.
+    await service.openReplayWindow("rec-1", {} as never, "team-1");
+    expect(browserWindowInstances).toHaveLength(1);
+    const url = new URL(browserWindowInstances[0]!.loadedUrl!);
+    expect(url.searchParams.get("recordingId")).toBe("rec-1");
+    expect(url.searchParams.get("teamId")).toBe("team-1");
+    await service.openReplayWindow("rec-1", {} as never, "team-1");
+    expect(browserWindowInstances).toHaveLength(1);
+    expect(browserWindowInstances[0]!.focus).toHaveBeenCalled();
+
+    await service.load("rec-1", "team-1");
+    await service.readSegment("rec-1", 2, "team-1");
+    await service.readSnapshot("rec-1", 3, "team-1");
+    expect(viewer.load).toHaveBeenCalledWith("team-1", "rec-1");
+    expect(viewer.readSegment).toHaveBeenCalledWith("team-1", "rec-1", 2);
+    expect(viewer.readSnapshot).toHaveBeenCalledWith("team-1", "rec-1", 3);
+  });
+
+  // 세션이 끝나면 마지막 구간이 넘어온 뒤에야 녹화 파일이 다 쓰이고 끝이 알려진다. 그 사이 올리기가 이 녹화를
+  // "앱이 죽은 녹화"로 보고 끊김으로 끝내면 안 된다(실제 앱에서 짧은 세션이 끊김으로 남았다).
+  it("ends a team recording as ended, not cut, when its session closes normally", async () => {
+    vi.useRealTimers();
+    const coreManager = {
+      getSessionLifecycleState: vi.fn(() => createLifecycleState({ hostId: "team-host" })),
+      attachSessionRecording: vi.fn(),
+    };
+    const service = activateService(
+      new SessionReplayService({ get: () => ({ sessionReplayRetentionCount: 100 }) } as never, coreManager as never),
+    );
+    const server = createFakeTeamReplayServer();
+    const uploads = new TeamReplayUploads({
+      api: server.api as never,
+      getHistoryLimits: async () => ({ replayMaxCount: 10, replayMaxBytes: 1 << 30, replayMaxBytesPerRecording: 1 << 28, segmentMaxBytes: 1 << 20 }),
+      openTeamAccess: () => testTeamAccess(),
+      scanHost: createInProcessScanHost(),
+      isRecordingActive: (recordingId) => service.isRecordingActive(recordingId),
+      onTruncated: vi.fn(),
+    });
+    uploads.activate(path.join(tempDir, "team-history"));
+    service.attachTeamUploads(uploads);
+    service.setTeamOfHost(() => TEST_TEAM_ID);
+
+    service.handleTerminalEvent({ type: "connected", sessionId: "session-1", payload: { status: "connected" } } as never);
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1] as string;
+    service.handleTerminalStream("session-1", new Uint8Array(Buffer.from("short session\n")));
+    service.handleTerminalEvent({ type: "closed", sessionId: "session-1", payload: { message: "closed" } } as never);
+
+    await vi.waitFor(() => expect(server.replays.get(recordingId)?.complete ?? null).not.toBeNull(), { timeout: 5000, interval: 20 });
+    expect(server.replays.get(recordingId)).toMatchObject({ state: "ended", complete: { cut: false, lastSegment: 0 } });
+    expect(service.isRecordingActive(recordingId)).toBe(false);
+    uploads.deactivate();
+  });
+
+  // 위 경쟁을 시각에 기대지 않고 막는 규칙 — 마지막 구간이 넘어갈 때와 끝을 알릴 때까지는 녹화 중이다.
+  it("keeps a closing team recording active until its end is handed to the team uploads", async () => {
+    vi.useRealTimers();
+    const coreManager = {
+      getSessionLifecycleState: vi.fn(() => createLifecycleState({ hostId: "team-host" })),
+      attachSessionRecording: vi.fn(),
+    };
+    const service = activateService(
+      new SessionReplayService({ get: () => ({ sessionReplayRetentionCount: 100 }) } as never, coreManager as never),
+    );
+    const seen: Array<[string, boolean]> = [];
+    const uploads = {
+      onRecordingStarted: vi.fn(),
+      onSegment: vi.fn((recordingId: string) => seen.push(["segment", service.isRecordingActive(recordingId)])),
+      onRecordingEnded: vi.fn((recordingId: string) => seen.push(["ended", service.isRecordingActive(recordingId)])),
+      isPending: vi.fn(() => false),
+    };
+    service.attachTeamUploads(uploads as never);
+    service.setTeamOfHost(() => "team-1");
+
+    service.handleTerminalEvent({ type: "connected", sessionId: "session-1", payload: { status: "connected" } } as never);
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1] as string;
+    service.handleTerminalStream("session-1", new Uint8Array(Buffer.from("last words\n")));
+    service.handleTerminalEvent({ type: "closed", sessionId: "session-1", payload: { message: "closed" } } as never);
+    await vi.waitFor(() => expect(uploads.onRecordingEnded).toHaveBeenCalled(), { timeout: 3000, interval: 10 });
+
+    expect(seen).toEqual([
+      ["segment", true],
+      ["ended", true],
+    ]);
+    expect(service.isRecordingActive(recordingId)).toBe(false);
+  });
+
+  // 녹화한 사람 기기에는 같은 ID 의 로컬 녹화와 팀 녹화가 다 있다 — 한쪽 창이 다른 쪽을 가리면 안 된다.
+  it("opens this device's recording and the team's copy of it in separate windows", async () => {
+    const coreManager = {
+      getSessionLifecycleState: vi.fn(() => createLifecycleState()),
+      attachSessionRecording: vi.fn(),
+    };
+    const service = activateService(
+      new SessionReplayService({ get: () => ({ sessionReplayRetentionCount: 100 }) } as never, coreManager as never),
+    );
+    service.attachTeamViewer({ load: vi.fn(), readSegment: vi.fn(), readSnapshot: vi.fn() } as never);
+    service.handleTerminalEvent({ type: "connected", sessionId: "session-1", payload: { status: "connected" } } as never);
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1] as string;
+    vi.setSystemTime(new Date("2026-03-29T00:00:02.000Z"));
+    service.handleTerminalEvent({ type: "closed", sessionId: "session-1", payload: { message: "closed" } } as never);
+
+    await service.openReplayWindow(recordingId, {} as never);
+    await service.openReplayWindow(recordingId, {} as never, "team-1");
+    expect(browserWindowInstances).toHaveLength(2);
+    expect(new URL(browserWindowInstances[0]!.loadedUrl!).searchParams.get("teamId")).toBeNull();
+    expect(new URL(browserWindowInstances[1]!.loadedUrl!).searchParams.get("teamId")).toBe("team-1");
+  });
+
+  it("keeps a recording the team uploads still need out of pruning", () => {
+    const lifecycleStates = new Map<string, ReturnType<typeof createLifecycleState>>([
+      ["session-1", createLifecycleState()],
+      ["session-2", createLifecycleState()],
+    ]);
+    const coreManager = {
+      getSessionLifecycleState: vi.fn((sessionId: string) => lifecycleStates.get(sessionId) ?? null),
+      attachSessionRecording: vi.fn(),
+    };
+    let pending: string | null = null;
+    const service = activateService(
+      new SessionReplayService({ get: () => ({ sessionReplayRetentionCount: 1 }) } as never, coreManager as never),
+    );
+    service.attachTeamUploads({ isPending: (recordingId: string) => recordingId === pending } as never);
+    const { replayDirectoryPath } = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+    const record = (sessionId: string, minute: string) => {
+      vi.setSystemTime(new Date(`2026-03-29T00:${minute}:00.000Z`));
+      service.handleTerminalEvent({ type: "connected", sessionId, payload: { status: "connected" } } as never);
+      const recordingId = coreManager.attachSessionRecording.mock.calls.at(-1)?.[1] as string;
+      vi.setSystemTime(new Date(`2026-03-29T00:${minute}:03.000Z`));
+      service.handleTerminalEvent({ type: "closed", sessionId, payload: { message: "closed" } } as never);
+      return recordingId;
+    };
+
+    const first = record("session-1", "00");
+    pending = first;
+    record("session-2", "01");
+    expect(existsSync(path.join(replayDirectoryPath, `${first}.meta.json`))).toBe(true);
+    expect(existsSync(path.join(replayDirectoryPath, `${first}.events.jsonl.gz`))).toBe(true);
+  });
 });
 
 /** 이 형식 전의 녹화(.events.jsonl, 압축·색인 없음)를 만든다. */

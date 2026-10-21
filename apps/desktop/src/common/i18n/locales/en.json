@@ -881,7 +881,9 @@
       "screenShare": "Screen sharing",
       "os": "OS",
       "portForward": "Forwarding",
-      "portForwardStarting": "{{count}} starting"
+      "portForwardStarting": "{{count}} starting",
+      "team": "Team",
+      "teamRecorded": "{{team}} · Saved to the team's history and recordings"
     },
     "update": {
       "checking": "Checking GitHub Releases for a new version.",
@@ -2895,7 +2897,9 @@
       "clientOutdated": "This team has items added in a newer version. Update the app and try again.",
       "memberNotFound": "Not a member of this team.",
       "alreadyMember": "Already a member of this team.",
-      "exists": "This team already exists."
+      "exists": "This team already exists.",
+      "replayNotFound": "Team recording not found.",
+      "replayDeleted": "This recording was removed by the team's recording limit."
     },
     "crossVault": {
       "jumpHost": "A jump host must be in the same vault.",
@@ -3080,7 +3084,8 @@
       "unsupportedVaultTitle": "New sync vault required",
       "unsupportedVaultBody": "Teams work with the new vault locked by a sync passphrase. Move your vault, then open the link again.",
       "serverUnsupportedTitle": "This server doesn't support teams",
-      "serverUnsupportedBody": "Update the sync server to use teams."
+      "serverUnsupportedBody": "Update the sync server to use teams.",
+      "history": "Every member can see the activity and terminal recordings of this team's hosts."
     },
     "actionFailed": "Couldn't finish the team action.",
     "intro": "Share hosts and passwords with your team. The server can't read them.",
@@ -4341,5 +4346,30 @@
   "snippetDelete": {
     "body": "This snippet will be deleted. This cannot be undone.",
     "hostUsage": "It is the startup command for {{count}} hosts — those hosts will lose their startup command."
+  },
+  "teamReplay": {
+    "truncated": "The {{host}} recording went over the team's per-recording limit. Only the beginning is in the team; the rest is only on the recorder's device.",
+    "teamNotOpen": "This team isn't open on this device yet. Try again in a moment.",
+    "unsupported": "Update the app to view this.",
+    "stateLive": "Still recording — plays what had arrived when you opened it",
+    "stateCut": "The recorder's app stopped without finishing — plays up to where it stopped",
+    "statePartial": "Over the team's per-recording limit — only the beginning is in the team",
+    "inProgress": "In progress"
+  },
+  "teamLogs": {
+    "memberJoined": "{{email}} joined the team",
+    "memberLeft": "{{email}} left the team",
+    "memberLeftVaultReset": "{{email}} left the team by resetting their sync passphrase",
+    "memberLeftAccountDeleted": "{{email}} left the team by deleting their account",
+    "memberRemoved": "{{by}} removed {{email}} from the team",
+    "ownerChanged": "{{by}} made {{email}} the owner",
+    "ownerSucceeded": "{{email}} became the owner after the previous owner left",
+    "membersChanged": "The team's members changed",
+    "unreadable": "This entry can't be opened",
+    "replayDeleted": "Removed to stay within the team's recording limit",
+    "replayPending": "Still uploading — the recorder's app is sending it or is offline",
+    "loadFailed": "Couldn't load the team's history",
+    "loading": "Loading the team's history",
+    "emptyDescription": "Connections and changes in this team vault show up here."
   }
 }

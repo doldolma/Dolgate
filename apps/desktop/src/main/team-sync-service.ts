@@ -138,6 +138,8 @@ export interface TeamSyncServiceOptions {
   secretStore: Pick<VaultSecretStore, "load" | "save" | "remove">;
   /** 팀 목록이나 팀 데이터가 바뀌었다 — 화면을 다시 읽히고, 코어에 tailnet 설정을 다시 알린다. */
   onChanged?: () => void;
+  /** 이 기기에서 팀을 지웠다(빠짐·팀 삭제·로그아웃) — 팀 기록·녹화의 대기열과 캐시를 지운다. */
+  onTeamForgotten?: (teamId: string) => void;
   api?: TeamApi;
   storage?: DesktopStateStorage;
   /** 시험용. */
@@ -249,6 +251,7 @@ export class TeamSyncService {
   private readonly api: TeamApi;
   private readonly storage: DesktopStateStorage;
   private readonly onChanged: () => void;
+  private readonly onTeamForgotten: (teamId: string) => void;
   private readonly startWatchLoop: (options: SyncWatchLoopOptions) => SyncWatchLoop;
   private readonly runtimes = new Map<string, TeamRuntime>();
   private readonly statuses = new Map<string, TeamSyncStatus>();
@@ -265,6 +268,7 @@ export class TeamSyncService {
     this.api = options.api ?? new TeamApi(options.auth);
     this.storage = options.storage ?? getDesktopStateStorage();
     this.onChanged = options.onChanged ?? (() => undefined);
+    this.onTeamForgotten = options.onTeamForgotten ?? (() => undefined);
     this.startWatchLoop = options.startWatchLoop ?? startSyncWatchLoop;
   }
 
@@ -373,8 +377,35 @@ export class TeamSyncService {
     for (const teamId of this.storage.listTeamIds()) {
       this.storage.removeTeam(teamId);
       await this.secretStore.remove(pendingTeamJoinAccount(teamId)).catch(() => undefined);
+      this.onTeamForgotten(teamId);
     }
     this.onChanged();
+  }
+
+  /**
+   * 팀 기록·녹화가 쓰는 그 팀의 키와 요청 권한. 그 팀이 열려 있지 않으면(키를 아직 못 풀었거나, 잠겼거나,
+   * 로그아웃했거나, 빠졌다) null 이다. 권한은 그 팀이 멈추면 함께 끊긴다.
+   */
+  openTeamAccess(teamId: string): { lease: TeamRequestLease; teamKeyBase64: string } | null {
+    const runtime = this.runtimes.get(teamId);
+    if (!runtime) {
+      return null;
+    }
+    const lease = this.captureLease();
+    if (!lease || this.runtimes.get(teamId) !== runtime) {
+      return null;
+    }
+    const teamLease = this.teamLease(lease, runtime);
+    return {
+      lease: {
+        serverUrl: teamLease.serverUrl,
+        accessToken: teamLease.accessToken,
+        vaultEpoch: teamLease.vaultEpoch,
+        signal: teamLease.signal,
+        isActive: teamLease.isActive,
+      },
+      teamKeyBase64: runtime.dekBase64,
+    };
   }
 
   /**
@@ -624,6 +655,7 @@ export class TeamSyncService {
     }
     this.statuses.delete(teamId);
     await this.secretStore.remove(pendingTeamJoinAccount(teamId)).catch(() => undefined);
+    this.onTeamForgotten(teamId);
     return this.storage.removeTeam(teamId);
   }
 

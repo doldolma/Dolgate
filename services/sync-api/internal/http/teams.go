@@ -455,6 +455,8 @@ func registerTeamRoutes(
 		}
 	})
 
+	registerTeamHistoryRoutes(data, dataStore)
+
 	// 링크 페이지 — 로그인 없이 열린다. 팀 이름만 보이고(초대한 사람은 앱의 참여 카드에서), `앱 열기` 는 페이지
 	// 스크립트가 # 뒤(서버로 오지 않는 비밀값)를 붙여 앱으로 넘긴다. 채팅 미리보기도 이 페이지를 읽는다.
 	router.GET("/invite/:code", func(ctx *gin.Context) {
@@ -600,6 +602,22 @@ func respondTeamError(ctx *gin.Context, err error) {
 		ctx.JSON(http.StatusConflict, gin.H{"error": "동기화 암호가 초기화되었습니다. 새 동기화 암호로 잠금을 해제해 주세요.", "code": vaultDekMismatchCode})
 	case errors.Is(err, storepkg.ErrBadSyncRecord):
 		logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
+	case errors.Is(err, storepkg.ErrTeamReplayNotFound):
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "녹화를 찾을 수 없습니다.", "code": "team_replay_not_found"})
+	case errors.Is(err, storepkg.ErrTeamReplayDeleted):
+		ctx.JSON(http.StatusGone, gin.H{"error": "팀 녹화 한도로 지워진 녹화입니다.", "code": "team_replay_deleted"})
+	case errors.Is(err, storepkg.ErrTeamReplayAuthorOnly):
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "녹화한 사람만 올릴 수 있습니다.", "code": "team_replay_author_only"})
+	case errors.Is(err, storepkg.ErrTeamReplayClosed):
+		ctx.JSON(http.StatusConflict, gin.H{"error": "이미 끝난 녹화입니다.", "code": "team_replay_closed"})
+	case errors.Is(err, storepkg.ErrTeamReplayTooLarge):
+		ctx.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "녹화가 한 개 최대를 넘었습니다. 앞부분까지만 팀에 남습니다.", "code": "team_replay_too_large"})
+	case errors.Is(err, storepkg.ErrTeamReplayQuotaBusy):
+		// 진행 중인 녹화가 끝나면 지울 녹화가 생긴다 — 앱은 그 구간을 들고 있다가 다시 보낸다.
+		ctx.Header("Retry-After", "60")
+		ctx.JSON(http.StatusConflict, gin.H{"error": "팀 녹화 공간이 진행 중인 녹화로 차 있습니다.", "code": "team_replay_quota_busy"})
+	case errors.Is(err, storepkg.ErrTeamReplayIncomplete):
+		ctx.JSON(http.StatusConflict, gin.H{"error": "빠진 구간이 있습니다.", "code": "team_replay_incomplete"})
 	default:
 		logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 	}

@@ -94,6 +94,16 @@ type serverInfoCapabilities struct {
 // 자체 호스팅 서버가 옛것일 때다.
 type serverInfoTeamsCapabilities struct {
 	Enabled bool `json:"enabled"`
+	// History 는 팀 기록·녹화 API 와 그 한도다. 없으면(옛 서버) 앱은 팀 기록·녹화를 올리지 않는다.
+	History *serverInfoTeamHistoryCapabilities `json:"history,omitempty"`
+}
+
+// serverInfoTeamHistoryCapabilities 는 앱이 녹화를 보내기 전에 알아야 하는 한도다(바이트).
+type serverInfoTeamHistoryCapabilities struct {
+	ReplayMaxCount             int64 `json:"replayMaxCount"`
+	ReplayMaxBytes             int64 `json:"replayMaxBytes"`
+	ReplayMaxBytesPerRecording int64 `json:"replayMaxBytesPerRecording"`
+	SegmentMaxBytes            int64 `json:"segmentMaxBytes"`
 }
 
 type serverInfoAuthCapabilities struct {
@@ -615,6 +625,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	})
 
 	router.GET("/api/info", func(ctx *gin.Context) {
+		teamHistoryLimits := store.TeamHistoryLimits()
 		ctx.JSON(http.StatusOK, serverInfoResponse{
 			ServerVersion: resolveServerVersion(config.ServerVersion),
 			Capabilities: serverInfoCapabilities{
@@ -636,6 +647,12 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 				},
 				Teams: serverInfoTeamsCapabilities{
 					Enabled: true,
+					History: &serverInfoTeamHistoryCapabilities{
+						ReplayMaxCount:             teamHistoryLimits.ReplayMaxCount,
+						ReplayMaxBytes:             teamHistoryLimits.ReplayMaxBytes,
+						ReplayMaxBytesPerRecording: teamHistoryLimits.ReplayMaxBytesPerRecording,
+						SegmentMaxBytes:            teamReplaySegmentMaxBytes,
+					},
 				},
 			},
 		})

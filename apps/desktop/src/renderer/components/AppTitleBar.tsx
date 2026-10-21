@@ -18,6 +18,7 @@ import type {
   TailnetStatus,
   TerminalTab,
   UpdateState,
+  VaultIndex,
 } from "@shared";
 import {
   describeRdpDrives,
@@ -27,6 +28,7 @@ import {
   withLocalHostDrives,
 } from "@shared";
 import { useAppStore } from "../store/appStore";
+import { TeamMark } from "./teams/TeamMark";
 import type {
   DynamicTabStripItem,
   TmuxSessionGroup,
@@ -251,6 +253,8 @@ type TitlebarDynamicItem =
       /** 원격 화면 세션에만 있는 메뉴를 위해 종류를 구분한다. */
       paneKind: "terminal" | "rdp" | "vnc";
       rttMs: number | null;
+      /** 팀 호스트 세션이면 그 팀 — 접속 기록과 녹화가 팀에 남는다. */
+      team: { id: string; name: string } | null;
     }
   | {
       kind: "workspace";
@@ -715,6 +719,16 @@ export function shortenRouterName(name: string, max = 14): string {
  * 그런데 보여주는 자리가 레코드 값을 그대로 읽으면, 연결이 실제로 붙이는 폴더와 화면이 말하는
  * 폴더가 갈린다 — 어느 폴더가 원격에 열려 있는지는 틀리면 안 되는 정보다.
  */
+/** 호스트의 팀(개인 호스트면 null). */
+function teamOfHost(
+  vaultIndex: VaultIndex | null | undefined,
+  hostId: string | null | undefined,
+): { id: string; name: string } | null {
+  const teamId = hostId ? vaultIndex?.teamIdByHostId[hostId] : undefined;
+  const team = teamId ? vaultIndex?.teams.find((candidate) => candidate.id === teamId) : undefined;
+  return team ? { id: team.id, name: team.name } : null;
+}
+
 function useHostsWithLocalDrives(hosts: HostRecord[]): HostRecord[] {
   const drivesByHostId = useAppStore(
     (state) => state.settings?.rdpDrivesByHostId,
@@ -849,6 +863,12 @@ export function buildTabHoverInfo(
       ? (hosts.find((candidate) => candidate.id === tab.hostId) ?? null)
       : null;
     const kind = deriveSessionConnectionKind(tab, host);
+    if (item.team) {
+      rows.push({
+        label: t("titleBar.hover.team"),
+        value: t("titleBar.hover.teamRecorded", { team: item.team.name }),
+      });
+    }
     // 연결할 때 감지한 운영체제. 뱃지는 마크가 있을 때만 바뀌므로(Windows·NAS 는 글자로 남는다)
     // 실제로 무엇을 잡았는지는 여기서만 볼 수 있다.
     if (host?.detectedOs) {
@@ -1355,6 +1375,7 @@ export function AppTitleBar({
   // 탭 툴팁이 말하는 공유 폴더는 연결이 실제로 붙이는 것과 같아야 한다 — 드라이브는 기기 로컬
   // 설정이라 레코드 값을 그대로 읽으면 둘이 갈린다.
   const hostsWithLocalDrives = useHostsWithLocalDrives(hosts);
+  const vaultIndex = useAppStore((state) => state.vaultIndex);
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [isDetachHovering, setIsDetachHovering] = useState(false);
   const [tabDropPreview, setTabDropPreview] = useState<{
@@ -1536,6 +1557,7 @@ export function AppTitleBar({
               // RDP 탭에만 뜨는 메뉴가 있어 종류를 함께 싣는다.
               paneKind: tab.paneKind ?? "terminal",
               rttMs: tab.lastRttMs ?? null,
+              team: teamOfHost(vaultIndex, tab.hostId),
             } satisfies TitlebarDynamicItem;
           }
 
@@ -1608,7 +1630,7 @@ export function AppTitleBar({
           }
         })
         .filter((item): item is TitlebarDynamicItem => item !== null),
-    [activeWorkspaceTab, hosts, tabStrip, tabs, tmuxGroups, workspaces],
+    [activeWorkspaceTab, hosts, tabStrip, tabs, tmuxGroups, vaultIndex, workspaces],
   );
 
   // 세션 패널을 열 수 있는 대상. 세션 셸과 같은 계산을 써야 토글이 켜는 패널과 실제로 열리는
@@ -2364,6 +2386,9 @@ export function AppTitleBar({
                       onClick={() => onSelectSession(item.sessionId)}
                     >
                       <TabStatusDot state={item.dotState} />
+                      {/* 팀 호스트 세션 — 접속 기록과 녹화가 팀에 남는다(탭 hover 에서 말한다). */}
+                      {/* TabButton 은 flex 가 아니라 점처럼 표시 자체에 우측 여백을 준다. */}
+                      {item.team ? <TeamMark name={item.team.name} size="xs" className="mr-1.5 align-middle" /> : null}
                       <span className="truncate">{item.title}</span>
                     </TabButton>
                     <IconButton

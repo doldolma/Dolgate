@@ -109,6 +109,10 @@ func resetTestStore(t *testing.T, store *GormStore) {
 	t.Helper()
 
 	tables := []string{
+		"team_replay_extras",
+		"team_replay_segments",
+		"team_replays",
+		"team_events",
 		"team_record_history",
 		"team_sync_records",
 		"team_member_private",

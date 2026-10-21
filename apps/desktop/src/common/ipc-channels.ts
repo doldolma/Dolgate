@@ -345,6 +345,8 @@ export const ipcChannels = {
     getMyCredentials: 'teams:get-my-credentials',
     setMyCredentials: 'teams:set-my-credentials',
     clearMyCredentials: 'teams:clear-my-credentials',
+    listActivity: 'teams:list-activity',
+    getReplayStatuses: 'teams:get-replay-statuses',
     // 팀 목록이 바뀌었을 때 메인이 렌더러로 보낸다.
     changed: 'teams:changed',
     // 브라우저의 링크 페이지가 초대 링크를 넘겼다 — 화면은 takePendingInviteLink 로 가져간다.
@@ -388,6 +390,7 @@ export const ipcChannels = {
     open: 'session-replays:open',
     load: 'session-replays:load',
     readSegment: 'session-replays:read-segment',
+    readSnapshot: 'session-replays:read-snapshot',
     storageUsage: 'session-replays:storage-usage'
   },
   keychain: {

@@ -54,6 +54,10 @@ describe('JoinTeamDialogHost', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Acme Infra' });
     expect(within(dialog).getByText('dolma@acme.dev 님의 초대 · 멤버 3명')).toBeInTheDocument();
     expect(within(dialog).getByText(/서버는 내용을 볼 수 없습니다/)).toBeInTheDocument();
+    // 들어가기 전에 안다 — 팀 호스트의 접속 기록과 녹화는 멤버 모두가 본다.
+    expect(
+      within(dialog).getByText('이 팀 호스트의 접속 기록과 터미널 녹화는 멤버 모두가 봅니다.'),
+    ).toBeInTheDocument();
     expect(desktopApi.teams.previewInvite).toHaveBeenCalledWith(LINK);
 
     fireEvent.click(within(dialog).getByRole('button', { name: '참여' }));

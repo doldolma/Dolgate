@@ -3,6 +3,7 @@ import {
   loadSessionReplay,
   openSessionReplay,
   readSessionReplaySegment,
+  readSessionReplaySnapshot,
 } from '../services/desktop/session-replays';
 import { getDesktopSettings } from '../services/desktop/settings';
 
@@ -12,6 +13,7 @@ export function useSessionReplayController() {
       getDesktopSettings,
       loadSessionReplay,
       readSessionReplaySegment,
+      readSessionReplaySnapshot,
       openSessionReplay,
     }),
     [],

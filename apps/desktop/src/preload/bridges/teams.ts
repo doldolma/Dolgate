@@ -30,6 +30,9 @@ export function buildTeamsBridge(ipcRenderer: IpcRenderer): DesktopApi["teams"] 
     setMyCredentials: (hostId, credentials) =>
       ipcRenderer.invoke(ipcChannels.teams.setMyCredentials, hostId, credentials),
     clearMyCredentials: (hostId) => ipcRenderer.invoke(ipcChannels.teams.clearMyCredentials, hostId),
+    listActivity: (teamId, query) => ipcRenderer.invoke(ipcChannels.teams.listActivity, teamId, query),
+    getReplayStatuses: (teamId, recordingIds) =>
+      ipcRenderer.invoke(ipcChannels.teams.getReplayStatuses, teamId, recordingIds),
     onChanged: (listener) => subscribeTeamsChanged(listener),
     onInviteLink: (listener) => subscribeTeamInviteLink(listener),
   };

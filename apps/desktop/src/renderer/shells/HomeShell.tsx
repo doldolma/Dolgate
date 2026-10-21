@@ -1215,6 +1215,7 @@ export function HomeShell({
                   logs={settingsViewModel.activityLogs}
                   onClear={settingsViewModel.clearLogs}
                   onOpenReplay={openSessionReplay}
+                  teams={homeViewModel.vaultIndex?.teams}
                 />
               ) : null}
 

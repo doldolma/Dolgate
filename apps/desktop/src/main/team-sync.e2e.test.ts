@@ -1,12 +1,12 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createDecipheriv, randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { SyncWatchLoopOptions } from "@shared";
+import type { ActivityLogRecord, SessionReplaySegment, SyncWatchLoopOptions } from "@shared";
 
 /*
  * 팀 볼트를 실제 서버(services/sync-api)에 붙여 처음부터 끝까지 돌린다.
@@ -14,7 +14,8 @@ import type { SyncWatchLoopOptions } from "@shared";
  * 다른 팀 시험은 가짜 서버에 붙는다. 그 가짜는 실제 서버를 보고 따라 만든 것이라, 필드 이름·헤더·
  * ETag·감시 응답이 어긋나도 그 시험들은 통과한다. 여기서는 서버를 빌드해 임시 SQLite 로 띄우고, 계정
  * 둘(A·B)을 API 로 만든 뒤 앱의 실제 코드(팀 동기화·팀 관리·카탈로그·저장소·실제 상태 파일)를 기기
- * 셋(A 의 기기 둘, B)에 붙인다.
+ * 셋(A 의 기기 둘, B)에 붙인다. 팀 기록·녹화(올리기·보기)도 기기마다 실제 코드로 붙인다 — 서버는 녹화를 둘만
+ * 남기게 띄워 오래된 녹화가 지워지는 것까지 본다. 나가는 멤버는 C 다(B 는 마지막에 내보낸다).
  *
  * Go 가 있어야 하고 빌드까지 1분 안팎 걸려 평소 시험에서는 건너뛴다. 돌리려면:
  *   npm run test:desktop:team-e2e   (DOLGATE_TEAM_E2E=1)
@@ -24,6 +25,18 @@ const RUN = process.env.DOLGATE_TEAM_E2E === "1";
 const SYNC_API_DIR = fileURLToPath(new URL("../../../../services/sync-api", import.meta.url));
 const PASSWORD = "team-e2e-password-1234";
 const CLIENT_HEADERS = { "X-Dolgate-Client": "desktop", "X-Dolgate-Client-Version": "1.9.14" };
+/** 서버가 팀에 남기는 녹화 수. 셋째 녹화가 시작하면 가장 오래된 것이 지워진다. */
+const REPLAY_MAX_COUNT = 2;
+/** 셸 통합 표시가 있는 짧은 세션 — 명령 둘(ls -la, uptime). */
+const SESSION_LINES: Array<[number, string]> = [
+  [0, "ops@prod:~$ \x1b]133;B\x07"],
+  [100, "ls -la\r\n\x1b]133;C\x07"],
+  [150, "file-a\r\nfile-b\r\n"],
+  [400, "\x1b]133;D;0\x07"],
+  [410, "ops@prod:~$ \x1b]133;B\x07"],
+  [500, "uptime\r\n\x1b]133;C\x07"],
+  [600, " 10:00 up 3 days\r\n\x1b]133;D;0\x07"],
+];
 
 vi.mock("electron", () => ({
   app: {
@@ -177,9 +190,12 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
     };
     const loops: Array<{ options: SyncWatchLoopOptions; stopped: boolean }> = [];
     const secretStore = new SecretStore();
+    // 팀을 잃으면 그 팀의 기록 대기열·녹화 올리기·녹화 캐시를 지운다(main.ts 의 연결 그대로).
+    let forgetTeamHistory: (teamId: string) => void = () => undefined;
     const service = new TeamSyncService({
       auth,
       secretStore,
+      onTeamForgotten: (forgotten) => forgetTeamHistory(forgotten),
       // 감시 루프는 시험이 한 바퀴씩 돌린다 — 바뀐 것이 없을 때 돌리면 서버가 25초 안팎 붙들고 있다.
       startWatchLoop: (options) => {
         const entry = { options, stopped: false };
@@ -214,6 +230,39 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
     );
     // 복사하는 IPC 가 하는 일 그대로 — 쓰고 나서 동기화는 시험이 직접 건다.
     const copies = new VaultCopyService({ vaults: catalog, onCopied: () => undefined });
+
+    // 팀 기록·녹화 — 타이머 대신 시험이 보내기를 직접 건다(flush·pump).
+    const { TeamApi } = await import("./team-api");
+    const { TeamHistoryService, resolveLogTeamId } = await import("./team-history-service");
+    const { TeamReplayUploads } = await import("./team-replay-uploads");
+    const { TeamReplayViewer } = await import("./team-replay-viewer");
+    const { TeamReplayCache } = await import("./team-replay-cache");
+    const { createInProcessScanHost } = await import("./replay-scan-host");
+    const teamApi = new TeamApi(auth);
+    const openTeamAccess = (forTeam: string) => service.openTeamAccess(forTeam);
+    const manualTimer = () => ({ cancel: () => undefined });
+    const history = new TeamHistoryService({ api: teamApi, openTeamAccess, setTimer: manualTimer });
+    history.setTeamResolver((metadata) => resolveLogTeamId(catalog, metadata));
+    history.activate(dataDir);
+    /** 이 기기에서 지금 녹화 중인 것(세션 서비스의 isRecordingActive). */
+    const recording = new Set<string>();
+    const uploads = new TeamReplayUploads({
+      api: teamApi,
+      getHistoryLimits: (access) => history.getHistoryLimits(access.lease),
+      openTeamAccess,
+      scanHost: createInProcessScanHost(),
+      isRecordingActive: (recordingId) => recording.has(recordingId),
+      onTruncated: () => undefined,
+      setTimer: manualTimer,
+    });
+    uploads.activate(history.stateDirectoryPath!);
+    const viewer = new TeamReplayViewer({ api: teamApi, openTeamAccess, cache: new TeamReplayCache() });
+    viewer.activate(history.stateDirectoryPath!);
+    forgetTeamHistory = (forgotten) => {
+      history.forgetTeam(forgotten);
+      uploads.forgetTeam(forgotten);
+      viewer.forgetTeam(forgotten);
+    };
     /** 살아 있는 감시 루프를 한 바퀴씩. 바뀐 것이 있을 때만 부른다. */
     const tick = async () => {
       for (const entry of loops.filter((candidate) => !candidate.stopped)) {
@@ -236,7 +285,126 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
       vaultRoot,
       tick,
       activeLoops: () => loops.filter((entry) => !entry.stopped).length,
+      history,
+      uploads,
+      viewer,
+      recording,
+      replayCacheDir: path.join(history.stateDirectoryPath!, "replay-cache"),
     };
+  }
+
+  type Device = Awaited<ReturnType<typeof createDevice>>;
+
+  /** 팀 호스트 접속 줄(core-manager 가 남기는 수명 기록). */
+  function sessionRecord(sessionId: string, status: "connected" | "closed", recordingId: string, connectedAt: string): ActivityLogRecord {
+    return {
+      id: `session:${sessionId}`,
+      level: "info",
+      category: "session",
+      kind: "session-lifecycle",
+      message: "SSH 세션",
+      messageKey: "core.sessionLog",
+      messageParams: { kind: "SSH" },
+      metadata: {
+        sessionId,
+        hostId: "team-host",
+        hostLabel: "from-b",
+        title: "from-b",
+        connectionKind: "ssh",
+        connectedAt,
+        disconnectedAt: status === "closed" ? new Date().toISOString() : null,
+        status,
+        recordingId,
+        hasReplay: true,
+      },
+      createdAt: connectedAt,
+      updatedAt: new Date().toISOString(),
+    } as ActivityLogRecord;
+  }
+
+  /**
+   * 팀 호스트 세션 하나 — 세션 서비스가 하는 일 그대로: 접속 줄을 남기고, 실제 녹화 쓰기가 구간을 끊어 넘기는 대로
+   * 올리기에 주고, 세션 동안 한 번 보낸 뒤 끝을 알린다. 로컬 녹화 파일 자리를 돌려준다.
+   */
+  async function recordTeamSession(device: Device, recordingId: string, onLive?: () => Promise<void>) {
+    // 세션마다 다른 ID — 접속 줄의 기록 ID 가 여기서 나오고, 서버는 같은 기록 ID 를 다시 보낸 것으로 본다.
+    const sessionId = `session-${recordingId}`;
+    const connectedAt = new Date().toISOString();
+    const replayDir = mkdtempSync(path.join(workDir, `${device.name}-replays-`));
+    device.history.mirror(sessionRecord(sessionId, "connected", recordingId, connectedAt));
+    device.recording.add(recordingId);
+    device.uploads.onRecordingStarted({
+      recordingId,
+      teamId,
+      replayDirectoryPath: replayDir,
+      startMeta: {
+        sessionId,
+        hostId: "team-host",
+        hostLabel: "from-b",
+        title: "from-b",
+        connectionDetails: "ops@prod.internal:22",
+        connectionKind: "ssh",
+        connectedAt,
+        initialCols: 80,
+        initialRows: 24,
+      },
+    });
+    const { ReplayEventsWriter } = await import("./session-replay-events");
+    const writer = new ReplayEventsWriter(
+      path.join(replayDir, `${recordingId}.events.jsonl.gz`),
+      path.join(replayDir, `${recordingId}.index.jsonl`),
+      { segmentBytes: 160, onSegment: (record, index, data) => device.uploads.onSegment(recordingId, index, record, data) },
+    );
+    for (const [atMs, text] of SESSION_LINES) {
+      writer.append(JSON.stringify({ type: "output", atMs, dataBase64: Buffer.from(text).toString("base64") }), atMs, text.length);
+    }
+    await writer.end();
+    // 세션 동안 — 끝난 구간은 벌써 팀에 간다.
+    await device.history.flush();
+    await device.uploads.pump();
+    await onLive?.();
+    device.uploads.onRecordingEnded(recordingId, {
+      disconnectedAt: new Date().toISOString(),
+      durationMs: SESSION_LINES[SESSION_LINES.length - 1]![0],
+      lastSegment: writer.segments.length - 1,
+    });
+    device.recording.delete(recordingId);
+    device.history.mirror(sessionRecord(sessionId, "closed", recordingId, connectedAt));
+    await device.history.flush();
+    await device.uploads.pump();
+    return { replayDir, segments: writer.segments.length };
+  }
+
+  /** 이 기기의 녹화 파일을 처음부터 끝까지 읽는다. */
+  async function readLocalRecording(replayDir: string, recordingId: string): Promise<SessionReplaySegment> {
+    const { loadReplaySegments, readReplaySegment } = await import("./session-replay-events");
+    const { concatReplaySegments } = await import("./replay-segment-groups");
+    const events = path.join(replayDir, `${recordingId}.events.jsonl.gz`);
+    const records = await loadReplaySegments({
+      events,
+      legacyEvents: path.join(replayDir, `${recordingId}.events.jsonl`),
+      index: path.join(replayDir, `${recordingId}.index.jsonl`),
+    });
+    return concatReplaySegments(await Promise.all(records.map((record) => readReplaySegment(events, record))));
+  }
+
+  /** 팀 녹화를 보는 쪽처럼 연다: 녹화 정보와 구간 전부. */
+  async function playTeamRecording(device: Device, recordingId: string) {
+    const { concatReplaySegments } = await import("./replay-segment-groups");
+    const view = await device.viewer.load(teamId, recordingId);
+    const parts: SessionReplaySegment[] = [];
+    for (let index = 0; index < view.segments.length; index += 1) {
+      parts.push(await device.viewer.readSegment(teamId, recordingId, index));
+    }
+    return { view, played: concatReplaySegments(parts) };
+  }
+
+  function sameEntries(left: SessionReplaySegment, right: SessionReplaySegment): boolean {
+    return (
+      [...left.atMs].join(",") === [...right.atMs].join(",") &&
+      [...left.dataEnd].join(",") === [...right.dataEnd].join(",") &&
+      Buffer.from(left.data).equals(Buffer.from(right.data))
+    );
   }
 
   beforeAll(async () => {
@@ -252,6 +420,7 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
         PORT: String(port),
         DATABASE_URL: `file:${path.join(workDir, "sync.db")}`,
         AUTH_SIGNING_PRIVATE_KEY_PATH: path.join(workDir, "signing.pem"),
+        TEAM_REPLAY_MAX_COUNT: String(REPLAY_MAX_COUNT),
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -630,6 +799,92 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
     expect(deviceA2.catalog.listTailnetPayloads().find((tailnet) => tailnet.id === tailnetId)?.authKey).toBe("tskey-a-only");
     expect(deviceB.catalog.getScope(teamId)!.memberPrefs!.readAwsProfileCredentials(profileId)).toBeNull();
     expect(deviceB.catalog.listTailnetPayloads().find((tailnet) => tailnet.id === tailnetId)?.authKey).toBeUndefined();
+  }, 60_000);
+
+  // 팀 호스트 세션은 접속 기록과 녹화가 팀에 남는다 — 서버는 잠긴 것만 보고, B 는 받아 열어 본다.
+  const recordingIds = [
+    "5e1f0c3a-1b2c-4d5e-8f60-000000000001",
+    "5e1f0c3a-1b2c-4d5e-8f60-000000000002",
+    "5e1f0c3a-1b2c-4d5e-8f60-000000000003",
+    "5e1f0c3a-1b2c-4d5e-8f60-000000000004",
+  ];
+
+  it("A's team host session reaches B as activity and a recording B plays exactly like A's file", async () => {
+    let sawLive = false;
+    const { replayDir, segments } = await recordTeamSession(deviceA1, recordingIds[0]!, async () => {
+      // 아직 세션 중 — B 는 이미 접속 줄을 보고 녹화를 열 수 있다.
+      const [status] = await deviceB.history.getReplayStatuses(teamId, [recordingIds[0]!]);
+      expect(status).toMatchObject({ state: "live", authorEmail: accountA.email });
+      expect(status!.segmentCount).toBeGreaterThan(0);
+      const [start] = await deviceB.history.listActivity(teamId, { limit: 1 });
+      expect(start).toMatchObject({ authorEmail: accountA.email, activity: { phase: "start" } });
+      expect(start!.activity!.record.metadata).toMatchObject({ status: "connected", recordingId: recordingIds[0] });
+      sawLive = true;
+    });
+    expect(sawLive).toBe(true);
+    expect(segments).toBeGreaterThan(1);
+
+    // 끝난 뒤 — 끝 줄과 끝난 녹화.
+    const [end] = await deviceB.history.listActivity(teamId, { limit: 1 });
+    expect(end).toMatchObject({ authorEmail: accountA.email, activity: { phase: "end" } });
+    expect(end!.activity!.record.metadata).toMatchObject({ status: "closed", recordingId: recordingIds[0] });
+    const { view, played } = await playTeamRecording(deviceB, recordingIds[0]!);
+    expect(view.team).toMatchObject({ teamId, authorEmail: accountA.email, state: "ended" });
+    expect(view.team!.commands!.blocks.map((block) => block.command)).toEqual(["ls -la", "uptime"]);
+    expect(view).toMatchObject({ hostLabel: "from-b", connectionDetails: "ops@prod.internal:22", initialCols: 80 });
+    expect(sameEntries(played, await readLocalRecording(replayDir, recordingIds[0]!))).toBe(true);
+    expect(existsSync(path.join(deviceB.replayCacheDir, teamId, recordingIds[0]!))).toBe(true);
+
+    // 서버에는 잠긴 것만 있다 — 호스트 이름도 명령도 평문으로 없다.
+    const rawEvents = await api(accountB.accessToken, "GET", `/teams/${teamId}/events`);
+    expect(rawEvents.status).toBe(200);
+    expect(JSON.stringify(rawEvents.body)).not.toMatch(/from-b|prod\.internal/);
+    const rawReplay = await api(accountB.accessToken, "GET", `/teams/${teamId}/replays/${recordingIds[0]}`);
+    expect(JSON.stringify(rawReplay.body)).not.toMatch(/from-b|ls -la|uptime/);
+  }, 60_000);
+
+  it("keeps only the newest recordings: the oldest is gone for B, and B's copy of it goes too", async () => {
+    await recordTeamSession(deviceA1, recordingIds[1]!);
+    await recordTeamSession(deviceA1, recordingIds[2]!);
+
+    const statuses = await deviceB.history.getReplayStatuses(teamId, recordingIds.slice(0, 3));
+    expect(Object.fromEntries(statuses.map((status) => [status.recordingId, status.state]))).toEqual({
+      [recordingIds[0]!]: "deleted",
+      [recordingIds[1]!]: "ended",
+      [recordingIds[2]!]: "ended",
+    });
+    await expect(deviceB.viewer.load(teamId, recordingIds[0]!)).rejects.toMatchObject({ code: "team_replay_deleted" });
+    // 지워진 녹화의 캐시도 지운다.
+    expect(existsSync(path.join(deviceB.replayCacheDir, teamId, recordingIds[0]!))).toBe(false);
+    await expect(playTeamRecording(deviceB, recordingIds[2]!)).resolves.toMatchObject({ view: { team: { state: "ended" } } });
+  }, 60_000);
+
+  it("a member who leaves stays in the team's history: A sees C's session, recording and leaving", async () => {
+    const accountC = await createAccount("c@team-e2e.test");
+    const deviceC = await createDevice("c", accountC);
+    const invite = await deviceA1.teams.createInvite(teamId);
+    await expect(deviceC.teams.join(invite.link)).resolves.toMatchObject({ id: teamId, role: "member" });
+    await deviceC.tick();
+    expect(deviceC.catalog.scopeOfHost("team-host").id).toBe(teamId);
+
+    const { replayDir } = await recordTeamSession(deviceC, recordingIds[3]!);
+    await playTeamRecording(deviceC, recordingIds[2]!);
+    expect(existsSync(path.join(deviceC.replayCacheDir, teamId))).toBe(true);
+    await deviceC.teams.leave(teamId);
+    // C 의 기기에서 팀이 지워지며 팀 녹화 캐시도 지워진다.
+    expect(existsSync(path.join(deviceC.replayCacheDir, teamId))).toBe(false);
+    expect(deviceC.uploads.isPending(recordingIds[3]!)).toBe(false);
+
+    const recent = await deviceA1.history.listActivity(teamId, { limit: 10 });
+    expect(recent[0]).toMatchObject({ source: "server", memberChange: { type: "member_left", email: accountC.email } });
+    expect(recent.some((item) => item.memberChange?.type === "member_joined" && item.memberChange.email === accountC.email)).toBe(true);
+    const sessionOfC = recent.filter((item) => item.authorEmail === accountC.email && item.activity?.record.kind === "session-lifecycle");
+    expect(sessionOfC.map((item) => item.activity!.phase)).toEqual(["end", "start"]);
+
+    const { view, played } = await playTeamRecording(deviceA1, recordingIds[3]!);
+    expect(view.team).toMatchObject({ authorEmail: accountC.email, state: "ended" });
+    expect(sameEntries(played, await readLocalRecording(replayDir, recordingIds[3]!))).toBe(true);
+    expect((await deviceA1.teams.listMembers(teamId)).map((member) => member.email).sort()).toEqual([accountA.email, accountB.email]);
   }, 60_000);
 
   it("removing B wipes B's copy and the old link stops working", async () => {

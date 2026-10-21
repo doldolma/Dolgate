@@ -163,6 +163,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
         "audit",
         logMessage('knownHostsIpc.hostKeyTrusted'),
         {
+          hostId: input.hostId,
           host: input.host,
           port: input.port,
           fingerprintSha256: input.fingerprintSha256,
@@ -217,24 +218,31 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
 
   ipcMain.handle(
     ipcChannels.sessionReplays.open,
-    async (event, recordingId: string) => {
+    async (event, recordingId: string, teamId?: string | null) => {
       await ctx.sessionReplayService.openReplayWindow(
         recordingId,
         ctx.resolveWindowFromSender(event.sender),
+        teamId ?? null,
       );
     },
   );
 
   ipcMain.handle(
     ipcChannels.sessionReplays.load,
-    async (_event, recordingId: string) =>
-      ctx.sessionReplayService.load(recordingId),
+    async (_event, recordingId: string, teamId?: string | null) =>
+      ctx.sessionReplayService.load(recordingId, teamId ?? null),
   );
 
   ipcMain.handle(
     ipcChannels.sessionReplays.readSegment,
-    async (_event, recordingId: string, segmentIndex: number) =>
-      ctx.sessionReplayService.readSegment(recordingId, segmentIndex),
+    async (_event, recordingId: string, segmentIndex: number, teamId?: string | null) =>
+      ctx.sessionReplayService.readSegment(recordingId, segmentIndex, teamId ?? null),
+  );
+
+  ipcMain.handle(
+    ipcChannels.sessionReplays.readSnapshot,
+    async (_event, recordingId: string, segmentIndex: number, teamId: string) =>
+      ctx.sessionReplayService.readSnapshot(recordingId, segmentIndex, teamId),
   );
 
   ipcMain.handle(ipcChannels.sessionReplays.storageUsage, async () =>
@@ -301,12 +309,14 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
     async (_event, secretRef: string) => {
       // 그 볼트의 호스트만 이 비밀값을 가리킨다(볼트를 넘는 참조는 메인이 거절한다). 지움 기록을 먼저 남긴다 —
       // 비밀값을 지우고 메타데이터를 지우기 전(기다리는 사이)에 팀 동기화가 돌면, 기록 없이 빠진 것을 서버 사본으로 되살린다.
+      const vaultId = ctx.vaults.scopeOfSecret(secretRef).id;
       const vault = secretVaultOf(ctx, secretRef);
       vault.syncOutbox.upsertDeletion("secrets", secretRef);
       await vault.secrets.remove(secretRef);
       vault.metadata.remove(secretRef);
       vault.hosts.clearSecretRef(secretRef);
       ctx.activityLogs.append("warn", "audit", logMessage('knownHostsIpc.secretRemoved'), {
+        vaultId,
         secretRef,
       });
       ctx.queueSync();

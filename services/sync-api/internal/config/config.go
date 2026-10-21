@@ -15,11 +15,20 @@ type AppConfig struct {
 	Teams    TeamsConfig    `json:"teams"`
 }
 
-// TeamsConfig 는 팀 볼트의 보존 한도다. 녹화·기록 한도는 그 기능을 만들 때 여기에 더한다.
+// TeamsConfig 는 팀 볼트의 보존 한도다.
 type TeamsConfig struct {
 	// HistoryRetentionDays 는 바뀌거나 지워진 팀 레코드의 이전 판을 남겨 두는 날 수다. 소유자는 이
 	// 기간 안의 판으로 되돌릴 수 있고, 지나면 서버가 지운다.
 	HistoryRetentionDays int `json:"historyRetentionDays"`
+	// ReplayMaxCount 는 팀마다 남겨 두는 녹화 수다. 넘으면 끝났거나 끊긴 녹화를 오래된 것부터 지운다.
+	ReplayMaxCount int `json:"replayMaxCount"`
+	// ReplayMaxMegabytes 는 팀의 녹화가 차지할 수 있는 용량(MB)이다. 진행 중인 녹화도 센다.
+	ReplayMaxMegabytes int `json:"replayMaxMegabytes"`
+	// ReplayMaxMegabytesPerRecording 은 녹화 하나가 차지할 수 있는 용량(MB)이다. 큰 녹화 하나가 팀의
+	// 녹화를 통째로 밀어내지 않게 둔다. 넘는 녹화는 앞부분까지만 팀에 남는다.
+	ReplayMaxMegabytesPerRecording int `json:"replayMaxMegabytesPerRecording"`
+	// EventMaxCount 는 팀마다 남겨 두는 기록 줄 수다. 넘으면 오래된 것부터 지운다.
+	EventMaxCount int `json:"eventMaxCount"`
 }
 
 type ServerConfig struct {
@@ -139,7 +148,11 @@ func defaultConfig() AppConfig {
 			},
 		},
 		Teams: TeamsConfig{
-			HistoryRetentionDays: 90,
+			HistoryRetentionDays:           90,
+			ReplayMaxCount:                 1000,
+			ReplayMaxMegabytes:             2048,
+			ReplayMaxMegabytesPerRecording: 200,
+			EventMaxCount:                  100000,
 		},
 	}
 }
@@ -224,6 +237,10 @@ func applyEnvOverrides(cfg *AppConfig) {
 	cfg.Auth.WebAuthn.RPDisplayName = getenv("WEBAUTHN_RP_DISPLAY_NAME", cfg.Auth.WebAuthn.RPDisplayName)
 	cfg.Auth.WebAuthn.Origins = getenvCSV("WEBAUTHN_ORIGINS", cfg.Auth.WebAuthn.Origins)
 	cfg.Teams.HistoryRetentionDays = getenvInt("TEAM_HISTORY_RETENTION_DAYS", cfg.Teams.HistoryRetentionDays)
+	cfg.Teams.ReplayMaxCount = getenvInt("TEAM_REPLAY_MAX_COUNT", cfg.Teams.ReplayMaxCount)
+	cfg.Teams.ReplayMaxMegabytes = getenvInt("TEAM_REPLAY_MAX_MEGABYTES", cfg.Teams.ReplayMaxMegabytes)
+	cfg.Teams.ReplayMaxMegabytesPerRecording = getenvInt("TEAM_REPLAY_MAX_MEGABYTES_PER_RECORDING", cfg.Teams.ReplayMaxMegabytesPerRecording)
+	cfg.Teams.EventMaxCount = getenvInt("TEAM_EVENT_MAX_COUNT", cfg.Teams.EventMaxCount)
 }
 
 func validateConfig(cfg AppConfig) error {
@@ -238,6 +255,22 @@ func validateConfig(cfg AppConfig) error {
 	}
 	if cfg.Teams.HistoryRetentionDays < 1 {
 		return errors.New("teams.historyRetentionDays must be at least 1")
+	}
+	if cfg.Teams.ReplayMaxCount < 1 {
+		return errors.New("teams.replayMaxCount must be at least 1")
+	}
+	if cfg.Teams.ReplayMaxMegabytes < 1 {
+		return errors.New("teams.replayMaxMegabytes must be at least 1")
+	}
+	if cfg.Teams.ReplayMaxMegabytesPerRecording < 1 {
+		return errors.New("teams.replayMaxMegabytesPerRecording must be at least 1")
+	}
+	// 한 개 최대가 팀 전체보다 크면 그런 녹화는 다른 녹화를 다 지워도 들어갈 자리가 없다.
+	if cfg.Teams.ReplayMaxMegabytesPerRecording > cfg.Teams.ReplayMaxMegabytes {
+		return errors.New("teams.replayMaxMegabytesPerRecording must not exceed teams.replayMaxMegabytes")
+	}
+	if cfg.Teams.EventMaxCount < 1 {
+		return errors.New("teams.eventMaxCount must be at least 1")
 	}
 	return nil
 }

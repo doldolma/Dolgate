@@ -881,7 +881,9 @@
       "screenShare": "화면 공유",
       "os": "운영체제",
       "portForward": "포워딩",
-      "portForwardStarting": "{{count}}개 시작 중"
+      "portForwardStarting": "{{count}}개 시작 중",
+      "team": "팀",
+      "teamRecorded": "{{team}} · 팀 기록·녹화에 남습니다"
     },
     "update": {
       "checking": "GitHub Releases에서 새 버전을 확인하고 있습니다.",
@@ -2895,7 +2897,9 @@
       "clientOutdated": "이 팀에는 최신 버전에서 추가한 항목이 있습니다. 앱을 업데이트한 뒤 다시 시도해 주세요.",
       "memberNotFound": "이 팀의 멤버가 아닙니다.",
       "alreadyMember": "이미 이 팀의 멤버입니다.",
-      "exists": "이미 있는 팀입니다."
+      "exists": "이미 있는 팀입니다.",
+      "replayNotFound": "팀 녹화를 찾을 수 없습니다.",
+      "replayDeleted": "팀 녹화 한도로 지워진 녹화입니다."
     },
     "crossVault": {
       "jumpHost": "점프 호스트는 같은 볼트의 호스트만 쓸 수 있습니다.",
@@ -3080,7 +3084,8 @@
       "unsupportedVaultTitle": "새 동기화 볼트가 필요합니다",
       "unsupportedVaultBody": "팀은 동기화 암호로 잠그는 새 볼트에서 쓸 수 있습니다. 볼트를 옮긴 뒤 다시 여세요.",
       "serverUnsupportedTitle": "이 서버는 팀을 지원하지 않습니다",
-      "serverUnsupportedBody": "동기화 서버를 최신 버전으로 올리면 쓸 수 있습니다."
+      "serverUnsupportedBody": "동기화 서버를 최신 버전으로 올리면 쓸 수 있습니다.",
+      "history": "이 팀 호스트의 접속 기록과 터미널 녹화는 멤버 모두가 봅니다."
     },
     "actionFailed": "팀 작업을 마치지 못했습니다.",
     "intro": "팀원과 호스트·비밀번호를 함께 씁니다. 서버는 내용을 볼 수 없습니다.",
@@ -4341,5 +4346,30 @@
   "snippetDelete": {
     "body": "이 스니펫을 지웁니다. 되돌릴 수 없습니다.",
     "hostUsage": "호스트 {{count}}개의 시작 명령으로 쓰이고 있습니다 — 그 호스트의 시작 명령이 함께 해제됩니다."
+  },
+  "teamReplay": {
+    "truncated": "{{host}} 녹화가 팀 녹화 한 개 최대를 넘어 앞부분만 팀에 남았습니다. 나머지는 녹화한 사람 기기에만 있습니다.",
+    "teamNotOpen": "이 팀을 아직 이 기기에서 열지 못했습니다. 잠시 뒤 다시 열어 보세요.",
+    "unsupported": "앱을 업데이트하면 볼 수 있습니다.",
+    "stateLive": "아직 녹화 중입니다 — 연 때까지 올라온 만큼 재생합니다",
+    "stateCut": "녹화한 사람의 앱이 끝을 알리지 못하고 끊겼습니다 — 올라온 데까지 재생합니다",
+    "statePartial": "팀 녹화 한 개 최대를 넘어 앞부분만 팀에 있습니다",
+    "inProgress": "진행 중"
+  },
+  "teamLogs": {
+    "memberJoined": "{{email}} 님이 팀에 들어왔습니다",
+    "memberLeft": "{{email}} 님이 팀을 나갔습니다",
+    "memberLeftVaultReset": "{{email}} 님이 동기화 암호를 초기화해 팀에서 빠졌습니다",
+    "memberLeftAccountDeleted": "{{email}} 님이 계정을 지워 팀에서 빠졌습니다",
+    "memberRemoved": "{{by}} 님이 {{email}} 님을 팀에서 내보냈습니다",
+    "ownerChanged": "{{by}} 님이 {{email}} 님에게 소유권을 넘겼습니다",
+    "ownerSucceeded": "소유자가 떠나 {{email}} 님이 소유자가 되었습니다",
+    "membersChanged": "팀 멤버가 바뀌었습니다",
+    "unreadable": "이 기록을 열 수 없습니다",
+    "replayDeleted": "팀 녹화 한도로 지워졌습니다",
+    "replayPending": "아직 올라오는 중입니다 — 녹화한 사람의 앱이 보내는 중이거나 오프라인입니다",
+    "loadFailed": "팀 기록을 불러오지 못했습니다",
+    "loading": "팀 기록을 불러오는 중입니다",
+    "emptyDescription": "이 팀 볼트의 접속·변경 기록이 여기에 쌓입니다."
   }
 }

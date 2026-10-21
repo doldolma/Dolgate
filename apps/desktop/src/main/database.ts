@@ -2729,6 +2729,22 @@ export class KnownHostRepository {
 }
 
 export class ActivityLogRepository {
+  private observer: ((record: ActivityLogRecord) => void) | null = null;
+
+  /** 쓴 기록마다 불린다(팀 기록이 팀 볼트의 활동을 함께 올린다). 기록 쓰기는 이것의 실패와 상관없이 끝난다. */
+  setObserver(observer: ((record: ActivityLogRecord) => void) | null): void {
+    this.observer = observer;
+  }
+
+  private notifyObserver(record: ActivityLogRecord): ActivityLogRecord {
+    try {
+      this.observer?.(record);
+    } catch (error) {
+      console.warn('[activity-log] observer failed', error);
+    }
+    return record;
+  }
+
   activate(owner: LocalHistoryOwner): void {
     getDesktopStateStorage().activateActivityLogScope(owner);
   }
@@ -2767,11 +2783,11 @@ export class ActivityLogRepository {
       createdAt: timestamp,
       updatedAt: timestamp
     };
-    return stateStorage.appendActivityLog(record);
+    return this.notifyObserver(stateStorage.appendActivityLog(record));
   }
 
   upsert(record: ActivityLogRecord): ActivityLogRecord {
-    return stateStorage.upsertActivityLog(record);
+    return this.notifyObserver(stateStorage.upsertActivityLog(record));
   }
 
   clear(): void {

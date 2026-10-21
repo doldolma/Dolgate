@@ -29,6 +29,17 @@ describe('resolveRendererWindowMode', () => {
     ).toEqual({
       kind: 'session-replay',
       recordingId: 'recording-1',
+      teamId: null,
+    });
+  });
+
+  it('carries the team of a team recording', () => {
+    expect(
+      resolveRendererWindowMode('?window=session-replay&recordingId=recording-1&teamId=team-1'),
+    ).toEqual({
+      kind: 'session-replay',
+      recordingId: 'recording-1',
+      teamId: 'team-1',
     });
   });
 });

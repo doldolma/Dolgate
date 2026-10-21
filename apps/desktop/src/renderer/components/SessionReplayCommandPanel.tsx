@@ -11,6 +11,8 @@ interface SessionReplayCommandPanelProps {
   blocks: readonly ReplayCommandBlock[];
   scanning: boolean;
   shellIntegrationDetected: boolean;
+  /** 목록이 비었을 때 대신 보일 말(팀 녹화의 목록이 이 앱이 모르는 형식일 때). */
+  notice?: string | null;
   /**
    * 지금 재생 중인 명령의 id. positionMs 를 그대로 받으면 재생 중 매 프레임 리렌더되어
    * 명령 수백 개의 행이 초당 60번 다시 만들어진다. 경계를 넘을 때만 바뀌는 값으로 받는다.
@@ -62,6 +64,7 @@ function SessionReplayCommandPanelImpl({
   blocks,
   scanning,
   shellIntegrationDetected,
+  notice,
   activeBlockId,
   onSeek,
   className,
@@ -95,9 +98,10 @@ function SessionReplayCommandPanelImpl({
           </p>
         ) : blocks.length === 0 ? (
           <p className="m-0 px-3 py-4 text-[0.8rem] leading-[1.5] text-[var(--text-soft)]">
-            {shellIntegrationDetected
-              ? translate('replayCommands.noCommands')
-              : translate('replayCommands.noShellIntegration')}
+            {notice ??
+              (shellIntegrationDetected
+                ? translate('replayCommands.noCommands')
+                : translate('replayCommands.noShellIntegration'))}
           </p>
         ) : (
           blocks.map((block) => {

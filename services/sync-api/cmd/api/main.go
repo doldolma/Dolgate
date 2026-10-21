@@ -45,6 +45,12 @@ func main() {
 		log.Fatalf("open store: %v", err)
 	}
 	dbStore.SetTeamHistoryRetention(time.Duration(cfg.Teams.HistoryRetentionDays) * 24 * time.Hour)
+	dbStore.SetTeamHistoryLimits(store.TeamHistoryLimits{
+		ReplayMaxCount:             int64(cfg.Teams.ReplayMaxCount),
+		ReplayMaxBytes:             int64(cfg.Teams.ReplayMaxMegabytes) << 20,
+		ReplayMaxBytesPerRecording: int64(cfg.Teams.ReplayMaxMegabytesPerRecording) << 20,
+		EventMaxCount:              int64(cfg.Teams.EventMaxCount),
+	})
 	defer func() {
 		if err := dbStore.Close(); err != nil {
 			log.Printf("close store: %v", err)

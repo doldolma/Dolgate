@@ -1,3 +1,4 @@
+import type { ReplayCommandScanResult, ReplaySnapshot } from "../common/replay/replay-command-scan";
 import type {
   ActivityLogRecord,
   AiProviderId,
@@ -1312,6 +1313,77 @@ export type TeamRole = "owner" | "member";
  */
 export type TeamSyncStateName = "idle" | "ready" | "needs-rejoin" | "outdated" | "error";
 
+/** 팀 기록 한 줄의 본문(앱 활동). 팀 키로 잠가 올린다. 로컬 기록과 같은 모양이라 화면이 같은 방식으로 그린다. */
+export interface TeamActivityBody {
+  v: number;
+  /** 수명 줄(접속·SFTP·포트 포워딩·컨테이너)의 시작·끝. 같은 record.id 의 줄을 화면이 한 줄로 합친다. */
+  phase?: "start" | "end";
+  record: ActivityLogRecord;
+}
+
+/** 서버가 남긴 멤버 변화(평문). 이메일은 그때의 것이다. */
+export interface TeamMemberChange {
+  type: "member_joined" | "member_left" | "member_removed" | "owner_changed" | (string & {});
+  userId: string;
+  email?: string;
+  byUserId?: string;
+  byEmail?: string;
+  /** member_left 의 까닭(vault_reset·account_deleted)이나, 소유자가 저절로 바뀐 까닭(successor). */
+  reason?: string;
+}
+
+/** 화면에 주는 팀 기록 한 줄. 앱 활동이면 activity, 멤버 변화면 memberChange 가 있다. */
+export interface TeamActivityItem {
+  seq: number;
+  id: string;
+  source: "app" | "server";
+  authorUserId: string;
+  authorEmail: string;
+  createdAt: string;
+  receivedAt: string;
+  activity: TeamActivityBody | null;
+  memberChange: TeamMemberChange | null;
+  /** 풀지 못한 줄 — 더 새 형식이면(업데이트하면 보인다) unsupported-version, 아니면 broken. */
+  unreadable: "unsupported-version" | "broken" | null;
+}
+
+export interface TeamActivityQuery {
+  before?: number;
+  after?: number;
+  limit?: number;
+}
+
+/**
+ * 팀 녹화 상태. live 는 아직 받는 중(열면 그때까지 재생), cut 은 끝을 알리지 못하고 끊김, truncated 는 한 개
+ * 최대를 넘어 앞부분만, deleted 는 팀 녹화 한도로 지워짐.
+ */
+export type TeamReplayState = "live" | "ended" | "cut" | "truncated" | "deleted";
+
+/** 서버에 있는 팀 녹화 하나의 상태 — 기록 화면의 Replay 단추가 본다. */
+export interface TeamReplayStatus {
+  recordingId: string;
+  state: TeamReplayState;
+  authorEmail: string;
+  /** 서버에 온 구간 수. 0 이면 아직 볼 것이 없다(녹화한 쪽 앱이 첫 구간을 보내는 중). */
+  segmentCount: number;
+}
+
+/** 팀 녹화를 열 때 함께 받는 것. 이 기기의 녹화에는 없다. */
+export interface TeamReplayView {
+  teamId: string;
+  authorEmail: string;
+  state: TeamReplayState;
+  /** 녹화한 쪽 앱이 세션 동안 만들어 올린 명령 목록. 이 앱이 모르는 형식이 섞였으면 null(업데이트하면 보인다). */
+  commands: ReplayCommandScanResult | null;
+  /** 스냅샷이 있는 구간(재생 창 구간 번호)과 그 시각. 화면은 멀리 건너뛸 때 readSnapshot 으로 받는다. */
+  snapshots: Array<{ segment: number; atMs: number }>;
+}
+
+/** 재생 창이 처음 받는 것. 팀 녹화면 team 이 있다. */
+export interface SessionReplayView extends SessionReplayIndex {
+  team?: TeamReplayView;
+}
+
 /** 이 기기에 있는 팀 하나. */
 export interface TeamListItem {
   id: string;
@@ -2114,6 +2186,10 @@ export interface DesktopApi {
     /** 팀 호스트에 내 자격 증명을 둔다(통째로 바꾼다). 내 기기끼리만 맞춰진다. */
     setMyCredentials: (hostId: string, credentials: MyHostCredentialsInput) => Promise<MyHostCredentialsSummary | null>;
     clearMyCredentials: (hostId: string) => Promise<void>;
+    /** 팀 기록(서버). after 를 주면 그 뒤를 오래된 것부터, 아니면 before 앞을 최신부터 준다. */
+    listActivity: (teamId: string, query?: TeamActivityQuery) => Promise<TeamActivityItem[]>;
+    /** 그 녹화들이 팀 서버에 있는지와 상태. 서버에 없는 녹화는 결과에 없다. */
+    getReplayStatuses: (teamId: string, recordingIds: string[]) => Promise<TeamReplayStatus[]>;
     /** 팀 목록이 바뀌었다(참여·빠짐·이름·역할). */
     onChanged: (listener: () => void) => () => void;
   };
@@ -2185,14 +2261,22 @@ export interface DesktopApi {
     onChanged: (listener: () => void) => () => void;
   };
   sessionReplays: {
-    open: (recordingId: string) => Promise<void>;
+    /** teamId 를 주면 그 팀의 녹화(서버)를 연다. 없으면 이 기기의 녹화다. */
+    open: (recordingId: string, teamId?: string | null) => Promise<void>;
     /** 녹화 정보와 구간 목록(출력은 담지 않는다). */
-    load: (recordingId: string) => Promise<SessionReplayIndex>;
+    load: (recordingId: string, teamId?: string | null) => Promise<SessionReplayView>;
     /** 한 구간의 항목. 재생 창이 재생 위치 근처만 받아 간다. */
     readSegment: (
       recordingId: string,
       segmentIndex: number,
+      teamId?: string | null,
     ) => Promise<SessionReplaySegment>;
+    /** 팀 녹화의 스냅샷 하나(멀리 건너뛸 때). 쓸 수 없으면 null — 재생 창은 처음부터 그린다. */
+    readSnapshot: (
+      recordingId: string,
+      segmentIndex: number,
+      teamId: string,
+    ) => Promise<ReplaySnapshot | null>;
     storageUsage: () => Promise<SessionReplayStorageUsage>;
   };
   keychain: {

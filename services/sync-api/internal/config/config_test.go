@@ -275,3 +275,45 @@ func TestLoadTeamsHistoryRetention(t *testing.T) {
 		t.Fatalf("zero retention error = %v, want a historyRetentionDays error", err)
 	}
 }
+
+func TestLoadTeamsReplayAndEventLimits(t *testing.T) {
+	t.Setenv("AUTH_SIGNING_PRIVATE_KEY_PATH", "/secure/key.pem")
+	cfg, _, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Teams.ReplayMaxCount != 1000 || cfg.Teams.ReplayMaxMegabytes != 2048 ||
+		cfg.Teams.ReplayMaxMegabytesPerRecording != 200 || cfg.Teams.EventMaxCount != 100000 {
+		t.Fatalf("default limits = %#v", cfg.Teams)
+	}
+
+	t.Setenv("TEAM_REPLAY_MAX_COUNT", "10")
+	t.Setenv("TEAM_REPLAY_MAX_MEGABYTES", "64")
+	t.Setenv("TEAM_REPLAY_MAX_MEGABYTES_PER_RECORDING", "8")
+	t.Setenv("TEAM_EVENT_MAX_COUNT", "500")
+	cfg, _, err = Load()
+	if err != nil || cfg.Teams.ReplayMaxCount != 10 || cfg.Teams.ReplayMaxMegabytes != 64 ||
+		cfg.Teams.ReplayMaxMegabytesPerRecording != 8 || cfg.Teams.EventMaxCount != 500 {
+		t.Fatalf("env limits = %#v, %v", cfg.Teams, err)
+	}
+
+	for name, value := range map[string]string{
+		"TEAM_REPLAY_MAX_COUNT":                   "0",
+		"TEAM_REPLAY_MAX_MEGABYTES":               "0",
+		"TEAM_REPLAY_MAX_MEGABYTES_PER_RECORDING": "0",
+		"TEAM_EVENT_MAX_COUNT":                    "0",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(name, value)
+			if _, _, err := Load(); err == nil {
+				t.Fatalf("%s=%s loaded without error", name, value)
+			}
+		})
+	}
+
+	// 한 개 최대가 팀 전체보다 크면 그 녹화는 들어갈 자리가 없다.
+	t.Setenv("TEAM_REPLAY_MAX_MEGABYTES_PER_RECORDING", "65")
+	if _, _, err := Load(); err == nil || !strings.Contains(err.Error(), "replayMaxMegabytesPerRecording") {
+		t.Fatalf("per-recording over total error = %v", err)
+	}
+}

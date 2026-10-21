@@ -260,4 +260,5 @@ type Store interface {
 	DeleteUserData(ctx context.Context, userID string) error
 
 	TeamStore
+	TeamHistoryStore
 }

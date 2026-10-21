@@ -235,6 +235,7 @@ export function registerPortForwardAndDnsIpcHandlers(
       if (current) {
         ctx.hostsOverrideManager.removeStaticOverrideState(current.id);
         ctx.activityLogs.append("warn", "audit", logMessage("pfIpc.dnsDeleted"), {
+          vaultId: scope.id,
           dnsOverrideId: current.id,
           type: current.type,
           hostname: current.hostname,
@@ -342,6 +343,7 @@ export function registerPortForwardAndDnsIpcHandlers(
       scope.portForwards.remove(id);
       if (current) {
         ctx.activityLogs.append("warn", "audit", logMessage("pfIpc.ruleDeleted"), {
+          vaultId: scope.id,
           ruleId: current.id,
           label: current.label,
           hostId: current.hostId,

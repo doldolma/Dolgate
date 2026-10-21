@@ -20,6 +20,9 @@ module.exports = {
   directories: {
     output: 'release/dist'
   },
+  // 팀 녹화 훑기 작업 스레드는 asar 밖에 둔다 — 작업 스레드가 asar 안의 파일을 못 여는 Electron 에서도 뜨게
+  // (src/main/replay-scan-host.ts 의 resolveReplayScanWorkerPath 가 풀어 둔 쪽을 먼저 쓴다).
+  asarUnpack: ['.vite/build/replay-scan-worker.js'],
   publish: [
     {
       provider: 'github',

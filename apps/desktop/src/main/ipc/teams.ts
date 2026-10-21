@@ -1,5 +1,13 @@
 import { ipcMain } from "electron";
-import type { MyHostCredentialsInput, MyHostCredentialsSummary, VaultCopyRequest, VaultIndex } from "@shared";
+import type {
+  MyHostCredentialsInput,
+  MyHostCredentialsSummary,
+  TeamActivityItem,
+  TeamActivityQuery,
+  TeamReplayStatus,
+  VaultCopyRequest,
+  VaultIndex,
+} from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
 import { logMessage } from "../activity-log-message";
 import { getTeamInviteInbox } from "../team-invite-inbox";
@@ -88,6 +96,21 @@ export function registerTeamsIpcHandlers(ctx: MainIpcContext): void {
     ctx.activityLogs.append("info", "audit", logMessage("teams.myCredentialsCleared"), { hostId });
     ctx.queueSync();
   });
+  ipcMain.handle(
+    ipcChannels.teams.listActivity,
+    async (_event, teamId: string, query?: TeamActivityQuery): Promise<TeamActivityItem[]> =>
+      ctx.teamHistory ? ctx.teamHistory.listActivity(teamId, query ?? {}) : [],
+  );
+  ipcMain.handle(
+    ipcChannels.teams.getReplayStatuses,
+    async (_event, teamId: string, recordingIds: unknown): Promise<TeamReplayStatus[]> =>
+      ctx.teamHistory && Array.isArray(recordingIds)
+        ? ctx.teamHistory.getReplayStatuses(
+            teamId,
+            recordingIds.filter((id): id is string => typeof id === "string"),
+          )
+        : [],
+  );
 }
 
 /**

@@ -5,7 +5,7 @@ import { useAppStore } from '../../store/appStore';
 import { normalizeErrorMessage } from '../../store/utils/errors-and-prompts';
 import { DialogBackdrop } from '../DialogBackdrop';
 import { Button, ModalBody, ModalFooter, ModalShell } from '../../ui';
-import { Link, Lock } from '../../ui/icons';
+import { History, Link, Lock } from '../../ui/icons';
 import { TeamDialogError } from './TeamDialogFrame';
 import { MarkSquare, TeamMark } from './TeamMark';
 
@@ -257,10 +257,17 @@ export function JoinTeamDialogHost({ onRequestLogin }: JoinTeamDialogHostProps) 
         <SoftLine>
           {translate('teamsPanel.joinCard.invitedBy', { email: preview.inviterEmail, count: preview.memberCount })}
         </SoftLine>
-        <p className="m-0 flex items-start gap-2 rounded-[10px] border border-[var(--selection-border)] bg-[var(--selection-tint)] px-3 py-2.5 text-left text-[0.84rem] leading-[1.55] text-[var(--text-soft)]">
-          <Lock className="mt-[0.2rem] h-4 w-4 shrink-0 text-[var(--accent-strong)]" aria-hidden="true" />
-          <span>{translate('teamsPanel.joinCard.what')}</span>
-        </p>
+        <div className="grid gap-2 rounded-[10px] border border-[var(--selection-border)] bg-[var(--selection-tint)] px-3 py-2.5 text-left text-[0.84rem] leading-[1.55] text-[var(--text-soft)]">
+          <p className="m-0 flex items-start gap-2">
+            <Lock className="mt-[0.2rem] h-4 w-4 shrink-0 text-[var(--accent-strong)]" aria-hidden="true" />
+            <span>{translate('teamsPanel.joinCard.what')}</span>
+          </p>
+          {/* 들어가기 전에 알아야 한다 — 팀 호스트에서 한 일은 멤버 모두가 본다. */}
+          <p className="m-0 flex items-start gap-2">
+            <History className="mt-[0.2rem] h-4 w-4 shrink-0 text-[var(--accent-strong)]" aria-hidden="true" />
+            <span>{translate('teamsPanel.joinCard.history')}</span>
+          </p>
+        </div>
         <TeamDialogError message={joinError} />
       </JoinCard>
     );

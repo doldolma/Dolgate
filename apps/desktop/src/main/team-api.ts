@@ -7,6 +7,7 @@ import {
   type TeamInvite,
   type TeamInviteInfo,
   type TeamMember,
+  type TeamReplayState,
 } from "@shared";
 import { AUTH_INVALID_ERROR_MESSAGE } from "./auth-error-message";
 import { t } from "./i18n";
@@ -98,6 +99,47 @@ export interface TeamWatchRevisions {
 export type TeamWatchResult =
   | { changed: false }
   | { changed: true; etag: string | null; revisions: TeamWatchRevisions };
+
+/** 팀 기록 한 줄(서버 모양). payload 는 앱 기록이면 팀 키로 잠근 것, 서버 기록(멤버 변화)이면 평문 JSON 이다. */
+export interface RawTeamEvent {
+  seq: number;
+  id: string;
+  source: "app" | "server";
+  authorUserId: string;
+  authorEmail: string;
+  createdAt: string;
+  receivedAt: string;
+  payload: string;
+}
+
+export interface RawTeamReplay {
+  recordingId: string;
+  authorUserId: string;
+  authorEmail: string;
+  state: TeamReplayState;
+  segmentCount: number;
+  lastSegment: number;
+  totalBytes: number;
+  createdAt: string;
+  lastActivityAt: string;
+  endedAt?: string;
+}
+
+export type TeamReplayExtraKind = "commands" | "snapshot";
+
+/** 녹화를 열 때 받는 것 — 메타와 구간·덧붙임의 목록(내용 없이). 메타·구간 정보는 녹화 열쇠로 잠근 것이다. */
+export interface RawTeamReplayDetail extends RawTeamReplay {
+  startMeta: string;
+  endMeta?: string;
+  segments: Array<{ index: number; info: string; size: number }>;
+  extras: Array<{ kind: TeamReplayExtraKind; index: number; size: number }>;
+}
+
+/** 묶어 받은 구간·덧붙임 하나(잠긴 바이트 그대로). */
+export interface TeamReplayFrame {
+  index: number;
+  data: Uint8Array;
+}
 
 export class TeamApi {
   constructor(private readonly auth: TeamApiAuth) {}
@@ -222,6 +264,144 @@ export class TeamApi {
 
   async putPrivate(lease: TeamRequestLease, teamId: string, payload: TeamSyncPayload): Promise<number | null> {
     return this.pushSnapshot(lease, "PUT", `${teamPath(teamId)}/me`, payload, { vaultEpoch: true });
+  }
+
+  /** 앱 활동 기록을 올린다(여러 줄 한 번에). 이미 받은 기록 ID 는 서버가 건너뛴다 — 받은 줄 수를 돌려준다. */
+  async appendTeamEvents(
+    lease: TeamRequestLease,
+    teamId: string,
+    events: Array<{ id: string; createdAt: string; payload: string }>,
+  ): Promise<number> {
+    const body = await this.json<{ accepted?: number }>(lease, "POST", `${teamPath(teamId)}/events`, {
+      body: { events },
+      fallback: t("sync.uploadFailed"),
+    });
+    return typeof body.accepted === "number" ? body.accepted : 0;
+  }
+
+  /** 팀 기록. after 를 주면 그 뒤를 오래된 것부터, 아니면 before 앞을 최신부터 준다. */
+  async listTeamEvents(
+    lease: TeamRequestLease,
+    teamId: string,
+    query: { before?: number; after?: number; limit?: number },
+  ): Promise<RawTeamEvent[]> {
+    const params = new URLSearchParams();
+    if (query.before) params.set("before", String(query.before));
+    if (query.after) params.set("after", String(query.after));
+    if (query.limit) params.set("limit", String(query.limit));
+    const suffix = params.size > 0 ? `?${params.toString()}` : "";
+    const body = await this.json<{ events?: RawTeamEvent[] }>(lease, "GET", `${teamPath(teamId)}/events${suffix}`);
+    return body.events ?? [];
+  }
+
+  /** 녹화를 시작한다. 같은 녹화를 다시 시작하면 서버의 지금 상태를 그대로 준다. */
+  async startTeamReplay(
+    lease: TeamRequestLease,
+    teamId: string,
+    recordingId: string,
+    startMeta: string,
+  ): Promise<RawTeamReplay> {
+    return this.json<RawTeamReplay>(lease, "POST", `${teamPath(teamId)}/replays`, {
+      body: { recordingId, startMeta },
+      fallback: t("sync.uploadFailed"),
+    });
+  }
+
+  /** 구간 하나를 올린다 — 본문은 잠근 구간 바이트, 구간 정보(잠금)는 헤더에. 같은 번호를 다시 올리면 덮어쓴다. */
+  async putTeamReplaySegment(
+    lease: TeamRequestLease,
+    teamId: string,
+    recordingId: string,
+    index: number,
+    info: string,
+    data: Uint8Array,
+  ): Promise<void> {
+    await this.send(lease, "PUT", `${replayPath(teamId, recordingId)}/segments/${index}`, {
+      bytes: data,
+      headers: { "X-Dolgate-Segment-Info": info },
+      fallback: t("sync.uploadFailed"),
+    });
+  }
+
+  /** 녹화 덧붙임(구간별 명령 목록·스냅샷)을 올린다. 번호는 그 구간 번호다. */
+  async putTeamReplayExtra(
+    lease: TeamRequestLease,
+    teamId: string,
+    recordingId: string,
+    kind: TeamReplayExtraKind,
+    index: number,
+    data: Uint8Array,
+  ): Promise<void> {
+    await this.send(lease, "PUT", `${replayPath(teamId, recordingId)}/extras/${kind}/${index}`, {
+      bytes: data,
+      fallback: t("sync.uploadFailed"),
+    });
+  }
+
+  /** 녹화 끝을 알린다. lastSegment 까지 서버에 다 있어야 받는다. cut 은 비정상 종료를 알리는 것이다. */
+  async completeTeamReplay(
+    lease: TeamRequestLease,
+    teamId: string,
+    recordingId: string,
+    input: { endMeta: string; lastSegment: number; cut: boolean },
+  ): Promise<void> {
+    await this.send(lease, "POST", `${replayPath(teamId, recordingId)}/complete`, {
+      body: input,
+      fallback: t("sync.uploadFailed"),
+    });
+  }
+
+  /** 녹화 목록. ids 를 주면 그 녹화들의 상태만(지워진 것까지) 준다. */
+  async listTeamReplays(
+    lease: TeamRequestLease,
+    teamId: string,
+    query: { ids?: string[]; before?: string; limit?: number },
+  ): Promise<RawTeamReplay[]> {
+    const params = new URLSearchParams();
+    if (query.ids && query.ids.length > 0) params.set("ids", query.ids.join(","));
+    if (query.before) params.set("before", query.before);
+    if (query.limit) params.set("limit", String(query.limit));
+    const suffix = params.size > 0 ? `?${params.toString()}` : "";
+    const body = await this.json<{ replays?: RawTeamReplay[] }>(lease, "GET", `${teamPath(teamId)}/replays${suffix}`);
+    return body.replays ?? [];
+  }
+
+  async getTeamReplay(lease: TeamRequestLease, teamId: string, recordingId: string): Promise<RawTeamReplayDetail> {
+    const body = await this.json<RawTeamReplayDetail>(lease, "GET", replayPath(teamId, recordingId));
+    return { ...body, segments: body.segments ?? [], extras: body.extras ?? [] };
+  }
+
+  /** 구간을 from 부터 묶어 받는다(서버가 한 응답 상한까지 자른다). */
+  async readTeamReplaySegments(
+    lease: TeamRequestLease,
+    teamId: string,
+    recordingId: string,
+    from: number,
+    limit?: number,
+  ): Promise<TeamReplayFrame[]> {
+    const params = new URLSearchParams({ from: String(from) });
+    if (limit) params.set("limit", String(limit));
+    return this.frames(lease, `${replayPath(teamId, recordingId)}/segments?${params.toString()}`);
+  }
+
+  async readTeamReplayExtras(
+    lease: TeamRequestLease,
+    teamId: string,
+    recordingId: string,
+    kind: TeamReplayExtraKind,
+    from: number,
+    limit?: number,
+  ): Promise<TeamReplayFrame[]> {
+    const params = new URLSearchParams({ from: String(from) });
+    if (limit) params.set("limit", String(limit));
+    return this.frames(lease, `${replayPath(teamId, recordingId)}/extras/${kind}?${params.toString()}`);
+  }
+
+  private async frames(lease: TeamRequestLease, path: string): Promise<TeamReplayFrame[]> {
+    const response = await this.request(lease, "GET", path, { fallback: t("sync.fetchFailed") });
+    const body = new Uint8Array(await response.arrayBuffer());
+    assertActive(lease);
+    return decodeTeamReplayFrames(body);
   }
 
   /**
@@ -350,8 +530,12 @@ export class TeamApi {
     if (options.vaultEpoch && lease.vaultEpoch !== null) {
       headers.set(VAULT_EPOCH_HEADER, String(lease.vaultEpoch));
     }
-    let body: string | undefined;
-    if (options.body !== undefined) {
+    let body: string | Uint8Array<ArrayBuffer> | undefined;
+    if (options.bytes !== undefined) {
+      headers.set("Content-Type", "application/octet-stream");
+      // 잠근 조각은 늘 ArrayBuffer 위에 있다(SharedArrayBuffer 가 아니다).
+      body = options.bytes as Uint8Array<ArrayBuffer>;
+    } else if (options.body !== undefined) {
       headers.set("Content-Type", "application/json");
       body = JSON.stringify(options.body);
     }
@@ -359,8 +543,34 @@ export class TeamApi {
   }
 }
 
+/**
+ * 구간·덧붙임 묶음 응답을 푼다. 하나마다 [번호 8바이트][길이 4바이트][내용]이고 둘 다 빅엔디언이다
+ * (services/sync-api/internal/http/team_history.go 의 writeTeamReplayFrames).
+ */
+export function decodeTeamReplayFrames(body: Uint8Array): TeamReplayFrame[] {
+  const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+  const frames: TeamReplayFrame[] = [];
+  let offset = 0;
+  while (offset < body.length) {
+    if (offset + 12 > body.length) {
+      throw new Error(t("sync.fetchFailed"));
+    }
+    const index = Number(view.getBigUint64(offset));
+    const length = view.getUint32(offset + 8);
+    offset += 12;
+    if (offset + length > body.length) {
+      throw new Error(t("sync.fetchFailed"));
+    }
+    frames.push({ index, data: body.slice(offset, offset + length) });
+    offset += length;
+  }
+  return frames;
+}
+
 interface RequestOptions {
   body?: unknown;
+  /** 바이트 그대로 보내는 본문(녹화 구간·덧붙임). 주면 body 는 쓰지 않는다. */
+  bytes?: Uint8Array;
   headers?: Record<string, string>;
   vaultEpoch?: boolean;
   signal?: AbortSignal;
@@ -402,6 +612,10 @@ function teamPath(teamId: string): string {
   return `/teams/${encodeURIComponent(teamId)}`;
 }
 
+function replayPath(teamId: string, recordingId: string): string {
+  return `${teamPath(teamId)}/replays/${encodeURIComponent(recordingId)}`;
+}
+
 function assertActive(lease: TeamRequestLease): void {
   if (!lease.isActive()) {
     throw new TeamLeaseExpiredError();
@@ -441,6 +655,8 @@ const TEAM_API_ERROR_KEYS = new Map<string, string>([
   ["team_member_not_found", "teams.api.memberNotFound"],
   ["team_already_member", "teams.api.alreadyMember"],
   ["team_exists", "teams.api.exists"],
+  ["team_replay_not_found", "teams.api.replayNotFound"],
+  ["team_replay_deleted", "teams.api.replayDeleted"],
 ]);
 
 function toError(status: number, failure: { message: string; code: string | null }): Error {

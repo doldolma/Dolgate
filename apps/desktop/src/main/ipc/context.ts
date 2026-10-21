@@ -56,6 +56,7 @@ import type { SessionReplayService } from "../session-replay-service";
 import type { SessionShareService } from "../session-share-service";
 import type { SyncService } from "../sync-service";
 import type { TeamService } from "../team-service";
+import type { TeamHistoryService } from "../team-history-service";
 import type { TermiusImportService } from "../termius-import-service";
 import type { UpdateService } from "../update-service";
 import type { VaultCatalog, VaultScope } from "../vault-catalog";
@@ -153,6 +154,8 @@ export interface MainIpcContext {
   syncService: SyncService;
   /** 팀 볼트 관리(만들기·멤버·초대 링크·참여). */
   teams: TeamService;
+  /** 팀 기록(서버의 팀 기록 읽기·녹화 상태). 시험에서는 없을 수 있다. */
+  teamHistory?: TeamHistoryService;
   termiusImportService: TermiusImportService;
   opensshImportService: OpenSshImportService;
   xshellImportService: XshellImportService;

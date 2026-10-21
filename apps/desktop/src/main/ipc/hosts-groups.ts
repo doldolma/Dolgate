@@ -256,9 +256,12 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(ipcChannels.hosts.remove, async (event, id: string) => {
     const current = ctx.vaults.getHost(id);
+    // 지운 뒤에는 볼트를 찾을 수 없다 — 기록에 실어 팀 기록이 가른다.
+    const vaultId = ctx.vaults.scopeOfHost(id).id;
     ctx.vaults.removeHost(id);
     if (current) {
       ctx.activityLogs.append("warn", "audit", logMessage('hostsIpc.hostDeleted'), {
+        vaultId,
         hostId: current.id,
         label: current.label,
         kind: current.kind,
@@ -330,6 +333,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
     async (event, name: string, parentPath?: string | null, vaultId?: string | null) => {
       const group = groupVault(vaultId).groups.create(randomUUID(), name, parentPath);
       ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.groupCreated'), {
+        vaultId: vaultId ?? null,
         groupId: group.id,
         name: group.name,
         path: group.path,
@@ -356,6 +360,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         vault.syncOutbox.upsertDeletion("workspaces", workspaceId);
       }
       ctx.activityLogs.append("warn", "audit", logMessage('hostsIpc.groupDeleted'), {
+        vaultId: vaultId ?? null,
         path,
         mode,
         removedGroupCount: result.removedGroupIds.length,
@@ -377,6 +382,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
     async (event, path: string, targetParentPath: string | null, vaultId?: string | null) => {
       const result = groupVault(vaultId).groups.move(path, targetParentPath);
       ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.groupMoved'), {
+        vaultId: vaultId ?? null,
         path,
         targetParentPath: targetParentPath ?? null,
         nextPath: result.nextPath,
@@ -404,6 +410,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
     async (event, path: string, name: string, vaultId?: string | null) => {
       const result = groupVault(vaultId).groups.rename(path, name);
       ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.groupRenamed'), {
+        vaultId: vaultId ?? null,
         path,
         nextPath: result.nextPath,
         name,

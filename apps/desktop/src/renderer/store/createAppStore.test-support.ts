@@ -967,6 +967,7 @@ export function createMockApi(): DesktopApi {
       open: vi.fn().mockResolvedValue(undefined),
       load: vi.fn().mockRejectedValue(new Error("not implemented in test")),
       readSegment: vi.fn().mockRejectedValue(new Error("not implemented in test")),
+      readSnapshot: vi.fn().mockResolvedValue(null),
     },
     portForwards: {
       list: vi.fn().mockResolvedValue({
@@ -1044,6 +1045,8 @@ export function createMockApi(): DesktopApi {
       getMyCredentials: vi.fn().mockResolvedValue(null),
       setMyCredentials: vi.fn().mockResolvedValue(null),
       clearMyCredentials: vi.fn().mockResolvedValue(undefined),
+      listActivity: vi.fn().mockResolvedValue([]),
+      getReplayStatuses: vi.fn().mockResolvedValue([]),
     },
     savedWorkspaces: {
       list: vi.fn().mockResolvedValue([]),

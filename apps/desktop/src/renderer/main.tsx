@@ -31,7 +31,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     {rendererWindowMode.kind === 'session-share-chat' ? (
       <SessionShareChatWindow sessionId={rendererWindowMode.sessionId} />
     ) : rendererWindowMode.kind === 'session-replay' ? (
-      <SessionReplayWindow recordingId={rendererWindowMode.recordingId} />
+      <SessionReplayWindow
+        recordingId={rendererWindowMode.recordingId}
+        teamId={rendererWindowMode.teamId}
+      />
     ) : rendererWindowMode.kind === 'rdp-monitor' ? (
       <RdpMonitorWindow
         sessionId={rendererWindowMode.sessionId}

@@ -219,15 +219,23 @@ export function buildSessionReplaysBridge(
   ipcRenderer: IpcRenderer,
 ): DesktopApi["sessionReplays"] {
   return {
-    open: (recordingId: string) =>
-      ipcRenderer.invoke(ipcChannels.sessionReplays.open, recordingId),
-    load: (recordingId: string) =>
-      ipcRenderer.invoke(ipcChannels.sessionReplays.load, recordingId),
-    readSegment: (recordingId: string, segmentIndex: number) =>
+    open: (recordingId: string, teamId?: string | null) =>
+      ipcRenderer.invoke(ipcChannels.sessionReplays.open, recordingId, teamId ?? null),
+    load: (recordingId: string, teamId?: string | null) =>
+      ipcRenderer.invoke(ipcChannels.sessionReplays.load, recordingId, teamId ?? null),
+    readSegment: (recordingId: string, segmentIndex: number, teamId?: string | null) =>
       ipcRenderer.invoke(
         ipcChannels.sessionReplays.readSegment,
         recordingId,
         segmentIndex,
+        teamId ?? null,
+      ),
+    readSnapshot: (recordingId: string, segmentIndex: number, teamId: string) =>
+      ipcRenderer.invoke(
+        ipcChannels.sessionReplays.readSnapshot,
+        recordingId,
+        segmentIndex,
+        teamId,
       ),
     storageUsage: () =>
       ipcRenderer.invoke(ipcChannels.sessionReplays.storageUsage),
