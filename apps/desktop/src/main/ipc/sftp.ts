@@ -31,6 +31,7 @@ import {
   runWithAwsServerProxyAuthRetry,
 } from "../aws-ws-proxy";
 import { runWithIpcSessionOwner } from "./session-owner";
+import { collectHopSecretsToPersist, findHostNeedingPassword, jumpHostRejectingAuth } from "./connect-credentials";
 import { t } from '../i18n';
 import { logMessage } from "../activity-log-message";
 
@@ -338,11 +339,17 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
       }
 
       const sshHost = typedHost as SshHostRecord;
+      // 쓸 비밀번호가 없는 홉이 있으면 코어를 부르지 않고 그 홉을 알린다(세션과 같다 — ipc/ssh.ts).
+      const needsPasswordFor = await findHostNeedingPassword(ctx, sshHost, input.secrets, input.jumpSecrets);
+      if (needsPasswordFor) {
+        return { credentialsNeeded: { hostId: needsPasswordFor, reason: "missing" as const } };
+      }
       const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys(sshHost);
       const { username, authType, secrets, shouldPersistHostSecret, typedUsername } =
         await ctx.resolveSshAuth(sshHost, input.secrets);
       await ctx.ensureCertificateAuthReady(sshHost, secrets, authType);
-      const jump = await ctx.resolveJumpHostTarget(sshHost);
+      const jump = await ctx.resolveJumpHostTarget(sshHost, input.jumpSecrets);
+      const hopSecretsToPersist = await collectHopSecretsToPersist(ctx, sshHost, input.jumpSecrets);
       const authAgentEndpoint =
         authType === "agent" ? await resolveLocalAgentEndpoint() : null;
 
@@ -365,14 +372,34 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
         authAgentEndpoint: authAgentEndpoint?.endpoint,
         hostId: sshHost.id,
         title: sshHost.label,
+      }).catch((error: unknown) => {
+        // 점프 홉이 인증을 거절했으면 오류 대신 그 홉을 알린다 — 화면이 요청 창을 대상이 아니라 그 홉으로 띄운다.
+        const rejectingHop = jumpHostRejectingAuth(ctx, sshHost, error);
+        if (!rejectingHop) {
+          throw error;
+        }
+        return {
+          credentialsNeeded: {
+            hostId: rejectingHop.id,
+            reason: "rejected" as const,
+            message: error instanceof Error ? error.message : String(error),
+          },
+        };
       });
+      if ("credentialsNeeded" in endpoint) {
+        return endpoint;
+      }
 
       if (shouldPersistHostSecret) {
         await ctx.persistHostSpecificSecret(sshHost.id, sshHost.label, secrets, typedUsername);
-        if (typedUsername) {
-          // 개인 호스트면 레코드의 사용자 이름이 바뀌었다 — 화면이 호스트 목록을 다시 읽게 한다.
-          ctx.emitWorkspaceChanged?.();
-        }
+      }
+      // 요청 창에 넣은 점프 호스트의 값도 그 홉 제자리에(팀 호스트는 내 자격 증명).
+      for (const hop of hopSecretsToPersist) {
+        await ctx.persistHostSpecificSecret(hop.hostId, hop.label, hop.secrets, hop.username);
+      }
+      if ((shouldPersistHostSecret && typedUsername) || hopSecretsToPersist.some((hop) => hop.username)) {
+        // 개인 호스트면 레코드의 사용자 이름이 바뀌었다 — 화면이 호스트 목록을 다시 읽게 한다.
+        ctx.emitWorkspaceChanged?.();
       }
 
       return endpoint;

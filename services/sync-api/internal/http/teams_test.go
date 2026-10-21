@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -518,4 +519,69 @@ func TestTeamVaultResetAndAccountDeletionWakeRemainingMembers(t *testing.T) {
 	waiting = teamWatchAsync(t, router, hub, other, teamID, currentTeamWatchETag(t, router, other, teamID))
 	expectStatus(t, teamCall(router, member, http.MethodDelete, "/auth/account", "", nil), http.StatusNoContent, "member account deletion")
 	expectStatus(t, awaitWatch(t, waiting, 2*time.Second, "other team watch after member deletion"), http.StatusOK, "other team watch after member deletion")
+}
+
+// 링크 페이지는 로그인 없이 열리고 팀 이름만 보인다 — 이름은 HTML 로 이스케이프되고, 초대한 사람·상자는 없다.
+// `앱 열기` 는 로그인 콜백(dolgate://)과 다른 스킴으로 넘긴다.
+func TestTeamInvitePageShowsOnlyTheTeamName(t *testing.T) {
+	env := newWatchTestEnv(t)
+	router := env.router(t, httpserver.RouterConfig{SyncWatch: env.hub(t, time.Hour)})
+	owner := newWatchTestAccount(t, router, "invite-page-owner@example.com")
+	teamID := createTeamOverHTTP(t, router, owner, "Acme <script>alert(1)</script>")
+	code, _ := createInviteOverHTTP(t, router, owner, teamID, time.Hour)
+
+	request := httptest.NewRequest(http.MethodGet, "/invite/"+code, nil)
+	request.Header.Set("Accept-Language", "ko-KR,ko;q=0.9")
+	page := httptest.NewRecorder()
+	router.ServeHTTP(page, request)
+
+	expectStatus(t, page, http.StatusOK, "invite page")
+	body := page.Body.String()
+	for _, want := range []string{
+		"Acme &lt;script&gt;alert(1)&lt;/script&gt;",
+		`property="og:title"`,
+		"Dolgate 에서 열기",
+		"Dolgate 내려받기",
+		`"dolgate-invite"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("invite page lacks %q:\n%s", want, body)
+		}
+	}
+	for _, unwanted := range []string{"<script>alert(1)", "invite-page-owner@example.com", "sealed-team-key"} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("invite page shows %q:\n%s", unwanted, body)
+		}
+	}
+	if csp := page.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") {
+		t.Fatalf("invite page CSP = %q", csp)
+	}
+	if cache := page.Header().Get("Cache-Control"); cache != "no-store" {
+		t.Fatalf("invite page Cache-Control = %q", cache)
+	}
+}
+
+// 취소했거나 없는 링크는 팀 이름 없이 만료 안내만 보인다(열기 단추도 없다).
+func TestTeamInvitePageForAnUnusableLink(t *testing.T) {
+	env := newWatchTestEnv(t)
+	router := env.router(t, httpserver.RouterConfig{SyncWatch: env.hub(t, time.Hour)})
+	owner := newWatchTestAccount(t, router, "invite-page-gone@example.com")
+	teamID := createTeamOverHTTP(t, router, owner, "Hidden Team")
+	code, _ := createInviteOverHTTP(t, router, owner, teamID, time.Hour)
+	expectStatus(t, teamCall(router, owner, http.MethodDelete, "/teams/"+teamID+"/invites/"+code, "", nil), http.StatusNoContent, "revoke")
+
+	for _, path := range []string{"/invite/" + code, "/invite/no-such-code"} {
+		page := httptest.NewRecorder()
+		router.ServeHTTP(page, httptest.NewRequest(http.MethodGet, path, nil))
+		expectStatus(t, page, http.StatusNotFound, path)
+		body := page.Body.String()
+		if !strings.Contains(body, "This invite link has expired") {
+			t.Fatalf("%s: no expiry notice:\n%s", path, body)
+		}
+		for _, unwanted := range []string{"Hidden Team", "open-app", "dolgate-invite"} {
+			if strings.Contains(body, unwanted) {
+				t.Fatalf("%s: shows %q:\n%s", path, unwanted, body)
+			}
+		}
+	}
 }

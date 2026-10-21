@@ -11,6 +11,7 @@ const { mocks, storeState, watchMocks } = vi.hoisted(() => ({
     localTailnetNodeName: 'dev' as string | null,
     hosts: [] as HostRecord[],
     refreshHostCatalog: vi.fn(),
+    vaultIndex: undefined as unknown,
   },
   watchMocks: {
     acquireTailnetWatch: () => () => {},
@@ -27,6 +28,7 @@ const { mocks, storeState, watchMocks } = vi.hoisted(() => ({
     removeTailnet: vi.fn(),
     saveTailnet: vi.fn(),
     onTailnetStatus: vi.fn(),
+    listTeamTailnets: vi.fn(),
   },
 }));
 
@@ -239,5 +241,66 @@ describe('TailnetSettingsPanel', () => {
 
     await waitFor(() => expect(mocks.removeTailnet).toHaveBeenCalledWith('net-1'));
     expect(storeState.refreshHostCatalog).toHaveBeenCalledTimes(1);
+  });
+});
+
+// 설정의 볼트별 묶음(4-7). 새 tailnet 은 묶음 머리의 + 로 그 볼트에 — 팀 것의 auth key 는 내 칸에만 간다(K1).
+describe('TailnetSettingsPanel with team vaults', () => {
+  beforeEach(() => {
+    for (const mock of Object.values(mocks)) {
+      mock.mockReset();
+    }
+    mocks.listTailnets.mockResolvedValue([createRecord()]);
+    mocks.listTeamTailnets.mockResolvedValue([createRecord({ id: 'net-team', label: 'acme-tailnet', hasAuthKey: true })]);
+    mocks.snapshotTailnets.mockResolvedValue({ statuses: [], localNodeName: 'dev' });
+    mocks.onTailnetStatus.mockReturnValue(() => {});
+    mocks.saveTailnet.mockResolvedValue(createRecord({ id: 'net-draft' }));
+    storeState.tailnetStatuses = {};
+    storeState.hosts = [];
+    storeState.vaultIndex = {
+      teams: [{ id: 'team-a', name: 'Acme Infra', role: 'owner', syncState: 'ready', syncError: null, groups: [] }],
+    };
+  });
+
+  const section = (vaultId: string) =>
+    within(document.querySelector(`[data-vault-section="${vaultId}"]`)!.closest('section')!);
+
+  it('groups tailnets by vault and adds a team one into that team, the auth key labelled as mine', async () => {
+    const draftId = vi.spyOn(crypto, 'randomUUID').mockReturnValue('net-draft' as ReturnType<typeof crypto.randomUUID>);
+    const { rerender } = render(<TailnetSettingsPanel />);
+
+    await waitFor(() => expect(section('team-a').getByText('acme-tailnet')).toBeInTheDocument());
+    expect(mocks.listTeamTailnets).toHaveBeenCalledWith('team-a');
+    expect(section('personal').getByText('corp')).toBeInTheDocument();
+    // 팀이 있으면 위의 추가 단추 대신 묶음 머리의 + 로 만든다.
+    expect(screen.queryByRole('button', { name: '네트워크 추가' })).toBeNull();
+
+    fireEvent.click(section('team-a').getByRole('button', { name: 'Acme Infra에 네트워크 추가' }));
+    // 폼은 그 묶음 안에 열린다.
+    expect(section('team-a').getByText('My auth key')).toBeInTheDocument();
+    fireEvent.change(section('team-a').getByLabelText('My auth key'), {
+      target: { value: 'tskey-mine' },
+    });
+    // 붙은 뒤에만 저장된다 — 시험이 올린 노드가 붙은 상태를 준다.
+    putStatus({ id: 'net-draft', state: 'running', tailnetName: 'acme.ts.net' } as TailnetStatus);
+    rerender(<TailnetSettingsPanel />);
+    fireEvent.click(section('team-a').getByRole('button', { name: '저장' }));
+
+    await waitFor(() =>
+      expect(mocks.saveTailnet).toHaveBeenCalledWith(
+        expect.objectContaining({ vaultId: 'team-a', authKey: 'tskey-mine', record: expect.objectContaining({ id: 'net-draft' }) }),
+      ),
+    );
+    draftId.mockRestore();
+  });
+
+  it('keeps a personal tailnet personal', async () => {
+    render(<TailnetSettingsPanel />);
+    await waitFor(() => expect(section('personal').getByText('corp')).toBeInTheDocument());
+
+    fireEvent.click(section('personal').getByRole('button', { name: 'Personal에 네트워크 추가' }));
+
+    expect(section('personal').queryByText('My auth key')).toBeNull();
+    expect(section('personal').getByText('auth key')).toBeInTheDocument();
   });
 });

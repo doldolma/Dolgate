@@ -13,6 +13,14 @@ import type {
   HostContainersTabState,
 } from "../store/createAppStore";
 import { AwsEcsWorkspace } from "./AwsEcsWorkspace";
+import { appStore } from "../store/appStore";
+import { createEmptyVaultIndex } from "../store/utils";
+
+const awsImports = vi.hoisted(() => ({ updateAwsProfile: vi.fn() }));
+vi.mock("../services/desktop/imports", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../services/desktop/imports")>()),
+  updateAwsProfile: awsImports.updateAwsProfile,
+}));
 
 const uPlotMock = vi.hoisted(() => {
   const ctor = vi.fn().mockImplementation(function UPlotMock(
@@ -619,6 +627,48 @@ describe("AwsEcsWorkspace", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
     expect(onRefresh).toHaveBeenCalledTimes(2);
+  });
+
+  // 키 없는 팀 정적 프로필(4-7 M3) — 그 자리에서 내 키를 넣고 다시 읽는다. 설정으로 보내지 않는다.
+  it("offers to add my own key for a team profile that has none, then loads the cluster again", async () => {
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+    awsImports.updateAwsProfile.mockResolvedValue(undefined);
+    appStore.setState({
+      vaultIndex: {
+        ...createEmptyVaultIndex(),
+        teams: [{ id: "team-a", name: "Acme Infra", role: "owner", syncState: "ready", syncError: null, groups: [] }],
+      },
+      awsMissingMyKeyByProfileId: {
+        "team-prod": { teamId: "team-a", profileId: "team-prod", profileName: "acme-prod" },
+      },
+    });
+
+    render(
+      <AwsEcsWorkspace
+        host={{ ...createHost(), awsProfileId: "team-prod", awsProfileName: "acme-prod" }}
+        tab={createTab(createSnapshot(), {
+          isLoading: false,
+          errorMessage: '팀 프로필 "acme-prod" 에 내 AWS 키가 없습니다. 키는 팀원마다 각자 넣습니다.',
+        })}
+        isActive={false}
+        onRefresh={onRefresh}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "내 키 넣기" }));
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.change(dialog.getByLabelText("My Access Key"), { target: { value: "AKIAMINE" } });
+    fireEvent.change(dialog.getByLabelText("My Secret"), { target: { value: "mine" } });
+    fireEvent.click(dialog.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledWith("ecs-host-1"));
+    expect(awsImports.updateAwsProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ profileName: "acme-prod", vaultId: "team-a" }),
+    );
+    expect(appStore.getState().awsMissingMyKeyByProfileId).toEqual({});
+    appStore.setState(appStore.getInitialState(), true);
   });
 
   it("does not show SSO recovery actions for generic ECS errors", () => {

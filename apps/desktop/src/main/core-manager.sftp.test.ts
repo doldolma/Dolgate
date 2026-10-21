@@ -39,7 +39,7 @@ vi.mock("node:child_process", () => ({
   spawn: spawnMock,
 }));
 
-import { CoreManager } from "./core-manager";
+import { CoreManager, jumpDepthOfCoreError } from "./core-manager";
 
 function decodeControlFrame(
   buffer: Buffer,
@@ -941,6 +941,39 @@ describe("CoreManager SFTP sessions", () => {
       },
       secrets,
     );
+  });
+
+  // 코어가 실은 점프 깊이를 Error 에 붙여 둔다 — 메인이 문구를 뜯지 않고 어느 홉이 거절했는지 안다.
+  it("keeps the core's jump depth on a failed SFTP connect", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const manager = new CoreManager(() => undefined);
+
+    const connectPromise = manager.sftpConnect({
+      endpointId: "endpoint-jump",
+      host: "t.internal",
+      port: 22,
+      username: "app",
+      authType: "password",
+      password: "app-pw",
+      trustedHostKeyBase64: "AAAATEST",
+      hostId: "target",
+      title: "Target",
+    });
+
+    await waitForWriteCount(fakeProcess.writes, 1);
+    const request = decodeControlFrame(fakeProcess.writes[0]);
+    fakeProcess.emitControl({
+      type: "sftpError",
+      requestId: request.id,
+      endpointId: "endpoint-jump",
+      payload: { message: "jump host: ssh: unable to authenticate", jumpDepth: 1 },
+    });
+
+    const error = await connectPromise.catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(jumpDepthOfCoreError(error)).toBe(1);
+    expect(jumpDepthOfCoreError(new Error("ssh: unable to authenticate"))).toBe(0);
   });
 
   it("does not copy SFTP connection secrets into connection failure logs", async () => {

@@ -13,8 +13,12 @@ import {
 type StoreSetter = SliceDeps["set"];
 
 export function createBootstrapSyncServices({ api }: SliceDeps) {
+  // 볼트 표와 팀 사용 가능 여부. 못 읽어도 다른 목록 읽기를 막지 않는다 — 그때는 지금 값을 그대로 둔다.
+  const loadVaultIndex = () => api.teams.getVaultIndex().catch(() => null);
+  const loadTeamAvailability = () => api.teams.getAvailability().catch(() => null);
+
   const syncOperationalData = async (set: StoreSetter) => {
-    const [snapshot, dnsOverrides, knownHosts, activityLogs, keychainEntries, snippets, savedWorkspaces] =
+    const [snapshot, dnsOverrides, knownHosts, activityLogs, keychainEntries, snippets, savedWorkspaces, vaultIndex] =
       await Promise.all([
         api.portForwards.list(),
         api.dnsOverrides.list(),
@@ -23,6 +27,7 @@ export function createBootstrapSyncServices({ api }: SliceDeps) {
         api.keychain.list(),
         api.snippets.list(),
         api.savedWorkspaces.list(),
+        loadVaultIndex(),
       ]);
 
     set({
@@ -34,14 +39,17 @@ export function createBootstrapSyncServices({ api }: SliceDeps) {
       keychainEntries: sortKeychainEntries(keychainEntries),
       snippets,
       savedWorkspaces,
+      ...(vaultIndex ? { vaultIndex } : {}),
     } satisfies Partial<AppState>);
   };
 
   const syncSyncedWorkspaceData = async (set: StoreSetter) => {
-    const [snapshot, snippets, savedWorkspaces] = await Promise.all([
+    const [snapshot, snippets, savedWorkspaces, vaultIndex, teamAvailability] = await Promise.all([
       api.bootstrap.getSyncedWorkspaceSnapshot(),
       api.snippets.list(),
       api.savedWorkspaces.list(),
+      loadVaultIndex(),
+      loadTeamAvailability(),
     ]);
 
     set({
@@ -55,21 +63,27 @@ export function createBootstrapSyncServices({ api }: SliceDeps) {
       settings: snapshot.settings,
       snippets,
       savedWorkspaces,
+      ...(vaultIndex ? { vaultIndex } : {}),
+      ...(teamAvailability ? { teamAvailability } : {}),
     } satisfies Partial<AppState>);
   };
 
   const refreshHostAndKeychainState = async (set: StoreSetter) => {
-    const [hosts, keychainEntries] = await Promise.all([
+    const [hosts, keychainEntries, vaultIndex] = await Promise.all([
       api.hosts.list(),
       api.keychain.list(),
+      loadVaultIndex(),
     ]);
     set({
       hosts: sortHosts(hosts),
       keychainEntries: sortKeychainEntries(keychainEntries),
+      ...(vaultIndex ? { vaultIndex } : {}),
     } satisfies Partial<AppState>);
   };
 
   return {
+    loadVaultIndex,
+    loadTeamAvailability,
     syncOperationalData,
     syncSyncedWorkspaceData,
     refreshHostAndKeychainState,

@@ -227,4 +227,180 @@ describe('registerPortForwardAndDnsIpcHandlers', () => {
       }),
     );
   });
+
+  // 4-6: 볼트는 레코드가 정한다 — 규칙은 호스트의 볼트, Linked DNS 는 규칙의 볼트, Static DNS 는 화면이 고른 볼트.
+  describe('writes go to the vault the record belongs to', () => {
+    const at = '2025-01-01T00:00:00.000Z';
+    // 메모리에 두는 저장소 가짜 — 핸들러가 부르는 것만.
+    function memoryVault(seed: { hosts?: string[]; rules?: Array<Record<string, unknown>>; dns?: Array<Record<string, unknown>> }) {
+      const rules = [...(seed.rules ?? [])];
+      let dns = [...(seed.dns ?? [])];
+      const hosts = (seed.hosts ?? []).map((id) => ({ id, kind: 'ssh', label: id, hostname: `${id}.test`, port: 22, username: 'u' }));
+      return {
+        hosts: { getById: vi.fn((id: string) => hosts.find((host) => host.id === id) ?? null), list: vi.fn(() => hosts) },
+        portForwards: {
+          list: vi.fn(() => rules),
+          getById: vi.fn((id: string) => rules.find((rule) => rule.id === id) ?? null),
+          create: vi.fn((draft: Record<string, unknown>) => {
+            const record = { ...draft, id: `new-rule-${rules.length}`, createdAt: at, updatedAt: at };
+            rules.push(record);
+            return record;
+          }),
+          update: vi.fn((id: string, draft: Record<string, unknown>) => ({ ...draft, id, createdAt: at, updatedAt: at })),
+          remove: vi.fn(),
+        },
+        dnsOverrides: {
+          list: vi.fn(() => dns),
+          getById: vi.fn((id: string) => dns.find((record) => record.id === id) ?? null),
+          create: vi.fn((draft: Record<string, unknown>) => {
+            const record = { ...draft, id: `new-dns-${dns.length}`, createdAt: at, updatedAt: at };
+            dns.push(record);
+            return record;
+          }),
+          update: vi.fn((id: string, draft: Record<string, unknown>) => ({ ...draft, id, createdAt: at, updatedAt: at })),
+          remove: vi.fn((id: string) => {
+            dns = dns.filter((record) => record.id !== id);
+          }),
+          replaceAll: vi.fn(),
+        },
+        syncOutbox: { upsertDeletion: vi.fn() },
+      };
+    }
+    const teamPrefs = {
+      read: () => ({ hosts: new Map(), workspaces: new Map(), terminalThemeByHostId: {} }),
+      readHostCredentials: () => null,
+    };
+    const sshRule = (id: string, hostId: string) => ({
+      id, hostId, transport: 'ssh', label: id, mode: 'local', bindAddress: '127.0.0.1', bindPort: 9000, targetHost: 'localhost', targetPort: 80, createdAt: at, updatedAt: at,
+    });
+
+    function setup() {
+      const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+      electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+        handlers.set(channel, handler);
+      });
+      const personal = memoryVault({
+        hosts: ['p-host'],
+        rules: [sshRule('p-rule', 'p-host')],
+        dns: [{ id: 'p-static', type: 'static', hostname: 'grafana.lab.test', address: '10.0.0.20', createdAt: at, updatedAt: at }],
+      });
+      const team = {
+        ...memoryVault({
+          hosts: ['t-host', 't-host-2'],
+          rules: [sshRule('t-rule', 't-host')],
+          dns: [
+            { id: 't-linked', type: 'linked', hostname: 'acme.internal', portForwardRuleId: 't-rule', createdAt: at, updatedAt: at },
+            { id: 't-static', type: 'static', hostname: 'grafana.lab.test', address: '10.20.0.50', createdAt: at, updatedAt: at },
+          ],
+        }),
+        memberPrefs: teamPrefs,
+      };
+      const ctx = withVaults(
+        {
+          ...personal,
+          assertSshHost: vi.fn(),
+          stopPortForwardWithDnsOverrideCleanup: vi.fn().mockResolvedValue(undefined),
+          rewriteActiveDnsOverrides: vi.fn().mockResolvedValue(undefined),
+          // 만든 것을 돌려줄 때 찾는 목록 — 두 볼트의 것을 그대로.
+          listResolvedDnsOverrides: vi.fn(() =>
+            [...personal.dnsOverrides.list(), ...team.dnsOverrides.list()].map((record) => ({ ...record, status: 'inactive' })),
+          ),
+          hostsOverrideManager: {
+            getActiveStaticOverrideIds: vi.fn(() => new Set<string>()),
+            setStaticOverrideActive: vi.fn(),
+            removeStaticOverrideState: vi.fn(),
+          },
+          activityLogs: { append: vi.fn() },
+          queueSync: vi.fn(),
+        },
+        { 'team-1': team },
+      );
+      registerPortForwardAndDnsIpcHandlers(ctx as any);
+      const call = (channel: string, ...args: unknown[]) => handlers.get(channel)!({}, ...args);
+      return { personal, team, ctx, call };
+    }
+
+    it('creates a rule in the vault of its host', async () => {
+      const { personal, team, call } = setup();
+      const draft = { label: 'app', hostId: 't-host', transport: 'ssh', mode: 'local', bindAddress: '127.0.0.1', bindPort: 9100, targetHost: 'localhost', targetPort: 3000 };
+
+      await call(ipcChannels.portForwards.create, draft);
+      expect(team.portForwards.create).toHaveBeenCalledWith(draft);
+      expect(personal.portForwards.create).not.toHaveBeenCalled();
+
+      await call(ipcChannels.portForwards.create, { ...draft, hostId: 'p-host' });
+      expect(personal.portForwards.create).toHaveBeenCalledWith({ ...draft, hostId: 'p-host' });
+    });
+
+    it('refuses to move a rule onto a host in another vault', async () => {
+      const { personal, team, call } = setup();
+      const draft = { label: 't', transport: 'ssh', mode: 'local', bindAddress: '127.0.0.1', bindPort: 9000, targetHost: 'localhost', targetPort: 80 };
+
+      await expect(call(ipcChannels.portForwards.update, 't-rule', { ...draft, hostId: 'p-host' })).rejects.toThrow(
+        '이 규칙을 다른 볼트의 호스트로 바꿀 수 없습니다',
+      );
+      expect(team.portForwards.update).not.toHaveBeenCalled();
+      expect(personal.portForwards.update).not.toHaveBeenCalled();
+
+      await call(ipcChannels.portForwards.update, 't-rule', { ...draft, hostId: 't-host-2' });
+      expect(team.portForwards.update).toHaveBeenCalledWith('t-rule', { ...draft, hostId: 't-host-2' });
+    });
+
+    it("removes a team rule and its linked DNS override from the team vault", async () => {
+      const { personal, team, call } = setup();
+
+      await call(ipcChannels.portForwards.remove, 't-rule');
+
+      expect(team.dnsOverrides.remove).toHaveBeenCalledWith('t-linked');
+      expect(team.syncOutbox.upsertDeletion).toHaveBeenCalledWith('dnsOverrides', 't-linked');
+      expect(team.syncOutbox.upsertDeletion).toHaveBeenCalledWith('portForwards', 't-rule');
+      expect(team.portForwards.remove).toHaveBeenCalledWith('t-rule');
+      expect(personal.portForwards.remove).not.toHaveBeenCalled();
+      expect(personal.syncOutbox.upsertDeletion).not.toHaveBeenCalled();
+    });
+
+    it("puts a static override in the vault the screen picked and a linked one in its rule's vault", async () => {
+      const { personal, team, call } = setup();
+      const staticDraft = { type: 'static', hostname: 'grafana.lab.test', address: '10.20.0.60' };
+
+      await call(ipcChannels.dnsOverrides.create, staticDraft, 'team-1');
+      expect(team.dnsOverrides.create).toHaveBeenCalledWith(staticDraft, team.portForwards);
+
+      await call(ipcChannels.dnsOverrides.create, staticDraft);
+      expect(personal.dnsOverrides.create).toHaveBeenCalledWith(staticDraft, personal.portForwards);
+
+      const linkedDraft = { type: 'linked', hostname: 'api.internal', portForwardRuleId: 't-rule' };
+      await call(ipcChannels.dnsOverrides.create, linkedDraft);
+      expect(team.dnsOverrides.create).toHaveBeenLastCalledWith(linkedDraft, team.portForwards);
+      // 화면이 고른 볼트와 규칙의 볼트가 다르면 거절한다.
+      await expect(call(ipcChannels.dnsOverrides.create, linkedDraft, 'personal')).rejects.toThrow(
+        '다른 볼트의 포트 포워딩 규칙에는 이을 수 없습니다',
+      );
+      await expect(call(ipcChannels.dnsOverrides.create, staticDraft, 'team-gone')).rejects.toThrow();
+    });
+
+    it("keeps a team override on the team's rules, and toggles and removes it in the team vault", async () => {
+      const { personal, team, ctx, call } = setup();
+
+      await expect(
+        call(ipcChannels.dnsOverrides.update, 't-linked', { type: 'linked', hostname: 'acme.internal', portForwardRuleId: 'p-rule' }),
+      ).rejects.toThrow('다른 볼트의 포트 포워딩 규칙에는 이을 수 없습니다');
+      expect(team.dnsOverrides.update).not.toHaveBeenCalled();
+
+      await call(ipcChannels.dnsOverrides.update, 't-static', { type: 'static', hostname: 'grafana.lab.test', address: '10.20.0.70' });
+      expect(team.dnsOverrides.update).toHaveBeenCalledWith(
+        't-static',
+        { type: 'static', hostname: 'grafana.lab.test', address: '10.20.0.70' },
+        team.portForwards,
+      );
+
+      await call(ipcChannels.dnsOverrides.setStaticActive, 't-static', true);
+      expect(ctx.hostsOverrideManager.setStaticOverrideActive).toHaveBeenCalledWith('t-static', true);
+
+      await call(ipcChannels.dnsOverrides.remove, 't-static');
+      expect(team.dnsOverrides.remove).toHaveBeenCalledWith('t-static');
+      expect(team.syncOutbox.upsertDeletion).toHaveBeenCalledWith('dnsOverrides', 't-static');
+      expect(personal.dnsOverrides.remove).not.toHaveBeenCalled();
+    });
+  });
 });

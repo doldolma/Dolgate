@@ -220,6 +220,7 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
               connectionProgress: null,
               connectionDiagnostic: null,
               hostGroupPath: null,
+              hostVaultId: null,
               currentPath:
                 sourceKind === "local"
                   ? pane.lastLocalPath || get().sftp.localHomePath
@@ -283,11 +284,12 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
                 hostSearchQuery: query,
               }),
             })),
-    navigateSftpHostGroup: (paneId, path) =>
+    navigateSftpHostGroup: (paneId, path, vaultId) =>
             set((state) => ({
               sftp: updatePaneState(state, paneId, {
                 ...getPane(state, paneId),
                 hostGroupPath: normalizeGroupPath(path),
+                hostVaultId: vaultId ?? null,
                 selectedHostId: null,
                 connectingHostId: null,
                 connectingEndpointId: null,

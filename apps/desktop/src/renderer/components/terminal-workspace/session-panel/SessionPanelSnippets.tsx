@@ -29,6 +29,9 @@ import {
 } from '../SnippetVariablesDialog';
 import { SnippetEditDialog } from '../../SnippetEditDialog';
 import { useSessionScopedState } from '../../../lib/session-scoped-state';
+import { teamOfVault, vaultIdOf } from '../../../lib/vault-groups';
+import { TeamMark } from '../../teams/TeamMark';
+import { useSessionSnippets } from '../useSessionSnippets';
 import type { SessionPanelSender } from './useSessionPanelTarget';
 
 interface SessionPanelSnippetsProps {
@@ -49,8 +52,13 @@ interface EditingState {
 
 export function SessionPanelSnippets({ sessionId, sender }: SessionPanelSnippetsProps) {
   const { t: translate } = useTranslation();
-  const snippets = useAppStore((state) => state.snippets);
   const hosts = useAppStore((state) => state.hosts);
+  const vaultIndex = useAppStore((state) => state.vaultIndex);
+  // 이 세션이 붙은 호스트의 볼트 것을 먼저(S1) — 자동완성과 같은 순서.
+  const sessionHostId = useAppStore(
+    (state) => state.tabs.find((tab) => tab.sessionId === sessionId)?.hostId ?? null,
+  );
+  const snippets = useSessionSnippets(sessionHostId);
   const saveSnippet = useAppStore((state) => state.saveSnippet);
   const removeSnippet = useAppStore((state) => state.removeSnippet);
   // 목록은 전역이지만 검색어는 세션마다 따로 둔다 — 다른 서버로 옮기면 비고, 돌아오면 남는다.
@@ -67,6 +75,24 @@ export function SessionPanelSnippets({ sessionId, sender }: SessionPanelSnippets
       ),
     [query, snippets],
   );
+
+  // 팀 스니펫에만 작은 팀 표시(팔레트·카드와 같은 표시). 개인 것에는 아무것도 안 붙인다.
+  function snippetMeta(snippet: SnippetRecord) {
+    const text = [snippet.label, snippet.keyword].filter(Boolean).join(' · ');
+    const team = teamOfVault(vaultIndex, vaultIdOf(vaultIndex?.teamIdBySnippetId, snippet.id));
+    if (!team) {
+      return text;
+    }
+    return (
+      <span className="inline-flex max-w-full items-center gap-[0.3rem]">
+        <Tooltip label={team.name} className="shrink-0">
+          <TeamMark name={team.name} size="xs" />
+        </Tooltip>
+        <span className="sr-only">{team.name}</span>
+        <span className="min-w-0 truncate">{text}</span>
+      </span>
+    );
+  }
 
   function perform(command: string, mode: 'insert' | 'run'): void {
     if (mode === 'insert') {
@@ -137,7 +163,7 @@ export function SessionPanelSnippets({ sessionId, sender }: SessionPanelSnippets
               <SessionPanelRow
                 key={snippet.id}
                 text={snippet.command}
-                meta={[snippet.label, snippet.keyword].filter(Boolean).join(' · ')}
+                meta={snippetMeta(snippet)}
                 actions={actions}
                 blockedHint={
                   actions.blockedReason

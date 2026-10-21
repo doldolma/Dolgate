@@ -39,6 +39,7 @@ import {
 } from "./auth-error-message";
 import { desktopArgon2idDerive } from "./vault-crypto";
 import { getMainLocale, t } from "./i18n";
+import { APP_URL_SCHEMES } from "./protocol-links";
 import { getNewVaultPassphraseMessage } from "../common/shared-messages";
 
 // shared-core 는 코드만 돌려주므로, 사용자에게 보일 문구는 이 앱에서 만들어 던진다.
@@ -2853,17 +2854,20 @@ export class AuthService {
     this.appendLog?.(entry);
   }
 
+  /** 앱이 받는 주소 스킴(로그인 콜백·팀 초대 — protocol-links.ts)을 OS 에 등록한다. */
   registerProtocolClient(): void {
     if (!app.isPackaged) {
       return;
     }
-    if (process.defaultApp && process.argv.length >= 2) {
-      app.setAsDefaultProtocolClient("dolgate", process.execPath, [
-        process.argv[1]!,
-      ]);
-      return;
+    for (const scheme of APP_URL_SCHEMES) {
+      if (process.defaultApp && process.argv.length >= 2) {
+        app.setAsDefaultProtocolClient(scheme, process.execPath, [
+          process.argv[1]!,
+        ]);
+      } else {
+        app.setAsDefaultProtocolClient(scheme);
+      }
     }
-    app.setAsDefaultProtocolClient("dolgate");
   }
 
   private async prepareBrowserRedirectUri(): Promise<string> {

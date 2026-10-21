@@ -1,7 +1,19 @@
-import type { HostRecord } from '@shared';
+import { isSshHostRecord, type HostRecord } from '@shared';
 import { getFormatLocale, t } from '../../i18n';
 
 /** 상세 패널용 풀 타입 라벨. */
+/**
+ * 팀 호스트에 내 사용자 이름이 있으면 그 이름으로 보인다 — 실제로 그 이름으로 붙는다(내 자격 증명이 먼저).
+ * 표시만 바꾼다: 레코드(편집 서랍)는 팀 것 그대로라 저장에 내 이름이 섞이지 않는다(F4).
+ */
+export function withMyUsername<T extends HostRecord>(
+  host: T,
+  myUsernameByHostId: Readonly<Record<string, string>> | null | undefined,
+): T {
+  const mine = myUsernameByHostId?.[host.id];
+  return mine && isSshHostRecord(host) ? ({ ...host, username: mine } as T) : host;
+}
+
 export function getHostTypeLabel(host: HostRecord): string {
   switch (host.kind) {
     case 'aws-ec2':

@@ -10,7 +10,12 @@ import {
   teamAwsProfileName,
 } from './aws-service';
 import { AwsProfileRepository } from './database';
-import { resetDesktopStateStorageForTests } from './state-storage';
+import {
+  createTeamState,
+  getDesktopStateStorage,
+  resetDesktopStateStorageForTests,
+} from './state-storage';
+import { createTeamVaultScope, listStoredTeamAwsProfiles } from './team-vault-scope';
 
 vi.mock('electron', () => ({
   app: {
@@ -2717,5 +2722,180 @@ describe('AwsService team vault profiles', () => {
       id: 'team:prod',
       isAuthenticated: true,
     });
+  });
+});
+
+// 설정의 팀 묶음에서 팀 프로필을 만들고 고친다(4-7). 팀에는 설정만 가고 정적 키는 늘 내 칸에 — 팀 저장소가 나눈다.
+describe('AwsService team profile management', () => {
+  const TEAM_ID = '7a1c2e3f-4b5d-4c6e-9f80-1a2b3c4d5e6f';
+
+  function addTeamVault() {
+    getDesktopStateStorage().updateState((state) => {
+      state.teams[TEAM_ID] = createTeamState({
+        name: 'Acme',
+        role: 'owner',
+        wrappedTeamDek: 'wrapped',
+        dataFloor: 1,
+        updatedAt: '2026-10-21T00:00:00.000Z',
+      });
+    });
+    const scope = createTeamVaultScope(TEAM_ID);
+    return { scope, vault: { teamId: TEAM_ID, profiles: scope.awsProfiles } };
+  }
+
+  async function createTeamService(personal: ManagedAwsProfilePayload[] = []) {
+    const rootDir = await createTempAwsProfileDir();
+    const service = createManagedAwsService(rootDir, personal);
+    service.setTeamProfileSource(listStoredTeamAwsProfiles);
+    return { rootDir, service, ...addTeamVault() };
+  }
+
+  it('makes, re-regions, rekeys, renames and deletes a team static profile inside the team, its keys in my own slot', async () => {
+    const { rootDir, service, scope, vault } = await createTeamService([
+      managedStaticProfile('prod', { region: 'ap-northeast-2' }),
+    ]);
+    const sts = service as unknown as { stsGetCallerIdentityWithStaticCredentials: ReturnType<typeof vi.fn> };
+    sts.stsGetCallerIdentityWithStaticCredentials = vi.fn().mockResolvedValue(undefined);
+    const credentials = () => readFile(path.join(rootDir, 'credentials'), 'utf8');
+    const teamName = (name: string) => teamAwsProfileName(TEAM_ID, name);
+
+    // 개인에 같은 이름이 있어도 겹침은 팀 안에서만 본다.
+    await service.createProfile(
+      { kind: 'static', profileName: 'prod', accessKeyId: 'AKIAMINE', secretAccessKey: 'mine-secret', region: 'us-east-1' },
+      vault,
+    );
+    const [teamProd] = scope.awsProfiles.listPayloads();
+    expect(teamProd).toMatchObject({ name: 'prod', region: 'us-east-1', accessKeyId: '', secretAccessKey: '' });
+    expect(scope.memberPrefs.readAwsProfileCredentials(teamProd!.id)).toEqual({
+      accessKeyId: 'AKIAMINE',
+      secretAccessKey: 'mine-secret',
+    });
+    await expect(credentials()).resolves.toContain(`[${teamName('prod')}]\naws_access_key_id = AKIAMINE`);
+    await expect(
+      service.createProfile({ kind: 'static', profileName: 'prod', accessKeyId: 'AKIAX', secretAccessKey: 'x' }, vault),
+    ).rejects.toThrow('같은 이름의 AWS 프로필이 이미 존재합니다.');
+
+    // 리전은 팀 설정이다 — 바꿔도 내 키는 그대로.
+    await service.updateProfileRegion({ profileName: 'prod', region: 'eu-west-1' }, vault);
+    expect(scope.awsProfiles.getPayloadById(teamProd!.id)).toMatchObject({ region: 'eu-west-1' });
+    expect(scope.memberPrefs.readAwsProfileCredentials(teamProd!.id)).toMatchObject({ accessKeyId: 'AKIAMINE' });
+
+    // 내 키만 바꾸면(리전을 보내지 않으면) 리전은 그대로 둔다.
+    await service.updateProfile({ profileName: 'prod', accessKeyId: 'AKIANEW', secretAccessKey: 'new-secret' }, vault);
+    expect(scope.awsProfiles.getPayloadById(teamProd!.id)).toMatchObject({ region: 'eu-west-1', accessKeyId: '' });
+    expect(scope.memberPrefs.readAwsProfileCredentials(teamProd!.id)).toEqual({
+      accessKeyId: 'AKIANEW',
+      secretAccessKey: 'new-secret',
+    });
+
+    await service.renameProfile({ profileName: 'prod', nextProfileName: 'prod-team' }, vault);
+    expect(scope.awsProfiles.listMetadata().map((profile) => profile.name)).toEqual(['prod-team']);
+    expect(scope.memberPrefs.readAwsProfileCredentials(teamProd!.id)).toMatchObject({ accessKeyId: 'AKIANEW' });
+    await expect(credentials()).resolves.toContain(`[${teamName('prod-team')}]\naws_access_key_id = AKIANEW`);
+
+    await service.deleteProfile('prod-team', vault);
+    expect(scope.awsProfiles.listMetadata()).toEqual([]);
+    expect(scope.memberPrefs.readAwsProfileCredentials(teamProd!.id)).toBeNull();
+    await expect(credentials()).resolves.not.toContain('@team-');
+    // 개인 것은 손대지 않았다.
+    expect(new AwsProfileRepository().listPayloads()).toEqual([
+      expect.objectContaining({ name: 'prod', region: 'ap-northeast-2', secretAccessKey: 'prod-secret' }),
+    ]);
+  });
+
+  it('makes a team assume-role only from a source in the same team, checked under the team name', async () => {
+    const { service, scope, vault } = await createTeamService([managedStaticProfile('corp-only')]);
+    scope.awsProfiles.upsert(managedStaticProfile('base', { id: 'team:base', accessKeyId: 'AKIAMINE', secretAccessKey: 'mine' }));
+    await service.materializeManagedProfiles();
+    const sts = service as unknown as { stsAssumeRoleWithSourceProfile: ReturnType<typeof vi.fn> };
+    sts.stsAssumeRoleWithSourceProfile = vi.fn().mockResolvedValue(undefined);
+
+    await service.createProfile(
+      { kind: 'role', profileName: 'admin', sourceProfileName: 'base', roleArn: 'arn:aws:iam::123456789012:role/Admin' },
+      vault,
+    );
+
+    expect(sts.stsAssumeRoleWithSourceProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceProfileName: teamAwsProfileName(TEAM_ID, 'base') }),
+    );
+    expect(scope.awsProfiles.getPayloadById(scope.awsProfiles.getMetadataByName('admin')!.id)).toMatchObject({
+      kind: 'role',
+      sourceProfileId: 'team:base',
+    });
+    // 개인 프로필은 팀 role 의 원본이 될 수 없다(펼칠 때도 볼트를 넘어 잇지 않는다).
+    await expect(
+      service.createProfile(
+        {
+          kind: 'role',
+          profileName: 'stray',
+          sourceProfileId: 'profile:corp-only',
+          sourceProfileName: 'corp-only',
+          roleArn: 'arn:aws:iam::123456789012:role/Admin',
+        },
+        vault,
+      ),
+    ).rejects.toThrow('선택한 source profile을 찾지 못했습니다.');
+  });
+
+  it('says a team static profile needs my own key instead of asking AWS, for the profile and for a role on it', async () => {
+    const { service, scope, vault } = await createTeamService();
+    scope.awsProfiles.upsert(
+      managedStaticProfile('keyless', { id: 'team:keyless', accessKeyId: '', secretAccessKey: '', region: 'us-east-1' }),
+    );
+    scope.awsProfiles.upsert(managedRoleProfile('ops', 'team:keyless', { id: 'team:ops' }));
+    await service.materializeManagedProfiles();
+    const sts = service as unknown as { stsGetCallerIdentityFromRoot: ReturnType<typeof vi.fn> };
+    sts.stsGetCallerIdentityFromRoot = vi.fn().mockResolvedValue({ account: '123456789012', arn: 'arn:aws:iam::123456789012:user/me' });
+    const missingMyKey = { teamId: TEAM_ID, profileId: 'team:keyless', profileName: 'keyless' };
+
+    await expect(service.getProfileStatus('keyless', vault)).resolves.toMatchObject({
+      profileName: 'keyless',
+      isAuthenticated: false,
+      isSsoProfile: false,
+      configuredRegion: 'us-east-1',
+      errorMessage: expect.stringContaining('keyless'),
+      missingMyKey,
+    });
+    // 접속 경로는 펼친 이름으로 묻는다(getProfileStatusById). role 은 원본을 가리킨다.
+    await expect(service.getProfileStatus(teamAwsProfileName(TEAM_ID, 'ops'))).resolves.toMatchObject({ missingMyKey });
+    expect(sts.stsGetCallerIdentityFromRoot).not.toHaveBeenCalled();
+
+    // 내 키를 넣으면 보통처럼 AWS 에 묻는다.
+    scope.memberPrefs.writeAwsProfileCredentials('team:keyless', { accessKeyId: 'AKIAMINE', secretAccessKey: 'mine' });
+    await service.materializeManagedProfiles();
+    const status = await service.getProfileStatus('keyless', vault);
+    expect(status).toMatchObject({ isAuthenticated: true });
+    expect(status.missingMyKey).toBeUndefined();
+  });
+
+  it('shows a team profile under its own name in the details, and logs in to a team SSO profile by that name', async () => {
+    const { service, scope, vault } = await createTeamService();
+    scope.awsProfiles.upsert(managedStaticProfile('prod', { id: 'team:prod', accessKeyId: 'AKIAMINE', secretAccessKey: 'mine' }));
+    scope.awsProfiles.upsert(managedRoleProfile('ops', 'team:prod', { id: 'team:ops' }));
+    scope.awsProfiles.upsert(managedSsoProfile('corp', { id: 'team:corp', ssoStartUrl: 'https://acme.awsapps.com/start' }));
+    await service.materializeManagedProfiles();
+    const probe = service as unknown as {
+      stsGetCallerIdentityFromRoot: ReturnType<typeof vi.fn>;
+      performSsoLoginForRoot: ReturnType<typeof vi.fn>;
+    };
+    probe.stsGetCallerIdentityFromRoot = vi.fn().mockRejectedValue(new Error('expired'));
+    probe.performSsoLoginForRoot = vi.fn().mockResolvedValue({ accessToken: 'token' });
+
+    await expect(service.getProfileDetails('ops', vault)).resolves.toMatchObject({
+      id: 'team:ops',
+      profileName: 'ops',
+      kind: 'role',
+      sourceProfile: 'prod',
+      sourceProfileId: 'team:prod',
+    });
+    await expect(service.getProfileDetails('prod', vault)).resolves.toMatchObject({
+      profileName: 'prod',
+      referencedByProfileNames: ['ops'],
+    });
+
+    await service.login('corp', vault);
+    expect(probe.performSsoLoginForRoot).toHaveBeenCalledWith(
+      expect.objectContaining({ startUrl: 'https://acme.awsapps.com/start' }),
+    );
   });
 });

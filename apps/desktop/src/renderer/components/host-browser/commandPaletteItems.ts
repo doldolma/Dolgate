@@ -23,6 +23,7 @@ import {
   SquareTerminal,
 } from '../../ui/icons';
 import type { HostBrowserModel } from './useHostBrowser';
+import { withMyUsername } from './hostDisplay';
 import { t } from '../../i18n';
 import { hostSubtitleLabels } from '../../../common/shared-messages';
 
@@ -224,10 +225,11 @@ export function buildHostBrowserCommandPaletteItems(
         group: 'host',
         title: t('palette.host.connect', { label: host.label }),
         subtitle: getHostPaletteSubtitle(
-          host,
+          withMyUsername(host, hb.myUsernameByHostId),
           !query && (hb.lastConnectedByHostId.get(host.id) ?? 0) > 0 ? t('palette.host.recent') : undefined,
         ),
         keywords: [host.label, host.groupName ?? '', getHostPaletteText(host)],
+        team: hb.hasVaults ? hb.teamOfAsset(`host:${host.id}`) : null,
         Icon: SquareTerminal,
         // 연결은 홈을 떠난다 — 열려 있는 호스트 편집기의 저장하지 않은 편집을 먼저 묻는다.
         run: () => hb.withLeaveHostEditor(() => void hb.onConnectHost(host.id)),
@@ -238,8 +240,9 @@ export function buildHostBrowserCommandPaletteItems(
         id: `host:sftp:${host.id}`,
         group: 'host',
         title: `${host.label} SFTP`,
-        subtitle: getHostPaletteSubtitle(host),
+        subtitle: getHostPaletteSubtitle(withMyUsername(host, hb.myUsernameByHostId)),
         keywords: ['sftp', 'files', host.label, getHostPaletteText(host)],
+        team: hb.hasVaults ? hb.teamOfAsset(`host:${host.id}`) : null,
         Icon: Folder,
         run: () => hb.onOpenSftp?.(host.id),
       });
@@ -249,8 +252,9 @@ export function buildHostBrowserCommandPaletteItems(
         id: `host:containers:${host.id}`,
         group: 'host',
         title: t('palette.host.containers', { label: host.label }),
-        subtitle: getHostPaletteSubtitle(host),
+        subtitle: getHostPaletteSubtitle(withMyUsername(host, hb.myUsernameByHostId)),
         keywords: ['containers', 'docker', 'podman', host.label, getHostPaletteText(host)],
+        team: hb.hasVaults ? hb.teamOfAsset(`host:${host.id}`) : null,
         Icon: Container,
         run: () => hb.withLeaveHostEditor(() => void hb.onOpenHostContainers(host.id)),
       });

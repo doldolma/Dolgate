@@ -56,11 +56,16 @@ class TeamTailnetRepository extends TailnetRepository {
     super(teamVaultRoot(teamId));
   }
 
+  /**
+   * 이 기기의 사람에게 보이는 모양 — 로그인 계정은 이 기기 것을, 키가 있는지(hasAuthKey)는 내 auth key 가
+   * 있는지를 얹는다. auth key 는 늘 각자 내 칸에 두므로 팀 레코드의 값은 쓰지 않는다.
+   */
   list(): TailnetRecord[] {
     const loginNames = getDesktopStateStorage().readTeamTailnetLoginNames(this.teamId);
-    return super.list().map(({ loginName: _stored, ...record }) =>
-      loginNames[record.id] ? { ...record, loginName: loginNames[record.id] } : record,
-    );
+    return super.list().map(({ loginName: _stored, ...record }) => {
+      const mine = { ...record, hasAuthKey: this.mine.readTailnetCredentials(record.id) !== null };
+      return loginNames[record.id] ? { ...mine, loginName: loginNames[record.id] } : mine;
+    });
   }
 
   save(record: TailnetRecord, authKey?: string): TailnetRecord {
@@ -80,6 +85,11 @@ class TeamTailnetRepository extends TailnetRepository {
     super.remove(id);
     getDesktopStateStorage().setTeamTailnetLoginName(this.teamId, id, null);
     this.mine.writeTailnetCredentials(id, null);
+  }
+
+  /** 시험·연결에 쓸 키 — 팀 것은 늘 내 auth key 다(팀 칸에는 키를 두지 않는다). */
+  readAuthKey(id: string): string | null {
+    return this.mine.readTailnetCredentials(id)?.authKey ?? null;
   }
 
   /** 팀에 올리는 것 — 이 기기의 계정도, auth key 도 싣지 않는다. */

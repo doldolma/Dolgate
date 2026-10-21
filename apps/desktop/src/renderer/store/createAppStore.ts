@@ -9,6 +9,7 @@ import { createSessionPanelSlice } from "./slices/sessionPanelSlice";
 import { createSessionSlice } from "./slices/sessionSlice";
 import { createSettingsSlice } from "./slices/settingsSlice";
 import { createSftpSlice } from "./slices/sftpSlice";
+import { createTeamsSlice } from "./slices/teamsSlice";
 import { createZmodemSlice } from "./slices/zmodemSlice";
 import { upsertTransferJob } from "./services/sftp";
 import type { AppState } from "./types";
@@ -30,6 +31,7 @@ export function createAppStore(api: DesktopApi) {
       ...createZmodemSlice(deps),
       ...createAiChatSlice(deps),
       ...createSessionPanelSlice(deps),
+      ...createTeamsSlice(deps),
     };
   });
 }

@@ -70,6 +70,15 @@ vi.mock("uplot", () => ({
   default: uPlotMock.ctor,
 }));
 
+const awsImports = vi.hoisted(() => ({ updateAwsProfile: vi.fn() }));
+vi.mock("../services/desktop/imports", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../services/desktop/imports")>()),
+  updateAwsProfile: awsImports.updateAwsProfile,
+}));
+
+import { appStore } from "../store/appStore";
+import { createEmptyVaultIndex } from "../store/utils";
+
 import {
   ContainerTunnelErrorBoundary,
   ContainersWorkspace,
@@ -377,6 +386,52 @@ describe("ContainersWorkspace", () => {
 
     expect(onRetryConnection).toHaveBeenCalledWith("host-1");
     expect(onClose).toHaveBeenCalledWith("host-1");
+  });
+
+  // 키 없는 팀 정적 AWS 프로필(4-7 M3) — 실패 창에서 그 자리에서 내 키를 넣고 다시 붙는다.
+  it("offers to add my own key on the failure overlay of an EC2 host whose team profile has none", async () => {
+    const onRetryConnection = vi.fn().mockResolvedValue(undefined);
+    awsImports.updateAwsProfile.mockResolvedValue(undefined);
+    appStore.setState({
+      vaultIndex: {
+        ...createEmptyVaultIndex(),
+        teams: [{ id: "team-a", name: "Acme Infra", role: "owner", syncState: "ready", syncError: null, groups: [] }],
+      },
+      awsMissingMyKeyByProfileId: {
+        "team-prod": { teamId: "team-a", profileId: "team-prod", profileName: "acme-prod" },
+      },
+    });
+    const ec2 = {
+      id: "host-1",
+      kind: "aws-ec2",
+      label: "acme-web",
+      awsProfileId: "team-prod",
+      awsProfileName: "acme-prod",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-abc",
+      groupName: null,
+      tags: [],
+      terminalThemeId: null,
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+    } as unknown as HostRecord;
+    render(
+      <ContainersWorkspace
+        {...createProps({ ...createTab(), errorMessage: '팀 프로필 "acme-prod" 에 내 AWS 키가 없습니다.' })}
+        host={ec2}
+        onRetryConnection={onRetryConnection}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "내 키 넣기" }));
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.change(dialog.getByLabelText("My Access Key"), { target: { value: "AKIAMINE" } });
+    fireEvent.change(dialog.getByLabelText("My Secret"), { target: { value: "mine" } });
+    fireEvent.click(dialog.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => expect(onRetryConnection).toHaveBeenCalledWith("host-1"));
+    expect(awsImports.updateAwsProfile).toHaveBeenCalledWith(expect.objectContaining({ vaultId: "team-a" }));
+    appStore.setState(appStore.getInitialState(), true);
   });
 
   it("shows a friendly connection failure overlay and notice for container list network errors", () => {

@@ -84,6 +84,14 @@ export {
   Plug,
   LogOut,
   Share2,
+  Link,
+  LogIn,
+  Crown,
+  UserMinus,
+  Lock,
+  User,
+  Users,
+  TriangleAlert,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';

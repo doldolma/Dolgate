@@ -2015,11 +2015,18 @@ export interface AwsStaticProfileDraft {
   region?: string | null;
 }
 
-export interface AwsStaticProfileCreateInput extends AwsStaticProfileDraft {
+/**
+ * 관리할 볼트. 설정 화면의 팀 묶음에서 만들고 고칠 때만 싣는다 — 없거나 "personal" 이면 개인 볼트(지금까지와 같다).
+ */
+export interface AwsProfileVaultTarget {
+  vaultId?: string | null;
+}
+
+export interface AwsStaticProfileCreateInput extends AwsStaticProfileDraft, AwsProfileVaultTarget {
   kind: "static";
 }
 
-export interface AwsSsoProfilePrepareInput {
+export interface AwsSsoProfilePrepareInput extends AwsProfileVaultTarget {
   profileName: string;
   ssoStartUrl: string;
   ssoRegion: string;
@@ -2058,7 +2065,7 @@ export interface AwsSsoProfileCreateInput extends AwsSsoProfilePrepareInput {
   ssoRoleName: string;
 }
 
-export interface AwsRoleProfileCreateInput {
+export interface AwsRoleProfileCreateInput extends AwsProfileVaultTarget {
   kind: "role";
   profileName: string;
   sourceProfileId?: string | null;
@@ -2072,16 +2079,16 @@ export type AwsProfileCreateInput =
   | AwsSsoProfileCreateInput
   | AwsRoleProfileCreateInput;
 
-export interface AwsProfileUpdateInput extends AwsStaticProfileDraft {
+export interface AwsProfileUpdateInput extends AwsStaticProfileDraft, AwsProfileVaultTarget {
   profileName: string;
 }
 
-export interface AwsProfileRegionUpdateInput {
+export interface AwsProfileRegionUpdateInput extends AwsProfileVaultTarget {
   profileName: string;
   region?: string | null;
 }
 
-export interface AwsProfileRenameInput {
+export interface AwsProfileRenameInput extends AwsProfileVaultTarget {
   profileName: string;
   nextProfileName: string;
 }
@@ -2130,6 +2137,17 @@ export const AWS_PROFILE_REGION_OPTIONS = [
   "us-west-2",
 ] as const;
 
+/**
+ * 내 키가 없어 붙을 수 없는 팀 정적 프로필 — 키를 넣을 곳(assume role 이면 그 원본). 팀에는 설정만 가고 정적 키는
+ * 늘 각자 넣는다.
+ */
+export interface AwsProfileMissingMyKey {
+  teamId: string;
+  profileId: string;
+  /** 팀에서의 원래 이름(화면에 보이는 이름). */
+  profileName: string;
+}
+
 export interface AwsProfileStatus {
   id: string | null;
   profileName: string;
@@ -2140,6 +2158,8 @@ export interface AwsProfileStatus {
   accountId?: string | null;
   arn?: string | null;
   errorMessage?: string | null;
+  /** 있으면 이 프로필로는 내 키를 넣기 전까지 붙을 수 없다. */
+  missingMyKey?: AwsProfileMissingMyKey | null;
 }
 
 export interface AwsProfileDetails extends AwsProfileStatus {
@@ -2631,6 +2651,11 @@ export type DnsOverrideDraft = LinkedDnsOverrideDraft | StaticDnsOverrideDraft;
 
 export type DnsOverrideResolvedRecord = (DnsOverrideRecord & {
   status: DnsOverrideStatus;
+  /**
+   * 같은 이름을 앞 볼트(개인 → 먼저 있는 팀)의 것이 적용하고 있으면 그 볼트 id. 이 줄은 켜져 있어도 쓰이지 않는다.
+   * status(켜 둔 상태)는 그대로 둔다 — 켜기·끄기는 그것을 본다.
+   */
+  appliedByVaultId?: string | null;
 });
 
 export function isLinkedDnsOverrideRecord(value: DnsOverrideRecord): value is LinkedDnsOverrideRecord {

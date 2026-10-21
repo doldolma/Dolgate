@@ -40,7 +40,11 @@ import {
   resolveErrorProgress,
   resolveHostKeyCheckProgress,
   resolveLocalStartingProgress,
+  myUsernameOf,
+  buildHopCredentialRetry,
+  resolveCredentialRetryProgress,
 } from "../utils";
+import { rememberConnectAttemptSecrets } from "../utils/connect-attempt-secrets";
 import { t } from '../../i18n';
 
 type StoreSetter = SliceDeps["set"];
@@ -557,6 +561,7 @@ export function createSessionServices(deps: SliceDeps) {
     sessionId: string,
     hostId: string,
     secrets?: HostSecretInput,
+    jumpSecrets?: Record<string, HostSecretInput>,
   ) => {
     const state = get();
     const attempt = findPendingConnectionAttempt(state, sessionId);
@@ -615,10 +620,35 @@ export function createSessionServices(deps: SliceDeps) {
             rows: attempt.latestRows,
             startupCommand: state.resolvedStartupCommandsBySessionId[sessionId],
             secrets,
+            jumpSecrets,
             tmux: attempt.tmux,
             tmuxCommand: attempt.tmuxCommand,
             tmuxVersion: attempt.tmuxVersion,
           });
+      if ("credentialsNeeded" in connection) {
+        // 붙기 전에 쓸 비밀번호가 없는 홉이 있다 — 요청 창을 그 홉으로 띄운다(점프면 베스천부터). 탭과 연결
+        // 시도는 그대로 둔다(다시 시도가 이 탭을 이어 쓴다). 앞서 넣은 값은 요청에 실어 다음 시도로 넘긴다.
+        const retry = buildHopCredentialRetry({
+          hosts: get().hosts,
+          vaultIndex: get().vaultIndex,
+          hostId,
+          needed: connection.credentialsNeeded,
+          source: "ssh",
+          sessionId,
+          carried: { secrets, jumpSecrets },
+        });
+        if (!retry) {
+          markSessionError(set, sessionId, t('sessionSvc.connectFailed'));
+          return;
+        }
+        const promptHost =
+          get().hosts.find((item) => item.id === connection.credentialsNeeded.hostId) ?? host;
+        set({ pendingCredentialRetry: retry });
+        updateSessionProgress(set, sessionId, resolveCredentialRetryProgress(promptHost, "auth"));
+        return;
+      }
+      // 실패는 이 요청이 돌아온 뒤 오류 이벤트로 온다 — 그때 다시 물으면서 지금 넣은 값을 함께 보낼 수 있게 둔다.
+      rememberConnectAttemptSecrets(connection.sessionId, { secrets, jumpSecrets });
       // `in` 으로 좁히면 시리얼 쪽 타입이 섞여 unknown 이 된다 — 분기 조건을 그대로 다시 쓴다.
       const ec2Connection = isSerialHostRecord(host)
         ? undefined
@@ -702,7 +732,8 @@ export function createSessionServices(deps: SliceDeps) {
                   ? "privateKey"
                   : "password",
             message,
-            initialUsername: host.username,
+            initialUsername: myUsernameOf(get().vaultIndex, host.id) ?? host.username,
+            carried: { secrets, jumpSecrets },
           },
         });
       }
@@ -1163,6 +1194,8 @@ export function createSessionServices(deps: SliceDeps) {
     replaceSessionId?: string,
     reconnectGroupId?: string,
     tmuxVersion?: string,
+    /** 이번 시도에서 요청 창에 넣은 점프 호스트의 값(점프 호스트 id → 값). */
+    jumpSecrets?: Record<string, HostSecretInput>,
   ) => {
     const host = get().hosts.find((item) => item.id === hostId);
     if (!host) {
@@ -1307,7 +1340,7 @@ export function createSessionServices(deps: SliceDeps) {
         return;
       }
 
-      await startPendingSessionConnect(set, get, sessionId, host.id, secrets);
+      await startPendingSessionConnect(set, get, sessionId, host.id, secrets, jumpSecrets);
     } catch (error) {
       const message =
         error instanceof Error

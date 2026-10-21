@@ -240,6 +240,7 @@ export function AppShell({
           renderNewTabAction={() => (
             <NewTabButton
               hosts={homeViewModel.hosts}
+              myUsernameByHostId={homeViewModel.vaultIndex?.myUsernameByHostId}
               savedWorkspaces={homeViewModel.savedWorkspaces}
               onOpenSavedWorkspace={(workspaceId) =>
                 void homeViewModel.openSavedWorkspace(
@@ -443,6 +444,7 @@ export function AppShell({
           setIsUpdateInstallConfirmOpen(false);
           await loginController.installUpdateAndRestart();
         }}
+        onRequestLogin={() => setIsLoginDialogOpen(true)}
       />
 
       <LoginDialog

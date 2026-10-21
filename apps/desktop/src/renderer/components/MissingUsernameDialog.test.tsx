@@ -16,6 +16,20 @@ describe('MissingUsernameDialog', () => {
     expect(screen.getByText(/다음 연결부터 자동으로 재사용합니다/)).toBeInTheDocument();
   });
 
+  it('says a team host keeps the name in my own credentials', () => {
+    render(
+      <MissingUsernameDialog
+        request={{ hostLabel: 'acme-web-1', source: 'sftp', teamHost: true }}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByText(/SFTP 연결을 계속하려면/)).toBeInTheDocument();
+    expect(screen.getByText(/내 자격 증명에 저장되며 팀원에게는 보이지 않습니다/)).toBeInTheDocument();
+    expect(screen.queryByText(/이 호스트에 저장되며/)).toBeNull();
+  });
+
   it('keeps the same save-and-continue behavior for non-SSH fallback flows', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 

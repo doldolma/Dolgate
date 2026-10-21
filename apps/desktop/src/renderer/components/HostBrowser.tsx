@@ -28,10 +28,16 @@ import {
   Copy,
   Download,
   Folder,
+  FolderPlus,
+  Link,
   Pencil,
+  Plus,
+  Share2,
   SquareTerminal,
   Trash2,
+  Users,
 } from "../ui/icons";
+import { isTeamVaultId, PERSONAL_VAULT_ID } from "../store/utils";
 import { HomeSidebar } from "./host-browser/HomeSidebar";
 import { HostListPanel } from "./host-browser/HostListPanel";
 import { HostDetailPanel } from "./host-browser/HostDetailPanel";
@@ -188,8 +194,22 @@ export function HostBrowser({
   latestHosts.current = hb.hosts;
   const groupExportAssetKeys =
     contextMenu?.kind === "group"
-      ? hb.getAssetKeysInGroupTrees(contextMenu.groupPaths)
+      ? hb.getAssetKeysInGroupTrees(contextMenu.groupPaths, contextMenu.vaultId)
       : [];
+  // 볼트 줄 메뉴의 볼트. 다시 들어와야 하는 팀은 팀 키가 없어 쓸 수 없으니 "팀 관리" 만 남긴다.
+  // 볼트 사이 복사(공유) — 한 볼트의 호스트들·워크스페이스들이나 그룹 하나, 넣을 다른 볼트가 있을 때만 메뉴에 보인다.
+  const assetCopy =
+    contextMenu?.kind === "asset" ? hb.copySelectionOfAssets(contextMenuAssetKeys) : null;
+  const assetCopySourceVaultId = assetCopy?.sourceVaultId ?? null;
+  const showAssetCopy =
+    assetCopySourceVaultId !== null && hb.hasCopyTargetFrom(assetCopySourceVaultId);
+  const showGroupCopy =
+    contextMenu?.kind === "group" && hb.hasCopyTargetFrom(contextMenu.vaultId);
+  const contextMenuVault =
+    contextMenu?.kind === "vault"
+      ? (hb.vaults?.find((vault) => vault.id === contextMenu.vaultId) ?? null)
+      : null;
+  const contextMenuVaultWritable = contextMenuVault?.blocked !== "needs-rejoin";
 
   function openAssets(assetKeys: readonly HomeAssetKey[]) {
     hb.setContextMenu(null);
@@ -349,6 +369,11 @@ export function HostBrowser({
                   onSetSavedWorkspaceFavorite ?? (() => undefined)
                 }
                 onDelete={setWorkspaceDeleteTarget}
+                favoriteHint={
+                  hb.teamOfAsset(`workspace:${selectedWorkspace.id}`)
+                    ? translate("teams.perPerson.favorite")
+                    : null
+                }
               />
             ) : (
               <HostDetailPanel hb={hb} tmuxPrefixKey={tmuxPrefixKey} />
@@ -553,6 +578,24 @@ export function HostBrowser({
                           count: contextMenuAssetKeys.length,
                         })}
                   </button>
+                  {showAssetCopy && assetCopy ? (
+                    <button
+                      type="button"
+                      className={CTX_ITEM}
+                      onClick={() => {
+                        hb.setContextMenu(null);
+                        hb.requestVaultCopy({ ...assetCopy, target: null });
+                      }}
+                    >
+                      <Share2 className={CTX_ICON} aria-hidden />
+                      {/* 개인 것은 팀에 내놓는 것이라 "공유", 팀 것은 어디로든 사본이라 "볼트로 복사". */}
+                      {translate(
+                        assetCopySourceVaultId === PERSONAL_VAULT_ID
+                          ? "hostBrowser.menu.share"
+                          : "hostBrowser.menu.copyToVault",
+                      )}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className={CTX_ITEM}
@@ -587,6 +630,65 @@ export function HostBrowser({
                         })}
                   </button>
                 </>
+              ) : contextMenu.kind === "vault" ? (
+                <>
+                  {contextMenuVault?.kind === "team" &&
+                  contextMenuVaultWritable &&
+                  hb.onOpenTeamInvite ? (
+                    <button
+                      type="button"
+                      className={CTX_ITEM}
+                      onClick={() => {
+                        hb.setContextMenu(null);
+                        hb.onOpenTeamInvite?.(contextMenu.vaultId);
+                      }}
+                    >
+                      <Link className={CTX_ICON} aria-hidden />
+                      {translate("hostBrowser.vaultMenu.invite")}
+                    </button>
+                  ) : null}
+                  {contextMenuVaultWritable && hb.onCreateHostInVault ? (
+                    <button
+                      type="button"
+                      className={CTX_ITEM}
+                      onClick={() => hb.createHostInVault(contextMenu.vaultId)}
+                    >
+                      <Plus className={CTX_ICON} aria-hidden />
+                      {translate("hostBrowser.vaultMenu.newHost")}
+                    </button>
+                  ) : null}
+                  {contextMenuVaultWritable ? (
+                    <button
+                      type="button"
+                      className={CTX_ITEM}
+                      onClick={() => hb.openCreateGroupInVault(contextMenu.vaultId)}
+                    >
+                      <FolderPlus className={CTX_ICON} aria-hidden />
+                      {translate("hostBrowser.vaultMenu.newGroup")}
+                    </button>
+                  ) : null}
+                  {isTeamVaultId(contextMenu.vaultId) && hb.onManageTeam ? (
+                    <>
+                      {contextMenuVaultWritable ? (
+                        <div
+                          role="separator"
+                          className="my-[0.35rem] h-px bg-[var(--border)]"
+                        />
+                      ) : null}
+                      <button
+                        type="button"
+                        className={CTX_ITEM}
+                        onClick={() => {
+                          hb.setContextMenu(null);
+                          hb.onManageTeam?.(contextMenu.vaultId);
+                        }}
+                      >
+                        <Users className={CTX_ICON} aria-hidden />
+                        {translate("hostBrowser.vaultMenu.manageTeam")}
+                      </button>
+                    </>
+                  ) : null}
+                </>
               ) : (
                 <>
                   <button
@@ -599,7 +701,10 @@ export function HostBrowser({
                       if (!targetGroupPath) {
                         return;
                       }
-                      hb.openCreateSubgroupModal(targetGroupPath);
+                      hb.openCreateSubgroupModal(
+                        targetGroupPath,
+                        contextMenu.vaultId,
+                      );
                     }}
                   >
                     {translate("hostBrowser.menu.newSubgroup")}
@@ -614,11 +719,40 @@ export function HostBrowser({
                       if (!targetGroupPath) {
                         return;
                       }
-                      hb.openRenameGroupModal(targetGroupPath);
+                      hb.openRenameGroupModal(
+                        targetGroupPath,
+                        contextMenu.vaultId,
+                      );
                     }}
                   >
                     {translate("hostBrowser.menu.rename")}
                   </button>
+                  {showGroupCopy ? (
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-[0.7rem] rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                      disabled={contextMenu.groupPaths.length !== 1}
+                      onClick={() => {
+                        const groupPath = contextMenu.groupPaths[0];
+                        hb.setContextMenu(null);
+                        if (!groupPath) {
+                          return;
+                        }
+                        hb.requestVaultCopy({
+                          sourceVaultId: contextMenu.vaultId,
+                          selection: { kind: "group", groupPath },
+                          target: null,
+                        });
+                      }}
+                    >
+                      <Share2 className={CTX_ICON} aria-hidden />
+                      {translate(
+                        contextMenu.vaultId === PERSONAL_VAULT_ID
+                          ? "hostBrowser.menu.share"
+                          : "hostBrowser.menu.copyToVault",
+                      )}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="flex w-full items-center gap-[0.7rem] rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
@@ -645,7 +779,10 @@ export function HostBrowser({
                     className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)]"
                     onClick={() => {
                       hb.setGroupDeleteTarget(
-                        hb.buildGroupDeleteTarget(contextMenu.groupPaths),
+                        hb.buildGroupDeleteTarget(
+                          contextMenu.groupPaths,
+                          contextMenu.vaultId,
+                        ),
                       );
                       hb.setGroupDeleteError(null);
                       hb.setContextMenu(null);
@@ -718,9 +855,10 @@ export function HostBrowser({
                     if (groupModalState.mode === "create") {
                       // parentPath 미지정(루트 + 버튼)이면 store가 currentGroupPath를 쓰고,
                       // 그룹 우클릭 "하위 그룹 생성"이면 그 그룹 아래에 만든다.
-                      await hb.onCreateGroup(
+                      await hb.createGroupIn(
                         hb.newGroupName,
                         groupModalState.parentPath,
+                        groupModalState.vaultId,
                       );
                     } else {
                       const nextGroupPath = normalizeGroupPath(
@@ -728,14 +866,16 @@ export function HostBrowser({
                           ? `${getParentGroupPath(groupModalState.path)}/${hb.newGroupName.trim()}`
                           : hb.newGroupName.trim(),
                       );
-                      await hb.onRenameGroup(
+                      await hb.renameGroupIn(
                         groupModalState.path,
                         hb.newGroupName,
+                        groupModalState.vaultId,
                       );
                       if (nextGroupPath) {
                         hb.applyGroupPathUiMutation(
                           groupModalState.path,
                           nextGroupPath,
+                          groupModalState.vaultId ?? PERSONAL_VAULT_ID,
                         );
                       }
                     }
@@ -894,7 +1034,11 @@ export function HostBrowser({
                       try {
                         hb.setIsRemovingGroup(true);
                         for (const path of groupDeleteTarget.paths) {
-                          await hb.onRemoveGroup(path, "reparent-descendants");
+                          await hb.removeGroupIn(
+                            path,
+                            "reparent-descendants",
+                            groupDeleteTarget.vaultId,
+                          );
                         }
                         hb.setSelectedGroupPaths((current) =>
                           current.filter(
@@ -923,12 +1067,17 @@ export function HostBrowser({
                     onClick={async () => {
                       try {
                         hb.setIsRemovingGroup(true);
-                        await hb.onRemoveGroup(
+                        await hb.removeGroupIn(
                           groupDeleteTarget.paths[0],
                           "delete-subtree",
+                          groupDeleteTarget.vaultId,
                         );
                         for (const path of groupDeleteTarget.paths.slice(1)) {
-                          await hb.onRemoveGroup(path, "delete-subtree");
+                          await hb.removeGroupIn(
+                            path,
+                            "delete-subtree",
+                            groupDeleteTarget.vaultId,
+                          );
                         }
                         hb.setSelectedGroupPaths((current) =>
                           current.filter(
@@ -958,12 +1107,17 @@ export function HostBrowser({
                   onClick={async () => {
                     try {
                       hb.setIsRemovingGroup(true);
-                      await hb.onRemoveGroup(
+                      await hb.removeGroupIn(
                         groupDeleteTarget.paths[0],
                         "reparent-descendants",
+                        groupDeleteTarget.vaultId,
                       );
                       for (const path of groupDeleteTarget.paths.slice(1)) {
-                        await hb.onRemoveGroup(path, "reparent-descendants");
+                        await hb.removeGroupIn(
+                          path,
+                          "reparent-descendants",
+                          groupDeleteTarget.vaultId,
+                        );
                       }
                       hb.setSelectedGroupPaths((current) =>
                         current.filter(

@@ -7,6 +7,11 @@ export function listAwsProfiles() {
   return desktopApi.aws.listProfiles();
 }
 
+/** 그 팀 볼트의 AWS 프로필. 개인은 listAwsProfiles 다. */
+export function listTeamAwsProfiles(teamId: string) {
+  return desktopApi.aws.listProfiles(teamId);
+}
+
 export function getSyncStatus() {
   return desktopApi.sync.status();
 }
@@ -55,8 +60,11 @@ export function prepareAwsSsoProfile(
   return desktopApi.aws.prepareSsoProfile(input);
 }
 
-export function getAwsProfileDetails(profileName: string) {
-  return desktopApi.aws.getProfileDetails(profileName);
+// 볼트는 팀 프로필일 때만 싣는다(설정의 팀 묶음) — 개인 프로필은 지금과 같은 인자로 간다.
+export function getAwsProfileDetails(profileName: string, vaultId?: string | null) {
+  return vaultId
+    ? desktopApi.aws.getProfileDetails(profileName, vaultId)
+    : desktopApi.aws.getProfileDetails(profileName);
 }
 
 export function getExternalAwsProfileDetails(profileName: string) {
@@ -87,16 +95,20 @@ export function renameAwsProfile(
   return desktopApi.aws.renameProfile(input);
 }
 
-export function deleteAwsProfile(profileName: string) {
-  return desktopApi.aws.deleteProfile(profileName);
+export function deleteAwsProfile(profileName: string, vaultId?: string | null) {
+  return vaultId
+    ? desktopApi.aws.deleteProfile(profileName, vaultId)
+    : desktopApi.aws.deleteProfile(profileName);
 }
 
-export function getAwsProfileStatus(profileName: string) {
-  return desktopApi.aws.getProfileStatus(profileName);
+export function getAwsProfileStatus(profileName: string, vaultId?: string | null) {
+  return vaultId
+    ? desktopApi.aws.getProfileStatus(profileName, vaultId)
+    : desktopApi.aws.getProfileStatus(profileName);
 }
 
-export function loginAwsProfile(profileName: string) {
-  return desktopApi.aws.login(profileName);
+export function loginAwsProfile(profileName: string, vaultId?: string | null) {
+  return vaultId ? desktopApi.aws.login(profileName, vaultId) : desktopApi.aws.login(profileName);
 }
 
 export function listAwsRegions(profileName: string) {

@@ -360,6 +360,7 @@ describe("createAppStore catalog and settings", () => {
       mode: "create",
       defaultGroupPath: null,
       kind: "ssh",
+      vaultId: "personal",
     });
 
     store.getState().openEditHostDrawer("host-1");
@@ -501,6 +502,7 @@ describe("createAppStore catalog and settings", () => {
       mode: "create",
       defaultGroupPath: "Servers",
       kind: "ssh",
+      vaultId: "personal",
     });
 
     await store.getState().createGroup("Production");
@@ -572,6 +574,7 @@ describe("createAppStore catalog and settings", () => {
         mode: "create",
         defaultGroupPath: "Servers/Nested",
         kind: "ssh",
+        vaultId: "personal",
       },
     });
 
@@ -583,6 +586,7 @@ describe("createAppStore catalog and settings", () => {
       mode: "create",
       defaultGroupPath: "Clients/Nested",
       kind: "ssh",
+      vaultId: "personal",
     });
     expect(store.getState().hosts[0]?.groupName).toBe("Clients/Nested");
   });
@@ -628,6 +632,7 @@ describe("createAppStore catalog and settings", () => {
         mode: "create",
         defaultGroupPath: "Servers/Nested",
         kind: "ssh",
+        vaultId: "personal",
       },
     });
 
@@ -639,6 +644,7 @@ describe("createAppStore catalog and settings", () => {
       mode: "create",
       defaultGroupPath: "Servers/API",
       kind: "ssh",
+      vaultId: "personal",
     });
     expect(store.getState().hosts[0]?.groupName).toBe("Servers/API");
   });

@@ -1,5 +1,5 @@
 import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown } from '../ui/icons';
+import { ChevronDown, Info } from '../ui/icons';
 import {
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
@@ -38,8 +38,9 @@ import type {
   PendingHostKeyPrompt,
   PendingPortForwardInteractiveAuth
 } from '../store/createAppStore';
-import { formatInteractiveHop, normalizeErrorMessage } from '../store/utils';
+import { formatInteractiveHop, normalizeErrorMessage, PERSONAL_VAULT_ID } from '../store/utils';
 import { cn } from '../lib/cn';
+import { groupByVault, hasTeamVaults, teamOfVault, vaultIdOf, type VaultSection } from '../lib/vault-groups';
 import {
   portForwardFailureMessage,
   portForwardStatusLabel,
@@ -77,6 +78,7 @@ import {
 } from '../ui';
 import { DialogBackdrop } from './DialogBackdrop';
 import { KnownHostPromptDialog } from './KnownHostPromptDialog';
+import { VaultChip, VaultEmptyLine, VaultSectionHeader } from './teams/VaultMark';
 import { Trans, useTranslation } from 'react-i18next';
 import { ConnectionProgressModal } from './ConnectionProgressModal';
 import { appStore, useAppStore } from '../store/appStore';
@@ -105,7 +107,8 @@ interface PortForwardingPanelProps {
   interactiveAuth: PendingPortForwardInteractiveAuth | null;
   discoveryInteractiveAuth: PendingContainersInteractiveAuth | null;
   onSave: (ruleId: string | null, draft: PortForwardDraft) => Promise<void>;
-  onSaveDnsOverride: (overrideId: string | null, draft: DnsOverrideDraft) => Promise<void>;
+  /** 새 Static 덮어쓰기는 vaultId 볼트에 만든다(Linked 는 규칙의 볼트). */
+  onSaveDnsOverride: (overrideId: string | null, draft: DnsOverrideDraft, vaultId?: string) => Promise<void>;
   onSetStaticDnsOverrideActive: (overrideId: string, active: boolean) => Promise<void>;
   onRemove: (ruleId: string) => Promise<void>;
   onRemoveDnsOverride: (overrideId: string) => Promise<void>;
@@ -842,6 +845,16 @@ export function PortForwardingPanel({
     () => getAvailablePortForwardHosts(hosts, 'container').filter((host) => !isAwsEcsHostRecord(host)),
     [hosts],
   );
+  // 볼트 표 — 팀이 있으면 목록을 볼트별로 묶고(L2), 편집 창은 그 볼트의 호스트·규칙만 보인다(N2).
+  const vaultIndex = useAppStore((state) => state.vaultIndex);
+  const teamsExist = hasTeamVaults(vaultIndex);
+  // 편집 창이 만들거나 고치는 볼트. 묶음의 + 가 주고, 고칠 때는 레코드의 볼트다.
+  const [editorVaultId, setEditorVaultId] = useState<string>(PERSONAL_VAULT_ID);
+  const hostVaultOf = (hostId: string) => vaultIdOf(vaultIndex?.teamIdByHostId, hostId);
+  const ruleVaultOf = (ruleId: string) => vaultIdOf(vaultIndex?.teamIdByPortForwardId, ruleId);
+  /** 그 볼트의 것만. 팀이 없으면 모두다(지금 그대로). */
+  const inVault = <T,>(list: readonly T[], idOf: (item: T) => string, vaultOf: (id: string) => string, vaultId: string): T[] =>
+    teamsExist ? list.filter((item) => vaultOf(idOf(item)) === vaultId) : [...list];
   const [activeTab, setActiveTab] = useState<ForwardTab>(lastSelectedForwardTab);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [editingDnsOverrideId, setEditingDnsOverrideId] = useState<string | null>(null);
@@ -872,7 +885,9 @@ export function PortForwardingPanel({
   const discoveryListRequestRef = useRef(0);
   const discoveryDetailsRequestRef = useRef(0);
   const containerPickerRef = useRef<HTMLDivElement | null>(null);
-  const eligibleRules = useMemo(() => getDnsOverrideEligibleRules(rules), [rules]);
+  const allEligibleRules = useMemo(() => getDnsOverrideEligibleRules(rules), [rules]);
+  // Linked 덮어쓰기는 같은 볼트의 규칙에만 잇는다.
+  const eligibleRules = inVault(allEligibleRules, (rule) => rule.id, ruleVaultOf, editorVaultId);
   const ruleMap = useMemo(
     () => new Map(rules.map((rule) => [rule.id, rule])),
     [rules],
@@ -881,6 +896,15 @@ export function PortForwardingPanel({
   const visibleRules = useMemo(
     () => (activeTab === 'dns' ? [] : filterPortForwardRules(rules, activeTab)),
     [activeTab, rules]
+  );
+  // 팀이 있을 때만 묶는다 — 없으면 null 이라 목록은 지금 그대로다.
+  const ruleSections = useMemo(
+    () => (activeTab === 'dns' ? null : groupByVault(visibleRules, vaultIndex?.teamIdByPortForwardId, vaultIndex)),
+    [activeTab, visibleRules, vaultIndex],
+  );
+  const dnsSections = useMemo(
+    () => (activeTab === 'dns' ? groupByVault(dnsOverrides, vaultIndex?.teamIdByDnsOverrideId, vaultIndex) : null),
+    [activeTab, dnsOverrides, vaultIndex],
   );
   const visibleEcsEphemeralRuntimes = useMemo(() => {
     if (activeTab !== 'ecs-task') {
@@ -989,48 +1013,52 @@ export function PortForwardingPanel({
   );
   const sshHostOptions = useMemo<SearchableSelectOption[]>(
     () =>
-      sshHosts.map((host) => ({
+      inVault(sshHosts, (host) => host.id, hostVaultOf, editorVaultId).map((host) => ({
         value: host.id,
         label: host.label,
         description: getSshForwardHostSecondaryLabel(host),
         badge: 'SSH',
         searchText: getPortForwardHostSearchText(host),
       })),
-    [sshHosts],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sshHosts, editorVaultId, vaultIndex],
   );
   const awsHostOptions = useMemo<SearchableSelectOption[]>(
     () =>
-      awsHosts.map((host) => ({
+      inVault(awsHosts, (host) => host.id, hostVaultOf, editorVaultId).map((host) => ({
         value: host.id,
         label: host.label,
         description: getAwsSsmForwardHostSecondaryLabel(host),
         badge: 'AWS',
         searchText: getPortForwardHostSearchText(host),
       })),
-    [awsHosts],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [awsHosts, editorVaultId, vaultIndex],
   );
   const selectedEcsHost = ecsTaskDraft ? ecsHosts.find((host) => host.id === ecsTaskDraft.hostId) ?? null : null;
   const ecsHostOptions = useMemo<SearchableSelectOption[]>(
     () =>
-      ecsHosts.map((host) => ({
+      inVault(ecsHosts, (host) => host.id, hostVaultOf, editorVaultId).map((host) => ({
         value: host.id,
         label: host.label,
         description: getEcsTaskForwardHostSecondaryLabel(host),
         badge: 'ECS',
         searchText: getPortForwardHostSearchText(host),
       })),
-    [ecsHosts],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ecsHosts, editorVaultId, vaultIndex],
   );
   const containerHostOptions = useMemo<SearchableSelectOption[]>(
     () =>
-      containerHosts.map((host) => ({
+      inVault(containerHosts, (host) => host.id, hostVaultOf, editorVaultId).map((host) => ({
         value: host.id,
         label: host.label,
         description: getContainerHostSecondaryLabel(host),
         badge: getContainerHostKindLabel(host),
         searchText: getPortForwardHostSearchText(host),
       })),
-    [containerHosts],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [containerHosts, editorVaultId, vaultIndex],
   );
   const ecsContainerOptions = useMemo(
     () => ecsServiceDetails?.containers ?? [],
@@ -1281,6 +1309,117 @@ export function PortForwardingPanel({
     );
   }
 
+  function renderDnsCard(override: DnsOverrideResolvedRecord) {
+    const rule = isLinkedDnsOverrideRecord(override)
+      ? (ruleMap.get(override.portForwardRuleId) ?? null)
+      : null;
+    const runtime = rule ? runtimeMap.get(rule.id) : undefined;
+    const isRunning = runtime?.status === 'running' || runtime?.status === 'starting';
+    const isStatic = isStaticDnsOverrideRecord(override);
+    // 같은 이름을 앞 볼트(개인 → 먼저 있는 팀)가 적용 중이면 이 줄은 쓰이지 않는다(X1). 켜 둔 상태는 그대로다.
+    const appliedBy = override.appliedByVaultId
+      ? (teamOfVault(vaultIndex, override.appliedByVaultId)?.name ?? translate('sidebar.personalVault'))
+      : null;
+
+    return (
+      <Card
+        key={override.id}
+        className="items-start max-[760px]:flex-col max-[760px]:items-stretch"
+      >
+        <CardMain>
+          <CardTitleRow>
+            <strong>{override.hostname}</strong>
+            <Badge>{isStatic ? 'Static' : 'Linked'}</Badge>
+            {appliedBy ? (
+              <>
+                <StatusBadge tone="stopped">{translate('portForward.status.notApplied')}</StatusBadge>
+                <Tooltip label={translate('portForward.appliedBy', { vault: appliedBy })}>
+                  <span
+                    role="img"
+                    aria-label={translate('portForward.appliedBy', { vault: appliedBy })}
+                    className="inline-flex text-[var(--text-soft)]"
+                  >
+                    <Info className="h-3.5 w-3.5" aria-hidden />
+                  </span>
+                </Tooltip>
+              </>
+            ) : (
+              <StatusBadge tone={portForwardStatusTone(isStatic ? (override.status === 'active' ? 'running' : 'stopped') : runtime?.status)}>
+                {isStatic ? (override.status === 'active' ? 'On' : 'Off') : portForwardStatusLabel(runtime)}
+              </StatusBadge>
+            )}
+          </CardTitleRow>
+          <CardMeta>
+            <span>Hosts file</span>
+            <span>{isStatic ? 'Static IP' : rule?.label ?? 'Linked rule missing'}</span>
+            <span>
+              {isStatic
+                ? override.address
+                : `${runtime?.bindAddress ?? rule?.bindAddress ?? '127.0.0.1'}:${runtime?.bindPort ?? rule?.bindPort ?? 0}`}
+            </span>
+          </CardMeta>
+          {!isStatic && runtime?.message ? <CardMessage>{runtime.message}</CardMessage> : null}
+        </CardMain>
+        <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
+          {rule ? (
+            <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
+              {isRunning ? translate('portForward.action.stop') : translate('portForward.action.start')}
+            </Button>
+          ) : null}
+          {isStatic ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => void handleSetStaticDnsOverrideActive(override.id, override.status !== 'active')}
+              disabled={pendingDnsToggleId === override.id}
+            >
+              {override.status === 'active' ? 'Off' : 'On'}
+            </Button>
+          ) : null}
+          <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit-dns', dnsOverrideId: override.id })}>
+            {translate('portForward.action.edit')}
+          </Button>
+          <Button type="button" variant="danger" size="sm" onClick={() => void onRemoveDnsOverride(override.id)}>
+            {translate('portForward.action.delete')}
+          </Button>
+        </CardActions>
+      </Card>
+    );
+  }
+
+  /**
+   * 볼트별 묶음(L2) — 머리(표시·이름·개수·+)와 그 볼트의 카드. 빈 볼트는 점선 한 줄. 막힌 팀에는 + 가 없다.
+   */
+  function renderVaultSections<T extends { id: string }>(sections: VaultSection<T>[], renderItem: (item: T) => ReactNode) {
+    return (
+      <div className="flex flex-col gap-[1.4rem]">
+        {sections.map((section) => (
+          <section key={section.vaultId} className="flex flex-col gap-[0.9rem]">
+            <VaultSectionHeader
+              team={section.team}
+              count={section.items.length}
+              addLabel={
+                section.blocked
+                  ? null
+                  : translate('teams.vault.addTo', {
+                      vault: section.team?.name ?? translate('sidebar.personalVault'),
+                      action: createButtonLabel(activeTab),
+                    })
+              }
+              onAdd={() => openPortForwardEditor({ kind: 'create', transport: activeTab, vaultId: section.vaultId })}
+            />
+            {section.items.length > 0 ? (
+              section.items.map(renderItem)
+            ) : (
+              <VaultEmptyLine>{emptyStateTitle(activeTab)}</VaultEmptyLine>
+            )}
+          </section>
+        ))}
+      </div>
+    );
+  }
+
   function renderEcsEphemeralRuntimeCard({
     runtime,
     host,
@@ -1459,23 +1598,27 @@ export function PortForwardingPanel({
    * `hostId` 는 여는 쪽이 정한 대상이다 — 세션 패널에서 열면 그 세션의 호스트여야 한다. 없으면
    * 그 방식의 첫 호스트를 고른다(포트 화면에서 + 를 누르는 경우).
    */
-  function openCreate(tab: ForwardTab = activeTab, hostId?: string) {
+  function openCreate(tab: ForwardTab = activeTab, hostId?: string, vaultId?: string) {
+    // 만들 볼트 — 묶음의 + 가 주고, 호스트를 정해 열면(세션 패널) 그 호스트의 볼트다.
+    const nextVaultId = vaultId ?? (hostId ? hostVaultOf(hostId) : PERSONAL_VAULT_ID);
+    const firstHost = (list: readonly HostRecord[]) => inVault(list, (host) => host.id, hostVaultOf, nextVaultId)[0]?.id;
+    setEditorVaultId(nextVaultId);
     setActiveTab(tab);
     setEditingRuleId(null);
     setEditingDnsOverrideId(null);
     setIsContainerPickerOpen(false);
     setDraft(
       tab === 'ssh'
-        ? emptySshDraft(hostId ?? sshHosts[0]?.id)
+        ? emptySshDraft(hostId ?? firstHost(sshHosts))
         : tab === 'aws-ssm'
-          ? emptyAwsDraft(hostId ?? awsHosts[0]?.id)
+          ? emptyAwsDraft(hostId ?? firstHost(awsHosts))
           : tab === 'ecs-task'
-            ? emptyEcsTaskDraft(hostId ?? ecsHosts[0]?.id)
+            ? emptyEcsTaskDraft(hostId ?? firstHost(ecsHosts))
             : tab === 'container'
               ? emptyContainerDraft(hostId)
-              : emptySshDraft(hostId ?? sshHosts[0]?.id)
+              : emptySshDraft(hostId ?? firstHost(sshHosts))
     );
-    setDnsDraft(emptyDnsDraft(eligibleRules[0]?.id));
+    setDnsDraft(emptyDnsDraft(inVault(allEligibleRules, (rule) => rule.id, ruleVaultOf, nextVaultId)[0]?.id));
     setIsSubmitting(false);
     setError(null);
     resetDiscoveryState();
@@ -1484,6 +1627,7 @@ export function PortForwardingPanel({
   }
 
   function openEdit(rule: PortForwardRuleRecord) {
+    setEditorVaultId(ruleVaultOf(rule.id));
     setEditingRuleId(rule.id);
     setEditingDnsOverrideId(null);
     setActiveTab(rule.transport);
@@ -1497,6 +1641,7 @@ export function PortForwardingPanel({
   }
 
   function openEditDnsOverride(override: DnsOverrideResolvedRecord) {
+    setEditorVaultId(vaultIdOf(vaultIndex?.teamIdByDnsOverrideId, override.id));
     setEditingRuleId(null);
     setEditingDnsOverrideId(override.id);
     setActiveTab('dns');
@@ -1536,7 +1681,7 @@ export function PortForwardingPanel({
       return;
     }
     if (portForwardEditor.kind === 'create') {
-      openCreate(portForwardEditor.transport, portForwardEditor.hostId);
+      openCreate(portForwardEditor.transport, portForwardEditor.hostId, portForwardEditor.vaultId);
       return;
     }
     if (portForwardEditor.kind === 'edit') {
@@ -1802,7 +1947,12 @@ export function PortForwardingPanel({
               hostname: dnsDraft.hostname.trim().toLowerCase(),
               address: dnsDraft.address.trim(),
             };
-        await onSaveDnsOverride(editingDnsOverrideId, nextDnsDraft);
+        // 새 Static 은 이 창의 볼트에(Linked 는 메인이 규칙의 볼트로 정한다). 팀이 없으면 지금과 같은 호출이다.
+        if (editingDnsOverrideId || !teamsExist) {
+          await onSaveDnsOverride(editingDnsOverrideId, nextDnsDraft);
+        } else {
+          await onSaveDnsOverride(null, nextDnsDraft, editorVaultId);
+        }
         setIsModalOpen(false);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : translate('portForward.error.dnsSaveFailed'));
@@ -2103,6 +2253,12 @@ export function PortForwardingPanel({
                     : editingRuleId
                       ? `Edit ${tabTitle(activeTab)}`
                       : createButtonLabel(activeTab)}
+                  {/* 어느 볼트에 만드는지(고치는지) — 팀이 있을 때만. */}
+                  {teamsExist ? (
+                    <span className="ml-[0.6rem] inline-flex align-middle">
+                      <VaultChip team={teamOfVault(vaultIndex, editorVaultId)} />
+                    </span>
+                  ) : null}
                 </h3>
               </div>
               <IconButton
@@ -2938,9 +3094,12 @@ export function PortForwardingPanel({
             {translate('portForward.tab.dns')}
           </TabButton>
         </Tabs>
-        <Button type="button" variant="primary" onClick={() => openPortForwardEditor({ kind: 'create', transport: activeTab })}>
-          {createButtonLabel(activeTab)}
-        </Button>
+        {/* 팀이 있으면 만들기는 묶음 머리의 + 로 — 어느 볼트에 만드는지 헷갈리지 않게. */}
+        {teamsExist ? null : (
+          <Button type="button" variant="primary" onClick={() => openPortForwardEditor({ kind: 'create', transport: activeTab })}>
+            {createButtonLabel(activeTab)}
+          </Button>
+        )}
       </div>
 
       <PanelSection>
@@ -2950,70 +3109,14 @@ export function PortForwardingPanel({
           </NoticeCard>
         ) : null}
         {activeTab === 'dns' ? (
-          !hasVisibleEntries ? (
+          dnsSections ? (
+            renderVaultSections(dnsSections, renderDnsCard)
+          ) : !hasVisibleEntries ? (
             <EmptyState title={emptyStateTitle(activeTab)} description={emptyStateDescription(activeTab)} />
           ) : (
-            dnsOverrides.map((override) => {
-              const rule = isLinkedDnsOverrideRecord(override)
-                ? (ruleMap.get(override.portForwardRuleId) ?? null)
-                : null;
-              const runtime = rule ? runtimeMap.get(rule.id) : undefined;
-              const isRunning = runtime?.status === 'running' || runtime?.status === 'starting';
-              const isStatic = isStaticDnsOverrideRecord(override);
-
-              return (
-                <Card
-                  key={override.id}
-                  className="items-start max-[760px]:flex-col max-[760px]:items-stretch"
-                >
-                  <CardMain>
-                    <CardTitleRow>
-                      <strong>{override.hostname}</strong>
-                      <Badge>{isStatic ? 'Static' : 'Linked'}</Badge>
-                      <StatusBadge tone={portForwardStatusTone(isStatic ? (override.status === 'active' ? 'running' : 'stopped') : runtime?.status)}>
-                        {isStatic ? (override.status === 'active' ? 'On' : 'Off') : portForwardStatusLabel(runtime)}
-                      </StatusBadge>
-                    </CardTitleRow>
-                    <CardMeta>
-                      <span>Hosts file</span>
-                      <span>{isStatic ? 'Static IP' : rule?.label ?? 'Linked rule missing'}</span>
-                      <span>
-                        {isStatic
-                          ? override.address
-                          : `${runtime?.bindAddress ?? rule?.bindAddress ?? '127.0.0.1'}:${runtime?.bindPort ?? rule?.bindPort ?? 0}`}
-                      </span>
-                    </CardMeta>
-                    {!isStatic && runtime?.message ? <CardMessage>{runtime.message}</CardMessage> : null}
-                  </CardMain>
-                  <CardActions className="max-[760px]:w-full max-[760px]:[&>*]:flex-1">
-                    {rule ? (
-                      <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
-                        {isRunning ? translate('portForward.action.stop') : translate('portForward.action.start')}
-                      </Button>
-                    ) : null}
-                    {isStatic ? (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => void handleSetStaticDnsOverrideActive(override.id, override.status !== 'active')}
-                        disabled={pendingDnsToggleId === override.id}
-                      >
-                        {override.status === 'active' ? 'Off' : 'On'}
-                      </Button>
-                    ) : null}
-                    <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit-dns', dnsOverrideId: override.id })}>
-                      {translate('portForward.action.edit')}
-                    </Button>
-                    <Button type="button" variant="danger" size="sm" onClick={() => void onRemoveDnsOverride(override.id)}>
-                      {translate('portForward.action.delete')}
-                    </Button>
-                  </CardActions>
-                </Card>
-              );
-            })
+            dnsOverrides.map(renderDnsCard)
           )
-        ) : !hasVisibleEntries ? (
+        ) : !hasVisibleEntries && !ruleSections ? (
           <EmptyState title={emptyStateTitle(activeTab)} description={emptyStateDescription(activeTab)} />
         ) : (
           <>
@@ -3034,7 +3137,10 @@ export function PortForwardingPanel({
               </section>
             ) : null}
 
-            {visibleRules.length > 0 ? (
+            {/* 팀이 있으면 저장한 규칙은 볼트별로(L2). 임시 터널(Running tunnels)은 묶지 않고 위에 둔다. */}
+            {ruleSections ? (
+              renderVaultSections(ruleSections, renderRuleCard)
+            ) : visibleRules.length > 0 ? (
               <section className="flex flex-col gap-[0.9rem]">
                 {activeTab === 'ecs-task' || activeTab === 'container' ? (
                   <SectionLabel className="m-0">{translate('portForward.section.savedRules')}</SectionLabel>

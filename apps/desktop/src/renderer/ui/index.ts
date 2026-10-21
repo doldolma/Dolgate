@@ -9,6 +9,7 @@ export * from './FilterRow';
 export * from './FontSelectField';
 export * from './IconButton';
 export * from './Input';
+export * from './NumberInput';
 export * from './InfoHint';
 export * from './ModalShell';
 export * from './SearchableSelect';

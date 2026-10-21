@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -334,5 +335,46 @@ func TestDialClientClosesJumpWhenTargetCloses(t *testing.T) {
 	case <-bastion.connClosed:
 	case <-time.After(3 * time.Second):
 		t.Fatal("bastion connection not closed after target client closed")
+	}
+}
+
+// 어느 홉의 인증이 실패했는지 깊이로 올린다(대상에서 거꾸로 센 수) — 앱이 요청 창을 대상이 아니라 그 점프
+// 호스트로 띄운다. 문구는 예전 그대로 "jump host: …" 다.
+func TestDialClientReportsWhichJumpHopFailed(t *testing.T) {
+	target := newJumpTestServer(t, "tuser", "tpw", "TARGET-OK")
+	jump2 := newJumpTestServer(t, "j2user", "j2pw", "JUMP2-OK")
+	jump1 := newJumpTestServer(t, "j1user", "j1pw", "JUMP1-OK")
+
+	chain := func(jump1Password, jump2Password, targetPassword string) Target {
+		targetTarget := target.target("tuser", targetPassword)
+		jump2Target := jump2.target("j2user", jump2Password)
+		jump1Target := jump1.target("j1user", jump1Password)
+		jump2Target.Jump = &jump1Target
+		targetTarget.Jump = &jump2Target
+		return targetTarget
+	}
+
+	cases := []struct {
+		name   string
+		target Target
+		depth  int
+	}{
+		{"first hop (two away from the target)", chain("wrong", "j2pw", "tpw"), 2},
+		{"last hop (right before the target)", chain("j1pw", "wrong", "tpw"), 1},
+		{"the target itself", chain("j1pw", "j2pw", "wrong"), 0},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := DialClient(context.Background(), testCase.target, DefaultConfig, nil)
+			if err == nil {
+				t.Fatal("DialClient = nil error, want an authentication failure")
+			}
+			if got := JumpDepth(err); got != testCase.depth {
+				t.Fatalf("JumpDepth = %d, want %d (err: %v)", got, testCase.depth, err)
+			}
+			if testCase.depth > 0 && !strings.HasPrefix(err.Error(), "jump host: ") {
+				t.Fatalf("message = %q, want the old \"jump host: \" prefix", err.Error())
+			}
+		})
 	}
 }

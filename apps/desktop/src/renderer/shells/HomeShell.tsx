@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listTailnets } from "../services/desktop/tailnet";
+import { listTailnets, listTeamTailnets } from "../services/desktop/tailnet";
 import {
   buildGroupOptions,
   getGroupLabel,
@@ -15,11 +15,23 @@ import {
   type AuthState,
   type HostDraft,
   type HomeHostViewMode,
+  type SecretMetadataRecord,
   type SshKeyGenerateInput,
+  type VaultCopyRequest,
+  type VaultCopyResult,
 } from "@shared";
 import { AwsImportDialog } from "../components/AwsImportDialog";
 import { HostBrowser } from "../components/HostBrowser";
+import { buildBrowserVaults } from "../components/host-browser/browserVaults";
 import type { HomeAssetRef } from "../components/host-browser/homeAssets";
+import { InviteLinkDialog } from "../components/teams/InviteLinkDialog";
+import { VaultCopyDialog } from "../components/teams/VaultCopyDialog";
+import type {
+  MyCredentialsApi,
+  VaultCopyDraft,
+} from "../components/host-browser/useHostBrowser";
+import { isTeamVaultId, PERSONAL_VAULT_ID } from "../store/utils";
+import { listTeamSavedCredentials } from "../services/desktop/settings";
 import { HostDrawer, type HostDrawerHandle } from "../components/HostDrawer";
 import { HostEditSwitchConfirmDialog } from "../components/HostEditSwitchConfirmDialog";
 import { LogoutConfirmDialog } from "../components/LogoutConfirmDialog";
@@ -131,6 +143,52 @@ export function HomeShell({
   const [hostBrowserStatus, setHostBrowserStatus] = useState<string | null>(
     null,
   );
+  /** 볼트 줄 메뉴에서 연 초대 링크 창의 팀. */
+  const [inviteTeamId, setInviteTeamId] = useState<string | null>(null);
+  /** 다른 볼트에 놓았거나 줄 메뉴의 공유로 연 복사 확인 창. */
+  const [vaultCopyDraft, setVaultCopyDraft] = useState<VaultCopyDraft | null>(null);
+  // 팀 호스트의 내 자격 증명 — 상세 칸이 읽고 쓴다. 같은 객체를 넘겨야 칸이 렌더마다 다시 읽지 않는다.
+  const myCredentialsApi = useMemo<MyCredentialsApi>(
+    () => ({
+      load: homeViewModel.getMyHostCredentials,
+      save: homeViewModel.saveMyHostCredentials,
+      clear: homeViewModel.clearMyHostCredentials,
+    }),
+    [
+      homeViewModel.clearMyHostCredentials,
+      homeViewModel.getMyHostCredentials,
+      homeViewModel.saveMyHostCredentials,
+    ],
+  );
+  // 사이드바 맨 윗단의 볼트들. 팀이 없으면 비어 있고 홈은 지금 화면 그대로다.
+  const browserVaults = useMemo(
+    () =>
+      buildBrowserVaults({
+        hosts: homeViewModel.hosts,
+        groups: homeViewModel.groups,
+        savedWorkspaces: homeViewModel.savedWorkspaces ?? [],
+        vaultIndex: homeViewModel.vaultIndex,
+        personalName: translate("sidebar.personalVault"),
+      }),
+    [
+      homeViewModel.groups,
+      homeViewModel.hosts,
+      homeViewModel.savedWorkspaces,
+      homeViewModel.vaultIndex,
+      translate,
+    ],
+  );
+  // 지금 위치가 팀 볼트면 그 팀 id. 새 호스트(빠른 연결 포함)는 그 팀에 만들고, 가져오기는 개인 맨 위로 보낸다
+  // (가져오기는 비밀값까지 개인 볼트에 쓰는 길이라 팀으로 보내지 않는다).
+  const teamVaultId =
+    typeof homeViewModel.currentVaultId === "string" &&
+    isTeamVaultId(homeViewModel.currentVaultId)
+      ? homeViewModel.currentVaultId
+      : null;
+  const importGroupPath = teamVaultId ? null : homeViewModel.currentGroupPath;
+  const inviteTeam = inviteTeamId
+    ? (browserVaults.find((vault) => vault.id === inviteTeamId) ?? null)
+    : null;
 
   useEffect(() => {
     if (
@@ -200,16 +258,39 @@ export function HomeShell({
   } | null>(null);
   const [isEditorExitSaving, setIsEditorExitSaving] = useState(false);
   const [editorExitError, setEditorExitError] = useState<string | null>(null);
+  // 서랍의 볼트 — 만들 때는 서랍이 연 볼트, 고칠 때는 그 호스트가 든 볼트. 고르기(그룹·점프·자격 증명·AWS·
+  // tailnet·스니펫)는 그 볼트 것만 보인다. 팀이 없으면 null 이고 고르기는 지금 그대로다.
+  const drawerVault = useMemo(() => {
+    if (browserVaults.length === 0) {
+      return null;
+    }
+    const drawer = homeViewModel.hostDrawer;
+    const vaultId =
+      drawer.mode === "create"
+        ? drawer.vaultId
+        : drawer.mode === "edit"
+          ? (browserVaults.find((vault) =>
+              vault.hosts.some((host) => host.id === drawer.hostId),
+            )?.id ?? PERSONAL_VAULT_ID)
+          : PERSONAL_VAULT_ID;
+    return browserVaults.find((vault) => vault.id === vaultId) ?? null;
+  }, [browserVaults, homeViewModel.hostDrawer]);
+  const drawerTeamId = drawerVault?.kind === "team" ? drawerVault.id : null;
   const groupOptions = useMemo(
     () =>
-      buildGroupOptions(homeViewModel.groups, homeViewModel.hosts, [
-        currentHost?.groupName,
-        homeViewModel.hostDrawer.mode === "create"
-          ? homeViewModel.hostDrawer.defaultGroupPath
-          : homeViewModel.currentGroupPath,
-      ]),
+      buildGroupOptions(
+        drawerVault ? drawerVault.groups : homeViewModel.groups,
+        drawerVault ? drawerVault.hosts : homeViewModel.hosts,
+        [
+          currentHost?.groupName,
+          homeViewModel.hostDrawer.mode === "create"
+            ? homeViewModel.hostDrawer.defaultGroupPath
+            : homeViewModel.currentGroupPath,
+        ],
+      ),
     [
       currentHost?.groupName,
+      drawerVault,
       homeViewModel.currentGroupPath,
       homeViewModel.groups,
       homeViewModel.hostDrawer,
@@ -217,9 +298,30 @@ export function HomeShell({
     ],
   );
   const jumpHostOptions = useMemo(
-    () => getJumpHostCandidates(homeViewModel.hosts, currentHost?.id ?? null),
-    [homeViewModel.hosts, currentHost?.id],
+    () =>
+      getJumpHostCandidates(
+        drawerVault ? drawerVault.hosts : homeViewModel.hosts,
+        currentHost?.id ?? null,
+      ),
+    [drawerVault, homeViewModel.hosts, currentHost?.id],
   );
+  // 시작 스니펫도 그 볼트 것만. 볼트 표에 없는 스니펫은 개인 것이다.
+  const drawerSnippets = useMemo(() => {
+    if (!drawerVault) {
+      return homeViewModel.snippets;
+    }
+    const teamIdBySnippetId = homeViewModel.vaultIndex?.teamIdBySnippetId ?? {};
+    return (homeViewModel.snippets ?? []).filter(
+      (snippet) =>
+        (teamIdBySnippetId[snippet.id] ?? PERSONAL_VAULT_ID) === drawerVault.id,
+    );
+  }, [drawerVault, homeViewModel.snippets, homeViewModel.vaultIndex]);
+  // 팀 호스트의 저장된 자격 증명은 그 팀 볼트에 있다 — 서랍이 열릴 때 읽는다. 개인은 스토어 목록 그대로.
+  // 어느 팀 것인지 함께 둔다. 다 읽기 전에는 서랍을 띄우지 않는다(아래 hostEditor).
+  const [teamKeychain, setTeamKeychain] = useState<{
+    teamId: string;
+    entries: SecretMetadataRecord[];
+  } | null>(null);
   const isDrawerOpen =
     active &&
     homeViewModel.homeSection === "hosts" &&
@@ -256,9 +358,9 @@ export function HomeShell({
     async (isCancelled?: () => boolean) => {
       // Promise 로 감싸는 이유: 브리지가 없으면 listTailnets 가 동기적으로 던지고, 그러면
       // .catch 가 잡지 못해 셸 전체가 죽는다. tailnet 을 못 읽는 것이 호스트 편집을 막을
-      // 이유는 없다.
+      // 이유는 없다. 팀 호스트면 그 팀의 tailnet 을 읽는다.
       await Promise.resolve()
-        .then(listTailnets)
+        .then(() => (drawerTeamId ? listTeamTailnets(drawerTeamId) : listTailnets()))
         .then((records) => {
           if (isCancelled?.()) {
             return;
@@ -271,7 +373,7 @@ export function HomeShell({
           // tailnet 을 못 읽어도 호스트 편집 자체는 되어야 한다.
         });
     },
-    [],
+    [drawerTeamId],
   );
 
   useEffect(() => {
@@ -284,6 +386,30 @@ export function HomeShell({
       cancelled = true;
     };
   }, [isDrawerOpen, refreshTailnetOptions]);
+
+  // 브리지가 없으면 동기적으로 던진다 — 못 읽어도 호스트 편집은 되어야 하니 빈 목록으로 연다(tailnet 과 같다).
+  const readTeamKeychain = useCallback(
+    (teamId: string) =>
+      Promise.resolve()
+        .then(() => listTeamSavedCredentials(teamId))
+        .catch((): SecretMetadataRecord[] => []),
+    [],
+  );
+  useEffect(() => {
+    setTeamKeychain(null);
+    if (!isDrawerOpen || !drawerTeamId) {
+      return;
+    }
+    let cancelled = false;
+    void readTeamKeychain(drawerTeamId).then((entries) => {
+      if (!cancelled) {
+        setTeamKeychain({ teamId: drawerTeamId, entries });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [drawerTeamId, isDrawerOpen, readTeamKeychain]);
   const highlightedHostId = editingHostId ?? selectedHostId;
   const sectionTitle =
     homeViewModel.homeSection === "portForwarding"
@@ -345,7 +471,9 @@ export function HomeShell({
       env: [],
     };
 
-    const created = await homeViewModel.saveHost(null, draft);
+    const created = teamVaultId
+      ? await homeViewModel.saveHost(null, draft, undefined, teamVaultId)
+      : await homeViewModel.saveHost(null, draft);
     homeViewModel.closeHostDrawer();
     setSelectedHostId(created.id);
     setHostBrowserStatus(`Saved ${created.label}. Connecting...`);
@@ -464,6 +592,33 @@ export function HomeShell({
     });
   }
 
+  /**
+   * 복사가 끝나면 복사본이 있는 곳을 보여 준다 — 그 볼트의 놓은 그룹(그룹째 복사면 복사된 그룹)으로 가서 첫
+   * 복사본을 고른다. 편집 중이면 떠나기 전에 묻는다(다른 이동과 같다).
+   */
+  function showVaultCopies(request: VaultCopyRequest, result: VaultCopyResult) {
+    const { selection } = request;
+    const groupPath =
+      selection.kind === "group"
+        ? [request.targetGroupPath, getGroupLabel(selection.groupPath)]
+            .filter(Boolean)
+            .join("/")
+        : (request.targetGroupPath ?? "");
+    // 워크스페이스를 복사했으면 그 자리로만 간다 — 따라온 호스트를 고르면 무엇을 복사했는지 헷갈린다.
+    const firstHostId =
+      selection.kind === "hosts"
+        ? result.hostIds[selection.hostIds[0] ?? ""]
+        : selection.kind === "workspaces"
+          ? undefined
+          : Object.values(result.hostIds)[0];
+    guardEditorExit(() => {
+      homeViewModel.closeHostDrawer();
+      resetHostBrowserMessages();
+      homeViewModel.navigateGroup(groupPath || null, request.targetVaultId);
+      setSelectedHostId(firstHostId ?? null);
+    });
+  }
+
   function handleEditHost(hostId: string) {
     guardEditorExit(() => switchEditTargetTo(hostId));
   }
@@ -472,7 +627,8 @@ export function HomeShell({
     if (!currentHost || !isSshHostRecord(currentHost)) {
       return;
     }
-    const entry = settingsViewModel.keychainEntries.find(
+    // 팀 호스트의 자격 증명은 그 팀 목록에 있다(서랍이 읽은 것). 메인이 그 볼트에서 읽고 고친다.
+    const entry = (drawerKeychainEntries ?? settingsViewModel.keychainEntries).find(
       (item) => item.secretRef === secretRef,
     );
     onRequestSecretEditor({
@@ -488,10 +644,11 @@ export function HomeShell({
     });
   }
 
-  function openKeychainSecretEditor(secretRef: string) {
-    const entry = settingsViewModel.keychainEntries.find(
-      (item) => item.secretRef === secretRef,
-    );
+  function openKeychainSecretEditor(secretRef: string, teamEntry?: SecretMetadataRecord) {
+    // 팀 것은 설정 화면이 항목을 함께 준다 — 개인 목록(스토어)에는 없다.
+    const entry =
+      teamEntry ??
+      settingsViewModel.keychainEntries.find((item) => item.secretRef === secretRef);
     if (!entry) {
       return;
     }
@@ -508,10 +665,10 @@ export function HomeShell({
     });
   }
 
-  async function handleRemoveSecret(secretRef: string) {
-    const entry = settingsViewModel.keychainEntries.find(
-      (item) => item.secretRef === secretRef,
-    );
+  async function handleRemoveSecret(secretRef: string, teamEntry?: SecretMetadataRecord) {
+    const entry =
+      teamEntry ??
+      settingsViewModel.keychainEntries.find((item) => item.secretRef === secretRef);
     const linkedHostCount = entry?.linkedHostCount ?? 0;
     const confirmed = window.confirm(
       linkedHostCount > 0
@@ -558,19 +715,27 @@ export function HomeShell({
     );
   }
 
+  const drawerKeychainEntries = drawerTeamId
+    ? teamKeychain?.teamId === drawerTeamId
+      ? teamKeychain.entries
+      : null
+    : settingsViewModel.keychainEntries;
   // 호스트 편집/생성 폼은 별도 오버레이가 아니라 우측 상세 영역(HostBrowser aside) 안에 표시한다.
-  const hostEditor = isDrawerOpen ? (
+  // 팀 호스트는 그 팀의 자격 증명을 다 읽은 뒤에 띄운다. 폼은 고른 자격 증명이 목록에 없으면 "새 자격 증명"으로
+  // 되돌리므로, 빈 목록으로 먼저 뜨면 저장된 팀 비밀번호가 풀린 채로 보이고 그대로 저장하면 호스트에서 떨어진다.
+  const hostEditor = isDrawerOpen && drawerKeychainEntries ? (
     <HostDrawer
       ref={hostDrawerRef}
       open={isDrawerOpen}
       mode={homeViewModel.hostDrawer.mode === "create" ? "create" : "edit"}
       host={currentHost}
-      keychainEntries={settingsViewModel.keychainEntries}
+      keychainEntries={drawerKeychainEntries}
       groupOptions={groupOptions}
       jumpHostOptions={jumpHostOptions}
       jumpHostTailnetNames={jumpHostTailnetNames}
       tailnetOptions={tailnetOptions}
-      snippets={homeViewModel.snippets}
+      snippets={drawerSnippets}
+      vaultId={drawerTeamId}
       defaultGroupPath={
         homeViewModel.hostDrawer.mode === "create"
           ? homeViewModel.hostDrawer.defaultGroupPath
@@ -598,11 +763,25 @@ export function HomeShell({
         // 기기에서 열 수 없는 값이 된다(모니터 세부 선택과 같은 이유). 저장한 뒤 그 호스트의
         // 기기 로컬 설정에 넣는다 — 새로 만든 경우에도 id 는 저장이 끝나야 나온다.
         const { draft: outgoing, drives } = detachHostDrives(draft);
-        const saved = await homeViewModel.saveHost(
-          isEdit ? (currentHost?.id ?? null) : null,
-          outgoing,
-          secrets,
-        );
+        // 만들 때는 서랍이 연 볼트에 만든다(팀 볼트 안이나 볼트 줄 메뉴). 개인은 지금처럼 부른다.
+        const createVaultId =
+          homeViewModel.hostDrawer.mode === "create" &&
+          isTeamVaultId(homeViewModel.hostDrawer.vaultId)
+            ? homeViewModel.hostDrawer.vaultId
+            : null;
+        const saved = createVaultId
+          ? await homeViewModel.saveHost(null, outgoing, secrets, createVaultId)
+          : await homeViewModel.saveHost(
+              isEdit ? (currentHost?.id ?? null) : null,
+              outgoing,
+              secrets,
+            );
+        // 팀 호스트에 새 비밀번호를 넣었으면 그 팀 목록에 새 항목이 생긴다. 폼은 저장이 끝나면 호스트를 다시 채우는데
+        // 그때 목록에 없으면 위와 같이 풀린다 — 끝나기 전에 다시 읽어 둔다(개인은 saveHost 가 스토어 목록을 다시 읽는다).
+        if (isEdit && drawerTeamId) {
+          const entries = await readTeamKeychain(drawerTeamId);
+          setTeamKeychain({ teamId: drawerTeamId, entries });
+        }
         if (drives !== null) {
           await settingsViewModel.updateSettings({
             rdpDrivesByHostId: withHostDrives(
@@ -626,7 +805,10 @@ export function HomeShell({
             }
           : undefined
       }
+      // 편집 창은 개인 자격 증명만 읽고 고친다 — 팀 자격 증명에서는 편집을 숨긴다.
       onEditExistingSecret={openHostSecretEditor}
+      // 폼 안에서 tailnet 을 추가하면 지금은 개인 볼트에 생긴다 — 팀 호스트 서랍에서는 추가를 숨긴다(팀에 만드는
+      // 길은 설정에서 볼트를 고르는 화면).
       onTailnetAdded={() => refreshTailnetOptions()}
     />
   ) : null;
@@ -678,6 +860,8 @@ export function HomeShell({
             desktopPlatform={desktopPlatform}
             hosts={homeViewModel.hosts}
             groups={homeViewModel.groups}
+            vaults={browserVaults}
+            currentVaultId={homeViewModel.currentVaultId}
             keychainEntries={settingsViewModel.keychainEntries}
             currentGroupPath={homeViewModel.currentGroupPath}
             searchQuery={homeViewModel.searchQuery}
@@ -745,14 +929,27 @@ export function HomeShell({
             }}
             onCreateGroup={homeViewModel.createGroup}
             onRemoveGroup={homeViewModel.removeGroup}
-            onReorderGroup={async (path, targetParentPath, targetIndex) => {
+            onReorderGroup={async (
+              path,
+              targetParentPath,
+              targetIndex,
+              vaultId,
+            ) => {
               resetHostBrowserMessages();
               try {
-                await homeViewModel.reorderGroup(
-                  path,
-                  targetParentPath,
-                  targetIndex,
-                );
+                // 팀 그룹일 때만 볼트가 온다. 개인은 지금처럼 부른다.
+                await (vaultId
+                  ? homeViewModel.reorderGroup(
+                      path,
+                      targetParentPath,
+                      targetIndex,
+                      vaultId,
+                    )
+                  : homeViewModel.reorderGroup(
+                      path,
+                      targetParentPath,
+                      targetIndex,
+                    ));
               } catch (error) {
                 setHostBrowserError(
                   error instanceof Error
@@ -761,10 +958,12 @@ export function HomeShell({
                 );
               }
             }}
-            onMoveGroup={async (path, targetParentPath) => {
+            onMoveGroup={async (path, targetParentPath, vaultId) => {
               resetHostBrowserMessages();
               try {
-                await homeViewModel.moveGroup(path, targetParentPath);
+                await (vaultId
+                  ? homeViewModel.moveGroup(path, targetParentPath, vaultId)
+                  : homeViewModel.moveGroup(path, targetParentPath));
                 const nextPath = buildMovedGroupPath(path, targetParentPath);
                 setHostBrowserStatus(
                   nextPath
@@ -780,10 +979,12 @@ export function HomeShell({
                 throw error;
               }
             }}
-            onRenameGroup={async (path, name) => {
+            onRenameGroup={async (path, name, vaultId) => {
               resetHostBrowserMessages();
               try {
-                await homeViewModel.renameGroup(path, name);
+                await (vaultId
+                  ? homeViewModel.renameGroup(path, name, vaultId)
+                  : homeViewModel.renameGroup(path, name));
                 const nextPath = buildRenamedGroupPath(path, name);
                 setHostBrowserStatus(
                   nextPath
@@ -799,11 +1000,28 @@ export function HomeShell({
                 throw error;
               }
             }}
-            onNavigateGroup={(path) => {
+            onNavigateGroup={(path, vaultId) => {
               resetHostBrowserMessages();
               setSelectedHostId(null);
-              homeViewModel.navigateGroup(path);
+              // 볼트는 볼트가 있을 때만 온다(볼트 맨 위·그 볼트의 그룹). 없으면 All 이거나 팀이 없는 것이다.
+              if (vaultId) {
+                homeViewModel.navigateGroup(path, vaultId);
+              } else {
+                homeViewModel.navigateGroup(path);
+              }
             }}
+            onCreateHostInVault={(vaultId) =>
+              guardEditorExit(() => {
+                resetHostBrowserMessages();
+                setSelectedHostId(null);
+                homeViewModel.openCreateHostDrawer({ vaultId, groupPath: null });
+              })
+            }
+            onOpenTeamInvite={setInviteTeamId}
+            onRequestVaultCopy={setVaultCopyDraft}
+            myCredentials={myCredentialsApi}
+            myUsernameByHostId={homeViewModel.vaultIndex?.myUsernameByHostId}
+            onManageTeam={homeViewModel.showTeamInPanel}
             // 그룹 이동·All Hosts 복귀도 편집기를 떠나는 동작이다. 막기만 하면 확인을 받은 뒤
             // 이동을 다시 실행할 주체가 없어 편집기만 닫힌다 — 이동 자체를 이어서 실행한다.
             onLeaveGroupScope={(proceed) => {
@@ -986,6 +1204,7 @@ export function HomeShell({
                 <SnippetsPanel
                   snippets={homeViewModel.snippets}
                   hosts={homeViewModel.hosts}
+                  vaultIndex={homeViewModel.vaultIndex}
                   onSave={homeViewModel.saveSnippet}
                   onRemove={homeViewModel.removeSnippet}
                 />
@@ -1010,6 +1229,8 @@ export function HomeShell({
                     settingsViewModel.savedCredentialsSearchQuery
                   }
                   currentUserEmail={authState.session?.user.email ?? null}
+                  currentUserId={authState.session?.user.id ?? null}
+                  teamsAvailable={settingsViewModel.teamsAvailable}
                   isLocalOnly={isLocalOnlyAuthState(authState)}
                   onStartLogin={async () => onRequestLogin()}
                   passwordState={
@@ -1056,7 +1277,7 @@ export function HomeShell({
 
       <AwsImportDialog
         open={isAwsImportOpen}
-        currentGroupPath={homeViewModel.currentGroupPath}
+        currentGroupPath={importGroupPath}
         onClose={() => setIsAwsImportOpen(false)}
         onImport={async (draft, secrets) => {
           // RDP 경로는 자격증명(Administrator + 암호)을 함께 만든다. saveHost 가 시크릿까지 받는다.
@@ -1134,7 +1355,7 @@ export function HomeShell({
 
       <OpenSshImportDialog
         open={isOpenSshImportOpen}
-        currentGroupPath={homeViewModel.currentGroupPath}
+        currentGroupPath={importGroupPath}
         onClose={() => setIsOpenSshImportOpen(false)}
         onImported={async (result) => {
           await homeViewModel.refreshHostCatalog();
@@ -1183,12 +1404,41 @@ export function HomeShell({
 
       <WarpgateImportDialog
         open={isWarpgateImportOpen}
-        currentGroupPath={homeViewModel.currentGroupPath}
+        currentGroupPath={importGroupPath}
         onClose={() => setIsWarpgateImportOpen(false)}
         onImport={async (draft) => {
           await homeViewModel.saveHost(null, draft);
         }}
       />
+      {inviteTeam ? (
+        <InviteLinkDialog
+          teamName={inviteTeam.name}
+          onCreate={(expiresInHours) =>
+            homeViewModel.createTeamInvite(inviteTeam.id, expiresInHours)
+          }
+          onClose={() => setInviteTeamId(null)}
+        />
+      ) : null}
+      {vaultCopyDraft ? (
+        <VaultCopyDialog
+          vaults={browserVaults}
+          draft={vaultCopyDraft}
+          hostLabelOf={(hostId) =>
+            homeViewModel.hosts.find((host) => host.id === hostId)?.label ?? null
+          }
+          workspaceLabelOf={(workspaceId) =>
+            homeViewModel.savedWorkspaces.find((workspace) => workspace.id === workspaceId)?.name ?? null
+          }
+          onPreview={homeViewModel.previewVaultCopy}
+          onListMembers={homeViewModel.listTeamMembers}
+          onCopy={async (request) => {
+            const result = await homeViewModel.copyToVault(request);
+            showVaultCopies(request, result);
+          }}
+          onClose={() => setVaultCopyDraft(null)}
+        />
+      ) : null}
+
       <LogoutConfirmDialog
         open={loginController.isLogoutConfirmOpen}
         onClose={loginController.cancelLogout}

@@ -36,6 +36,8 @@ import {
   shouldPromptAwsSftpConfigRetry,
   updatePaneState,
   upsertTransferJob,
+  myUsernameOf,
+  buildHopCredentialRetry,
 } from "../utils";
 import { t } from '../../i18n';
 
@@ -407,6 +409,8 @@ export function createSftpServices(deps: SliceDeps) {
       hostId: string;
       endpointId: string;
       secrets?: HostSecretInput;
+      /** 이번 시도에서 요청 창에 넣은 점프 호스트의 값(점프 호스트 id → 값). */
+      jumpSecrets?: Record<string, HostSecretInput>;
     },
   ): Promise<boolean> => {
     const pane = getPane(get(), input.paneId);
@@ -435,7 +439,37 @@ export function createSftpServices(deps: SliceDeps) {
         hostId: input.hostId,
         endpointId: input.endpointId,
         secrets: input.secrets,
+        jumpSecrets: input.jumpSecrets,
       });
+      if ("credentialsNeeded" in endpoint) {
+        // 그 홉의 자격 증명이 있어야 붙는다(없음 — 점프면 베스천부터, 또는 점프 홉의 거절). pane 은 오류로
+        // 물들이지 않고 대기 모양으로 되돌리고, 요청 창을 그 홉으로 띄운다. 앞서 넣은 값은 요청에 싣는다.
+        set((state) => ({
+          pendingCredentialRetry:
+            buildHopCredentialRetry({
+              hosts: state.hosts,
+              vaultIndex: state.vaultIndex,
+              hostId: input.hostId,
+              needed: endpoint.credentialsNeeded,
+              source: "sftp",
+              paneId: input.paneId,
+              carried: { secrets: input.secrets, jumpSecrets: input.jumpSecrets },
+            }) ?? state.pendingCredentialRetry,
+          sftp: updatePaneState(state, input.paneId, {
+            ...getPane(state, input.paneId),
+            sourceKind: "host",
+            endpoint: null,
+            connectingHostId: null,
+            connectingEndpointId: null,
+            connectionProgress: null,
+            connectionDiagnostic: null,
+            isLoading: false,
+            errorMessage: undefined,
+            warningMessages: [],
+          }),
+        }));
+        return false;
+      }
       set((state) => ({
         sftp: updatePaneState(state, input.paneId, {
           ...getPane(state, input.paneId),
@@ -457,7 +491,10 @@ export function createSftpServices(deps: SliceDeps) {
       await loadPaneListing(set, get, input.paneId, endpoint.path, {
         pushToHistory: false,
       });
-      if (hasProvidedSecrets(input.secrets)) {
+      if (
+        hasProvidedSecrets(input.secrets) ||
+        Object.values(input.jumpSecrets ?? {}).some((secrets) => hasProvidedSecrets(secrets))
+      ) {
         await refreshHostAndKeychainState(set);
       }
       return true;
@@ -515,7 +552,8 @@ export function createSftpServices(deps: SliceDeps) {
                   : "password",
             paneId: input.paneId,
             message,
-            initialUsername: host.username,
+            initialUsername: myUsernameOf(get().vaultIndex, host.id) ?? host.username,
+            carried: { secrets: input.secrets, jumpSecrets: input.jumpSecrets },
           },
         });
       } else if (host && shouldPromptAwsConfig && isAwsEc2HostRecord(host)) {
@@ -631,7 +669,20 @@ export function createSftpServices(deps: SliceDeps) {
           throw new TerminalUploadAwaitingHostTrustError();
         }
       }
-      const endpoint = await api.sftp.connect({ hostId, endpointId });
+      const result = await api.sftp.connect({ hostId, endpointId });
+      if ("credentialsNeeded" in result) {
+        // 이 경로에는 요청 창이 없다 — 무엇이 필요한지 문구로 알리고 호출자가 안내한다(전과 같다).
+        const state = get();
+        const retry = buildHopCredentialRetry({
+          hosts: state.hosts,
+          vaultIndex: state.vaultIndex,
+          hostId,
+          needed: result.credentialsNeeded,
+          source: "sftp",
+        });
+        throw new Error(retry?.message || t('sftpStore.connectFailed'));
+      }
+      const endpoint = result;
       set((current) => ({
         sftp: {
           ...current.sftp,

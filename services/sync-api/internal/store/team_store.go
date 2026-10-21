@@ -225,6 +225,11 @@ type TeamInviteInfo struct {
 	ExpiresAt    time.Time
 }
 
+// TeamInvitePage 는 로그인 없이 여는 링크 페이지에 보일 것 — 팀 이름뿐이다(초대한 사람은 앱의 참여 카드에서).
+type TeamInvitePage struct {
+	TeamName string
+}
+
 type TeamJoinResult struct {
 	TeamID    string
 	TeamName  string
@@ -281,6 +286,8 @@ type TeamStore interface {
 	ListTeamInvites(ctx context.Context, teamID string, actorID string) ([]TeamInvite, error)
 	RevokeTeamInvite(ctx context.Context, teamID string, actorID string, code string) error
 	GetTeamInviteInfo(ctx context.Context, code string, joinToken string) (TeamInviteInfo, error)
+	// GetTeamInvitePage 는 로그인 없이 여는 링크 페이지에 보일 팀 이름이다. 쓸 수 없는 링크면 ErrTeamInviteInvalid.
+	GetTeamInvitePage(ctx context.Context, code string) (TeamInvitePage, error)
 	JoinTeam(ctx context.Context, code string, joinToken string, userID string) (TeamJoinResult, error)
 
 	GetTeamGate(ctx context.Context, teamID string, userID string) (TeamGate, error)
@@ -933,10 +940,15 @@ func (s *GormStore) RevokeTeamInvite(ctx context.Context, teamID string, actorID
 	})
 }
 
+// liveInvite 는 아직 쓸 수 있는 링크인지다 — 상자가 있고, 취소되지 않았고, 기한 안이다.
+func liveInvite(invite teamInviteRow, now time.Time) bool {
+	return invite.InviteBox != nil && *invite.InviteBox != "" && invite.RevokedAt == nil && invite.ExpiresAt.After(now)
+}
+
 // usableInvite 는 링크로 지금 들어올 수 있는지 본다. 이유는 밖에 알리지 않는다(ErrTeamInviteInvalid 하나).
 // 토큰 대조는 상수 시간이다.
 func usableInvite(invite teamInviteRow, joinToken string, now time.Time) bool {
-	if invite.InviteBox == nil || *invite.InviteBox == "" || invite.RevokedAt != nil || !invite.ExpiresAt.After(now) {
+	if !liveInvite(invite, now) {
 		return false
 	}
 	if joinToken == "" {
@@ -982,6 +994,31 @@ func (s *GormStore) GetTeamInviteInfo(ctx context.Context, code string, joinToke
 		return TeamInviteInfo{}, err
 	}
 	return info, nil
+}
+
+// GetTeamInvitePage 는 링크 페이지(로그인 없이 열린다)에 보일 팀 이름을 준다. 토큰을 받지 않으므로 팀 이름
+// 말고는 아무것도 주지 않는다(설계 — 번호를 아는 사람은 팀 이름까지만 본다). 기한이 지났거나 취소됐거나 없는
+// 링크면 ErrTeamInviteInvalid 다 — 페이지는 이름 없이 만료 안내만 보인다.
+func (s *GormStore) GetTeamInvitePage(ctx context.Context, code string) (TeamInvitePage, error) {
+	db := s.db.WithContext(ctx)
+	var invite teamInviteRow
+	if err := db.Where("code = ?", code).Take(&invite).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return TeamInvitePage{}, ErrTeamInviteInvalid
+		}
+		return TeamInvitePage{}, err
+	}
+	if !liveInvite(invite, time.Now().UTC()) {
+		return TeamInvitePage{}, ErrTeamInviteInvalid
+	}
+	var team teamRow
+	if err := db.Select("id", "name").Where("id = ?", invite.TeamID).Take(&team).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return TeamInvitePage{}, ErrTeamInviteInvalid
+		}
+		return TeamInvitePage{}, err
+	}
+	return TeamInvitePage{TeamName: team.Name}, nil
 }
 
 func (s *GormStore) JoinTeam(ctx context.Context, code string, joinToken string, userID string) (TeamJoinResult, error) {

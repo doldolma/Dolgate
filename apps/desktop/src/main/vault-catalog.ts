@@ -1,8 +1,12 @@
 import type {
+  DnsOverrideRecord,
+  GroupRecord,
   HostDraft,
   HostRecord,
   PortForwardRuleRecord,
+  SavedWorkspaceDraft,
   SavedWorkspaceRecord,
+  SnippetRecord,
   TailnetPayload,
   TerminalThemeId,
 } from "@shared";
@@ -111,6 +115,21 @@ export function pickVaultRepositories(
   };
 }
 
+/**
+ * 팀 볼트마다 그룹과, 그 팀이 가진 레코드 id. 화면이 레코드의 볼트를 찾는 표(VaultIndex)의 재료다 — 팀
+ * 이름·역할은 팀 서비스가 붙인다.
+ */
+export interface TeamVaultLayout {
+  groupsByTeamId: Record<string, GroupRecord[]>;
+  teamIdByHostId: Record<string, string>;
+  teamIdByWorkspaceId: Record<string, string>;
+  teamIdByPortForwardId: Record<string, string>;
+  teamIdByDnsOverrideId: Record<string, string>;
+  teamIdBySnippetId: Record<string, string>;
+  /** 팀 호스트에 둔 내 사용자 이름(있을 때만). */
+  myUsernameByHostId: Record<string, string>;
+}
+
 const NO_TEAM_VAULTS: TeamVaultSource = {
   listTeamIds: () => [],
   createScope: (teamId) => {
@@ -165,6 +184,24 @@ export interface VaultCatalog {
   listTailnetPayloads(): TailnetPayload[];
   /** 모든 볼트에서 포트 포워딩 규칙을 id 로 찾는다(켜고 끌 때). */
   getPortForward(id: string): PortForwardRuleRecord | null;
+  /** 모든 볼트의 포트 포워딩 규칙. 볼트 순서대로다. */
+  listPortForwards(): PortForwardRuleRecord[];
+  /** 그 규칙이 든 볼트. 못 찾으면 개인이다(scopeOfHost 와 같은 규칙). */
+  scopeOfPortForward(id: string): VaultScope;
+  /** 모든 볼트에서 DNS 덮어쓰기를 id 로 찾는다. */
+  getDnsOverride(id: string): DnsOverrideRecord | null;
+  /** 그 DNS 덮어쓰기가 든 볼트. 못 찾으면 개인이다. */
+  scopeOfDnsOverride(id: string): VaultScope;
+  /** 모든 볼트의 스니펫. 볼트 순서대로다. */
+  listSnippets(): SnippetRecord[];
+  /** 그 스니펫이 든 볼트. 못 찾으면 개인이다. */
+  scopeOfSnippet(id: string): VaultScope;
+  /** 그 저장 자격 증명(`secret:*`)이 든 볼트 — 메타데이터로 찾는다. 못 찾으면 개인이다. */
+  scopeOfSecret(secretRef: string): VaultScope;
+  /** 그 tailnet 설정이 든 볼트. 못 찾으면 개인이다. */
+  scopeOfTailnet(id: string): VaultScope;
+  /** 그 호스트 키 기록이 든 볼트. 못 찾으면 개인이다. */
+  scopeOfKnownHost(id: string): VaultScope;
   /** 팀 호스트에 둔 내 자격 증명(멤버 개인 칸). 개인 호스트거나 없으면 null. */
   getMyHostCredentials(hostId: string): TeamHostCredentials | null;
   /** 팀 호스트에 내 자격 증명을 둔다(null 이면 지운다). 개인 호스트는 호스트의 비밀값을 쓰므로 던진다. */
@@ -174,6 +211,11 @@ export interface VaultCatalog {
    * 둔다 — 팀 레코드에 쓰면 팀 모두의 사용자 이름이 바뀐다. 팀 것과 같으면 내 칸에서 뺀다.
    */
   setHostLoginUsername(hostId: string, username: string): HostRecord | null;
+  /**
+   * 팀 볼트마다 그룹과 그 팀이 가진 레코드 id. id 가 겹치면 목록(listHosts 등)과 같은 규칙으로 앞 볼트가
+   * 가진다 — 개인이 이기고, 팀끼리는 먼저 있는 팀이 이긴다. 그래서 목록에 나온 레코드와 표가 늘 맞는다.
+   */
+  describeTeamVaults(): TeamVaultLayout;
   /** 팀 호스트면 내 개인 칸에만 둔다. */
   setHostFavorite(id: string, favorite: boolean): HostRecord | null;
   /** 팀 호스트면 이 기기에만 둔다. */
@@ -184,10 +226,23 @@ export interface VaultCatalog {
   createHost(vaultId: string, id: string, draft: HostDraft, secretRef?: string | null): HostRecord;
   /** 모든 볼트의 워크스페이스. 볼트 순서대로다. */
   listWorkspaces(): SavedWorkspaceRecord[];
+  /** 그 워크스페이스가 든 볼트. 못 찾으면 개인이다. */
+  scopeOfWorkspace(id: string): VaultScope;
+  /**
+   * vaultId 볼트에 워크스페이스를 만든다. 팀 것이면 즐겨찾기는 내 칸에 둔다(createHost 와 같은 나누기). 이 기기에
+   * 없는 볼트면 던진다.
+   */
+  createWorkspace(vaultId: string, draft: SavedWorkspaceDraft): SavedWorkspaceRecord;
   /** 팀 워크스페이스면 내 개인 칸에만 둔다. */
   setWorkspaceFavorite(id: string, favorite: boolean): SavedWorkspaceRecord;
   /** 팀 워크스페이스면 내 개인 칸에만 둔다. */
   touchWorkspaceOpened(id: string): SavedWorkspaceRecord;
+  /** 워크스페이스가 든 볼트에서 이름을 바꾼다. 팀 것은 내 값을 얹어 돌려준다. */
+  renameWorkspace(id: string, name: string): SavedWorkspaceRecord;
+  /** 워크스페이스가 든 볼트 안에서 그룹을 옮긴다. */
+  moveWorkspaceToGroup(id: string, groupName: string | null): SavedWorkspaceRecord;
+  /** 워크스페이스를 그 볼트에서 지운다 — 그 볼트의 삭제 대기열에 올리고 뺀다. */
+  removeWorkspace(id: string): void;
 }
 
 /** SSH 호스트의 사용자 이름(앞뒤 공백 없이). 칸이 없으면 빈 글. */
@@ -371,6 +426,26 @@ export function createVaultCatalog(
       }
       return null;
     },
+    listPortForwards: () => listAcrossVaults((scope) => scope.portForwards.list(), (record) => record),
+    scopeOfPortForward: (id) => findInTeam((scope) => scope.portForwards.getById(id))?.scope ?? personalScope,
+    getDnsOverride: (id) => {
+      for (const scope of listScopes()) {
+        const record = scope.dnsOverrides.getById(id);
+        if (record) {
+          return record;
+        }
+      }
+      return null;
+    },
+    scopeOfDnsOverride: (id) => findInTeam((scope) => scope.dnsOverrides.getById(id))?.scope ?? personalScope,
+    listSnippets: () => listAcrossVaults((scope) => scope.snippets.list(), (record) => record),
+    scopeOfSnippet: (id) => findInTeam((scope) => scope.snippets.getById(id))?.scope ?? personalScope,
+    scopeOfSecret: (secretRef) =>
+      findInTeam((scope) => scope.secretMetadata.getBySecretRef(secretRef))?.scope ?? personalScope,
+    scopeOfTailnet: (id) =>
+      findInTeam((scope) => scope.tailnets.list().find((record) => record.id === id) ?? null)?.scope ?? personalScope,
+    scopeOfKnownHost: (id) =>
+      findInTeam((scope) => scope.knownHosts.list().find((record) => record.id === id) ?? null)?.scope ?? personalScope,
     // 팀 tailnet 은 내 auth key 가 있으면 그것을 쓴다(내 것 → 팀 것). 이 목록은 코어에 넘기는 데만 쓴다 — 팀에
     // 올리는 것은 팀 저장소의 listPayloads() 라 내 키가 실리지 않는다.
     listTailnetPayloads: () =>
@@ -382,6 +457,57 @@ export function createVaultCatalog(
           }),
         (record) => record,
       ),
+    describeTeamVaults: () => {
+      const layout: TeamVaultLayout = {
+        groupsByTeamId: {},
+        teamIdByHostId: {},
+        teamIdByWorkspaceId: {},
+        teamIdByPortForwardId: {},
+        teamIdByDnsOverrideId: {},
+        teamIdBySnippetId: {},
+        myUsernameByHostId: {},
+      };
+      const scopes = listTeamScopes();
+      if (scopes.length === 0) {
+        return layout;
+      }
+      // 종류마다 목록(listAcrossVaults)과 같은 규칙으로 임자를 정한다 — 개인 id 를 먼저 깔고, 팀은 볼트
+      // 순서대로 처음 나온 것만 가진다.
+      const claim = (
+        list: (scope: VaultScope) => Array<{ id: string }>,
+        target: Record<string, string>,
+        onClaim?: (scope: TeamVaultScope, id: string) => void,
+      ) => {
+        const seen = new Set(list(personalScope).map((record) => record.id));
+        for (const scope of scopes) {
+          for (const record of list(scope)) {
+            if (!seen.has(record.id)) {
+              seen.add(record.id);
+              target[record.id] = scope.id;
+              onClaim?.(scope, record.id);
+            }
+          }
+        }
+      };
+      for (const scope of scopes) {
+        layout.groupsByTeamId[scope.id] = scope.groups.list();
+      }
+      claim(
+        (scope) => scope.hosts.list(),
+        layout.teamIdByHostId,
+        (scope, hostId) => {
+          const mine = scope.memberPrefs.readHostCredentials(hostId)?.username?.trim();
+          if (mine) {
+            layout.myUsernameByHostId[hostId] = mine;
+          }
+        },
+      );
+      claim((scope) => scope.savedWorkspaces.list(), layout.teamIdByWorkspaceId);
+      claim((scope) => scope.portForwards.list(), layout.teamIdByPortForwardId);
+      claim((scope) => scope.dnsOverrides.list(), layout.teamIdByDnsOverrideId);
+      claim((scope) => scope.snippets.list(), layout.teamIdBySnippetId);
+      return layout;
+    },
     setHostFavorite: (id, favorite) => {
       const team = findHostInTeam(id);
       if (!team) {
@@ -440,6 +566,22 @@ export function createVaultCatalog(
     },
     listWorkspaces: () =>
       listAcrossVaults((scope) => scope.savedWorkspaces.list(), overlayWorkspaceMemberPrefs),
+    scopeOfWorkspace: (id) => findWorkspaceInTeam(id)?.scope ?? personalScope,
+    createWorkspace: (vaultId, draft) => {
+      if (vaultId === PERSONAL_VAULT_ID) {
+        return personalScope.savedWorkspaces.create(draft);
+      }
+      if (!teams.listTeamIds().includes(vaultId)) {
+        throw new Error(t("teams.notOnDevice"));
+      }
+      const scope = teamScope(vaultId);
+      // 즐겨찾기는 사람마다 다르다 — 팀 레코드에는 두지 않는다.
+      const record = scope.savedWorkspaces.create({ ...draft, favorite: false });
+      if (draft.favorite === true) {
+        scope.memberPrefs.updateWorkspace(record.id, { favorite: true });
+      }
+      return overlayWorkspaceMemberPrefs(record, scope.memberPrefs.read());
+    },
     setWorkspaceFavorite: (id, favorite) => {
       const team = findWorkspaceInTeam(id);
       if (!team) {
@@ -455,6 +597,28 @@ export function createVaultCatalog(
       }
       team.scope.memberPrefs.updateWorkspace(id, { lastOpenedAt: new Date().toISOString() });
       return overlayWorkspaceMemberPrefs(team.record, team.scope.memberPrefs.read());
+    },
+    renameWorkspace: (id, name) => {
+      const team = findWorkspaceInTeam(id);
+      if (!team) {
+        return personalScope.savedWorkspaces.rename(id, name);
+      }
+      return overlayWorkspaceMemberPrefs(team.scope.savedWorkspaces.rename(id, name), team.scope.memberPrefs.read());
+    },
+    moveWorkspaceToGroup: (id, groupName) => {
+      const team = findWorkspaceInTeam(id);
+      if (!team) {
+        return personalScope.savedWorkspaces.moveToGroup(id, groupName);
+      }
+      return overlayWorkspaceMemberPrefs(
+        team.scope.savedWorkspaces.moveToGroup(id, groupName),
+        team.scope.memberPrefs.read(),
+      );
+    },
+    removeWorkspace: (id) => {
+      const scope = findWorkspaceInTeam(id)?.scope ?? personalScope;
+      scope.syncOutbox.upsertDeletion("workspaces", id);
+      scope.savedWorkspaces.remove(id);
     },
   };
 }

@@ -1,7 +1,38 @@
 import { ipcMain } from "electron";
-import type { SavedWorkspaceDraft } from "@shared";
+import type { SavedWorkspaceDraft, SavedWorkspaceNode } from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
+import { t } from "../i18n";
+import { PERSONAL_VAULT_ID } from "../vault-catalog";
 import type { MainIpcContext } from "./context";
+
+/** 창이 가리키는 호스트 id(로컬 창 빼고). 모양이 틀린 마디는 건너뛴다 — 검사는 저장소가 한다. */
+export function listWorkspaceHostIds(node: SavedWorkspaceNode | null | undefined): string[] {
+  if (node?.kind === "leaf") {
+    return node.target?.kind === "host" ? [node.target.hostId] : [];
+  }
+  if (node?.kind === "split") {
+    return [...listWorkspaceHostIds(node.first), ...listWorkspaceHostIds(node.second)];
+  }
+  return [];
+}
+
+/**
+ * 새 워크스페이스가 들어갈 볼트 — 창의 호스트가 든 볼트다(로컬 창만이면 vaultId, 없으면 개인). 지워져 어디에도 없는
+ * 호스트는 세지 않는다. 볼트가 섞였거나 vaultId 와 다르면 거절한다 — 팀 워크스페이스가 개인 호스트를(또는 그 반대를)
+ * 가리키면 팀원에게는 없는 창이 된다.
+ */
+function resolveWorkspaceVault(ctx: MainIpcContext, draft: SavedWorkspaceDraft, vaultId?: string): string {
+  const vaultIds = new Set(
+    listWorkspaceHostIds(draft.root)
+      .filter((hostId) => ctx.vaults.getHost(hostId) !== null)
+      .map((hostId) => ctx.vaults.scopeOfHost(hostId).id),
+  );
+  if (vaultIds.size > 1 || (vaultId !== undefined && vaultIds.size === 1 && !vaultIds.has(vaultId))) {
+    const involved = new Set([...vaultIds, ...(vaultId === undefined ? [] : [vaultId])]);
+    throw new Error(t(involved.has(PERSONAL_VAULT_ID) ? "savedWorkspace.mixedVaults" : "savedWorkspace.mixedTeams"));
+  }
+  return [...vaultIds][0] ?? vaultId ?? PERSONAL_VAULT_ID;
+}
 
 /**
  * 저장된 Workspace 의 IPC 핸들러.
@@ -21,8 +52,8 @@ export function registerSavedWorkspacesIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.savedWorkspaces.create,
-    async (event, draft: SavedWorkspaceDraft) => {
-      const record = ctx.savedWorkspaces.create(draft);
+    async (event, draft: SavedWorkspaceDraft, vaultId?: string) => {
+      const record = ctx.vaults.createWorkspace(resolveWorkspaceVault(ctx, draft, vaultId), draft);
       ctx.queueSync();
       ctx.emitWorkspaceChanged?.(event?.sender);
       return record;
@@ -32,7 +63,7 @@ export function registerSavedWorkspacesIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.savedWorkspaces.rename,
     async (event, id: string, name: string) => {
-      const record = ctx.savedWorkspaces.rename(id, name);
+      const record = ctx.vaults.renameWorkspace(id, name);
       ctx.queueSync();
       ctx.emitWorkspaceChanged?.(event?.sender);
       return record;
@@ -42,7 +73,7 @@ export function registerSavedWorkspacesIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.savedWorkspaces.moveToGroup,
     async (event, id: string, groupName: string | null) => {
-      const record = ctx.savedWorkspaces.moveToGroup(id, groupName);
+      const record = ctx.vaults.moveWorkspaceToGroup(id, groupName);
       ctx.queueSync();
       ctx.emitWorkspaceChanged?.(event?.sender);
       return record;
@@ -71,8 +102,7 @@ export function registerSavedWorkspacesIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.savedWorkspaces.remove,
     async (event, id: string) => {
-      ctx.savedWorkspaces.remove(id);
-      ctx.syncOutbox.upsertDeletion("workspaces", id);
+      ctx.vaults.removeWorkspace(id);
       ctx.queueSync();
       ctx.emitWorkspaceChanged?.(event?.sender);
     },

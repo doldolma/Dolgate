@@ -85,6 +85,15 @@ describe("NewTabButton", () => {
     expect(props.onConnectHost).toHaveBeenCalledWith("h-2");
   });
 
+  it("팀 호스트에 내 사용자 이름이 있으면 부제에 그 이름을 적는다", () => {
+    renderButton({ myUsernameByHostId: { "h-1": "deploy" } });
+
+    fireEvent.click(screen.getByLabelText("새 탭"));
+    const texts = screen.getAllByRole("option").map((option) => option.textContent ?? "");
+    expect(texts.find((text) => text.includes("alpha"))).toContain("deploy@h-1.example.com");
+    expect(texts.find((text) => text.includes("bravo"))).toContain("ubuntu@h-2.example.com");
+  });
+
   // 그룹 머리글이 "PALETTE.GROUP.HOST" 로 떴다. 동작만 보는 테스트는 이것을 못 잡는다 —
   // 화면에 실제로 뭐가 적히는지 봐야 한다.
   it("그룹 머리글을 사람이 읽는 말로 적는다", () => {

@@ -5,6 +5,9 @@ const { mocks, storeState, watchMocks } = vi.hoisted(() => ({
   storeState: {
     openExternalUrl: () => {},
     tailnetStatuses: {} as Record<string, unknown>,
+    vaultIndex: {
+      teams: [{ id: 'team-a', name: 'Acme Infra', role: 'owner', syncState: 'ready', syncError: null, groups: [] }],
+    } as unknown,
   },
   watchMocks: {
     acquireTailnetWatch: () => () => {},
@@ -101,6 +104,35 @@ describe('TailnetAddDialog', () => {
     await waitFor(() => {
       expect(onAdded).toHaveBeenCalledWith({ id: DRAFT_ID, label: 'corp.ts.net' });
     });
+  });
+
+  // 팀 호스트의 서랍에서 열면 그 팀에 만든다(4-7) — 머리에 볼트 칩, auth key 는 내 칸에만.
+  it('creates the tailnet in the team of a team host, the auth key labelled as mine', async () => {
+    mocks.saveTailnet.mockResolvedValue(undefined);
+    markConnected('acme.ts.net');
+
+    render(<TailnetAddDialog vaultId="team-a" onClose={vi.fn()} onAdded={vi.fn()} />);
+
+    expect(screen.getByRole('heading', { name: /Acme Infra/ })).toBeInTheDocument();
+    expect(screen.getByText('My auth key')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('My auth key'), { target: { value: 'tskey-mine' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+
+    await waitFor(() =>
+      expect(mocks.saveTailnet).toHaveBeenCalledWith(expect.objectContaining({ vaultId: 'team-a', authKey: 'tskey-mine' })),
+    );
+  });
+
+  it('saves a personal host tailnet without a vault, as before', async () => {
+    mocks.saveTailnet.mockResolvedValue(undefined);
+    markConnected();
+
+    render(<TailnetAddDialog onClose={vi.fn()} onAdded={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+
+    await waitFor(() => expect(mocks.saveTailnet).toHaveBeenCalled());
+    expect(mocks.saveTailnet.mock.calls[0]![0]).not.toHaveProperty('vaultId');
+    expect(screen.queryByText('My auth key')).toBeNull();
   });
 
   // 시험은 **진짜 노드를 올린다.** 저장하지 않고 닫으면 그 노드가 유령으로 남는다.

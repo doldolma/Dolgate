@@ -1047,6 +1047,22 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "unknown error";
 }
 
+/**
+ * 코어가 오류에 실은 점프 깊이(대상에서 거꾸로 센 홉 수 — 그 점프 홉에서 실패했다). 없으면 0.
+ * 응답을 기다리던 요청(SFTP 접속 등)이 받는 Error 에 붙여 둔다 — 문구를 뜯지 않고 어느 홉인지 안다.
+ */
+export function jumpDepthOfCoreError(error: unknown): number {
+  const depth = (error as { jumpDepth?: unknown } | null)?.jumpDepth;
+  return typeof depth === "number" && Number.isInteger(depth) && depth > 0 ? depth : 0;
+}
+
+function withJumpDepth(error: Error, jumpDepth: unknown): Error {
+  if (typeof jumpDepth === "number" && Number.isInteger(jumpDepth) && jumpDepth > 0) {
+    Object.assign(error, { jumpDepth });
+  }
+  return error;
+}
+
 export class CoreManager {
   constructor(
     private readonly appendLog?: (entry: ActivityLogInput) => void,
@@ -5650,7 +5666,10 @@ export class CoreManager {
       clearTimeout(pending.timeout);
       this.pendingResponses.delete(event.requestId);
       pending.reject(
-        new Error(String(event.payload.message ?? "SSH core error")),
+        withJumpDepth(
+          new Error(String(event.payload.message ?? "SSH core error")),
+          event.payload.jumpDepth,
+        ),
       );
       return;
     }

@@ -8,6 +8,8 @@ export function useHomeViewModel() {
   const homeSection = useAppStore((state) => state.homeSection);
   const hostDrawer = useAppStore((state) => state.hostDrawer);
   const currentGroupPath = useAppStore((state) => state.currentGroupPath);
+  const currentVaultId = useAppStore((state) => state.currentVaultId);
+  const vaultIndex = useAppStore((state) => state.vaultIndex);
   const searchQuery = useAppStore((state) => state.searchQuery);
   const portForwards = useAppStore((state) => state.portForwards);
   const dnsOverrides = useAppStore((state) => state.dnsOverrides);
@@ -74,6 +76,14 @@ export function useHomeViewModel() {
   const handleActivityLogsChanged = useAppStore(
     (state) => state.handleActivityLogsChanged,
   );
+  const showTeamInPanel = useAppStore((state) => state.showTeamInPanel);
+  const createTeamInvite = useAppStore((state) => state.createTeamInvite);
+  const listTeamMembers = useAppStore((state) => state.listTeamMembers);
+  const previewVaultCopy = useAppStore((state) => state.previewVaultCopy);
+  const copyToVault = useAppStore((state) => state.copyToVault);
+  const getMyHostCredentials = useAppStore((state) => state.getMyHostCredentials);
+  const saveMyHostCredentials = useAppStore((state) => state.saveMyHostCredentials);
+  const clearMyHostCredentials = useAppStore((state) => state.clearMyHostCredentials);
   return {
     hosts,
     groups,
@@ -81,6 +91,8 @@ export function useHomeViewModel() {
     homeSection,
     hostDrawer,
     currentGroupPath,
+    currentVaultId,
+    vaultIndex,
     searchQuery,
     portForwards,
     dnsOverrides,
@@ -135,6 +147,14 @@ export function useHomeViewModel() {
     handleVncEvent,
     handlePortForwardEvent,
     handleActivityLogsChanged,
+    showTeamInPanel,
+    createTeamInvite,
+    listTeamMembers,
+    previewVaultCopy,
+    copyToVault,
+    getMyHostCredentials,
+    saveMyHostCredentials,
+    clearMyHostCredentials,
     openHostInNewWindow,
   };
 }

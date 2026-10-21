@@ -326,6 +326,63 @@ describe("registerSshIpcHandlers", () => {
     });
   });
 
+  // 비밀번호 빼고 공유한 팀 호스트가 점프를 거치면, 요청 창이 대상만 물어 베스천 비밀번호를 넣을 길이 없었다.
+  // 붙기 전에 쓸 비밀번호가 없는 홉을 체인 순서대로 찾아 코어를 부르지 않고 알린다.
+  describe("password checks along the jump chain", () => {
+    const bastion = { id: "bastion", kind: "ssh", label: "Bastion", hostname: "b.example.com", port: 22, username: "jump", authType: "password" };
+    const target = { id: "target", kind: "ssh", label: "Target", hostname: "t.internal", port: 22, username: "app", authType: "password", jumpHostIds: ["bastion"] };
+
+    function chainContext() {
+      const ctx = createContext();
+      ctx.hosts.getById.mockImplementation((id: string) => ({ bastion, target })[id as "bastion" | "target"]);
+      ctx.requireTrustedHostKeys.mockReturnValue(["trusted"]);
+      ctx.resolveSshAuth.mockImplementation(async (host: { username: string; authType: string }, provided?: { password?: string }) => ({
+        username: host.username,
+        authType: host.authType,
+        secrets: provided?.password ? { password: provided.password } : {},
+        shouldPersistHostSecret: Boolean(provided?.password),
+        typedUsername: null,
+      }));
+      ctx.coreManager.connect.mockResolvedValue({ sessionId: "session-chain" });
+      registerSshIpcHandlers(ctx);
+      return ctx;
+    }
+
+    it("asks for the jump host first, then the target, without calling the core", async () => {
+      const ctx = chainContext();
+      const connect = ipcHandlers.get(ipcChannels.ssh.connect)!;
+
+      await expect(connect(null, { hostId: "target", cols: 120, rows: 32 })).resolves.toEqual({
+        credentialsNeeded: { hostId: "bastion", reason: "missing" },
+      });
+      await expect(
+        connect(null, { hostId: "target", cols: 120, rows: 32, jumpSecrets: { bastion: { password: "jump-pw" } } }),
+      ).resolves.toEqual({ credentialsNeeded: { hostId: "target", reason: "missing" } });
+      expect(ctx.coreManager.connect).not.toHaveBeenCalled();
+    });
+
+    it("connects with this attempt's jump values and keeps them to save once the session connects", async () => {
+      const ctx = chainContext();
+
+      await ipcHandlers.get(ipcChannels.ssh.connect)?.(null, {
+        hostId: "target",
+        cols: 120,
+        rows: 32,
+        secrets: { password: "app-pw" },
+        jumpSecrets: { bastion: { password: "jump-pw" } },
+      });
+
+      expect(ctx.resolveJumpHostTarget).toHaveBeenCalledWith(target, { bastion: { password: "jump-pw" } });
+      expect(ctx.pendingSessionSecrets.get("session-chain")).toEqual({
+        hostId: "target",
+        label: "Target",
+        secrets: { password: "app-pw" },
+        username: null,
+        jumps: [{ hostId: "bastion", label: "Bastion", secrets: { password: "jump-pw" }, username: null }],
+      });
+    });
+  });
+
   it("forwards startup commands for direct SSH sessions", async () => {
     const ctx = createContext();
     ctx.hosts.getById.mockReturnValue({

@@ -32,9 +32,22 @@ import type {
   SshKeyGenerateInput,
   SshKeyInstallInput,
   SshKeyInstallResult,
+  VaultCopySelection,
+  MyHostCredentialsInput,
+  MyHostCredentialsSummary,
 } from "@shared";
 import type { HomeSection, SettingsSection } from "../../store/types";
-import { listSavedWorkspaceLeaves } from "../../store/utils";
+import {
+  isTeamVaultId,
+  listSavedWorkspaceLeaves,
+  PERSONAL_VAULT_ID,
+} from "../../store/utils";
+import {
+  groupTreeKey,
+  pathOfGroupTreeKey,
+  type BrowserVault,
+} from "./browserVaults";
+import type { AssetTeam } from "./AssetLocation";
 import { getUnusedSavedCredentialsAfterHostDeletion } from "../../lib/host-secret-cleanup";
 import {
   getKeyboardLayoutSearchQueries,
@@ -66,6 +79,8 @@ export const HOSTS_DRAG_MIME_TYPE = "application/x-dolssh-host-ids";
 export const HOME_ASSETS_DRAG_MIME_TYPE =
   "application/x-dolgate-home-assets";
 export const GROUP_DRAG_MIME_TYPE = "application/x-dolssh-group-path";
+/** 끄는 그룹이 든 볼트. 없으면 개인이다(팀이 없을 때의 끌기 데이터가 그대로다). */
+export const GROUP_VAULT_DRAG_MIME_TYPE = "application/x-dolgate-group-vault";
 
 // Serial·RDP 는 여기 없다 — 가져오기가 아니라 새로 만들기라서, New Host 폼 맨 위의
 // 종류 셀렉터(SSH/Serial/RDP)로 옮겼다.
@@ -114,6 +129,8 @@ export type HostViewMode = HomeHostViewMode;
 
 export interface GroupDeleteTarget {
   paths: string[];
+  /** 지울 그룹이 든 볼트. 여러 개 고르기는 한 볼트 안에서만 된다. */
+  vaultId: string;
   groupCount: number;
   title: string;
   hostCount: number;
@@ -137,15 +154,49 @@ export interface AssetContextMenuState {
 export interface GroupContextMenuState {
   kind: "group";
   groupPaths: string[];
+  /** 고른 그룹들이 든 볼트. 여러 개 고르기는 한 볼트 안에서만 된다. */
+  vaultId: string;
   x: number;
   y: number;
 }
 
-export type ContextMenuState = AssetContextMenuState | GroupContextMenuState;
+/** 볼트 줄 메뉴 — 팀: 초대 링크·새 호스트·새 그룹·팀 관리, 개인: 새 호스트·새 그룹. */
+export interface VaultContextMenuState {
+  kind: "vault";
+  vaultId: string;
+  x: number;
+  y: number;
+}
 
+export type ContextMenuState =
+  | AssetContextMenuState
+  | GroupContextMenuState
+  | VaultContextMenuState;
+
+/**
+ * 볼트 사이 복사(공유)를 묻는 창에 넘길 것. 놓은 자리가 없으면(줄 메뉴) 창에서 고른다.
+ * 넘길 수 있는 것은 메인 요청 모양대로 호스트 여럿, 워크스페이스 여럿, 그룹 하나다.
+ */
+export interface VaultCopyDraft {
+  sourceVaultId: string;
+  selection: VaultCopySelection;
+  target: { vaultId: string; groupPath: string | null } | null;
+}
+
+/** 끌고 있는 것을 거기 놓으면 — 같은 볼트는 옮기기, 다른 볼트는 복사. */
+export type VaultDropIntent = "move" | "copy";
+
+/** 팀 호스트의 내 자격 증명(상세의 My credentials) — 홈이 스토어로 잇는다. */
+export interface MyCredentialsApi {
+  load: (hostId: string) => Promise<MyHostCredentialsSummary | null>;
+  save: (hostId: string, input: MyHostCredentialsInput) => Promise<MyHostCredentialsSummary | null>;
+  clear: (hostId: string) => Promise<void>;
+}
+
+/** vaultId 가 없으면 개인이다. */
 export type GroupModalState =
-  | { mode: "create"; parentPath?: string | null }
-  | { mode: "rename"; path: string };
+  | { mode: "create"; parentPath?: string | null; vaultId?: string }
+  | { mode: "rename"; path: string; vaultId?: string };
 
 export interface GroupTreeRow {
   path: string;
@@ -159,6 +210,53 @@ export interface GroupTreeRow {
 export interface TagCount {
   tag: string;
   count: number;
+}
+
+/**
+ * 볼트 하나의 그룹 트리. 팀이 없으면 개인 하나뿐이고(vault 가 null — 볼트 줄을 그리지 않는다) 그 볼트가 전부다.
+ */
+export interface VaultTree {
+  vaultId: string;
+  vault: BrowserVault | null;
+  groups: GroupRecord[];
+  hosts: HostRecord[];
+  workspaces: readonly SavedWorkspaceRecord[];
+  allGroupPaths: string[];
+  /** 트리 순서 그대로(정렬 전). */
+  rows: GroupTreeRow[];
+  /** 그룹 정렬을 건 줄. 직접 정렬에서 놓을 자리를 셀 때 쓴다. */
+  sortedRows: GroupTreeRow[];
+  /** 접기·빈 그룹 숨김까지 건, 화면에 그릴 줄. */
+  visibleRows: GroupTreeRow[];
+  /** 볼트 줄의 개수(호스트 + 워크스페이스). */
+  assetCount: number;
+  /** 볼트 줄을 접었는가. */
+  collapsed: boolean;
+}
+
+const NO_VAULTS: readonly BrowserVault[] = [];
+const NO_USERNAMES: Readonly<Record<string, string>> = {};
+
+/** 그룹별 최근 사용 시각(ms): 그룹 서브트리 내 호스트 활동의 최댓값(조상 경로에도 전파). */
+function buildGroupRecentByPath(
+  hosts: readonly HostRecord[],
+  lastConnectedByHostId: Map<string, number>,
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const host of hosts) {
+    const ms = lastConnectedByHostId.get(host.id) ?? 0;
+    if (ms <= 0) {
+      continue;
+    }
+    let path = normalizeGroupPath(host.groupName ?? null);
+    while (path) {
+      map.set(path, Math.max(map.get(path) ?? 0, ms));
+      path = normalizeGroupPath(
+        path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : null,
+      );
+    }
+  }
+  return map;
 }
 
 /**
@@ -436,6 +534,13 @@ export interface UseHostBrowserParams {
   keychainEntries: SecretMetadataRecord[];
   currentGroupPath: string | null;
   /**
+   * 볼트들(개인 + 이 기기의 팀, buildBrowserVaults). **팀이 없으면 비어 있다** — 그때는 볼트 줄 없이 지금
+   * 화면 그대로이고, 그룹 콜백도 지금처럼 볼트 없이 부른다.
+   */
+  vaults?: readonly BrowserVault[];
+  /** 지금 위치의 볼트. null 은 All(즐겨찾기 포함 — 모든 볼트가 섞여 보인다). */
+  currentVaultId?: string | null;
+  /**
    * 홈의 호스트 화면이 지금 보이는 화면인지. 홈 셸은 세션 탭이 활성일 때도 마운트된 채
    * 숨겨지기만 하므로, 창 전역 키 처리는 이 값을 봐야 터미널을 쓰는 중에 끼어들지 않는다.
    */
@@ -495,17 +600,44 @@ export interface UseHostBrowserParams {
   onOpenXshellImport: () => void;
   onOpenTermiusImport: () => void;
   onOpenWarpgateImport: () => void;
-  onCreateGroup: (name: string, parentPath?: string | null) => Promise<void>;
-  onRemoveGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
-  onMoveGroup: (path: string, targetParentPath: string | null) => Promise<void>;
+  // 그룹 콜백의 마지막 vaultId 는 팀 그룹일 때만 온다. 없으면 개인이다(팀이 없을 때의 호출 그대로).
+  onCreateGroup: (
+    name: string,
+    parentPath?: string | null,
+    vaultId?: string,
+  ) => Promise<void>;
+  onRemoveGroup: (
+    path: string,
+    mode: GroupRemoveMode,
+    vaultId?: string,
+  ) => Promise<void>;
+  onMoveGroup: (
+    path: string,
+    targetParentPath: string | null,
+    vaultId?: string,
+  ) => Promise<void>;
   /** 직접 정렬에서 자리를 옮긴다(부모가 바뀌면 이동까지 함께). */
   onReorderGroup: (
     path: string,
     targetParentPath: string | null,
     targetIndex: number,
+    vaultId?: string,
   ) => Promise<void>;
-  onRenameGroup: (path: string, name: string) => Promise<void>;
-  onNavigateGroup: (path: string | null) => void;
+  onRenameGroup: (path: string, name: string, vaultId?: string) => Promise<void>;
+  /** 볼트가 있을 때만 vaultId 를 준다(볼트 맨 위·그 볼트의 그룹). 없으면 All 이거나 팀이 없는 것이다. */
+  onNavigateGroup: (path: string | null, vaultId?: string) => void;
+  /** 볼트 줄 메뉴의 "새 호스트" — 그 볼트 맨 위에 만든다. 부르기 전에 그 볼트로 옮겨 둔다. */
+  onCreateHostInVault?: (vaultId: string) => void;
+  /** 팀 볼트 줄 메뉴의 "초대 링크". */
+  onOpenTeamInvite?: (teamId: string) => void;
+  /** 팀 볼트 줄 메뉴의 "팀 관리" — 설정 Teams 에서 그 팀. */
+  onManageTeam?: (teamId: string) => void;
+  /** 다른 볼트에 놓았거나 줄 메뉴의 공유 — 복사할지 묻는 창을 연다. 없으면 볼트 사이 복사가 없다. */
+  onRequestVaultCopy?: (draft: VaultCopyDraft) => void;
+  /** 팀 호스트의 내 자격 증명 읽기·저장·지우기. 없으면 상세에 그 칸이 없다. */
+  myCredentials?: MyCredentialsApi;
+  /** 팀 호스트에 둔 내 사용자 이름(볼트 표). 팔레트 부제에만 쓴다 — 레코드는 팀 것 그대로(F4). */
+  myUsernameByHostId?: Readonly<Record<string, string>>;
   onClearHostSelection: () => void;
   onSelectHost: (hostId: string) => void;
   onEditHost: (hostId: string) => void;
@@ -563,11 +695,26 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     onClearHostSelection,
     onSelectHost,
     onNavigateGroup,
-    onMoveGroup,
-    onReorderGroup,
     onMoveHostToGroup,
     onMoveSavedWorkspaceToGroup,
   } = params;
+
+  // 볼트. 팀이 없으면 비어 있고, 그때는 위치에도 볼트가 없다(지금 화면 그대로).
+  const vaults = params.vaults ?? NO_VAULTS;
+  const hasVaults = vaults.length > 0;
+  const currentVaultId = hasVaults ? (params.currentVaultId ?? null) : null;
+  const currentVault = currentVaultId
+    ? (vaults.find((vault) => vault.id === currentVaultId) ?? null)
+    : null;
+  // 지금 위치의 볼트 것만. All·즐겨찾기(볼트 없음)는 모든 볼트가 섞인다.
+  const locationHosts = currentVault ? currentVault.hosts : hosts;
+  const locationWorkspaceIds = useMemo(
+    () =>
+      currentVault
+        ? new Set(currentVault.workspaces.map((workspace) => workspace.id))
+        : null,
+    [currentVault],
+  );
 
   const [groupModalState, setGroupModalState] =
     useState<GroupModalState | null>(null);
@@ -604,6 +751,9 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     setAssetSelectionAnchorKey(key);
   }, [selectedHostId]);
   const [selectedGroupPaths, setSelectedGroupPaths] = useState<string[]>([]);
+  /** 고른 그룹들이 든 볼트. 여러 개 고르기는 한 볼트 안에서만 된다(경로가 볼트 안에서만 유일하다). */
+  const [selectedGroupVaultId, setSelectedGroupVaultId] =
+    useState<string>(PERSONAL_VAULT_ID);
   const [groupSelectionAnchor, setGroupSelectionAnchor] = useState<
     string | null
   >(null);
@@ -626,7 +776,15 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   );
   const [draggedAssetKeys, setDraggedAssetKeys] = useState<HomeAssetKey[]>([]);
   const [draggedGroupPath, setDraggedGroupPath] = useState<string | null>(null);
+  const [draggedGroupVaultId, setDraggedGroupVaultId] =
+    useState<string>(PERSONAL_VAULT_ID);
   const [isRootDragTarget, setIsRootDragTarget] = useState(false);
+  /** 볼트 줄 위에 끌고 있다(그 볼트 맨 위로 옮긴다). */
+  const [vaultDragTargetId, setVaultDragTargetId] = useState<string | null>(
+    null,
+  );
+  /** 지금 끌고 있는 자리에 놓으면 옮기기인지 복사인지 — 복사면 놓을 줄에 "+ Copy" 를 단다. */
+  const [dropIntent, setDropIntent] = useState<VaultDropIntent | null>(null);
   /**
    * 형제 사이에 놓을 자리 표시. `직접` 정렬일 때만 쓴다 — 다른 정렬에서는 놓아도 그 기준대로
    * 다시 배치되므로 있지도 않은 자리를 그리게 된다.
@@ -637,9 +795,11 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   } | null>(null);
   const [expandedHostTags, setExpandedHostTags] = useState<string[]>([]);
   const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
+  // 키는 groupTreeKey 다 — 개인은 경로 그대로, 팀은 볼트를 붙인다.
   const [collapsedTreeGroupPaths, setCollapsedTreeGroupPaths] = useState<
     string[]
   >([]);
+  const [collapsedVaultIds, setCollapsedVaultIds] = useState<string[]>([]);
   // 신규: 태그 필터 / 정렬 / 뷰 모드.
   const [activeTagFilter, setActiveTagFilter] = useState<string[]>([]);
   const [favoritesFilterActive, setFavoritesFilterActive] = useState(false);
@@ -680,9 +840,10 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   }, [contextMenu]);
 
   // 현재 그룹 안에서는 그 하위 트리만 검색하고, 루트에서는 전체 호스트를 그대로 보여준다.
+  // 볼트 안이면 그 볼트의 호스트에서 고른다 — 같은 경로가 다른 볼트에 있어도 섞이지 않는다.
   const scopedHosts = useMemo(
-    () => filterHostsInGroupTree(hosts, currentGroupPath),
-    [currentGroupPath, hosts],
+    () => filterHostsInGroupTree(locationHosts, currentGroupPath),
+    [currentGroupPath, locationHosts],
   );
 
   const searchableHosts = useMemo(
@@ -812,14 +973,19 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     if (activeTagFilter.length > 0) {
       return [];
     }
-    let next = currentGroupPath
+    let next = locationWorkspaceIds
       ? searchedWorkspaces.filter((workspace) =>
-          isGroupWithinPath(
-            normalizeGroupPath(workspace.groupName),
-            currentGroupPath,
-          ),
+          locationWorkspaceIds.has(workspace.id),
         )
       : searchedWorkspaces;
+    if (currentGroupPath) {
+      next = next.filter((workspace) =>
+        isGroupWithinPath(
+          normalizeGroupPath(workspace.groupName),
+          currentGroupPath,
+        ),
+      );
+    }
     if (favoritesFilterActive) {
       next = next.filter((workspace) => workspace.favorite);
     }
@@ -829,6 +995,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     activeTagFilter,
     currentGroupPath,
     favoritesFilterActive,
+    locationWorkspaceIds,
     searchedWorkspaces,
   ]);
 
@@ -858,35 +1025,62 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   const { hostIds: selectedHostIds, workspaceIds: selectedWorkspaceIds } =
     partitionHomeAssetKeys(selectedAssetKeys);
 
-  const allGroupPaths = useMemo(
-    () => collectGroupPaths(groups, hosts, savedWorkspaces),
-    [groups, hosts, savedWorkspaces],
-  );
-  const groupTreeRows = useMemo(
-    () => buildGroupTreeRows(allGroupPaths, groups, hosts, savedWorkspaces),
-    [allGroupPaths, groups, hosts, savedWorkspaces],
-  );
-  // 그룹별 최근 사용 시각(ms): 그룹 서브트리 내 호스트 활동의 최댓값(조상 경로에도 전파).
-  const groupRecentByPath = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const host of hosts) {
-      const ms = lastConnectedByHostId.get(host.id) ?? 0;
-      if (ms <= 0) {
-        continue;
-      }
-      let path = normalizeGroupPath(host.groupName ?? null);
-      while (path) {
-        map.set(path, Math.max(map.get(path) ?? 0, ms));
-        path = normalizeGroupPath(
-          path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : null,
-        );
-      }
-    }
-    return map;
-  }, [hosts, lastConnectedByHostId]);
-  const sortedGroupTreeRows = useMemo(
-    () => sortGroupTreeRows(groupTreeRows, groupSortKey, groupRecentByPath),
-    [groupTreeRows, groupSortKey, groupRecentByPath],
+  // 볼트마다 그 볼트의 그룹·호스트·워크스페이스만 넣어 같은 함수로 트리를 만든다. 팀이 없으면 하나뿐이다
+  // (전부 개인) — 그때의 계산은 볼트가 생기기 전과 같다.
+  const baseTrees = useMemo(() => {
+    const sources: Array<{
+      vaultId: string;
+      vault: BrowserVault | null;
+      groups: GroupRecord[];
+      hosts: HostRecord[];
+      workspaces: readonly SavedWorkspaceRecord[];
+    }> = hasVaults
+      ? vaults.map((vault) => ({
+          vaultId: vault.id,
+          vault,
+          groups: vault.groups,
+          hosts: vault.hosts,
+          workspaces: vault.workspaces,
+        }))
+      : [
+          {
+            vaultId: PERSONAL_VAULT_ID,
+            vault: null,
+            groups,
+            hosts,
+            workspaces: savedWorkspaces,
+          },
+        ];
+    return sources.map((source) => {
+      const allGroupPaths = collectGroupPaths(
+        source.groups,
+        source.hosts,
+        source.workspaces,
+      );
+      return {
+        ...source,
+        allGroupPaths,
+        rows: buildGroupTreeRows(
+          allGroupPaths,
+          source.groups,
+          source.hosts,
+          source.workspaces,
+        ),
+        assetCount: source.hosts.length + source.workspaces.length,
+      };
+    });
+  }, [groups, hasVaults, hosts, savedWorkspaces, vaults]);
+  const sortedTrees = useMemo(
+    () =>
+      baseTrees.map((tree) => ({
+        ...tree,
+        sortedRows: sortGroupTreeRows(
+          tree.rows,
+          groupSortKey,
+          buildGroupRecentByPath(tree.hosts, lastConnectedByHostId),
+        ),
+      })),
+    [baseTrees, groupSortKey, lastConnectedByHostId],
   );
 
   /** 끌어서 순서를 바꿀 수 있는 상태인가. 다른 정렬에서는 놓자마자 제자리로 튄다. */
@@ -899,7 +1093,14 @@ export function useHostBrowser(params: UseHostBrowserParams) {
    * 먼저 빼고 끼워 넣으므로, 그대로 세면 아래로 옮길 때 한 칸 어긋난다.
    */
   const resolveGroupDropTarget = useCallback(
-    (rowPath: string, edge: "before" | "after", draggedPath: string) => {
+    (
+      rowPath: string,
+      edge: "before" | "after",
+      draggedPath: string,
+      vaultId: string = PERSONAL_VAULT_ID,
+    ) => {
+      const sortedGroupTreeRows =
+        sortedTrees.find((tree) => tree.vaultId === vaultId)?.sortedRows ?? [];
       const row = sortedGroupTreeRows.find(
         (candidate) => candidate.path === rowPath,
       );
@@ -922,38 +1123,63 @@ export function useHostBrowser(params: UseHostBrowserParams) {
         index: edge === "before" ? anchor : anchor + 1,
       };
     },
-    [sortedGroupTreeRows],
+    [sortedTrees],
   );
-  const expandAllGroups = () => setCollapsedTreeGroupPaths([]);
+  // 모두 펼치기는 접힌 볼트 줄까지 편다. 모두 접기는 그룹만 접는다 — 볼트 줄까지 접으면 볼트 이름만 남는다.
+  const expandAllGroups = () => {
+    setCollapsedTreeGroupPaths([]);
+    setCollapsedVaultIds([]);
+  };
   const collapseAllGroups = () =>
     setCollapsedTreeGroupPaths(
-      groupTreeRows.filter((row) => row.hasChildren).map((row) => row.path),
+      baseTrees.flatMap((tree) =>
+        tree.rows
+          .filter((row) => row.hasChildren)
+          .map((row) => groupTreeKey(tree.vaultId, row.path)),
+      ),
     );
   const collapsedTreeGroupPathSet = useMemo(
     () => new Set(collapsedTreeGroupPaths),
     [collapsedTreeGroupPaths],
   );
-  const visibleGroupTreeRows = useMemo(
+  const collapsedVaultIdSet = useMemo(
+    () => new Set(collapsedVaultIds),
+    [collapsedVaultIds],
+  );
+  const vaultTrees = useMemo<VaultTree[]>(
     () =>
-      sortedGroupTreeRows.filter((group) => {
-        if (hideEmptyGroups && group.assetCount === 0) {
-          return false;
-        }
-        let ancestorPath = group.parentPath;
-        while (ancestorPath) {
-          if (collapsedTreeGroupPathSet.has(ancestorPath)) {
+      sortedTrees.map((tree) => ({
+        ...tree,
+        visibleRows: tree.sortedRows.filter((group) => {
+          if (hideEmptyGroups && group.assetCount === 0) {
             return false;
           }
-          ancestorPath = normalizeGroupPath(
-            ancestorPath.includes("/")
-              ? ancestorPath.slice(0, ancestorPath.lastIndexOf("/"))
-              : null,
-          );
-        }
-        return true;
-      }),
-    [collapsedTreeGroupPathSet, sortedGroupTreeRows, hideEmptyGroups],
+          let ancestorPath = group.parentPath;
+          while (ancestorPath) {
+            if (
+              collapsedTreeGroupPathSet.has(
+                groupTreeKey(tree.vaultId, ancestorPath),
+              )
+            ) {
+              return false;
+            }
+            ancestorPath = normalizeGroupPath(
+              ancestorPath.includes("/")
+                ? ancestorPath.slice(0, ancestorPath.lastIndexOf("/"))
+                : null,
+            );
+          }
+          return true;
+        }),
+        collapsed: collapsedVaultIdSet.has(tree.vaultId),
+      })),
+    [collapsedTreeGroupPathSet, collapsedVaultIdSet, sortedTrees, hideEmptyGroups],
   );
+  // 볼트 줄 없이 그리는 트리(팀이 없을 때)와 그 값들. 볼트가 있으면 개인 트리다.
+  const personalTree = vaultTrees[0]!;
+  const allGroupPaths = personalTree.allGroupPaths;
+  const groupTreeRows = personalTree.rows;
+  const visibleGroupTreeRows = personalTree.visibleRows;
   // 화면 순서에서 호스트만 걸러 낸다. visibleHosts 를 따로 정렬해 쓰면 두 순서가 갈릴 수
   // 있는데, 이 값은 "화면에 보이는 순서" 로 쓰인다(선택 순회·삭제 대화상자 목록).
   const visibleHostIds = useMemo(
@@ -963,10 +1189,58 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       ),
     [visibleAssets],
   );
+  // 그룹 고르기는 고른 그룹들의 볼트 트리 안에서 움직인다(shift 범위·사라진 줄 정리).
+  const selectionTree =
+    vaultTrees.find((tree) => tree.vaultId === selectedGroupVaultId) ?? null;
+  const selectionVisibleRows = selectionTree?.visibleRows;
   const visibleGroupPaths = useMemo(
-    () => visibleGroupTreeRows.map((group) => group.path),
-    [visibleGroupTreeRows],
+    () => (selectionVisibleRows ?? []).map((group) => group.path),
+    [selectionVisibleRows],
   );
+  // 그 볼트 트리의 모든 줄 키 — 접어 둔 줄 중 사라진 것을 걸러 낸다.
+  const allGroupTreeKeys = useMemo(
+    () =>
+      new Set(
+        baseTrees.flatMap((tree) =>
+          tree.allGroupPaths.map((path) => groupTreeKey(tree.vaultId, path)),
+        ),
+      ),
+    [baseTrees],
+  );
+  // 팀 것이면 그 팀(이름은 볼트 줄과 같다). 볼트가 섞이는 목록이 팀 표시를 붙일 때 쓴다.
+  const teamByAssetKey = useMemo(() => {
+    const map = new Map<HomeAssetKey, AssetTeam>();
+    for (const vault of vaults) {
+      if (vault.kind !== "team") {
+        continue;
+      }
+      const team = { id: vault.id, name: vault.name };
+      for (const host of vault.hosts) {
+        map.set(`host:${host.id}`, team);
+      }
+      for (const workspace of vault.workspaces) {
+        map.set(`workspace:${workspace.id}`, team);
+      }
+    }
+    return map;
+  }, [vaults]);
+  const teamOfAsset = useCallback(
+    (key: HomeAssetKey): AssetTeam | null => teamByAssetKey.get(key) ?? null,
+    [teamByAssetKey],
+  );
+  // 끄는 항목이 든 볼트. 볼트 사이로는 옮기지 않는다(복사는 4-4) — 놓을 자리에서 이것으로 거른다.
+  const vaultIdByAssetKey = useMemo(() => {
+    const map = new Map<HomeAssetKey, string>();
+    for (const vault of vaults) {
+      for (const host of vault.hosts) {
+        map.set(`host:${host.id}`, vault.id);
+      }
+      for (const workspace of vault.workspaces) {
+        map.set(`workspace:${workspace.id}`, vault.id);
+      }
+    }
+    return map;
+  }, [vaults]);
 
   const {
     ref: hostGridRef,
@@ -1048,10 +1322,41 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   }, [contextMenu]);
 
   useEffect(() => {
-    setCollapsedTreeGroupPaths((current) =>
-      current.filter((path) => allGroupPaths.includes(path)),
-    );
-  }, [allGroupPaths]);
+    setCollapsedTreeGroupPaths((current) => {
+      const next = current.filter((key) => allGroupTreeKeys.has(key));
+      return next.length === current.length ? current : next;
+    });
+  }, [allGroupTreeKeys]);
+
+  useEffect(() => {
+    setCollapsedVaultIds((current) => {
+      const next = current.filter((vaultId) =>
+        vaults.some((vault) => vault.id === vaultId),
+      );
+      return next.length === current.length ? current : next;
+    });
+    // 고른 그룹의 볼트가 사라지면(팀에서 나감) 고르기는 개인으로 돌아간다. 고른 경로는 아래에서 비워진다.
+    if (
+      selectedGroupVaultId !== PERSONAL_VAULT_ID &&
+      !vaults.some((vault) => vault.id === selectedGroupVaultId)
+    ) {
+      setSelectedGroupVaultId(PERSONAL_VAULT_ID);
+      setSelectedGroupPaths([]);
+      setGroupSelectionAnchor(null);
+    }
+  }, [selectedGroupVaultId, vaults]);
+
+  // 지금 있던 팀 볼트가 사라지면(나가기·삭제·빠짐) All 로 돌아간다. 그대로 두면 그 팀의 경로로 다른 볼트를 거른다.
+  const requestedVaultId = params.currentVaultId;
+  useEffect(() => {
+    if (
+      typeof requestedVaultId === "string" &&
+      isTeamVaultId(requestedVaultId) &&
+      !vaults.some((vault) => vault.id === requestedVaultId)
+    ) {
+      onNavigateGroup(null);
+    }
+  }, [requestedVaultId, vaults]);
 
   useEffect(() => {
     setSelectedAssetKeys((current) =>
@@ -1061,8 +1366,15 @@ export function useHostBrowser(params: UseHostBrowserParams) {
 
   useEffect(() => {
     if (focusedAssetKey && !visibleAssetKeys.includes(focusedAssetKey)) {
+      // 상위가 방금 보이는 호스트를 골랐으면 그것을 따른다 — 위치와 선택을 한 번에 바꾸면(복사본 보이기) 이 효과는
+      // 같은 커밋의 옛 선택을 보고 있어서, 안 그러면 새 선택을 지워 버린다(실제로 그랬다).
+      const upperKey = selectedHostId
+        ? (`host:${selectedHostId}` as HomeAssetKey)
+        : null;
       const nextFocus =
-        selectedAssetKeys.find((key) => visibleAssetKeys.includes(key)) ?? null;
+        (upperKey && visibleAssetKeys.includes(upperKey) ? upperKey : null) ??
+        selectedAssetKeys.find((key) => visibleAssetKeys.includes(key)) ??
+        null;
       setFocusedAssetKey(nextFocus);
       // 포커스를 옮기는 다른 모든 경로처럼 상위의 선택도 같이 옮긴다. 이것만 빠져 있어서,
       // 동기화가 포커스된 항목을 지우면 목록은 다음 항목을 고른 것처럼 보이는데 우측 상세는
@@ -1074,7 +1386,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
         onClearHostSelection();
       }
     }
-  }, [focusedAssetKey, selectedAssetKeys, visibleAssetKeys]);
+  }, [focusedAssetKey, selectedAssetKeys, selectedHostId, visibleAssetKeys]);
 
   const keyboardActive = params.active !== false;
 
@@ -1266,20 +1578,33 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     onClearHostSelection();
   }
 
-  function buildGroupDeleteTarget(groupPaths: string[]): GroupDeleteTarget {
+  /** 그 볼트의 트리(팀이 없으면 하나뿐인 개인 트리). 볼트가 사라졌으면 빈 트리처럼 다룬다. */
+  function treeOfVault(vaultId: string) {
+    return baseTrees.find((tree) => tree.vaultId === vaultId) ?? null;
+  }
+
+  function buildGroupDeleteTarget(
+    groupPaths: string[],
+    vaultId: string = PERSONAL_VAULT_ID,
+  ): GroupDeleteTarget {
+    // 그 볼트 안에서만 센다 — 다른 볼트의 같은 경로에 든 것은 지워지지 않는다.
+    const tree = treeOfVault(vaultId);
+    const treeHosts = tree?.hosts ?? [];
+    const treeWorkspaces = tree?.workspaces ?? [];
+    const treeGroups = tree?.groups ?? [];
     const normalizedPaths = normalizeGroupSelectionForDelete(groupPaths);
     const normalizedPathSet = new Set(normalizedPaths);
-    const hostCount = hosts.filter((host) =>
+    const hostCount = treeHosts.filter((host) =>
       normalizedPaths.some((path) =>
         isGroupWithinPath(normalizeGroupPath(host.groupName), path),
       ),
     ).length;
-    const workspaceCount = savedWorkspaces.filter((workspace) =>
+    const workspaceCount = treeWorkspaces.filter((workspace) =>
       normalizedPaths.some((path) =>
         isGroupWithinPath(normalizeGroupPath(workspace.groupName), path),
       ),
     ).length;
-    const childGroupCount = allGroupPaths.filter(
+    const childGroupCount = (tree?.allGroupPaths ?? []).filter(
       (candidatePath) =>
         !normalizedPathSet.has(candidatePath) &&
         normalizedPaths.some((path) => candidatePath.startsWith(`${path}/`)),
@@ -1287,11 +1612,12 @@ export function useHostBrowser(params: UseHostBrowserParams) {
 
     return {
       paths: normalizedPaths,
+      vaultId,
       groupCount: normalizedPaths.length,
       title:
         normalizedPaths.length === 1
-          ? (groups.find((group) => group.path === normalizedPaths[0])?.name ??
-            normalizedPaths[0])
+          ? (treeGroups.find((group) => group.path === normalizedPaths[0])
+              ?.name ?? normalizedPaths[0])
           : `${normalizedPaths.length} groups`,
       hostCount,
       workspaceCount,
@@ -1299,9 +1625,13 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     };
   }
 
-  function getAssetKeysInGroupTrees(groupPaths: string[]): HomeAssetKey[] {
+  function getAssetKeysInGroupTrees(
+    groupPaths: string[],
+    vaultId: string = PERSONAL_VAULT_ID,
+  ): HomeAssetKey[] {
+    const tree = treeOfVault(vaultId);
     const normalizedPaths = normalizeGroupSelectionForDelete(groupPaths);
-    return buildHomeAssets(savedWorkspaces, hosts)
+    return buildHomeAssets(tree?.workspaces ?? [], tree?.hosts ?? [])
       .filter((asset) =>
         normalizedPaths.some((path) =>
           isGroupWithinPath(normalizeGroupPath(asset.groupName), path),
@@ -1518,7 +1848,11 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     setGroupSelectionAnchor(groupPath);
   }
 
-  function selectSingleGroup(groupPath: string) {
+  function selectSingleGroup(
+    groupPath: string,
+    vaultId: string = PERSONAL_VAULT_ID,
+  ) {
+    setSelectedGroupVaultId(vaultId);
     setSelectedGroupPaths([groupPath]);
     setSelectedAssetKeys([]);
     setFocusedAssetKey(null);
@@ -1527,11 +1861,31 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     onClearHostSelection();
   }
 
+  /**
+   * 그 위치로 간다. 볼트가 있을 때만 볼트를 함께 준다 — 팀이 없으면 지금처럼 경로만 준다.
+   */
+  function navigateTo(groupPath: string | null, vaultId: string | null) {
+    if (hasVaults && vaultId) {
+      onNavigateGroup(groupPath, vaultId);
+      return;
+    }
+    onNavigateGroup(groupPath);
+  }
+
   function handleGroupSelection(
     groupPath: string,
     event: Pick<MouseEvent, "shiftKey" | "ctrlKey" | "metaKey">,
+    vaultId: string = PERSONAL_VAULT_ID,
   ) {
     setContextMenu(null);
+    const additive = event.shiftKey || isAdditiveSelectionEvent(event);
+    if (additive && vaultId !== selectedGroupVaultId) {
+      // 여러 개 고르기는 한 볼트 안에서만 — 다른 볼트의 그룹을 더하면 거기서 새로 시작한다.
+      setSelectedGroupVaultId(vaultId);
+      setSelectedGroupPaths([groupPath]);
+      setGroupSelectionAnchor(groupPath);
+      return;
+    }
     if (event.shiftKey) {
       selectGroupRange(groupPath);
       return;
@@ -1541,20 +1895,26 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       return;
     }
     // 이미 단독 선택된 그룹을 다시 누르면 선택을 해제하고 루트로 복귀한다(호스트 재클릭 해제와 동일한 UX).
+    // 볼트가 있으면 루트는 그 볼트의 맨 위다.
     if (
+      vaultId === selectedGroupVaultId &&
       selectedGroupPaths.length === 1 &&
       selectedGroupPaths[0] === groupPath
     ) {
-      handleNavigateRoot();
+      if (hasVaults) {
+        handleNavigateVault(vaultId);
+      } else {
+        handleNavigateRoot();
+      }
       return;
     }
     // 상위가 편집 중이면 확인을 받은 뒤에 이 계속(continuation)을 부른다. 내부 상태 변경도 그
     // 안에 있어서, 확인 중에 하이라이트만 먼저 움직이는 일이 없다.
     leaveGroupScope(() => {
-      selectSingleGroup(groupPath);
+      selectSingleGroup(groupPath, vaultId);
       // 그룹을 고르면 즐겨찾기 스코프는 해제(즐겨찾기/그룹/All Hosts는 상호배타 스코프).
       setFavoritesFilterActive(false);
-      onNavigateGroup(groupPath);
+      navigateTo(groupPath, vaultId);
     });
   }
 
@@ -1567,25 +1927,79 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     proceed();
   }
 
+  /** 그룹·항목 고르기를 비운다(위치를 옮길 때). */
+  function clearScopeSelection() {
+    setSelectedGroupPaths([]);
+    setSelectedAssetKeys([]);
+    setFocusedAssetKey(null);
+    setGroupSelectionAnchor(null);
+    setAssetSelectionAnchorKey(null);
+    setFavoritesFilterActive(false);
+    onClearHostSelection();
+  }
+
   function handleNavigateRoot() {
     setContextMenu(null);
     leaveGroupScope(() => {
-      setSelectedGroupPaths([]);
-      setSelectedAssetKeys([]);
-      setFocusedAssetKey(null);
-      setGroupSelectionAnchor(null);
-      setAssetSelectionAnchorKey(null);
-      setFavoritesFilterActive(false);
-      onClearHostSelection();
+      clearScopeSelection();
       onNavigateGroup(null);
     });
   }
 
-  function handleToggleGroupBranch(groupPath: string) {
+  /** 볼트 줄을 누르면 그 볼트 맨 위 — 그 볼트의 호스트 전부. */
+  function handleNavigateVault(vaultId: string) {
+    setContextMenu(null);
+    leaveGroupScope(() => {
+      clearScopeSelection();
+      setSelectedGroupVaultId(vaultId);
+      navigateTo(null, vaultId);
+    });
+  }
+
+  /** 볼트 줄 메뉴의 "새 호스트" — 그 볼트로 옮긴 뒤 맨 위에 만든다(만든 호스트가 목록에 바로 보이게). */
+  function createHostInVault(vaultId: string) {
+    setContextMenu(null);
+    leaveGroupScope(() => {
+      clearScopeSelection();
+      setSelectedGroupVaultId(vaultId);
+      navigateTo(null, vaultId);
+      params.onCreateHostInVault?.(vaultId);
+    });
+  }
+
+  function handleToggleGroupBranch(
+    groupPath: string,
+    vaultId: string = PERSONAL_VAULT_ID,
+  ) {
+    const key = groupTreeKey(vaultId, groupPath);
     setCollapsedTreeGroupPaths((current) =>
-      current.includes(groupPath)
-        ? current.filter((path) => path !== groupPath)
-        : [...current, groupPath],
+      current.includes(key)
+        ? current.filter((path) => path !== key)
+        : [...current, key],
+    );
+  }
+
+  function toggleVaultCollapsed(vaultId: string) {
+    setCollapsedVaultIds((current) =>
+      current.includes(vaultId)
+        ? current.filter((entry) => entry !== vaultId)
+        : [...current, vaultId],
+    );
+  }
+
+  function isGroupCollapsed(vaultId: string, groupPath: string): boolean {
+    return collapsedTreeGroupPathSet.has(groupTreeKey(vaultId, groupPath));
+  }
+
+  function isGroupSelected(vaultId: string, groupPath: string): boolean {
+    return vaultId === selectedGroupVaultId && selectedGroupPathSet.has(groupPath);
+  }
+
+  /** 지금 위치가 이 그룹인가. 볼트가 있으면 볼트까지 같아야 한다. */
+  function isCurrentGroup(vaultId: string, groupPath: string): boolean {
+    return (
+      currentGroupPath === groupPath &&
+      (!hasVaults || currentVaultId === vaultId)
     );
   }
 
@@ -1612,42 +2026,74 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   function applyGroupPathUiMutation(
     previousGroupPath: string,
     nextGroupPath: string,
+    vaultId: string = PERSONAL_VAULT_ID,
   ) {
-    setSelectedGroupPaths((current) => {
-      const nextSelected = current
-        .map((groupPath) =>
-          rebaseGroupPath(groupPath, previousGroupPath, nextGroupPath),
-        )
-        .filter((groupPath): groupPath is string => Boolean(groupPath));
-      return [...new Set(nextSelected)];
-    });
-    setGroupSelectionAnchor((current) =>
-      rebaseGroupPath(current, previousGroupPath, nextGroupPath),
-    );
+    // 그 볼트의 줄만 따라간다 — 다른 볼트의 같은 경로는 그대로다.
+    if (vaultId === selectedGroupVaultId) {
+      setSelectedGroupPaths((current) => {
+        const nextSelected = current
+          .map((groupPath) =>
+            rebaseGroupPath(groupPath, previousGroupPath, nextGroupPath),
+          )
+          .filter((groupPath): groupPath is string => Boolean(groupPath));
+        return [...new Set(nextSelected)];
+      });
+      setGroupSelectionAnchor((current) =>
+        rebaseGroupPath(current, previousGroupPath, nextGroupPath),
+      );
+    }
     setCollapsedTreeGroupPaths((current) => {
       const nextCollapsed = current
-        .map((groupPath) =>
-          rebaseGroupPath(groupPath, previousGroupPath, nextGroupPath),
-        )
-        .filter((groupPath): groupPath is string => Boolean(groupPath));
+        .map((key) => {
+          const groupPath = pathOfGroupTreeKey(key, vaultId);
+          if (groupPath === null) {
+            return key;
+          }
+          const rebased = rebaseGroupPath(
+            groupPath,
+            previousGroupPath,
+            nextGroupPath,
+          );
+          return rebased ? groupTreeKey(vaultId, rebased) : null;
+        })
+        .filter((key): key is string => Boolean(key));
       return [...new Set(nextCollapsed)];
     });
   }
 
+  // 새 그룹(+ 단추·빈 화면 단추)은 지금 위치의 볼트에 만든다. 클릭 이벤트를 그대로 받는 자리라 인자를 받지 않는다.
   function openCreateGroupModal() {
-    setGroupModalState({ mode: "create" });
+    setGroupModalState(
+      hasVaults
+        ? { mode: "create", vaultId: currentVaultId ?? PERSONAL_VAULT_ID }
+        : { mode: "create" },
+    );
     setNewGroupName("");
     setGroupError(null);
   }
 
-  function openCreateSubgroupModal(parentPath: string) {
-    setGroupModalState({ mode: "create", parentPath });
+  /** 볼트 줄 메뉴의 "새 그룹" — 그 볼트 맨 위에. */
+  function openCreateGroupInVault(vaultId: string) {
+    setContextMenu(null);
+    setGroupModalState({ mode: "create", parentPath: null, vaultId });
     setNewGroupName("");
     setGroupError(null);
   }
 
-  function openRenameGroupModal(groupPath: string) {
-    setGroupModalState({ mode: "rename", path: groupPath });
+  function openCreateSubgroupModal(
+    parentPath: string,
+    vaultId: string = PERSONAL_VAULT_ID,
+  ) {
+    setGroupModalState({ mode: "create", parentPath, vaultId });
+    setNewGroupName("");
+    setGroupError(null);
+  }
+
+  function openRenameGroupModal(
+    groupPath: string,
+    vaultId: string = PERSONAL_VAULT_ID,
+  ) {
+    setGroupModalState({ mode: "rename", path: groupPath, vaultId });
     setNewGroupName(getGroupLabel(groupPath));
     setGroupError(null);
   }
@@ -1658,11 +2104,95 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     setGroupError(null);
   }
 
+  // 그룹 쓰기. 팀 그룹일 때만 볼트를 붙인다 — 개인은 지금처럼 부른다(팀이 없을 때의 호출이 그대로다).
+  function createGroupIn(
+    name: string,
+    parentPath: string | null | undefined,
+    vaultId?: string,
+  ) {
+    return isTeamVaultId(vaultId)
+      ? params.onCreateGroup(name, parentPath, vaultId)
+      : params.onCreateGroup(name, parentPath);
+  }
+
+  function renameGroupIn(groupPath: string, name: string, vaultId?: string) {
+    return isTeamVaultId(vaultId)
+      ? params.onRenameGroup(groupPath, name, vaultId)
+      : params.onRenameGroup(groupPath, name);
+  }
+
+  function moveGroupIn(
+    groupPath: string,
+    targetParentPath: string | null,
+    vaultId?: string,
+  ) {
+    return isTeamVaultId(vaultId)
+      ? params.onMoveGroup(groupPath, targetParentPath, vaultId)
+      : params.onMoveGroup(groupPath, targetParentPath);
+  }
+
+  function reorderGroupIn(
+    groupPath: string,
+    targetParentPath: string | null,
+    targetIndex: number,
+    vaultId?: string,
+  ) {
+    return isTeamVaultId(vaultId)
+      ? params.onReorderGroup(groupPath, targetParentPath, targetIndex, vaultId)
+      : params.onReorderGroup(groupPath, targetParentPath, targetIndex);
+  }
+
+  function removeGroupIn(
+    groupPath: string,
+    mode: GroupRemoveMode,
+    vaultId?: string,
+  ) {
+    return isTeamVaultId(vaultId)
+      ? params.onRemoveGroup(groupPath, mode, vaultId)
+      : params.onRemoveGroup(groupPath, mode);
+  }
+
   function clearDragState() {
     setDragTargetGroupPath(null);
     setDraggedAssetKeys([]);
     setDraggedGroupPath(null);
+    setDraggedGroupVaultId(PERSONAL_VAULT_ID);
     setIsRootDragTarget(false);
+    setVaultDragTargetId(null);
+    setDropIntent(null);
+  }
+
+  /** 사이드바에서 그룹을 끌기 시작한다. 끄는 데이터에 볼트를 싣는다(개인이면 싣지 않는다 — 지금 데이터 그대로). */
+  function startGroupDrag(
+    groupPath: string,
+    vaultId: string,
+    dataTransfer: DataTransfer,
+  ) {
+    setDraggedAssetKeys([]);
+    setDraggedGroupPath(groupPath);
+    setDraggedGroupVaultId(vaultId);
+    dataTransfer.setData(GROUP_DRAG_MIME_TYPE, groupPath);
+    if (isTeamVaultId(vaultId)) {
+      dataTransfer.setData(GROUP_VAULT_DRAG_MIME_TYPE, vaultId);
+    }
+  }
+
+  /** 끌고 있는 그룹과 그 볼트. 상태가 비어 있으면(다른 곳에서 시작한 끌기) 끄는 데이터에서 읽는다. */
+  function getActiveDraggedGroup(
+    dataTransfer: DataTransfer,
+  ): { path: string; vaultId: string } | null {
+    if (draggedGroupPath) {
+      return { path: draggedGroupPath, vaultId: draggedGroupVaultId };
+    }
+    const path = normalizeGroupPath(dataTransfer.getData(GROUP_DRAG_MIME_TYPE));
+    if (!path) {
+      return null;
+    }
+    return {
+      path,
+      vaultId:
+        dataTransfer.getData(GROUP_VAULT_DRAG_MIME_TYPE) || PERSONAL_VAULT_ID,
+    };
   }
 
   const selectedAssetKeySet = new Set(selectedAssetKeys);
@@ -1719,10 +2249,156 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     return ordered.length > 0 ? ordered : [key];
   }
 
+  /**
+   * 이 항목들을 그 볼트에 놓을 수 있는가 — 모두 그 볼트 것이어야 한다. 볼트 사이는 옮기기가 아니라
+   * 복사(공유)라 여기서 놓이지 않는다.
+   */
+  function canDropAssetsInVault(
+    assetKeys: readonly HomeAssetKey[],
+    vaultId: string,
+  ): boolean {
+    return assetKeys.every(
+      (key) => (vaultIdByAssetKey.get(key) ?? PERSONAL_VAULT_ID) === vaultId,
+    );
+  }
+
+  // ── 볼트 사이 복사(공유) ──
+  // 팀이 있으면 끌기가 복사로도 놓이게 둔다. 없으면 지금 그대로 옮기기만이다.
+  const dragEffectAllowed: DataTransfer["effectAllowed"] = hasVaults
+    ? "copyMove"
+    : "move";
+
+  /** 그 볼트에 복사해 넣을 수 있는가 — 막힌 팀(다시 들어와야 함·업데이트 필요)은 안 된다. */
+  function canCopyWithVault(vaultId: string): boolean {
+    if (!params.onRequestVaultCopy) {
+      return false;
+    }
+    const vault = vaults.find((entry) => entry.id === vaultId);
+    return Boolean(vault) && !vault?.blocked;
+  }
+
+  /**
+   * 복사로 넘길 것 — 한 볼트에서 온 호스트들, 또는 한 볼트에서 온 워크스페이스들(창의 호스트까지 복사된다).
+   * 호스트와 워크스페이스가 섞였거나, 볼트가 섞였거나, 막힌 팀이면 null.
+   */
+  function copySelectionOfAssets(
+    assetKeys: readonly HomeAssetKey[],
+  ): { sourceVaultId: string; selection: VaultCopySelection } | null {
+    if (!hasVaults || assetKeys.length === 0) {
+      return null;
+    }
+    let source: string | null = null;
+    let kind: HomeAssetRef["kind"] | null = null;
+    const ids: string[] = [];
+    for (const key of assetKeys) {
+      const ref = parseHomeAssetKey(key);
+      if (kind !== null && kind !== ref.kind) {
+        return null;
+      }
+      kind = ref.kind;
+      const vaultId = vaultIdByAssetKey.get(key) ?? PERSONAL_VAULT_ID;
+      if (source !== null && source !== vaultId) {
+        return null;
+      }
+      source = vaultId;
+      ids.push(ref.id);
+    }
+    if (!source || !canCopyWithVault(source)) {
+      return null;
+    }
+    return {
+      sourceVaultId: source,
+      selection:
+        kind === "workspace"
+          ? { kind: "workspaces", workspaceIds: ids }
+          : { kind: "hosts", hostIds: ids },
+    };
+  }
+
+  /** 복사로 넘길 것이 든 볼트(줄 메뉴가 공유를 보일지). 안 되면 null. */
+  function copySourceOfAssets(
+    assetKeys: readonly HomeAssetKey[],
+  ): string | null {
+    return copySelectionOfAssets(assetKeys)?.sourceVaultId ?? null;
+  }
+
+  /** 그 볼트 말고 복사해 넣을 볼트가 있는가 — 줄 메뉴의 공유를 보일지. */
+  function hasCopyTargetFrom(sourceVaultId: string): boolean {
+    return (
+      canCopyWithVault(sourceVaultId) &&
+      vaults.some((vault) => vault.id !== sourceVaultId && !vault.blocked)
+    );
+  }
+
+  /**
+   * 끌고 있는 것을 이 볼트(의 그룹)에 놓으면 무슨 일인가. 같은 볼트는 지금 옮기기 그대로, 다른 볼트는 복사,
+   * 볼트가 섞였거나 호스트와 워크스페이스가 섞였거나 막힌 팀이면 놓을 수 없다(null).
+   */
+  function resolveDropIntent(
+    dataTransfer: DataTransfer,
+    vaultId: string,
+    groupPath: string | null,
+  ): VaultDropIntent | null {
+    const assetKeys = getActiveDraggedAssetKeys(dataTransfer);
+    if (assetKeys.length > 0) {
+      if (canDropAssetsInVault(assetKeys, vaultId)) {
+        return "move";
+      }
+      return copySourceOfAssets(assetKeys) !== null && canCopyWithVault(vaultId)
+        ? "copy"
+        : null;
+    }
+    const group = getActiveDraggedGroup(dataTransfer);
+    if (!group) {
+      return null;
+    }
+    if (group.vaultId === vaultId) {
+      return canReparentGroup(group.path, groupPath) ? "move" : null;
+    }
+    return hasVaults && canCopyWithVault(group.vaultId) && canCopyWithVault(vaultId)
+      ? "copy"
+      : null;
+  }
+
+  /** 다른 볼트에 놓았다 — 복사할지 묻는 창을 연다(놓은 자리가 대상이다). */
+  function requestVaultCopyFromDrop(
+    dataTransfer: DataTransfer,
+    vaultId: string,
+    groupPath: string | null,
+  ) {
+    const target = { vaultId, groupPath };
+    const assetKeys = getActiveDraggedAssetKeys(dataTransfer);
+    if (assetKeys.length > 0) {
+      const copy = copySelectionOfAssets(assetKeys);
+      if (copy) {
+        params.onRequestVaultCopy?.({ ...copy, target });
+      }
+      return;
+    }
+    const group = getActiveDraggedGroup(dataTransfer);
+    if (group) {
+      params.onRequestVaultCopy?.({
+        sourceVaultId: group.vaultId,
+        selection: { kind: "group", groupPath: group.path },
+        target,
+      });
+    }
+  }
+
+  /** 줄 메뉴의 공유 — 대상은 창에서 고른다. */
+  function requestVaultCopy(draft: VaultCopyDraft) {
+    params.onRequestVaultCopy?.(draft);
+  }
+
   async function moveAssetsToGroup(
     assetKeys: readonly HomeAssetKey[],
     groupPath: string | null,
+    vaultId: string = PERSONAL_VAULT_ID,
   ) {
+    // 놓을 자리에서 이미 거르지만, 다른 볼트 것은 여기서도 옮기지 않는다.
+    if (!canDropAssetsInVault(assetKeys, vaultId)) {
+      return;
+    }
     for (const key of orderHomeAssetKeys(assetKeys, visibleAssets)) {
       const ref = parseHomeAssetKey(key);
       if (ref.kind === "host") {
@@ -1803,6 +2479,25 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     setHideEmptyGroups,
     expandAllGroups,
     collapseAllGroups,
+    isGroupCollapsed,
+    // vaults — 팀이 없으면 vaultTrees 가 비어 있고 사이드바는 볼트 줄 없이 그린다.
+    hasVaults,
+    // 볼트가 섞인 목록(All·즐겨찾기 — 지금 위치에 볼트가 없을 때)에만 팀 표시를 붙인다. 볼트 안은 다 같은 볼트다.
+    showsTeamMarks: hasVaults && !currentVault,
+    teamOfAsset,
+    vaultTrees: hasVaults ? vaultTrees : [],
+    currentVault,
+    locationHosts,
+    handleNavigateVault,
+    toggleVaultCollapsed,
+    createHostInVault,
+    openCreateGroupInVault,
+    // 그룹 쓰기(팀 그룹이면 볼트를 붙여 부른다)
+    createGroupIn,
+    renameGroupIn,
+    moveGroupIn,
+    reorderGroupIn,
+    removeGroupIn,
     // selection state
     visibleAssets,
     visibleAssetKeys,
@@ -1834,6 +2529,9 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     selectSingleGroup,
     handleNavigateRoot,
     handleToggleGroupBranch,
+    selectedGroupVaultId,
+    isGroupSelected,
+    isCurrentGroup,
     runForOrderedHosts,
     getAssetKeysInGroupTrees,
     clearSelections,
@@ -1846,7 +2544,6 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     setDragTargetGroupPath,
     groupDropEdge,
     setGroupDropEdge,
-    onReorderGroup,
     canReorderGroups,
     resolveGroupDropTarget,
     isRootDragTarget,
@@ -1855,6 +2552,23 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     getNextDraggedAssetKeys,
     moveAssetsToGroup,
     clearDragState,
+    startGroupDrag,
+    getActiveDraggedGroup,
+    draggedGroupVaultId,
+    canDropAssetsInVault,
+    vaultDragTargetId,
+    setVaultDragTargetId,
+    dropIntent,
+    setDropIntent,
+    myCredentials: params.myCredentials ?? null,
+    myUsernameByHostId: params.myUsernameByHostId ?? NO_USERNAMES,
+    dragEffectAllowed,
+    resolveDropIntent,
+    requestVaultCopyFromDrop,
+    requestVaultCopy,
+    copySourceOfAssets,
+    copySelectionOfAssets,
+    hasCopyTargetFrom,
     canReparentGroup,
     buildNextGroupPath,
     applyGroupPathUiMutation,
@@ -1908,6 +2622,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     // exposed for clarity
     selectedHostId,
     currentGroupPath,
+    currentVaultId,
     hosts,
     groups,
   };

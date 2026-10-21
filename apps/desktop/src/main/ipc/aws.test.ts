@@ -89,6 +89,27 @@ describe("registerAwsIpcHandlers", () => {
     expect(queueSync).toHaveBeenCalledTimes(1);
   });
 
+  it("lists the AWS profiles of the vault the settings screen picks, names only for a team", async () => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+      handlers.set(channel, handler);
+    });
+    const listProfiles = vi.fn().mockResolvedValue([{ id: "p-1", name: "personal" }]);
+    const listMetadata = vi.fn(() => [
+      { id: "t-1", name: "team-static", kind: "static", region: "ap-northeast-2", updatedAt: "t" },
+    ]);
+    registerAwsIpcHandlers(
+      withVaults({ awsService: { listProfiles } }, { "team-1": { awsProfiles: { listMetadata } } }) as any,
+    );
+    const list = handlers.get(ipcChannels.aws.listProfiles)!;
+
+    await expect(list({})).resolves.toEqual([{ id: "p-1", name: "personal" }]);
+    await expect(list({}, "personal")).resolves.toEqual([{ id: "p-1", name: "personal" }]);
+    await expect(list({}, "team-1")).resolves.toEqual([{ id: "t-1", name: "team-static" }]);
+    await expect(list({}, "team-gone")).resolves.toEqual([]);
+    expect(listProfiles).toHaveBeenCalledTimes(2);
+  });
+
   it("resolves host authentication operations by managed profile ID", async () => {
     const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
     electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
@@ -129,6 +150,95 @@ describe("registerAwsIpcHandlers", () => {
     );
     expect(getProfileStatus).toHaveBeenCalledWith("prod-admin");
     expect(login).toHaveBeenCalledWith("prod-admin");
+  });
+
+  // 설정의 팀 묶음에서 만들고 고친 것은 그 팀으로 간다(4-7). 개인 경로는 지금 그대로다.
+  it("manages a team's AWS profiles in that team, and the team's hosts follow a rename or delete", async () => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+      handlers.set(channel, handler);
+    });
+    const awsService = {
+      createProfile: vi.fn().mockResolvedValue(undefined),
+      prepareSsoProfile: vi.fn().mockResolvedValue({}),
+      getProfileDetails: vi.fn().mockResolvedValue({ id: "t-1", profileName: "prod" }),
+      updateProfile: vi.fn().mockResolvedValue(undefined),
+      updateProfileRegion: vi.fn().mockResolvedValue(undefined),
+      renameProfile: vi.fn().mockResolvedValue(undefined),
+      deleteProfile: vi.fn().mockResolvedValue(undefined),
+      getProfileStatus: vi.fn().mockResolvedValue({}),
+      login: vi.fn().mockResolvedValue(undefined),
+      listProfiles: vi.fn(),
+    };
+    const teamProfiles = [{ id: "t-1", name: "prod-team", kind: "static", updatedAt: "t" }];
+    const team = {
+      awsProfiles: {
+        listMetadata: vi.fn(() => teamProfiles),
+        getMetadataByName: vi.fn((name: string) => teamProfiles.find((profile) => profile.name === name) ?? null),
+      },
+      hosts: { refreshAwsProfileNameCaches: vi.fn(() => []) },
+      syncOutbox: { upsertDeletion: vi.fn(), clear: vi.fn() },
+    };
+    const personalHosts = { updateAwsProfileCache: vi.fn(), refreshAwsProfileNameCaches: vi.fn() };
+    const personalOutbox = { upsertDeletion: vi.fn() };
+    const queueSync = vi.fn();
+    registerAwsIpcHandlers(
+      withVaults({ awsService, hosts: personalHosts, syncOutbox: personalOutbox, queueSync }, { "team-1": team }) as any,
+    );
+    const call = (channel: string, ...args: unknown[]) => handlers.get(channel)!({}, ...args);
+    const vault = { teamId: "team-1", profiles: team.awsProfiles };
+
+    await call(ipcChannels.aws.createProfile, {
+      kind: "static",
+      profileName: "prod",
+      accessKeyId: "AKIA",
+      secretAccessKey: "secret",
+      vaultId: "team-1",
+    });
+    await call(ipcChannels.aws.prepareSsoProfile, { profileName: "corp", ssoStartUrl: "u", ssoRegion: "r", vaultId: "team-1" });
+    await call(ipcChannels.aws.getProfileDetails, "prod", "team-1");
+    await call(ipcChannels.aws.updateProfile, { profileName: "prod", accessKeyId: "AKIA", secretAccessKey: "s", vaultId: "team-1" });
+    await call(ipcChannels.aws.updateProfileRegion, { profileName: "prod", region: "us-east-1", vaultId: "team-1" });
+    await call(ipcChannels.aws.getProfileStatus, "prod", "team-1");
+    await call(ipcChannels.aws.login, "corp", "team-1");
+
+    expect(awsService.createProfile).toHaveBeenCalledWith(expect.objectContaining({ profileName: "prod" }), vault);
+    expect(awsService.prepareSsoProfile).toHaveBeenCalledWith(expect.objectContaining({ profileName: "corp" }), vault);
+    expect(awsService.getProfileDetails).toHaveBeenCalledWith("prod", vault);
+    expect(awsService.updateProfile).toHaveBeenCalledWith(expect.objectContaining({ profileName: "prod" }), vault);
+    expect(awsService.updateProfileRegion).toHaveBeenCalledWith(expect.objectContaining({ region: "us-east-1" }), vault);
+    expect(awsService.getProfileStatus).toHaveBeenCalledWith("prod", vault);
+    expect(awsService.login).toHaveBeenCalledWith("corp", vault);
+
+    // 이름 바꾸기·지우기 — 그 팀 호스트가 기억하는 프로필 이름이 따라가고, 지움 표시는 그 팀에 남는다. 지움 기록이
+    // 먼저다: 지운 뒤 펼치는 사이 팀 동기화가 돌아도 서버 사본으로 되살리지 않게(실제 앱에서 잠깐 되살아났다).
+    awsService.deleteProfile.mockImplementationOnce(async () => {
+      expect(team.syncOutbox.upsertDeletion).toHaveBeenCalledWith("awsProfiles", "t-1");
+    });
+    await call(ipcChannels.aws.renameProfile, { profileName: "prod", nextProfileName: "prod-team", vaultId: "team-1" });
+    expect(awsService.renameProfile).toHaveBeenCalledWith(expect.objectContaining({ nextProfileName: "prod-team" }), vault);
+    expect(team.hosts.refreshAwsProfileNameCaches).toHaveBeenLastCalledWith([{ id: "t-1", name: "prod-team" }]);
+    await call(ipcChannels.aws.deleteProfile, "prod-team", "team-1");
+    expect(awsService.deleteProfile).toHaveBeenCalledWith("prod-team", vault);
+    expect(team.hosts.refreshAwsProfileNameCaches).toHaveBeenCalledTimes(2);
+    expect(team.syncOutbox.upsertDeletion).toHaveBeenCalledWith("awsProfiles", "t-1");
+    expect(queueSync).toHaveBeenCalledTimes(5);
+    // 개인 쪽은 건드리지 않고, 팀 이름 바꾸기·지우기는 상세(STS)를 다시 부르지 않는다.
+    expect(personalHosts.updateAwsProfileCache).not.toHaveBeenCalled();
+    expect(personalHosts.refreshAwsProfileNameCaches).not.toHaveBeenCalled();
+    expect(personalOutbox.upsertDeletion).not.toHaveBeenCalled();
+    expect(awsService.getProfileDetails).toHaveBeenCalledTimes(1);
+
+    // 이 기기에 없는 팀이면 쓰지 않는다.
+    await expect(
+      call(ipcChannels.aws.createProfile, { kind: "static", profileName: "x", accessKeyId: "A", secretAccessKey: "S", vaultId: "team-gone" }),
+    ).rejects.toThrow();
+    expect(awsService.createProfile).toHaveBeenCalledTimes(1);
+
+    // 못 지우면 남긴 지움 기록도 거둔다 — 남기면 다음 동기화가 서버에서 지워 버린다.
+    awsService.deleteProfile.mockRejectedValueOnce(new Error("locked"));
+    await expect(call(ipcChannels.aws.deleteProfile, "prod-team", "team-1")).rejects.toThrow("locked");
+    expect(team.syncOutbox.clear).toHaveBeenCalledWith("awsProfiles", "t-1");
   });
 
   it("updates an aws profile region and queues sync", async () => {

@@ -368,6 +368,7 @@ export interface VaultCopyWrite {
   secretMetadata: DesktopVaultData['secretMetadata'];
   awsProfiles: DesktopVaultData['awsProfiles'];
   snippets: DesktopVaultData['snippets'];
+  savedWorkspaces: DesktopVaultData['savedWorkspaces'];
   tailnets: DesktopVaultData['tailnets'];
   secrets: Record<string, StoredEncryptedValue>;
   awsProfilePayloads: Record<string, StoredEncryptedValue>;
@@ -2126,6 +2127,7 @@ class DesktopStateStorage {
         secretMetadata: [...data.secretMetadata, ...write.secretMetadata],
         awsProfiles: [...data.awsProfiles, ...write.awsProfiles],
         snippets: [...data.snippets, ...write.snippets],
+        savedWorkspaces: [...data.savedWorkspaces, ...write.savedWorkspaces],
         tailnets: [...data.tailnets, ...write.tailnets],
       };
       const nextSecure = {

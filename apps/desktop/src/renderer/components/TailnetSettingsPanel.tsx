@@ -34,6 +34,7 @@ import { normalizeErrorMessage } from '../store/utils/errors-and-prompts';
 import {
   deriveTailnetLabel,
   useTailnetDraft,
+  type TailnetDraft,
 } from '../controllers/useTailnetDraft';
 import { TailnetForm } from './tailnet/TailnetForm';
 import {
@@ -52,12 +53,17 @@ import {
   disconnectTailnet,
   forgetTailnet,
   listTailnets,
+  listTeamTailnets,
   snapshotTailnets,
   onTailnetStatus,
   removeTailnet,
   saveTailnet,
   testTailnet,
 } from '../services/desktop/tailnet';
+import { useTeamVaultLists } from '../controllers/useTeamVaultLists';
+import { sectionsByVault } from '../lib/vault-groups';
+import { PERSONAL_VAULT_ID } from '../store/utils/vaults';
+import { VaultEmptyLine, VaultSectionHeader } from './teams/VaultMark';
 
 
 // 스냅샷을 다시 읽는 간격.
@@ -190,6 +196,13 @@ export function TailnetSettingsPanel() {
   const localNodeName = useAppStore((state) => state.localTailnetNodeName);
   const hosts = useAppStore((state) => state.hosts);
   const refreshHostCatalog = useAppStore((state) => state.refreshHostCatalog);
+  const vaultIndex = useAppStore((state) => state.vaultIndex);
+  // 팀이 있으면 팀 볼트의 tailnet 도 읽어 볼트별로 묶는다. 개인 목록을 다시 읽으면(저장·삭제 뒤) 팀 것도 다시 읽는다.
+  const { listsByTeamId } = useTeamVaultLists((teamId) => listTeamTailnets(teamId), records);
+  const allRecords = useMemo(
+    () => [...records, ...Object.values(listsByTeamId).flat()],
+    [listsByTeamId, records],
+  );
 
   const [pendingRemoval, setPendingRemoval] = useState<TailnetRecord | null>(null);
   /**
@@ -250,7 +263,7 @@ export function TailnetSettingsPanel() {
    * 뜻이고, 조용히 갱신해 버리면 경고할 근거가 사라진다.
    */
   useEffect(() => {
-    const stale = records.filter((record) => {
+    const stale = allRecords.filter((record) => {
       const status = statusById[record.id];
       if (status?.state !== 'running' || !status.tailnetName) {
         return false;
@@ -288,7 +301,7 @@ export function TailnetSettingsPanel() {
     return () => {
       cancelled = true;
     };
-  }, [records, statusById, refresh]);
+  }, [allRecords, statusById, refresh]);
 
   useEffect(() => {
     return onTailnetStatus((status) => {
@@ -371,14 +384,145 @@ export function TailnetSettingsPanel() {
     return grouped;
   }, [hosts]);
 
-  const rows = useMemo(
-    () =>
-      records.map((record) => ({
-        record,
-        status: statusById[record.id],
-        hosts: hostsByTailnetId.get(record.id) ?? [],
-      })),
-    [hostsByTailnetId, records, statusById],
+  const rowOf = useCallback(
+    (record: TailnetRecord): TailnetRow => ({
+      record,
+      status: statusById[record.id],
+      hosts: hostsByTailnetId.get(record.id) ?? [],
+    }),
+    [hostsByTailnetId, statusById],
+  );
+  const rows = useMemo(() => records.map(rowOf), [records, rowOf]);
+  // 팀이 있으면 볼트별 묶음(4-6 과 같은 모양). 새 것은 묶음 머리의 + 로 그 볼트에 만든다.
+  const sections = sectionsByVault(records, listsByTeamId, vaultIndex);
+  const draftVaultId = draft?.vaultId ?? PERSONAL_VAULT_ID;
+
+  const renderDraftForm = (draft: TailnetDraft) => (
+    <TailnetForm
+      draft={draft}
+      status={statusById[draft.id]}
+      testing={testingId === draft.id}
+      testDisabled={testingId !== null}
+      error={error}
+      onChange={setDraft}
+      onSave={handleSave}
+      onTest={() =>
+        void handleTest({
+          id: draft.id,
+          controlUrl: draft.controlUrl.trim() || undefined,
+          authKey: draft.authKey.trim() || undefined,
+          isDraft: true,
+        })
+      }
+      onCancelTest={() => void handleCancel(draft.id)}
+      onCancel={() => void handleCancelDraft()}
+      myKey={Boolean(draft.vaultId)}
+    />
+  );
+
+  const renderRow = ({ record, status, hosts: usingHosts }: TailnetRow) => (
+    <Card key={record.id} className="flex-col items-stretch gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <CardMain>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate font-semibold">{record.label}</span>
+            <Badge>
+              {record.hasAuthKey
+                ? translate('tailnetSettings.usingAuthKey')
+                : translate('tailnetSettings.usingBrowser')}
+            </Badge>
+            {status ? <TailnetStateBadge status={status} /> : null}
+          </div>
+          <div className="truncate text-[0.82rem] text-[var(--text-soft)]">
+            {record.controlUrl || translate('tailnetSettings.tailscaleDefault')}
+          </div>
+          {/* 붙어 있지 않아도 어느 tailnet 의 어느 계정인지는 늘 보여야 한다.
+              Tailscale 기본 서버는 설정에 단서가 없어서, 이게 없으면 다른 기기에서
+              어느 계정으로 로그인해야 하는지 알 방법이 없다. 저장할 때 넣어 둔 값을
+              쓰고, 붙어 있으면 실시간 값이 우선한다. */}
+          <div className="mt-2">
+            <TailnetIdentity
+              tailnetName={status?.tailnetName ?? record.tailnetName}
+              loginName={status?.loginName ?? record.loginName}
+              nodeName={status?.nodeName}
+              nodeIp={status?.nodeIp}
+            />
+          </div>
+          <TailnetHostUsage hosts={usingHosts} />
+          {/* 백엔드가 스스로 보고하는 문제. 상태가 "연결됨" 인데 통신이 안 되는 경우가
+              있고(컨트롤 플레인에서 노드를 만료시켜도 상태는 그대로 남는다), 그때
+              여기에만 단서가 남는다 — tailscale 자신의 GUI 도 이것을 보여 준다. */}
+          {status?.health?.length ? (
+            <ul className="mt-2 space-y-1 text-xs text-[var(--text-soft)]">
+              {status.health.map((warning) => (
+                <li key={warning}>⚠ {warning}</li>
+              ))}
+            </ul>
+          ) : null}
+        </CardMain>
+
+        <div className="flex flex-none items-center gap-2">
+          {/* 저장된 네트워크에서 "시험"과 "연결"은 같은 동작이다. 둘을 따로 두면
+              사용자가 무엇이 다른지 알 수 없다. 상태에 따라 하나만 보여 준다. */}
+          {/* 판정은 코어가 한다(ready). 여기서 state 로 다시 판단하면 설정 화면만
+              "연결됨" 이라고 말하는 상태가 생긴다 — 만료된 노드가 그렇다. */}
+          {status?.ready === true ? (
+            <Button
+              variant="secondary"
+              onClick={() => void handleDisconnect(record)}
+              disabled={testingId !== null}
+            >
+              {translate('tailnetSettings.disconnect')}
+            </Button>
+          ) : testingId === record.id || isAttempting(status) ? (
+            // 시도 중에는 접을 수 있어야 한다. 브라우저 로그인은 최대 3 분까지
+            // 사람을 기다리는데, 그동안 누를 것이 없으면 갇힌 것과 같다.
+            // 여기서 시작한 시도만 보지 않는다 — 호스트 연결이 올리는 중일 수도 있다.
+            // 진행 중에 내밀 수 있는 것은 취소뿐이다. 결과가 나오지 않은 상태에서
+            // "다시 시도" 는 모순이고, 링크가 오지 않는 경우는 코어가 스스로 노드를
+            // 다시 세워 푼다(그 횟수는 아래 상태 줄에 나온다).
+            <Button
+              variant="secondary"
+              onClick={() => void handleCancel(record.id)}
+            >
+              <RefreshCw className="h-4 w-4 animate-spin" aria-hidden />
+              {translate('common.cancel')}
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              onClick={() => void handleTest(record)}
+              disabled={testingId !== null}
+            >
+              {translate('tailnetSettings.connect')}
+            </Button>
+          )}
+          <Button
+            variant="danger"
+            onClick={() => setPendingRemoval(record)}
+            disabled={testingId !== null}
+          >
+            {translate('common.delete')}
+          </Button>
+        </div>
+      </div>
+
+      {status ? (
+        <TailnetStatusNotice
+          controlUrl={record.controlUrl}
+          status={status}
+        />
+      ) : null}
+
+      {isDifferentTailnet(record, status) ? (
+        <NoticeCard tone="warning" role="alert">
+          {translate('tailnetSettings.tailnetMismatch', {
+            expected: record.tailnetName,
+            actual: status?.tailnetName,
+          })}
+        </NoticeCard>
+      ) : null}
+    </Card>
   );
 
   return (
@@ -409,13 +553,16 @@ export function TailnetSettingsPanel() {
             </p>
           </div>
 
-          <Button
-            variant="primary"
-            onClick={beginDraft}
-            disabled={draft !== null}
-          >
-            {translate('tailnetSettings.add')}
-          </Button>
+          {/* 팀이 있으면 만들기는 묶음 머리의 + 로 — 어느 볼트에 만드는지 헷갈리지 않게. */}
+          {sections ? null : (
+            <Button
+              variant="primary"
+              onClick={() => beginDraft()}
+              disabled={draft !== null}
+            >
+              {translate('tailnetSettings.add')}
+            </Button>
+          )}
         </div>
 
         <div className="border-t border-[var(--border)] pt-4">
@@ -435,144 +582,48 @@ export function TailnetSettingsPanel() {
         </NoticeCard>
       ) : null}
 
-      {draft ? (
-        <TailnetForm
-          draft={draft}
-          status={statusById[draft.id]}
-          testing={testingId === draft.id}
-          testDisabled={testingId !== null}
-          error={error}
-          onChange={setDraft}
-          onSave={handleSave}
-          onTest={() =>
-            void handleTest({
-              id: draft.id,
-              controlUrl: draft.controlUrl.trim() || undefined,
-              authKey: draft.authKey.trim() || undefined,
-              isDraft: true,
-            })
-          }
-          onCancelTest={() => void handleCancel(draft.id)}
-          onCancel={() => void handleCancelDraft()}
-        />
-      ) : null}
-
-      {rows.length === 0 && !draft ? (
-        // 이 기능을 처음 보는 사람의 물음은 여기서 딱 한 번 생긴다. 화면이 비어 있는 지금이
-        // 설명할 자리이고, 하나라도 등록하면 사라지므로 매일 쓰는 사람에게는 비용이 없다.
-        <EmptyState title={translate('tailnetSettings.empty')}>
-          <TailnetUsageSteps />
-        </EmptyState>
-      ) : null}
-
-      {rows.length > 0 ? (
-        <div className="grid gap-3">
-          {rows.map(({ record, status, hosts: usingHosts }) => (
-            <Card key={record.id} className="flex-col items-stretch gap-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <CardMain>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate font-semibold">{record.label}</span>
-                    <Badge>
-                      {record.hasAuthKey
-                        ? translate('tailnetSettings.usingAuthKey')
-                        : translate('tailnetSettings.usingBrowser')}
-                    </Badge>
-                    {status ? <TailnetStateBadge status={status} /> : null}
-                  </div>
-                  <div className="truncate text-[0.82rem] text-[var(--text-soft)]">
-                    {record.controlUrl || translate('tailnetSettings.tailscaleDefault')}
-                  </div>
-                  {/* 붙어 있지 않아도 어느 tailnet 의 어느 계정인지는 늘 보여야 한다.
-                      Tailscale 기본 서버는 설정에 단서가 없어서, 이게 없으면 다른 기기에서
-                      어느 계정으로 로그인해야 하는지 알 방법이 없다. 저장할 때 넣어 둔 값을
-                      쓰고, 붙어 있으면 실시간 값이 우선한다. */}
-                  <div className="mt-2">
-                    <TailnetIdentity
-                      tailnetName={status?.tailnetName ?? record.tailnetName}
-                      loginName={status?.loginName ?? record.loginName}
-                      nodeName={status?.nodeName}
-                      nodeIp={status?.nodeIp}
-                    />
-                  </div>
-                  <TailnetHostUsage hosts={usingHosts} />
-                  {/* 백엔드가 스스로 보고하는 문제. 상태가 "연결됨" 인데 통신이 안 되는 경우가
-                      있고(컨트롤 플레인에서 노드를 만료시켜도 상태는 그대로 남는다), 그때
-                      여기에만 단서가 남는다 — tailscale 자신의 GUI 도 이것을 보여 준다. */}
-                  {status?.health?.length ? (
-                    <ul className="mt-2 space-y-1 text-xs text-[var(--text-soft)]">
-                      {status.health.map((warning) => (
-                        <li key={warning}>⚠ {warning}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </CardMain>
-
-                <div className="flex flex-none items-center gap-2">
-                  {/* 저장된 네트워크에서 "시험"과 "연결"은 같은 동작이다. 둘을 따로 두면
-                      사용자가 무엇이 다른지 알 수 없다. 상태에 따라 하나만 보여 준다. */}
-                  {/* 판정은 코어가 한다(ready). 여기서 state 로 다시 판단하면 설정 화면만
-                      "연결됨" 이라고 말하는 상태가 생긴다 — 만료된 노드가 그렇다. */}
-                  {status?.ready === true ? (
-                    <Button
-                      variant="secondary"
-                      onClick={() => void handleDisconnect(record)}
-                      disabled={testingId !== null}
-                    >
-                      {translate('tailnetSettings.disconnect')}
-                    </Button>
-                  ) : testingId === record.id || isAttempting(status) ? (
-                    // 시도 중에는 접을 수 있어야 한다. 브라우저 로그인은 최대 3 분까지
-                    // 사람을 기다리는데, 그동안 누를 것이 없으면 갇힌 것과 같다.
-                    // 여기서 시작한 시도만 보지 않는다 — 호스트 연결이 올리는 중일 수도 있다.
-                    // 진행 중에 내밀 수 있는 것은 취소뿐이다. 결과가 나오지 않은 상태에서
-                    // "다시 시도" 는 모순이고, 링크가 오지 않는 경우는 코어가 스스로 노드를
-                    // 다시 세워 푼다(그 횟수는 아래 상태 줄에 나온다).
-                    <Button
-                      variant="secondary"
-                      onClick={() => void handleCancel(record.id)}
-                    >
-                      <RefreshCw className="h-4 w-4 animate-spin" aria-hidden />
-                      {translate('common.cancel')}
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="secondary"
-                      onClick={() => void handleTest(record)}
-                      disabled={testingId !== null}
-                    >
-                      {translate('tailnetSettings.connect')}
-                    </Button>
-                  )}
-                  <Button
-                    variant="danger"
-                    onClick={() => setPendingRemoval(record)}
-                    disabled={testingId !== null}
-                  >
-                    {translate('common.delete')}
-                  </Button>
-                </div>
-              </div>
-
-              {status ? (
-                <TailnetStatusNotice
-                  controlUrl={record.controlUrl}
-                  status={status}
-                />
-              ) : null}
-
-              {isDifferentTailnet(record, status) ? (
-                <NoticeCard tone="warning" role="alert">
-                  {translate('tailnetSettings.tailnetMismatch', {
-                    expected: record.tailnetName,
-                    actual: status?.tailnetName,
-                  })}
-                </NoticeCard>
-              ) : null}
-            </Card>
+      {sections ? (
+        <div className="flex flex-col gap-[1.4rem]">
+          {sections.map((section) => (
+            <section key={section.vaultId} className="flex flex-col gap-[0.9rem]">
+              <VaultSectionHeader
+                team={section.team}
+                count={section.items.length}
+                // 막힌 팀과 초안을 쓰는 중에는 + 를 내지 않는다(초안 하나가 시험 노드 하나다).
+                addLabel={
+                  section.blocked || draft !== null
+                    ? null
+                    : translate('teams.vault.addTo', {
+                        vault: section.team?.name ?? translate('sidebar.personalVault'),
+                        action: translate('tailnetSettings.add'),
+                      })
+                }
+                onAdd={() => beginDraft(section.team ? section.vaultId : null)}
+              />
+              {draft && draftVaultId === section.vaultId ? renderDraftForm(draft) : null}
+              {section.items.length > 0 ? (
+                <div className="grid gap-3">{section.items.map((record) => renderRow(rowOf(record)))}</div>
+              ) : draft && draftVaultId === section.vaultId ? null : (
+                <VaultEmptyLine>{translate('tailnetSettings.empty')}</VaultEmptyLine>
+              )}
+            </section>
           ))}
         </div>
-      ) : null}
+      ) : (
+        <>
+          {draft ? renderDraftForm(draft) : null}
+
+          {rows.length === 0 && !draft ? (
+            // 이 기능을 처음 보는 사람의 물음은 여기서 딱 한 번 생긴다. 화면이 비어 있는 지금이
+            // 설명할 자리이고, 하나라도 등록하면 사라지므로 매일 쓰는 사람에게는 비용이 없다.
+            <EmptyState title={translate('tailnetSettings.empty')}>
+              <TailnetUsageSteps />
+            </EmptyState>
+          ) : null}
+
+          {rows.length > 0 ? <div className="grid gap-3">{rows.map(renderRow)}</div> : null}
+        </>
+      )}
 
       <TailnetDeleteConfirmDialog
         record={pendingRemoval}
@@ -640,6 +691,13 @@ function TailnetDeleteConfirmDialog({
  * 어떤 계정으로 어느 tailnet 에 붙었는지가 유일한 단서라, 붙었으면 그것을 보여 준다.
  */
 type TailnetCapableHost = SshHostRecord | RdpHostRecord | VncHostRecord;
+
+/** 목록 한 줄 — 설정과 그 순간의 상태, 그 tailnet 을 쓰는 호스트. */
+interface TailnetRow {
+  record: TailnetRecord;
+  status: TailnetStatus | undefined;
+  hosts: TailnetCapableHost[];
+}
 
 function TailnetHostUsage({ hosts }: { hosts: TailnetCapableHost[] }) {
   const { t: translate } = useTranslation();

@@ -160,6 +160,72 @@ describe("registerSftpIpcHandlers", () => {
     expect(ctx.emitWorkspaceChanged).toHaveBeenCalled();
   });
 
+  describe("jump chains", () => {
+    const bastion = { id: "bastion", kind: "ssh", label: "Bastion", hostname: "b.example.com", port: 22, username: "jump", authType: "password" };
+    const target = { id: "target", kind: "ssh", label: "Target", hostname: "t.internal", port: 22, username: "app", authType: "password", jumpHostIds: ["bastion"] };
+
+    function chainContext() {
+      const ctx = createContext(target as never);
+      ctx.hosts.getById = vi.fn((id: string) => ({ bastion, target })[id as "bastion" | "target"]);
+      ctx.resolveSshAuth = vi.fn(async (host: { username: string; authType: string }, provided?: { password?: string }) => ({
+        username: host.username,
+        authType: host.authType,
+        secrets: provided?.password ? { password: provided.password } : {},
+        shouldPersistHostSecret: Boolean(provided?.password),
+        typedUsername: null,
+      }));
+      ctx.ensureCertificateAuthReady = vi.fn();
+      ctx.resolveJumpHostTarget = vi.fn().mockResolvedValue(undefined);
+      ctx.resolveTailnetRoute = vi.fn(() => ({}));
+      ctx.persistHostSpecificSecret = vi.fn().mockResolvedValue(null);
+      ctx.emitWorkspaceChanged = vi.fn();
+      registerSftpIpcHandlers(ctx);
+      return ctx;
+    }
+
+    it("asks for the jump host's password before calling the core", async () => {
+      const ctx = chainContext();
+      await expect(
+        ipcHandlers.get(ipcChannels.sftp.connect)?.({ sender: { id: 41 } }, { hostId: "target", endpointId: "endpoint-chain" }),
+      ).resolves.toEqual({ credentialsNeeded: { hostId: "bastion", reason: "missing" } });
+      expect(ctx.coreManager.sftpConnect).not.toHaveBeenCalled();
+    });
+
+    // 점프 홉이 거절하면 코어가 깊이를 싣는다 — 대상이 아니라 그 홉을 묻게 알린다.
+    it("names the jump host that rejected the login instead of failing", async () => {
+      const ctx = chainContext();
+      ctx.coreManager.sftpConnect.mockRejectedValueOnce(
+        Object.assign(new Error("jump host: ssh: handshake failed: ssh: unable to authenticate, attempted methods [none password]"), { jumpDepth: 1 }),
+      );
+
+      await expect(
+        ipcHandlers.get(ipcChannels.sftp.connect)?.(
+          { sender: { id: 41 } },
+          { hostId: "target", endpointId: "endpoint-chain", secrets: { password: "app-pw" }, jumpSecrets: { bastion: { password: "wrong" } } },
+        ),
+      ).resolves.toEqual({
+        credentialsNeeded: {
+          hostId: "bastion",
+          reason: "rejected",
+          message: "jump host: ssh: handshake failed: ssh: unable to authenticate, attempted methods [none password]",
+        },
+      });
+      expect(ctx.persistHostSpecificSecret).not.toHaveBeenCalled();
+    });
+
+    it("saves the jump host's prompt value once connected", async () => {
+      const ctx = chainContext();
+      await ipcHandlers.get(ipcChannels.sftp.connect)?.(
+        { sender: { id: 41 } },
+        { hostId: "target", endpointId: "endpoint-chain", secrets: { password: "app-pw" }, jumpSecrets: { bastion: { password: "jump-pw" } } },
+      );
+
+      expect(ctx.resolveJumpHostTarget).toHaveBeenCalledWith(target, { bastion: { password: "jump-pw" } });
+      expect(ctx.persistHostSpecificSecret).toHaveBeenCalledWith("target", "Target", { password: "app-pw" }, null);
+      expect(ctx.persistHostSpecificSecret).toHaveBeenCalledWith("bastion", "Bastion", { password: "jump-pw" }, null);
+    });
+  });
+
   it("registers endpoint ownership before emitting connection progress", async () => {
     const ctx = createContext(createAwsHost({ awsSshUsername: null }));
     registerSftpIpcHandlers(ctx);

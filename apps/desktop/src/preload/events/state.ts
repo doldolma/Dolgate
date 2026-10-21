@@ -67,6 +67,7 @@ const updateEventHub = createListenerHub<UpdateEvent>();
 const authEventHub = createListenerHub<AuthState>();
 const workspaceChangedHub = createListenerHub<void>();
 const teamsChangedHub = createListenerHub<void>();
+const teamInviteLinkHub = createListenerHub<void>();
 const windowStateHub = createListenerHub<DesktopWindowState>();
 const warpgateImportEventHub = createListenerHub<WarpgateImportEvent>();
 const sessionShareEventHub = createListenerHub<SessionShareEvent>();
@@ -366,6 +367,14 @@ export function emitTeamsChanged(): void {
 
 export function subscribeTeamsChanged(listener: () => void): () => void {
   return teamsChangedHub.subscribe(listener);
+}
+
+export function emitTeamInviteLink(): void {
+  teamInviteLinkHub.emit(undefined);
+}
+
+export function subscribeTeamInviteLink(listener: () => void): () => void {
+  return teamInviteLinkHub.subscribe(listener);
 }
 
 export function subscribeSshData(

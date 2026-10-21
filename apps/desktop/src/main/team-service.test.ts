@@ -153,7 +153,7 @@ describe("TeamService", () => {
     const harness = await createTeamHarness(tempDir);
     const created = await harness.teams.create("Acme");
     harness.server.teams.get(created.id)!.members.set("user-2", harness.server.newMember("member", "wrapped-2"));
-    const { invite } = await harness.teams.createInvite(created.id, { expiresInDays: 1 });
+    const { invite } = await harness.teams.createInvite(created.id, { expiresInHours: 24 });
 
     expect((await harness.teams.listMembers(created.id)).map((member) => [member.userId, member.role])).toEqual([
       ["user-1", "owner"],
@@ -183,12 +183,48 @@ describe("TeamService", () => {
     expect(harness.activeLoops()).toBe(0);
   });
 
+  it("previews a link for the join card and says why one cannot be opened", async () => {
+    const harness = await createTeamHarness(tempDir);
+    const created = await harness.teams.create("Acme");
+    const { link, invite } = await harness.teams.createInvite(created.id, { expiresInHours: 1 });
+    const hours = (Date.parse(invite.expiresAt) - Date.now()) / 3_600_000;
+    expect(hours).toBeGreaterThan(0.98);
+    expect(hours).toBeLessThanOrEqual(1);
+    const revoked = await harness.teams.createInvite(created.id);
+    await harness.teams.revokeInvite(created.id, revoked.invite.code);
+
+    await harness.service.purgeAll();
+    signInAs(harness, "user-2", OTHER_PERSONAL_KEY);
+    await expect(harness.teams.previewInvite(link)).resolves.toEqual({
+      status: "ok",
+      teamId: created.id,
+      teamName: "Acme",
+      inviterEmail: "user-1@example.com",
+      memberCount: 1,
+      expiresAt: invite.expiresAt,
+      alreadyJoined: false,
+    });
+    // 미리 보기는 팀 키 상자를 받지 않는다 — 참여할 때만 받는다.
+    expect(harness.server.requestsTo("POST", `/invite/${invite.code}/join`)).toHaveLength(0);
+    await harness.teams.join(link);
+    await expect(harness.teams.previewInvite(link)).resolves.toMatchObject({ status: "ok", alreadyJoined: true });
+
+    await expect(harness.teams.previewInvite(revoked.link)).resolves.toEqual({ status: "expired" });
+    await expect(harness.teams.previewInvite(link.replace(SERVER, "https://other.example.com:8443"))).resolves.toEqual({
+      status: "other-server",
+      serverHost: "other.example.com:8443",
+    });
+    await expect(harness.teams.previewInvite(link.slice(0, link.indexOf("#")))).resolves.toEqual({ status: "invalid" });
+    await expect(harness.teams.previewInvite(link.replace("#v1.", "#v2."))).resolves.toEqual({ status: "update-required" });
+  });
+
   it("refuses what it cannot do: a locked vault, odd link lifetimes, another server's link", async () => {
     const harness = await createTeamHarness(tempDir);
     const created = await harness.teams.create("Acme");
 
-    await expect(harness.teams.createInvite(created.id, { expiresInDays: 31 })).rejects.toThrow("초대 링크 기한은 1~30일로 정할 수 있습니다.");
-    await expect(harness.teams.createInvite(created.id, { expiresInDays: 0 })).rejects.toThrow("초대 링크 기한은 1~30일로 정할 수 있습니다.");
+    for (const expiresInHours of [30 * 24 + 1, 0, 1.5]) {
+      await expect(harness.teams.createInvite(created.id, { expiresInHours })).rejects.toThrow("초대 링크 기한은 1시간~30일로 정할 수 있습니다.");
+    }
     const { link } = await harness.teams.createInvite(created.id);
     const foreign = link.replace(SERVER, "https://other.example.com");
     await expect(harness.teams.getInviteInfo(foreign)).rejects.toThrow("다른 동기화 서버의 초대 링크입니다.");

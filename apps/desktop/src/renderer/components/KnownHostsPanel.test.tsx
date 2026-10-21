@@ -1,7 +1,17 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostRecord, KnownHostRecord } from '@shared';
+import { appStore } from '../store/appStore';
+import { createEmptyVaultIndex } from '../store/utils';
+import { listTeamKnownHosts } from '../services/desktop/known-hosts';
 import { KnownHostsPanel } from './KnownHostsPanel';
+
+vi.mock('../services/desktop/known-hosts', () => ({ listTeamKnownHosts: vi.fn() }));
+
+beforeEach(() => {
+  appStore.setState(appStore.getInitialState(), true);
+  vi.mocked(listTeamKnownHosts).mockReset();
+});
 
 // 설정 › Security 는 "이 앱이 무엇을 신뢰하고 있나" 에 답하는 화면이다. SSH 호스트 키는 known_hosts
 // 저장소에 있고 RDP 서버 인증서는 호스트 레코드(certificateFingerprint)에 있어서, 예전에는 RDP 를
@@ -100,5 +110,44 @@ describe('KnownHostsPanel', () => {
     expect(screen.getByText('신뢰한 RDP 서버 인증서가 없습니다.')).toBeInTheDocument();
     // SSH 목록의 빈 상태와 뒤섞이면 안 된다.
     expect(screen.queryByText('아직 저장된 known host가 없습니다.')).not.toBeInTheDocument();
+  });
+});
+
+// 설정의 볼트별 묶음(4-7). 팀 호스트 키는 접속할 때 고치지 않아 "본 때"가 아니라 "신뢰한 때"다(F1).
+describe('KnownHostsPanel with team vaults', () => {
+  const TEAM_RDP_HOST = { ...TRUSTED_RDP_HOST, id: 'rdp-team', label: 'team-pc', certificateFingerprint: 'SHA256:cert-team' } as HostRecord;
+  const vaultSection = (vaultId: string, index: number) =>
+    document.querySelectorAll(`[data-vault-section="${vaultId}"]`)[index]!.closest('section')!;
+
+  it('groups host keys and RDP certificates by vault, and says when a team key was trusted', async () => {
+    appStore.setState({
+      vaultIndex: {
+        ...createEmptyVaultIndex(),
+        teams: [{ id: 'team-a', name: 'Acme Infra', role: 'owner', syncState: 'ready', syncError: null, groups: [] }],
+        teamIdByHostId: { 'rdp-team': 'team-a' },
+      },
+    });
+    vi.mocked(listTeamKnownHosts).mockResolvedValue([
+      { ...KNOWN_HOST, id: 'known-team', host: '10.20.0.11', lastSeenAt: '2026-10-20T08:00:00.000Z' },
+    ]);
+    const { onRemove } = renderPanel([TRUSTED_RDP_HOST, TEAM_RDP_HOST]);
+
+    await screen.findByText('10.20.0.11:22');
+    expect(listTeamKnownHosts).toHaveBeenCalledWith('team-a');
+    const teamKeys = within(vaultSection('team-a', 0));
+    expect(teamKeys.getByText('Acme Infra')).toBeInTheDocument();
+    expect(teamKeys.getByText(/^Trusted /)).toBeInTheDocument();
+    expect(teamKeys.queryByText(/^Last seen /)).toBeNull();
+    const personalKeys = within(vaultSection('personal', 0));
+    expect(personalKeys.getByText('gate.example.com:22')).toBeInTheDocument();
+    expect(personalKeys.getByText(/^Last seen /)).toBeInTheDocument();
+
+    // RDP 인증서도 그 호스트의 볼트에.
+    expect(within(vaultSection('team-a', 1)).getByText('team-pc')).toBeInTheDocument();
+    expect(within(vaultSection('personal', 1)).getByText('work-pc')).toBeInTheDocument();
+
+    // 지우기는 id 로 — 메인이 그 볼트를 찾는다.
+    fireEvent.click(teamKeys.getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(onRemove).toHaveBeenCalledWith('known-team'));
   });
 });

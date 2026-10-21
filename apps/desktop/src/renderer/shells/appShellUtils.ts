@@ -1,5 +1,7 @@
 import type { HostRecord, LinkedHostSummary } from '@shared';
 import type { WorkspaceTab } from '../store/createAppStore';
+import type { PendingCredentialRetry } from '../store/types';
+import type { CredentialRetryDialogRequest } from '../components/CredentialRetryDialog';
 import { t } from '../i18n';
 
 export interface DraggedSessionPayload {
@@ -10,6 +12,29 @@ export interface DraggedSessionPayload {
 
 export function findHost(hosts: HostRecord[], hostId: string | null): HostRecord | null {
   return hostId ? hosts.find((host) => host.id === hostId) ?? null : null;
+}
+
+/**
+ * 요청 창이 보일 것 — 묻는 호스트의 이름과 저장된 비밀값. 점프 홉에서 막혔으면 대상이 아니라 그 점프 호스트다
+ * (promptHostId).
+ */
+export function credentialRetryDialogRequest(
+  hosts: HostRecord[],
+  pending: PendingCredentialRetry | null,
+): CredentialRetryDialogRequest | null {
+  if (!pending) {
+    return null;
+  }
+  const host = findHost(hosts, pending.promptHostId ?? pending.hostId);
+  if (!host || host.kind !== 'ssh') {
+    return null;
+  }
+  return {
+    ...pending,
+    hostLabel: host.label,
+    hasStoredSecret: Boolean(host.secretRef),
+    secretRef: host.secretRef ?? null,
+  };
 }
 
 export function toLinkedHostSummary(

@@ -101,6 +101,20 @@ describe('tailnet ipc handlers', () => {
     expect(JSON.stringify(listed)).not.toContain('tskey-secret');
   });
 
+  it('lists the tailnets of the vault the settings screen picks', async () => {
+    const teamTailnets = [record({ id: 'net-team', hasAuthKey: false })];
+    ipcHandlers.clear();
+    const picked = withVaults(createContext(), { 'team-1': { tailnets: { list: vi.fn(() => teamTailnets) } } });
+    registerTailnetIpcHandlers(picked as never);
+
+    await expect(invoke(ipcChannels.tailnet.list)).resolves.toEqual([expect.objectContaining({ id: 'net-1' })]);
+    await expect(invoke(ipcChannels.tailnet.list, 'personal')).resolves.toEqual([
+      expect.objectContaining({ id: 'net-1' }),
+    ]);
+    await expect(invoke(ipcChannels.tailnet.list, 'team-1')).resolves.toBe(teamTailnets);
+    await expect(invoke(ipcChannels.tailnet.list, 'team-gone')).resolves.toEqual([]);
+  });
+
   // 저장했다고 동기화에 알리지 않으면 **그 레코드가 사라진다.**
   //
    // 다음 기동의 pull 이 서버 스냅샷으로 목록을 통째로 갈아 끼우고, 서버에 없는 것은 삭제로
@@ -419,5 +433,68 @@ describe('tailnet config push', () => {
     await invoke(ipcChannels.tailnet.remove, 'net-1');
 
     expect(ctx.coreManager.pushTailnetConfigs).toHaveBeenCalledTimes(1);
+  });
+});
+
+// 설정의 팀 묶음(4-7): 새 tailnet 은 + 를 누른 볼트에, 있는 것은 그것이 든 볼트에 둔다. 팀 것의 auth key 는 내 칸.
+describe('team vault tailnets', () => {
+  function createTeamContext() {
+    ipcHandlers.clear();
+    const ctx = createContext();
+    const teamTailnets = [record({ id: 'net-team', hasAuthKey: false })];
+    const team = {
+      tailnets: {
+        list: vi.fn(() => teamTailnets),
+        save: vi.fn((next: TailnetRecord) => next),
+        remove: vi.fn(),
+        readAuthKey: vi.fn(() => 'tskey-mine'),
+        listPayloads: vi.fn(() => []),
+      },
+      syncOutbox: { upsertDeletion: vi.fn() },
+      memberPrefs: { readTailnetCredentials: vi.fn(() => null), read: vi.fn() },
+    };
+    withVaults(ctx, { 'team-1': team });
+    registerTailnetIpcHandlers(ctx as never);
+    return { ctx, team };
+  }
+
+  it('saves a new tailnet into the vault the screen picked, an existing one where it already is', async () => {
+    const { ctx, team } = createTeamContext();
+
+    await invoke(ipcChannels.tailnet.save, { record: record({ id: 'net-new' }), authKey: 'tskey-new', vaultId: 'team-1' });
+    expect(team.tailnets.save).toHaveBeenCalledWith(expect.objectContaining({ id: 'net-new' }), 'tskey-new');
+    expect(ctx.tailnets.save).not.toHaveBeenCalled();
+
+    // 있는 팀 것을 고치면 볼트를 주지 않아도 팀에, 있는 개인 것은 팀을 줘도 개인에 둔다.
+    await invoke(ipcChannels.tailnet.save, { record: record({ id: 'net-team', label: 'renamed' }) });
+    expect(team.tailnets.save).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'net-team', label: 'renamed' }), undefined);
+    await invoke(ipcChannels.tailnet.save, { record: record({ id: 'net-1' }), vaultId: 'team-1' });
+    expect(ctx.tailnets.save).toHaveBeenCalledWith(expect.objectContaining({ id: 'net-1' }), undefined);
+    expect(team.tailnets.save).toHaveBeenCalledTimes(2);
+    expect(ctx.coreManager.pushTailnetConfigs).toHaveBeenCalledTimes(3);
+    expect(ctx.queueSync).toHaveBeenCalledTimes(3);
+
+    // 이 기기에 없는 팀이면 저장하지 않는다.
+    await expect(
+      invoke(ipcChannels.tailnet.save, { record: record({ id: 'net-other' }), vaultId: 'team-gone' }),
+    ).rejects.toThrow();
+  });
+
+  it('removes a team tailnet from the team and tests it with my own auth key', async () => {
+    const { ctx, team } = createTeamContext();
+
+    await invoke(ipcChannels.tailnet.test, { id: 'net-team', controlUrl: 'https://vpn.acme.test' });
+    expect(ctx.coreManager.testTailnet).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'net-team', authKey: 'tskey-mine' }),
+      expect.any(Function),
+    );
+    expect(ctx.tailnets.readAuthKey).not.toHaveBeenCalled();
+
+    await invoke(ipcChannels.tailnet.remove, 'net-team');
+    expect(ctx.coreManager.forgetTailnet).toHaveBeenCalledWith('net-team');
+    expect(team.tailnets.remove).toHaveBeenCalledWith('net-team');
+    expect(team.syncOutbox.upsertDeletion).toHaveBeenCalledWith('tailnets', 'net-team');
+    expect(ctx.tailnets.remove).not.toHaveBeenCalled();
+    expect(ctx.syncOutbox.upsertDeletion).not.toHaveBeenCalled();
   });
 });

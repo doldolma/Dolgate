@@ -36,6 +36,8 @@ interface AwsProfileCreateWizardProps {
   prepareSsoProfile: (
     input: AwsSsoProfilePrepareInput,
   ) => Promise<AwsSsoProfilePrepareResult>
+  /** 만들 팀 볼트(설정의 팀 묶음 +). 없으면 개인. 팀이면 정적 키 칸은 "내 키"다. */
+  vaultId?: string | null
 }
 
 function createEmptyStaticDraft(): AwsStaticProfileDraft {
@@ -96,8 +98,11 @@ export function AwsProfileCreateWizard({
   onSuccess,
   createProfile,
   prepareSsoProfile,
+  vaultId = null,
 }: AwsProfileCreateWizardProps) {
   const { t: translate } = useTranslation();
+  // 볼트는 팀일 때만 싣는다 — 개인 만들기는 지금과 같은 입력으로 간다.
+  const withVault = <T extends object>(input: T): T => (vaultId ? { ...input, vaultId } : input)
   const [activeKind, setActiveKind] = useState<AwsProfileCreateKind>('static')
   const [staticDraft, setStaticDraft] = useState<AwsStaticProfileDraft>(
     createEmptyStaticDraft(),
@@ -167,13 +172,13 @@ export function AwsProfileCreateWizard({
     setIsSubmitting(true)
     setError(null)
     try {
-      await createProfile({
+      await createProfile(withVault({
         kind: 'static',
         profileName: staticDraft.profileName,
         accessKeyId: staticDraft.accessKeyId,
         secretAccessKey: staticDraft.secretAccessKey,
         region: staticDraft.region ?? null,
-      })
+      }))
       await onSuccess?.(staticDraft.profileName)
     } catch (submitError) {
       setError(normalizeErrorMessage(submitError, translate('awsWizard.error.createFailed')))
@@ -187,7 +192,7 @@ export function AwsProfileCreateWizard({
     setError(null)
     try {
       if (!ssoPreparation) {
-        const preparation = await prepareSsoProfile(ssoDraft)
+        const preparation = await prepareSsoProfile(withVault(ssoDraft))
         setSsoPreparation(preparation)
         return
       }
@@ -197,7 +202,7 @@ export function AwsProfileCreateWizard({
         return
       }
 
-      await createProfile({
+      await createProfile(withVault({
         kind: 'sso',
         profileName: ssoPreparation.profileName,
         ssoStartUrl: ssoPreparation.ssoStartUrl,
@@ -207,7 +212,7 @@ export function AwsProfileCreateWizard({
         ssoSessionName: ssoPreparation.ssoSessionName,
         ssoAccountId: selectedSsoAccountId,
         ssoRoleName: selectedSsoRoleName,
-      })
+      }))
       await onSuccess?.(ssoPreparation.profileName)
     } catch (submitError) {
       setError(normalizeErrorMessage(submitError, translate('awsWizard.error.ssoCreateFailed')))
@@ -226,13 +231,13 @@ export function AwsProfileCreateWizard({
         return
       }
 
-      await createProfile({
+      await createProfile(withVault({
         kind: 'role',
         profileName: roleDraft.profileName,
         sourceProfileName: roleDraft.sourceProfileName,
         roleArn: roleDraft.roleArn,
         region: roleDraft.region ?? null,
-      })
+      }))
       await onSuccess?.(roleDraft.profileName)
     } catch (submitError) {
       setError(normalizeErrorMessage(submitError, translate('awsWizard.error.roleCreateFailed')))
@@ -290,6 +295,7 @@ export function AwsProfileCreateWizard({
           submitLabel={translate('awsWizard.static.submit')}
           submittingLabel={translate('awsWizard.static.submitting')}
           profileNameLabel={translate('awsWizard.static.profileName')}
+          myKeys={Boolean(vaultId)}
           onChange={setStaticDraft}
           onCancel={onCancel}
           onSubmit={() => {

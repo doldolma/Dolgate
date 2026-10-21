@@ -13,6 +13,7 @@ import (
 
 	"dolssh/services/ssh-core/internal/neterr"
 	"dolssh/services/ssh-core/internal/protocol"
+	"dolssh/services/ssh-core/internal/sshconn"
 	coreruntime "dolssh/services/ssh-core/pkg/runtime"
 )
 
@@ -709,8 +710,9 @@ func emitAsyncError(
 				SessionID:  sessionID,
 				EndpointID: endpointID,
 				Payload: protocol.ErrorPayload{
-					Message: neterr.Normalize(err).Error(),
-					Failure: neterr.Code(err),
+					Message:   neterr.Normalize(err).Error(),
+					Failure:   neterr.Code(err),
+					JumpDepth: sshconn.JumpDepth(err),
 				},
 			})
 		}

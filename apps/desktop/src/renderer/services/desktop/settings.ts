@@ -1,5 +1,10 @@
 import { desktopApi } from '../desktopApi';
-import type { LoadedManagedSecretPayload, SerialPortSummary } from '@shared';
+import type { LoadedManagedSecretPayload, SecretMetadataRecord, SerialPortSummary } from '@shared';
+
+/** 그 팀 볼트에 저장된 자격 증명(이름·종류만). 개인 목록은 스토어가 들고 있다. */
+export function listTeamSavedCredentials(teamId: string): Promise<SecretMetadataRecord[]> {
+  return desktopApi.keychain.list(teamId);
+}
 
 export function getDesktopSettings() {
   return desktopApi.settings.get();

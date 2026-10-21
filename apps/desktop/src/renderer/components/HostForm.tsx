@@ -7,9 +7,10 @@ import { loadSavedCredential } from '../services/desktop/settings';
 import { pickRdpShareFolder } from '../services/desktop/rdp';
 import { CredentialSelect } from './CredentialSelect';
 import { terminalThemePresets } from '../lib/terminal-presets';
-import { listAwsProfiles } from '../services/desktop/imports';
-import { Button, IconButton, Input, SearchableSelect, SelectField, TagInputField, Textarea, ToggleSwitch } from '../ui';
-import { FolderPlus, Trash2 } from '../ui/icons';
+import { listAwsProfiles, listTeamAwsProfiles } from '../services/desktop/imports';
+import { Button, IconButton, Input, NumberInput, SearchableSelect, SelectField, TagInputField, Textarea, ToggleSwitch } from '../ui';
+import { FolderPlus, Info, Trash2 } from '../ui/icons';
+import { PerPersonHint } from './teams/PerPersonHint';
 import type { SearchableSelectOption } from '../ui';
 import { ArrowDown, ArrowUp, X } from '../ui/icons';
 import { useTranslation } from 'react-i18next';
@@ -401,6 +402,11 @@ export interface HostFormProps {
    * 버튼이 있어도 반쪽이다.
    */
   onTailnetAdded?: () => void | Promise<void>;
+  /**
+   * 이 호스트가 든(만들 때는 만들) 볼트. 팀이면 AWS 프로필을 그 팀 것으로 읽는다 — 다른 고르기 목록은
+   * 상위가 그 볼트 것으로 좁혀 넘긴다. 없으면 개인이다.
+   */
+  vaultId?: string | null;
   onActionStateChange?: (state: HostFormActionState) => void;
   /** draft.label 이 바뀔 때마다 호출 — 드로어 헤더의 편집 가능한 타이틀과 동기화한다. */
   onLabelChange?: (label: string) => void;
@@ -641,12 +647,20 @@ function buildHostHydrationKey(host: HostRecord): string {
 
 function renderTerminalThemeField(
   value: TerminalThemeId | null | undefined,
-  onChange: (value: TerminalThemeId | null) => void
+  onChange: (value: TerminalThemeId | null) => void,
+  /** 팀 호스트면 테마가 이 기기에만 적용된다는 툴팁. */
+  hint?: string | null
 ) {
   return (
     <label className="flex flex-col gap-[0.4rem] text-[var(--text)]">
-      <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
+      <span className="flex items-center gap-[0.35rem] text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
         {t('hostForm.field.terminalTheme')}
+        {hint ? (
+          <PerPersonHint hint={hint}>
+            <Info className="h-[0.85rem] w-[0.85rem] text-[var(--text-muted)]" aria-hidden="true" />
+            <span className="sr-only">{hint}</span>
+          </PerPersonHint>
+        ) : null}
       </span>
       <SelectField
         value={value ?? ''}
@@ -699,10 +713,18 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   onConnect,
   onEditExistingSecret,
   onTailnetAdded,
+  vaultId = null,
   onActionStateChange,
   onLabelChange
 }: HostFormProps, ref) {
   const { t: translate } = useTranslation();
+  // 팀 호스트의 사람마다 다른 칸 — 자리는 그대로, 툴팁으로만 알린다. 개인 호스트는 없음(지금 화면 그대로).
+  const perPersonHints = vaultId
+    ? {
+        agentForwarding: translate('teams.perPerson.agentForwarding'),
+        terminalTheme: translate('teams.perPerson.terminalTheme'),
+      }
+    : null;
   const fieldClassName = 'flex flex-col gap-[0.4rem] text-[var(--text)]';
   const fieldLabelClassName =
     'text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]';
@@ -1279,7 +1301,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     let canceled = false;
     setIsLoadingAwsProfiles(true);
     setAwsProfilesError(null);
-    void listAwsProfiles()
+    // 팀 호스트면 그 팀의 프로필, 개인이면 지금 호출 그대로.
+    void (vaultId ? listTeamAwsProfiles(vaultId) : listAwsProfiles())
       .then((profiles) => {
         if (canceled) {
           return;
@@ -1303,7 +1326,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     return () => {
       canceled = true;
     };
-  }, [isAwsDraft]);
+  }, [isAwsDraft, vaultId]);
 
   useEffect(() => {
     if (!isEditMode || saveInFlight) {
@@ -1668,7 +1691,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           </span>
         ) : tailnetChoices.length === 0 ? (
           <span className="text-[0.82rem] text-[var(--text-soft)]">
-            {translate('hostForm.tailnet.empty')}
+            {translate(vaultId ? 'hostForm.tailnet.emptyTeam' : 'hostForm.tailnet.empty')}
           </span>
         ) : null}
       </div>
@@ -1687,6 +1710,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
 
   const tailnetAddDialog = tailnetDialogOpen ? (
     <TailnetAddDialog
+      vaultId={vaultId}
       onClose={() => setTailnetDialogOpen(false)}
       onAdded={async (tailnet) => {
         // 먼저 이 폼이 바로 그릴 수 있게 담고 고른다. 상위 목록 갱신은 그다음이다 —
@@ -2121,17 +2145,16 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           <div className="grid gap-[0.7rem] md:grid-cols-[120px_minmax(0,1fr)]">
             <label className={fieldClassName}>
               <span className={fieldLabelClassName}>{translate('hostForm.field.sshPort')}</span>
-              <Input
-                type="number"
+              <NumberInput
                 min={1}
                 max={65535}
                 value={draft.awsSshPort ?? 22}
-                onChange={(event) =>
+                onValueChange={(next) =>
                   setDraft((current) =>
                     current.kind === 'aws-ec2'
                       ? {
                           ...current,
-                          awsSshPort: Number(event.target.value) || 22
+                          awsSshPort: next
                         }
                       : current
                   )
@@ -2172,6 +2195,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   )
               }
           />
+          <PerPersonHint hint={perPersonHints?.agentForwarding} className="flex w-full">
           <ToggleSwitch
               checked={draft.agentForwarding === true}
               label={translate('hostForm.field.agentForwarding')}
@@ -2187,6 +2211,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   )
               }
           />
+          </PerPersonHint>
           </FormSection>
 
           <FormSection
@@ -2202,7 +2227,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             description="Optional local preference."
             testId="hostform-section-preferences"
           >
-            {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })))}
+            {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })), perPersonHints?.terminalTheme)}
             {startupCommandField}
           </FormSection>
         </>
@@ -2258,12 +2283,12 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             description="Optional local preference."
             testId="hostform-section-preferences"
           >
-            {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })))}
+            {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })), perPersonHints?.terminalTheme)}
           </FormSection>
         </>
       ) : draft.kind === 'warpgate-ssh' ? (
         <>
-          {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })))}
+          {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })), perPersonHints?.terminalTheme)}
           {startupCommandField}
 
           <label className={fieldClassName}>
@@ -2320,12 +2345,11 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             <div className="grid gap-[0.7rem] md:grid-cols-[120px_minmax(0,1fr)]">
               <label className={fieldClassName}>
                 <span className={fieldLabelClassName}>{translate('hostForm.field.port')}</span>
-                <Input
-                  type="number"
+                <NumberInput
                   min={1}
                   max={65535}
                   value={sshDraft.port}
-                  onChange={(event) => setDraft({ ...sshDraft, port: Number(event.target.value) || 22 })}
+                  onValueChange={(next) => setDraft({ ...sshDraft, port: next })}
                   required
                 />
               </label>
@@ -2541,6 +2565,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               />
             </div>
             <div className={fieldClassName}>
+              <PerPersonHint hint={perPersonHints?.agentForwarding} className="flex w-full">
               <ToggleSwitch
                 label={translate('hostForm.field.agentForwarding')}
                 description={
@@ -2560,6 +2585,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   })
                 }
               />
+              </PerPersonHint>
             </div>
           </FormSection>
 
@@ -2576,7 +2602,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             description="Optional local preference."
             testId="hostform-section-preferences"
           >
-            {renderTerminalThemeField(sshDraft.terminalThemeId ?? null, (terminalThemeId) => setDraft({ ...sshDraft, terminalThemeId }))}
+            {renderTerminalThemeField(sshDraft.terminalThemeId ?? null, (terminalThemeId) => setDraft({ ...sshDraft, terminalThemeId }), perPersonHints?.terminalTheme)}
             {startupCommandField}
             <div className={fieldClassName}>
               <span className={fieldLabelClassName}>{translate('hostForm.field.envVars')}</span>
@@ -2671,12 +2697,11 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 </label>
                 <label className={fieldClassName}>
                   <span className={fieldLabelClassName}>{translate('hostForm.field.port')}</span>
-                  <Input
-                    type="number"
+                  <NumberInput
                     min={1}
                     max={65535}
                     value={serialDraft.port ?? 4001}
-                    onChange={(event) => handleSerialFieldChange('port', Number(event.target.value) || 4001)}
+                    onValueChange={(next) => handleSerialFieldChange('port', next)}
                     required
                   />
                 </label>
@@ -2688,11 +2713,10 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 <div className="grid gap-[0.7rem] md:grid-cols-2">
                   <label className={fieldClassName}>
                     <span className={fieldLabelClassName}>{translate('hostForm.field.baudRate')}</span>
-                    <Input
-                      type="number"
+                    <NumberInput
                       min={1}
                       value={serialDraft.baudRate}
-                      onChange={(event) => handleSerialFieldChange('baudRate', Number(event.target.value) || 115200)}
+                      onValueChange={(next) => handleSerialFieldChange('baudRate', next)}
                       required
                     />
                   </label>
@@ -2800,7 +2824,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 <option value="crlf">CRLF</option>
               </SelectField>
             </label>
-            {renderTerminalThemeField(serialDraft.terminalThemeId ?? null, (terminalThemeId) => setDraft({ ...serialDraft, terminalThemeId }))}
+            {renderTerminalThemeField(serialDraft.terminalThemeId ?? null, (terminalThemeId) => setDraft({ ...serialDraft, terminalThemeId }), perPersonHints?.terminalTheme)}
           </FormSection>
         </>
       ) : vncDraft ? (

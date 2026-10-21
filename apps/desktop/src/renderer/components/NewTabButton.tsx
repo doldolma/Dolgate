@@ -28,6 +28,7 @@ import {
 import { hostSubtitleLabels } from "../../common/shared-messages";
 import { CommandPalette, type CommandPaletteItem } from "./CommandPalette";
 import { hostSupportsTerminalConnect } from "./host-browser/hostCapabilities";
+import { withMyUsername } from "./host-browser/hostDisplay";
 import { matchesKeyboardLayoutQuery } from "../lib/keyboard-layout-search";
 import { Input } from "../ui";
 import { Columns2, Plus, SquareTerminal } from "../ui/icons";
@@ -44,6 +45,8 @@ const VIEWPORT_MARGIN = 8;
 
 interface NewTabButtonProps {
   hosts: readonly HostRecord[];
+  /** 팀 호스트에 둔 내 사용자 이름 — 부제에 쓴다(표시만). */
+  myUsernameByHostId?: Readonly<Record<string, string>>;
   /** 호스트별 마지막 연결 시각(ms). 검색어가 없을 때 이 순서로 보여 준다. */
   lastConnectedByHostId: Map<string, number>;
   onConnectHost: (hostId: string) => void;
@@ -57,6 +60,7 @@ interface NewTabButtonProps {
 
 export function NewTabButton({
   hosts,
+  myUsernameByHostId,
   lastConnectedByHostId,
   onConnectHost,
   onOpenLocalTerminal,
@@ -165,7 +169,7 @@ export function NewTabButton({
             [
               host.label,
               host.groupName ?? "",
-              getHostSubtitle(host, hostSubtitleLabels()),
+              getHostSubtitle(withMyUsername(host, myUsernameByHostId), hostSubtitleLabels()),
             ].join(" "),
             trimmed,
           ),
@@ -244,7 +248,7 @@ export function NewTabButton({
         id: `host:${host.id}`,
         group: "host",
         title: host.label,
-        subtitle: getHostSubtitle(host, hostSubtitleLabels()),
+        subtitle: getHostSubtitle(withMyUsername(host, myUsernameByHostId), hostSubtitleLabels()),
         keywords: [],
         Icon: SquareTerminal,
         run: () => {
@@ -271,6 +275,7 @@ export function NewTabButton({
   }, [
     hosts,
     lastConnectedByHostId,
+    myUsernameByHostId,
     onConnectHost,
     onOpenLocalTerminal,
     onOpenSavedWorkspace,

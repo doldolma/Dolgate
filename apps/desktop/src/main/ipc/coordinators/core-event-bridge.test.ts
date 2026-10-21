@@ -109,6 +109,28 @@ describe("core event bridge", () => {
     expect(bridge.pendingSessionSecrets.has("session-1")).toBe(false);
   });
 
+  // 요청 창에서 넣은 점프 호스트의 값도 붙은 뒤 그 홉 제자리에 저장한다(팀 호스트는 내 자격 증명).
+  it("persists the jump hosts' prompt values on connected events", async () => {
+    const { deps, bridge, terminalHandler } = createBridge();
+    bridge.pendingSessionSecrets.set("session-1", {
+      hostId: "target",
+      label: "Target",
+      secrets: {},
+      username: null,
+      jumps: [{ hostId: "bastion", label: "Bastion", secrets: { password: "jump-pw" }, username: null }],
+    });
+
+    await terminalHandler()({ type: "connected", sessionId: "session-1" });
+
+    expect(deps.secretCoordinator.persistHostSpecificSecret).toHaveBeenCalledWith(
+      "bastion",
+      "Bastion",
+      { password: "jump-pw" },
+      null,
+    );
+    expect(bridge.pendingSessionSecrets.has("session-1")).toBe(false);
+  });
+
   // 요청 창에서 바꾼 사용자 이름은 붙은 뒤에 저장되고(개인 호스트는 레코드, 팀 호스트는 내 칸), 화면이 호스트
   // 목록을 다시 읽는다.
   it("saves the username typed into the prompt once connected and has the windows reload hosts", async () => {

@@ -7,6 +7,8 @@ import { t } from '../i18n';
 export interface MissingUsernameDialogRequest {
   hostLabel: string;
   source: "ssh" | "sftp" | "containers" | "containerShell" | "portForward";
+  /** 팀 호스트 — 입력한 이름은 팀 레코드가 아니라 내 자격 증명에 들어간다(F4). */
+  teamHost?: boolean;
 }
 
 interface MissingUsernameDialogProps {
@@ -15,7 +17,10 @@ interface MissingUsernameDialogProps {
   onSubmit: (input: { username: string }) => Promise<void>;
 }
 
-function resolveMessage(source: MissingUsernameDialogRequest["source"]): string {
+function resolveMessage(source: MissingUsernameDialogRequest["source"], teamHost = false): string {
+  if (teamHost) {
+    return t(`missingUsername.team.${source}`);
+  }
   switch (source) {
     case "sftp":
       return t('missingUsername.sftp');
@@ -67,7 +72,7 @@ export function MissingUsernameDialog({
         </ModalHeader>
         <ModalBody className="grid gap-4">
           <p className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
-            {resolveMessage(request.source)}
+            {resolveMessage(request.source, request.teamHost)}
           </p>
           <FieldGroup label="SSH Username">
             <Input

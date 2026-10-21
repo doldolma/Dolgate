@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { DialogBackdrop } from './DialogBackdrop';
-import { Button, FieldGroup, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
+import { Button, FieldGroup, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, NumberInput, SectionLabel } from '../ui';
 import { useTranslation } from 'react-i18next';
 
 export interface AwsSftpConfigRetryDialogRequest {
@@ -68,13 +68,12 @@ export function AwsSftpConfigRetryDialog({ request, onClose, onSubmit }: AwsSftp
           </button>
           {showAdvanced ? (
             <FieldGroup label="SSH Port">
-              <Input
-                type="number"
+              <NumberInput
                 min={1}
                 max={65535}
                 value={port}
-                onChange={(event) => {
-                  setPort(Number(event.target.value) || 22);
+                onValueChange={(next) => {
+                  setPort(next);
                   setError(null);
                 }}
               />

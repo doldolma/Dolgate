@@ -1194,6 +1194,9 @@ type ErrorPayload struct {
 	// **문구도 함께 정규화해서 올린다.** 이 필드만 믿으면 구버전 앱이 아무것도 못 읽고, 문구만
 	// 정규화하면 앱이 계속 문장을 뒤져야 한다. 둘을 같이 보내는 것이 요점이다.
 	Failure string `json:"failure,omitempty"`
+	// JumpDepth 는 실패가 점프 홉에서 났을 때 대상에서 거꾸로 센 홉 수다(1 = 대상 바로 앞). 대상 자신이거나
+	// 점프와 무관하면 0(생략). 앱은 이것으로 요청 창을 그 점프 호스트로 띄운다 — 문구를 뜯지 않는다.
+	JumpDepth int `json:"jumpDepth,omitempty"`
 }
 
 type ClosedPayload struct {

@@ -8,7 +8,9 @@ import type {
 } from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
 import { t } from "../i18n";
+import { PERSONAL_VAULT_ID, type VaultScope } from "../vault-catalog";
 import type { MainIpcContext } from "./context";
+import { resolveListedVault } from "./listed-vault";
 
 /**
  * 코어가 올려 보낸 오류를 사용자가 읽을 수 있는 문장으로 바꾼다.
@@ -44,6 +46,31 @@ export interface TailnetSaveInput {
   record: TailnetRecord;
   /** 생략하면 기존 키를 그대로 둔다. 빈 문자열이면 키를 지운다. */
   authKey?: string;
+  /** 새 설정을 둘 볼트(설정 화면의 묶음 + 가 준다). 없으면 개인. 있는 설정은 그것이 든 볼트에 그대로 둔다. */
+  vaultId?: string | null;
+}
+
+/**
+ * 그 tailnet 설정이 든 볼트. 개인이면 "personal" — 지금까지 쓰던 ctx.tailnets·syncOutbox 를 그대로 탄다(팀이
+ * 없으면 호출이 바뀌지 않는다).
+ */
+function tailnetVaultOf(ctx: MainIpcContext, id: string): VaultScope | "personal" {
+  const scope = ctx.vaults.scopeOfTailnet(id);
+  return scope.id === PERSONAL_VAULT_ID ? "personal" : scope;
+}
+
+/** 저장할 볼트 — 있는 설정이면 그것이 든 볼트, 새 것이면 화면이 준 볼트. 이 기기에 없는 팀이면 던진다. */
+function tailnetVaultForSave(ctx: MainIpcContext, input: TailnetSaveInput): VaultScope | "personal" {
+  const owner = tailnetVaultOf(ctx, input.record.id);
+  const exists = owner !== "personal" || ctx.tailnets.list().some((record) => record.id === input.record.id);
+  if (exists || !input.vaultId || input.vaultId === PERSONAL_VAULT_ID) {
+    return owner;
+  }
+  const scope = ctx.vaults.getScope(input.vaultId);
+  if (!scope) {
+    throw new Error(t("teams.notOnDevice"));
+  }
+  return scope;
 }
 
 /**
@@ -107,15 +134,24 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
   // 다시 떠도 CoreManager 가 이 제공자를 다시 불러 복구한다.
   ctx.coreManager.setTailnetConfigProvider(() => buildTailnetConfigs(ctx));
 
+  // 설정 화면이 볼트를 골라 본다. 팀 tailnet 의 hasAuthKey 는 내 auth key 가 있는지다(팀 저장소가 얹는다).
   ipcMain.handle(
     ipcChannels.tailnet.list,
-    async (): Promise<TailnetRecord[]> => ctx.tailnets.list(),
+    async (_event, vaultId?: string | null): Promise<TailnetRecord[]> => {
+      const vault = resolveListedVault(ctx.vaults, vaultId);
+      return vault === "personal" ? ctx.tailnets.list() : (vault?.tailnets.list() ?? []);
+    },
   );
 
   ipcMain.handle(
     ipcChannels.tailnet.save,
     async (_event, input: TailnetSaveInput): Promise<TailnetRecord> => {
-      const saved = ctx.tailnets.save(input.record, input.authKey);
+      // 팀 것의 auth key 는 팀 저장소가 내 칸으로 보낸다 — 팀에는 설정만 간다.
+      const vault = tailnetVaultForSave(ctx, input);
+      const saved =
+        vault === "personal"
+          ? ctx.tailnets.save(input.record, input.authKey)
+          : vault.tailnets.save(input.record, input.authKey);
       // 코어가 새 설정을 알아야 이 tailnet 을 지정한 호스트가 곧바로 붙는다.
       ctx.coreManager.pushTailnetConfigs();
       // 동기화에도 알린다. 이것이 없으면 방금 저장한 레코드가 **사라진다** — 다음 기동의
@@ -142,12 +178,18 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
         // 그 외에는 노드가 없거나 컨트롤 플레인에 닿지 못한 경우. 설정 삭제까지 막을 이유는
         // 없다 — 사용자가 지우겠다고 한 것이고, 남은 노드는 콘솔에서 지울 수 있다.
       }
-      ctx.tailnets.remove(id);
+      // 그 설정이 든 볼트에서 지운다. 같은 볼트 호스트의 경유 설정도 저장소가 함께 푼다.
+      const vault = tailnetVaultOf(ctx, id);
+      if (vault === "personal") {
+        ctx.tailnets.remove(id);
+      } else {
+        vault.tailnets.remove(id);
+      }
       // 지워진 설정은 코어에서도 빼야 한다. 목록에 없는 id 는 코어가 버린다.
       ctx.coreManager.pushTailnetConfigs();
       // 다른 기기도 지워야 한다. 동기화는 "안 보낸 것을 지운다"가 아니라 툼스톤 기반이라,
       // 여기서 기록하지 않으면 다른 기기에서 되살아난다.
-      ctx.syncOutbox.upsertDeletion("tailnets", id);
+      (vault === "personal" ? ctx.syncOutbox : vault.syncOutbox).upsertDeletion("tailnets", id);
       ctx.queueSync();
     },
   );
@@ -168,10 +210,12 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
       // 저장 전에도 시험할 수 있어야 하므로, 방금 입력한 키가 딸려 오면 그것을 쓴다.
       // 그 외에는 렌더러가 키를 갖고 있지 않으니 여기서 읽어 넣는다. 키가 위로 올라오는 건
       // 저장과 같은 방향이라 "키는 렌더러로 내려보내지 않는다"는 원칙과 무관하다.
+      // 팀 것은 내 auth key 를 읽는다(팀 저장소가 내 칸에서 준다).
       const typedAuthKey = request.authKey?.trim();
+      const vault = typedAuthKey ? "personal" : tailnetVaultOf(ctx, request.id);
       const authKey = typedAuthKey
         ? typedAuthKey
-        : (ctx.tailnets.readAuthKey(request.id) ?? undefined);
+        : ((vault === "personal" ? ctx.tailnets : vault.tailnets).readAuthKey(request.id) ?? undefined);
 
       // 화면의 요청을 코어 설정으로 승격한다. TailnetConfig 로 못박아 두면 새 필드가 생겼을 때
       // 여기서 컴파일 오류가 난다 — 조용히 빠지는 것보다 낫다.

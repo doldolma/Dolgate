@@ -6,6 +6,7 @@ import type {
   ActivityLogRecord,
   AuthType,
   AppSettings,
+  AwsProfileMissingMyKey,
   AwsEcsClusterSnapshot,
   AwsEcsServiceLogsSnapshot,
   AwsMetricHistoryPoint,
@@ -52,6 +53,18 @@ import type {
   SftpPrincipal,
   SecretMetadataRecord,
   SshKeyGenerateInput,
+  TeamAvailability,
+  TeamInvite,
+  TeamInviteCreated,
+  VaultCopyCounts,
+  VaultCopyRequest,
+  VaultCopyResult,
+  MyHostCredentialsInput,
+  MyHostCredentialsSummary,
+  TeamInvitePreview,
+  TeamListItem,
+  TeamMember,
+  VaultIndex,
   AiApiKeyStatus,
   AiAttachment,
   AiChatEvent,
@@ -106,6 +119,7 @@ export type SettingsSection =
   | "aws-profiles"
   | "tailnet"
   | "ai"
+  | "teams"
   | "account";
 export type SftpSourceKind = "local" | "host";
 export type WorkspaceDropDirection = "left" | "right" | "top" | "bottom";
@@ -115,6 +129,8 @@ export type HostDrawerState =
       mode: "create";
       defaultGroupPath: string | null;
       kind: "ssh" | "serial" | "rdp";
+      /** 만들 볼트('personal' 또는 팀 ID). 그룹 경로는 이 볼트 안의 경로다. */
+      vaultId: string;
     }
   | { mode: "edit"; hostId: string };
 
@@ -436,6 +452,11 @@ export interface SftpPaneState {
   // 다단 ProxyJump 연결 시 각 홉 진행(공통 오버레이 스텝). connectionHopProgress가 endpointId로 채운다.
   connectionHops?: TerminalConnectionHop[] | null;
   hostGroupPath: string | null;
+  /**
+   * 호스트 고르기가 들어가 있는 볼트. 팀이 있으면 맨 위가 볼트 고르기라, 없거나 null 이면 맨 위다(경로는 그 볼트
+   * 안의 경로). 팀이 없으면 쓰지 않는다.
+   */
+  hostVaultId?: string | null;
   currentPath: string;
   lastLocalPath: string;
   history: string[];
@@ -543,13 +564,35 @@ export interface PendingHostKeyPrompt {
 }
 
 export interface PendingCredentialRetry {
+  /**
+   * 이 요청의 표식. 제출한 요청만 닫으려고 쓴다 — 다시 시도가 다음 홉(점프 다음 대상 등)을 묻는 새 요청을
+   * 띄웠으면 그것은 남긴다. 세션 id 가 바뀌면 요청도 새 객체로 옮겨지므로 객체 비교로는 가를 수 없다.
+   */
+  requestId?: string;
   sessionId?: string | null;
+  /** 붙으려는 호스트(세션·SFTP 의 대상). */
   hostId: string;
+  /**
+   * 요청 창이 묻는 호스트가 대상이 아니라 그 점프 호스트일 때 그 id. 창의 제목·사용자 이름·인증 방식은 이
+   * 호스트 것이고, 넣은 값은 그 홉 자리(jumpSecrets)로 간다.
+   */
+  promptHostId?: string;
   source: "ssh" | "sftp";
   authType: Extract<AuthType, "password" | "privateKey" | "certificate">;
   message: string;
   initialUsername: string;
   paneId?: SftpPaneId;
+  /**
+   * 이번 시도에서 앞서 요청 창에 넣은 값. 아직 붙지 않아 저장되지 않았으므로, 다음 시도에 이것을 함께 보낸다
+   * — 점프 호스트를 묻는 동안 대상에 넣은 값을(또는 그 반대를) 잃지 않는다.
+   */
+  carried?: ConnectAttemptSecrets;
+}
+
+/** 한 접속 시도에서 요청 창에 넣은 값 — 대상의 것과 점프 호스트마다의 것. */
+export interface ConnectAttemptSecrets {
+  secrets?: HostSecretInput;
+  jumpSecrets?: Record<string, HostSecretInput>;
 }
 
 export interface PendingCredentialRetryAttempt {
@@ -775,7 +818,11 @@ export type TerminalUploadResult =
  * 열어도 홈 화면의 탭이 따라 움직이지 않는다.
  */
 export type PortForwardEditorIntent =
-  | { kind: "create"; transport: PortForwardTransport | "dns"; hostId?: string }
+  /**
+   * 만들 볼트는 묶음 머리의 + 가 준다(vaultId). 세션 패널처럼 호스트를 정해 열면 그 호스트의 볼트다. 둘 다 없으면
+   * 개인이다(팀이 없을 때).
+   */
+  | { kind: "create"; transport: PortForwardTransport | "dns"; hostId?: string; vaultId?: string }
   | { kind: "edit"; ruleId: string }
   | { kind: "edit-dns"; dnsOverrideId: string };
 interface AppStateParts {
@@ -797,12 +844,24 @@ interface AppStateParts {
   knownHosts: KnownHostRecord[];
   activityLogs: ActivityLogRecord[];
   keychainEntries: SecretMetadataRecord[];
+  /**
+   * 레코드의 볼트를 찾는 표(팀 볼트·그 그룹·팀 레코드 id). 레코드 모양은 그대로라 화면은 id 로 볼트를 찾는다 —
+   * 표에 없으면 개인 볼트 것이다. 팀이 없으면 비어 있다.
+   */
+  vaultIndex: VaultIndex;
+  /** 이 계정으로 팀을 쓸 수 있는지. 못 쓰면 팀 메뉴를 그리지 않는다. */
+  teamAvailability: TeamAvailability;
   activeWorkspaceTab: WorkspaceTabId;
   homeSection: HomeSection;
   settingsSection: SettingsSection;
   savedCredentialsSearchQuery: string;
   hostDrawer: HostDrawerState;
   currentGroupPath: string | null;
+  /**
+   * 지금 위치의 볼트('personal' 또는 팀 ID). null 은 All — 모든 볼트를 섞어 보인다. currentGroupPath 는 이
+   * 볼트 안의 경로다(팀이 없으면 늘 개인이라 지금과 같다).
+   */
+  currentVaultId: string | null;
   searchQuery: string;
   selectedHostTags: string[];
   settings: AppSettings;
@@ -862,6 +921,13 @@ interface AppStateParts {
   activeCredentialRetryAttempt: PendingCredentialRetryAttempt | null;
   pendingAwsSftpConfigRetry: PendingAwsSftpConfigRetry | null;
   pendingMissingUsernamePrompt: PendingMissingUsernamePrompt | null;
+  /**
+   * 내 키가 없어 붙지 못한 팀 정적 AWS 프로필 — 호스트가 쓰는 프로필 id 마다 키를 넣을 곳. 연결 실패 화면이 이것을
+   * 보고 "내 키 넣기"를 낸다(오류 문장에 표식을 섞지 않는다). 그 프로필 상태가 다시 괜찮으면 지운다.
+   */
+  awsMissingMyKeyByProfileId: Record<string, AwsProfileMissingMyKey>;
+  /** 내 키를 넣은 뒤 지운다. */
+  clearAwsMissingMyKey: (profileId: string) => void;
   pendingStartupCommandPrompt: PendingStartupCommandPrompt | null;
   /**
    * 지금 답을 기다리는 대화형 인증들. **대상(세션·엔드포인트)마다 하나씩** 담는다.
@@ -889,19 +955,27 @@ interface AppStateParts {
   focusHostContainersTab: (hostId: string) => void;
   openHomeSection: (section: HomeSection) => void;
   openSettingsSection: (section: SettingsSection) => void;
-  openCreateHostDrawer: () => void;
+  /** 새 호스트 서랍. 볼트·그룹을 안 주면 지금 위치(All 이면 개인)에 만든다. */
+  openCreateHostDrawer: (target?: { vaultId: string; groupPath: string | null }) => void;
   openEditHostDrawer: (hostId: string) => void;
   closeHostDrawer: () => void;
-  navigateGroup: (path: string | null) => void;
+  /**
+   * 그 볼트의 그 그룹으로 간다. 볼트를 안 주면 경로가 있을 때 개인, 없을 때 All 이다(팀이 없을 때의 옛 호출).
+   * 경로 없이 볼트만 주면 그 볼트 맨 위다.
+   */
+  navigateGroup: (path: string | null, vaultId?: string | null) => void;
   bootstrap: () => Promise<void>;
   refreshHostCatalog: () => Promise<void>;
   refreshOperationalData: () => Promise<void>;
   refreshSyncedWorkspaceData: () => Promise<void>;
+  /** 볼트 표만 다시 읽는다 — 팀 볼트에 쓴 뒤 그 레코드가 어느 볼트 것인지 곧장 맞추려고. */
+  refreshVaultIndex: () => Promise<void>;
   clearSyncedWorkspaceData: () => void;
-  createGroup: (name: string, parentPath?: string | null) => Promise<void>;
-  removeGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
-  moveGroup: (path: string, targetParentPath: string | null) => Promise<void>;
-  renameGroup: (path: string, name: string) => Promise<void>;
+  /** 그룹 쓰기의 vaultId 는 그 그룹의 볼트다. 없으면 개인(팀에 쓴 뒤에는 목록과 볼트 표를 다시 읽는다). */
+  createGroup: (name: string, parentPath?: string | null, vaultId?: string) => Promise<void>;
+  removeGroup: (path: string, mode: GroupRemoveMode, vaultId?: string) => Promise<void>;
+  moveGroup: (path: string, targetParentPath: string | null, vaultId?: string) => Promise<void>;
+  renameGroup: (path: string, name: string, vaultId?: string) => Promise<void>;
   /**
    * 직접 정렬에서 그룹을 옮긴다. 부모가 바뀌면 이동까지 함께 처리한다.
    *
@@ -911,11 +985,14 @@ interface AppStateParts {
     path: string,
     targetParentPath: string | null,
     targetIndex: number,
+    vaultId?: string,
   ) => Promise<void>;
+  /** 새로 만들 때(hostId 없음) vaultId 의 볼트에 만든다. 없으면 개인. */
   saveHost: (
     hostId: string | null,
     draft: HostDraft,
     secrets?: HostSecretInput,
+    vaultId?: string,
   ) => Promise<HostRecord>;
   duplicateHosts: (hostIds: string[]) => Promise<void>;
   moveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
@@ -975,6 +1052,8 @@ interface AppStateParts {
   retrySessionConnection: (
     sessionId: string,
     secrets?: HostSecretInput,
+    /** 이번 시도에서 요청 창에 넣은 점프 호스트의 값(점프 호스트 id → 값). */
+    jumpSecrets?: Record<string, HostSecretInput>,
   ) => Promise<void>;
   /** RDP 세션을 같은 탭에 다시 붙인다. 재연결 오케스트레이터와 오버레이의 재시도가 쓴다. */
   retryRdpConnection: (sessionId: string) => Promise<void>;
@@ -1186,18 +1265,22 @@ interface AppStateParts {
     ruleId: string | null,
     draft: PortForwardDraft,
   ) => Promise<void>;
+  /** 새 Static 덮어쓰기는 vaultId 볼트에(없으면 개인). Linked 는 규칙의 볼트다. */
   saveDnsOverride: (
     overrideId: string | null,
     draft: DnsOverrideDraft,
+    vaultId?: string,
   ) => Promise<void>;
   setStaticDnsOverrideActive: (
     overrideId: string,
     active: boolean,
   ) => Promise<void>;
   removeDnsOverride: (overrideId: string) => Promise<void>;
+  /** 새 스니펫은 vaultId 볼트에(없으면 개인). */
   saveSnippet: (
     snippetId: string | null,
     draft: SnippetDraft,
+    vaultId?: string,
   ) => Promise<SnippetRecord>;
   removeSnippet: (snippetId: string) => Promise<void>;
   removePortForward: (ruleId: string) => Promise<void>;
@@ -1381,7 +1464,8 @@ interface AppStateParts {
   ) => Promise<void>;
   setSftpPaneFilter: (paneId: SftpPaneId, query: string) => void;
   setSftpHostSearchQuery: (paneId: SftpPaneId, query: string) => void;
-  navigateSftpHostGroup: (paneId: SftpPaneId, path: string | null) => void;
+  /** vaultId 는 팀이 있을 때만 준다(그 볼트 안의 경로). 안 주면 볼트 없이 — 맨 위 또는 팀이 없을 때. */
+  navigateSftpHostGroup: (paneId: SftpPaneId, path: string | null, vaultId?: string | null) => void;
   selectSftpHost: (paneId: SftpPaneId, hostId: string) => void;
   connectSftpHost: (paneId: SftpPaneId, hostId: string) => Promise<void>;
   openSftpEntry: (paneId: SftpPaneId, entryPath: string) => Promise<void>;
@@ -1453,12 +1537,15 @@ export type CatalogSlice = Pick<
   AppStateParts,
   | "hosts"
   | "groups"
+  | "vaultIndex"
+  | "teamAvailability"
   | "activeWorkspaceTab"
   | "homeSection"
   | "settingsSection"
   | "savedCredentialsSearchQuery"
   | "hostDrawer"
   | "currentGroupPath"
+  | "currentVaultId"
   | "searchQuery"
   | "selectedHostTags"
   | "isReady"
@@ -1483,6 +1570,7 @@ export type CatalogSlice = Pick<
   | "refreshHostCatalog"
   | "refreshOperationalData"
   | "refreshSyncedWorkspaceData"
+  | "refreshVaultIndex"
   | "clearSyncedWorkspaceData"
   | "createGroup"
   | "removeGroup"
@@ -1513,6 +1601,8 @@ export type SessionSlice = Pick<
   | "pendingCredentialRetry"
   | "activeCredentialRetryAttempt"
   | "pendingMissingUsernamePrompt"
+  | "awsMissingMyKeyByProfileId"
+  | "clearAwsMissingMyKey"
   | "pendingStartupCommandPrompt"
   | "pendingInteractiveAuths"
   | "pendingConnectionAttempts"
@@ -1813,6 +1903,56 @@ export interface SessionPanelSlice {
   ) => void;
 }
 
+/**
+ * 팀 관리(Teams 탭)와 초대 링크로 참여하기. 팀 목록이 바뀌는 동작은 볼트 표를 곧장 다시 읽는다 — 메인의
+ * workspaceChanged 도 오지만, 그 사이 이 창의 화면이 옛 팀을 보이지 않게.
+ */
+export interface TeamsSlice {
+  /** Teams 탭이 보이는 팀. 없거나 사라진 팀이면 탭이 첫 팀을 보인다. */
+  teamsPanelTeamId: string | null;
+  selectTeamInPanel: (teamId: string) => void;
+  /** 설정의 Teams 탭을 열어 그 팀을 보인다. */
+  showTeamInPanel: (teamId: string) => void;
+  /** 팀을 쓸 수 있는지 메인에 새로 묻는다. 못 물으면 지금 값을 돌려준다. */
+  checkTeamAvailability: () => Promise<TeamAvailability>;
+  /** 링크 페이지가 넘겼거나 붙여 넣은 초대 링크. 팀을 쓸 수 있을 때 참여 카드가 뜬다. */
+  pendingInviteLink: string | null;
+  /** 메인이 받아 둔 초대 링크를 가져온다(켤 때·teams:invite-link 때). */
+  takePendingInviteLink: () => Promise<void>;
+  openInviteLink: (link: string) => void;
+  dismissInviteLink: () => void;
+  previewTeamInvite: (link: string) => Promise<TeamInvitePreview>;
+  joinTeam: (link: string) => Promise<TeamListItem>;
+  createTeam: (name: string) => Promise<TeamListItem>;
+  renameTeam: (teamId: string, name: string) => Promise<void>;
+  deleteTeam: (teamId: string) => Promise<void>;
+  /** 소유자는 newOwnerId 에게 넘긴 뒤 나간다. 마지막 한 명이 나가면 팀이 지워진다. */
+  leaveTeam: (teamId: string, newOwnerId?: string | null) => Promise<void>;
+  transferTeamOwnership: (teamId: string, userId: string) => Promise<void>;
+  removeTeamMember: (teamId: string, userId: string) => Promise<void>;
+  listTeamMembers: (teamId: string) => Promise<TeamMember[]>;
+  listTeamInvites: (teamId: string) => Promise<TeamInvite[]>;
+  createTeamInvite: (teamId: string, expiresInHours: number) => Promise<TeamInviteCreated>;
+  revokeTeamInvite: (teamId: string, code: string) => Promise<void>;
+  /** 팀이 함께 쓰는 비밀번호·키 수(팀 삭제 창). */
+  countTeamSecrets: (teamId: string) => Promise<number>;
+  /** 팀 호스트에 둔 내 자격 증명(비밀값 없이). 없으면 null. */
+  getMyHostCredentials: (hostId: string) => Promise<MyHostCredentialsSummary | null>;
+  /**
+   * 팀 호스트에 내 자격 증명을 둔다 — 비워 보낸 비밀값은 그대로다(메인이 합친다). 끝나면 호스트 목록과 볼트 표를
+   * 다시 읽는다(카드·팔레트의 내 이름).
+   */
+  saveMyHostCredentials: (hostId: string, input: MyHostCredentialsInput) => Promise<MyHostCredentialsSummary | null>;
+  clearMyHostCredentials: (hostId: string) => Promise<void>;
+  /** 볼트 사이 복사로 무엇이 몇 개 오는지(쓰지 않는다). */
+  previewVaultCopy: (request: VaultCopyRequest) => Promise<VaultCopyCounts>;
+  /**
+   * 볼트 사이 복사(공유). 끝나면 호스트·그룹·볼트 표·운영 목록을 다시 읽는다 — 메인의 바뀜 알림은 쓴 창
+   * 자신에게는 오지 않는다.
+   */
+  copyToVault: (request: VaultCopyRequest) => Promise<VaultCopyResult>;
+}
+
 export type AppState = CatalogSlice &
   SessionSlice &
   ContainersSlice &
@@ -1822,7 +1962,8 @@ export type AppState = CatalogSlice &
   RuntimeEventSlice &
   ZmodemSlice &
   AiChatSlice &
-  SessionPanelSlice;
+  SessionPanelSlice &
+  TeamsSlice;
 
 export interface SliceDeps {
   api: DesktopApi;

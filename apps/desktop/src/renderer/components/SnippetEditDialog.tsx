@@ -8,8 +8,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SnippetDraft, SnippetRecord } from '@shared';
 import { useTranslation } from 'react-i18next';
 import { parseSnippetVariables } from '../lib/snippet';
+import type { VaultSectionTeam } from '../lib/vault-groups';
 import { DialogBackdrop } from './DialogBackdrop';
 import { SnippetDeleteConfirmDialog } from './SnippetDeleteConfirmDialog';
+import { VaultChip } from './teams/VaultMark';
 import {
   Badge,
   Button,
@@ -39,6 +41,8 @@ interface SnippetEditDialogProps {
   onRemove?: (id: string) => Promise<void>;
   /** 삭제 확인에 보여 줄, 이 스니펫을 시작 명령으로 쓰는 호스트 수. */
   hostUsageCount?: number;
+  /** 팀이 있을 때 어느 볼트의 스니펫인지 — 제목 옆 칩. 없으면 칩을 그리지 않는다. */
+  vault?: { team: VaultSectionTeam | null } | null;
   onClose: () => void;
 }
 
@@ -48,6 +52,7 @@ export function SnippetEditDialog({
   onSave,
   onRemove,
   hostUsageCount = 0,
+  vault = null,
   onClose,
 }: SnippetEditDialogProps) {
   const { t: translate } = useTranslation();
@@ -141,6 +146,11 @@ export function SnippetEditDialog({
           <SectionLabel>{translate('sessionPanel.snippets.title')}</SectionLabel>
           <h3 id="snippet-edit-title">
             {translate(snippet ? 'snippets.editTitle' : 'snippets.addTitle')}
+            {vault ? (
+              <span className="ml-[0.6rem] inline-flex align-middle">
+                <VaultChip team={vault.team} />
+              </span>
+            ) : null}
           </h3>
         </ModalHeader>
         <ModalBody>

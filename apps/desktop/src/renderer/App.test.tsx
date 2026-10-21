@@ -182,6 +182,15 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     refreshHostCatalog: fn(),
     refreshSyncedWorkspaceData: fn(),
     clearSyncedWorkspaceData: fn(),
+    // 팀(초대 링크·참여 카드). 팀을 못 쓰는 계정이 기본이다.
+    teamAvailability: { available: false, reason: 'signed-out' },
+    pendingInviteLink: null,
+    takePendingInviteLink: vi.fn().mockResolvedValue(undefined),
+    dismissInviteLink: fn(),
+    checkTeamAvailability: fn(),
+    previewTeamInvite: fn(),
+    joinTeam: fn(),
+    showTeamInPanel: fn(),
     setSearchQuery: fn(),
     setSavedCredentialsSearchQuery: fn(),
     activateHome: fn(),
@@ -345,6 +354,9 @@ function createDolsshApi(options: {
     portForwards: {
       onEvent: vi.fn(() => off.forward),
     },
+    teams: {
+      onInviteLink: vi.fn(() => vi.fn()),
+    },
     sessionShares: {
       onEvent: vi.fn(() => off.sessionShare),
       onChatEvent: options.includeSessionShareChatEvent === false ? undefined : vi.fn(() => off.sessionShareChat),
@@ -492,6 +504,41 @@ describe('App integration', () => {
       expect(mocks.storeState.refreshSyncedWorkspaceData).toHaveBeenCalledTimes(1);
       expect(screen.getByTestId('terminal-workspace')).toBeInTheDocument();
     });
+  });
+
+  // 링크 페이지에서 넘어온 초대: 창이 뜨면 메인에 기다리던 링크를 가져가고(이후 오는 링크도 구독), 워크스페이스
+  // 위에 참여 카드를 띄운다 — 브리지·AppShell·AppModals 를 지나는 배관 전체.
+  it('takes a waiting team invite on start and shows the join card over the workspace', async () => {
+    const api = createDolsshApi({
+      authBootstrapState: {
+        status: 'authenticated',
+        session: { user: { id: 'user-1', email: 'user@example.com' } },
+        offline: null,
+        errorMessage: null,
+      },
+    });
+    mocks.desktopApi = api;
+    mocks.storeState = createMockStoreState({
+      pendingInviteLink: 'https://sync.dolgate.app/invite/k3Hq9xAb#v1.Qm9vYmFy',
+      teamAvailability: { available: true },
+      checkTeamAvailability: vi.fn().mockResolvedValue({ available: true }),
+      previewTeamInvite: vi.fn().mockResolvedValue({
+        status: 'ok',
+        teamId: 'team-1',
+        teamName: 'Acme Infra',
+        inviterEmail: 'dolma@acme.dev',
+        memberCount: 3,
+        expiresAt: '2026-10-27T00:00:00.000Z',
+        alreadyJoined: false,
+      }),
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('dialog', { name: 'Acme Infra' })).toBeInTheDocument();
+    expect(screen.getByTestId('terminal-workspace')).toBeInTheDocument();
+    expect(mocks.storeState.takePendingInviteLink).toHaveBeenCalled();
+    expect(api.teams.onInviteLink).toHaveBeenCalledTimes(1);
   });
 
   describe('다른 기기 변경 대기', () => {

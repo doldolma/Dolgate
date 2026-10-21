@@ -102,6 +102,8 @@ interface HostDrawerProps {
   onEditExistingSecret?: (secretRef: string) => void;
   /** tailnet 이 새로 추가됐을 때 — 상위가 목록을 다시 읽는다. */
   onTailnetAdded?: () => void | Promise<void>;
+  /** 이 호스트가 든(만들 때는 만들) 볼트. 폼이 AWS 프로필을 그 볼트에서 읽는다. 없으면 개인. */
+  vaultId?: string | null;
 }
 
 /**
@@ -135,7 +137,8 @@ export const HostDrawer = forwardRef<HostDrawerHandle, HostDrawerProps>(function
   onSubmit,
   onConnect,
   onEditExistingSecret,
-  onTailnetAdded
+  onTailnetAdded,
+  vaultId = null
 }: HostDrawerProps, ref) {
   const { t: translate } = useTranslation();
   const drawerRef = useRef<HTMLElement | null>(null);
@@ -347,6 +350,7 @@ export const HostDrawer = forwardRef<HostDrawerHandle, HostDrawerProps>(function
           onConnect={onConnect}
           onEditExistingSecret={onEditExistingSecret}
           onTailnetAdded={onTailnetAdded}
+          vaultId={vaultId}
           onActionStateChange={setFormActionState}
           onLabelChange={handleFormLabelChange}
         />

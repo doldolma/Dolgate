@@ -182,6 +182,8 @@ export function collectActiveDnsOverrideEntries(
 
 /** DNS 덮어쓰기를 가진 볼트 하나 — 그 볼트의 덮어쓰기와 포트 포워딩 규칙. */
 export interface DnsOverrideVault {
+  /** 볼트 id. 화면에 "어느 볼트 것이 적용 중"을 말할 때만 쓴다. */
+  id?: string;
   overrides: DnsOverrideRecord[];
   rules: PortForwardRuleRecord[];
 }
@@ -206,6 +208,37 @@ export function collectActiveDnsOverrideEntriesAcrossVaults(
     }
   }
   return entries.sort((left, right) => left.hostname.localeCompare(right.hostname) || left.address.localeCompare(right.address));
+}
+
+/**
+ * 볼트 여럿(개인이 먼저)의 덮어쓰기를 화면에 보일 모양으로. 켜 둔 상태(status)는 볼트 안에서 정하고 —
+ * 켜기·끄기가 그것을 본다 — 같은 이름을 앞 볼트가 적용 중이면 뒤의 것에 그 볼트를 단다(appliedByVaultId).
+ * 적용 규칙은 collectActiveDnsOverrideEntriesAcrossVaults 와 같다. id 가 겹치면 앞 볼트 것만 남긴다(목록과 같다).
+ */
+export function resolveDnsOverrideRecordsAcrossVaults(
+  vaults: Array<DnsOverrideVault & { id: string }>,
+  runtimes: PortForwardRuntimeRecord[],
+  activeStaticOverrideIds: ReadonlySet<string> = new Set(),
+): DnsOverrideResolvedRecord[] {
+  const appliedBy = new Map<string, string>();
+  const seenIds = new Set<string>();
+  const records: DnsOverrideResolvedRecord[] = [];
+  for (const vault of vaults) {
+    for (const record of resolveDnsOverrideRecords(vault.overrides, vault.rules, runtimes, activeStaticOverrideIds)) {
+      if (seenIds.has(record.id)) {
+        continue;
+      }
+      seenIds.add(record.id);
+      const owner = record.status === 'active' ? appliedBy.get(record.hostname.trim().toLowerCase()) : undefined;
+      records.push(owner ? { ...record, appliedByVaultId: owner } : record);
+    }
+    for (const entry of collectActiveDnsOverrideEntries(vault.overrides, vault.rules, runtimes, activeStaticOverrideIds)) {
+      if (!appliedBy.has(entry.hostname)) {
+        appliedBy.set(entry.hostname, vault.id);
+      }
+    }
+  }
+  return records;
 }
 
 /** 모든 볼트의 정적 덮어쓰기 id. 켜 둔 상태를 정리할 때 다른 볼트 것을 지우지 않게 함께 넘긴다. */

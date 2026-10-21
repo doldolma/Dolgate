@@ -8,6 +8,7 @@ import type { TailnetStatus } from '@shared';
 import { Button, Card, FieldGroup, Input, NoticeCard } from '../../ui';
 import { RefreshCw } from '../../ui/icons';
 import type { TailnetDraft } from '../../controllers/useTailnetDraft';
+import { MyKeyField } from '../teams/MyKeyField';
 import {
   TailnetIdentity,
   TailnetStateBadge,
@@ -38,6 +39,7 @@ export function TailnetForm({
   onTest,
   onCancelTest,
   onCancel,
+  myKey = false,
 }: {
   draft: TailnetDraft;
   status?: TailnetStatus;
@@ -49,9 +51,27 @@ export function TailnetForm({
   onTest: () => void;
   onCancelTest: () => void;
   onCancel: () => void;
+  /** 팀 tailnet 이면 auth key 는 내 칸에만 간다 — 칸 이름이 그것을 말한다(K1). */
+  myKey?: boolean;
 }) {
   const { t: translate } = useTranslation();
   const connected = connectedTailnet(status);
+  const authKeyInput = (
+    <>
+      <Input
+        type="password"
+        // 팀 것은 이름표(label)로 감싸지 않으므로 칸에 직접 이름을 준다.
+        aria-label={myKey ? 'My auth key' : undefined}
+        value={draft.authKey}
+        placeholder={translate('tailnetSettings.field.authKeyPlaceholder')}
+        onChange={(event) => onChange({ ...draft, authKey: event.target.value })}
+      />
+      {/* 1회용 키는 첫 재등록에서 막힌다. ephemeral 쪽 결과는 삭제할 때 안내한다. */}
+      <span className="text-[0.76rem] font-normal leading-[1.45] text-[var(--text-soft)]">
+        {translate('tailnetSettings.field.authKeyHint')}
+      </span>
+    </>
+  );
 
   return (
     <Card tone="muted" as="section" className="flex-col items-stretch gap-4">
@@ -72,18 +92,14 @@ export function TailnetForm({
           />
         </FieldGroup>
 
-        <FieldGroup label={translate('tailnetSettings.field.authKey')}>
-          <Input
-            type="password"
-            value={draft.authKey}
-            placeholder={translate('tailnetSettings.field.authKeyPlaceholder')}
-            onChange={(event) => onChange({ ...draft, authKey: event.target.value })}
-          />
-          {/* 1회용 키는 첫 재등록에서 막힌다. ephemeral 쪽 결과는 삭제할 때 안내한다. */}
-          <span className="text-[0.76rem] font-normal leading-[1.45] text-[var(--text-soft)]">
-            {translate('tailnetSettings.field.authKeyHint')}
-          </span>
-        </FieldGroup>
+        {myKey ? (
+          // 팀 tailnet 의 키 칸(K1) — ⓘ 가 이름표 밖에 있어야 이름이 입력 칸을 가리킨다.
+          <MyKeyField label="My auth key" hint={translate('teams.myKey.tailnetHint')}>
+            {authKeyInput}
+          </MyKeyField>
+        ) : (
+          <FieldGroup label={translate('tailnetSettings.field.authKey')}>{authKeyInput}</FieldGroup>
+        )}
       </div>
 
       {error ? (

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { SavedWorkspaceRecord } from "@shared";
 import { cn } from "../../lib/cn";
 import { listSavedWorkspaceLeaves } from "../../store/utils";
@@ -164,6 +164,9 @@ export function HostListPanel({
               workspace.name,
               ...leaves.map((leaf) => leaf.target.label),
             ],
+            team: hb.hasVaults
+              ? hb.teamOfAsset(`workspace:${workspace.id}`)
+              : null,
             Icon: Columns2,
             run: () => {
               hb.withLeaveHostEditor(() => void onOpenWorkspace(workspace.id));
@@ -171,7 +174,9 @@ export function HostListPanel({
           };
         }),
     [
+      hb.hasVaults,
       hb.paletteWorkspaces,
+      hb.teamOfAsset,
       hb.withLeaveHostEditor,
       onOpenWorkspace,
       searchQuery,
@@ -282,6 +287,12 @@ export function HostListPanel({
           label: host.label,
         })}
         lastUsedAt={hb.lastConnectedByHostId.get(host.id)}
+        team={hb.showsTeamMarks ? hb.teamOfAsset(`host:${host.id}`) : null}
+        favoriteHint={
+          hb.teamOfAsset(`host:${host.id}`)
+            ? translate("teams.perPerson.favorite")
+            : null
+        }
         onToggleFavorite={() => hb.toggleFavorite(host.id)}
         onOpenMenu={({ x, y }) => openHostMenu(host, x, y)}
         style={hb.clampedHostCardStyle}
@@ -305,7 +316,7 @@ export function HostListPanel({
           ).hostIds;
           hb.setDraggedGroupPath(null);
           hb.setDraggedAssetKeys(nextDraggedAssetKeys);
-          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.effectAllowed = hb.dragEffectAllowed;
           event.dataTransfer.setData(
             HOME_ASSETS_DRAG_MIME_TYPE,
             JSON.stringify(refs),
@@ -379,6 +390,14 @@ export function HostListPanel({
           onToggleWorkspaceFavorite(workspace.id, !workspace.favorite)
         }
         onOpenMenu={({ x, y }) => openWorkspaceMenu(workspace, x, y)}
+        team={
+          hb.showsTeamMarks ? hb.teamOfAsset(`workspace:${workspace.id}`) : null
+        }
+        favoriteHint={
+          hb.teamOfAsset(`workspace:${workspace.id}`)
+            ? translate("teams.perPerson.favorite")
+            : null
+        }
         style={hb.clampedHostCardStyle}
         draggable
         role="button"
@@ -572,8 +591,27 @@ export function HostListPanel({
 
       {/* Meta row: count + sort + view toggle */}
       <div className="flex items-center justify-between gap-3 px-[1.1rem] pb-[0.7rem]">
-        <span className="text-[0.9rem] font-semibold text-[var(--text)]">
-          {translate("savedWorkspace.assetCount", { count: visibleAssetCount })}
+        {/* 볼트 안이면 지금 위치를 개수 앞에 한 줄로(H1): "Acme Infra / Prod · 항목 4개". All·즐겨찾기·팀 없음은 개수만. */}
+        <span className="min-w-0 truncate text-[0.9rem] font-semibold text-[var(--text)]">
+          {hb.currentVault ? (
+            <>
+              {hb.currentVault.name}
+              {(hb.currentGroupPath?.split("/") ?? []).map((segment, index) => (
+                <Fragment key={index}>
+                  {" "}
+                  <span className="text-[var(--text-muted)]">/</span> {segment}
+                </Fragment>
+              ))}{" "}
+              <span className="font-medium text-[var(--text-soft)]">
+                ·{" "}
+                {translate("savedWorkspace.assetCount", {
+                  count: visibleAssetCount,
+                })}
+              </span>
+            </>
+          ) : (
+            translate("savedWorkspace.assetCount", { count: visibleAssetCount })
+          )}
         </span>
         <div className="flex items-center gap-2">
           <div className="inline-flex items-center gap-[0.25rem] rounded-[10px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] p-[0.25rem]">

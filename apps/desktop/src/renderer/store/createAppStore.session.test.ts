@@ -759,6 +759,35 @@ describe("createAppStore sessions and auth recovery", () => {
     });
   });
 
+  it("prefills my username in the retry request for a team host", async () => {
+    // 팀 호스트는 내 자격 증명의 이름으로 붙는다 — 요청 창도 그 이름부터 보인다(팀 레코드의 ubuntu 가 아니라).
+    const api = createMockApi();
+    api.teams.getVaultIndex = vi.fn().mockResolvedValue({
+        teams: [],
+        teamIdByHostId: { "host-1": "team-1" },
+        teamIdByWorkspaceId: {},
+        teamIdByPortForwardId: {},
+        teamIdByDnsOverrideId: {},
+        teamIdBySnippetId: {},
+        myUsernameByHostId: { "host-1": "deploy" },
+      });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().refreshVaultIndex();
+    await store.getState().connectHost("host-1", 120, 32);
+    store.getState().handleCoreEvent({
+      type: "error",
+      sessionId: "session-1",
+      payload: {
+        message:
+          "ssh handshake failed: ssh: handshake failed: ssh: unexpected message type 51 (expected 60)",
+      },
+    });
+
+    expect(store.getState().pendingCredentialRetry).toMatchObject({ hostId: "host-1", initialUsername: "deploy" });
+  });
+
   it("opens the retry dialog when certificate preflight fails before connect", async () => {
     const api = createMockApi();
     api.hosts.list = vi.fn().mockResolvedValue([
@@ -798,6 +827,21 @@ describe("createAppStore sessions and auth recovery", () => {
       initialUsername: "ubuntu",
       message: "SSH 인증서가 만료되었습니다. 새 인증서를 가져와 다시 시도하세요.",
     });
+
+    // 팀 호스트에 내 이름이 있으면 그 이름부터.
+    store.getState().dismissPendingCredentialRetry();
+    api.teams.getVaultIndex = vi.fn().mockResolvedValue({
+        teams: [],
+        teamIdByHostId: { "host-1": "team-1" },
+        teamIdByWorkspaceId: {},
+        teamIdByPortForwardId: {},
+        teamIdByDnsOverrideId: {},
+        teamIdBySnippetId: {},
+        myUsernameByHostId: { "host-1": "deploy" },
+      });
+    await store.getState().refreshVaultIndex();
+    await store.getState().connectHost("host-1", 120, 32);
+    expect(store.getState().pendingCredentialRetry).toMatchObject({ hostId: "host-1", initialUsername: "deploy" });
   });
 
   it("retries SSH auth with username and reopens using the attempted username on failure", async () => {

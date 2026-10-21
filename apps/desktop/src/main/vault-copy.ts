@@ -14,6 +14,8 @@ import {
   type ManagedAwsProfilePayload,
   type ManagedSecretPayload,
   type PortForwardRuleRecord,
+  type SavedWorkspaceNode,
+  type SavedWorkspaceRecord,
   type SecretMetadataRecord,
   type SnippetRecord,
   type TailnetPayload,
@@ -83,6 +85,7 @@ export interface VaultCopyPlan {
   snippets: SnippetRecord[];
   awsProfiles: ManagedAwsProfilePayload[];
   tailnets: TailnetPayload[];
+  savedWorkspaces: SavedWorkspaceRecord[];
   memberValues: VaultCopyMemberValues[];
   /** 복사한 사람의 내 칸에 둘 자격 증명(대상이 팀일 때). id 는 복사본의 id 다. */
   memberCredentials: {
@@ -92,7 +95,17 @@ export interface VaultCopyPlan {
   };
   /** 원본 호스트 id → 복사본 id. */
   hostIdMap: Record<string, string>;
+  /** 원본 워크스페이스 id → 복사본 id. */
+  workspaceIdMap: Record<string, string>;
   counts: VaultCopyCounts;
+}
+
+/** 창이 가리키는 호스트 id(로컬 창 빼고). */
+function workspaceHostIds(node: SavedWorkspaceNode): string[] {
+  if (node.kind === "leaf") {
+    return node.target.kind === "host" ? [node.target.hostId] : [];
+  }
+  return [...workspaceHostIds(node.first), ...workspaceHostIds(node.second)];
 }
 
 /** SSH 의 비밀값 칸. 사용자 이름은 호스트 레코드에 있다. */
@@ -160,13 +173,26 @@ export function planVaultCopy(
     throw new Error("vault copy needs a group path");
   }
 
-  // 1. 고른 것과 그것이 쓰는 것. 모으기는 내보내기와 같은 것을 쓴다.
+  // 1. 고른 것과 그것이 쓰는 것. 모으기는 내보내기와 같은 것을 쓴다. 워크스페이스는 창의 호스트를 고른 것으로 본다
+  //    (원본 볼트에 있는 것만 — 지워진 호스트를 가리키는 창도 있다).
+  const selectedWorkspaces =
+    selection.kind === "workspaces"
+      ? source.data.savedWorkspaces.filter((workspace) => selection.workspaceIds.includes(workspace.id))
+      : [];
+  if (selection.kind === "workspaces" && selectedWorkspaces.length === 0) {
+    throw new Error("vault copy needs at least one workspace");
+  }
+  const sourceHostIds = new Set(source.data.hosts.map((host) => host.id));
   const rootHostIds =
     selection.kind === "hosts"
       ? [...new Set(selection.hostIds)]
-      : source.data.hosts
-          .filter((host) => isGroupWithinPath(normalizeGroupPath(host.groupName), selectedGroupPath))
-          .map((host) => host.id);
+      : selection.kind === "workspaces"
+        ? [...new Set(selectedWorkspaces.flatMap((workspace) => workspaceHostIds(workspace.root)))].filter((id) =>
+            sourceHostIds.has(id),
+          )
+        : source.data.hosts
+            .filter((host) => isGroupWithinPath(normalizeGroupPath(host.groupName), selectedGroupPath))
+            .map((host) => host.id);
   if (selection.kind === "hosts" && rootHostIds.length === 0) {
     throw new Error("vault copy needs at least one host");
   }
@@ -384,6 +410,9 @@ export function planVaultCopy(
   for (const host of hosts) {
     addWithAncestors(host.groupName ?? null);
   }
+  if (selectedWorkspaces.length > 0) {
+    addWithAncestors(targetGroupPath);
+  }
   const targetGroupPaths = new Set(target.data.groups.map((group) => group.path));
   const groups: GroupRecord[] = [...neededPaths]
     .filter((path) => !targetGroupPaths.has(path))
@@ -514,6 +543,32 @@ export function planVaultCopy(
     }
   }
 
+  // 8. 워크스페이스 — 놓은 자리에, 창은 복사본 호스트로 다시 잇는다. 원본 볼트에 없는 호스트(지워졌거나 다른 볼트
+  //    것)를 가리키던 창은 어디에도 없는 id 로 바꿔 "없는 호스트" 창으로 남긴다 — 복사본이 원본 볼트를 가리키지
+  //    않게. 즐겨찾기·연 시각은 사람마다 다르니 비운다.
+  const workspaceIdMap = new Map(selectedWorkspaces.map((workspace) => [workspace.id, newId()]));
+  const remapNode = (node: SavedWorkspaceNode): SavedWorkspaceNode => {
+    if (node.kind === "split") {
+      return { ...node, first: remapNode(node.first), second: remapNode(node.second) };
+    }
+    if (node.target.kind !== "host") {
+      return node;
+    }
+    return { ...node, target: { ...node.target, hostId: hostIdMap.get(node.target.hostId) ?? newId() } };
+  };
+  const savedWorkspaces = selectedWorkspaces.map(
+    (workspace): SavedWorkspaceRecord => ({
+      ...workspace,
+      id: workspaceIdMap.get(workspace.id) as string,
+      root: remapNode(workspace.root),
+      favorite: false,
+      groupName: targetGroupPath,
+      lastOpenedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    }),
+  );
+
   const plan: VaultCopyPlan = {
     groups,
     hosts,
@@ -525,6 +580,7 @@ export function planVaultCopy(
     snippets,
     awsProfiles,
     tailnets,
+    savedWorkspaces,
     memberValues,
     memberCredentials: {
       hostCredentials: memberHostCredentials,
@@ -532,6 +588,7 @@ export function planVaultCopy(
       tailnetCredentials: memberTailnetCredentials,
     },
     hostIdMap: Object.fromEntries(hostIdMap),
+    workspaceIdMap: Object.fromEntries(workspaceIdMap),
     counts: {
       groups: groups.length,
       hosts: hosts.length,
@@ -547,6 +604,7 @@ export function planVaultCopy(
       snippets: snippets.length,
       awsProfiles: awsProfiles.length,
       tailnets: tailnets.length,
+      workspaces: savedWorkspaces.length,
     },
   };
   assertNoOutsideReferences(plan);

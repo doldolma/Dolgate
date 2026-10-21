@@ -10,8 +10,9 @@ import {
   type SecretEditDialogRequest,
 } from '../components/SecretEditDialog';
 import { UpdateInstallConfirmDialog } from '../components/UpdateInstallConfirmDialog';
+import { JoinTeamDialogHost } from '../components/teams/JoinTeamDialogHost';
 import type { useAppModalViewModel, useAppSettingsViewModel } from '../view-models/appViewModels';
-import { findHost } from './appShellUtils';
+import { credentialRetryDialogRequest, findHost } from './appShellUtils';
 import { useTranslation } from 'react-i18next';
 
 interface AppModalsProps {
@@ -35,6 +36,8 @@ interface AppModalsProps {
   isUpdateInstallConfirmOpen: boolean;
   onCloseUpdateInstallConfirm: () => void;
   onConfirmInstallUpdate: () => Promise<void>;
+  /** 계정 없이 쓰는 사람이 초대 링크를 열었을 때 로그인 창을 연다. */
+  onRequestLogin: () => void;
 }
 
 export function AppModals({
@@ -47,6 +50,7 @@ export function AppModals({
   isUpdateInstallConfirmOpen,
   onCloseUpdateInstallConfirm,
   onConfirmInstallUpdate,
+  onRequestLogin,
 }: AppModalsProps) {
   const { t: translate } = useTranslation();
   return (
@@ -64,22 +68,7 @@ export function AppModals({
       />
 
       <CredentialRetryDialog
-        request={(() => {
-          const pending = modalViewModel.pendingCredentialRetry;
-          if (!pending) {
-            return null;
-          }
-          const host = findHost(hosts, pending.hostId);
-          if (!host || host.kind !== "ssh") {
-            return null;
-          }
-          return {
-            ...pending,
-            hostLabel: host.label,
-            hasStoredSecret: Boolean(host.secretRef),
-            secretRef: host.secretRef ?? null,
-          };
-        })()}
+        request={credentialRetryDialogRequest(hosts, modalViewModel.pendingCredentialRetry)}
         onClose={modalViewModel.dismissPendingCredentialRetry}
         onSubmit={modalViewModel.submitCredentialRetry}
       />
@@ -109,6 +98,7 @@ export function AppModals({
                 hostLabel:
                   findHost(hosts, modalViewModel.pendingMissingUsernamePrompt.hostId)?.label ?? 'SSH Host',
                 source: modalViewModel.pendingMissingUsernamePrompt.source,
+                teamHost: modalViewModel.pendingMissingUsernameTeamHost,
               }
             : null
         }
@@ -137,6 +127,9 @@ export function AppModals({
         onClose={onCloseUpdateInstallConfirm}
         onConfirm={onConfirmInstallUpdate}
       />
+
+      {/* 초대 링크의 참여 카드. 링크 페이지에서 넘어왔거나 Teams 탭에 붙여 넣은 링크다. */}
+      <JoinTeamDialogHost onRequestLogin={onRequestLogin} />
     </>
   );
 }

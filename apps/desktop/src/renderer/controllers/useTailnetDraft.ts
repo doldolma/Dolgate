@@ -16,6 +16,8 @@ export interface TailnetDraft {
   controlUrl: string;
   /** 저장할 때만 쓴다. 기존 키는 절대 내려오지 않으므로 빈 값 = "그대로 두기". */
   authKey: string;
+  /** 새 tailnet 을 둘 팀 볼트(설정의 팀 묶음 + · 팀 호스트 서랍). 없으면 개인. */
+  vaultId?: string;
 }
 
 /**
@@ -95,8 +97,8 @@ export function useTailnetDraft({
     };
   }, []);
 
-  const beginDraft = useCallback(() => {
-    setDraft(emptyTailnetDraft());
+  const beginDraft = useCallback((vaultId?: string | null) => {
+    setDraft(vaultId ? { ...emptyTailnetDraft(), vaultId } : emptyTailnetDraft());
   }, []);
 
   /**
@@ -185,6 +187,8 @@ export function useTailnetDraft({
         },
         // 빈 문자열은 "지우기"라서 그대로 넘기면 안 된다. 손대지 않았으면 생략한다.
         authKey: draft.authKey.length > 0 ? draft.authKey : undefined,
+        // 볼트는 팀일 때만 싣는다 — 개인 저장은 지금과 같은 모양으로 간다.
+        ...(draft.vaultId ? { vaultId: draft.vaultId } : {}),
       });
     } catch (cause) {
       setError(normalizeErrorMessage(cause, translate('tailnetSettings.unknownError')));

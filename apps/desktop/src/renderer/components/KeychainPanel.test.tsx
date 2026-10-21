@@ -1,11 +1,19 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostRecord, SecretMetadataRecord } from '@shared';
+import { appStore } from '../store/appStore';
+import { createEmptyVaultIndex } from '../store/utils';
 
 // 비밀번호 복사는 preload 를 타므로 여기서는 부른 적 없다는 것만 보장한다.
-vi.mock('../services/desktop/settings', () => ({
+const settingsService = vi.hoisted(() => ({
   copySavedCredentialPassword: vi.fn().mockResolvedValue(undefined),
+  listTeamSavedCredentials: vi.fn(),
 }));
+vi.mock('../services/desktop/settings', () => settingsService);
+
+beforeEach(() => {
+  appStore.setState(appStore.getInitialState(), true);
+});
 
 const { KeychainPanel } = await import('./KeychainPanel');
 
@@ -97,5 +105,79 @@ describe('KeychainPanel 자격증명 종류 표시', () => {
 
     expect(screen.getByText('win admin')).toBeInTheDocument();
     expect(screen.queryByText('lab console')).not.toBeInTheDocument();
+  });
+});
+
+// 설정의 볼트별 묶음(4-7). 팀 것은 함께 쓴다 — 바꾸거나 지우면 멤버 모두에게 간다(S1).
+describe('KeychainPanel with team vaults', () => {
+  const TEAM_ENTRY = secret({ secretRef: 'secret:team', label: 'acme db', kind: 'ssh', linkedHostCount: 2, hasManagedPrivateKey: true });
+  const sshHost = (id: string, label: string) =>
+    ({ id, kind: 'ssh', label, hostname: `${label}.example.com`, port: 22, username: 'ops', authType: 'agent' }) as unknown as HostRecord;
+
+  function renderTeamPanel() {
+    appStore.setState({
+      vaultIndex: {
+        ...createEmptyVaultIndex(),
+        teams: [{ id: 'team-a', name: 'Acme Infra', role: 'owner', syncState: 'ready', syncError: null, groups: [] }],
+        teamIdByHostId: { 'team-web': 'team-a' },
+      },
+    });
+    settingsService.listTeamSavedCredentials.mockResolvedValue([TEAM_ENTRY]);
+    const onEditSecret = vi.fn();
+    const onRemoveSecret = vi.fn().mockResolvedValue(undefined);
+    render(
+      <KeychainPanel
+        entries={[secret({ secretRef: 'secret:mine', label: 'my login', kind: 'ssh' })]}
+        hosts={[sshHost('my-web', 'my-web'), sshHost('team-web', 'team-web')]}
+        searchQuery=""
+        onSearchQueryChange={vi.fn()}
+        onRemoveSecret={onRemoveSecret}
+        onEditSecret={onEditSecret}
+        onGenerateSshKey={vi.fn().mockResolvedValue({} as never)}
+        onCopySshPublicKey={vi.fn().mockResolvedValue(undefined)}
+        onInstallSshPublicKey={vi.fn().mockResolvedValue({} as never)}
+      />,
+    );
+    return { onEditSecret, onRemoveSecret };
+  }
+  const section = (vaultId: string) =>
+    within(document.querySelector(`[data-vault-section="${vaultId}"]`)!.closest('section')!);
+
+  it("lists a team's credentials under the team, with what changing them means in a hint", async () => {
+    renderTeamPanel();
+
+    await waitFor(() => expect(section('team-a').getByText('acme db')).toBeInTheDocument());
+    expect(settingsService.listTeamSavedCredentials).toHaveBeenCalledWith('team-a');
+    expect(section('personal').getByText('my login')).toBeInTheDocument();
+    // 개인 묶음에는 말풍선이 없다.
+    expect(section('personal').queryByRole('button', { name: '팀 자격 증명 설명' })).toBeNull();
+    fireEvent.mouseEnter(section('team-a').getByRole('button', { name: '팀 자격 증명 설명' }).parentElement!);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Acme Infra 멤버가 함께 쓰는 비밀번호·키입니다');
+    expect(screen.getByRole('tooltip')).toHaveTextContent('바꾸거나 지우면 멤버 모두에게 갑니다');
+  });
+
+  it('hands the team entry to edit and delete — the personal list does not have it', async () => {
+    const { onEditSecret, onRemoveSecret } = renderTeamPanel();
+    await waitFor(() => expect(section('team-a').getByText('acme db')).toBeInTheDocument());
+
+    fireEvent.click(section('team-a').getByRole('button', { name: '편집' }));
+    fireEvent.click(section('team-a').getByRole('button', { name: '삭제' }));
+    expect(onEditSecret).toHaveBeenCalledWith('secret:team', TEAM_ENTRY);
+    expect(onRemoveSecret).toHaveBeenCalledWith('secret:team', TEAM_ENTRY);
+
+    // 개인 것은 지금처럼 참조만.
+    fireEvent.click(section('personal').getByRole('button', { name: '편집' }));
+    expect(onEditSecret).toHaveBeenLastCalledWith('secret:mine');
+  });
+
+  it("offers only the key's own vault hosts to install a team key on", async () => {
+    renderTeamPanel();
+    await waitFor(() => expect(section('team-a').getByText('acme db')).toBeInTheDocument());
+
+    fireEvent.click(section('team-a').getByRole('button', { name: '호스트에 설치' }));
+
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByText('team-web')).toBeInTheDocument();
+    expect(dialog.queryByText('my-web')).toBeNull();
   });
 });

@@ -7,6 +7,7 @@ import {
   SelectField,
 } from '../ui'
 import { useTranslation } from 'react-i18next';
+import { MyKeyField } from './teams/MyKeyField'
 
 interface AwsStaticProfileFormProps {
   title?: string
@@ -20,6 +21,8 @@ interface AwsStaticProfileFormProps {
   profileNameEditable?: boolean
   testId?: string
   accessKeyHelpText?: string | null
+  /** 팀 프로필이면 키는 내 칸에만 간다 — 칸 이름이 그것을 말한다(K1). */
+  myKeys?: boolean
   onChange: (draft: AwsStaticProfileDraft) => void
   onCancel?: () => void
   onSubmit: () => void
@@ -37,11 +40,35 @@ export function AwsStaticProfileForm({
   profileNameEditable = true,
   testId,
   accessKeyHelpText = null,
+  myKeys = false,
   onChange,
   onCancel,
   onSubmit,
 }: AwsStaticProfileFormProps) {
   const { t: translate } = useTranslation();
+  const accessKeyLabel = myKeys ? 'My Access Key' : 'Access Key'
+  const secretLabel = myKeys ? 'My Secret' : 'Secret'
+  const accessKeyInput = (
+    <div className="grid gap-2">
+      <Input
+        aria-label={accessKeyLabel}
+        value={draft.accessKeyId}
+        onChange={(event) =>
+          onChange({
+            ...draft,
+            accessKeyId: event.target.value,
+          })
+        }
+        placeholder="AKIA..."
+        disabled={isSubmitting}
+      />
+      {accessKeyHelpText ? (
+        <p className="m-0 text-[0.82rem] text-[var(--text-soft)]">
+          {accessKeyHelpText}
+        </p>
+      ) : null}
+    </div>
+  )
   return (
     <form
       data-testid={testId}
@@ -104,31 +131,18 @@ export function AwsStaticProfileForm({
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <FieldGroup label="Access Key">
-          <div className="grid gap-2">
-            <Input
-              aria-label="Access Key"
-              value={draft.accessKeyId}
-              onChange={(event) =>
-                onChange({
-                  ...draft,
-                  accessKeyId: event.target.value,
-                })
-              }
-              placeholder="AKIA..."
-              disabled={isSubmitting}
-            />
-            {accessKeyHelpText ? (
-              <p className="m-0 text-[0.82rem] text-[var(--text-soft)]">
-                {accessKeyHelpText}
-              </p>
-            ) : null}
-          </div>
-        </FieldGroup>
+        {myKeys ? (
+          // 팀 프로필의 키 칸(K1) — ⓘ 가 이름표 밖에 있어야 이름이 입력 칸을 가리킨다.
+          <MyKeyField label={accessKeyLabel} hint={translate('teams.myKey.awsHint')}>
+            {accessKeyInput}
+          </MyKeyField>
+        ) : (
+          <FieldGroup label={accessKeyLabel}>{accessKeyInput}</FieldGroup>
+        )}
 
-        <FieldGroup label="Secret">
+        <FieldGroup label={secretLabel}>
           <Input
-            aria-label="Secret"
+            aria-label={secretLabel}
             type="password"
             value={draft.secretAccessKey}
             onChange={(event) =>

@@ -362,6 +362,7 @@ describe("planVaultCopy", () => {
       snippets: 1,
       awsProfiles: 2,
       tailnets: 1,
+      workspaces: 0,
     });
   });
 
@@ -577,5 +578,85 @@ describe("planVaultCopy", () => {
 
     expect(plan.hosts[0]).toMatchObject({ tailnetId: null, groupName: "Ops" });
     expect(plan.groups.map((record) => record.path)).toEqual(["Ops"]);
+  });
+
+  // 4-6: 워크스페이스를 다른 볼트에 놓으면 그 창의 호스트(와 호스트가 쓰는 것)까지 복사하고 창을 복사본으로 잇는다.
+  it("copies workspaces with their panes' hosts and relinks the panes to the copies", () => {
+    const source = emptyVault();
+    source.data.hosts.push(
+      sshHost("bastion", "Ops"),
+      sshHost("web", "Prod", { jumpHostIds: ["bastion"], jumpHostId: "bastion" }),
+      sshHost("db", "Prod"),
+      sshHost("unused", "Prod"),
+    );
+    const leaf = (hostId: string) => ({ id: `leaf-${hostId}`, kind: "leaf" as const, target: { kind: "host" as const, hostId, label: hostId } });
+    const local = (id: string) => ({ id, kind: "leaf" as const, target: { kind: "local" as const, label: "Local" } });
+    // 저장된 워크스페이스는 창이 둘 이상이다.
+    const shellsRoot = { id: "split-shells", kind: "split" as const, axis: "horizontal" as const, ratio: 0.5, first: local("l-1"), second: local("l-2") };
+    source.data.savedWorkspaces.push(
+      {
+        version: 1,
+        id: "ws-1",
+        name: "Web + DB",
+        root: {
+          id: "split-1",
+          kind: "split",
+          axis: "horizontal",
+          ratio: 0.5,
+          first: leaf("web"),
+          second: { id: "split-2", kind: "split", axis: "vertical", ratio: 0.5, first: leaf("db"), second: leaf("deleted") },
+        },
+        favorite: true,
+        groupName: "Prod",
+        lastOpenedAt: at,
+        createdAt: at,
+        updatedAt: at,
+      },
+      { version: 1, id: "ws-local", name: "Shells", root: shellsRoot, favorite: false, groupName: null, lastOpenedAt: null, createdAt: at, updatedAt: at },
+      {
+        version: 1,
+        id: "ws-other",
+        name: "Other",
+        root: { id: "split-other", kind: "split", axis: "vertical", ratio: 0.5, first: leaf("unused"), second: local("l-3") },
+        favorite: false,
+        groupName: null,
+        lastOpenedAt: null,
+        createdAt: at,
+        updatedAt: at,
+      },
+    );
+    let sequence = 0;
+
+    const plan = planVaultCopy(source, emptyVault(), { kind: "workspaces", workspaceIds: ["ws-1", "ws-local"] }, {
+      targetGroupPath: "Shared",
+      targetIsTeam: true,
+      now: NOW,
+      newId: () => `new-${++sequence}`,
+    });
+
+    // 창의 호스트와 그 점프 호스트만 — 고르지 않은 워크스페이스의 호스트는 오지 않는다.
+    expect(plan.hosts.map((host) => host.label).sort()).toEqual(["bastion", "db", "web"]);
+    expect(plan.counts).toMatchObject({ workspaces: 2, hosts: 3, dependencyHosts: 1 });
+    const [copy, shells] = plan.savedWorkspaces;
+    expect(plan.workspaceIdMap).toEqual({ "ws-1": copy.id, "ws-local": shells.id });
+    expect(copy).toMatchObject({ name: "Web + DB", groupName: "Shared", favorite: false, lastOpenedAt: null, createdAt: NOW });
+    expect(copy.id).not.toBe("ws-1");
+    const panes = JSON.stringify(copy.root);
+    expect(panes).toContain(`"hostId":"${plan.hostIdMap.web}"`);
+    expect(panes).toContain(`"hostId":"${plan.hostIdMap.db}"`);
+    // 원본 볼트를 가리키는 id 는 남지 않는다 — 지워진 호스트를 가리키던 창은 어디에도 없는 id 로.
+    for (const sourceId of ["web", "db", "deleted"]) {
+      expect(panes).not.toContain(`"hostId":"${sourceId}"`);
+    }
+    expect(shells.root).toEqual(shellsRoot);
+    // 놓은 자리(Shared)가 대상에 없으면 만든다. 호스트도 그 자리로 간다.
+    expect(plan.groups.map((record) => record.path)).toEqual(["Shared"]);
+    expect(new Set(plan.hosts.map((host) => host.groupName))).toEqual(new Set(["Shared"]));
+  });
+
+  it("refuses a workspace copy that names no workspace in the source", () => {
+    expect(() =>
+      planVaultCopy(emptyVault(), emptyVault(), { kind: "workspaces", workspaceIds: ["nope"] }, { targetGroupPath: null, targetIsTeam: true }),
+    ).toThrow(/workspace/);
   });
 });

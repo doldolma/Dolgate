@@ -18,6 +18,8 @@ import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext } from "./context";
 import { t } from '../i18n';
+import { PERSONAL_VAULT_ID } from "../vault-catalog";
+import { findCrossVaultReference } from "../vault-references";
 import { logMessage } from "../activity-log-message";
 
 /**
@@ -77,6 +79,11 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         throw new Error("Vault not found");
       }
       const teamScope = scope === ctx.vaults.personal ? null : scope;
+      // 다른 볼트를 가리키는 참조(점프·터널 호스트·tailnet·AWS 프로필·시작 스니펫·자격 증명)는 받지 않는다.
+      const crossReference = findCrossVaultReference(ctx.vaults, scope, draft);
+      if (crossReference) {
+        throw new Error(t(`teams.crossVault.${crossReference.kind}`));
+      }
       const persist = (label: string, value: HostSecretInput) =>
         teamScope
           ? ctx.persistSecret(label, value, teamScope)
@@ -101,7 +108,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         !teamScope.secretMetadata.getBySecretRef(existingSecretRef)
       ) {
         // 저장해 둔 내 자격 증명을 팀 호스트에 걸면 팀원은 못 쓰고, 팀 쪽에 개인 참조가 남는다.
-        throw new Error("A team host can only use credentials saved in that team");
+        throw new Error(t("teams.crossVault.secret"));
       }
       const resolvedSecrets: HostSecretInput = isSshHostDraft(draft)
         ? {
@@ -150,6 +157,10 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
       // 팀 호스트의 비밀값은 그 팀 볼트에 둔다(만들 때와 같다).
       const vault = ctx.vaults.scopeOfHost(id);
       const teamScope = vault === ctx.vaults.personal ? null : vault;
+      const crossReference = findCrossVaultReference(ctx.vaults, vault, draft, current);
+      if (crossReference) {
+        throw new Error(t(`teams.crossVault.${crossReference.kind}`));
+      }
       const persist = (label: string, value: HostSecretInput) =>
         teamScope
           ? ctx.persistSecret(label, value, teamScope)
@@ -173,7 +184,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         secretRef !== (("secretRef" in current ? current.secretRef : null) ?? null) &&
         !teamScope.secretMetadata.getBySecretRef(secretRef)
       ) {
-        throw new Error("A team host can only use credentials saved in that team");
+        throw new Error(t("teams.crossVault.secret"));
       }
       const shouldReuseCurrentSecretMaterial =
         Boolean(
@@ -300,10 +311,24 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(ipcChannels.groups.list, async () => ctx.groups.list());
 
+  // 그룹은 볼트마다 따로 있다. vaultId 가 없거나 개인이면 지금과 같은 개인 저장소를 쓴다(옛 호출 그대로).
+  // 팀이면 그 팀 묶음의 저장소와 삭제 대기열로 — 그룹을 지우거나 옮길 때 함께 바뀌는 호스트·워크스페이스도
+  // 같은 볼트 안의 것이다(저장소가 자기 볼트 뿌리만 본다).
+  const groupVault = (vaultId?: string | null) => {
+    if (!vaultId || vaultId === PERSONAL_VAULT_ID) {
+      return { groups: ctx.groups, syncOutbox: ctx.syncOutbox };
+    }
+    const scope = ctx.vaults.getScope(vaultId);
+    if (!scope) {
+      throw new Error(t("teams.notOnDevice"));
+    }
+    return { groups: scope.groups, syncOutbox: scope.syncOutbox };
+  };
+
   ipcMain.handle(
     ipcChannels.groups.create,
-    async (event, name: string, parentPath?: string | null) => {
-      const group = ctx.groups.create(randomUUID(), name, parentPath);
+    async (event, name: string, parentPath?: string | null, vaultId?: string | null) => {
+      const group = groupVault(vaultId).groups.create(randomUUID(), name, parentPath);
       ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.groupCreated'), {
         groupId: group.id,
         name: group.name,
@@ -318,16 +343,17 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.groups.remove,
-    async (event, path: string, mode: GroupRemoveMode) => {
-      const result = ctx.groups.remove(path, mode);
+    async (event, path: string, mode: GroupRemoveMode, vaultId?: string | null) => {
+      const vault = groupVault(vaultId);
+      const result = vault.groups.remove(path, mode);
       for (const groupId of result.removedGroupIds) {
-        ctx.syncOutbox.upsertDeletion("groups", groupId);
+        vault.syncOutbox.upsertDeletion("groups", groupId);
       }
       for (const hostId of result.removedHostIds) {
-        ctx.syncOutbox.upsertDeletion("hosts", hostId);
+        vault.syncOutbox.upsertDeletion("hosts", hostId);
       }
       for (const workspaceId of result.removedWorkspaceIds) {
-        ctx.syncOutbox.upsertDeletion("workspaces", workspaceId);
+        vault.syncOutbox.upsertDeletion("workspaces", workspaceId);
       }
       ctx.activityLogs.append("warn", "audit", logMessage('hostsIpc.groupDeleted'), {
         path,
@@ -348,8 +374,8 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.groups.move,
-    async (event, path: string, targetParentPath: string | null) => {
-      const result = ctx.groups.move(path, targetParentPath);
+    async (event, path: string, targetParentPath: string | null, vaultId?: string | null) => {
+      const result = groupVault(vaultId).groups.move(path, targetParentPath);
       ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.groupMoved'), {
         path,
         targetParentPath: targetParentPath ?? null,
@@ -363,10 +389,10 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.groups.setOrder,
-    async (event, assignments: Array<{ id: string; sortRank: number }>) => {
+    async (event, assignments: Array<{ id: string; sortRank: number }>, vaultId?: string | null) => {
       // 삭제가 아니므로 outbox 툼스톤은 없다 — create/move/rename 과 같이 queueSync 가
       // 다음 push 에서 바뀐 레코드를 실어 간다.
-      const groups = ctx.groups.setSortRanks(assignments);
+      const groups = groupVault(vaultId).groups.setSortRanks(assignments);
       ctx.queueSync();
       ctx.emitWorkspaceChanged?.(event?.sender);
       return groups;
@@ -375,8 +401,8 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.groups.rename,
-    async (event, path: string, name: string) => {
-      const result = ctx.groups.rename(path, name);
+    async (event, path: string, name: string, vaultId?: string | null) => {
+      const result = groupVault(vaultId).groups.rename(path, name);
       ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.groupRenamed'), {
         path,
         nextPath: result.nextPath,

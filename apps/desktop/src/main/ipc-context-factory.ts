@@ -90,7 +90,6 @@ export function createMainIpcContext(
     hosts,
     groups,
     settings,
-    portForwards,
     dnsOverrides,
     snippets,
     savedWorkspaces,
@@ -133,7 +132,8 @@ export function createMainIpcContext(
   };
   const portForwardLifecycleLogger = new PortForwardLifecycleLogger(
     activityLogs,
-    portForwards,
+    // 팀 규칙의 이름도 기록에 남게 모든 볼트에서 찾는다.
+    { getById: (id) => vaults.getPortForward(id) },
     vaults,
   );
 

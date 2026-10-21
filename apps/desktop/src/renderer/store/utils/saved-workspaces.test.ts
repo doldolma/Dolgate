@@ -4,6 +4,7 @@ import type { WorkspaceLayoutNode } from "../types";
 import {
   captureSavedWorkspaceNode,
   countSavedWorkspacePanes,
+  findMixedVaultMessageKey,
   hydrateSavedWorkspaceLayout,
   listSavedWorkspaceLeaves,
 } from "./saved-workspaces";
@@ -250,5 +251,35 @@ describe("captureSavedWorkspaceNode - 컨테이너 셸", () => {
 
     expect(captured).not.toBeNull();
     expect(countSavedWorkspacePanes(captured as SavedWorkspaceNode)).toBe(2);
+  });
+});
+
+// 4-6: 볼트가 섞인 워크스페이스는 저장하지 않는다 — 알릴 문구를 고른다.
+describe("findMixedVaultMessageKey", () => {
+  const leaf = (id: string, hostId: string | null): SavedWorkspaceNode =>
+    hostId
+      ? { id, kind: "leaf", target: { kind: "host", hostId, label: hostId } }
+      : { id, kind: "leaf", target: { kind: "local", label: "Local" } };
+  const split = (first: SavedWorkspaceNode, second: SavedWorkspaceNode): SavedWorkspaceNode => ({
+    id: `${first.id}+${second.id}`,
+    kind: "split",
+    axis: "horizontal",
+    ratio: 0.5,
+    first,
+    second,
+  });
+  const vaults: Record<string, string> = { mine: "personal", a1: "team-a", a2: "team-a", b1: "team-b" };
+  const known = new Set(Object.keys(vaults));
+  const key = (node: SavedWorkspaceNode) =>
+    findMixedVaultMessageKey(node, known, (hostId) => vaults[hostId] ?? "personal", "personal");
+
+  it("names personal-and-team and team-and-team mixes apart", () => {
+    expect(key(split(leaf("x", "mine"), leaf("y", "a1")))).toBe("savedWorkspace.mixedVaults");
+    expect(key(split(leaf("x", "a1"), leaf("y", "b1")))).toBe("savedWorkspace.mixedTeams");
+  });
+
+  it("is fine with one vault, local panes, and hosts that are gone", () => {
+    expect(key(split(leaf("x", "a1"), split(leaf("y", "a2"), leaf("z", null))))).toBeNull();
+    expect(key(split(leaf("x", "a1"), leaf("y", "deleted-host")))).toBeNull();
   });
 });

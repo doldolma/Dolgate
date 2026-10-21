@@ -19,6 +19,7 @@ export {
 export { getAwsEc2SftpDisabledMessage } from '../../../common/shared-messages';
 export * from "./connection-views";
 export * from "./containers";
+export * from "./credential-prompt";
 export * from "./errors-and-prompts";
 export * from "./host-key-prompts";
 export * from "./hosts";
@@ -30,5 +31,6 @@ export * from "./settings";
 export * from "./sftp";
 export * from "./sorting";
 export * from "./saved-workspaces";
+export * from "./vaults";
 export * from "./vnc";
 export * from "./workspaces";

@@ -12,6 +12,7 @@ import { NetworkBridge } from './bridges/NetworkBridge';
 import { DesktopStateBridge } from './bridges/DesktopStateBridge';
 import { LanguageBridge } from './bridges/LanguageBridge';
 import { ThemeBridge } from './bridges/ThemeBridge';
+import { TeamInviteBridge } from './bridges/TeamInviteBridge';
 import { useLoginController } from './controllers/useLoginController';
 import { LoginShell } from './shells/LoginShell';
 import { VaultGateShell } from './shells/VaultGateShell';
@@ -462,6 +463,7 @@ export function App() {
         onPrefersDarkChange={setPrefersDark}
       />
       <LanguageBridge language={settingsViewModel.settings.language} />
+      <TeamInviteBridge />
     </>
   );
 

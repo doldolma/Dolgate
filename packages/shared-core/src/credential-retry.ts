@@ -1,4 +1,4 @@
-import { isSshHostRecord } from './models';
+import { isSshHostRecord, normalizeJumpHostIds } from './models';
 import type { HostRecord } from './models';
 
 // 연결이 깨졌을 때 **계정·비밀번호를 다시 받아 볼 만한가**를 판정한다. 데스크톱에서 실전으로
@@ -104,4 +104,19 @@ export function resolveCredentialRetryKind(
   )
     ? "auth"
     : null;
+}
+
+/**
+ * 코어가 실은 점프 깊이(대상에서 거꾸로 센 홉 수, 1 = 대상 바로 앞 홉)를 그 점프 호스트 id 로 바꾼다.
+ * 깊이가 없거나(대상 자신의 실패) 체인 밖이면 null.
+ */
+export function jumpHostIdAtDepth(
+  host: { jumpHostIds?: readonly (string | null | undefined)[] | null; jumpHostId?: string | null },
+  jumpDepth: number | null | undefined,
+): string | null {
+  if (!jumpDepth || jumpDepth < 1) {
+    return null;
+  }
+  const chain = normalizeJumpHostIds(host.jumpHostIds, host.jumpHostId);
+  return chain[chain.length - jumpDepth] ?? null;
 }

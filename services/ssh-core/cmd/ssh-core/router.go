@@ -6,6 +6,7 @@ import (
 
 	"dolssh/services/ssh-core/internal/neterr"
 	"dolssh/services/ssh-core/internal/protocol"
+	"dolssh/services/ssh-core/internal/sshconn"
 )
 
 // logRouterf 는 배차 진단을 stderr 로 남긴다(stdout 은 프레임 채널이라 쓸 수 없다).
@@ -184,8 +185,9 @@ func (router *frameRouter) run(frame protocol.Frame) {
 			Payload: protocol.ErrorPayload{
 				// OS·netstack 문구를 정경 문구로 접어 올리고, 원인 코드도 함께 싣는다. 여기가
 				// 명령 실패가 모두 지나는 자리라, 각 dial 사이트를 빠뜨려도 새지 않는다(neterr).
-				Message: neterr.Normalize(err).Error(),
-				Failure: neterr.Code(err),
+				Message:   neterr.Normalize(err).Error(),
+				Failure:   neterr.Code(err),
+				JumpDepth: sshconn.JumpDepth(err),
 			},
 		})
 	}

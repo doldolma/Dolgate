@@ -454,7 +454,8 @@ func DialClient(
 	} else if target.Jump != nil {
 		jumpClient, err = DialClient(ctx, *target.Jump, config, responder)
 		if err != nil {
-			return nil, fmt.Errorf("jump host: %w", err)
+			// 어느 홉인지 실어 올린다(문구는 그대로) — 앱이 요청 창을 그 점프 호스트로 띄운다.
+			return nil, wrapJumpHopError(err)
 		}
 		reportProgress(ProgressConnecting)
 		rawConn, err = jumpClient.Dial("tcp", addr)

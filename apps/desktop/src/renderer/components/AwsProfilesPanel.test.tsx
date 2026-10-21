@@ -1,6 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { AwsProfileDetails, DesktopApi, HostRecord } from '@shared'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { appStore } from '../store/appStore'
+import { createEmptyVaultIndex } from '../store/utils'
 import { AwsProfilesPanel, resetAwsProfilesPanelCacheForTests } from './AwsProfilesPanel'
 
 function createDeferred<T>() {
@@ -750,5 +752,133 @@ describe('AwsProfilesPanel', () => {
 
     await waitFor(() => expect(api.aws.login).toHaveBeenCalledWith('corp-sso'))
     await waitFor(() => expect(api.aws.listProfiles).toHaveBeenCalledTimes(2))
+  })
+})
+
+// 설정의 볼트별 묶음(4-7). 팀 프로필은 그 팀에 만들고 고친다 — 정적 키 칸은 "내 키"다(K1).
+describe('AwsProfilesPanel with team vaults', () => {
+  const TEAM = 'team-a'
+  const teamDetails: Record<string, AwsProfileDetails> = {
+    'acme-prod': createProfileDetails({ id: 'team-prod', profileName: 'acme-prod', configuredRegion: 'us-east-1' }),
+    'acme-sso': createProfileDetails({
+      id: 'team-sso',
+      profileName: 'acme-sso',
+      kind: 'sso',
+      isSsoProfile: true,
+      isAuthenticated: false,
+    }),
+  }
+
+  function installTeamApi() {
+    const mocked = installMockApi()
+    const teamProfiles = [
+      { id: 'team-prod', name: 'acme-prod' },
+      { id: 'team-sso', name: 'acme-sso' },
+    ]
+    const personalList = mocked.api.aws.listProfiles.getMockImplementation()!
+    mocked.api.aws.listProfiles.mockImplementation(async (vaultId?: string) =>
+      vaultId === TEAM ? teamProfiles : personalList(),
+    )
+    const personalDetails = mocked.api.aws.getProfileDetails.getMockImplementation()!
+    mocked.api.aws.getProfileDetails.mockImplementation(async (profileName: string, vaultId?: string) =>
+      vaultId === TEAM ? teamDetails[profileName]! : personalDetails(profileName),
+    )
+    return mocked
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    resetAwsProfilesPanelCacheForTests()
+    appStore.setState({
+      vaultIndex: {
+        ...createEmptyVaultIndex(),
+        teams: [{ id: TEAM, name: 'Acme Infra', role: 'owner', syncState: 'ready', syncError: null, groups: [] }],
+      },
+    })
+  })
+
+  afterEach(() => {
+    appStore.setState(appStore.getInitialState(), true)
+  })
+
+  const section = (vaultId: string) =>
+    within(document.querySelector(`[data-vault-section="${vaultId}"]`)!.closest('section')!)
+
+  it("lists each vault's profiles and makes a new one in the team from the team's +, keys labelled as mine", async () => {
+    const { api } = installTeamApi()
+    render(<AwsProfilesPanel hosts={[]} />)
+
+    await waitFor(() => expect(section(TEAM).getByText('acme-prod')).toBeInTheDocument())
+    expect(section('personal').getByText('default')).toBeInTheDocument()
+    expect(api.aws.getProfileDetails).toHaveBeenCalledWith('acme-prod', TEAM)
+    expect(api.aws.getProfileDetails).toHaveBeenCalledWith('default')
+    // 팀이 있으면 위의 새 프로필 대신 묶음 머리의 + 로 만든다.
+    expect(screen.queryByRole('button', { name: '새 프로필' })).toBeNull()
+
+    fireEvent.click(section(TEAM).getByRole('button', { name: 'Acme Infra에 새 프로필' }))
+    const dialog = within(screen.getByText('AWS 프로필 생성').closest('[class*="shadow-[var(--shadow-floating)]"]') as HTMLElement)
+    expect(dialog.getByText('Acme Infra 에 저장합니다. 팀원 모두가 이 프로필을 씁니다.')).toBeInTheDocument()
+    fireEvent.change(dialog.getByLabelText('새 프로필명'), { target: { value: 'acme-dev' } })
+    fireEvent.change(dialog.getByLabelText('My Access Key'), { target: { value: 'AKIAMINE' } })
+    fireEvent.change(dialog.getByLabelText('My Secret'), { target: { value: 'mine' } })
+    fireEvent.click(dialog.getByRole('button', { name: '프로필 저장' }))
+
+    await waitFor(() =>
+      expect(api.aws.createProfile).toHaveBeenCalledWith({
+        kind: 'static',
+        profileName: 'acme-dev',
+        accessKeyId: 'AKIAMINE',
+        secretAccessKey: 'mine',
+        region: null,
+        vaultId: TEAM,
+      }),
+    )
+  })
+
+  it('edits, re-regions, renames, logs in to and deletes a team profile in that team', async () => {
+    const { api } = installTeamApi()
+    render(<AwsProfilesPanel hosts={[]} />)
+    await waitFor(() => expect(section(TEAM).getByText('acme-prod')).toBeInTheDocument())
+
+    fireEvent.click(section(TEAM).getByRole('button', { name: /acme-prod/ }))
+    await screen.findByRole('heading', { name: 'acme-prod' })
+
+    // 내 키만 바꾼다 — 키 칸은 "내 키".
+    fireEvent.click(screen.getByRole('button', { name: '수정' }))
+    fireEvent.change(screen.getByLabelText('My Access Key'), { target: { value: 'AKIANEW' } })
+    fireEvent.change(screen.getByLabelText('My Secret'), { target: { value: 'new-secret' } })
+    fireEvent.click(screen.getByRole('button', { name: '프로필 업데이트' }))
+    await waitFor(() =>
+      expect(api.aws.updateProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ profileName: 'acme-prod', accessKeyId: 'AKIANEW', vaultId: TEAM }),
+      ),
+    )
+
+    await screen.findByRole('heading', { name: 'acme-prod' })
+    fireEvent.click(screen.getByRole('button', { name: '기본 Region 변경' }))
+    fireEvent.change(screen.getByLabelText('기본 Region'), { target: { value: 'eu-west-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Region 저장' }))
+    await waitFor(() =>
+      expect(api.aws.updateProfileRegion).toHaveBeenCalledWith({ profileName: 'acme-prod', region: 'eu-west-1', vaultId: TEAM }),
+    )
+
+    await screen.findByRole('heading', { name: 'acme-prod' })
+    fireEvent.click(screen.getByRole('button', { name: '이름 변경' }))
+    fireEvent.change(screen.getByLabelText('새 프로필명'), { target: { value: 'acme-live' } })
+    fireEvent.click(screen.getByRole('button', { name: '프로필명 변경' }))
+    await waitFor(() =>
+      expect(api.aws.renameProfile).toHaveBeenCalledWith({ profileName: 'acme-prod', nextProfileName: 'acme-live', vaultId: TEAM }),
+    )
+
+    // 팀 SSO 로그인은 이 기기에서 내가 한다.
+    fireEvent.click(section(TEAM).getByRole('button', { name: /acme-sso/ }))
+    await screen.findByRole('heading', { name: 'acme-sso' })
+    fireEvent.click(screen.getByRole('button', { name: 'AWS SSO 로그인' }))
+    await waitFor(() => expect(api.aws.login).toHaveBeenCalledWith('acme-sso', TEAM))
+
+    await screen.findByRole('heading', { name: 'acme-sso' })
+    fireEvent.click(screen.getByRole('button', { name: '삭제' }))
+    fireEvent.click(screen.getByRole('button', { name: '프로필 삭제' }))
+    await waitFor(() => expect(api.aws.deleteProfile).toHaveBeenCalledWith('acme-sso', TEAM))
   })
 })

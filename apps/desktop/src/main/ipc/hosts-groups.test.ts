@@ -104,9 +104,64 @@ describe("registerHostsGroupsIpcHandlers", () => {
 
     // 저장해 둔 내 자격 증명은 팀 호스트에 걸 수 없다.
     await expect(create({}, { ...draft, secretRef: "secret:mine" }, undefined, "team-1")).rejects.toThrow(
-      /credentials saved in that team/,
+      /같은 볼트의 것만|must be in the same vault/,
     );
     await expect(create({}, draft, undefined, "missing-team")).rejects.toThrow(/Vault not found/);
+  });
+
+  // 호스트는 다른 볼트의 레코드를 가리킬 수 없다 — 팀원에게는 없는 것을 가리키거나, 팀에서 빠진 뒤 깨진다.
+  it("refuses to save a host that points into another vault", async () => {
+    const records = (ids: { host: string; tailnet: string; secret: string }) => ({
+      hosts: { list: vi.fn(() => []), getById: vi.fn((id: string) => (id === ids.host ? { id } : null)) },
+      tailnets: { list: vi.fn(() => [{ id: ids.tailnet }]) },
+      awsProfiles: { getMetadataById: vi.fn(() => null) },
+      snippets: { getById: vi.fn(() => null) },
+      secretMetadata: { getBySecretRef: vi.fn((ref: string) => (ref === ids.secret ? { secretRef: ref } : null)) },
+    });
+    const personal = records({ host: "my-jump", tailnet: "my-tailnet", secret: "secret:mine" });
+    const team = records({ host: "team-jump", tailnet: "team-tailnet", secret: "secret:team" });
+    const base = createContext();
+    delete base.vaults;
+    const ctx = withVaults({ ...base, ...personal }, { "team-1": team }) as any;
+    const created: unknown[] = [];
+    const catalog = ctx.vaults;
+    const myHost = { id: "my-host", kind: "ssh", label: "Mine", hostname: "h", port: 22, username: "u", authType: "password", tailnetId: "team-tailnet" };
+    ctx.vaults = {
+      ...catalog,
+      createHost: vi.fn((vaultId: string, id: string, draft: object) => {
+        created.push(vaultId);
+        return { id, ...draft };
+      }),
+      // 고칠 호스트(my-host)만 따로 두고, 나머지는 진짜 카탈로그로 찾는다.
+      getHost: vi.fn((id: string) => (id === "my-host" ? myHost : catalog.getHost(id))),
+      scopeOfHost: vi.fn((id: string) => (id === "my-host" ? catalog.personal : catalog.scopeOfHost(id))),
+      updateHost: vi.fn((id: string, draft: object) => ({ id, ...draft })),
+    };
+    ctx.persistSecret.mockResolvedValue(null);
+    ctx.resolveManagedPrivateKeyPem.mockResolvedValue(undefined);
+    ctx.resolveManagedCertificateText.mockResolvedValue(undefined);
+    registerHostsGroupsIpcHandlers(ctx);
+    const create = getRegisteredHandler(ipcChannels.hosts.create);
+    const update = getRegisteredHandler(ipcChannels.hosts.update);
+    const draft = { kind: "ssh", label: "Prod", hostname: "prod", port: 22, username: "ubuntu", authType: "password" };
+    const refused = /같은 볼트의|must be in the same vault/;
+
+    // 팀 호스트가 개인 점프 호스트·tailnet 을, 개인 호스트가 팀 자격 증명을 가리키면 저장하지 않는다.
+    await expect(create({}, { ...draft, jumpHostIds: ["my-jump"] }, undefined, "team-1")).rejects.toThrow(refused);
+    await expect(create({}, { ...draft, tailnetId: "my-tailnet" }, undefined, "team-1")).rejects.toThrow(refused);
+    await expect(create({}, { ...draft, secretRef: "secret:team" })).rejects.toThrow(refused);
+    expect(created).toEqual([]);
+
+    // 같은 볼트 것·어디에도 없는 것은 된다.
+    await create({}, { ...draft, jumpHostIds: ["team-jump"], tailnetId: "team-tailnet" }, undefined, "team-1");
+    await create({}, { ...draft, tailnetId: "gone" });
+    expect(created).toEqual(["team-1", "personal"]);
+
+    // 고치기 전부터 가리키던 것은 그대로 두고(옛 레코드), 새로 바꾸면 막는다.
+    await update({}, "my-host", { ...draft, tailnetId: "team-tailnet", label: "Renamed" });
+    expect(ctx.vaults.updateHost).toHaveBeenCalledTimes(1);
+    await expect(update({}, "my-host", { ...draft, tailnetId: "team-tailnet", jumpHostIds: ["team-jump"] })).rejects.toThrow(refused);
+    expect(ctx.vaults.updateHost).toHaveBeenCalledTimes(1);
   });
 
   it("edits and removes a team host in its own vault", async () => {
@@ -133,7 +188,7 @@ describe("registerHostsGroupsIpcHandlers", () => {
     // 저장해 둔 내 자격 증명으로는 바꿀 수 없다.
     await expect(
       getRegisteredHandler(ipcChannels.hosts.update)({}, "team-host", { ...draft, secretRef: "secret:mine" }),
-    ).rejects.toThrow(/credentials saved in that team/);
+    ).rejects.toThrow(/같은 볼트의 것만|must be in the same vault/);
 
     await getRegisteredHandler(ipcChannels.hosts.remove)({}, "team-host");
     expect(ctx.vaults.removeHost).toHaveBeenCalledWith("team-host");
@@ -441,6 +496,60 @@ describe("registerHostsGroupsIpcHandlers", () => {
       },
       "secret:existing",
     );
+  });
+
+  // 팀 그룹은 그 팀 볼트의 저장소와 삭제 대기열로 간다 — 개인 그룹·개인 대기열은 건드리지 않는다.
+  it("writes a team's groups in that team, tombstones and all", async () => {
+    const ctx = createContext();
+    const mutation = { groups: [], hosts: [], savedWorkspaces: [] };
+    const teamGroups = {
+      create: vi.fn((id: string, name: string, parentPath?: string | null) => ({ id, name, path: name, parentPath: parentPath ?? null })),
+      rename: vi.fn(() => ({ ...mutation, nextPath: "Prod2" })),
+      move: vi.fn(() => ({ ...mutation, nextPath: "Ops/Prod2" })),
+      setSortRanks: vi.fn(() => []),
+      remove: vi.fn(() => ({
+        ...mutation,
+        removedGroupIds: ["group-t"],
+        removedHostIds: ["host-t"],
+        removedWorkspaceIds: ["workspace-t"],
+      })),
+    };
+    const teamOutbox = { upsertDeletion: vi.fn() };
+    ctx.vaults = {
+      ...ctx.vaults,
+      getScope: vi.fn((vaultId: string) => (vaultId === "team-1" ? { id: "team-1", groups: teamGroups, syncOutbox: teamOutbox } : null)),
+    };
+    registerHostsGroupsIpcHandlers(ctx);
+
+    await getRegisteredHandler(ipcChannels.groups.create)({}, "Prod", null, "team-1");
+    await getRegisteredHandler(ipcChannels.groups.rename)({}, "Prod", "Prod2", "team-1");
+    await getRegisteredHandler(ipcChannels.groups.move)({}, "Prod2", "Ops", "team-1");
+    await getRegisteredHandler(ipcChannels.groups.setOrder)({}, [{ id: "group-t", sortRank: 1 }], "team-1");
+    await getRegisteredHandler(ipcChannels.groups.remove)({}, "Ops/Prod2", "delete-subtree", "team-1");
+
+    expect(teamGroups.create).toHaveBeenCalledWith(expect.any(String), "Prod", null);
+    expect(teamGroups.rename).toHaveBeenCalledWith("Prod", "Prod2");
+    expect(teamGroups.move).toHaveBeenCalledWith("Prod2", "Ops");
+    expect(teamGroups.setSortRanks).toHaveBeenCalledWith([{ id: "group-t", sortRank: 1 }]);
+    expect(teamGroups.remove).toHaveBeenCalledWith("Ops/Prod2", "delete-subtree");
+    expect(teamOutbox.upsertDeletion.mock.calls).toEqual([
+      ["groups", "group-t"],
+      ["hosts", "host-t"],
+      ["workspaces", "workspace-t"],
+    ]);
+    expect(ctx.groups.create).not.toHaveBeenCalled();
+    expect(ctx.groups.remove).not.toHaveBeenCalled();
+    expect(ctx.syncOutbox.upsertDeletion).not.toHaveBeenCalled();
+    expect(ctx.queueSync).toHaveBeenCalledTimes(5);
+
+    // 이 기기에 없는 팀이면 아무것도 쓰지 않고 던진다.
+    await expect(getRegisteredHandler(ipcChannels.groups.create)({}, "X", null, "missing-team")).rejects.toThrow(
+      /이 기기에 없는 팀입니다|isn't on this device/,
+    );
+    // 볼트를 안 주면 지금처럼 개인이다.
+    ctx.groups.create.mockReturnValue({ id: "group-p", name: "Home", path: "Home", parentPath: null });
+    await getRegisteredHandler(ipcChannels.groups.create)({}, "Home", null);
+    expect(ctx.groups.create).toHaveBeenCalledWith(expect.any(String), "Home", null);
   });
 
   it("writes Workspace tombstones when deleting a group subtree", async () => {

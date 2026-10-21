@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import {
   isAwsEc2HostRecord,
+  isAwsEcsHostRecord,
   isSshHostRecord,
   isWarpgateSshHostRecord,
 } from '@shared';
@@ -11,6 +12,7 @@ import {
   resolveTailnetTargetAddress,
 } from '../../lib/host-tailnet';
 import { useAppStore } from '../../store/appStore';
+import { withMyUsername } from '../host-browser/hostDisplay';
 import { cancelTailnet, listTailnets } from '../../services/desktop/tailnet';
 import { acquireTailnetWatch } from '../../services/desktop/tailnet-watch';
 import {
@@ -36,9 +38,11 @@ import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SerialSessionActions } from './SerialSessionActions';
 import { TerminalSearchOverlay } from './TerminalSearchOverlay';
 import { TerminalSharePopover } from './TerminalSharePopover';
+import { MyAwsKeyDialog } from '../teams/MyAwsKeyDialog';
 import type { TerminalSessionPaneProps } from './types';
 import { Button, NoticeCard } from '../../ui';
 import { findHostKeyPromptForSession, resolveConnectionFailurePresentation } from '../../store/utils';
+import { useSessionSnippets } from './useSessionSnippets';
 import {
   describeAwsTransport,
   canReadHostMetrics,
@@ -82,7 +86,10 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     tab,
   } = props;
 
-  const snippets = useAppStore((state) => state.snippets);
+  // 자동완성 후보 — 이 세션 호스트의 볼트 것을 먼저(같은 키워드면 그것이 이긴다). 팀이 없으면 그대로다.
+  const snippets = useSessionSnippets(tab?.hostId);
+  // 팀 호스트에 둔 내 사용자 이름 — 머리의 대상 표기는 실제로 붙은 이름이어야 한다.
+  const myUsernameByHostId = useAppStore((state) => state.vaultIndex?.myUsernameByHostId);
   const openExternalUrl = useAppStore((state) => state.openExternalUrl);
 
   // tailnet 복구 동작은 이 화면에 없다.
@@ -446,6 +453,21 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
    */
   const tailnetAuthUrl = tailnetAuthInFlight ? tailnetStatus?.authUrl : undefined;
 
+  /**
+   * 내 키가 없는 팀 정적 AWS 프로필로 붙으려다 막혔으면 넣을 곳(연결 흐름이 남긴다). 실패 화면이 "내 키 넣기"를 내고,
+   * 넣으면 그 자리에서 다시 붙는다 — 설정으로 보내지 않는다.
+   */
+  const awsProfileIdOfHost =
+    props.host && (isAwsEc2HostRecord(props.host) || isAwsEcsHostRecord(props.host))
+      ? (props.host.awsProfileId ?? null)
+      : null;
+  const awsMissingMyKey = useAppStore((state) =>
+    awsProfileIdOfHost ? state.awsMissingMyKeyByProfileId[awsProfileIdOfHost] : undefined,
+  );
+  const clearAwsMissingMyKey = useAppStore((state) => state.clearAwsMissingMyKey);
+  const [myAwsKeyOpen, setMyAwsKeyOpen] = useState(false);
+  const offerMyAwsKey = tab?.status === 'error' && Boolean(awsMissingMyKey);
+
   const tailnetFailureMessage =
     tab?.status === 'error'
       ? // 실패한 화면에서는 "브라우저에서 로그인을 마쳐 주세요" 라고 하면 안 된다 — 실패로
@@ -677,7 +699,11 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           kind={props.host?.kind}
           // 대상 표기는 앱의 다른 목록과 같은 헬퍼를 쓴다 — pane 헤더만 따로 만들면 같은
           // 호스트가 화면마다 다르게 적힌다(AWS·Warpgate·시리얼은 형식이 제각각이다).
-          subtitle={props.host ? getHostSubtitle(props.host, hostSubtitleLabels()) : undefined}
+          subtitle={
+            props.host
+              ? getHostSubtitle(withMyUsername(props.host, myUsernameByHostId), hostSubtitleLabels())
+              : undefined
+          }
           // 지연은 하단바가 없는 분할에서 헤더가 든다. 이력은 재연결을 건너 이어져야 하므로
           // stableId 를 키로 쓴다(sessionId 는 재연결마다 새로 난다).
           rttMs={tab?.lastRttMs ?? null}
@@ -922,13 +948,31 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
                 secondaryActionLabel={
                   // 링크가 있으면 할 일은 브라우저로 돌아가는 것뿐이다. 복구 동작을 내밀지
                   // 않는다 — 그 판단은 코어가 한다.
-                  tailnetAuthUrl ? translate('misc.reopenBrowser') : undefined
+                  tailnetAuthUrl
+                    ? translate('misc.reopenBrowser')
+                    : offerMyAwsKey
+                      ? translate('teams.myKey.add')
+                      : undefined
                 }
                 onSecondaryAction={
                   tailnetAuthUrl
                     ? () => void openExternalUrl(tailnetAuthUrl)
-                    : undefined
+                    : offerMyAwsKey
+                      ? () => setMyAwsKeyOpen(true)
+                      : undefined
                 }
+              />
+            ) : null}
+            {myAwsKeyOpen && awsMissingMyKey && awsProfileIdOfHost ? (
+              <MyAwsKeyDialog
+                missing={awsMissingMyKey}
+                onClose={() => setMyAwsKeyOpen(false)}
+                onSaved={() => {
+                  // 넣었으면 알아서 다시 붙는다(M3).
+                  setMyAwsKeyOpen(false);
+                  clearAwsMissingMyKey(awsProfileIdOfHost);
+                  void onRetry?.();
+                }}
               />
             ) : null}
             <TerminalAutocompleteOverlay

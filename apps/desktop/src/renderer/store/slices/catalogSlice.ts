@@ -149,7 +149,10 @@ import {
   getPane,
   updatePaneState,
   toTrustInput,
+  createEmptyVaultIndex,
+  TEAMS_SIGNED_OUT,
 } from "../utils";
+import { PERSONAL_VAULT_ID, isTeamVaultId, vaultIdOfHost } from "../utils";
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
 import { releaseTerminalUploadEndpoints } from "../services/sftp";
 
@@ -158,20 +161,90 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
   const services = createBootstrapSyncServices(deps);
 
   const {
+    loadVaultIndex,
+    loadTeamAvailability,
     syncOperationalData,
     syncSyncedWorkspaceData,
     refreshHostAndKeychainState,
   } = services;
 
+  // ── 볼트별 그룹 쓰기 ──
+  // 지금 위치의 볼트인가(All 이면 개인으로 본다 — All 일 때 지금 경로는 늘 비어 있다).
+  const isCurrentVault = (vaultId: string) => (get().currentVaultId ?? PERSONAL_VAULT_ID) === vaultId;
+  // 그 볼트가 지금 위치일 때만 지금 경로를 고친다 — 다른 볼트의 같은 경로를 따라 움직이지 않게.
+  const followCurrentPath = (vaultId: string, next: (current: string | null) => string | null) => {
+    if (isCurrentVault(vaultId)) {
+      set((state) => ({ currentGroupPath: next(state.currentGroupPath) }));
+    }
+  };
+  // 그 볼트에 만들던 새 호스트 서랍의 그룹을 옮긴 경로로 따라 바꾼다.
+  const rebaseDrawerGroup = (vaultId: string, path: string, nextPath: string) => {
+    set((state) =>
+      state.hostDrawer.mode === "create" && state.hostDrawer.vaultId === vaultId
+        ? {
+            hostDrawer: {
+              ...state.hostDrawer,
+              defaultGroupPath: rebaseGroupPath(state.hostDrawer.defaultGroupPath, path, nextPath),
+            },
+          }
+        : state,
+    );
+  };
+  // 팀 볼트의 그룹·호스트·워크스페이스(직접 정렬이 형제를 만들 때).
+  const teamInputsOf = (vaultId: string) => {
+    const state = get();
+    return {
+      groups: state.vaultIndex.teams.find((team) => team.id === vaultId)?.groups ?? [],
+      hosts: state.hosts.filter((host) => state.vaultIndex.teamIdByHostId[host.id] === vaultId),
+      savedWorkspaces: state.savedWorkspaces.filter(
+        (workspace) => state.vaultIndex.teamIdByWorkspaceId[workspace.id] === vaultId,
+      ),
+    };
+  };
+  // 개인 볼트의 호스트·워크스페이스(개인 그룹의 직접 정렬이 형제를 만들 때). 팀 레코드의 그룹 경로까지 개인 형제로
+  // 세면 개인 볼트에 팀 그룹 이름의 빈 그룹이 생긴다.
+  const personalInputs = () => {
+    const state = get();
+    return {
+      hosts: state.hosts.filter((host) => !state.vaultIndex.teamIdByHostId[host.id]),
+      savedWorkspaces: state.savedWorkspaces.filter(
+        (workspace) => !state.vaultIndex.teamIdByWorkspaceId[workspace.id],
+      ),
+    };
+  };
+  // 개인 그룹을 바꾼 뒤의 목록. 메인이 돌려준 목록은 개인 볼트 것이다 — 그대로 덮으면 팀 레코드가 화면에서
+  // 사라진다(다음에 다시 읽을 때까지). 개인 것만 바꾸고 팀 레코드는 그대로 둔다.
+  const withTeamRecords = (
+    state: ReturnType<typeof get>,
+    personal: { hosts: HostRecord[]; savedWorkspaces?: SavedWorkspaceRecord[] | null },
+  ) => ({
+    hosts: sortHosts([...personal.hosts, ...state.hosts.filter((host) => state.vaultIndex.teamIdByHostId[host.id])]),
+    savedWorkspaces: personal.savedWorkspaces
+      ? [
+          ...personal.savedWorkspaces,
+          ...state.savedWorkspaces.filter((workspace) => state.vaultIndex.teamIdByWorkspaceId[workspace.id]),
+        ]
+      : state.savedWorkspaces,
+  });
+  // 팀 볼트의 그룹을 바꾼 뒤. 메인이 돌려준 목록은 그 팀 것이라 쓰지 않고, 모든 볼트의 목록과 볼트 표를
+  // 다시 읽는다(그룹을 지우거나 옮기면 그 팀 호스트·워크스페이스의 그룹도 바뀐다).
+  const reloadAfterTeamGroupWrite = async () => {
+    const [savedWorkspaces] = await Promise.all([api.savedWorkspaces.list(), get().refreshHostCatalog()]);
+    set({ savedWorkspaces });
+  };
+
   return {
     hosts: [],
     groups: [],
+    vaultIndex: createEmptyVaultIndex(),
+    teamAvailability: TEAMS_SIGNED_OUT,
     activeWorkspaceTab: "home",
     homeSection: "hosts",
     settingsSection: "general",
     savedCredentialsSearchQuery: "",
     hostDrawer: { mode: "closed" },
     currentGroupPath: null,
+    currentVaultId: null,
     searchQuery: "",
     selectedHostTags: [],
     isReady: false,
@@ -282,16 +355,20 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
         settingsSection: section,
       }),
     // 종류(SSH·Serial·RDP)는 드로어 안 셀렉터가 정한다 — 여기서는 기본값만 정해 준다.
-    openCreateHostDrawer: () =>
+    openCreateHostDrawer: (target) => {
+      const state = get();
+      // 지금 위치에 만든다. All 이면 개인 맨 위다(팀이 없을 때와 같다).
       set({
         activeWorkspaceTab: "home",
         homeSection: "hosts",
         hostDrawer: {
           mode: "create",
-          defaultGroupPath: get().currentGroupPath,
+          defaultGroupPath: target ? target.groupPath : state.currentGroupPath,
           kind: "ssh",
+          vaultId: target?.vaultId ?? state.currentVaultId ?? PERSONAL_VAULT_ID,
         },
-      }),
+      });
+    },
     openEditHostDrawer: (hostId) =>
       set({
         activeWorkspaceTab: "home",
@@ -299,18 +376,23 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
         hostDrawer: { mode: "edit", hostId },
       }),
     closeHostDrawer: () => set({ hostDrawer: { mode: "closed" } }),
-    navigateGroup: (path) =>
+    navigateGroup: (path, vaultId) => {
+      const nextPath = normalizeGroupPath(path);
       set({
         activeWorkspaceTab: "home",
         homeSection: "hosts",
-        currentGroupPath: normalizeGroupPath(path),
+        currentGroupPath: nextPath,
+        currentVaultId: vaultId ?? (nextPath ? PERSONAL_VAULT_ID : null),
         hostDrawer: { mode: "closed" },
-      }),
+      });
+    },
     bootstrap: async () => {
-      const [snapshot, snippets, savedWorkspaces] = await Promise.all([
+      const [snapshot, snippets, savedWorkspaces, vaultIndex, teamAvailability] = await Promise.all([
         api.bootstrap.getInitialSnapshot(),
         api.snippets.list(),
         api.savedWorkspaces.list(),
+        loadVaultIndex(),
+        loadTeamAvailability(),
       ]);
       // 아래 set이 terminalUploadEndpoints 참조를 통째로 버리므로, 그 전에
       // 실제 연결을 닫아 고아 커넥션을 막는다 (첫 부트스트랩에서는 no-op).
@@ -318,6 +400,8 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
       set({
         hosts: sortHosts(snapshot.hosts),
         groups: sortGroups(snapshot.groups),
+        vaultIndex: vaultIndex ?? createEmptyVaultIndex(),
+        teamAvailability: teamAvailability ?? TEAMS_SIGNED_OUT,
         tabs: snapshot.tabs.map((tab) => ({
           ...tab,
           sessionShare: normalizeSessionShareState(tab.sessionShare),
@@ -344,6 +428,7 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
         settingsSection: "general",
         hostDrawer: { mode: "closed" },
         currentGroupPath: null,
+        currentVaultId: null,
         selectedHostTags: [],
         settings: snapshot.settings,
         isReady: true,
@@ -374,15 +459,17 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
       });
     },
     refreshHostCatalog: async () => {
-      const [nextHosts, nextGroups, nextKeychainEntries] = await Promise.all([
+      const [nextHosts, nextGroups, nextKeychainEntries, vaultIndex] = await Promise.all([
         api.hosts.list(),
         api.groups.list(),
         api.keychain.list(),
+        loadVaultIndex(),
       ]);
       set({
         hosts: sortHosts(nextHosts),
         groups: sortGroups(nextGroups),
         keychainEntries: sortKeychainEntries(nextKeychainEntries),
+        ...(vaultIndex ? { vaultIndex } : {}),
       });
     },
     refreshOperationalData: async () => {
@@ -390,6 +477,12 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
     },
     refreshSyncedWorkspaceData: async () => {
       await syncSyncedWorkspaceData(set);
+    },
+    refreshVaultIndex: async () => {
+      const vaultIndex = await loadVaultIndex();
+      if (vaultIndex) {
+        set({ vaultIndex });
+      }
     },
     clearSyncedWorkspaceData: () =>
       set({
@@ -402,12 +495,19 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
         activityLogs: [],
         keychainEntries: [],
         savedWorkspaces: [],
+        vaultIndex: createEmptyVaultIndex(),
+        teamAvailability: TEAMS_SIGNED_OUT,
       }),
-    createGroup: async (name, parentPath) => {
-      const next = await api.groups.create(
-        name,
-        parentPath !== undefined ? parentPath : get().currentGroupPath,
-      );
+    createGroup: async (name, parentPath, vaultId = PERSONAL_VAULT_ID) => {
+      const parent =
+        parentPath !== undefined ? parentPath : isCurrentVault(vaultId) ? get().currentGroupPath : null;
+      if (isTeamVaultId(vaultId)) {
+        await api.groups.create(name, parent, vaultId);
+        // 팀 그룹은 볼트 표에 있다.
+        await get().refreshVaultIndex();
+        return;
+      }
+      const next = await api.groups.create(name, parent);
       set((state) => ({
         groups: sortGroups([
           ...state.groups.filter((group) => group.id !== next.id),
@@ -415,52 +515,52 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
         ]),
       }));
     },
-    removeGroup: async (path, mode) => {
+    removeGroup: async (path, mode, vaultId = PERSONAL_VAULT_ID) => {
+      if (isTeamVaultId(vaultId)) {
+        await api.groups.remove(path, mode, vaultId);
+        await reloadAfterTeamGroupWrite();
+        followCurrentPath(vaultId, (current) => resolveCurrentGroupPathAfterGroupRemoval(current, path, mode));
+        return;
+      }
       const result = await api.groups.remove(path, mode);
       set((state) => ({
         groups: sortGroups(result.groups),
-        hosts: sortHosts(result.hosts),
-        savedWorkspaces: result.savedWorkspaces ?? state.savedWorkspaces,
-        currentGroupPath: resolveCurrentGroupPathAfterGroupRemoval(
-          state.currentGroupPath,
-          path,
-          mode,
-        ),
+        ...withTeamRecords(state, result),
+        currentGroupPath: isCurrentVault(vaultId)
+          ? resolveCurrentGroupPathAfterGroupRemoval(state.currentGroupPath, path, mode)
+          : state.currentGroupPath,
       }));
     },
-    moveGroup: async (path, targetParentPath) => {
+    moveGroup: async (path, targetParentPath, vaultId = PERSONAL_VAULT_ID) => {
+      if (isTeamVaultId(vaultId)) {
+        const result = await api.groups.move(path, targetParentPath, vaultId);
+        await reloadAfterTeamGroupWrite();
+        followCurrentPath(vaultId, (current) => resolveCurrentGroupPathAfterGroupMutation(current, path, result.nextPath));
+        rebaseDrawerGroup(vaultId, path, result.nextPath);
+        return;
+      }
       const result = await api.groups.move(path, targetParentPath);
       set((state) => ({
         groups: sortGroups(result.groups),
-        hosts: sortHosts(result.hosts),
-        savedWorkspaces: result.savedWorkspaces ?? state.savedWorkspaces,
-        currentGroupPath: resolveCurrentGroupPathAfterGroupMutation(
-          state.currentGroupPath,
-          path,
-          result.nextPath,
-        ),
-        hostDrawer:
-          state.hostDrawer.mode === "create"
-            ? {
-                ...state.hostDrawer,
-                defaultGroupPath: rebaseGroupPath(
-                  state.hostDrawer.defaultGroupPath,
-                  path,
-                  result.nextPath,
-                ),
-              }
-            : state.hostDrawer,
+        ...withTeamRecords(state, result),
+        currentGroupPath: isCurrentVault(vaultId)
+          ? resolveCurrentGroupPathAfterGroupMutation(state.currentGroupPath, path, result.nextPath)
+          : state.currentGroupPath,
       }));
+      rebaseDrawerGroup(vaultId, path, result.nextPath);
     },
-    reorderGroup: async (path, targetParentPath, targetIndex) => {
+    reorderGroup: async (path, targetParentPath, targetIndex, vaultId = PERSONAL_VAULT_ID) => {
       const nextParentPath = normalizeGroupPath(targetParentPath);
-      let groups = get().groups;
+      // 팀 볼트면 그 팀의 그룹·호스트·워크스페이스로 형제를 만들고, 쓰기는 그 팀으로 보낸다.
+      const team = isTeamVaultId(vaultId) ? vaultId : null;
+      const teamInputs = team ? teamInputsOf(team) : null;
+      let groups = teamInputs ? teamInputs.groups : get().groups;
       // hosts 도 이 동작이 소유하지 않는다. 그룹을 옮겨 호스트의 groupName 이 바뀐 경우에만 주
       // 프로세스가 준 새 목록을 쓰고, 그 밖에는 손대지 않는다 — savedWorkspaces 와 같은 이유로,
       // 아래 await 들 사이에 들어온 호스트 갱신(동기화 폴링, 이름 변경, detectedOs)을 스냅샷으로
       // 덮어써서 되돌리던 자리다.
       let movedHosts: HostRecord[] | null = null;
-      let hosts = get().hosts;
+      let hosts = teamInputs ? teamInputs.hosts : personalInputs().hosts;
       // 이 동작은 savedWorkspaces 를 소유하지 않는다. 그룹을 옮겨 경로가 바뀐 경우에만 주 프로세스가
       // 준 새 목록을 쓰고, 그 밖에는 손대지 않는다 — 아래 await 들 사이에 들어온 갱신(touchOpened,
       // 이름 변경, 삭제)을 스냅샷으로 덮어써서 되돌리던 자리다.
@@ -472,7 +572,9 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
 
       // 부모가 다르면 먼저 옮긴다 — 경로가 바뀌므로 형제 목록을 그 뒤에 만들어야 한다.
       if (getParentGroupPath(movedPath) !== nextParentPath) {
-        const moved = await api.groups.move(movedPath, nextParentPath);
+        const moved = team
+          ? await api.groups.move(movedPath, nextParentPath, team)
+          : await api.groups.move(movedPath, nextParentPath);
         groups = moved.groups;
         hosts = moved.hosts;
         movedHosts = moved.hosts;
@@ -481,7 +583,11 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
       }
 
       // 형제 목록을 **화면에 보이는 순서**로 만든다. planGroupReorder 가 그 순서를 전제한다.
-      const siblingPaths = collectGroupPaths(groups, hosts, movedSavedWorkspaces ?? get().savedWorkspaces).filter(
+      const siblingPaths = collectGroupPaths(
+        groups,
+        hosts,
+        movedSavedWorkspaces ?? (teamInputs ? teamInputs.savedWorkspaces : personalInputs().savedWorkspaces),
+      ).filter(
         (candidate: string) => isDirectGroupChild(candidate, nextParentPath),
       );
 
@@ -495,10 +601,9 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
         if (recordByPath.has(siblingPath)) {
           continue;
         }
-        const created = await api.groups.create(
-          getGroupLabel(siblingPath),
-          nextParentPath,
-        );
+        const created = team
+          ? await api.groups.create(getGroupLabel(siblingPath), nextParentPath, team)
+          : await api.groups.create(getGroupLabel(siblingPath), nextParentPath);
         recordByPath.set(created.path, created);
         groups = [...groups, created];
       }
@@ -516,44 +621,48 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
       const assignments = planGroupReorder(siblings, moved.id, targetIndex);
       const nextGroups =
         assignments.length > 0
-          ? await api.groups.setOrder(assignments)
+          ? team
+            ? await api.groups.setOrder(assignments, team)
+            : await api.groups.setOrder(assignments)
           : groups;
+      if (team) {
+        // 메인이 돌려준 목록은 그 팀 것이다 — 모든 볼트 목록과 볼트 표를 다시 읽는다.
+        await reloadAfterTeamGroupWrite();
+        return;
+      }
 
       set((state) => ({
         // groups 는 이 동작이 실제로 쓴 결과다(setOrder/create 를 거친 nextGroups).
         groups: sortGroups(nextGroups),
-        hosts: movedHosts ? sortHosts(movedHosts) : state.hosts,
-        savedWorkspaces: movedSavedWorkspaces ?? state.savedWorkspaces,
+        ...(movedHosts
+          ? withTeamRecords(state, { hosts: movedHosts, savedWorkspaces: movedSavedWorkspaces })
+          : { hosts: state.hosts, savedWorkspaces: movedSavedWorkspaces ?? state.savedWorkspaces }),
       }));
     },
-    renameGroup: async (path, name) => {
+    renameGroup: async (path, name, vaultId = PERSONAL_VAULT_ID) => {
+      if (isTeamVaultId(vaultId)) {
+        const result = await api.groups.rename(path, name, vaultId);
+        await reloadAfterTeamGroupWrite();
+        followCurrentPath(vaultId, (current) => resolveCurrentGroupPathAfterGroupMutation(current, path, result.nextPath));
+        rebaseDrawerGroup(vaultId, path, result.nextPath);
+        return;
+      }
       const result = await api.groups.rename(path, name);
       set((state) => ({
         groups: sortGroups(result.groups),
-        hosts: sortHosts(result.hosts),
-        savedWorkspaces: result.savedWorkspaces ?? state.savedWorkspaces,
-        currentGroupPath: resolveCurrentGroupPathAfterGroupMutation(
-          state.currentGroupPath,
-          path,
-          result.nextPath,
-        ),
-        hostDrawer:
-          state.hostDrawer.mode === "create"
-            ? {
-                ...state.hostDrawer,
-                defaultGroupPath: rebaseGroupPath(
-                  state.hostDrawer.defaultGroupPath,
-                  path,
-                  result.nextPath,
-                ),
-              }
-            : state.hostDrawer,
+        ...withTeamRecords(state, result),
+        currentGroupPath: isCurrentVault(vaultId)
+          ? resolveCurrentGroupPathAfterGroupMutation(state.currentGroupPath, path, result.nextPath)
+          : state.currentGroupPath,
       }));
+      rebaseDrawerGroup(vaultId, path, result.nextPath);
     },
-    saveHost: async (hostId, draft, secrets) => {
+    saveHost: async (hostId, draft, secrets, vaultId) => {
       const next = hostId
         ? await api.hosts.update(hostId, draft, secrets)
-        : await api.hosts.create(draft, secrets);
+        : isTeamVaultId(vaultId)
+          ? await api.hosts.create(draft, secrets, vaultId)
+          : await api.hosts.create(draft, secrets);
       set({
         hosts: sortHosts([
           ...get().hosts.filter((host) => host.id !== next.id),
@@ -587,12 +696,15 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
           current,
           buildDuplicateHostLabel(current, workingHosts),
         );
-        const next = await api.hosts.create(
-          // 공유 폴더의 주인은 **기기 로컬 설정**이다. 레코드에 남아 있는 옛 값(마이그레이션
-          // 전에 저장된 것)을 복제본에 실어 보내면 `/Users/...` 같은 이 기기의 경로가 다시
-          // 동기화돼 다른 기기로 흘러간다. 아래에서 로컬 설정으로 옮겨 담는다.
-          draft.kind === "rdp" ? { ...draft, drives: null } : draft,
-        );
+        // 공유 폴더의 주인은 **기기 로컬 설정**이다. 레코드에 남아 있는 옛 값(마이그레이션
+        // 전에 저장된 것)을 복제본에 실어 보내면 `/Users/...` 같은 이 기기의 경로가 다시
+        // 동기화돼 다른 기기로 흘러간다. 아래에서 로컬 설정으로 옮겨 담는다.
+        const outgoing = draft.kind === "rdp" ? { ...draft, drives: null } : draft;
+        // 복제본은 원본과 같은 볼트에 둔다 — 팀 호스트를 개인에 복제하면 개인 레코드가 팀 비밀값을 가리킨다.
+        const vaultId = vaultIdOfHost(get().vaultIndex, current.id);
+        const next = isTeamVaultId(vaultId)
+          ? await api.hosts.create(outgoing, undefined, vaultId)
+          : await api.hosts.create(outgoing);
         // 공유 폴더는 기기 로컬 설정에 있다 — 레코드를 복사하는 것만으로는 따라오지
         // 않는다. 복제는 **같은 기기 안**에서 일어나므로 경로가 그대로 유효하고, 원본이
         // 열어 둔 폴더가 복제본에서 조용히 사라지면 왜 파일이 안 보이는지 알 수 없다.

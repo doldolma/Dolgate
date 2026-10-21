@@ -150,6 +150,10 @@ import {
   getPane,
   updatePaneState,
   toTrustInput,
+  findMixedVaultMessageKey,
+  PERSONAL_VAULT_ID,
+  vaultIdOfHost,
+  vaultIdOfWorkspace,
 } from "../utils";
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
 import {
@@ -293,6 +297,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     pendingCredentialRetry: null,
     activeCredentialRetryAttempt: null,
     pendingMissingUsernamePrompt: null,
+    awsMissingMyKeyByProfileId: {},
     pendingStartupCommandPrompt: null,
     pendingInteractiveAuths: [],
     pendingConnectionAttempts: [],
@@ -739,7 +744,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     retryVncConnection: async (sessionId) => {
       await retryVncConnection(set, get, sessionId);
     },
-    retrySessionConnection: async (sessionId, secrets) => {
+    retrySessionConnection: async (sessionId, secrets, jumpSecrets) => {
       const currentTab = get().tabs.find((tab) => tab.sessionId === sessionId);
       if (!currentTab) {
         return;
@@ -1015,6 +1020,13 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
         latestRows,
         secrets,
         pendingSessionId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        jumpSecrets,
       );
     },
     startSessionShare: async (input) => {
@@ -1435,6 +1447,21 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
       if (!root || countSavedWorkspacePanes(root) < 2) {
         throw new Error(t("savedWorkspace.unsupported"));
       }
+      // 워크스페이스는 창의 호스트가 든 볼트에 생긴다. 볼트가 섞였으면 저장을 누른 순간 알린다(메인도 거절한다) —
+      // 저장 단추를 미리 잠그지 않는다.
+      const index = state.vaultIndex;
+      const hasTeams = Boolean(index?.teams.length);
+      if (index && hasTeams) {
+        const mixed = findMixedVaultMessageKey(
+          root,
+          new Set(state.hosts.map((host) => host.id)),
+          (hostId) => vaultIdOfHost(index, hostId),
+          PERSONAL_VAULT_ID,
+        );
+        if (mixed) {
+          throw new Error(t(mixed));
+        }
+      }
       const record = await api.savedWorkspaces.create({ name, root });
       set((current) => ({
         savedWorkspaces: sortSavedWorkspaces([
@@ -1442,6 +1469,10 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
           record,
         ]),
       }));
+      // 팀 워크스페이스는 볼트 표를 다시 읽어야 트리의 그 팀 아래에 보인다.
+      if (hasTeams) {
+        await get().refreshVaultIndex();
+      }
       return record;
     },
     renameSavedWorkspace: async (savedWorkspaceId, name) => {
@@ -1462,7 +1493,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
       if (!current) {
         throw new Error(t("savedWorkspace.notFound"));
       }
-      const record = await api.savedWorkspaces.create({
+      const draft = {
         name: t("savedWorkspace.copyName", { name: current.name }),
         root: current.root,
         favorite: false,
@@ -1470,7 +1501,14 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
         // 그룹 안을 보고 있던 사용자에게는 복제가 조용히 실패한 것처럼 보인다(호스트 복제는
         // groupName 을 유지한다).
         groupName: current.groupName,
-      });
+      };
+      // 복제본도 원본 볼트에 둔다(그룹 경로는 볼트 안에서만 뜻이 있다). 팀이 없으면 지금과 같은 호출이다.
+      const index = get().vaultIndex;
+      const hasTeams = Boolean(index?.teams.length);
+      const record =
+        index && hasTeams
+          ? await api.savedWorkspaces.create(draft, vaultIdOfWorkspace(index, savedWorkspaceId))
+          : await api.savedWorkspaces.create(draft);
       set((state) => ({
         // create 와 같은 upsert 다. await 사이에 동기화 새로고침이 들어와 이미 이 레코드를
         // 담고 있으면, 그대로 붙이면 같은 id 가 두 번 들어가 카드가 두 장 그려진다(React key
@@ -1480,6 +1518,9 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
           record,
         ]),
       }));
+      if (hasTeams) {
+        await get().refreshVaultIndex();
+      }
       return record;
     },
     setSavedWorkspaceFavorite: async (savedWorkspaceId, favorite) => {
@@ -2457,7 +2498,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     dismissPendingCredentialRetry: () => {
       const pending = get().pendingCredentialRetry;
       if (pending?.sessionId) {
-        const host = get().hosts.find((item) => item.id === pending.hostId);
+        const host = get().hosts.find((item) => item.id === (pending.promptHostId ?? pending.hostId));
         const message = t("sessionStore.authInputCancelled", {
           label: host?.label ?? t("runtime.session"),
         });
@@ -2479,6 +2520,14 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
       if (!host || !isSshHostRecord(host)) {
         return;
       }
+      // 창이 묻는 호스트 — 대상이거나, 그 점프 호스트.
+      const isHopPrompt = Boolean(pending.promptHostId) && pending.promptHostId !== pending.hostId;
+      const promptHost = isHopPrompt
+        ? get().hosts.find((item) => item.id === pending.promptHostId)
+        : host;
+      if (!promptHost || !isSshHostRecord(promptHost)) {
+        return;
+      }
 
       const username = input.username.trim();
       if (!username) {
@@ -2487,8 +2536,8 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
 
       // 바꾼 사용자 이름은 호스트 레코드에 쓰지 않고 이번 시도의 값으로 넘긴다. 붙으면 메인이 제자리에
       // 저장한다(개인 호스트는 레코드, 팀 호스트는 내 자격 증명) — 팀 레코드에 쓰면 팀 모두의 이름이 바뀐다.
-      const usernameChanged = username !== host.username.trim();
-      const secrets = {
+      const usernameChanged = username !== promptHost.username.trim();
+      const entered = {
         username: usernameChanged ? username : undefined,
         password:
           input.password !== undefined && input.password.length > 0
@@ -2508,6 +2557,13 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             ? input.certificateText
             : undefined,
       };
+      // 넣은 값은 묻는 호스트 자리로 — 점프 호스트면 그 홉 값으로, 아니면 대상 값으로. 이번 시도에서 앞서
+      // 넣은 값(아직 붙지 않아 저장 전)은 그대로 함께 보낸다.
+      const carried = pending.carried ?? {};
+      const secrets = isHopPrompt ? carried.secrets : entered;
+      const jumpSecrets = isHopPrompt
+        ? { ...carried.jumpSecrets, [promptHost.id]: entered }
+        : carried.jumpSecrets;
 
       set({
         activeCredentialRetryAttempt: {
@@ -2516,18 +2572,21 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
           sessionId: pending.sessionId ?? null,
           paneId: pending.paneId,
           originalUsername: host.username,
-          attemptedUsername: username,
+          attemptedUsername: isHopPrompt ? (carried.secrets?.username ?? host.username) : username,
         },
       });
 
       try {
         if (pending.source === "ssh") {
           if (pending.sessionId) {
-            await get().retrySessionConnection(pending.sessionId, secrets);
+            await get().retrySessionConnection(pending.sessionId, secrets, jumpSecrets);
           } else {
             await get().connectHost(pending.hostId, 120, 32, secrets);
           }
-          set({ pendingCredentialRetry: null });
+          // 다시 시도가 다음 홉을 묻는 새 요청 창을 띄웠으면(점프 다음 대상 등) 그것은 남긴다.
+          if (get().pendingCredentialRetry?.requestId === pending.requestId) {
+            set({ pendingCredentialRetry: null });
+          }
           return;
         }
 
@@ -2556,6 +2615,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
           hostId: pending.hostId,
           endpointId,
           secrets,
+          jumpSecrets,
         });
         if (!connected) {
           set({ activeCredentialRetryAttempt: null });
@@ -2572,6 +2632,14 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     },
     dismissPendingMissingUsernamePrompt: () =>
       set({ pendingMissingUsernamePrompt: null }),
+    clearAwsMissingMyKey: (profileId) => {
+      const current = get().awsMissingMyKeyByProfileId;
+      if (!current[profileId]) {
+        return;
+      }
+      const { [profileId]: _cleared, ...rest } = current;
+      set({ awsMissingMyKeyByProfileId: rest });
+    },
     submitMissingUsernamePrompt: async ({ username }) => {
       const pending = get().pendingMissingUsernamePrompt;
       if (!pending) {

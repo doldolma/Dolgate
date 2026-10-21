@@ -345,11 +345,24 @@ describe("login to connect with", () => {
   // 키 설치는 이 실행 중 요청 창에 넣었던 값을 다시 쓰지 않는다(전과 같다).
   it("leaves out the prompt values remembered for reconnecting when asked to", async () => {
     const { coordinator } = createTeamCoordinator(null);
-    await coordinator.resolveSshAuth(teamHost, { passphrase: "typed" });
+    await coordinator.persistHostSpecificSecret("team-host", "Shared", { passphrase: "typed" });
 
     await expect(coordinator.resolveSshAuth(teamHost)).resolves.toMatchObject({ secrets: { passphrase: "typed" } });
     const withoutCache = await coordinator.resolveSshAuth(teamHost, undefined, { includeRuntimeCache: false });
     expect(withoutCache.secrets.passphrase).toBeUndefined();
+    clearRuntimeSecretCache();
+  });
+
+  // 붙기 전에 기억하면, 다른 까닭(점프 홉)으로 실패한 뒤 다음 접속이 그 값으로 붙고도 저장하지 않아 앱을 다시
+  // 켜면 또 물었다.
+  it("remembers prompt values for reconnecting only once the connection succeeded", async () => {
+    const { coordinator } = createTeamCoordinator(null);
+    await coordinator.resolveSshAuth(teamHost, { password: "typed" });
+
+    await expect(coordinator.resolveSshAuth(teamHost)).resolves.not.toMatchObject({ secrets: { password: "typed" } });
+
+    await coordinator.persistHostSpecificSecret("team-host", "Shared", { password: "typed" });
+    await expect(coordinator.resolveSshAuth(teamHost)).resolves.toMatchObject({ secrets: { password: "typed" } });
     clearRuntimeSecretCache();
   });
 

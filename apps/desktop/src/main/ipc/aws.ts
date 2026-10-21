@@ -10,8 +10,36 @@ import { randomUUID } from "node:crypto";
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { AwsEc2HostRecord, AwsEcsHostRecord, MainIpcContext } from "./context";
+import { resolveListedVault } from "./listed-vault";
 import { runWithIpcSessionOwner } from "./session-owner";
 import { t } from '../i18n';
+import type { AwsProfileVault } from "../aws-service";
+import { PERSONAL_VAULT_ID, type VaultScope } from "../vault-catalog";
+
+/**
+ * 관리할 볼트. 없거나 개인이면 undefined — AWS 서비스와 호스트 갱신이 지금까지의 개인 경로를 그대로 탄다. 이 기기에
+ * 없는 팀이면 던진다(화면이 막 빠진 팀을 들고 있을 수 있다).
+ */
+function resolveProfileVault(
+  ctx: MainIpcContext,
+  vaultId: string | null | undefined,
+): { scope: VaultScope; vault: AwsProfileVault } | undefined {
+  if (!vaultId || vaultId === PERSONAL_VAULT_ID) {
+    return undefined;
+  }
+  const scope = ctx.vaults.getScope(vaultId);
+  if (!scope) {
+    throw new Error(t("teams.notOnDevice"));
+  }
+  return { scope, vault: { teamId: scope.id, profiles: scope.awsProfiles } };
+}
+
+/** 팀 볼트의 호스트가 기억하는 프로필 이름(표시용)을 그 팀 프로필 목록에 맞춘다. */
+function refreshTeamHostProfileNames(scope: VaultScope): void {
+  scope.hosts.refreshAwsProfileNameCaches(
+    scope.awsProfiles.listMetadata().map(({ id, name }) => ({ id, name })),
+  );
+}
 
 export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   const resolveHostProfileName = (host: {
@@ -32,9 +60,14 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
     );
   };
 
-  ipcMain.handle(ipcChannels.aws.listProfiles, async () =>
-    ctx.awsService.listProfiles(),
-  );
+  // 설정 화면이 볼트를 골라 본다. 팀 프로필은 이름·id 만 — 정적 프로필의 키는 늘 각자 내 칸에 있다.
+  ipcMain.handle(ipcChannels.aws.listProfiles, async (_event, vaultId?: string | null) => {
+    const vault = resolveListedVault(ctx.vaults, vaultId);
+    if (vault === "personal") {
+      return ctx.awsService.listProfiles();
+    }
+    return (vault?.awsProfiles.listMetadata() ?? []).map(({ id, name }) => ({ id, name }));
+  });
 
   ipcMain.handle(ipcChannels.aws.listExternalProfiles, async () =>
     ctx.awsService.listExternalProfiles(),
@@ -43,21 +76,32 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.aws.createProfile,
     async (_event, input: AwsProfileCreateInput) => {
-      await ctx.awsService.createProfile(input);
+      const target = resolveProfileVault(ctx, input.vaultId);
+      await (target
+        ? ctx.awsService.createProfile(input, target.vault)
+        : ctx.awsService.createProfile(input));
       ctx.queueSync();
     },
   );
 
   ipcMain.handle(
     ipcChannels.aws.prepareSsoProfile,
-    async (_event, input: AwsSsoProfilePrepareInput) =>
-      ctx.awsService.prepareSsoProfile(input),
+    async (_event, input: AwsSsoProfilePrepareInput) => {
+      const target = resolveProfileVault(ctx, input.vaultId);
+      return target
+        ? ctx.awsService.prepareSsoProfile(input, target.vault)
+        : ctx.awsService.prepareSsoProfile(input);
+    },
   );
 
   ipcMain.handle(
     ipcChannels.aws.getProfileDetails,
-    async (_event, profileName: string) =>
-      ctx.awsService.getProfileDetails(profileName),
+    async (_event, profileName: string, vaultId?: string | null) => {
+      const target = resolveProfileVault(ctx, vaultId);
+      return target
+        ? ctx.awsService.getProfileDetails(profileName, target.vault)
+        : ctx.awsService.getProfileDetails(profileName);
+    },
   );
 
   ipcMain.handle(
@@ -85,7 +129,11 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.aws.updateProfile,
     async (_event, input: AwsProfileUpdateInput) => {
-      await ctx.awsService.updateProfile(input);
+      // 팀 정적 프로필이면 키는 내 칸으로 간다(팀 저장소가 나눈다).
+      const target = resolveProfileVault(ctx, input.vaultId);
+      await (target
+        ? ctx.awsService.updateProfile(input, target.vault)
+        : ctx.awsService.updateProfile(input));
       ctx.queueSync();
     },
   );
@@ -93,7 +141,10 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.aws.updateProfileRegion,
     async (_event, input: AwsProfileRegionUpdateInput) => {
-      await ctx.awsService.updateProfileRegion(input);
+      const target = resolveProfileVault(ctx, input.vaultId);
+      await (target
+        ? ctx.awsService.updateProfileRegion(input, target.vault)
+        : ctx.awsService.updateProfileRegion(input));
       ctx.queueSync();
     },
   );
@@ -101,6 +152,14 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.aws.renameProfile,
     async (_event, input: AwsProfileRenameInput) => {
+      const target = resolveProfileVault(ctx, input.vaultId);
+      if (target) {
+        // 팀 프로필의 이름이 바뀌면 그 팀 호스트가 보이는 프로필 이름도 따라간다.
+        await ctx.awsService.renameProfile(input, target.vault);
+        refreshTeamHostProfileNames(target.scope);
+        ctx.queueSync();
+        return;
+      }
       await ctx.awsService.renameProfile(input);
       const details = await ctx.awsService.getProfileDetails(input.nextProfileName);
       if (details.id) {
@@ -112,7 +171,27 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.aws.deleteProfile,
-    async (_event, profileName: string) => {
+    async (_event, profileName: string, vaultId?: string | null) => {
+      const target = resolveProfileVault(ctx, vaultId);
+      if (target) {
+        const id = target.scope.awsProfiles.getMetadataByName(profileName.trim())?.id ?? null;
+        // 지움 기록을 먼저 남긴다. 지운 뒤(펼친 파일을 쓰는 동안) 팀 동기화가 한 바퀴 돌면, 기록 없이 빠진 레코드를
+        // 서버 사본으로 되살린다 — 실제 앱 시험에서 잠깐 되살아났다. 못 지우면 기록도 거둔다.
+        if (id) {
+          target.scope.syncOutbox.upsertDeletion("awsProfiles", id);
+        }
+        try {
+          await ctx.awsService.deleteProfile(profileName, target.vault);
+        } catch (error) {
+          if (id) {
+            target.scope.syncOutbox.clear("awsProfiles", id);
+          }
+          throw error;
+        }
+        refreshTeamHostProfileNames(target.scope);
+        ctx.queueSync();
+        return;
+      }
       const details = await ctx.awsService.getProfileDetails(profileName);
       await ctx.awsService.deleteProfile(profileName);
       ctx.hosts.refreshAwsProfileNameCaches(
@@ -129,8 +208,12 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.aws.getProfileStatus,
-    async (_event, profileName: string) =>
-      ctx.awsService.getProfileStatus(profileName),
+    async (_event, profileName: string, vaultId?: string | null) => {
+      const target = resolveProfileVault(ctx, vaultId);
+      return target
+        ? ctx.awsService.getProfileStatus(profileName, target.vault)
+        : ctx.awsService.getProfileStatus(profileName);
+    },
   );
 
   ipcMain.handle(
@@ -141,7 +224,12 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
       ),
   );
 
-  ipcMain.handle(ipcChannels.aws.login, async (_event, profileName: string) => {
+  ipcMain.handle(ipcChannels.aws.login, async (_event, profileName: string, vaultId?: string | null) => {
+    const target = resolveProfileVault(ctx, vaultId);
+    if (target) {
+      await ctx.awsService.login(profileName, target.vault);
+      return;
+    }
     await ctx.awsService.login(profileName);
   });
 

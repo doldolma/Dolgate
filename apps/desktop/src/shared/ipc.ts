@@ -596,6 +596,28 @@ export interface DesktopConnectInput {
    * tmux=true 일 때만 의미가 있고, 비우면 코어가 최신 가정으로 동작한다.
    */
   tmuxVersion?: string;
+  /**
+   * 이번 시도에서 요청 창에 넣은 점프 호스트의 값(점프 호스트 id → 값). 그 홉의 저장된 것보다 먼저 쓰고,
+   * 붙으면 그 홉 제자리(팀 호스트는 내 자격 증명)에 저장한다.
+   */
+  jumpSecrets?: Record<string, HostSecretInput>;
+}
+
+/**
+ * 메인이 "이 호스트의 자격 증명을 넣어야 붙는다"고 알린다. 화면은 요청 창을 이 호스트로 띄운다 — 점프
+ * 체인이면 대상이 아니라 그 점프 호스트일 수 있다.
+ */
+export interface ConnectCredentialsNeeded {
+  /** 물어야 할 호스트(점프 호스트 또는 대상). */
+  hostId: string;
+  /** missing: 쓸 비밀번호가 없다(붙기 전에 안다). rejected: 그 홉이 인증을 거절했다. */
+  reason: "missing" | "rejected";
+  /** rejected 일 때 코어가 올린 문구. */
+  message?: string;
+}
+
+export interface CredentialsNeededResult {
+  credentialsNeeded: ConnectCredentialsNeeded;
 }
 
 export type AgentForwardingEndpointKind = "unix" | "windows-openssh-pipe";
@@ -638,6 +660,8 @@ export interface DesktopSftpConnectInput {
   hostId: string;
   endpointId: string;
   secrets?: HostSecretInput;
+  /** 이번 시도에서 요청 창에 넣은 점프 호스트의 값(DesktopConnectInput.jumpSecrets 와 같다). */
+  jumpSecrets?: Record<string, HostSecretInput>;
 }
 
 // main 프로세스가 점프(베스천) 호스트의 자격증명/신뢰키까지 해석한 결과. Go 코어의
@@ -1339,10 +1363,26 @@ export interface TeamInviteInfo {
   alreadyJoined: boolean;
 }
 
+/**
+ * 참여 카드에 띄울 것. 열 수 있는 링크면 팀 정보(`ok`), 아니면 왜 못 여는지다.
+ * - other-server: 다른 동기화 서버의 팀이다(그 서버로 로그인하면 들어갈 수 있다)
+ * - expired: 기한이 지났거나 취소됐거나 없는 링크다
+ * - update-required: 이 앱이 모르는 새 형식의 링크다
+ * - invalid: 잘린 링크다
+ */
+export type TeamInvitePreview =
+  | ({ status: "ok" } & TeamInviteInfo)
+  | { status: "other-server"; serverHost: string }
+  | { status: "expired" }
+  | { status: "update-required" }
+  | { status: "invalid" };
+
 /** 볼트 사이 복사에서 고른 것 — 호스트 여럿, 또는 그룹 하나(하위 그룹과 호스트 통째로). */
 export type VaultCopySelection =
   | { kind: 'hosts'; hostIds: string[] }
-  | { kind: 'group'; groupPath: string };
+  | { kind: 'group'; groupPath: string }
+  /** 워크스페이스와 그 창의 호스트(호스트가 쓰는 것까지). 창은 복사본 호스트로 다시 잇는다. */
+  | { kind: 'workspaces'; workspaceIds: string[] };
 
 /** 개인 ↔ 팀(또는 팀 ↔ 팀) 복사. 볼트 id 는 'personal' 이나 팀 id 다. */
 export interface VaultCopyRequest {
@@ -1376,6 +1416,7 @@ export interface VaultCopyCounts {
   snippets: number;
   awsProfiles: number;
   tailnets: number;
+  workspaces: number;
 }
 
 /** 팀 호스트에 쓰는 내 자격 증명 — 넣을 때. 비운 칸은 호스트 것을 쓴다. */
@@ -1405,7 +1446,44 @@ export interface MyHostCredentialsSummary {
 export interface VaultCopyResult {
   /** 원본 호스트 id → 복사본 id. */
   hostIds: Record<string, string>;
+  /** 원본 워크스페이스 id → 복사본 id(워크스페이스를 복사했을 때). */
+  workspaceIds: Record<string, string>;
   counts: VaultCopyCounts;
+}
+
+/**
+ * 이 계정으로 팀을 쓸 수 있는지. 못 쓰면 화면은 팀 메뉴(Teams 탭)를 그리지 않는다.
+ * - signed-out: 로그인하지 않았다(계정 없이 쓰는 중 포함)
+ * - vault-locked: 볼트가 잠겨 있다
+ * - unsupported-vault: 팀 키를 감쌀 E2EE 볼트가 아니다(옛 볼트)
+ * - server-unsupported: 서버가 팀을 모른다(옛 자체 호스팅)
+ */
+export type TeamAvailability =
+  | { available: true }
+  | { available: false; reason: "signed-out" | "vault-locked" | "unsupported-vault" | "server-unsupported" };
+
+/** 이 기기에 있는 팀 볼트 하나와 그 그룹. 그룹 경로는 볼트 안에서만 유일해서 볼트마다 따로 준다. */
+export interface TeamVaultEntry extends TeamListItem {
+  groups: GroupRecord[];
+}
+
+/**
+ * 화면이 레코드의 볼트를 찾는 표. 레코드 모양은 그대로 두고, 팀 레코드의 id 로 그 팀을 찾는다 — id 는 볼트를
+ * 넘어 겹치지 않는다. 표에 없는 레코드는 개인 볼트 것이다.
+ *
+ * id 가 겹친 팀 레코드는 목록에 나오지 않으므로 표에도 없다(목록과 같은 규칙 — 개인이 이기고, 팀끼리는 먼저
+ * 있는 팀이 이긴다).
+ */
+export interface VaultIndex {
+  /** 이 기기의 팀 볼트. 개인 볼트는 늘 있으므로 따로 두지 않는다. */
+  teams: TeamVaultEntry[];
+  teamIdByHostId: Record<string, string>;
+  teamIdByWorkspaceId: Record<string, string>;
+  teamIdByPortForwardId: Record<string, string>;
+  teamIdByDnsOverrideId: Record<string, string>;
+  teamIdBySnippetId: Record<string, string>;
+  /** 팀 호스트에 둔 내 사용자 이름(내 자격 증명에 있을 때만). 화면은 팀 레코드의 이름 대신 이것을 보인다. */
+  myUsernameByHostId: Record<string, string>;
 }
 
 export interface DesktopApi {
@@ -1498,31 +1576,43 @@ export interface DesktopApi {
       detectedOs: HostDetectedOs | null,
     ) => Promise<HostRecord | null>;
   };
+  /**
+   * 개인 볼트의 그룹(list). 쓰기는 마지막 인자 vaultId 로 볼트를 고른다 — 없으면 개인, 팀 ID 면 그 팀 볼트
+   * (이 기기에 없는 팀이면 던진다). 팀 볼트에 쓴 결과의 목록은 그 팀 것이라, 화면은 팀에 쓴 뒤 목록을 다시
+   * 읽는다.
+   */
   groups: {
     list: () => Promise<GroupRecord[]>;
-    create: (name: string, parentPath?: string | null) => Promise<GroupRecord>;
-    remove: (path: string, mode: GroupRemoveMode) => Promise<GroupRemoveResult>;
+    create: (name: string, parentPath?: string | null, vaultId?: string | null) => Promise<GroupRecord>;
+    remove: (path: string, mode: GroupRemoveMode, vaultId?: string | null) => Promise<GroupRemoveResult>;
     move: (
       path: string,
       targetParentPath: string | null,
+      vaultId?: string | null,
     ) => Promise<GroupPathMutationResult>;
-    rename: (path: string, name: string) => Promise<GroupPathMutationResult>;
+    rename: (path: string, name: string, vaultId?: string | null) => Promise<GroupPathMutationResult>;
     /**
      * 직접 정렬 순서를 저장한다. 보통 한 건이지만, 형제 사이 간격이 닫히면 그 부모 아래를
      * 통째로 다시 매기므로 배열로 받는다(group-ordering 의 planGroupReorder).
      */
     setOrder: (
       assignments: Array<{ id: string; sortRank: number }>,
+      vaultId?: string | null,
     ) => Promise<GroupRecord[]>;
   };
   aws: {
-    listProfiles: () => Promise<AwsProfileSummary[]>;
+    /** vaultId 는 볼 볼트다. 없으면 개인, 팀 ID 면 그 팀 볼트(이 기기에 없는 팀이면 빈 목록). */
+    listProfiles: (vaultId?: string | null) => Promise<AwsProfileSummary[]>;
     listExternalProfiles: () => Promise<AwsProfileSummary[]>;
     createProfile: (input: AwsProfileCreateInput) => Promise<void>;
     prepareSsoProfile: (
       input: AwsSsoProfilePrepareInput,
     ) => Promise<AwsSsoProfilePrepareResult>;
-    getProfileDetails: (profileName: string) => Promise<AwsProfileDetails>;
+    /**
+     * vaultId 는 그 프로필이 든 볼트다(설정의 팀 묶음). 없으면 개인. 관리 입력(만들기·고치기·리전·이름 바꾸기)은
+     * 입력의 vaultId 로 같은 뜻이다. 팀 것도 화면에서는 원래 이름으로 다룬다.
+     */
+    getProfileDetails: (profileName: string, vaultId?: string | null) => Promise<AwsProfileDetails>;
     getExternalProfileDetails: (profileName: string) => Promise<AwsProfileDetails>;
     importExternalProfiles: (
       input: AwsExternalProfileImportInput,
@@ -1530,10 +1620,10 @@ export interface DesktopApi {
     updateProfile: (input: AwsProfileUpdateInput) => Promise<void>;
     updateProfileRegion: (input: AwsProfileRegionUpdateInput) => Promise<void>;
     renameProfile: (input: AwsProfileRenameInput) => Promise<void>;
-    deleteProfile: (profileName: string) => Promise<void>;
-    getProfileStatus: (profileName: string) => Promise<AwsProfileStatus>;
+    deleteProfile: (profileName: string, vaultId?: string | null) => Promise<void>;
+    getProfileStatus: (profileName: string, vaultId?: string | null) => Promise<AwsProfileStatus>;
     getProfileStatusById: (profileId: string) => Promise<AwsProfileStatus>;
-    login: (profileName: string) => Promise<void>;
+    login: (profileName: string, vaultId?: string | null) => Promise<void>;
     loginById: (profileId: string) => Promise<void>;
     listRegions: (profileName: string) => Promise<string[]>;
     listEc2Instances: (
@@ -1748,12 +1838,16 @@ export interface DesktopApi {
      * (`awsFallback`)이 함께 온다. 연결은 됐으니 오류가 아니라서 예전에는 아무 데도 안 나왔다.
      * 문장이 아니라 구조로 넘긴다 — 화면이 토스트·툴팁으로 나눠 쓴다.
      */
-    connect: (input: DesktopConnectInput) => Promise<{
-      sessionId: string;
-      awsTransport?: AwsSessionTransport;
-      awsFallback?: AwsSessionFallback;
-      sessionProtocol?: 'ssh' | 'mosh' | 'ssm-shell';
-    }>;
+    connect: (input: DesktopConnectInput) => Promise<
+      | {
+          sessionId: string;
+          awsTransport?: AwsSessionTransport;
+          awsFallback?: AwsSessionFallback;
+          sessionProtocol?: 'ssh' | 'mosh' | 'ssm-shell';
+        }
+      // 붙기 전에 쓸 비밀번호가 없는 홉을 찾으면 코어를 부르지 않고 그 홉을 알린다.
+      | CredentialsNeededResult
+    >;
     connectLocal: (
       input: DesktopLocalConnectInput,
     ) => Promise<{ sessionId: string }>;
@@ -1965,20 +2059,26 @@ export interface DesktopApi {
   };
   dnsOverrides: {
     list: () => Promise<DnsOverrideResolvedRecord[]>;
-    create: (draft: DnsOverrideDraft) => Promise<DnsOverrideResolvedRecord>;
+    /** Linked 는 규칙의 볼트에 만든다. Static 은 vaultId 볼트에(없으면 개인). */
+    create: (draft: DnsOverrideDraft, vaultId?: string) => Promise<DnsOverrideResolvedRecord>;
     update: (id: string, draft: DnsOverrideDraft) => Promise<DnsOverrideResolvedRecord>;
     setStaticActive: (id: string, active: boolean) => Promise<DnsOverrideResolvedRecord>;
     remove: (id: string) => Promise<void>;
   };
   snippets: {
     list: () => Promise<SnippetRecord[]>;
-    create: (draft: SnippetDraft) => Promise<SnippetRecord>;
+    /** vaultId 볼트에 만든다(없으면 개인). */
+    create: (draft: SnippetDraft, vaultId?: string) => Promise<SnippetRecord>;
     update: (id: string, draft: SnippetDraft) => Promise<SnippetRecord>;
     remove: (id: string) => Promise<void>;
   };
   teams: {
     /** 이 기기에 있는 팀들. */
     list: () => Promise<TeamListItem[]>;
+    /** 이 계정으로 팀을 쓸 수 있는지(로그인·E2EE 볼트·서버). */
+    getAvailability: () => Promise<TeamAvailability>;
+    /** 팀 볼트 목록·그룹과, 팀 레코드 id → 팀 표. 화면이 레코드의 볼트를 찾는다. */
+    getVaultIndex: () => Promise<VaultIndex>;
     /** 서버에서 팀 목록을 다시 읽은 뒤의 목록. */
     refresh: () => Promise<TeamListItem[]>;
     create: (name: string) => Promise<TeamListItem>;
@@ -1993,11 +2093,17 @@ export interface DesktopApi {
     removeMember: (teamId: string, userId: string) => Promise<void>;
     /** 다른 멤버가 남은 소유자는 소유권을 넘긴 뒤에 나갈 수 있다. */
     leave: (teamId: string) => Promise<void>;
-    /** 기한은 1~30일, 없으면 7일. */
-    createInvite: (teamId: string, options?: { expiresInDays?: number }) => Promise<TeamInviteCreated>;
+    /** 기한은 1시간~30일(시간 단위), 없으면 7일. */
+    createInvite: (teamId: string, options?: { expiresInHours?: number }) => Promise<TeamInviteCreated>;
     listInvites: (teamId: string) => Promise<TeamInvite[]>;
     revokeInvite: (teamId: string, code: string) => Promise<void>;
     getInviteInfo: (link: string) => Promise<TeamInviteInfo>;
+    /** 참여 카드에 띄울 것 — 열 수 없는 링크면 그 까닭(던지지 않는다). 팀 키 상자는 받지 않는다. */
+    previewInvite: (link: string) => Promise<TeamInvitePreview>;
+    /** 브라우저의 링크 페이지가 넘긴, 아직 화면이 가져가지 않은 초대 링크. 가져가면 비운다. */
+    takePendingInviteLink: () => Promise<string | null>;
+    /** 링크 페이지가 초대 링크를 넘겼다 — takePendingInviteLink 로 가져간다. */
+    onInviteLink: (listener: () => void) => () => void;
     join: (link: string) => Promise<TeamListItem>;
     /** 볼트 사이 복사를 하면 무엇이 몇 개 오는지(쓰지 않는다). */
     previewCopy: (request: VaultCopyRequest) => Promise<VaultCopyCounts>;
@@ -2013,7 +2119,11 @@ export interface DesktopApi {
   };
   savedWorkspaces: {
     list: () => Promise<SavedWorkspaceRecord[]>;
-    create: (draft: SavedWorkspaceDraft) => Promise<SavedWorkspaceRecord>;
+    /**
+     * 창의 호스트가 든 볼트에 만든다(로컬 창만이면 vaultId, 없으면 개인). 호스트의 볼트가 섞이거나 vaultId 와
+     * 다르면 거절한다.
+     */
+    create: (draft: SavedWorkspaceDraft, vaultId?: string) => Promise<SavedWorkspaceRecord>;
     rename: (id: string, name: string) => Promise<SavedWorkspaceRecord>;
     moveToGroup: (id: string, groupName: string | null) => Promise<SavedWorkspaceRecord>;
     setFavorite: (id: string, favorite: boolean) => Promise<SavedWorkspaceRecord>;
@@ -2024,11 +2134,19 @@ export interface DesktopApi {
     commandFinished: (payload: CommandFinishedNotification) => Promise<void>;
   };
   tailnet: {
-    list: () => Promise<TailnetRecord[]>;
-    /** authKey 를 생략하면 기존 키를 그대로 둔다. 빈 문자열이면 지운다. */
+    /**
+     * vaultId 는 볼 볼트다. 없으면 개인, 팀 ID 면 그 팀 볼트(이 기기에 없는 팀이면 빈 목록). 팀 tailnet 의
+     * hasAuthKey 는 내 auth key 가 있는지다 — auth key 는 늘 각자 내 칸에 둔다.
+     */
+    list: (vaultId?: string | null) => Promise<TailnetRecord[]>;
+    /**
+     * authKey 를 생략하면 기존 키를 그대로 둔다. 빈 문자열이면 지운다. vaultId 는 새 설정을 둘 볼트다(없으면 개인) —
+     * 있는 설정은 그것이 든 볼트에 그대로 둔다. 팀 것의 auth key 는 내 칸에만 간다.
+     */
     save: (input: {
       record: TailnetRecord;
       authKey?: string;
+      vaultId?: string | null;
     }) => Promise<TailnetRecord>;
     /** 노드를 정리하고 설정까지 지운다. */
     remove: (id: string) => Promise<void>;
@@ -2054,7 +2172,8 @@ export interface DesktopApi {
     onStatus: (listener: (status: TailnetStatus) => void) => () => void;
   };
   knownHosts: {
-    list: () => Promise<KnownHostRecord[]>;
+    /** vaultId 는 볼 볼트다. 없으면 개인, 팀 ID 면 그 팀 볼트(이 기기에 없는 팀이면 빈 목록). */
+    list: (vaultId?: string | null) => Promise<KnownHostRecord[]>;
     probeHost: (input: KnownHostProbeInput) => Promise<HostKeyProbeResult>;
     trust: (input: KnownHostTrustInput) => Promise<KnownHostRecord>;
     replace: (input: KnownHostTrustInput) => Promise<KnownHostRecord>;
@@ -2077,7 +2196,8 @@ export interface DesktopApi {
     storageUsage: () => Promise<SessionReplayStorageUsage>;
   };
   keychain: {
-    list: () => Promise<SecretMetadataRecord[]>;
+    /** vaultId 는 볼 볼트다. 없으면 개인, 팀 ID 면 그 팀 볼트(이 기기에 없는 팀이면 빈 목록). */
+    list: (vaultId?: string | null) => Promise<SecretMetadataRecord[]>;
     load: (secretRef: string) => Promise<LoadedManagedSecretPayload | null>;
     copyPassword: (secretRef: string) => Promise<void>;
     remove: (secretRef: string) => Promise<void>;
@@ -2125,7 +2245,8 @@ export interface DesktopApi {
     ) => () => void;
   };
   sftp: {
-    connect: (input: DesktopSftpConnectInput) => Promise<SftpEndpointSummary>;
+    /** 그 홉의 자격 증명을 넣어야 붙으면(없음·점프 홉 거절) 오류 대신 그 홉을 알린다. */
+    connect: (input: DesktopSftpConnectInput) => Promise<SftpEndpointSummary | CredentialsNeededResult>;
     disconnect: (endpointId: string) => Promise<void>;
     list: (input: SftpListInput) => Promise<DirectoryListing>;
     mkdir: (input: SftpMkdirInput) => Promise<void>;

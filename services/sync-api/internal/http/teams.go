@@ -455,6 +455,21 @@ func registerTeamRoutes(
 		}
 	})
 
+	// 링크 페이지 — 로그인 없이 열린다. 팀 이름만 보이고(초대한 사람은 앱의 참여 카드에서), `앱 열기` 는 페이지
+	// 스크립트가 # 뒤(서버로 오지 않는 비밀값)를 붙여 앱으로 넘긴다. 채팅 미리보기도 이 페이지를 읽는다.
+	router.GET("/invite/:code", func(ctx *gin.Context) {
+		page, err := dataStore.GetTeamInvitePage(ctx.Request.Context(), ctx.Param("code"))
+		switch {
+		case err == nil:
+			renderTeamInvitePage(ctx, http.StatusOK, page.TeamName)
+		case errors.Is(err, storepkg.ErrTeamInviteInvalid):
+			renderTeamInvitePage(ctx, http.StatusNotFound, "")
+		default:
+			log.Printf("teams: 링크 페이지 읽기 실패: %v", err)
+			ctx.String(http.StatusInternalServerError, pageTextOf(ctx).ServerError)
+		}
+	})
+
 	invites := router.Group("/invite")
 	invites.Use(authMiddleware(authService), requireExistingUser, noStore)
 

@@ -11,8 +11,22 @@ import { isSshHostRecord } from "@shared";
 import { BrowserWindow, clipboard, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext, SshHostRecord } from "./context";
+import { resolveListedVault } from "./listed-vault";
 import { t } from '../i18n';
 import { logMessage } from "../activity-log-message";
+import { PERSONAL_VAULT_ID } from "../vault-catalog";
+
+/**
+ * 그 저장 자격 증명이 든 볼트의 저장소. 개인이면 지금까지 쓰던 것(ctx 의 secretStore·secretMetadata·hosts·
+ * syncOutbox) 그대로다 — 팀이 없으면 호출이 하나도 바뀌지 않는다. 팀 것을 바꾸거나 지우면 멤버 모두에게 간다.
+ */
+function secretVaultOf(ctx: MainIpcContext, secretRef: string) {
+  const scope = ctx.vaults.scopeOfSecret(secretRef);
+  if (scope.id === PERSONAL_VAULT_ID) {
+    return { secrets: ctx.secretStore, metadata: ctx.secretMetadata, hosts: ctx.hosts, syncOutbox: ctx.syncOutbox };
+  }
+  return { secrets: scope.secrets, metadata: scope.secretMetadata, hosts: scope.hosts, syncOutbox: scope.syncOutbox };
+}
 
 function normalizeReplacementSecrets(secrets: HostSecretInput): HostSecretInput {
   const privateKeyPem =
@@ -53,7 +67,11 @@ function validateReplacementSecrets(secrets: HostSecretInput): string | null {
 export function registerKnownHostsLogsKeychainIpcHandlers(
   ctx: MainIpcContext,
 ): void {
-  ipcMain.handle(ipcChannels.knownHosts.list, async () => ctx.knownHosts.list());
+  // 설정 화면이 볼트를 골라 본다. 고르지 않았으면 개인 볼트다(지금까지와 같다).
+  ipcMain.handle(ipcChannels.knownHosts.list, async (_event, vaultId?: string | null) => {
+    const vault = resolveListedVault(ctx.vaults, vaultId);
+    return vault === "personal" ? ctx.knownHosts.list() : (vault?.knownHosts.list() ?? []);
+  });
 
   ipcMain.handle(
     ipcChannels.knownHosts.probeHost,
@@ -171,8 +189,15 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
   );
 
   ipcMain.handle(ipcChannels.knownHosts.remove, async (_event, id: string) => {
-    ctx.syncOutbox.upsertDeletion("knownHosts", id);
-    ctx.knownHosts.remove(id);
+    // 그 기록이 든 볼트에서 지운다 — 팀 것은 멤버 모두가 다음 접속에서 다시 확인한다.
+    const scope = ctx.vaults.scopeOfKnownHost(id);
+    if (scope.id === PERSONAL_VAULT_ID) {
+      ctx.syncOutbox.upsertDeletion("knownHosts", id);
+      ctx.knownHosts.remove(id);
+    } else {
+      scope.syncOutbox.upsertDeletion("knownHosts", id);
+      scope.knownHosts.remove(id);
+    }
     ctx.activityLogs.append(
       "info",
       "audit",
@@ -216,16 +241,20 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
     ctx.sessionReplayService.getStorageUsage(),
   );
 
-  ipcMain.handle(ipcChannels.keychain.list, async () => ctx.secretMetadata.list());
+  ipcMain.handle(ipcChannels.keychain.list, async (_event, vaultId?: string | null) => {
+    const vault = resolveListedVault(ctx.vaults, vaultId);
+    return vault === "personal" ? ctx.secretMetadata.list() : (vault?.secretMetadata.list() ?? []);
+  });
 
   ipcMain.handle(
     ipcChannels.keychain.load,
     async (_event, secretRef: string) => {
-      const metadata = ctx.secretMetadata.getBySecretRef(secretRef);
+      const vault = secretVaultOf(ctx, secretRef);
+      const metadata = vault.metadata.getBySecretRef(secretRef);
       if (!metadata) {
         return null;
       }
-      const raw = await ctx.secretStore.load(secretRef);
+      const raw = await vault.secrets.load(secretRef);
       if (!raw) {
         return null;
       }
@@ -247,12 +276,13 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
   ipcMain.handle(
     ipcChannels.keychain.copyPassword,
     async (_event, secretRef: string) => {
-      const metadata = ctx.secretMetadata.getBySecretRef(secretRef);
+      const vault = secretVaultOf(ctx, secretRef);
+      const metadata = vault.metadata.getBySecretRef(secretRef);
       if (!metadata) {
         throw new Error(t('knownHostsIpc.secretNotFound'));
       }
 
-      const raw = await ctx.secretStore.load(secretRef);
+      const raw = await vault.secrets.load(secretRef);
       if (!raw) {
         throw new Error(t('knownHostsIpc.secretLoadFailed'));
       }
@@ -269,10 +299,13 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
   ipcMain.handle(
     ipcChannels.keychain.remove,
     async (_event, secretRef: string) => {
-      await ctx.secretStore.remove(secretRef);
-      ctx.secretMetadata.remove(secretRef);
-      ctx.hosts.clearSecretRef(secretRef);
-      ctx.syncOutbox.upsertDeletion("secrets", secretRef);
+      // 그 볼트의 호스트만 이 비밀값을 가리킨다(볼트를 넘는 참조는 메인이 거절한다). 지움 기록을 먼저 남긴다 —
+      // 비밀값을 지우고 메타데이터를 지우기 전(기다리는 사이)에 팀 동기화가 돌면, 기록 없이 빠진 것을 서버 사본으로 되살린다.
+      const vault = secretVaultOf(ctx, secretRef);
+      vault.syncOutbox.upsertDeletion("secrets", secretRef);
+      await vault.secrets.remove(secretRef);
+      vault.metadata.remove(secretRef);
+      vault.hosts.clearSecretRef(secretRef);
       ctx.activityLogs.append("warn", "audit", logMessage('knownHostsIpc.secretRemoved'), {
         secretRef,
       });
@@ -283,7 +316,8 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
   ipcMain.handle(
     ipcChannels.keychain.update,
     async (_event, input: KeychainSecretUpdateInput) => {
-      const currentMetadata = ctx.secretMetadata.getBySecretRef(input.secretRef);
+      const vault = secretVaultOf(ctx, input.secretRef);
+      const currentMetadata = vault.metadata.getBySecretRef(input.secretRef);
       if (!currentMetadata) {
         throw new Error("Keychain secret not found");
       }
@@ -293,7 +327,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
       if (validationError) {
         throw new Error(validationError);
       }
-      const currentRaw = await ctx.secretStore.load(input.secretRef);
+      const currentRaw = await vault.secrets.load(input.secretRef);
       const currentPayload = currentRaw
         ? (JSON.parse(currentRaw) as ManagedSecretPayload)
         : null;
@@ -304,7 +338,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
       // 서로 다른 이름을 말한다. 빈 값은 "그대로" 로 본다 — 이름 없는 자격증명은 고를 수 없다.
       const nextLabel = input.label?.trim() ? input.label.trim() : currentMetadata.label;
 
-      await ctx.secretStore.save(
+      await vault.secrets.save(
         input.secretRef,
         JSON.stringify({
           secretRef: input.secretRef,
@@ -340,7 +374,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
           updatedAt: new Date().toISOString(),
         } satisfies ManagedSecretPayload),
       );
-      ctx.secretMetadata.upsert({
+      vault.metadata.upsert({
         secretRef: input.secretRef,
         label: nextLabel,
         hasPassword: Boolean(replacementSecrets.password),

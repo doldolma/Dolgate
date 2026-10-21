@@ -26,6 +26,7 @@ import {
   type SyncWatchLoopOptions,
   type SyncWatchOutcome,
   type TailnetPayload,
+  type TeamAvailability,
 } from "@shared";
 import type { AuthSyncContext } from "./auth-service";
 import { normalizeTailnetPayloadForStorage } from "./database";
@@ -273,6 +274,38 @@ export class TeamSyncService {
   }
 
   /**
+   * 이 계정으로 팀을 쓸 수 있는지. 화면이 팀 메뉴를 그릴지 정한다. 서버가 팀을 아는지는 서버마다 한 번 묻고
+   * 기억한다(팀 목록 읽기와 같은 값). 감시·팀 키는 건드리지 않는다.
+   */
+  async getAvailability(): Promise<TeamAvailability> {
+    if (this.auth.getState().status !== "authenticated") {
+      return { available: false, reason: "signed-out" };
+    }
+    if (this.auth.getVaultStatus() !== "unlocked") {
+      return { available: false, reason: "vault-locked" };
+    }
+    const context = captureTeamContext(this.auth);
+    if (!context) {
+      return { available: false, reason: "unsupported-vault" };
+    }
+    const lease: TeamRequestLease = {
+      serverUrl: context.serverUrl,
+      accessToken: context.accessToken,
+      vaultEpoch: context.vaultEpoch,
+      signal: this.abort.signal,
+      isActive: () => this.auth.isSyncContextCurrent(context),
+    };
+    try {
+      return (await this.isTeamsSupported(lease))
+        ? { available: true }
+        : { available: false, reason: "server-unsupported" };
+    } catch {
+      // 묻는 사이 계정·볼트가 바뀌었다(로그아웃·초기화 등). 바뀐 뒤의 화면 갱신이 다시 묻는다.
+      return { available: false, reason: "signed-out" };
+    }
+  }
+
+  /**
    * 팀 목록을 다시 읽어 이 기기의 팀 볼트를 맞춘다. 빠진 팀은 지우고, 새 팀은 키를 풀어 감시를 시작한다.
    * 볼트가 잠겼거나(팀 키를 풀 개인 DEK 가 없다) 로그인하지 않았으면 아무것도 하지 않는다.
    */
@@ -459,7 +492,7 @@ export class TeamSyncService {
     }
   }
 
-  private async isTeamsSupported(lease: TeamLease): Promise<boolean> {
+  private async isTeamsSupported(lease: TeamRequestLease): Promise<boolean> {
     if (this.teamsSupport?.serverUrl !== lease.serverUrl) {
       let supported = true;
       try {

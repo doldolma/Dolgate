@@ -86,6 +86,32 @@ describe('registerKnownHostsLogsKeychainIpcHandlers', () => {
     electronMocks.clipboardWriteText.mockReset();
   });
 
+  it('reads known hosts and saved credentials from the vault the settings screen picks', async () => {
+    const teamKnownHosts = [{ id: 'kh-team' }];
+    const teamSecrets = [{ secretRef: 'secret:team' }];
+    const ctx = withVaults(createContext(), {
+      'team-1': {
+        knownHosts: { list: vi.fn(() => teamKnownHosts) },
+        secretMetadata: { list: vi.fn(() => teamSecrets) },
+      },
+    }) as any;
+    ctx.knownHosts.list.mockReturnValue([{ id: 'kh-personal' }]);
+    ctx.secretMetadata.list.mockReturnValue([{ secretRef: 'secret:personal' }]);
+    registerKnownHostsLogsKeychainIpcHandlers(ctx);
+    const knownHosts = ipcHandlers.get(ipcChannels.knownHosts.list)!;
+    const keychain = ipcHandlers.get(ipcChannels.keychain.list)!;
+
+    // 고르지 않았거나 개인이면 지금까지와 같은 개인 저장소다.
+    await expect(knownHosts({})).resolves.toEqual([{ id: 'kh-personal' }]);
+    await expect(knownHosts({}, 'personal')).resolves.toEqual([{ id: 'kh-personal' }]);
+    await expect(keychain({})).resolves.toEqual([{ secretRef: 'secret:personal' }]);
+    await expect(knownHosts({}, 'team-1')).resolves.toBe(teamKnownHosts);
+    await expect(keychain({}, 'team-1')).resolves.toBe(teamSecrets);
+    // 막 빠진 팀을 화면이 아직 들고 있어도 깨지지 않는다.
+    await expect(knownHosts({}, 'team-gone')).resolves.toEqual([]);
+    await expect(keychain({}, 'team-gone')).resolves.toEqual([]);
+  });
+
   it('includes certificate validity info when loading a certificate secret', async () => {
     const ctx = createContext();
     ctx.secretMetadata.getBySecretRef.mockReturnValue({
@@ -444,5 +470,106 @@ describe('known host trust scope', () => {
     expect(ctx.knownHosts.trust).toHaveBeenCalledWith(
       expect.objectContaining({ tailnetId: 'net-a' }),
     );
+  });
+});
+
+// 설정의 팀 묶음(4-7): 팀의 저장 자격 증명·호스트 키는 그 팀에서 읽고, 바꾸고, 지운다 — 멤버 모두에게 간다.
+describe('team vault saved credentials and host keys', () => {
+  beforeEach(() => {
+    ipcHandlers.clear();
+    electronMocks.clipboardWriteText.mockClear();
+  });
+
+  function createTeamContext() {
+    const ctx = createContext();
+    // 개인 볼트에는 없는 것으로(목의 기본 undefined 는 "있다"로 읽힌다).
+    ctx.secretMetadata.getBySecretRef.mockImplementation((secretRef: string) =>
+      secretRef === 'secret:personal' ? { secretRef, label: 'mine', updatedAt: 't' } : null,
+    );
+    ctx.secretStore.load.mockResolvedValue(JSON.stringify({ secretRef: 'secret:personal', label: 'mine', password: 'my-pw' }));
+    ctx.knownHosts.list.mockReturnValue([{ id: 'kh-personal' }]);
+    const stored = new Map([
+      ['secret:team', JSON.stringify({ secretRef: 'secret:team', label: 'acme-db', password: 'team-pw', updatedAt: 't' })],
+    ]);
+    const team = {
+      secretMetadata: {
+        getBySecretRef: vi.fn((secretRef: string) =>
+          secretRef === 'secret:team' ? { secretRef, label: 'acme-db', updatedAt: 't', linkedHostCount: 2 } : null,
+        ),
+        list: vi.fn(() => []),
+        remove: vi.fn(),
+        upsert: vi.fn(),
+      },
+      secrets: {
+        load: vi.fn(async (secretRef: string) => stored.get(secretRef) ?? null),
+        save: vi.fn(async (secretRef: string) => secretRef),
+        remove: vi.fn(async () => {}),
+      },
+      hosts: { clearSecretRef: vi.fn() },
+      syncOutbox: { upsertDeletion: vi.fn() },
+      knownHosts: { list: vi.fn(() => [{ id: 'kh-team' }]), remove: vi.fn() },
+    };
+    withVaults(ctx, { 'team-1': team });
+    registerKnownHostsLogsKeychainIpcHandlers(ctx);
+    return { ctx, team };
+  }
+
+  const invoke = (channel: string, ...args: unknown[]) => ipcHandlers.get(channel)!({}, ...args);
+
+  it('loads, copies and edits a team credential in the team, and keeps a personal one personal', async () => {
+    const { ctx, team } = createTeamContext();
+
+    await expect(invoke(ipcChannels.keychain.load, 'secret:team')).resolves.toMatchObject({
+      secretRef: 'secret:team',
+      label: 'acme-db',
+      password: 'team-pw',
+    });
+    await invoke(ipcChannels.keychain.copyPassword, 'secret:team');
+    expect(electronMocks.clipboardWriteText).toHaveBeenCalledWith('team-pw');
+
+    await invoke(ipcChannels.keychain.update, { secretRef: 'secret:team', secrets: { password: 'new-team-pw' } });
+    expect(team.secrets.save).toHaveBeenCalledWith('secret:team', expect.stringContaining('new-team-pw'));
+    expect(team.secretMetadata.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ secretRef: 'secret:team', label: 'acme-db', hasPassword: true }),
+    );
+    expect(ctx.secretStore.save).not.toHaveBeenCalled();
+    expect(ctx.secretMetadata.upsert).not.toHaveBeenCalled();
+
+    // 개인 것은 팀이 있어도 개인 저장소로 간다.
+    await expect(invoke(ipcChannels.keychain.load, 'secret:personal')).resolves.toMatchObject({ password: 'my-pw' });
+    expect(ctx.secretStore.load).toHaveBeenCalledWith('secret:personal');
+    expect(team.secrets.load).not.toHaveBeenCalledWith('secret:personal');
+  });
+
+  it('removes a team credential from the team and unlinks it from the team hosts', async () => {
+    const { ctx, team } = createTeamContext();
+    // 지움 기록이 먼저다 — 지우는 사이 팀 동기화가 돌아도 서버 사본으로 되살리지 않게(실제 앱에서 잠깐 되살아났다).
+    team.secrets.remove.mockImplementation(async () => {
+      expect(team.syncOutbox.upsertDeletion).toHaveBeenCalledWith('secrets', 'secret:team');
+    });
+
+    await invoke(ipcChannels.keychain.remove, 'secret:team');
+
+    expect(team.secrets.remove).toHaveBeenCalledWith('secret:team');
+    expect(team.secretMetadata.remove).toHaveBeenCalledWith('secret:team');
+    expect(team.hosts.clearSecretRef).toHaveBeenCalledWith('secret:team');
+    expect(team.syncOutbox.upsertDeletion).toHaveBeenCalledWith('secrets', 'secret:team');
+    expect(ctx.secretStore.remove).not.toHaveBeenCalled();
+    expect(ctx.hosts.clearSecretRef).not.toHaveBeenCalled();
+    expect(ctx.syncOutbox.upsertDeletion).not.toHaveBeenCalled();
+  });
+
+  it('removes a team host key from the team, a personal one from the personal vault', async () => {
+    const { ctx, team } = createTeamContext();
+
+    await invoke(ipcChannels.knownHosts.remove, 'kh-team');
+    expect(team.syncOutbox.upsertDeletion).toHaveBeenCalledWith('knownHosts', 'kh-team');
+    expect(team.knownHosts.remove).toHaveBeenCalledWith('kh-team');
+    expect(ctx.knownHosts.remove).not.toHaveBeenCalled();
+
+    await invoke(ipcChannels.knownHosts.remove, 'kh-personal');
+    expect(ctx.syncOutbox.upsertDeletion).toHaveBeenCalledWith('knownHosts', 'kh-personal');
+    expect(ctx.knownHosts.remove).toHaveBeenCalledWith('kh-personal');
+    expect(team.knownHosts.remove).toHaveBeenCalledTimes(1);
   });
 });

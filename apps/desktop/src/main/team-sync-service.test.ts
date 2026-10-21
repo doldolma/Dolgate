@@ -790,3 +790,86 @@ describe("TeamSyncService feature paths", () => {
   });
 });
 
+
+describe("TeamSyncService availability", () => {
+  // 서버 하나만 /api/info 와 /teams 의 답을 바꾼다. 나머지는 가짜 서버가 그대로 받는다.
+  const answerFor = (
+    harness: Awaited<ReturnType<typeof createHarness>>,
+    pathname: string,
+    status: number,
+    body: unknown,
+  ) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | string, init?: RequestInit) => {
+        if (new URL(String(input)).pathname === pathname) {
+          harness.server.requests.push({
+            method: (init?.method ?? "GET").toUpperCase(),
+            path: pathname,
+            headers: new Headers(),
+            body: {},
+          });
+          return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+        }
+        return harness.server.handle(input, init);
+      }),
+    );
+  };
+
+  it("says teams are usable on an E2EE vault and a server that knows teams, asking the server once", async () => {
+    const harness = await createSyncedTeam();
+    const loopsBefore = harness.activeLoops();
+
+    await expect(harness.service.getAvailability()).resolves.toEqual({ available: true });
+    // 화면은 팀 관리(TeamService)를 거쳐 묻는다.
+    await expect(harness.teams.getAvailability()).resolves.toEqual({ available: true });
+
+    // 팀 목록 읽기 때 이미 물었다 — 같은 서버면 다시 묻지 않는다. 감시·팀 키도 건드리지 않는다.
+    expect(harness.server.requestsTo("GET", "/api/info")).toHaveLength(0);
+    expect(harness.activeLoops()).toBe(loopsBefore);
+  });
+
+  it("says why teams cannot be used, without asking the server when the account or vault rules it out", async () => {
+    const harness = await createHarness();
+    const signedIn = harness.auth.getState;
+
+    harness.auth.getState = () => ({ status: "local-only" });
+    await expect(harness.service.getAvailability()).resolves.toEqual({ available: false, reason: "signed-out" });
+    await expect(harness.teams.getAvailability()).resolves.toEqual({ available: false, reason: "signed-out" });
+    harness.auth.getState = signedIn;
+
+    harness.vault.status = "locked";
+    await expect(harness.service.getAvailability()).resolves.toEqual({ available: false, reason: "vault-locked" });
+    harness.vault.status = "unlocked";
+
+    // 옛 볼트는 서버가 DEK 를 안다 — 팀 키를 감쌀 수 없다.
+    harness.context.vaultEpoch = null;
+    await expect(harness.service.getAvailability()).resolves.toEqual({ available: false, reason: "unsupported-vault" });
+
+    expect(harness.server.requestsTo("GET", "/api/info")).toHaveLength(0);
+  });
+
+  it("says the server does not know teams when its info says so", async () => {
+    const harness = await createHarness();
+    answerFor(harness, "/api/info", 200, { capabilities: { teams: { enabled: false } } });
+
+    await expect(harness.service.getAvailability()).resolves.toEqual({
+      available: false,
+      reason: "server-unsupported",
+    });
+    await harness.service.getAvailability();
+    expect(harness.server.requestsTo("GET", "/api/info")).toHaveLength(1);
+  });
+
+  it("remembers that an old server turned the team list away", async () => {
+    const harness = await createHarness();
+    answerFor(harness, "/teams", 404, { error: "not found" });
+
+    await harness.service.refreshTeams();
+
+    await expect(harness.service.getAvailability()).resolves.toEqual({
+      available: false,
+      reason: "server-unsupported",
+    });
+  });
+});

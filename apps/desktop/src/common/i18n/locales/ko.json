@@ -78,7 +78,9 @@
       "title": "Workspace 상세",
       "placeholder": "Workspace를 선택하면 배치와 pane 정보를 볼 수 있습니다."
     },
-    "hostMissingUsername": "{{label}} 호스트에 사용자 이름이 없습니다. 호스트에 사용자 이름을 지정한 뒤 이 pane 을 재시도하세요."
+    "hostMissingUsername": "{{label}} 호스트에 사용자 이름이 없습니다. 호스트에 사용자 이름을 지정한 뒤 이 pane 을 재시도하세요.",
+    "mixedVaults": "개인 호스트와 팀 호스트가 섞여 있어 Workspace로 저장할 수 없습니다. 한 볼트의 창만 남기면 저장됩니다.",
+    "mixedTeams": "여러 팀의 호스트가 섞여 있어 Workspace로 저장할 수 없습니다. 한 볼트의 창만 남기면 저장됩니다."
   },
   "homeAssets": {
     "menu": {
@@ -511,8 +513,10 @@
       "containerDiscovery": "컨테이너 탐색"
     },
     "status": {
-      "stopped": "정지됨"
-    }
+      "stopped": "정지됨",
+      "notApplied": "Not applied"
+    },
+    "appliedBy": "같은 이름을 {{vault}} 것이 적용하고 있습니다"
   },
   "ai": {
     "provider": {
@@ -682,7 +686,8 @@
       "updateSubmit": "프로필 업데이트",
       "updateSubmitting": "업데이트 중...",
       "profileName": "프로필명",
-      "currentAccessKey": "현재 저장된 access key: {{key}}"
+      "currentAccessKey": "현재 저장된 access key: {{key}}",
+      "createDescriptionTeam": "{{team}} 에 저장합니다. 팀원 모두가 이 프로필을 씁니다."
     },
     "region": {
       "title": "기본 Region 변경",
@@ -966,7 +971,8 @@
       "notFound": "선택한 AWS 프로필을 찾지 못했습니다.",
       "sameName": "새 프로필명이 기존 프로필명과 같습니다.",
       "linkedNotFoundNamed": "연결된 AWS 프로필 \"{{label}}\"을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.",
-      "linkedNotFound": "연결된 AWS 프로필을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요."
+      "linkedNotFound": "연결된 AWS 프로필을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.",
+      "teamKeyMissing": "팀 프로필 \"{{profile}}\" 에 내 AWS 키가 없습니다. 키는 팀원마다 각자 넣습니다."
     },
     "role": {
       "assumeDenied": "선택한 source profile로 이 Role을 Assume할 수 없습니다. IAM 권한과 대상 role trust policy를 확인해 주세요.",
@@ -1596,7 +1602,8 @@
       "none": "사용하지 않음 (일반 네트워크)",
       "empty": "등록된 Tailscale 네트워크가 없습니다. 설정 → 네트워크에서 먼저 추가하세요. 네트워크는 기기마다 따로 등록합니다.",
       "missingOption": "설정에 없는 Tailscale 네트워크",
-      "missing": "이 호스트가 지정한 Tailscale 네트워크 설정이 없습니다. '사용하지 않음'을 선택해 해제하거나 네트워크를 다시 등록하세요."
+      "missing": "이 호스트가 지정한 Tailscale 네트워크 설정이 없습니다. '사용하지 않음'을 선택해 해제하거나 네트워크를 다시 등록하세요.",
+      "emptyTeam": "이 팀에 등록된 Tailscale 네트워크가 없습니다. 추가로 이 팀에 만드세요."
     },
     "rdp": {
       "domain": "도메인",
@@ -1825,7 +1832,9 @@
       "exportMany": "내보내기... ({{count}}개)",
       "newSubgroup": "하위 그룹 생성",
       "rename": "이름 변경",
-      "exportGroup": "내보내기... (항목 {{count}}개)"
+      "exportGroup": "내보내기... (항목 {{count}}개)",
+      "share": "공유…",
+      "copyToVault": "볼트로 복사…"
     },
     "error": {
       "groupCreateFailed": "그룹을 만들지 못했습니다.",
@@ -1843,7 +1852,14 @@
       "groupEmpty": "이 그룹은 비어 있습니다. 삭제하면 바로 사라집니다.",
       "keepChildren": "하위 항목 유지",
       "deleteChildren": "하위 항목까지 삭제"
-    }
+    },
+    "vaultMenu": {
+      "invite": "초대 링크",
+      "newHost": "새 호스트",
+      "newGroup": "새 그룹",
+      "manageTeam": "팀 관리"
+    },
+    "dropCopy": "Copy"
   },
   "awsWizard": {
     "error": {
@@ -2168,7 +2184,9 @@
     "azUnknown": "Availability Zone을 확인하지 못했습니다.",
     "remoteHostUnknown": "원격 호스트 주소를 확인해 주세요.",
     "hostsOverrideFailed": "hosts override를 적용하지 못했습니다.",
-    "ssmForwardStartFailed": "AWS SSM port forward를 시작하지 못했습니다."
+    "ssmForwardStartFailed": "AWS SSM port forward를 시작하지 못했습니다.",
+    "ruleInOtherVault": "다른 볼트의 포트 포워딩 규칙에는 이을 수 없습니다.",
+    "hostInOtherVault": "이 규칙을 다른 볼트의 호스트로 바꿀 수 없습니다. 그 볼트에 새로 만드세요."
   },
   "aiService": {
     "apiKeyEmpty": "API 키가 비어 있습니다.",
@@ -2415,7 +2433,12 @@
     },
     "aboutToggle": "자격증명 저장 방식 설명",
     "aboutStorage": "OS 암호화 저장소에 저장됩니다",
-    "aboutSync": "동기화 암호로 암호화해 올리므로 서버는 암호문만 봅니다"
+    "aboutSync": "동기화 암호로 암호화해 올리므로 서버는 암호문만 봅니다",
+    "team": {
+      "aboutToggle": "팀 자격 증명 설명",
+      "shared": "{{team}} 멤버가 함께 쓰는 비밀번호·키입니다",
+      "changesReachAll": "바꾸거나 지우면 멤버 모두에게 갑니다"
+    }
   },
   "sshKeyInstall": {
     "generateTitle": "새 SSH 키 생성·설치",
@@ -2638,7 +2661,8 @@
     "edit": "편집",
     "noResults": "검색 결과가 없습니다.",
     "addTitle": "새 스니펫",
-    "editTitle": "스니펫 편집"
+    "editTitle": "스니펫 편집",
+    "addAction": "스니펫 추가"
   },
   "sessionPane": {
     "dropPathFailed": "드롭한 파일 경로를 읽지 못했습니다.",
@@ -2851,7 +2875,7 @@
   },
   "teams": {
     "nameRequired": "팀 이름을 입력해 주세요.",
-    "inviteDaysRange": "초대 링크 기한은 1~{{max}}일로 정할 수 있습니다.",
+    "inviteHoursRange": "초대 링크 기한은 1시간~30일로 정할 수 있습니다.",
     "needsRejoin": "이 기기에 이 팀의 키가 없습니다. 초대 링크로 다시 들어와 주세요.",
     "inviteOtherServer": "다른 동기화 서버의 초대 링크입니다.",
     "inviteOtherTeam": "다른 팀의 초대 링크입니다.",
@@ -2872,7 +2896,203 @@
       "memberNotFound": "이 팀의 멤버가 아닙니다.",
       "alreadyMember": "이미 이 팀의 멤버입니다.",
       "exists": "이미 있는 팀입니다."
+    },
+    "crossVault": {
+      "jumpHost": "점프 호스트는 같은 볼트의 호스트만 쓸 수 있습니다.",
+      "tunnelHost": "SSH 터널 호스트는 같은 볼트의 호스트만 쓸 수 있습니다.",
+      "tailnet": "tailnet 은 같은 볼트의 것만 쓸 수 있습니다.",
+      "awsProfile": "AWS 프로필은 같은 볼트의 것만 쓸 수 있습니다.",
+      "snippet": "시작 스니펫은 같은 볼트의 것만 쓸 수 있습니다.",
+      "secret": "저장된 자격 증명은 같은 볼트의 것만 쓸 수 있습니다."
+    },
+    "perPerson": {
+      "favorite": "즐겨찾기는 나에게만 적용됩니다.",
+      "agentForwarding": "나에게만 적용됩니다 — 팀원의 설정은 그대로입니다.",
+      "terminalTheme": "이 기기에만 적용됩니다."
+    },
+    "copy": {
+      "shareTitle": "{{target}} 에 공유",
+      "copyTitle": "{{target}} 로 복사",
+      "share": "공유",
+      "copy": "복사",
+      "root": "맨 위",
+      "hostCount": "호스트 {{count}}개",
+      "vault": "Vault",
+      "group": "Group",
+      "shareSecrets": "비밀번호·SSH 키 {{count}}개도 함께 공유",
+      "shareSecretsHint": "끄면 팀원은 처음 접속할 때 자기 것을 넣습니다. 내 것은 내 자격 증명에 들어갑니다.",
+      "members": "멤버 {{count}}명이 보고 쓸 수 있습니다.",
+      "keepsOriginal": "원본은 {{source}} 에 그대로 남습니다.",
+      "onlyMe": "복사본은 나만 봅니다.",
+      "alongWith": "함께 오는 것: {{items}}",
+      "extra": {
+        "dependencyHosts": "점프·터널 호스트 {{count}}",
+        "knownHosts": "known hosts {{count}}",
+        "portForwards": "포트 포워딩 {{count}}",
+        "dnsOverrides": "DNS {{count}}",
+        "snippets": "스니펫 {{count}}",
+        "awsProfiles": "AWS 프로필 {{count}}",
+        "tailnets": "Tailscale {{count}}"
+      },
+      "previewFailed": "무엇을 복사할지 읽지 못했습니다.",
+      "failed": "복사하지 못했습니다.",
+      "workspaceCount": "Workspace {{count}}개"
+    },
+    "myCredentials": {
+      "cardHint": "나에게만 적용 — 채우면 팀 것 대신 이것으로 접속합니다.",
+      "dialogHint": "나에게만 적용됩니다. 비운 칸은 팀 것으로 접속합니다.",
+      "empty": "비어 있으면 팀 것으로 접속합니다.",
+      "title": "{{host}} · 내 자격 증명",
+      "teamValue": "{{value}} (팀)",
+      "teamAuth": "팀 것 그대로 ({{auth}})",
+      "account": "계정",
+      "domain": "도메인",
+      "clear": "지우기",
+      "saveFailed": "내 자격 증명을 저장하지 못했습니다.",
+      "stored": {
+        "password": "비밀번호",
+        "privateKey": "개인키",
+        "certificate": "인증서",
+        "passphrase": "패스프레이즈"
+      }
+    },
+    "vault": {
+      "addTo": "{{vault}}에 {{action}}"
+    },
+    "myKey": {
+      "aboutToggle": "내 키 설명",
+      "awsHint": "나에게만 저장됩니다. 팀원은 각자 자기 키를 넣고, 팀에는 프로필 설정만 갑니다.",
+      "tailnetHint": "나에게만 저장됩니다. 팀원은 각자 자기 auth key 를 넣습니다.",
+      "add": "내 키 넣기",
+      "dialogTitle": "{{profile}} · 내 키",
+      "saveFailed": "내 키를 저장하지 못했습니다."
     }
+  },
+  "teamsPanel": {
+    "empty": {
+      "title": "아직 팀이 없습니다.",
+      "stepCreate": "‘새 팀’으로 팀을 만듭니다",
+      "stepInvite": "‘초대 링크’를 만들어 동료에게 보냅니다",
+      "stepShare": "호스트를 사이드바의 팀으로 끌어다 놓아 함께 씁니다"
+    },
+    "newTeam": "새 팀",
+    "joinWithLink": "링크로 참여",
+    "inviteLink": "초대 링크",
+    "memberCount": "멤버 {{count}}명",
+    "sync": {
+      "outdated": "이 팀에 최신 버전에서 추가한 항목이 있습니다. 앱을 업데이트하면 다시 맞춰집니다.",
+      "error": "동기화하지 못했습니다: {{message}}"
+    },
+    "invites": {
+      "revoke": "링크 취소",
+      "title": "{{name}} 의 링크",
+      "expires": "{{when}} 만료",
+      "joined": "{{count}}명 참여",
+      "created": "{{when}} 만듦"
+    },
+    "members": {
+      "you": "(나)",
+      "createdTeam": "팀을 만듦",
+      "actions": "멤버 메뉴",
+      "makeOwner": "소유자로 지정",
+      "remove": "제거",
+      "loadFailed": "멤버 목록을 읽지 못했습니다.",
+      "joinedVia": "{{name}} 의 링크로 참여"
+    },
+    "danger": {
+      "description": "나가면 이 기기에서 팀의 호스트·비밀번호·키가 사라집니다.",
+      "leave": "팀 나가기",
+      "delete": "팀 삭제"
+    },
+    "nameDialog": {
+      "create": "만들기",
+      "placeholder": "예: 인프라팀"
+    },
+    "joinDialog": {
+      "next": "다음"
+    },
+    "invite": {
+      "title": "{{team}} 초대",
+      "createAndCopy": "만들고 복사",
+      "copied": "링크를 복사했습니다 — {{duration}} 동안 열립니다.",
+      "copyFailed": "복사하지 못했습니다. 아래 링크를 직접 복사하세요.",
+      "copyAgain": "다시 복사",
+      "onceHint": "이 링크는 지금만 볼 수 있습니다. 잃으면 새로 만드세요.",
+      "duration": {
+        "hour1": "1시간",
+        "day1": "1일",
+        "day7": "7일",
+        "day30": "30일"
+      }
+    },
+    "remove": {
+      "title": "{{email}} 제거",
+      "body": "팀에서 빠지고 이 팀의 데이터를 더 받지 못합니다. 이 팀의 초대 링크도 모두 취소됩니다.",
+      "done": "뺐습니다 — 초대 링크가 모두 취소됐습니다."
+    },
+    "makeOwner": {
+      "title": "{{email}} 에게 소유권 넘기기",
+      "body": "이름 변경·멤버 제거·팀 삭제는 소유자만 할 수 있습니다. 넘기면 나는 멤버가 됩니다.",
+      "confirm": "넘기기"
+    },
+    "leave": {
+      "title": "{{team}} 나가기",
+      "member": "이 기기에서 팀의 호스트·비밀번호·키가 사라집니다. 다시 들어오려면 새 초대 링크가 필요합니다.",
+      "owner": "소유자는 다른 멤버에게 넘기고 나갑니다.",
+      "earliest": "가장 먼저 들어옴",
+      "last": "마지막 멤버입니다. 나가면 팀과 그 안의 것이 모두 지워집니다.",
+      "copyFirst": "남기고 싶은 것은 먼저 개인 볼트로 복사하세요.",
+      "confirm": "나가기",
+      "transferAndLeave": "넘기고 나가기",
+      "deleteAndLeave": "지우고 나가기"
+    },
+    "delete": {
+      "title": "{{team}} 팀 삭제",
+      "others": "다른 멤버 {{count}}명의 화면에서도 사라집니다.",
+      "alone": "이 팀에 다른 멤버는 없습니다.",
+      "copyFirst": "남기고 싶은 것은 지우기 전에 각자 개인 볼트로 복사하세요."
+    },
+    "counts": {
+      "groups": "그룹",
+      "hosts": "호스트",
+      "secrets": "비밀번호와 키",
+      "workspaces": "Workspace"
+    },
+    "joinCard": {
+      "invitedBy": "{{email}} 님의 초대 · 멤버 {{count}}명",
+      "what": "참여하면 사이드바에 이 팀이 생기고, 팀의 호스트를 멤버 모두와 함께 씁니다. 서버는 내용을 볼 수 없습니다.",
+      "join": "참여",
+      "alreadyJoined": "이미 들어가 있는 팀입니다.",
+      "goToTeam": "팀으로 가기",
+      "otherServerTitle": "다른 서버의 팀입니다",
+      "otherServerBody": "이 팀은 {{host}} 에 있습니다. 그 서버로 로그인하면 들어갈 수 있습니다.",
+      "expiredTitle": "만료된 초대 링크",
+      "expiredBody": "기한이 지났거나 취소됐습니다. 팀 멤버에게 새 링크를 받으세요.",
+      "updateTitle": "앱 업데이트가 필요합니다",
+      "updateBody": "이 앱이 모르는 새 형식의 초대 링크입니다. 최신 버전으로 업데이트한 뒤 다시 여세요.",
+      "invalidTitle": "열 수 없는 초대 링크",
+      "invalidBody": "링크가 잘렸거나 올바르지 않습니다. 받은 링크를 통째로 붙여 넣으세요.",
+      "failedTitle": "초대를 확인하지 못했습니다",
+      "retry": "다시 시도",
+      "signedOutTitle": "로그인이 필요합니다",
+      "signedOutBody": "팀은 계정으로 로그인해야 쓸 수 있습니다.",
+      "login": "로그인",
+      "unsupportedVaultTitle": "새 동기화 볼트가 필요합니다",
+      "unsupportedVaultBody": "팀은 동기화 암호로 잠그는 새 볼트에서 쓸 수 있습니다. 볼트를 옮긴 뒤 다시 여세요.",
+      "serverUnsupportedTitle": "이 서버는 팀을 지원하지 않습니다",
+      "serverUnsupportedBody": "동기화 서버를 최신 버전으로 올리면 쓸 수 있습니다."
+    },
+    "actionFailed": "팀 작업을 마치지 못했습니다.",
+    "intro": "팀원과 호스트·비밀번호를 함께 씁니다. 서버는 내용을 볼 수 없습니다.",
+    "about": {
+      "label": "팀 볼트에 넣으면",
+      "edit": "팀에 넣은 것은 팀원 모두가 보고 고칠 수 있습니다.",
+      "members": "링크로 들어온 사람은 누구의 링크로 언제 들어왔는지 멤버 목록에 남습니다.",
+      "ownKeys": "AWS 정적 키와 Tailscale auth key 는 늘 각자의 것을 씁니다."
+    },
+    "hostCount": "호스트 {{count}}개",
+    "createdWhen": "{{when}} 만듦",
+    "teamActions": "팀 메뉴"
   },
   "shareChat": {
     "titleWith": "채팅 기록 · {{title}}",
@@ -2928,7 +3148,11 @@
     "hideEmpty": "빈 그룹 숨기기",
     "favorites": "즐겨찾기",
     "noGroups": "아직 만든 그룹이 없습니다.",
-    "sortManual": "사용자 지정"
+    "sortManual": "사용자 지정",
+    "personalVault": "Personal",
+    "vaultMenu": "{{name}} 메뉴",
+    "expandVault": "{{name}} 펼치기",
+    "collapseVault": "{{name}} 접기"
   },
   "sessionStatusBar": {
     "latencyValue": "{{ms}}ms",
@@ -3013,7 +3237,14 @@
     "ssh": "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. SSH 연결을 계속하려면 사용자명을 입력해 주세요. 지금 입력한 값은 이 호스트에 저장되며, 다음 연결부터 자동으로 재사용합니다.",
     "prompt": "{{label}} 사용자명을 입력해 주세요.",
     "saveFailed": "사용자명을 저장하지 못했습니다.",
-    "submit": "저장 후 계속"
+    "submit": "저장 후 계속",
+    "team": {
+      "sftp": "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. SFTP 연결을 계속하려면 사용자명을 입력해 주세요. 지금 입력한 값은 내 자격 증명에 저장되며 팀원에게는 보이지 않습니다. 다음 연결부터 자동으로 재사용합니다.",
+      "containers": "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. 컨테이너 연결을 계속하려면 사용자명을 입력해 주세요. 지금 입력한 값은 내 자격 증명에 저장되며 팀원에게는 보이지 않습니다. 다음 연결부터 자동으로 재사용합니다.",
+      "containerShell": "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. 컨테이너 셸 연결을 계속하려면 사용자명을 입력해 주세요. 지금 입력한 값은 내 자격 증명에 저장되며 팀원에게는 보이지 않습니다. 다음 연결부터 자동으로 재사용합니다.",
+      "portForward": "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. 포트 포워딩을 시작하려면 사용자명을 입력해 주세요. 지금 입력한 값은 내 자격 증명에 저장되며 팀원에게는 보이지 않습니다. 다음 연결부터 자동으로 재사용합니다.",
+      "ssh": "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. SSH 연결을 계속하려면 사용자명을 입력해 주세요. 지금 입력한 값은 내 자격 증명에 저장되며 팀원에게는 보이지 않습니다. 다음 연결부터 자동으로 재사용합니다."
+    }
   },
   "credentialRetry": {
     "prompt": "{{label}} 인증 정보를 다시 확인해 주세요.",
@@ -3023,7 +3254,9 @@
     "keyImportRequired": "개인키를 가져와 주세요.",
     "certificateRequired": "SSH 인증서를 가져와 주세요.",
     "retryFailed": "다시 시도하지 못했습니다.",
-    "retry": "다시 시도"
+    "retry": "다시 시도",
+    "passwordNeeded": "{{label}} 비밀번호를 넣어 주세요.",
+    "jumpPasswordNeeded": "점프 호스트 {{label}} 비밀번호를 넣어 주세요 — {{target}} 에 갈 때 거칩니다."
   },
   "opensshSvc": {
     "circularInclude": "{{path}}에서 순환 Include를 건너뛰었습니다.",

@@ -4,6 +4,8 @@ import { ModalBody, ModalHeader, ModalShell, SectionLabel } from '../../ui';
 import { DialogBackdrop } from '../DialogBackdrop';
 import { useAppStore } from '../../store/appStore';
 import { useTailnetDraft } from '../../controllers/useTailnetDraft';
+import { teamOfVault } from '../../lib/vault-groups';
+import { VaultChip } from '../teams/VaultMark';
 import { TailnetForm } from './TailnetForm';
 
 /**
@@ -19,14 +21,19 @@ import { TailnetForm } from './TailnetForm';
 export function TailnetAddDialog({
   onClose,
   onAdded,
+  vaultId = null,
 }: {
   onClose: () => void;
   /** 저장된 tailnet. 호스트 폼이 이 값을 곧바로 목록에 넣고 선택한다. */
   onAdded: (tailnet: { id: string; label: string }) => void | Promise<void>;
+  /** 팀 호스트의 서랍이면 그 팀 — 거기에 만든다(같은 볼트 것만 고를 수 있다). */
+  vaultId?: string | null;
 }) {
   const { t: translate } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const statusById = useAppStore((state) => state.tailnetStatuses);
+  const vaultIndex = useAppStore((state) => state.vaultIndex);
+  const team = vaultId ? teamOfVault(vaultIndex, vaultId) : null;
   const {
     draft,
     setDraft,
@@ -41,8 +48,8 @@ export function TailnetAddDialog({
   // 팝업이 열리는 순간 초안이 하나 있어야 한다. 설정 화면은 "추가" 버튼을 눌러 초안을
   // 만들지만, 여기서는 팝업이 열린 것 자체가 그 버튼을 누른 것이다.
   useEffect(() => {
-    beginDraft();
-  }, [beginDraft]);
+    beginDraft(vaultId);
+  }, [beginDraft, vaultId]);
 
   const current = draft;
   const testing = current !== null && testingId === current.id;
@@ -65,7 +72,10 @@ export function TailnetAddDialog({
         <ModalHeader>
           <div>
             <SectionLabel>Tailnet</SectionLabel>
-            <h3 id="tailnet-add-title">{translate('tailnetSettings.addTitle')}</h3>
+            <h3 id="tailnet-add-title" className="flex flex-wrap items-center gap-2">
+              {translate('tailnetSettings.addTitle')}
+              {team ? <VaultChip team={team} /> : null}
+            </h3>
           </div>
         </ModalHeader>
         <ModalBody>
@@ -97,6 +107,7 @@ export function TailnetAddDialog({
               }
               onCancelTest={() => void cancelTest(current.id)}
               onCancel={close}
+              myKey={Boolean(vaultId)}
             />
           ) : null}
         </ModalBody>

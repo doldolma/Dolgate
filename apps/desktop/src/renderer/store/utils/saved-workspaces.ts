@@ -26,6 +26,27 @@ export function listSavedWorkspaceLeaves(
 }
 
 /**
+ * 볼트가 섞인 워크스페이스면 알릴 문구의 키 — 개인과 팀이 섞였으면 mixedVaults, 팀끼리면 mixedTeams. 아니면 null.
+ * 로컬 창과 목록에 없는(지워진) 호스트는 세지 않는다. 메인도 같은 규칙으로 거절한다(saved-workspaces IPC).
+ */
+export function findMixedVaultMessageKey(
+  node: SavedWorkspaceNode,
+  knownHostIds: ReadonlySet<string>,
+  vaultOf: (hostId: string) => string,
+  personalVaultId: string,
+): "savedWorkspace.mixedVaults" | "savedWorkspace.mixedTeams" | null {
+  const vaultIds = new Set(
+    listSavedWorkspaceLeaves(node).flatMap(({ target }) =>
+      target.kind === "host" && knownHostIds.has(target.hostId) ? [vaultOf(target.hostId)] : [],
+    ),
+  );
+  if (vaultIds.size < 2) {
+    return null;
+  }
+  return vaultIds.has(personalVaultId) ? "savedWorkspace.mixedVaults" : "savedWorkspace.mixedTeams";
+}
+
+/**
  * 살아 있는 Workspace split 트리를 영속 target 트리로 바꾼다.
  *
  * tmux 여부는 호출자가 WorkspaceTab.tmux로 먼저 거른다. 여기서는 각 pane이 일반 호스트

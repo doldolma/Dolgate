@@ -167,7 +167,13 @@ import {
   updateConnectionView,
   upsertConnectionHop,
   clearConnectionView,
+  myUsernameOf,
+  credentialRetryAuthType,
 } from "../utils";
+import {
+  forgetConnectAttemptSecrets,
+  takeConnectAttemptSecrets,
+} from "../utils/connect-attempt-secrets";
 import { resolveHostTailnetId } from "../../lib/host-tailnet";
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
 import { createTrustAuthServices } from "../services/trust-auth";
@@ -187,8 +193,8 @@ import {
   markAutoRecoveredTransferJob,
 } from "../../lib/terminal-upload-registry";
 import { resolveHopHostNames } from "../../lib/connection-hops";
-import type { CoreEvent, HostRecord } from "@shared";
-import { hostIdFromKeyInstallCorrelation } from "@shared";
+import type { CoreEvent, HostRecord, SshHostRecord } from "@shared";
+import { hostIdFromKeyInstallCorrelation, jumpHostIdAtDepth } from "@shared";
 import { t } from "../../i18n";
 
 /**
@@ -2153,6 +2159,15 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
           (activeSessionReconnect && !reconnectEventPermanent));
       const willCancelSessionReconnect =
         isDropEvent && activeSessionReconnect && reconnectEventPermanent;
+      // 이 세션 접속에 쓴, 아직 저장되지 않은 요청 창 값. 실패면 다음 요청 창에 실어 넘기고, 붙거나 닫히면
+      // 버린다(붙은 값은 메인이 저장한다).
+      const attemptSecrets =
+        event.type === "error"
+          ? takeConnectAttemptSecrets(sessionId)
+          : undefined;
+      if (event.type === "connected" || event.type === "closed") {
+        forgetConnectAttemptSecrets(sessionId);
+      }
 
       set((state) => {
         const currentTab = state.tabs.find(
@@ -2371,10 +2386,24 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
           typeof (event.payload as { failure?: unknown }).failure === "string"
             ? ((event.payload as { failure: string }).failure)
             : null;
+        // 실패가 점프 홉에서 났으면(코어가 깊이를 싣는다) 요청 창은 대상이 아니라 그 점프 호스트를 묻는다 —
+        // 대상 창으로는 그 홉의 비밀번호를 넣을 길이 없다. 그 홉을 못 찾으면 묻지 않는다.
+        const jumpDepth = Number((event.payload as { jumpDepth?: unknown }).jumpDepth) || 0;
+        const failedJumpHostId =
+          event.type === "error" && currentSshHost
+            ? jumpHostIdAtDepth(currentSshHost, jumpDepth)
+            : null;
+        const failedJumpHost = failedJumpHostId
+          ? (state.hosts.find(
+              (host): host is SshHostRecord =>
+                host.id === failedJumpHostId && isSshHostRecord(host),
+            ) ?? null)
+          : null;
+        const credentialHost = jumpDepth > 0 ? failedJumpHost : currentSshHost;
         const shouldPromptCredentialRetry =
           event.type === "error"
             ? resolveCredentialRetryKind(
-                currentSshHost ?? undefined,
+                credentialHost ?? undefined,
                 errorMessage,
               )
             : null;
@@ -2451,21 +2480,21 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 )
               : state.pendingInteractiveAuths,
           pendingCredentialRetry:
-            shouldPromptCredentialRetry && currentSshHost
+            shouldPromptCredentialRetry && currentSshHost && credentialHost
               ? {
                   sessionId,
                   hostId: currentSshHost.id,
+                  ...(failedJumpHost ? { promptHostId: failedJumpHost.id } : {}),
                   source: "ssh",
-                  authType:
-                    currentSshHost.authType === "certificate"
-                      ? "certificate"
-                      : currentSshHost.authType === "privateKey"
-                        ? "privateKey"
-                        : "password",
+                  authType: credentialRetryAuthType(credentialHost.authType),
                   message: errorMessage,
-                  initialUsername:
-                    matchingRetryAttempt?.attemptedUsername ??
-                    currentSshHost.username,
+                  initialUsername: failedJumpHost
+                    ? (myUsernameOf(state.vaultIndex, failedJumpHost.id) ??
+                      failedJumpHost.username)
+                    : (matchingRetryAttempt?.attemptedUsername ??
+                      myUsernameOf(state.vaultIndex, currentSshHost.id) ??
+                      currentSshHost.username),
+                  ...(attemptSecrets ? { carried: attemptSecrets } : {}),
                 }
               : event.type === "connected" &&
                   state.pendingCredentialRetry?.source === "ssh" &&

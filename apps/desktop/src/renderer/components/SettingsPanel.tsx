@@ -32,6 +32,7 @@ import { KnownHostsPanel } from './KnownHostsPanel';
 import { TailnetSettingsPanel } from './TailnetSettingsPanel';
 import { AwsProfilesPanel } from './AwsProfilesPanel';
 import { AiSettingsPanel } from './AiSettingsPanel';
+import { TeamsPanel } from './teams/TeamsPanel';
 import {
   Button,
   FieldGroup,
@@ -66,6 +67,9 @@ interface SettingsPanelProps {
   keychainEntries: SecretMetadataRecord[];
   savedCredentialsSearchQuery: string;
   currentUserEmail?: string | null;
+  currentUserId?: string | null;
+  /** 이 계정으로 팀을 쓸 수 있는가. 못 쓰면 Teams 탭을 그리지 않는다. */
+  teamsAvailable?: boolean;
   /**
    * 계정 없이 이 기기에서만 쓰는 중인가.
    *
@@ -82,8 +86,9 @@ interface SettingsPanelProps {
   onRemoveKnownHost: (id: string) => Promise<void>;
   /** RDP 서버 인증서 신뢰 해제. 신뢰 목록이 SSH 키만 다루던 것을 메꾼다. */
   onRevokeRdpCertificate: (hostId: string) => Promise<void>;
-  onRemoveSecret: (secretRef: string) => Promise<void>;
-  onEditSecret: (secretRef: string) => void;
+  /** 팀 볼트의 것이면 그 항목을 함께 받는다(개인 목록에는 없다). */
+  onRemoveSecret: (secretRef: string, teamEntry?: SecretMetadataRecord) => Promise<void>;
+  onEditSecret: (secretRef: string, teamEntry?: SecretMetadataRecord) => void;
   onGenerateSshKey: (input: SshKeyGenerateInput) => Promise<SshKeyMaterialResult>;
   onCopySshPublicKey: (secretRef: string) => Promise<void>;
   onInstallSshPublicKey: (input: SshKeyInstallInput) => Promise<SshKeyInstallResult>;
@@ -276,6 +281,8 @@ export function SettingsPanel({
   keychainEntries,
   savedCredentialsSearchQuery,
   currentUserEmail = null,
+  currentUserId = null,
+  teamsAvailable = false,
   isLocalOnly = false,
   onStartLogin,
   passwordState = null,
@@ -407,6 +414,12 @@ export function SettingsPanel({
   // 용량이 줄 수 있으므로 retention 값이 바뀔 때마다 다시 조회한다.
   const [replayStorageUsage, setReplayStorageUsage] =
     useState<SessionReplayStorageUsage | null>(null);
+  // 팀을 못 쓰게 되면(로그아웃 등) Teams 탭이 사라지니, 그 탭을 보던 중이면 General 로 옮긴다.
+  useEffect(() => {
+    if (activeSection === 'teams' && !teamsAvailable) {
+      onSelectSection('general');
+    }
+  }, [activeSection, teamsAvailable, onSelectSection]);
   useEffect(() => {
     if (!onLoadSessionReplayStorageUsage || activeSection !== 'general') {
       return;
@@ -670,7 +683,12 @@ export function SettingsPanel({
       {/* 상단 브레드크럼(← Hosts · Settings)에 이미 제목이 있어 Preferences/Settings 헤더는 생략,
           섹션 탭을 맨 위로 올린다. */}
       <Tabs role="tablist" aria-label="Settings sections">
-        {settingsSections.map((section) => (
+        {(teamsAvailable
+          ? settingsSections.flatMap((section) =>
+              section.id === 'account' ? [{ id: 'teams' as const, title: 'Teams' }, section] : [section],
+            )
+          : settingsSections
+        ).map((section) => (
           <TabButton
             key={section.id}
             role="tab"
@@ -1683,6 +1701,10 @@ export function SettingsPanel({
 
       {activeSection === 'ai' ? (
         <AiSettingsPanel settings={settings.ai} onUpdateSettings={onUpdateSettings} />
+      ) : null}
+
+      {activeSection === 'teams' && teamsAvailable ? (
+        <TeamsPanel currentUserId={currentUserId} currentUserEmail={currentUserEmail} />
       ) : null}
     </div>
   );

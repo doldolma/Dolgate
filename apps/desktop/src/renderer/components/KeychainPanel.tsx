@@ -6,8 +6,10 @@ import {
   isSshHostRecord,
 } from '@shared';
 import type {
+  AwsEc2HostRecord,
   HostRecord,
   SecretMetadataRecord,
+  SshHostRecord,
   SshKeyGenerateInput,
   SshKeyInstallInput,
   SshKeyInstallResult,
@@ -37,17 +39,23 @@ import { DialogBackdrop } from './DialogBackdrop';
 import { SshKeyGenerateDialog } from './SshKeyGenerateDialog';
 import { describeSecretType, getSecretKindLabel } from '../lib/secret-display';
 import { matchesKeyboardLayoutQuery } from '../lib/keyboard-layout-search';
-import { copySavedCredentialPassword } from '../services/desktop/settings';
+import { copySavedCredentialPassword, listTeamSavedCredentials } from '../services/desktop/settings';
 import { useTranslation } from 'react-i18next';
 import { getFormatLocale, t } from '../i18n';
+import { useAppStore } from '../store/appStore';
+import { useTeamVaultLists } from '../controllers/useTeamVaultLists';
+import { sectionsByVault, vaultIdOf } from '../lib/vault-groups';
+import { PERSONAL_VAULT_ID } from '../store/utils/vaults';
+import { VaultEmptyLine, VaultSectionHeader } from './teams/VaultMark';
 
 interface KeychainPanelProps {
   entries: SecretMetadataRecord[];
   hosts: HostRecord[];
   searchQuery: string;
   onSearchQueryChange: (query: string) => void;
-  onRemoveSecret: (secretRef: string) => Promise<void>;
-  onEditSecret: (secretRef: string) => void;
+  /** 팀 볼트의 것이면 그 항목을 함께 준다 — 개인 목록(스토어)에는 없어서 부르는 쪽이 찾지 못한다. */
+  onRemoveSecret: (secretRef: string, teamEntry?: SecretMetadataRecord) => Promise<void>;
+  onEditSecret: (secretRef: string, teamEntry?: SecretMetadataRecord) => void;
   onGenerateSshKey: (input: SshKeyGenerateInput) => Promise<SshKeyMaterialResult>;
   onCopySshPublicKey: (secretRef: string) => Promise<void>;
   onInstallSshPublicKey: (input: SshKeyInstallInput) => Promise<SshKeyInstallResult>;
@@ -85,6 +93,9 @@ export function KeychainPanel({
   onInstallSshPublicKey,
 }: KeychainPanelProps) {
   const { t: translate } = useTranslation();
+  const vaultIndex = useAppStore((state) => state.vaultIndex);
+  // 팀이 있으면 팀 볼트의 것도 읽어 볼트별로 묶는다. 고치거나 지운 뒤 스토어가 개인 목록을 다시 읽으면 팀 것도 다시 읽는다.
+  const { listsByTeamId } = useTeamVaultLists((teamId) => listTeamSavedCredentials(teamId), entries);
   const [copyingSecretRef, setCopyingSecretRef] = useState<string | null>(null);
   const [copyingPublicKeyRef, setCopyingPublicKeyRef] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<{
@@ -158,25 +169,71 @@ export function KeychainPanel({
     return nextHostsBySecretRef;
   }, [hosts]);
 
-  const visibleEntries = useMemo(() => {
-    if (searchQuery.trim().length === 0) {
-      return entries;
-    }
-
-    return entries.filter((entry) =>
-      matchesKeyboardLayoutQuery(
-        buildKeychainEntrySearchText(entry, hostsBySecretRef.get(entry.secretRef) ?? []),
-        searchQuery,
+  const filterEntries = useMemo(() => {
+    const query = searchQuery.trim();
+    return (list: SecretMetadataRecord[]) =>
+      query.length === 0
+        ? list
+        : list.filter((entry) =>
+            matchesKeyboardLayoutQuery(
+              buildKeychainEntrySearchText(entry, hostsBySecretRef.get(entry.secretRef) ?? []),
+              searchQuery,
+            ),
+          );
+  }, [hostsBySecretRef, searchQuery]);
+  const visibleEntries = useMemo(() => filterEntries(entries), [entries, filterEntries]);
+  const sections = useMemo(
+    () =>
+      sectionsByVault(
+        visibleEntries,
+        Object.fromEntries(
+          Object.entries(listsByTeamId).map(([teamId, list]) => [teamId, filterEntries(list)]),
+        ),
+        vaultIndex,
       ),
-    );
-  }, [entries, hostsBySecretRef, searchQuery]);
+    [filterEntries, listsByTeamId, vaultIndex, visibleEntries],
+  );
+  const teamEntries = useMemo(() => Object.values(listsByTeamId).flat(), [listsByTeamId]);
+  // 그 자격 증명이 든 볼트(팀 것만 표에 있다). 팀 것은 개인 목록에 없어서 부르는 쪽에 항목을 함께 준다.
+  const teamIdBySecretRef = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(listsByTeamId).flatMap(([teamId, list]) =>
+          list.map((entry) => [entry.secretRef, teamId] as const),
+        ),
+      ),
+    [listsByTeamId],
+  );
+  const teamEntryOf = (entry: SecretMetadataRecord) =>
+    teamIdBySecretRef[entry.secretRef] ? entry : undefined;
+  const editSecret = (entry: SecretMetadataRecord) => {
+    const teamEntry = teamEntryOf(entry);
+    if (teamEntry) {
+      onEditSecret(entry.secretRef, teamEntry);
+    } else {
+      onEditSecret(entry.secretRef);
+    }
+  };
+  const removeSecret = (entry: SecretMetadataRecord) => {
+    const teamEntry = teamEntryOf(entry);
+    return teamEntry ? onRemoveSecret(entry.secretRef, teamEntry) : onRemoveSecret(entry.secretRef);
+  };
 
+  const installTarget =
+    [...entries, ...teamEntries].find((entry) => entry.secretRef === installTargetRef) ?? null;
+  // 키를 설치하고 쓰게 할 호스트는 그 키가 든 볼트 안에서만 고른다 — 볼트를 넘는 참조는 메인이 거절한다.
+  const installVaultId = installTargetRef
+    ? (teamIdBySecretRef[installTargetRef] ?? PERSONAL_VAULT_ID)
+    : PERSONAL_VAULT_ID;
   const installableHosts = useMemo(
     () =>
-      hosts.filter((host) => isSshHostRecord(host) || isAwsEc2HostRecord(host)),
-    [hosts],
+      hosts.filter(
+        (host): host is SshHostRecord | AwsEc2HostRecord =>
+          (isSshHostRecord(host) || isAwsEc2HostRecord(host)) &&
+          (!sections || vaultIdOf(vaultIndex?.teamIdByHostId, host.id) === installVaultId),
+      ),
+    [hosts, installVaultId, sections, vaultIndex],
   );
-  const installTarget = entries.find((entry) => entry.secretRef === installTargetRef) ?? null;
   const visibleInstallHosts = useMemo(() => {
     const query = installHostSearchQuery.trim();
     if (!query) {
@@ -229,6 +286,70 @@ export function KeychainPanel({
     setSelectedInstallHostIds([]);
   };
 
+  const renderEntry = (entry: SecretMetadataRecord) => (
+    <Card key={entry.secretRef}>
+      <CardMain>
+        <CardTitleRow>
+          <strong>{entry.label}</strong>
+          {/* 프로토콜 태그. 색이 있는 tone 들은 다른 화면에서 상태(running 등)를
+              뜻하므로, 상태가 아닌 분류에는 neutral 을 쓴다 — 목록 전체가 초록 알약으로
+              덮이면 상태처럼 읽힌다. */}
+          <Badge tone="neutral">{getSecretKindLabel(entry)}</Badge>
+        </CardTitleRow>
+        <CardMeta>
+          <span>{describeSecretType(entry)}</span>
+          {entry.keyAlgorithm ? <span>{entry.keyAlgorithm}</span> : null}
+          {entry.privateKeyEncrypted ? (
+            <span>
+              {entry.passphraseSaved ? 'Encrypted · passphrase saved' : 'Encrypted'}
+            </span>
+          ) : null}
+          {entry.privateKeyCipher ? (
+            <span>
+              {entry.privateKeyCipher}
+              {entry.privateKeyKdfRounds
+                ? ` · ${entry.privateKeyKdfRounds} rounds`
+                : ''}
+            </span>
+          ) : null}
+          <span>{translate('keychain.linkedHosts', { count: entry.linkedHostCount })}</span>
+          <span>{new Date(entry.updatedAt).toLocaleString(getFormatLocale())}</span>
+        </CardMeta>
+      </CardMain>
+      <CardActions>
+        {entry.hasPassword ? (
+          <Button
+            variant="secondary"
+            disabled={copyingSecretRef === entry.secretRef}
+            onClick={() => void handleCopyPassword(entry.secretRef)}
+          >
+            {translate(copyingSecretRef === entry.secretRef ? 'keychain.action.copying' : 'keychain.action.copyPassword')}
+          </Button>
+        ) : null}
+        <Button variant="secondary" onClick={() => editSecret(entry)}>
+          {translate('keychain.action.edit')}
+        </Button>
+        {entry.hasManagedPrivateKey ? (
+          <>
+            <Button
+              variant="secondary"
+              disabled={copyingPublicKeyRef === entry.secretRef}
+              onClick={() => void handleCopyPublicKey(entry.secretRef)}
+            >
+              {translate(copyingPublicKeyRef === entry.secretRef ? 'keychain.action.copying' : 'keychain.action.copyPublicKey')}
+            </Button>
+            <Button variant="secondary" onClick={() => openInstallDialog(entry.secretRef)}>
+              {translate('keychain.action.installOnHost')}
+            </Button>
+          </>
+        ) : null}
+        <Button variant="danger" onClick={() => void removeSecret(entry)}>
+          {translate('common.delete')}
+        </Button>
+      </CardActions>
+    </Card>
+  );
+
   return (
     <div className="flex flex-col gap-[1.1rem]">
       <div className="flex items-end justify-between gap-4 px-0 pt-1 pb-2">
@@ -252,7 +373,7 @@ export function KeychainPanel({
         </Button>
       </div>
 
-      {entries.length > 0 ? (
+      {entries.length > 0 || teamEntries.length > 0 ? (
         <Input
           type="search"
           aria-label="Search saved credentials"
@@ -276,7 +397,39 @@ export function KeychainPanel({
       ) : null}
 
       <PanelSection>
-        {entries.length === 0 ? (
+        {sections ? (
+          <div className="flex flex-col gap-[1.4rem]">
+            {sections.map((section) => (
+              <section key={section.vaultId} className="flex flex-col gap-[0.9rem]">
+                <VaultSectionHeader
+                  team={section.team}
+                  count={section.items.length}
+                  addLabel={null}
+                  hint={
+                    // 팀 것은 함께 쓴다 — 바꾸거나 지우면 멤버 모두에게 간다(후보 S1).
+                    section.team ? (
+                      <InfoHint label={translate('keychain.team.aboutToggle')} widthClassName="w-[24rem]">
+                        <InfoHintPoints
+                          items={[
+                            translate('keychain.team.shared', { team: section.team.name }),
+                            translate('keychain.team.changesReachAll'),
+                          ]}
+                        />
+                      </InfoHint>
+                    ) : undefined
+                  }
+                />
+                {section.items.length > 0 ? (
+                  section.items.map(renderEntry)
+                ) : (
+                  <VaultEmptyLine>
+                    {translate(searchQuery.trim() ? 'keychain.empty.searchTitle' : 'keychain.empty.title')}
+                  </VaultEmptyLine>
+                )}
+              </section>
+            ))}
+          </div>
+        ) : entries.length === 0 ? (
           <EmptyState
             title={translate('keychain.empty.title')}
             description={translate('keychain.empty.description')}
@@ -287,69 +440,7 @@ export function KeychainPanel({
             description={translate('keychain.empty.searchDescription')}
           />
         ) : (
-          visibleEntries.map((entry) => (
-            <Card key={entry.secretRef}>
-              <CardMain>
-                <CardTitleRow>
-                  <strong>{entry.label}</strong>
-                  {/* 프로토콜 태그. 색이 있는 tone 들은 다른 화면에서 상태(running 등)를
-                      뜻하므로, 상태가 아닌 분류에는 neutral 을 쓴다 — 목록 전체가 초록 알약으로
-                      덮이면 상태처럼 읽힌다. */}
-                  <Badge tone="neutral">{getSecretKindLabel(entry)}</Badge>
-                </CardTitleRow>
-                <CardMeta>
-                  <span>{describeSecretType(entry)}</span>
-                  {entry.keyAlgorithm ? <span>{entry.keyAlgorithm}</span> : null}
-                  {entry.privateKeyEncrypted ? (
-                    <span>
-                      {entry.passphraseSaved ? 'Encrypted · passphrase saved' : 'Encrypted'}
-                    </span>
-                  ) : null}
-                  {entry.privateKeyCipher ? (
-                    <span>
-                      {entry.privateKeyCipher}
-                      {entry.privateKeyKdfRounds
-                        ? ` · ${entry.privateKeyKdfRounds} rounds`
-                        : ''}
-                    </span>
-                  ) : null}
-                  <span>{translate('keychain.linkedHosts', { count: entry.linkedHostCount })}</span>
-                  <span>{new Date(entry.updatedAt).toLocaleString(getFormatLocale())}</span>
-                </CardMeta>
-              </CardMain>
-              <CardActions>
-                {entry.hasPassword ? (
-                  <Button
-                    variant="secondary"
-                    disabled={copyingSecretRef === entry.secretRef}
-                    onClick={() => void handleCopyPassword(entry.secretRef)}
-                  >
-                    {translate(copyingSecretRef === entry.secretRef ? 'keychain.action.copying' : 'keychain.action.copyPassword')}
-                  </Button>
-                ) : null}
-                <Button variant="secondary" onClick={() => onEditSecret(entry.secretRef)}>
-                  {translate('keychain.action.edit')}
-                </Button>
-                {entry.hasManagedPrivateKey ? (
-                  <>
-                    <Button
-                      variant="secondary"
-                      disabled={copyingPublicKeyRef === entry.secretRef}
-                      onClick={() => void handleCopyPublicKey(entry.secretRef)}
-                    >
-                      {translate(copyingPublicKeyRef === entry.secretRef ? 'keychain.action.copying' : 'keychain.action.copyPublicKey')}
-                    </Button>
-                    <Button variant="secondary" onClick={() => openInstallDialog(entry.secretRef)}>
-                      {translate('keychain.action.installOnHost')}
-                    </Button>
-                  </>
-                ) : null}
-                <Button variant="danger" onClick={() => void onRemoveSecret(entry.secretRef)}>
-                  {translate('common.delete')}
-                </Button>
-              </CardActions>
-            </Card>
-          ))
+          visibleEntries.map(renderEntry)
         )}
       </PanelSection>
 

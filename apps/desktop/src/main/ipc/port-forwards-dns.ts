@@ -1,6 +1,7 @@
 import {
   buildAwsSsmKnownHostIdentity,
   getAwsEc2HostSshPort,
+  isLinkedDnsOverrideDraft,
   isLinkedDnsOverrideRecord,
   isStaticDnsOverrideRecord,
   type DnsOverrideDraft,
@@ -24,6 +25,7 @@ import type {
 import { resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { t } from "../i18n";
 import { logMessage } from "../activity-log-message";
+import { PERSONAL_VAULT_ID, type VaultScope } from "../vault-catalog";
 
 export function registerPortForwardAndDnsIpcHandlers(
   ctx: MainIpcContext,
@@ -36,6 +38,32 @@ export function registerPortForwardAndDnsIpcHandlers(
       host.awsProfileId,
       host.awsProfileName,
     );
+
+  // 볼트는 레코드가 정한다 — 규칙은 호스트의 볼트, Linked DNS 는 규칙의 볼트, Static DNS 는 화면이 고른 볼트.
+  // 팀이 없으면 모두 개인 저장소다(지금과 같은 호출).
+  const requireScope = (vaultId: string): VaultScope => {
+    const scope = ctx.vaults.getScope(vaultId);
+    if (!scope) {
+      throw new Error(t("teams.notOnDevice"));
+    }
+    return scope;
+  };
+  /** 그 규칙이 이 볼트에 없고 다른 볼트에 있으면 던진다 — 팀 DNS 가 개인 규칙을(또는 그 반대를) 가리키지 않게. */
+  const assertRuleInScope = (scope: VaultScope, ruleId: string) => {
+    if (!scope.portForwards.getById(ruleId) && ctx.vaults.getPortForward(ruleId)) {
+      throw new Error(t("pfIpc.ruleInOtherVault"));
+    }
+  };
+  const scopeForNewDnsOverride = (draft: DnsOverrideDraft, vaultId?: string): VaultScope => {
+    if (isLinkedDnsOverrideDraft(draft)) {
+      const scope = ctx.vaults.scopeOfPortForward(draft.portForwardRuleId);
+      if (vaultId !== undefined && vaultId !== scope.id) {
+        throw new Error(t("pfIpc.ruleInOtherVault"));
+      }
+      return scope;
+    }
+    return requireScope(vaultId ?? PERSONAL_VAULT_ID);
+  };
 
   const buildUserFacingDnsOverrideErrorMessage = (
     failure: ReturnType<typeof describeHostsOverrideManagerFailure>,
@@ -64,12 +92,13 @@ export function registerPortForwardAndDnsIpcHandlers(
 
   ipcMain.handle(
     ipcChannels.dnsOverrides.create,
-    async (_event, draft: DnsOverrideDraft) => {
-      const record = ctx.dnsOverrides.create(draft, ctx.portForwards);
+    async (_event, draft: DnsOverrideDraft, vaultId?: string) => {
+      const scope = scopeForNewDnsOverride(draft, vaultId);
+      const record = scope.dnsOverrides.create(draft, scope.portForwards);
       try {
         await ctx.rewriteActiveDnsOverrides();
       } catch (error) {
-        ctx.dnsOverrides.remove(record.id);
+        scope.dnsOverrides.remove(record.id);
         throw error;
       }
       ctx.activityLogs.append("info", "audit", logMessage("pfIpc.dnsCreated"), {
@@ -94,12 +123,16 @@ export function registerPortForwardAndDnsIpcHandlers(
   ipcMain.handle(
     ipcChannels.dnsOverrides.update,
     async (_event, id: string, draft: DnsOverrideDraft) => {
-      const previous = ctx.dnsOverrides.list();
-      const record = ctx.dnsOverrides.update(id, draft, ctx.portForwards);
+      const scope = ctx.vaults.scopeOfDnsOverride(id);
+      if (isLinkedDnsOverrideDraft(draft)) {
+        assertRuleInScope(scope, draft.portForwardRuleId);
+      }
+      const previous = scope.dnsOverrides.list();
+      const record = scope.dnsOverrides.update(id, draft, scope.portForwards);
       try {
         await ctx.rewriteActiveDnsOverrides();
       } catch (error) {
-        ctx.dnsOverrides.replaceAll(previous);
+        scope.dnsOverrides.replaceAll(previous);
         throw error;
       }
       ctx.activityLogs.append("info", "audit", logMessage("pfIpc.dnsUpdated"), {
@@ -124,7 +157,7 @@ export function registerPortForwardAndDnsIpcHandlers(
   ipcMain.handle(
     ipcChannels.dnsOverrides.setStaticActive,
     async (_event, id: string, active: boolean) => {
-      const record = ctx.dnsOverrides.getById(id);
+      const record = ctx.vaults.getDnsOverride(id);
       if (!record || !isStaticDnsOverrideRecord(record)) {
         throw new Error("Static DNS override not found");
       }
@@ -188,16 +221,17 @@ export function registerPortForwardAndDnsIpcHandlers(
   ipcMain.handle(
     ipcChannels.dnsOverrides.remove,
     async (_event, id: string) => {
-      const previous = ctx.dnsOverrides.list();
-      const current = ctx.dnsOverrides.getById(id);
-      ctx.dnsOverrides.remove(id);
+      const scope = ctx.vaults.scopeOfDnsOverride(id);
+      const previous = scope.dnsOverrides.list();
+      const current = scope.dnsOverrides.getById(id);
+      scope.dnsOverrides.remove(id);
       try {
         await ctx.rewriteActiveDnsOverrides();
       } catch (error) {
-        ctx.dnsOverrides.replaceAll(previous);
+        scope.dnsOverrides.replaceAll(previous);
         throw error;
       }
-      ctx.syncOutbox.upsertDeletion("dnsOverrides", id);
+      scope.syncOutbox.upsertDeletion("dnsOverrides", id);
       if (current) {
         ctx.hostsOverrideManager.removeStaticOverrideState(current.id);
         ctx.activityLogs.append("warn", "audit", logMessage("pfIpc.dnsDeleted"), {
@@ -226,7 +260,8 @@ export function registerPortForwardAndDnsIpcHandlers(
       } else {
         ctx.assertSshHost(host);
       }
-      const record = ctx.portForwards.create(draft);
+      // 규칙은 호스트와 같은 볼트에 둔다.
+      const record = ctx.vaults.scopeOfHost(draft.hostId).portForwards.create(draft);
       ctx.activityLogs.append("info", "audit", logMessage("pfIpc.ruleCreated"), {
         ruleId: record.id,
         label: record.label,
@@ -259,7 +294,11 @@ export function registerPortForwardAndDnsIpcHandlers(
       } else {
         ctx.assertSshHost(host);
       }
-      const record = ctx.portForwards.update(id, draft);
+      const scope = ctx.vaults.scopeOfPortForward(id);
+      if (ctx.vaults.scopeOfHost(draft.hostId).id !== scope.id) {
+        throw new Error(t("pfIpc.hostInOtherVault"));
+      }
+      const record = scope.portForwards.update(id, draft);
       ctx.activityLogs.append("info", "audit", logMessage("pfIpc.ruleUpdated"), {
         ruleId: record.id,
         label: record.label,
@@ -282,11 +321,13 @@ export function registerPortForwardAndDnsIpcHandlers(
   ipcMain.handle(
     ipcChannels.portForwards.remove,
     async (_event, id: string) => {
-      const current = ctx.portForwards.getById(id);
+      // 규칙과 거기 딸린 Linked DNS 는 같은 볼트에 있다 — 그 볼트에서 지우고 그 볼트의 삭제 기록에 올린다.
+      const scope = ctx.vaults.scopeOfPortForward(id);
+      const current = scope.portForwards.getById(id);
       if (current) {
         await ctx.stopPortForwardWithDnsOverrideCleanup(id).catch(() => undefined);
       }
-      const linkedOverrides = ctx.dnsOverrides
+      const linkedOverrides = scope.dnsOverrides
         .list()
         .filter(
           (override) =>
@@ -294,11 +335,11 @@ export function registerPortForwardAndDnsIpcHandlers(
             override.portForwardRuleId === id,
         );
       for (const override of linkedOverrides) {
-        ctx.dnsOverrides.remove(override.id);
-        ctx.syncOutbox.upsertDeletion("dnsOverrides", override.id);
+        scope.dnsOverrides.remove(override.id);
+        scope.syncOutbox.upsertDeletion("dnsOverrides", override.id);
       }
-      ctx.syncOutbox.upsertDeletion("portForwards", id);
-      ctx.portForwards.remove(id);
+      scope.syncOutbox.upsertDeletion("portForwards", id);
+      scope.portForwards.remove(id);
       if (current) {
         ctx.activityLogs.append("warn", "audit", logMessage("pfIpc.ruleDeleted"), {
           ruleId: current.id,

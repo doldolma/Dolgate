@@ -20,6 +20,7 @@ import type { AwsEc2HostRecord, MainIpcContext, SshHostRecord } from "./context"
 import { probeLocalAgent, resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { connectAwsEc2OverSsm } from "./aws-ec2-ssh-over-ssm";
 import { runWithIpcSessionOwner } from "./session-owner";
+import { collectHopSecretsToPersist, findHostNeedingPassword } from "./connect-credentials";
 import { COMPLETION_EXIT_UNKNOWN } from "../core-manager";
 import type { AwsSessionFallback, AwsSessionTransport } from "@dolssh/shared-core";
 import { t } from '../i18n';
@@ -389,11 +390,18 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
 
       ctx.assertSshHost(host);
       const sshHost = host as SshHostRecord;
+      // 쓸 비밀번호가 없는 홉이 있으면 코어를 부르지 않고 그 홉을 알린다 — 화면이 요청 창을 그 홉으로 띄운다
+      // (점프 호스트면 베스천부터).
+      const needsPasswordFor = await findHostNeedingPassword(ctx, sshHost, input.secrets, input.jumpSecrets);
+      if (needsPasswordFor) {
+        return { credentialsNeeded: { hostId: needsPasswordFor, reason: "missing" as const } };
+      }
       const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys(sshHost);
       const { username, authType, secrets, shouldPersistHostSecret, typedUsername } =
         await ctx.resolveSshAuth(sshHost, input.secrets);
       await ctx.ensureCertificateAuthReady(sshHost, secrets, authType);
-      const jump = await ctx.resolveJumpHostTarget(sshHost);
+      const jump = await ctx.resolveJumpHostTarget(sshHost, input.jumpSecrets);
+      const hopSecretsToPersist = await collectHopSecretsToPersist(ctx, sshHost, input.jumpSecrets);
       const title = input.title?.trim() || sshHost.label;
       const useMosh = jump ? false : sshHost.useMosh === true;
       const agentForwardingRequested =
@@ -454,12 +462,14 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         input.rows,
       );
 
-      if (shouldPersistHostSecret) {
+      if (shouldPersistHostSecret || hopSecretsToPersist.length > 0) {
         ctx.pendingSessionSecrets.set(connection.sessionId, {
           hostId: sshHost.id,
           label: title,
-          secrets,
-          username: typedUsername,
+          // 대상은 요청 창 값이 있을 때만 저장한다(점프 홉 값만 넣은 시도도 있다).
+          secrets: shouldPersistHostSecret ? secrets : {},
+          username: shouldPersistHostSecret ? typedUsername : null,
+          ...(hopSecretsToPersist.length > 0 ? { jumps: hopSecretsToPersist } : {}),
         });
       }
 

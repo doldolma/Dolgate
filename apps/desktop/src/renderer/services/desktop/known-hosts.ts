@@ -17,3 +17,8 @@ export function replaceKnownHost(
 ) {
   return desktopApi.knownHosts.replace(input);
 }
+
+/** 그 팀 볼트의 호스트 키 기록. 개인 목록은 스토어가 들고 있다. */
+export function listTeamKnownHosts(teamId: string) {
+  return desktopApi.knownHosts.list(teamId);
+}

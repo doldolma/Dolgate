@@ -19,6 +19,7 @@ import {
 } from "../ui/icons";
 import { cn } from "../lib/cn";
 import { WorkspacePreview } from "./WorkspacePreview";
+import { PerPersonHint } from "./teams/PerPersonHint";
 
 interface WorkspaceDetailPanelProps {
   workspace: SavedWorkspaceRecord | null;
@@ -32,6 +33,8 @@ interface WorkspaceDetailPanelProps {
     favorite: boolean,
   ) => void | Promise<unknown>;
   onDelete: (workspace: SavedWorkspaceRecord) => void;
+  /** 팀 워크스페이스면 즐겨찾기가 나에게만 적용된다는 툴팁. */
+  favoriteHint?: string | null;
 }
 
 export function WorkspaceDetailPanel({
@@ -43,6 +46,7 @@ export function WorkspaceDetailPanel({
   onDuplicate,
   onToggleFavorite,
   onDelete,
+  favoriteHint = null,
 }: WorkspaceDetailPanelProps) {
   const { t } = useTranslation();
   const formatLocale = getFormatLocale();
@@ -125,6 +129,7 @@ export function WorkspaceDetailPanel({
                 })}
               </p>
             </div>
+            <PerPersonHint hint={favoriteHint}>
             <button
               type="button"
               aria-label={
@@ -148,6 +153,7 @@ export function WorkspaceDetailPanel({
                 aria-hidden="true"
               />
             </button>
+            </PerPersonHint>
           </div>
 
           <WorkspacePreview

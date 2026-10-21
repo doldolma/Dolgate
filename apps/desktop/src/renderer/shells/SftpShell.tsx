@@ -1,6 +1,9 @@
+import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { AuthState } from '@shared';
 import { RemoteFileEditorModal } from '../components/RemoteFileEditorModal';
 import { SftpWorkspace } from '../components/SftpWorkspace';
+import { buildBrowserVaults } from '../components/host-browser/browserVaults';
 import type { useLoginController } from '../controllers/useLoginController';
 import { cn } from '../lib/cn';
 import { getPathForDroppedFile, listLocalRoots } from '../services/desktop/files';
@@ -39,6 +42,19 @@ export function SftpShell({
   modalViewModel,
   loginController,
 }: SftpShellProps) {
+  const { t: translate } = useTranslation();
+  // 호스트 고르기의 맨 위 볼트들(홈 사이드바와 같은 것). 팀이 없으면 비어 있고 고르기는 지금 그대로다.
+  const vaults = useMemo(
+    () =>
+      buildBrowserVaults({
+        hosts: homeViewModel.hosts,
+        groups: homeViewModel.groups,
+        savedWorkspaces: homeViewModel.savedWorkspaces ?? [],
+        vaultIndex: homeViewModel.vaultIndex,
+        personalName: translate('sidebar.personalVault'),
+      }),
+    [homeViewModel.groups, homeViewModel.hosts, homeViewModel.savedWorkspaces, homeViewModel.vaultIndex, translate],
+  );
   return (
     <section
       className={cn(
@@ -62,6 +78,8 @@ export function SftpShell({
           desktopPlatform={desktopPlatform}
           hosts={homeViewModel.hosts}
           groups={homeViewModel.groups}
+          vaults={vaults}
+          myUsernameByHostId={homeViewModel.vaultIndex?.myUsernameByHostId}
           sftp={sftpViewModel.sftpState}
           transfers={sftpViewModel.transfers}
           settings={settingsViewModel.settings}

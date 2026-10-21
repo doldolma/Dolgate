@@ -28,7 +28,7 @@ export class VaultCopyService {
     const write = toVaultCopyWrite(plan, new Date().toISOString());
     getDesktopStateStorage().applyVaultCopy(request.targetVaultId, write);
     this.deps.onCopied({ request, counts: plan.counts });
-    return { hostIds: plan.hostIdMap, counts: plan.counts };
+    return { hostIds: plan.hostIdMap, workspaceIds: plan.workspaceIdMap, counts: plan.counts };
   }
 
   private plan(request: VaultCopyRequest): VaultCopyPlan {
@@ -69,6 +69,7 @@ export function toVaultCopyWrite(plan: VaultCopyPlan, now: string): VaultCopyWri
       updatedAt: profile.updatedAt,
     })),
     snippets: plan.snippets,
+    savedWorkspaces: plan.savedWorkspaces,
     tailnets: plan.tailnets.map(({ authKey, ...tailnet }) => ({ ...tailnet, hasAuthKey: Boolean(authKey) })),
     secrets: Object.fromEntries(
       plan.secrets.map((secret) => [secret.secretRef, encodeSecretForStorage(JSON.stringify(secret))]),

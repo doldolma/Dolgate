@@ -65,6 +65,14 @@ import type { XshellImportService } from "../xshell-import-service";
 export type SshHostRecord = Extract<HostRecord, { kind: "ssh" }>;
 
 /** SSH 로 붙을 때 쓸 자격 증명 — 사용자 이름·인증 방식·비밀값. SSH 계열 접속 경로는 모두 이것을 쓴다. */
+/** 붙은 뒤 제자리에 저장할 한 홉의 요청 창 값(점프 호스트). */
+export interface PendingHopSecret {
+  hostId: string;
+  label: string;
+  secrets: HostSecretInput;
+  username?: string | null;
+}
+
 export interface ResolvedSshAuth {
   username: string;
   authType: SshHostRecord["authType"];
@@ -182,6 +190,8 @@ export interface MainIpcContext {
       secrets: HostSecretInput;
       /** 요청 창에서 넣은 사용자 이름. 붙으면 그 자리(개인=호스트, 팀=내 칸)에 저장한다. */
       username?: string | null;
+      /** 요청 창에서 넣은 점프 호스트의 값. 붙으면 홉마다 그 자리에 저장한다. */
+      jumps?: PendingHopSecret[];
     }
   >;
   trackAwsSftpTunnelRuntime: (endpointId: string, runtimeId: string) => void;
@@ -277,8 +287,10 @@ export interface MainIpcContext {
   resolveSshAuth: (host: SshHostRecord, secrets?: HostSecretInput) => Promise<ResolvedSshAuth>;
   // host.jumpHostId가 있으면 그 점프 호스트를 해석한 ResolvedJumpHost, 없으면
   // undefined를 돌려준다. 4개 connect 핸들러가 payload.jump로 실어 보낸다.
+  // jumpSecrets 는 이번 시도에서 요청 창에 넣은 점프 호스트의 값(id → 값)이다.
   resolveJumpHostTarget: (
     host: SshHostRecord,
+    jumpSecrets?: Record<string, HostSecretInput>,
   ) => Promise<ResolvedJumpHost | undefined>;
   resolveManagedPrivateKeyPem: (
     draft: HostDraft,

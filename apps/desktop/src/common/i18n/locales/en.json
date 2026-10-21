@@ -78,7 +78,9 @@
       "title": "Workspace details",
       "placeholder": "Select a Workspace to inspect its layout and panes."
     },
-    "hostMissingUsername": "{{label}} has no username. Set one on the host, then retry this pane."
+    "hostMissingUsername": "{{label}} has no username. Set one on the host, then retry this pane.",
+    "mixedVaults": "Personal and team hosts are mixed, so this can't be saved as a Workspace. Keep panes from one vault to save it.",
+    "mixedTeams": "Hosts from different teams are mixed, so this can't be saved as a Workspace. Keep panes from one vault to save it."
   },
   "homeAssets": {
     "menu": {
@@ -511,8 +513,10 @@
       "containerDiscovery": "Container discovery"
     },
     "status": {
-      "stopped": "Stopped"
-    }
+      "stopped": "Stopped",
+      "notApplied": "Not applied"
+    },
+    "appliedBy": "{{vault}}'s override with the same name is applied instead"
   },
   "ai": {
     "provider": {
@@ -682,7 +686,8 @@
       "updateSubmit": "Update profile",
       "updateSubmitting": "Updating…",
       "profileName": "Profile name",
-      "currentAccessKey": "Currently stored access key: {{key}}"
+      "currentAccessKey": "Currently stored access key: {{key}}",
+      "createDescriptionTeam": "Saved to {{team}}. Every member uses this profile."
     },
     "region": {
       "title": "Change default region",
@@ -966,7 +971,8 @@
       "notFound": "The selected AWS profile was not found.",
       "sameName": "The new profile name is the same as the current one.",
       "linkedNotFoundNamed": "The linked AWS profile \"{{label}}\" could not be found. Choose the profile again in the host settings.",
-      "linkedNotFound": "The linked AWS profile could not be found. Choose the profile again in the host settings."
+      "linkedNotFound": "The linked AWS profile could not be found. Choose the profile again in the host settings.",
+      "teamKeyMissing": "You haven't added your own AWS key to the team profile \"{{profile}}\". Each member adds their own key."
     },
     "role": {
       "assumeDenied": "This role cannot be assumed with the selected source profile. Check the IAM permissions and the target role's trust policy.",
@@ -1596,7 +1602,8 @@
       "none": "Not used (regular network)",
       "empty": "No Tailscale network is registered yet. Add one in Settings → Network first. Each device registers its own.",
       "missingOption": "Tailscale network missing",
-      "missing": "The Tailscale network selected by this host is missing. Select 'Not used' to clear it, or register the network again."
+      "missing": "The Tailscale network selected by this host is missing. Select 'Not used' to clear it, or register the network again.",
+      "emptyTeam": "This team has no Tailscale network yet. Use Add to create one in the team."
     },
     "rdp": {
       "domain": "Domain",
@@ -1825,7 +1832,9 @@
       "exportMany": "Export… ({{count}})",
       "newSubgroup": "New subgroup",
       "rename": "Rename",
-      "exportGroup": "Export… ({{count}} items)"
+      "exportGroup": "Export… ({{count}} items)",
+      "share": "Share…",
+      "copyToVault": "Copy to vault…"
     },
     "error": {
       "groupCreateFailed": "Could not create the group.",
@@ -1843,7 +1852,14 @@
       "groupEmpty": "This group is empty. Deleting it removes it immediately.",
       "keepChildren": "Keep contents",
       "deleteChildren": "Delete contents too"
-    }
+    },
+    "vaultMenu": {
+      "invite": "Invite link",
+      "newHost": "New host",
+      "newGroup": "New group",
+      "manageTeam": "Manage team"
+    },
+    "dropCopy": "Copy"
   },
   "awsWizard": {
     "error": {
@@ -2168,7 +2184,9 @@
     "azUnknown": "Could not determine the availability zone.",
     "remoteHostUnknown": "Check the remote host address.",
     "hostsOverrideFailed": "Could not apply the hosts override.",
-    "ssmForwardStartFailed": "Could not start the AWS SSM port forward."
+    "ssmForwardStartFailed": "Could not start the AWS SSM port forward.",
+    "ruleInOtherVault": "You can't link to a port forwarding rule in another vault.",
+    "hostInOtherVault": "You can't move this rule to a host in another vault. Create it in that vault instead."
   },
   "aiService": {
     "apiKeyEmpty": "The API key is empty.",
@@ -2415,7 +2433,12 @@
     },
     "aboutToggle": "How credentials are stored",
     "aboutStorage": "Stored in your OS keychain",
-    "aboutSync": "Encrypted with your sync passphrase before upload, so the server only sees ciphertext"
+    "aboutSync": "Encrypted with your sync passphrase before upload, so the server only sees ciphertext",
+    "team": {
+      "aboutToggle": "About team credentials",
+      "shared": "Passwords and keys shared by {{team}} members",
+      "changesReachAll": "Changing or deleting one changes it for every member"
+    }
   },
   "sshKeyInstall": {
     "generateTitle": "Generate and install a new SSH key",
@@ -2638,7 +2661,8 @@
     "edit": "Edit",
     "noResults": "No search results.",
     "addTitle": "New snippet",
-    "editTitle": "Edit snippet"
+    "editTitle": "Edit snippet",
+    "addAction": "Add snippet"
   },
   "sessionPane": {
     "dropPathFailed": "Could not read the dropped file paths.",
@@ -2851,7 +2875,7 @@
   },
   "teams": {
     "nameRequired": "Enter a team name.",
-    "inviteDaysRange": "Invite links can last 1 to {{max}} days.",
+    "inviteHoursRange": "Invite links can last from 1 hour to 30 days.",
     "needsRejoin": "This device doesn't have this team's key. Join again with an invite link.",
     "inviteOtherServer": "This invite link is for a different sync server.",
     "inviteOtherTeam": "This invite link is for a different team.",
@@ -2872,7 +2896,203 @@
       "memberNotFound": "Not a member of this team.",
       "alreadyMember": "Already a member of this team.",
       "exists": "This team already exists."
+    },
+    "crossVault": {
+      "jumpHost": "A jump host must be in the same vault.",
+      "tunnelHost": "An SSH tunnel host must be in the same vault.",
+      "tailnet": "The tailnet must be in the same vault.",
+      "awsProfile": "The AWS profile must be in the same vault.",
+      "snippet": "The startup snippet must be in the same vault.",
+      "secret": "Saved credentials must be in the same vault."
+    },
+    "perPerson": {
+      "favorite": "Favorites apply only to you.",
+      "agentForwarding": "Applies only to you — teammates keep their own setting.",
+      "terminalTheme": "Applies only on this device."
+    },
+    "copy": {
+      "shareTitle": "Share to {{target}}",
+      "copyTitle": "Copy to {{target}}",
+      "share": "Share",
+      "copy": "Copy",
+      "root": "Top level",
+      "hostCount": "{{count}} hosts",
+      "vault": "Vault",
+      "group": "Group",
+      "shareSecrets": "Also share {{count}} passwords and SSH keys",
+      "shareSecretsHint": "When off, teammates enter their own the first time they connect. Yours goes to your own credentials.",
+      "members": "{{count}} members can see and use it.",
+      "keepsOriginal": "The original stays in {{source}}.",
+      "onlyMe": "Only you can see the copy.",
+      "alongWith": "Comes along: {{items}}",
+      "extra": {
+        "dependencyHosts": "jump/tunnel hosts {{count}}",
+        "knownHosts": "known hosts {{count}}",
+        "portForwards": "port forwards {{count}}",
+        "dnsOverrides": "DNS overrides {{count}}",
+        "snippets": "snippets {{count}}",
+        "awsProfiles": "AWS profiles {{count}}",
+        "tailnets": "Tailscale {{count}}"
+      },
+      "previewFailed": "Couldn't read what will be copied.",
+      "failed": "Couldn't copy.",
+      "workspaceCount": "{{count}} workspaces"
+    },
+    "myCredentials": {
+      "cardHint": "Applies only to you — when filled, you connect with these instead of the team's.",
+      "dialogHint": "Applies only to you. Blank fields use the team's.",
+      "empty": "When empty, you connect with the team's.",
+      "title": "{{host}} · My credentials",
+      "teamValue": "{{value}} (team)",
+      "teamAuth": "Team's ({{auth}})",
+      "account": "Account",
+      "domain": "Domain",
+      "clear": "Clear",
+      "saveFailed": "Couldn't save your credentials.",
+      "stored": {
+        "password": "Password",
+        "privateKey": "Private key",
+        "certificate": "Certificate",
+        "passphrase": "Passphrase"
+      }
+    },
+    "vault": {
+      "addTo": "{{action}} in {{vault}}"
+    },
+    "myKey": {
+      "aboutToggle": "About your own key",
+      "awsHint": "Saved for you only. Each member adds their own key — the team gets only the profile settings.",
+      "tailnetHint": "Saved for you only. Each member adds their own auth key.",
+      "add": "Add my key",
+      "dialogTitle": "{{profile}} · My key",
+      "saveFailed": "Couldn't save your key."
     }
+  },
+  "teamsPanel": {
+    "empty": {
+      "title": "No teams yet.",
+      "stepCreate": "Create a team with ‘New team’",
+      "stepInvite": "Make an ‘Invite link’ and send it to your teammates",
+      "stepShare": "Drag hosts onto the team in the sidebar to share them"
+    },
+    "newTeam": "New team",
+    "joinWithLink": "Join with link",
+    "inviteLink": "Invite link",
+    "memberCount": "Members: {{count}}",
+    "sync": {
+      "outdated": "This team has items added in a newer version. Update the app to catch up.",
+      "error": "Couldn't sync: {{message}}"
+    },
+    "invites": {
+      "revoke": "Revoke link",
+      "title": "{{name}}'s link",
+      "expires": "Expires {{when}}",
+      "joined": "Joined: {{count}}",
+      "created": "Created {{when}}"
+    },
+    "members": {
+      "you": "(you)",
+      "createdTeam": "Created the team",
+      "actions": "Member actions",
+      "makeOwner": "Make owner",
+      "remove": "Remove",
+      "loadFailed": "Couldn't load the members.",
+      "joinedVia": "Joined via {{name}}'s link"
+    },
+    "danger": {
+      "description": "Leaving removes the team's hosts, passwords and keys from this device.",
+      "leave": "Leave team",
+      "delete": "Delete team"
+    },
+    "nameDialog": {
+      "create": "Create",
+      "placeholder": "e.g. Infra"
+    },
+    "joinDialog": {
+      "next": "Next"
+    },
+    "invite": {
+      "title": "Invite to {{team}}",
+      "createAndCopy": "Create and copy",
+      "copied": "Link copied — it stays open for {{duration}}.",
+      "copyFailed": "Couldn't copy. Copy the link below yourself.",
+      "copyAgain": "Copy again",
+      "onceHint": "You can see this link only now. Make a new one if you lose it.",
+      "duration": {
+        "hour1": "1 hour",
+        "day1": "1 day",
+        "day7": "7 days",
+        "day30": "30 days"
+      }
+    },
+    "remove": {
+      "title": "Remove {{email}}",
+      "body": "They leave the team and stop receiving its data. All of this team's invite links are revoked too.",
+      "done": "Removed — all invite links were revoked."
+    },
+    "makeOwner": {
+      "title": "Make {{email}} the owner",
+      "body": "Only the owner can rename the team, remove members, and delete it. You become a member.",
+      "confirm": "Transfer"
+    },
+    "leave": {
+      "title": "Leave {{team}}",
+      "member": "The team's hosts, passwords and keys disappear from this device. You'll need a new invite link to come back.",
+      "owner": "As the owner, you hand the team over before you leave.",
+      "earliest": "Joined first",
+      "last": "You're the last member. Leaving deletes the team and everything in it.",
+      "copyFirst": "Copy anything you want to keep to your personal vault first.",
+      "confirm": "Leave",
+      "transferAndLeave": "Hand over and leave",
+      "deleteAndLeave": "Delete and leave"
+    },
+    "delete": {
+      "title": "Delete {{team}}",
+      "others": "It also disappears for the other members ({{count}}).",
+      "alone": "No one else is in this team.",
+      "copyFirst": "Before you delete it, everyone should copy what they want to keep to their personal vault."
+    },
+    "counts": {
+      "groups": "Groups",
+      "hosts": "Hosts",
+      "secrets": "Passwords and keys",
+      "workspaces": "Workspaces"
+    },
+    "joinCard": {
+      "invitedBy": "Invited by {{email}} · members: {{count}}",
+      "what": "Joining adds this team to your sidebar and shares its hosts with every member. The server can't see the contents.",
+      "join": "Join",
+      "alreadyJoined": "You're already in this team.",
+      "goToTeam": "Go to team",
+      "otherServerTitle": "This team is on another server",
+      "otherServerBody": "This team is on {{host}}. Sign in to that server to join it.",
+      "expiredTitle": "Invite link expired",
+      "expiredBody": "It expired or was revoked. Ask a team member for a new link.",
+      "updateTitle": "Update required",
+      "updateBody": "This invite link uses a newer format. Update the app, then open it again.",
+      "invalidTitle": "Can't open this invite link",
+      "invalidBody": "The link is cut off or wrong. Paste the whole link you received.",
+      "failedTitle": "Couldn't check the invite",
+      "retry": "Try again",
+      "signedOutTitle": "Sign in to join",
+      "signedOutBody": "Teams need an account.",
+      "login": "Sign in",
+      "unsupportedVaultTitle": "New sync vault required",
+      "unsupportedVaultBody": "Teams work with the new vault locked by a sync passphrase. Move your vault, then open the link again.",
+      "serverUnsupportedTitle": "This server doesn't support teams",
+      "serverUnsupportedBody": "Update the sync server to use teams."
+    },
+    "actionFailed": "Couldn't finish the team action.",
+    "intro": "Share hosts and passwords with your team. The server can't read them.",
+    "about": {
+      "label": "What a team vault shares",
+      "edit": "Everyone in the team can see and edit what you put in it.",
+      "members": "The member list shows who joined, through whose link, and when.",
+      "ownKeys": "AWS static keys and Tailscale auth keys always stay your own."
+    },
+    "hostCount": "Hosts: {{count}}",
+    "createdWhen": "Created {{when}}",
+    "teamActions": "Team actions"
   },
   "shareChat": {
     "titleWith": "Chat history · {{title}}",
@@ -2928,7 +3148,11 @@
     "hideEmpty": "Hide empty groups",
     "favorites": "Favorites",
     "noGroups": "No groups created yet.",
-    "sortManual": "Custom"
+    "sortManual": "Custom",
+    "personalVault": "Personal",
+    "vaultMenu": "{{name}} menu",
+    "expandVault": "Expand {{name}}",
+    "collapseVault": "Collapse {{name}}"
   },
   "sessionStatusBar": {
     "latencyValue": "{{ms}}ms",
@@ -3013,7 +3237,14 @@
     "ssh": "This host has no saved SSH username yet. Enter one to continue the SSH connection. What you enter is saved on this host and reused from the next connection on.",
     "prompt": "Enter the username for {{label}}.",
     "saveFailed": "Could not save the username.",
-    "submit": "Save and continue"
+    "submit": "Save and continue",
+    "team": {
+      "sftp": "This host has no saved SSH username yet. Enter one to continue the SFTP connection. What you enter is saved in your own credentials, hidden from teammates, and reused from the next connection on.",
+      "containers": "This host has no saved SSH username yet. Enter one to continue the container connection. What you enter is saved in your own credentials, hidden from teammates, and reused from the next connection on.",
+      "containerShell": "This host has no saved SSH username yet. Enter one to continue the container shell connection. What you enter is saved in your own credentials, hidden from teammates, and reused from the next connection on.",
+      "portForward": "This host has no saved SSH username yet. Enter one to start port forwarding. What you enter is saved in your own credentials, hidden from teammates, and reused from the next connection on.",
+      "ssh": "This host has no saved SSH username yet. Enter one to continue the SSH connection. What you enter is saved in your own credentials, hidden from teammates, and reused from the next connection on."
+    }
   },
   "credentialRetry": {
     "prompt": "Check the credentials for {{label}} again.",
@@ -3023,7 +3254,9 @@
     "keyImportRequired": "Import a private key.",
     "certificateRequired": "Import an SSH certificate.",
     "retryFailed": "The retry failed.",
-    "retry": "Try again"
+    "retry": "Try again",
+    "passwordNeeded": "Enter the password for {{label}}.",
+    "jumpPasswordNeeded": "Enter the password for the jump host {{label}} — the connection to {{target}} goes through it."
   },
   "opensshSvc": {
     "circularInclude": "Skipped a circular Include in {{path}}.",

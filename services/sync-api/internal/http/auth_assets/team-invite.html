@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="{{ .T.Lang }}">
+  <head>
+    {{ template "auth-head" }}
+    <meta name="robots" content="noindex" />
+    {{ if .Live }}
+      <title>{{ .TeamName }} · {{ .T.InviteTitle }}</title>
+      {{/* 채팅에 붙인 링크의 미리보기 카드도 이 페이지를 읽는다 — 팀 이름만 싣는다(초대한 사람은 빼고). */}}
+      <meta property="og:title" content="{{ .TeamName }}" />
+      <meta property="og:description" content="{{ .T.InvitePreview }}" />
+    {{ else }}
+      <title>{{ .T.InviteExpiredTitle }}</title>
+    {{ end }}
+    <style>
+      {{ template "auth-base-css" }}
+      .card { max-width:440px; text-align:center; }
+      .mark { display:inline-flex; align-items:center; justify-content:center; width:52px; height:52px; border-radius:14px; background:rgba(95,124,255,.16); border:1px solid rgba(95,124,255,.35); color:#b9c8ff; font-weight:700; font-size:18px; margin-bottom:14px; }
+      h1 { margin:0 0 8px; font-size:28px; line-height:1.15; overflow-wrap:anywhere; }
+      p { color:#9fb0d3; margin:0 0 20px; line-height:1.55; }
+      .actions { display:grid; gap:10px; }
+      a.button { display:flex; justify-content:center; align-items:center; border:none; border-radius:14px; padding:14px 16px; font-size:15px; font-weight:700; text-decoration:none; cursor:pointer; color:white; }
+      .primary { background:#5f7cff; }
+      .secondary { background:#24324a; }
+      .hint { margin-top:16px; color:#8fa0c5; font-size:13px; line-height:1.55; }
+      .copy { display:flex; align-items:center; gap:8px; margin-top:8px; background:#0d1522; border-radius:12px; padding:6px 6px 6px 12px; }
+      /* 16px 미만이면 iOS Safari 가 포커스 때 페이지를 확대한다(login.html 과 같은 까닭). */
+      .copy input { flex:1; min-width:0; border:none; background:transparent; color:#c7d3ea; font:16px ui-monospace,Menlo,monospace; text-overflow:ellipsis; }
+      .copy button { border:none; border-radius:9px; padding:8px 12px; background:#24324a; color:white; font-weight:700; font-size:13px; cursor:pointer; white-space:nowrap; }
+      @media (min-width:560px) {
+        h1 { font-size:32px; }
+        .copy input { font-size:13px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        {{ if .Live }}
+          <div class="mark" aria-hidden="true">{{ .TeamMark }}</div>
+          <div class="eyebrow">{{ .T.InviteEyebrow }}</div>
+          <h1>{{ .TeamName }}</h1>
+          <p>{{ .T.InviteLede }}</p>
+          <div class="actions">
+            <a id="open-app" class="button primary" href="#">{{ .T.InviteOpenApp }}</a>
+            <a class="button secondary" href="{{ .DownloadURL }}" rel="noopener">{{ .T.InviteDownload }}</a>
+          </div>
+          <div class="hint">{{ .T.InviteHint }}</div>
+          <div class="copy">
+            <input id="invite-link" readonly aria-label="{{ .T.InviteLinkLabel }}" />
+            <button id="copy-link" type="button">{{ .T.InviteCopy }}</button>
+          </div>
+        {{ else }}
+          <div class="eyebrow">Dolgate</div>
+          <h1>{{ .T.InviteExpiredTitle }}</h1>
+          <p>{{ .T.InviteExpiredBody }}</p>
+          <div class="actions">
+            <a class="button secondary" href="{{ .DownloadURL }}" rel="noopener">{{ .T.InviteDownload }}</a>
+          </div>
+        {{ end }}
+      </div>
+    </div>
+    {{ if .Live }}
+      <script>
+        // 링크의 # 뒤(팀 키 상자를 여는 비밀값)는 브라우저가 서버로 보내지 않는다. 이 페이지 안에서만 읽어
+        // 앱으로 넘기고 복사 칸에 보인다 — 서버에는 남지 않는다.
+        const link = window.location.href;
+        const scheme = {{ .AppScheme }};
+        const copiedLabel = {{ .T.InviteCopied }};
+        const field = document.getElementById('invite-link');
+        const copyButton = document.getElementById('copy-link');
+        field.value = link;
+        // 저절로 열지 않는다 — 누른 사람만 앱으로 넘어간다(앱이 없으면 아무 일도 없고 아래 안내가 보인다).
+        document.getElementById('open-app').addEventListener('click', (event) => {
+          event.preventDefault();
+          window.location.href = scheme + '://join?link=' + encodeURIComponent(link);
+        });
+        copyButton.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(link);
+          } catch {
+            // http 로 연 자체 호스팅 서버 등 클립보드 API 가 막힌 곳.
+            field.select();
+            document.execCommand('copy');
+          }
+          copyButton.textContent = copiedLabel;
+        });
+      </script>
+    {{ end }}
+  </body>
+</html>

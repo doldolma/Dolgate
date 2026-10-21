@@ -734,6 +734,32 @@ describe("createAppStore sftp", () => {
     expect(JSON.stringify(store.getState())).not.toContain("sudo-secret");
   });
 
+  it("prefills my username when an SFTP login to a team host fails", async () => {
+    const api = createMockApi();
+    api.teams.getVaultIndex = vi.fn().mockResolvedValue({
+        teams: [],
+        teamIdByHostId: { "host-1": "team-1" },
+        teamIdByWorkspaceId: {},
+        teamIdByPortForwardId: {},
+        teamIdByDnsOverrideId: {},
+        teamIdBySnippetId: {},
+        myUsernameByHostId: { "host-1": "deploy" },
+      });
+    api.sftp.connect = vi.fn().mockRejectedValue(new Error("ssh: handshake failed: ssh: unable to authenticate, attempted methods [none password], no supported methods remain"));
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().refreshVaultIndex();
+    store.getState().activateSftp();
+    await store.getState().connectSftpHost("right", "host-1");
+
+    expect(store.getState().pendingCredentialRetry).toMatchObject({
+      hostId: "host-1",
+      source: "sftp",
+      initialUsername: "deploy",
+    });
+  });
+
   it("prompts for a missing SSH username before starting an SFTP connection", async () => {
     const api = createMockApi();
     api.hosts.list = vi.fn().mockResolvedValue([

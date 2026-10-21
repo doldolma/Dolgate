@@ -23,6 +23,37 @@ describe("saved workspace IPC", () => {
     electronMocks.handlers.clear();
   });
 
+  // 팀 워크스페이스도 id 로 그 볼트를 찾아 고친다(예전에는 개인 저장소만 봐서 "찾을 수 없음"이었다).
+  it("renames, moves and removes a Workspace through the catalog so team ones work too", async () => {
+    const ctx = withVaults({
+      savedWorkspaces: { list: vi.fn(), create: vi.fn(), rename: vi.fn(), moveToGroup: vi.fn(), remove: vi.fn() },
+      syncOutbox: { upsertDeletion: vi.fn() },
+      queueSync: vi.fn(),
+      emitWorkspaceChanged: vi.fn(),
+    } as any);
+    const record = { id: "team-ws", name: "Deploy" };
+    ctx.vaults = {
+      ...ctx.vaults,
+      renameWorkspace: vi.fn(() => record),
+      moveWorkspaceToGroup: vi.fn(() => record),
+      removeWorkspace: vi.fn(),
+    } as any;
+    registerSavedWorkspacesIpcHandlers(ctx);
+
+    await expect(
+      electronMocks.handlers.get(ipcChannels.savedWorkspaces.rename)?.({ sender: "w" }, "team-ws", "Deploy"),
+    ).resolves.toBe(record);
+    await electronMocks.handlers.get(ipcChannels.savedWorkspaces.moveToGroup)?.({ sender: "w" }, "team-ws", "Prod");
+    await electronMocks.handlers.get(ipcChannels.savedWorkspaces.remove)?.({ sender: "w" }, "team-ws");
+
+    expect(ctx.vaults.renameWorkspace).toHaveBeenCalledWith("team-ws", "Deploy");
+    expect(ctx.vaults.moveWorkspaceToGroup).toHaveBeenCalledWith("team-ws", "Prod");
+    expect(ctx.vaults.removeWorkspace).toHaveBeenCalledWith("team-ws");
+    expect(ctx.savedWorkspaces.remove).not.toHaveBeenCalled();
+    expect(ctx.queueSync).toHaveBeenCalledTimes(3);
+    expect(ctx.emitWorkspaceChanged).toHaveBeenCalledTimes(3);
+  });
+
   it("removes the local record, writes a workspace tombstone, and queues sync", async () => {
     const ctx = withVaults({
       savedWorkspaces: {
@@ -143,5 +174,74 @@ describe("saved workspace IPC", () => {
 
     expect(ctx.queueSync).not.toHaveBeenCalled();
     expect(ctx.emitWorkspaceChanged).not.toHaveBeenCalled();
+  });
+  // 4-6: 새 워크스페이스는 창의 호스트가 든 볼트에 만든다. 섞이면 저장하지 않는다.
+  describe("creating a Workspace", () => {
+    const leaf = (hostId: string | null) =>
+      hostId
+        ? { id: `leaf-${hostId}`, kind: "leaf", target: { kind: "host", hostId, label: hostId } }
+        : { id: "leaf-local", kind: "leaf", target: { kind: "local", label: "Local" } };
+    const split = (first: object, second: object) => ({ id: "split", kind: "split", axis: "horizontal", ratio: 0.5, first, second });
+    const vault = (hostIds: string[]) => {
+      const hosts = hostIds.map((id) => ({ id, kind: "ssh", label: id }));
+      return {
+        hosts: { getById: vi.fn((id: string) => hosts.find((host) => host.id === id) ?? null) },
+        savedWorkspaces: { create: vi.fn((draft: object) => ({ ...draft, id: "ws-new" })) },
+      };
+    };
+    const prefs = () => ({
+      read: () => ({ hosts: new Map(), workspaces: new Map(), terminalThemeByHostId: {} }),
+      readHostCredentials: () => null,
+      updateWorkspace: vi.fn(),
+    });
+    function setup() {
+      const personal = vault(["p1"]);
+      const team = { ...vault(["t1", "t2"]), memberPrefs: prefs() };
+      const other = { ...vault(["o1"]), memberPrefs: prefs() };
+      const ctx = withVaults(
+        { ...personal, queueSync: vi.fn(), emitWorkspaceChanged: vi.fn() },
+        { "team-1": team, "team-2": other },
+      );
+      registerSavedWorkspacesIpcHandlers(ctx as any);
+      const create = (root: object, vaultId?: string) =>
+        electronMocks.handlers.get(ipcChannels.savedWorkspaces.create)?.({ sender: "w" }, { name: "W", root }, vaultId);
+      return { personal, team, other, create };
+    }
+
+    it("goes to the vault of its panes' hosts — local panes don't count", async () => {
+      const { personal, team, create } = setup();
+
+      await create(split(leaf("t1"), split(leaf(null), leaf("t2"))));
+      expect(team.savedWorkspaces.create).toHaveBeenCalledWith(expect.objectContaining({ name: "W", favorite: false }));
+      expect(personal.savedWorkspaces.create).not.toHaveBeenCalled();
+
+      await create(split(leaf("p1"), leaf(null)));
+      expect(personal.savedWorkspaces.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses personal and team hosts together, and two teams together", async () => {
+      const { personal, team, other, create } = setup();
+
+      await expect(create(split(leaf("p1"), leaf("t1")))).rejects.toThrow("개인 호스트와 팀 호스트가 섞여 있어");
+      await expect(create(split(leaf("t1"), leaf("o1")))).rejects.toThrow("여러 팀의 호스트가 섞여 있어");
+      expect(personal.savedWorkspaces.create).not.toHaveBeenCalled();
+      expect(team.savedWorkspaces.create).not.toHaveBeenCalled();
+      expect(other.savedWorkspaces.create).not.toHaveBeenCalled();
+    });
+
+    // 복제는 원본 볼트를 넘긴다 — 로컬 창만 있거나 호스트가 지워졌어도 원본 볼트에 남는다.
+    it("uses the given vault when no pane names a host that still exists, and refuses a different one", async () => {
+      const { personal, team, create } = setup();
+
+      await create(split(leaf(null), leaf("gone")), "team-1");
+      expect(team.savedWorkspaces.create).toHaveBeenCalledTimes(1);
+
+      await create(leaf("t2"), "team-1");
+      expect(team.savedWorkspaces.create).toHaveBeenCalledTimes(2);
+
+      await expect(create(leaf("p1"), "team-1")).rejects.toThrow("개인 호스트와 팀 호스트가 섞여 있어");
+      await expect(create(leaf(null), "team-gone")).rejects.toThrow();
+      expect(personal.savedWorkspaces.create).not.toHaveBeenCalled();
+    });
   });
 });

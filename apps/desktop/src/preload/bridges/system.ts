@@ -1,6 +1,7 @@
 import { webUtils, type IpcRenderer } from "electron";
 import type { DesktopApi } from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
+import { invokeVaultList } from "./vault-list";
 import {
   subscribeActivityLogsChanged,
   subscribeTailnetStatus,
@@ -109,13 +110,19 @@ export function buildPortForwardsBridge(
   };
 }
 
+/** 볼트 인자는 줄 때만 넘긴다 — 개인으로 만드는 옛 호출의 모양을 바꾸지 않는다. */
+function optionalVault(vaultId: string | undefined): [string] | [] {
+  return vaultId === undefined ? [] : [vaultId];
+}
+
 export function buildDnsOverridesBridge(
   ipcRenderer: IpcRenderer,
 ): DesktopApi["dnsOverrides"] {
   return {
     list: () => ipcRenderer.invoke(ipcChannels.dnsOverrides.list),
-    create: (draft) =>
-      ipcRenderer.invoke(ipcChannels.dnsOverrides.create, draft),
+    // 볼트를 주지 않으면 지금과 같은 호출이다(개인).
+    create: (draft, vaultId) =>
+      ipcRenderer.invoke(ipcChannels.dnsOverrides.create, draft, ...optionalVault(vaultId)),
     update: (id: string, draft) =>
       ipcRenderer.invoke(ipcChannels.dnsOverrides.update, id, draft),
     setStaticActive: (id: string, active: boolean) =>
@@ -130,7 +137,8 @@ export function buildSnippetsBridge(
 ): DesktopApi["snippets"] {
   return {
     list: () => ipcRenderer.invoke(ipcChannels.snippets.list),
-    create: (draft) => ipcRenderer.invoke(ipcChannels.snippets.create, draft),
+    create: (draft, vaultId) =>
+      ipcRenderer.invoke(ipcChannels.snippets.create, draft, ...optionalVault(vaultId)),
     update: (id: string, draft) =>
       ipcRenderer.invoke(ipcChannels.snippets.update, id, draft),
     remove: (id: string) => ipcRenderer.invoke(ipcChannels.snippets.remove, id),
@@ -142,7 +150,8 @@ export function buildSavedWorkspacesBridge(
 ): DesktopApi["savedWorkspaces"] {
   return {
     list: () => ipcRenderer.invoke(ipcChannels.savedWorkspaces.list),
-    create: (draft) => ipcRenderer.invoke(ipcChannels.savedWorkspaces.create, draft),
+    create: (draft, vaultId) =>
+      ipcRenderer.invoke(ipcChannels.savedWorkspaces.create, draft, ...optionalVault(vaultId)),
     rename: (id: string, name: string) =>
       ipcRenderer.invoke(ipcChannels.savedWorkspaces.rename, id, name),
     moveToGroup: (id: string, groupName: string | null) =>
@@ -169,7 +178,7 @@ export function buildTailnetBridge(
   ipcRenderer: IpcRenderer,
 ): DesktopApi["tailnet"] {
   return {
-    list: () => ipcRenderer.invoke(ipcChannels.tailnet.list),
+    list: (vaultId) => invokeVaultList(ipcRenderer, ipcChannels.tailnet.list, vaultId),
     save: (input) => ipcRenderer.invoke(ipcChannels.tailnet.save, input),
     remove: (id: string) => ipcRenderer.invoke(ipcChannels.tailnet.remove, id),
     test: (config) => ipcRenderer.invoke(ipcChannels.tailnet.test, config),
@@ -186,7 +195,7 @@ export function buildKnownHostsBridge(
   ipcRenderer: IpcRenderer,
 ): DesktopApi["knownHosts"] {
   return {
-    list: () => ipcRenderer.invoke(ipcChannels.knownHosts.list),
+    list: (vaultId) => invokeVaultList(ipcRenderer, ipcChannels.knownHosts.list, vaultId),
     probeHost: (input) =>
       ipcRenderer.invoke(ipcChannels.knownHosts.probeHost, input),
     trust: (input) => ipcRenderer.invoke(ipcChannels.knownHosts.trust, input),
@@ -229,7 +238,7 @@ export function buildKeychainBridge(
   ipcRenderer: IpcRenderer,
 ): DesktopApi["keychain"] {
   return {
-    list: () => ipcRenderer.invoke(ipcChannels.keychain.list),
+    list: (vaultId) => invokeVaultList(ipcRenderer, ipcChannels.keychain.list, vaultId),
     load: (secretRef: string) =>
       ipcRenderer.invoke(ipcChannels.keychain.load, secretRef),
     copyPassword: (secretRef: string) =>

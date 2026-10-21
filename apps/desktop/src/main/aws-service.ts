@@ -37,6 +37,7 @@ import type {
   AwsExternalProfileImportResult,
   AwsProfileRegionUpdateInput,
   AwsProfileKind,
+  AwsProfileMissingMyKey,
   AwsProfileRenameInput,
   AwsSsoProfileAccountOption,
   AwsSsoProfilePrepareInput,
@@ -1318,6 +1319,21 @@ export function teamAwsProfileName(teamId: string, name: string): string {
   return `${name.trim()}@team-${teamId}`;
 }
 
+/**
+ * 프로필을 관리(만들기·고치기·이름 바꾸기·지우기·상세)할 팀 볼트. 주지 않으면 개인 볼트다 — 지금까지와 같다.
+ * 화면은 원래 이름으로 다루고, 펼친 설정 파일을 읽을 때만 `teamAwsProfileName` 으로 바꾼다.
+ */
+export interface AwsProfileVault {
+  teamId: string;
+  profiles: AwsProfileRepository;
+}
+
+/** 펼친 팀 이름(`이름@team-<id>`)을 화면의 원래 이름으로. 그 팀 것이 아니면 그대로 둔다. */
+function displayAwsProfileName(name: string, vault: AwsProfileVault): string {
+  const suffix = `@team-${vault.teamId}`;
+  return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
+}
+
 export class AwsService {
   private static readonly ECS_SERVICE_LIST_CACHE_TTL_MS = 5 * 60_000;
   private static readonly ECS_TASK_DEFINITION_CACHE_TTL_MS = 5 * 60_000;
@@ -1801,12 +1817,52 @@ export class AwsService {
     await this.managedProfilesReadyTask;
   }
 
-  private getManagedProfileByName(profileName: string): ManagedAwsProfilePayload | null {
-    const metadata = this.profileRepository.getMetadataByName(profileName);
+  private getManagedProfileByName(
+    profileName: string,
+    profiles: AwsProfileRepository = this.profileRepository,
+  ): ManagedAwsProfilePayload | null {
+    const metadata = profiles.getMetadataByName(profileName);
     if (!metadata) {
       return null;
     }
-    return this.profileRepository.getPayloadById(metadata.id);
+    return profiles.getPayloadById(metadata.id);
+  }
+
+  /** 관리할 볼트의 저장소. 볼트를 주지 않으면 개인이다. */
+  private profilesOf(vault?: AwsProfileVault): AwsProfileRepository {
+    return vault?.profiles ?? this.profileRepository;
+  }
+
+  /** 펼친 설정 파일에서의 이름. 개인 것은 이름 그대로, 팀 것은 `teamAwsProfileName`. */
+  private materializedNameOf(profileName: string, vault?: AwsProfileVault): string {
+    return vault ? teamAwsProfileName(vault.teamId, profileName) : profileName;
+  }
+
+  /**
+   * 내 키가 없어 붙을 수 없는 팀 정적 프로필(키는 늘 각자 넣는다 — 팀에는 설정만 간다). assume role 이면 같은 팀의
+   * 원본을 본다. 펼친 이름으로 찾는다 — 개인 것이거나 키가 있으면 null.
+   */
+  private findTeamProfileMissingMyKey(profileName: string): AwsProfileMissingMyKey | null {
+    for (const team of this.teamProfileSource()) {
+      const payload = team.payloads.find(
+        (item) => teamAwsProfileName(team.teamId, item.name) === profileName,
+      );
+      if (!payload) {
+        continue;
+      }
+      const keyHolder =
+        payload.kind === "role"
+          ? team.payloads.find((item) => item.id === payload.sourceProfileId)
+          : payload;
+      if (
+        keyHolder?.kind === "static" &&
+        !(keyHolder.accessKeyId.trim() && keyHolder.secretAccessKey.trim())
+      ) {
+        return { teamId: team.teamId, profileId: keyHolder.id, profileName: keyHolder.name };
+      }
+      return null;
+    }
+    return null;
   }
 
   resolveManagedProfileName(profileId: string | null | undefined): string | null {
@@ -2329,8 +2385,12 @@ export class AwsService {
     );
   }
 
-  private async assertProfileNameAvailable(profileName: string): Promise<void> {
-    if (this.profileRepository.getMetadataByName(profileName)) {
+  private async assertProfileNameAvailable(
+    profileName: string,
+    profiles: AwsProfileRepository = this.profileRepository,
+  ): Promise<void> {
+    // 이름 겹침은 그 볼트 안에서만 본다 — 팀 것은 펼칠 때 팀 ID 가 붙어 개인 것과 겹치지 않는다.
+    if (profiles.getMetadataByName(profileName)) {
       throw new Error(t('aws.profile.duplicateName'));
     }
   }
@@ -2343,8 +2403,8 @@ export class AwsService {
     ssoAccountId: string;
     ssoRoleName: string;
     region?: string | null;
-  }): Promise<void> {
-    const existing = this.getManagedProfileByName(input.profileName);
+  }, profiles: AwsProfileRepository = this.profileRepository): Promise<void> {
+    const existing = this.getManagedProfileByName(input.profileName, profiles);
     const payload: ManagedAwsProfilePayload = {
       id: existing?.id ?? randomUUID(),
       kind: "sso",
@@ -2356,7 +2416,7 @@ export class AwsService {
       ssoRoleName: input.ssoRoleName.trim(),
       updatedAt: new Date().toISOString(),
     };
-    this.profileRepository.upsert(payload);
+    profiles.upsert(payload);
     await this.materializeManagedProfiles();
   }
 
@@ -2365,8 +2425,8 @@ export class AwsService {
     sourceProfileId: string;
     roleArn: string;
     region?: string | null;
-  }): Promise<void> {
-    const existing = this.getManagedProfileByName(input.profileName);
+  }, profiles: AwsProfileRepository = this.profileRepository): Promise<void> {
+    const existing = this.getManagedProfileByName(input.profileName, profiles);
     const payload: ManagedAwsProfilePayload = {
       id: existing?.id ?? randomUUID(),
       kind: "role",
@@ -2376,7 +2436,7 @@ export class AwsService {
       sourceProfileId: input.sourceProfileId,
       updatedAt: new Date().toISOString(),
     };
-    this.profileRepository.upsert(payload);
+    profiles.upsert(payload);
     await this.materializeManagedProfiles();
   }
 
@@ -2788,8 +2848,8 @@ export class AwsService {
     accessKeyId: string;
     secretAccessKey: string;
     region?: string | null;
-  }): Promise<void> {
-    const existing = this.getManagedProfileByName(input.profileName);
+  }, profiles: AwsProfileRepository = this.profileRepository): Promise<void> {
+    const existing = this.getManagedProfileByName(input.profileName, profiles);
     const payload: ManagedAwsProfilePayload = {
       id: existing?.id ?? randomUUID(),
       kind: "static",
@@ -2799,7 +2859,8 @@ export class AwsService {
       secretAccessKey: input.secretAccessKey.trim(),
       updatedAt: new Date().toISOString(),
     };
-    this.profileRepository.upsert(payload);
+    // 팀 저장소는 키를 내 칸으로 보내고 팀에는 설정만 둔다(TeamAwsProfileRepository).
+    profiles.upsert(payload);
     await this.materializeManagedProfiles();
   }
 
@@ -2851,12 +2912,13 @@ export class AwsService {
     };
   }
 
-  async createProfile(input: AwsProfileCreateInput): Promise<void> {
+  async createProfile(input: AwsProfileCreateInput, vault?: AwsProfileVault): Promise<void> {
     if (isE2EFakeAwsSessionEnabled()) {
       return;
     }
 
     await this.ensureManagedProfilesReady();
+    const profiles = this.profilesOf(vault);
 
     if (input.kind === "static") {
       const profileName = normalizeAwsProfileName(input.profileName);
@@ -2871,7 +2933,7 @@ export class AwsService {
         throw new Error(t('aws.field.secretRequired'));
       }
 
-      await this.assertProfileNameAvailable(profileName);
+      await this.assertProfileNameAvailable(profileName, profiles);
       await this.validateStaticCredentials({
         accessKeyId,
         secretAccessKey,
@@ -2882,7 +2944,7 @@ export class AwsService {
         accessKeyId,
         secretAccessKey,
         region,
-      });
+      }, profiles);
       return;
     }
 
@@ -2890,25 +2952,27 @@ export class AwsService {
       const profileName = normalizeAwsProfileName(input.profileName);
       const roleArn = input.roleArn.trim();
       const region = input.region?.trim() || null;
+      // 원본은 같은 볼트 안에서만 찾는다 — 펼칠 때도 같은 볼트 안에서만 잇는다.
       const sourceProfile =
         (input.sourceProfileId
-          ? this.profileRepository.getPayloadById(input.sourceProfileId)
+          ? profiles.getPayloadById(input.sourceProfileId)
           : null) ??
         this.getManagedProfileByName(
           normalizeAwsProfileName(input.sourceProfileName, "source profile"),
+          profiles,
         );
 
       if (!roleArn) {
         throw new Error(t('aws.field.roleArnRequired'));
       }
 
-      await this.assertProfileNameAvailable(profileName);
+      await this.assertProfileNameAvailable(profileName, profiles);
       if (!sourceProfile) {
         throw new Error(t('aws.profile.sourceNotFound'));
       }
 
       await this.validateAssumeRoleWithSourceProfile({
-        sourceProfileName: sourceProfile.name,
+        sourceProfileName: this.materializedNameOf(sourceProfile.name, vault),
         roleArn,
         errorContext: "role-validation",
         fallbackMessage:
@@ -2920,7 +2984,7 @@ export class AwsService {
         sourceProfileId: sourceProfile.id,
         roleArn,
         region,
-      });
+      }, profiles);
       return;
     }
 
@@ -2934,7 +2998,7 @@ export class AwsService {
       throw new Error(t('aws.field.ssoRoleRequired'));
     }
 
-    await this.assertProfileNameAvailable(profileName);
+    await this.assertProfileNameAvailable(profileName, profiles);
     const preparation = await this.consumeSsoPreparation(input.preparationToken);
     if (preparation.profileName !== profileName) {
       await this.destroyTempAwsRoot(preparation.homeDir);
@@ -2980,6 +3044,7 @@ export class AwsService {
         requireSourceCache: true,
       });
 
+      // 팀 SSO 는 설정만 팀에 둔다. 로그인(SSO 캐시)은 이 기기 것이라 각자 한다.
       await this.saveSsoProfileValues({
         profileName,
         ssoSessionName: preparation.ssoSessionName,
@@ -2988,7 +3053,7 @@ export class AwsService {
         ssoAccountId,
         ssoRoleName,
         region: preparation.region,
-      });
+      }, profiles);
     } finally {
       await this.destroyTempAwsRoot(preparation.homeDir);
     }
@@ -2996,6 +3061,7 @@ export class AwsService {
 
   async prepareSsoProfile(
     input: AwsSsoProfilePrepareInput,
+    vault?: AwsProfileVault,
   ): Promise<AwsSsoProfilePrepareResult> {
     if (isE2EFakeAwsSessionEnabled()) {
       return {
@@ -3039,7 +3105,7 @@ export class AwsService {
       throw new Error(t('aws.field.ssoRegionRequired'));
     }
 
-    await this.assertProfileNameAvailable(profileName);
+    await this.assertProfileNameAvailable(profileName, this.profilesOf(vault));
 
     const ssoSessionName = await this.buildUniqueSsoSessionName(profileName);
     const tempRoot = await this.createTempAwsRoot();
@@ -3236,6 +3302,21 @@ export class AwsService {
       };
     }
 
+    // 키 없이 공유된 팀 정적 프로필에 내 키도 없으면 붙을 수 없다. SDK 오류 대신 무엇을 넣어야 하는지 말한다.
+    const missingMyKey =
+      awsRootDir === this.awsProfileRootDir ? this.findTeamProfileMissingMyKey(profileName) : null;
+    if (missingMyKey) {
+      return {
+        id: profileId,
+        profileName,
+        available: true,
+        isSsoProfile: false,
+        isAuthenticated: false,
+        configuredRegion: (await this.readConfigValue(profileName, "region", awsRootDir)) || null,
+        errorMessage: t('aws.profile.teamKeyMissing', { profile: missingMyKey.profileName }),
+        missingMyKey,
+      };
+    }
 
     // isSsoProfile 은 source_profile 체인까지 따라가서 판정한다. assume role 프로필은 SSO 설정을
     // 자기 섹션이 아니라 source_profile 쪽에 두기 때문에, 자기 값만 보면 static 자격 증명
@@ -3278,9 +3359,13 @@ export class AwsService {
     }
   }
 
-  async getProfileStatus(profileName: string): Promise<AwsProfileStatus> {
+  async getProfileStatus(profileName: string, vault?: AwsProfileVault): Promise<AwsProfileStatus> {
     await this.ensureManagedProfilesReady();
-    return this.getProfileStatusFromRoot(profileName, this.awsProfileRootDir);
+    const status = await this.getProfileStatusFromRoot(
+      this.materializedNameOf(profileName, vault),
+      this.awsProfileRootDir,
+    );
+    return vault ? { ...status, profileName } : status;
   }
 
   private async getProfileDetailsFromRoot(
@@ -3383,9 +3468,26 @@ export class AwsService {
     };
   }
 
-  async getProfileDetails(profileName: string): Promise<AwsProfileDetails> {
+  async getProfileDetails(profileName: string, vault?: AwsProfileVault): Promise<AwsProfileDetails> {
     await this.ensureManagedProfilesReady();
-    return this.getProfileDetailsFromRoot(profileName, this.awsProfileRootDir);
+    const details = await this.getProfileDetailsFromRoot(
+      this.materializedNameOf(profileName, vault),
+      this.awsProfileRootDir,
+    );
+    if (!vault) {
+      return details;
+    }
+    // 화면은 원래 이름으로 다룬다 — 펼친 이름에 붙은 팀 꼬리를 뗀다.
+    return {
+      ...details,
+      profileName: displayAwsProfileName(details.profileName, vault),
+      sourceProfile: details.sourceProfile
+        ? displayAwsProfileName(details.sourceProfile, vault)
+        : details.sourceProfile,
+      referencedByProfileNames: details.referencedByProfileNames.map((name) =>
+        displayAwsProfileName(name, vault),
+      ),
+    };
   }
 
   async listExternalProfiles(): Promise<AwsProfileSummary[]> {
@@ -3396,17 +3498,17 @@ export class AwsService {
     return this.getProfileDetailsFromRoot(profileName, this.externalAwsProfileRootDir);
   }
 
-  async updateProfile(input: AwsProfileUpdateInput): Promise<void> {
+  async updateProfile(input: AwsProfileUpdateInput, vault?: AwsProfileVault): Promise<void> {
     if (isE2EFakeAwsSessionEnabled()) {
       return;
     }
 
     await this.ensureManagedProfilesReady();
+    const profiles = this.profilesOf(vault);
 
     const profileName = normalizeAwsProfileName(input.profileName);
     const accessKeyId = input.accessKeyId.trim();
     const secretAccessKey = input.secretAccessKey.trim();
-    const region = input.region?.trim() || null;
 
     if (!accessKeyId) {
       throw new Error(t('aws.field.accessKeyRequired'));
@@ -3415,10 +3517,13 @@ export class AwsService {
       throw new Error(t('aws.field.secretRequired'));
     }
 
-    const currentProfile = this.getManagedProfileByName(profileName);
+    const currentProfile = this.getManagedProfileByName(profileName, profiles);
     if (!currentProfile || currentProfile.kind !== "static") {
       throw new Error(t('aws.profile.accessKeyOnly'));
     }
+    // 리전을 보내지 않으면(내 키만 넣는 창) 지금 리전을 그대로 둔다 — 팀 것의 리전은 팀 설정이다.
+    const region =
+      input.region === undefined ? currentProfile.region ?? null : input.region?.trim() || null;
 
     await this.validateStaticCredentials({
       accessKeyId,
@@ -3430,15 +3535,16 @@ export class AwsService {
       accessKeyId,
       secretAccessKey,
       region,
-    });
+    }, profiles);
   }
 
-  async updateProfileRegion(input: AwsProfileRegionUpdateInput): Promise<void> {
+  async updateProfileRegion(input: AwsProfileRegionUpdateInput, vault?: AwsProfileVault): Promise<void> {
     if (isE2EFakeAwsSessionEnabled()) {
       return;
     }
 
     await this.ensureManagedProfilesReady();
+    const profiles = this.profilesOf(vault);
 
     const profileName = normalizeAwsProfileName(input.profileName);
     const region = input.region?.trim() || null;
@@ -3446,12 +3552,13 @@ export class AwsService {
       throw new Error(t('aws.region.unsupported'));
     }
 
-    const currentProfile = this.getManagedProfileByName(profileName);
+    const currentProfile = this.getManagedProfileByName(profileName, profiles);
     if (!currentProfile) {
       throw new Error(t('aws.profile.notFound'));
     }
 
-    this.profileRepository.upsert({
+    // 팀 정적 프로필이면 읽은 것에 키가 없다 — 저장소가 빈 키를 내 칸에 쓰지 않으니 내 키는 그대로다.
+    profiles.upsert({
       ...currentProfile,
       region,
       updatedAt: new Date().toISOString(),
@@ -3459,12 +3566,13 @@ export class AwsService {
     await this.materializeManagedProfiles();
   }
 
-  async renameProfile(input: AwsProfileRenameInput): Promise<void> {
+  async renameProfile(input: AwsProfileRenameInput, vault?: AwsProfileVault): Promise<void> {
     if (isE2EFakeAwsSessionEnabled()) {
       return;
     }
 
     await this.ensureManagedProfilesReady();
+    const profiles = this.profilesOf(vault);
 
     const profileName = normalizeAwsProfileName(input.profileName);
     const nextProfileName = normalizeAwsProfileName(
@@ -3475,14 +3583,14 @@ export class AwsService {
       throw new Error(t('aws.profile.sameName'));
     }
 
-    const currentProfile = this.getManagedProfileByName(profileName);
+    const currentProfile = this.getManagedProfileByName(profileName, profiles);
     if (!currentProfile) {
       throw new Error(t('aws.profile.notFound'));
     }
-    if (this.getManagedProfileByName(nextProfileName)) {
+    if (this.getManagedProfileByName(nextProfileName, profiles)) {
       throw new Error(t('aws.profile.duplicateName'));
     }
-    this.profileRepository.upsert({
+    profiles.upsert({
       ...currentProfile,
       name: nextProfileName,
       updatedAt: new Date().toISOString(),
@@ -3490,28 +3598,29 @@ export class AwsService {
     await this.materializeManagedProfiles();
   }
 
-  async deleteProfile(profileName: string): Promise<void> {
+  async deleteProfile(profileName: string, vault?: AwsProfileVault): Promise<void> {
     if (isE2EFakeAwsSessionEnabled()) {
       return;
     }
 
     await this.ensureManagedProfilesReady();
+    const profiles = this.profilesOf(vault);
 
     const normalizedProfileName = normalizeAwsProfileName(profileName);
-    const existingProfile = this.getManagedProfileByName(normalizedProfileName);
+    const existingProfile = this.getManagedProfileByName(normalizedProfileName, profiles);
     if (!existingProfile) {
       throw new Error(t('aws.profile.notFound'));
     }
-    this.profileRepository.remove(existingProfile.id);
+    profiles.remove(existingProfile.id);
     await this.materializeManagedProfiles();
   }
 
-  async login(profileName: string): Promise<void> {
+  async login(profileName: string, vault?: AwsProfileVault): Promise<void> {
     if (isE2EFakeAwsSessionEnabled()) {
       return;
     }
 
-    const status = await this.getProfileStatus(profileName);
+    const status = await this.getProfileStatus(profileName, vault);
     if (!status.isSsoProfile) {
       throw new Error(
         t('aws.auth.usesStoredCredentials'),
@@ -3522,7 +3631,7 @@ export class AwsService {
     // 토큰 캐시는 start URL·세션명으로 키가 잡히니, 체인 끝(실제 SSO 프로필)의 값으로 로그인해야
     // 이 프로필이 role 을 assume 할 때 쓰는 소스 자격 증명이 갱신된다.
     const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
-    const ssoChain = resolveAwsSsoChain(documents, profileName);
+    const ssoChain = resolveAwsSsoChain(documents, this.materializedNameOf(profileName, vault));
     if (!ssoChain?.startUrl || !ssoChain.ssoRegion) {
       throw new Error(t('aws.sso.configMissing'));
     }

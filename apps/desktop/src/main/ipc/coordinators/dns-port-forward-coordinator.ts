@@ -6,7 +6,7 @@ import {
   type DnsOverrideVault,
   HostsOverrideManager,
   listStaticDnsOverrideIds,
-  resolveDnsOverrideRecords,
+  resolveDnsOverrideRecordsAcrossVaults,
 } from "../../hosts-override-manager";
 import type { VaultCatalog } from "../../vault-catalog";
 
@@ -23,32 +23,30 @@ export interface DnsPortForwardCoordinator {
 }
 
 export function createDnsPortForwardCoordinator(deps: {
-  vaults: Pick<VaultCatalog, "personal" | "listScopes">;
+  vaults: Pick<VaultCatalog, "listScopes" | "listPortForwards">;
   coreManager: CoreManager;
   hostsOverrideManager: HostsOverrideManager;
 }): DnsPortForwardCoordinator {
   const { vaults, coreManager, hostsOverrideManager } = deps;
-  // 목록 화면은 아직 개인 것만 보인다(볼트별 목록은 작업 4). 적용과 켜 둔 상태 정리는 모든 볼트를 본다.
-  const { dnsOverrides, portForwards } = vaults.personal;
-  const listDnsOverrideVaults = (): DnsOverrideVault[] =>
+  // 목록·적용·켜 둔 상태 정리 모두 모든 볼트를 본다(개인이 먼저). 화면은 볼트 표로 묶는다.
+  const listDnsOverrideVaults = (): Array<DnsOverrideVault & { id: string }> =>
     vaults.listScopes().map((scope) => ({
+      id: scope.id,
       overrides: scope.dnsOverrides.list(),
       rules: scope.portForwards.list(),
     }));
 
   const listPortForwardSnapshot = () => ({
-    rules: portForwards.list(),
+    rules: vaults.listPortForwards(),
     runtimes: coreManager.listPortForwardRuntimes(),
   });
 
   const listResolvedDnsOverrides = (): DnsOverrideResolvedRecord[] => {
-    const overrides = dnsOverrides.list();
-    const portForwardSnapshot = listPortForwardSnapshot();
-    hostsOverrideManager.pruneStaticOverrideStates(listStaticDnsOverrideIds(listDnsOverrideVaults()));
-    return resolveDnsOverrideRecords(
-      overrides,
-      portForwardSnapshot.rules,
-      portForwardSnapshot.runtimes,
+    const dnsVaults = listDnsOverrideVaults();
+    hostsOverrideManager.pruneStaticOverrideStates(listStaticDnsOverrideIds(dnsVaults));
+    return resolveDnsOverrideRecordsAcrossVaults(
+      dnsVaults,
+      coreManager.listPortForwardRuntimes(),
       hostsOverrideManager.getActiveStaticOverrideIds(),
     );
   };

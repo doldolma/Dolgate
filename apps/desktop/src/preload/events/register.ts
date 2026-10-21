@@ -51,6 +51,7 @@ import {
   emitWindowState,
   emitWorkspaceChanged,
   emitTeamsChanged,
+  emitTeamInviteLink,
   setRdpFrameWatchNotifier,
 } from "./state";
 
@@ -174,6 +175,10 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
 
   ipcRenderer.on(ipcChannels.teams.changed, () => {
     emitTeamsChanged();
+  });
+
+  ipcRenderer.on(ipcChannels.teams.inviteLink, () => {
+    emitTeamInviteLink();
   });
 
   ipcRenderer.on(

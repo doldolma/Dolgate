@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { getHostBadgeLabel, getHostSubtitle } from "@shared";
+import { getHostBadgeLabel, getHostSubtitle, isAwsEcsHostRecord } from "@shared";
 import { cn } from "../lib/cn";
 import type {
   AwsEcsServiceActionContainerSummary,
@@ -81,6 +81,8 @@ import {
 } from "../store/utils";
 import { useTranslation } from "react-i18next";
 import { getFormatLocale, t } from '../i18n';
+import { useAppStore } from "../store/appStore";
+import { MyAwsKeyDialog } from "./teams/MyAwsKeyDialog";
 import { hostSubtitleLabels } from '../../common/shared-messages';
 
 interface AwsEcsWorkspaceProps {
@@ -815,6 +817,14 @@ export function AwsEcsWorkspace({
     clearServiceContexts();
     return onRefresh(host.id);
   }, [clearServiceContexts, host.id, onRefresh]);
+
+  // 내 키가 없는 팀 정적 AWS 프로필로 막혔으면 넣을 곳(연결 흐름이 남긴다) — 그 자리에서 넣고 다시 읽는다(M3).
+  const awsProfileIdOfHost = isAwsEcsHostRecord(host) ? (host.awsProfileId ?? null) : null;
+  const awsMissingMyKey = useAppStore((state) =>
+    awsProfileIdOfHost ? state.awsMissingMyKeyByProfileId[awsProfileIdOfHost] : undefined,
+  );
+  const clearAwsMissingMyKey = useAppStore((state) => state.clearAwsMissingMyKey);
+  const [myAwsKeyOpen, setMyAwsKeyOpen] = useState(false);
 
   useEffect(() => {
     serviceContextsRef.current = serviceContexts;
@@ -1935,6 +1945,13 @@ export function AwsEcsWorkspace({
       {tab.errorMessage ? (
         <NoticeCard tone="danger" role="alert">
           <p>{tab.errorMessage}</p>
+          {awsMissingMyKey ? (
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <Button type="button" variant="primary" size="sm" onClick={() => setMyAwsKeyOpen(true)}>
+                {translate("teams.myKey.add")}
+              </Button>
+            </div>
+          ) : null}
           {canRecoverSsoError ? (
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <Button
@@ -1965,6 +1982,18 @@ export function AwsEcsWorkspace({
             </div>
           ) : null}
         </NoticeCard>
+      ) : null}
+
+      {myAwsKeyOpen && awsMissingMyKey && awsProfileIdOfHost ? (
+        <MyAwsKeyDialog
+          missing={awsMissingMyKey}
+          onClose={() => setMyAwsKeyOpen(false)}
+          onSaved={() => {
+            setMyAwsKeyOpen(false);
+            clearAwsMissingMyKey(awsProfileIdOfHost);
+            void handleRefresh();
+          }}
+        />
       ) : null}
 
       {tab.ecsMetricsWarning ? (

@@ -10,6 +10,8 @@ import {
 } from './hostDisplay';
 import { useTranslation } from 'react-i18next';
 import { HostBadge } from './HostBadge';
+import { CardLocation, type AssetTeam } from './AssetLocation';
+import { PerPersonHint } from '../teams/PerPersonHint';
 
 const MAX_VISIBLE_TAGS = 3;
 
@@ -32,6 +34,10 @@ interface HostListCardProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
   lastUsedAt?: number;
   /** Opens the host action menu at the given viewport coords (the ⋮ button). */
   onOpenMenu?: (coords: { x: number; y: number }) => void;
+  /** 볼트가 섞인 목록에서 이 호스트가 든 팀. 아래 줄에 "[머리글자] 팀 이름 / 그룹" 으로 보인다. */
+  team?: AssetTeam | null;
+  /** 팀 호스트면 즐겨찾기가 나에게만 적용된다는 툴팁. */
+  favoriteHint?: string | null;
 }
 
 export function HostListCard({
@@ -44,6 +50,8 @@ export function HostListCard({
   onToggleFavorite,
   lastUsedAt,
   onOpenMenu,
+  team = null,
+  favoriteHint = null,
   className,
   ...props
 }: HostListCardProps) {
@@ -88,6 +96,7 @@ export function HostListCard({
           {host.label}
         </strong>
         {onToggleFavorite ? (
+          <PerPersonHint hint={favoriteHint}>
           <button
             type="button"
             aria-label={favoriteLabel ?? translate('hostCard.favorite')}
@@ -103,6 +112,7 @@ export function HostListCard({
           >
             <Star className="h-[1rem] w-[1rem]" fill={favorite ? 'currentColor' : 'none'} />
           </button>
+          </PerPersonHint>
         ) : null}
         {onOpenMenu ? (
           <button
@@ -153,9 +163,7 @@ export function HostListCard({
 
       {/* Group footer + 최근 사용시간(우측) */}
       <div className="mt-auto flex items-center gap-2 border-t border-[var(--border)] pt-[0.4rem] text-[0.7rem] text-[var(--text-muted)]">
-        <span className="min-w-0 flex-1 truncate">
-          {group ? group.split('/').join(' / ') : 'Ungrouped'}
-        </span>
+        <CardLocation team={team} group={group} ungroupedLabel="Ungrouped" />
         {lastUsedAt ? (
           <span className="shrink-0 tabular-nums">{formatLastUsed(lastUsedAt)}</span>
         ) : null}

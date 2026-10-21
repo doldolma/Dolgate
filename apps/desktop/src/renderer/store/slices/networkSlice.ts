@@ -168,6 +168,13 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
     loadContainersList,
   } = containersServices;
   const { connectTrustedHostPane, uploadFilesToHostPath } = sftpServices;
+  // 팀 볼트에 쓴 레코드는 볼트 표를 다시 읽어야 그 묶음에 보인다(메인의 바뀜 알림은 쓴 창에 오지 않는다).
+  // 팀이 없으면 읽지 않는다 — 개인 길은 지금과 같다.
+  const refreshVaultIndexWithTeams = async () => {
+    if (get().vaultIndex?.teams.length) {
+      await get().refreshVaultIndex();
+    }
+  };
 
   return {
     portForwards: [],
@@ -209,11 +216,15 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
                 next,
               ]),
             }));
+            // 팀 호스트의 규칙은 팀 볼트에 생긴다 — 볼트 표를 다시 읽어야 그 묶음에 보인다. 팀이 없으면 안 읽는다.
+            await refreshVaultIndexWithTeams();
           },
-    saveDnsOverride: async (overrideId, draft) => {
+    saveDnsOverride: async (overrideId, draft, vaultId) => {
             const next = overrideId
               ? await api.dnsOverrides.update(overrideId, draft)
-              : await api.dnsOverrides.create(draft);
+              : vaultId === undefined
+                ? await api.dnsOverrides.create(draft)
+                : await api.dnsOverrides.create(draft, vaultId);
             set((state) => ({
               dnsOverrides: sortDnsOverrides([
                 ...state.dnsOverrides.filter((override) => override.id !== next.id),
@@ -246,16 +257,19 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
             }));
             await syncOperationalData(set);
           },
-    saveSnippet: async (snippetId, draft) => {
+    saveSnippet: async (snippetId, draft, vaultId) => {
             const next = snippetId
               ? await api.snippets.update(snippetId, draft)
-              : await api.snippets.create(draft);
+              : vaultId === undefined
+                ? await api.snippets.create(draft)
+                : await api.snippets.create(draft, vaultId);
             set((state) => ({
               snippets: [
                 ...state.snippets.filter((entry) => entry.id !== next.id),
                 next,
               ].sort((left, right) => left.label.localeCompare(right.label)),
             }));
+            await refreshVaultIndexWithTeams();
             return next;
           },
     removeSnippet: async (snippetId) => {

@@ -12,6 +12,8 @@ import {
 } from "../../store/utils";
 import { Columns2, MoreVertical, Star } from "../../ui/icons";
 import { formatLastUsed } from "./hostDisplay";
+import { CardLocation, type AssetTeam } from "./AssetLocation";
+import { PerPersonHint } from "../teams/PerPersonHint";
 
 export interface WorkspaceCardSummary {
   paneCount: number;
@@ -65,6 +67,10 @@ interface WorkspaceListCardProps extends Omit<
   onToggleFavorite?: () => void;
   onOpenMenu?: (coords: { x: number; y: number }) => void;
   style?: CSSProperties;
+  /** 볼트가 섞인 목록에서 이 워크스페이스가 든 팀. 아래 줄에 "[머리글자] 팀 이름 / 그룹" 으로 보인다. */
+  team?: AssetTeam | null;
+  /** 팀 워크스페이스면 즐겨찾기가 나에게만 적용된다는 툴팁. */
+  favoriteHint?: string | null;
 }
 
 export function WorkspaceListCard({
@@ -74,15 +80,14 @@ export function WorkspaceListCard({
   menuTarget = false,
   onToggleFavorite,
   onOpenMenu,
+  team = null,
+  favoriteHint = null,
   className,
   ...props
 }: WorkspaceListCardProps) {
   const { t } = useTranslation();
   const summary = summarizeSavedWorkspace(workspace, hosts);
   const groupPath = normalizeGroupPath(workspace.groupName);
-  const groupLabel = groupPath
-    ? groupPath.split("/").join(" / ")
-    : t("savedWorkspace.ungrouped");
 
   // data-home-asset-key 를 카드가 직접 붙이는 이유는 HostListCard 의 같은 자리 주석에 있다.
   return (
@@ -111,6 +116,7 @@ export function WorkspaceListCard({
           {workspace.name}
         </strong>
         {onToggleFavorite ? (
+          <PerPersonHint hint={favoriteHint}>
           <button
             type="button"
             aria-label={
@@ -135,6 +141,7 @@ export function WorkspaceListCard({
               fill={workspace.favorite ? "currentColor" : "none"}
             />
           </button>
+          </PerPersonHint>
         ) : null}
         {onOpenMenu ? (
           <button
@@ -181,9 +188,11 @@ export function WorkspaceListCard({
       </div>
 
       <div className="mt-auto flex items-center gap-2 border-t border-[var(--border)] pt-[0.4rem] text-[0.7rem] text-[var(--text-muted)]">
-        <span className="min-w-0 flex-1 truncate">
-          {groupLabel}
-        </span>
+        <CardLocation
+          team={team}
+          group={groupPath}
+          ungroupedLabel={t("savedWorkspace.ungrouped")}
+        />
         <span className="shrink-0 tabular-nums">
           {t("savedWorkspace.lastOpened", {
             date: formatLastUsed(summary.lastUsedAt),

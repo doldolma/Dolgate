@@ -279,4 +279,42 @@ describe("jump hosts", () => {
     await expect(coordinator.resolveJumpHostTarget(target)).rejects.toThrow();
     expect(deps.vaults.getHostInSameVault).toHaveBeenCalledWith("team-target", "personal-bastion");
   });
+
+  // 이번 시도에서 요청 창에 넣은 점프 호스트의 값이 그 홉의 저장된 것보다 먼저다(비밀번호 빼고 공유한 팀 호스트).
+  it("hands this attempt's prompt values to their jump host", async () => {
+    const { deps } = createCoordinator();
+    const bastion = {
+      id: "bastion",
+      kind: "ssh",
+      label: "Bastion",
+      hostname: "bastion.example.com",
+      port: 22,
+      username: "jump",
+      authType: "password",
+    };
+    deps.vaults = { ...deps.vaults, getHostInSameVault: vi.fn(() => bastion) };
+    deps.resolveSshAuth = vi.fn(async (_host: unknown, provided?: { password?: string }) => ({
+      username: "jump",
+      authType: "password",
+      secrets: { password: provided?.password },
+      shouldPersistHostSecret: Boolean(provided?.password),
+      typedUsername: null,
+    }));
+    const coordinator = createHostCoordinator(deps);
+    const target = {
+      id: "target",
+      kind: "ssh",
+      label: "Target",
+      hostname: "target.internal",
+      port: 22,
+      username: "app",
+      authType: "password",
+      jumpHostIds: ["bastion"],
+    } as never;
+
+    await expect(
+      coordinator.resolveJumpHostTarget(target, { bastion: { password: "jump-pw" } }),
+    ).resolves.toMatchObject({ host: "bastion.example.com", username: "jump", password: "jump-pw" });
+    expect(deps.resolveSshAuth).toHaveBeenCalledWith(bastion, { password: "jump-pw" });
+  });
 });

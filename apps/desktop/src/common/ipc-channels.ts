@@ -323,6 +323,8 @@ export const ipcChannels = {
   },
   teams: {
     list: 'teams:list',
+    getAvailability: 'teams:get-availability',
+    getVaultIndex: 'teams:get-vault-index',
     refresh: 'teams:refresh',
     create: 'teams:create',
     rename: 'teams:rename',
@@ -335,6 +337,8 @@ export const ipcChannels = {
     listInvites: 'teams:list-invites',
     revokeInvite: 'teams:revoke-invite',
     getInviteInfo: 'teams:get-invite-info',
+    previewInvite: 'teams:preview-invite',
+    takePendingInviteLink: 'teams:take-pending-invite-link',
     join: 'teams:join',
     previewCopy: 'teams:preview-copy',
     copy: 'teams:copy',
@@ -342,7 +346,9 @@ export const ipcChannels = {
     setMyCredentials: 'teams:set-my-credentials',
     clearMyCredentials: 'teams:clear-my-credentials',
     // 팀 목록이 바뀌었을 때 메인이 렌더러로 보낸다.
-    changed: 'teams:changed'
+    changed: 'teams:changed',
+    // 브라우저의 링크 페이지가 초대 링크를 넘겼다 — 화면은 takePendingInviteLink 로 가져간다.
+    inviteLink: 'teams:invite-link'
   },
   savedWorkspaces: {
     list: 'saved-workspaces:list',

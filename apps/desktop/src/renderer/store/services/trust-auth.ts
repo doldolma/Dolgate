@@ -1,4 +1,5 @@
 import type {
+  AwsProfileStatus,
   HostRecord,
   HostSecretInput,
   SshHostRecord,
@@ -26,7 +27,22 @@ import { t } from '../../i18n';
 
 type StoreSetter = SliceDeps["set"];
 
-export function createTrustAuthServices({ api, get }: SliceDeps) {
+export function createTrustAuthServices({ api, get, set }: SliceDeps) {
+  /**
+   * 키 없는 팀 정적 프로필이면 그 사실을 남긴다 — 연결 실패 화면이 "내 키 넣기"를 낸다. 다시 괜찮아지면 지운다.
+   */
+  const rememberMissingMyKey = (profileId: string, status: AwsProfileStatus) => {
+    const current = get().awsMissingMyKeyByProfileId;
+    if (status.missingMyKey) {
+      set({ awsMissingMyKeyByProfileId: { ...current, [profileId]: status.missingMyKey } });
+      return;
+    }
+    if (current[profileId]) {
+      const { [profileId]: _cleared, ...rest } = current;
+      set({ awsMissingMyKeyByProfileId: rest });
+    }
+  };
+
   const requireAwsProfileId = (
     profileId: string | null | undefined,
     profileName: string,
@@ -165,6 +181,11 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     const requiredProfileId = requireAwsProfileId(profileId, profileName);
     reportProgress?.(t('containersStore.checkingProfile', { profile: profileName }));
     const status = await api.aws.getProfileStatusById(requiredProfileId);
+    rememberMissingMyKey(requiredProfileId, status);
+    // 내 키가 없는 팀 정적 프로필로는 붙지 않는다 — SDK 오류 대신 무엇을 넣어야 하는지 말한다.
+    if (status.missingMyKey) {
+      throw new Error(status.errorMessage || t('trustAuth.cliCredentialsNeeded', { profile: profileName }));
+    }
     if (status.isAuthenticated || !status.isSsoProfile) {
       return status;
     }

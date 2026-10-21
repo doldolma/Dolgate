@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRef, type RefObject } from 'react';
 import type { AwsEc2HostRecord, HostRecord, SecretMetadataRecord, SnippetRecord, SshHostRecord } from '@shared';
 import { HostForm, getJumpHostCandidates, type HostFormHandle } from './HostForm';
+import { appStore } from '../store/appStore';
+import { createEmptyVaultIndex } from '../store/utils';
 
 // 편집 폼은 자동저장하지 않으므로, 명시적 저장(submit)을 ref로 트리거한다.
 async function saveEdit(ref: RefObject<HostFormHandle | null>) {
@@ -307,6 +309,35 @@ describe('HostForm', () => {
     // 아직 만들지 않았으므로 상위 목록 갱신은 부르지 않는다.
     expect(onTailnetAdded).not.toHaveBeenCalled();
     unmount();
+  });
+
+  // 팀 호스트의 서랍(4-7) — tailnet 추가는 그 팀에 만든다: 창이 팀을 받아 볼트 칩과 "내 auth key" 칸을 보인다.
+  it('creates the tailnet in the team of a team host', () => {
+    appStore.setState({
+      vaultIndex: {
+        ...createEmptyVaultIndex(),
+        teams: [{ id: 'team-a', name: 'Acme Infra', role: 'owner', syncState: 'ready', syncError: null, groups: [] }],
+      },
+    });
+    const { unmount } = render(
+      <HostForm
+        host={createHost()}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        tailnetOptions={[]}
+        vaultId="team-a"
+        onTailnetAdded={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('이 팀에 등록된 Tailscale 네트워크가 없습니다. 추가로 이 팀에 만드세요.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '추가' }));
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByRole('heading', { name: /Acme Infra/ })).toBeInTheDocument();
+    expect(dialog.getByLabelText('My auth key')).toBeInTheDocument();
+    unmount();
+    appStore.setState(appStore.getInitialState(), true);
   });
 
   // 고를 것이 있으면 설명을 붙이지 않는다. 비어 있을 때만 안내가 필요하다.
@@ -911,6 +942,35 @@ describe('HostForm', () => {
       }),
       undefined
     );
+  });
+
+  // 칸을 백스페이스로 비우면 예전엔 22 로 되돌아가 이어 친 80 이 2280 이 됐다(범위 안이라 막히지도 않음).
+  it('lets the SSH port be cleared and retyped without appending to the old port', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const ref = createRef<HostFormHandle>();
+
+    render(
+      <HostForm
+        ref={ref}
+        host={createHost()}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />
+    );
+
+    const port = screen.getByLabelText('포트') as HTMLInputElement;
+    fireEvent.change(port, { target: { value: '2' } });
+    fireEvent.change(port, { target: { value: '' } });
+    // 비운 칸은 빈 채로 있어야 한다 — 22 로 돌아가면 이어 치는 숫자가 그 뒤에 붙는다.
+    expect(port.value).toBe('');
+    fireEvent.change(port, { target: { value: '8' } });
+    fireEvent.change(port, { target: { value: '80' } });
+    expect(port.value).toBe('80');
+
+    await saveEdit(ref);
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ port: 80 }), undefined);
   });
 
   it.each([

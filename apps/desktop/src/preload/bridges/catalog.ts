@@ -8,6 +8,7 @@ import type {
   TerminalThemeId,
 } from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
+import { invokeVaultList } from "./vault-list";
 import { subscribeWarpgateImportEvent } from "../events/state";
 
 export function buildHostsBridge(
@@ -36,30 +37,44 @@ export function buildGroupsBridge(
 ): DesktopApi["groups"] {
   return {
     list: () => ipcRenderer.invoke(ipcChannels.groups.list),
-    create: (name: string, parentPath?: string | null) =>
-      ipcRenderer.invoke(ipcChannels.groups.create, name, parentPath),
-    remove: (path: string, mode: GroupRemoveMode) =>
-      ipcRenderer.invoke(ipcChannels.groups.remove, path, mode),
-    move: (path: string, targetParentPath: string | null) =>
-      ipcRenderer.invoke(ipcChannels.groups.move, path, targetParentPath),
-    rename: (path: string, name: string) =>
-      ipcRenderer.invoke(ipcChannels.groups.rename, path, name),
-    setOrder: (assignments) =>
-      ipcRenderer.invoke(ipcChannels.groups.setOrder, assignments),
+    // 볼트는 줄 때만 싣는다 — 개인 쓰기는 지금과 같은 인자로 간다.
+    create: (name: string, parentPath?: string | null, vaultId?: string | null) =>
+      vaultId
+        ? ipcRenderer.invoke(ipcChannels.groups.create, name, parentPath ?? null, vaultId)
+        : ipcRenderer.invoke(ipcChannels.groups.create, name, parentPath),
+    remove: (path: string, mode: GroupRemoveMode, vaultId?: string | null) =>
+      vaultId
+        ? ipcRenderer.invoke(ipcChannels.groups.remove, path, mode, vaultId)
+        : ipcRenderer.invoke(ipcChannels.groups.remove, path, mode),
+    move: (path: string, targetParentPath: string | null, vaultId?: string | null) =>
+      vaultId
+        ? ipcRenderer.invoke(ipcChannels.groups.move, path, targetParentPath, vaultId)
+        : ipcRenderer.invoke(ipcChannels.groups.move, path, targetParentPath),
+    rename: (path: string, name: string, vaultId?: string | null) =>
+      vaultId
+        ? ipcRenderer.invoke(ipcChannels.groups.rename, path, name, vaultId)
+        : ipcRenderer.invoke(ipcChannels.groups.rename, path, name),
+    setOrder: (assignments, vaultId) =>
+      vaultId
+        ? ipcRenderer.invoke(ipcChannels.groups.setOrder, assignments, vaultId)
+        : ipcRenderer.invoke(ipcChannels.groups.setOrder, assignments),
   };
 }
 
 export function buildAwsBridge(ipcRenderer: IpcRenderer): DesktopApi["aws"] {
   return {
-    listProfiles: () => ipcRenderer.invoke(ipcChannels.aws.listProfiles),
+    listProfiles: (vaultId) => invokeVaultList(ipcRenderer, ipcChannels.aws.listProfiles, vaultId),
     listExternalProfiles: () =>
       ipcRenderer.invoke(ipcChannels.aws.listExternalProfiles),
     createProfile: (input) =>
       ipcRenderer.invoke(ipcChannels.aws.createProfile, input),
     prepareSsoProfile: (input) =>
       ipcRenderer.invoke(ipcChannels.aws.prepareSsoProfile, input),
-    getProfileDetails: (profileName: string) =>
-      ipcRenderer.invoke(ipcChannels.aws.getProfileDetails, profileName),
+    // 볼트는 줄 때만 싣는다 — 개인 프로필은 지금과 같은 인자로 간다.
+    getProfileDetails: (profileName: string, vaultId?: string | null) =>
+      vaultId
+        ? ipcRenderer.invoke(ipcChannels.aws.getProfileDetails, profileName, vaultId)
+        : ipcRenderer.invoke(ipcChannels.aws.getProfileDetails, profileName),
     getExternalProfileDetails: (profileName: string) =>
       ipcRenderer.invoke(ipcChannels.aws.getExternalProfileDetails, profileName),
     importExternalProfiles: (input) =>
@@ -70,14 +85,20 @@ export function buildAwsBridge(ipcRenderer: IpcRenderer): DesktopApi["aws"] {
       ipcRenderer.invoke(ipcChannels.aws.updateProfileRegion, input),
     renameProfile: (input) =>
       ipcRenderer.invoke(ipcChannels.aws.renameProfile, input),
-    deleteProfile: (profileName: string) =>
-      ipcRenderer.invoke(ipcChannels.aws.deleteProfile, profileName),
-    getProfileStatus: (profileName: string) =>
-      ipcRenderer.invoke(ipcChannels.aws.getProfileStatus, profileName),
+    deleteProfile: (profileName: string, vaultId?: string | null) =>
+      vaultId
+        ? ipcRenderer.invoke(ipcChannels.aws.deleteProfile, profileName, vaultId)
+        : ipcRenderer.invoke(ipcChannels.aws.deleteProfile, profileName),
+    getProfileStatus: (profileName: string, vaultId?: string | null) =>
+      vaultId
+        ? ipcRenderer.invoke(ipcChannels.aws.getProfileStatus, profileName, vaultId)
+        : ipcRenderer.invoke(ipcChannels.aws.getProfileStatus, profileName),
     getProfileStatusById: (profileId: string) =>
       ipcRenderer.invoke(ipcChannels.aws.getProfileStatusById, profileId),
-    login: (profileName: string) =>
-      ipcRenderer.invoke(ipcChannels.aws.login, profileName),
+    login: (profileName: string, vaultId?: string | null) =>
+      vaultId
+        ? ipcRenderer.invoke(ipcChannels.aws.login, profileName, vaultId)
+        : ipcRenderer.invoke(ipcChannels.aws.login, profileName),
     loginById: (profileId: string) =>
       ipcRenderer.invoke(ipcChannels.aws.loginById, profileId),
     listRegions: (profileName: string) =>

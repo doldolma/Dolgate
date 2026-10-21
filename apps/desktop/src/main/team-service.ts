@@ -5,6 +5,7 @@ import {
   deriveTeamInviteJoinToken,
   formatTeamInviteLink,
   hashTeamInviteJoinToken,
+  isTeamCryptoError,
   normalizeServerUrl,
   parseTeamInviteLink,
   sealTeamInviteBox,
@@ -13,12 +14,14 @@ import {
   type TeamInvite,
   type TeamInviteCreated,
   type TeamInviteInfo,
+  type TeamInvitePreview,
+  type TeamAvailability,
   type TeamListItem,
   type TeamMember,
 } from "@shared";
 import { t } from "./i18n";
 import { getDesktopStateStorage } from "./state-storage";
-import { TeamApi, type TeamRequestLease } from "./team-api";
+import { isTeamApiError, TeamApi, type TeamRequestLease } from "./team-api";
 import { captureTeamContext, type TeamSyncAuth, type TeamSyncService } from "./team-sync-service";
 
 /*
@@ -30,9 +33,10 @@ import { captureTeamContext, type TeamSyncAuth, type TeamSyncService } from "./t
  * 다시 읽기가 실패해도 화면이 어긋나지 않게.
  */
 
-export const DEFAULT_TEAM_INVITE_DAYS = 7;
-export const MAX_TEAM_INVITE_DAYS = 30;
-const DAY_MS = 24 * 60 * 60 * 1000;
+/** 초대 링크 기한(시간). 화면은 1시간·1일·7일·30일 중에서 고른다. */
+export const DEFAULT_TEAM_INVITE_HOURS = 7 * 24;
+export const MAX_TEAM_INVITE_HOURS = 30 * 24;
+const HOUR_MS = 60 * 60 * 1000;
 
 type DesktopStateStorage = ReturnType<typeof getDesktopStateStorage>;
 
@@ -44,7 +48,7 @@ export interface TeamServiceOptions {
   auth: TeamSyncAuth;
   teamSync: Pick<
     TeamSyncService,
-    "refreshTeams" | "joinWithLink" | "listStatuses" | "notifyChanged" | "forgetTeamLocally"
+    "refreshTeams" | "joinWithLink" | "listStatuses" | "notifyChanged" | "forgetTeamLocally" | "getAvailability"
   >;
   api?: TeamApi;
   storage?: DesktopStateStorage;
@@ -83,6 +87,11 @@ export class TeamService {
       })
       .filter((team): team is TeamListItem => team !== null)
       .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+  }
+
+  /** 이 계정으로 팀을 쓸 수 있는지(로그인·E2EE 볼트·서버). */
+  getAvailability(): Promise<TeamAvailability> {
+    return this.teamSync.getAvailability();
   }
 
   async refresh(): Promise<TeamListItem[]> {
@@ -145,11 +154,11 @@ export class TeamService {
    * 초대 링크를 만든다. 비밀값 S 로 팀 키를 상자에 봉해 올리고, 서버에는 참여 토큰의 해시만 둔다. S 는
    * 링크의 # 뒤에만 있다 — 서버에도 이 기기에도 남지 않는다.
    */
-  async createInvite(teamId: string, options?: { expiresInDays?: number }): Promise<TeamInviteCreated> {
+  async createInvite(teamId: string, options?: { expiresInHours?: number }): Promise<TeamInviteCreated> {
     const lease = this.requireLease();
-    const days = options?.expiresInDays ?? DEFAULT_TEAM_INVITE_DAYS;
-    if (!Number.isInteger(days) || days < 1 || days > MAX_TEAM_INVITE_DAYS) {
-      throw new Error(t("teams.inviteDaysRange", { max: MAX_TEAM_INVITE_DAYS }));
+    const hours = options?.expiresInHours ?? DEFAULT_TEAM_INVITE_HOURS;
+    if (!Number.isInteger(hours) || hours < 1 || hours > MAX_TEAM_INVITE_HOURS) {
+      throw new Error(t("teams.inviteHoursRange"));
     }
     const wrapped = this.storage.getTeamState(teamId)?.info.wrappedTeamDek;
     if (!wrapped) {
@@ -157,7 +166,7 @@ export class TeamService {
     }
     const teamDek = unwrapTeamDek(wrapped, lease.personalDek, teamId);
     const secret = createTeamInviteSecret();
-    const expiresAt = new Date(Date.now() + days * DAY_MS).toISOString();
+    const expiresAt = new Date(Date.now() + hours * HOUR_MS).toISOString();
     const invite = await this.api.createInvite(lease, teamId, {
       inviteBox: sealTeamInviteBox({ secret, teamId, teamDek, expiresAt }),
       joinTokenHash: hashTeamInviteJoinToken(deriveTeamInviteJoinToken(secret)),
@@ -183,6 +192,33 @@ export class TeamService {
     }
     const info = await this.api.getInviteInfo(lease, parsed.code, deriveTeamInviteJoinToken(parsed.secret));
     return { ...info, alreadyJoined: Boolean(this.storage.getTeamState(info.teamId)?.info.wrappedTeamDek) };
+  }
+
+  /**
+   * 참여 카드에 띄울 것. 열 수 없는 링크면 그 까닭을 돌려준다 — 화면이 까닭마다 다른 모양을 보인다. 상자는
+   * 받지 않는다.
+   */
+  async previewInvite(link: string): Promise<TeamInvitePreview> {
+    let parsed: ReturnType<typeof parseTeamInviteLink>;
+    try {
+      parsed = parseTeamInviteLink(link);
+    } catch (error) {
+      return { status: isTeamCryptoError(error) && error.code === "unsupported-version" ? "update-required" : "invalid" };
+    }
+    const lease = this.requireLease();
+    if (normalizeServerUrl(parsed.serverUrl) !== normalizeServerUrl(lease.serverUrl)) {
+      return { status: "other-server", serverHost: serverHostOf(parsed.serverUrl) };
+    }
+    try {
+      const info = await this.api.getInviteInfo(lease, parsed.code, deriveTeamInviteJoinToken(parsed.secret));
+      return { status: "ok", ...info, alreadyJoined: Boolean(this.storage.getTeamState(info.teamId)?.info.wrappedTeamDek) };
+    } catch (error) {
+      // 기한이 지났거나 취소됐거나 없는 링크 — 서버는 셋을 가리지 않는다(번호만 아는 사람에게 알리지 않으려고).
+      if (isTeamApiError(error, "team_invite_invalid")) {
+        return { status: "expired" };
+      }
+      throw error;
+    }
   }
 
   async join(link: string): Promise<TeamListItem> {
@@ -226,4 +262,13 @@ function requireName(name: string): string {
     throw new Error(t("teams.nameRequired"));
   }
   return trimmed;
+}
+
+/** 링크에 든 서버 주소의 호스트(참여 카드가 "이 팀은 … 에 있습니다"로 보인다). */
+function serverHostOf(serverUrl: string): string {
+  try {
+    return new URL(serverUrl).host;
+  } catch {
+    return serverUrl;
+  }
 }

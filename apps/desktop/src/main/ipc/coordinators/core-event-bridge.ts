@@ -8,7 +8,7 @@ import type { SessionShareService } from "../../session-share-service";
 import type { AwsSftpCoordinator } from "./aws-sftp-coordinator";
 import type { SecretCoordinator } from "./secret-coordinator";
 import type { TunnelRegistry } from "./tunnel-registry";
-import type { AwsConnectionProgressEmitter } from "../context";
+import type { AwsConnectionProgressEmitter, PendingHopSecret } from "../context";
 import { t } from '../../i18n';
 
 export interface CoreEventBridge {
@@ -20,6 +20,8 @@ export interface CoreEventBridge {
       secrets: HostSecretInput;
       /** 요청 창에서 넣은 사용자 이름. 붙으면 그 자리(개인=호스트, 팀=내 칸)에 저장한다. */
       username?: string | null;
+      /** 요청 창에서 넣은 점프 호스트의 값. 붙으면 홉마다 그 자리에 저장한다. */
+      jumps?: PendingHopSecret[];
     }
   >;
   emitSftpConnectionProgress: AwsConnectionProgressEmitter;
@@ -58,6 +60,7 @@ export function createCoreEventBridge(deps: {
       label: string;
       secrets: HostSecretInput;
       username?: string | null;
+      jumps?: PendingHopSecret[];
     }
   >();
 
@@ -152,7 +155,11 @@ export function createCoreEventBridge(deps: {
         pending.secrets,
         pending.username,
       );
-      if (pending.username) {
+      // 요청 창에 넣은 점프 호스트의 값도 그 홉 제자리에(팀 호스트는 내 자격 증명).
+      for (const hop of pending.jumps ?? []) {
+        await secretCoordinator.persistHostSpecificSecret(hop.hostId, hop.label, hop.secrets, hop.username);
+      }
+      if (pending.username || pending.jumps?.some((hop) => hop.username)) {
         // 개인 호스트면 레코드의 사용자 이름이 바뀌었다 — 화면이 호스트 목록을 다시 읽게 한다.
         emitWorkspaceChanged();
       }

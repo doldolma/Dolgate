@@ -637,6 +637,61 @@ describe('SessionPanel', () => {
   });
 });
 
+// 4-6(S1): 모든 볼트의 스니펫을 보이되 이 세션 호스트의 볼트 것을 먼저, 팀 것에는 작은 팀 표시.
+describe('SessionPanel 스니펫 — 볼트', () => {
+  const TEAM = 'team-1';
+  const vaultIndex = {
+    teams: [{ id: TEAM, name: 'Acme Infra', role: 'owner', syncState: 'ready', syncError: null, groups: [] }],
+    teamIdByHostId: { 'team-web': TEAM },
+    teamIdByWorkspaceId: {},
+    teamIdByPortForwardId: {},
+    teamIdByDnsOverrideId: {},
+    teamIdBySnippetId: { 't-restart': TEAM },
+    myUsernameByHostId: {},
+  };
+  const snippets = [
+    { id: 'p-df', label: 'Disk usage', command: 'df -h', keyword: 'df' },
+    { id: 't-restart', label: 'Restart app', command: 'systemctl restart app', keyword: 'ra' },
+  ];
+  const commands = () =>
+    [...document.querySelectorAll('p')]
+      .map((node) => node.textContent)
+      .filter((text) => text === 'df -h' || text === 'systemctl restart app');
+
+  function renderFor(hostId: string | null, overrides: Record<string, unknown> = {}) {
+    setState({
+      sessionPanelSectionBySessionId: { 'session-1': 'snippets' },
+      snippets,
+      vaultIndex,
+      tabs: [{ sessionId: 'session-1', title: 'Prod', paneKind: 'terminal', hostId }],
+      ...overrides,
+    });
+    render(<SessionPanel sessionId="session-1" />);
+  }
+
+  it("puts the team host's own snippets first and marks team snippets", () => {
+    renderFor('team-web');
+
+    expect(commands()).toEqual(['systemctl restart app', 'df -h']);
+    // 팀 것에만 팀 이름(표시 네모의 읽기 이름) — 개인 것에는 없다.
+    expect(screen.getAllByText('Acme Infra')).toHaveLength(1);
+  });
+
+  it('keeps the order for a personal host but still marks team snippets', () => {
+    renderFor('my-web');
+
+    expect(commands()).toEqual(['df -h', 'systemctl restart app']);
+    expect(screen.getAllByText('Acme Infra')).toHaveLength(1);
+  });
+
+  it('shows no team mark without teams', () => {
+    renderFor('team-web', { vaultIndex: { ...vaultIndex, teams: [], teamIdBySnippetId: {}, teamIdByHostId: {} } });
+
+    expect(commands()).toEqual(['df -h', 'systemctl restart app']);
+    expect(screen.queryByText('Acme Infra')).toBeNull();
+  });
+});
+
 // 목록 관리를 패널에서도 한다. 예전에는 여기서 "관리" 버튼으로 홈 화면으로 보내 버려서, 스니펫
 // 하나를 만들려면 작업 중인 세션에서 화면이 튀었다.
 describe('SessionPanel 스니펫 관리', () => {

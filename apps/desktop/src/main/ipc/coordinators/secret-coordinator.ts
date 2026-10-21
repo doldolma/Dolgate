@@ -407,6 +407,8 @@ export function createSecretCoordinator(deps: {
     if (!hasSecretValue(secrets)) {
       return null;
     }
+    // 붙은 값만 이 실행 동안 재연결에 다시 쓴다(위 resolveRuntimeSshSecrets).
+    writeRuntimeSecretCache(hostId, { password: secrets.password, passphrase: secrets.passphrase });
 
     // 팀 호스트에서 요청 창에 넣은 값은 내 자격 증명(멤버 개인 칸)에 둔다. 팀 호스트의 비밀값은 팀 모두의
     // 것이라 건드리지 않는다.
@@ -445,17 +447,10 @@ export function createSecretCoordinator(deps: {
     );
     const shouldPersistHostSecret = Boolean(secrets && hasSecretValue(secrets));
 
-    // 자동 재연결: 사용자가 런타임에 입력한(=keychain에 저장하지 않은) 비밀번호/
-    // 패스프레이즈를 호스트 단위로 메모리에 캐시한다. keychain·입력 어디에도
-    // 비밀번호가 없을 때만 캐시를 폴백으로 사용한다. 이 캐시는 "최초 연결 성공
-    // 이후의 transient 재연결"에서만 소비되므로(인증 실패는 permanent로 분류돼
-    // 재연결하지 않음) 잘못된 비밀번호가 재사용될 위험이 없다.
-    if (provided.password || provided.passphrase) {
-      writeRuntimeSecretCache(host.id, {
-        password: provided.password,
-        passphrase: provided.passphrase,
-      });
-    }
+    // 자동 재연결: 요청 창에 넣어 **붙은** 비밀번호/패스프레이즈를 호스트 단위로 메모리에 캐시한다
+    // (persistHostSpecificSecret 가 붙은 뒤에 쓴다). keychain·입력 어디에도 비밀번호가 없을 때만 폴백으로
+    // 쓴다. 붙기 전에 쓰면, 그 시도가 다른 까닭(점프 홉 등)으로 실패했을 때 다음 접속이 이 값으로 붙고도
+    // 저장은 하지 않아 앱을 다시 켜면 또 묻는다.
     if (!resolvedSecrets.password && !resolvedSecrets.passphrase) {
       const cached = readRuntimeSecretCache(host.id);
       if (cached) {

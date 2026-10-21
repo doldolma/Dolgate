@@ -22,6 +22,7 @@ import {
   listExternalAwsProfiles,
   listAwsProfiles,
   listAwsRegions,
+  listTeamAwsProfiles,
   loginAwsProfile,
   prepareAwsSsoProfile,
   onWarpgateImportEvent,
@@ -78,6 +79,7 @@ export function useAwsProfilesController() {
   return useMemo(
     () => ({
       listAwsProfiles,
+      listTeamAwsProfiles,
       getSyncStatus,
       listExternalAwsProfiles,
       createAwsProfile,

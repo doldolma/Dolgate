@@ -428,5 +428,227 @@ describe("createVaultCatalog", () => {
       catalog.touchWorkspaceOpened("ws-p");
       expect(personal.savedWorkspaces.touchOpened).toHaveBeenCalledWith("ws-p");
     });
+
+    it("renames, moves and removes a workspace in the vault that has it", () => {
+      const prefs = createMemberPrefs({
+        workspaces: [{ id: "ws-t", favorite: true, lastOpenedAt: null, updatedAt: "t" }],
+      });
+      const team = createTeam([], { prefs, workspaces: [createWorkspace("ws-t")] });
+      const teamWorkspaces = team.savedWorkspaces as unknown as Record<string, unknown>;
+      teamWorkspaces.rename = vi.fn((id: string, name: string) => createWorkspace(id, { name }));
+      teamWorkspaces.moveToGroup = vi.fn((id: string, groupName: string | null) => createWorkspace(id, { groupName }));
+      teamWorkspaces.remove = vi.fn();
+      const teamOutbox = { upsertDeletion: vi.fn() };
+      (team as unknown as Record<string, unknown>).syncOutbox = teamOutbox;
+      const personal = createRepositories([], { workspaces: [createWorkspace("ws-p")] });
+      const personalWorkspaces = personal.savedWorkspaces as unknown as Record<string, unknown>;
+      personalWorkspaces.rename = vi.fn((id: string, name: string) => createWorkspace(id, { name }));
+      personalWorkspaces.remove = vi.fn();
+      const personalOutbox = { upsertDeletion: vi.fn() };
+      (personal as unknown as Record<string, unknown>).syncOutbox = personalOutbox;
+      const catalog = createVaultCatalog(asScope(personal), createTeams({ "team-1": asTeam(team) }));
+
+      // 팀 것은 팀 저장소로, 돌려줄 때 내 즐겨찾기를 얹는다.
+      expect(catalog.renameWorkspace("ws-t", "Deploy")).toMatchObject({ id: "ws-t", name: "Deploy", favorite: true });
+      expect(catalog.moveWorkspaceToGroup("ws-t", "Prod")).toMatchObject({ groupName: "Prod", favorite: true });
+      catalog.removeWorkspace("ws-t");
+      expect(teamWorkspaces.remove).toHaveBeenCalledWith("ws-t");
+      expect(teamOutbox.upsertDeletion).toHaveBeenCalledWith("workspaces", "ws-t");
+
+      catalog.renameWorkspace("ws-p", "Mine");
+      expect(personalWorkspaces.rename).toHaveBeenCalledWith("ws-p", "Mine");
+      catalog.removeWorkspace("ws-p");
+      expect(personalWorkspaces.remove).toHaveBeenCalledWith("ws-p");
+      expect(personalOutbox.upsertDeletion).toHaveBeenCalledWith("workspaces", "ws-p");
+      expect(teamOutbox.upsertDeletion).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("the vault index the screen reads", () => {
+    // 볼트 표가 읽는 목록들. 카탈로그의 다른 시험이 쓰는 가짜에 없는 것만 더한다.
+    const withLists = <T extends object>(
+      repositories: T,
+      lists: {
+        groups?: Array<{ id: string; path: string }>;
+        portForwards?: Array<{ id: string }>;
+        dnsOverrides?: Array<{ id: string }>;
+        snippets?: Array<{ id: string }>;
+      } = {},
+    ) => ({
+      ...repositories,
+      groups: { list: vi.fn(() => lists.groups ?? []) },
+      portForwards: { list: vi.fn(() => lists.portForwards ?? []) },
+      dnsOverrides: { list: vi.fn(() => lists.dnsOverrides ?? []) },
+      snippets: { list: vi.fn(() => lists.snippets ?? []) },
+    });
+
+    it("is empty without teams and reads nothing from the personal vault", () => {
+      const personal = withLists(createRepositories([createHost("host-p", "p")]));
+      const catalog = createVaultCatalog(asScope(personal));
+
+      expect(catalog.describeTeamVaults()).toEqual({
+        groupsByTeamId: {},
+        teamIdByHostId: {},
+        teamIdByWorkspaceId: {},
+        teamIdByPortForwardId: {},
+        teamIdByDnsOverrideId: {},
+        teamIdBySnippetId: {},
+        myUsernameByHostId: {},
+      });
+      expect(personal.hosts.list).not.toHaveBeenCalled();
+      expect(personal.snippets.list).not.toHaveBeenCalled();
+    });
+
+    it("maps every kind of team record to its team and leaves personal ones out", () => {
+      const team1 = withLists(
+        createTeam([createHost("host-t1", "t1")], { workspaces: [createWorkspace("ws-t1")] }),
+        {
+          groups: [{ id: "g-1", path: "Prod" }],
+          portForwards: [{ id: "pf-t1" }],
+          dnsOverrides: [{ id: "dns-t1" }],
+          snippets: [{ id: "snip-t1" }],
+        },
+      );
+      const team2 = withLists(createTeam([createHost("host-t2", "t2")]), {
+        groups: [{ id: "g-2", path: "Prod" }],
+        snippets: [{ id: "snip-t2" }],
+      });
+      const personal = withLists(createRepositories([createHost("host-p", "p")], { workspaces: [createWorkspace("ws-p")] }), {
+        groups: [{ id: "g-p", path: "Prod" }],
+        portForwards: [{ id: "pf-p" }],
+        dnsOverrides: [{ id: "dns-p" }],
+        snippets: [{ id: "snip-p" }],
+      });
+      const catalog = createVaultCatalog(
+        asScope(personal),
+        createTeams({ "team-1": asTeam(team1), "team-2": asTeam(team2) }),
+      );
+
+      const layout = catalog.describeTeamVaults();
+
+      // 그룹 경로는 볼트 안에서만 유일하다 — 같은 "Prod" 가 팀마다 따로 온다. 개인 그룹은 groups.list 로 따로 읽는다.
+      expect(layout.groupsByTeamId).toEqual({
+        "team-1": [{ id: "g-1", path: "Prod" }],
+        "team-2": [{ id: "g-2", path: "Prod" }],
+      });
+      expect(layout.teamIdByHostId).toEqual({ "host-t1": "team-1", "host-t2": "team-2" });
+      expect(layout.teamIdByWorkspaceId).toEqual({ "ws-t1": "team-1" });
+      expect(layout.teamIdByPortForwardId).toEqual({ "pf-t1": "team-1" });
+      expect(layout.teamIdByDnsOverrideId).toEqual({ "dns-t1": "team-1" });
+      expect(layout.teamIdBySnippetId).toEqual({ "snip-t1": "team-1", "snip-t2": "team-2" });
+    });
+
+    // 목록(listHosts 등)에 나온 레코드와 표가 늘 맞아야 한다 — 겹친 id 는 목록과 같은 볼트가 가진다.
+    it("gives a colliding id to the same vault the lists show it from", () => {
+      const team1 = withLists(createTeam([createHost("shared", "t1"), createHost("team-dup", "t1-dup")]), {
+        snippets: [{ id: "snip-shared" }, { id: "snip-dup" }],
+      });
+      const team2 = withLists(createTeam([createHost("team-dup", "t2-dup")]), { snippets: [{ id: "snip-dup" }] });
+      const personal = withLists(createRepositories([createHost("shared", "p")]), { snippets: [{ id: "snip-shared" }] });
+      const catalog = createVaultCatalog(
+        asScope(personal),
+        createTeams({ "team-1": asTeam(team1), "team-2": asTeam(team2) }),
+      );
+
+      const layout = catalog.describeTeamVaults();
+
+      expect(layout.teamIdByHostId).toEqual({ "team-dup": "team-1" });
+      expect(layout.teamIdBySnippetId).toEqual({ "snip-dup": "team-1" });
+      expect(catalog.listHosts().map((host) => host.label)).toEqual(["p", "t1-dup"]);
+    });
+
+    it("carries my own username for the team hosts I set one on", () => {
+      const prefs = createMemberPrefs();
+      prefs.writeHostCredentials("host-mine", { username: "  bob  " });
+      prefs.writeHostCredentials("host-key-only", { password: "pw" });
+      prefs.writeHostCredentials("shared", { username: "not-used" });
+      const team = withLists(
+        createTeam([createHost("host-mine", "a"), createHost("host-key-only", "b"), createHost("shared", "c")], { prefs }),
+      );
+      const catalog = createVaultCatalog(
+        asScope(withLists(createRepositories([createHost("shared", "personal")]))),
+        createTeams({ "team-1": asTeam(team) }),
+      );
+
+      // 개인이 가진 id 는 팀 호스트가 아니므로 내 칸을 읽지도 않는다.
+      expect(catalog.describeTeamVaults().myUsernameByHostId).toEqual({ "host-mine": "bob" });
+      expect(prefs.readHostCredentials).not.toHaveBeenCalledWith("shared");
+    });
+  });
+
+  // 포트 포워딩·DNS·스니펫은 레코드가 든 볼트로 쓴다(4-6). 목록·볼트 찾기는 호스트와 같은 규칙이다 — 개인이 이기고,
+  // 못 찾으면 개인이다.
+  describe("port forwards, DNS overrides, snippets and new workspaces", () => {
+    const records = (items: Array<{ id: string }>) => ({
+      list: vi.fn(() => items),
+      getById: vi.fn((id: string) => items.find((item) => item.id === id) ?? null),
+    });
+    const withRecords = <T extends object>(
+      repositories: T,
+      lists: { portForwards?: Array<{ id: string }>; dnsOverrides?: Array<{ id: string }>; snippets?: Array<{ id: string }> },
+    ) => ({
+      ...repositories,
+      portForwards: records(lists.portForwards ?? []),
+      dnsOverrides: records(lists.dnsOverrides ?? []),
+      snippets: records(lists.snippets ?? []),
+    });
+
+    it("lists every vault's records and finds the vault each one is in", () => {
+      const personal = withRecords(createRepositories([]), {
+        portForwards: [{ id: "rule-p" }, { id: "dup" }],
+        dnsOverrides: [{ id: "dns-p" }],
+        snippets: [{ id: "snip-p" }],
+      });
+      const team = withRecords(createTeam([]), {
+        portForwards: [{ id: "rule-t" }, { id: "dup" }],
+        dnsOverrides: [{ id: "dns-t" }],
+        snippets: [{ id: "snip-t" }],
+      });
+      const catalog = createVaultCatalog(asScope(personal), createTeams({ "team-1": asTeam(team) }));
+
+      expect(catalog.listPortForwards().map((rule) => rule.id)).toEqual(["rule-p", "dup", "rule-t"]);
+      expect(catalog.listSnippets().map((snippet) => snippet.id)).toEqual(["snip-p", "snip-t"]);
+      expect(catalog.scopeOfPortForward("rule-t").id).toBe("team-1");
+      expect(catalog.scopeOfPortForward("rule-p")).toBe(catalog.personal);
+      // id 가 겹치면 개인이 이긴다(목록과 같다).
+      expect(catalog.scopeOfPortForward("dup")).toBe(catalog.personal);
+      expect(catalog.scopeOfPortForward("missing")).toBe(catalog.personal);
+      expect(catalog.scopeOfDnsOverride("dns-t").id).toBe("team-1");
+      expect(catalog.getDnsOverride("dns-t")).toEqual({ id: "dns-t" });
+      expect(catalog.getDnsOverride("missing")).toBeNull();
+      expect(catalog.scopeOfSnippet("snip-t").id).toBe("team-1");
+      expect(catalog.scopeOfSnippet("snip-p")).toBe(catalog.personal);
+    });
+
+    it("creates a team workspace with my favorite kept out of the team record", () => {
+      const prefs = createMemberPrefs();
+      const team = createTeam([], { prefs });
+      const create = vi.fn((draft: object) => ({ id: "ws-new", version: 1, lastOpenedAt: null, ...draft }));
+      (team.savedWorkspaces as unknown as { create: typeof create }).create = create;
+      const personal = createRepositories([]);
+      const personalCreate = vi.fn();
+      (personal.savedWorkspaces as unknown as { create: typeof personalCreate }).create = personalCreate;
+      const catalog = createVaultCatalog(asScope(personal), createTeams({ "team-1": asTeam(team) }));
+      const root = { id: "leaf", kind: "leaf", target: { kind: "local", label: "Local" } } as const;
+
+      const record = catalog.createWorkspace("team-1", { name: "W", root, favorite: true });
+
+      expect(create).toHaveBeenCalledWith({ name: "W", root, favorite: false });
+      expect(prefs.updateWorkspace).toHaveBeenCalledWith("ws-new", { favorite: true });
+      expect(record.favorite).toBe(true);
+      expect(personalCreate).not.toHaveBeenCalled();
+      expect(() => catalog.createWorkspace("team-gone", { name: "W", root })).toThrow();
+    });
+
+    it("creates a personal workspace with the draft as given", () => {
+      const personal = createRepositories([]);
+      const create = vi.fn(() => ({ id: "ws-p" }));
+      (personal.savedWorkspaces as unknown as { create: typeof create }).create = create;
+      const catalog = createVaultCatalog(asScope(personal));
+      const draft = { name: "W", root: { id: "leaf", kind: "leaf", target: { kind: "local", label: "L" } } as const, favorite: true };
+
+      expect(catalog.createWorkspace(PERSONAL_VAULT_ID, draft)).toEqual({ id: "ws-p" });
+      expect(create).toHaveBeenCalledWith(draft);
+    });
   });
 });

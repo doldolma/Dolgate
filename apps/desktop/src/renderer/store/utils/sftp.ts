@@ -27,6 +27,7 @@ export function createEmptyPane(id: SftpPaneId): SftpPaneState {
     connectionProgress: null,
     connectionDiagnostic: null,
     hostGroupPath: null,
+    hostVaultId: null,
     currentPath: "",
     lastLocalPath: "",
     history: [],

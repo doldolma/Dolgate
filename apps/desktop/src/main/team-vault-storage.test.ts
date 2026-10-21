@@ -203,6 +203,52 @@ describe("team vault secrets", () => {
   });
 });
 
+describe("finding the vault of settings records", () => {
+  // 설정의 볼트별 묶음(4-7)에서 고치고 지우는 것은 그 레코드가 든 볼트로 간다. id 가 겹치면 개인이 이긴다.
+  it("finds the vault that holds a saved credential, a tailnet and a host key", async () => {
+    const { database, addTeam, createCatalog } = await load();
+    addTeam(TEAM_ID);
+    const catalog = createCatalog();
+    const scope = catalog.getScope(TEAM_ID)!;
+    const credential = (secretRef: string) => ({ secretRef, label: secretRef, hasPassword: true, hasPassphrase: false });
+    scope.secretMetadata.upsert(credential("secret:team"));
+    scope.secretMetadata.upsert(credential("secret:both"));
+    new database.SecretMetadataRepository().upsert(credential("secret:both"));
+    scope.tailnets.save(TEAM_TAILNET);
+    const teamKey = scope.knownHosts.trust({
+      hostId: "",
+      hostLabel: "acme-web-1",
+      host: "10.20.0.11",
+      port: 22,
+      algorithm: "ssh-ed25519",
+      publicKeyBase64: "AAAA",
+      fingerprintSha256: "SHA256:team",
+    });
+
+    expect(catalog.scopeOfSecret("secret:team").id).toBe(TEAM_ID);
+    expect(catalog.scopeOfSecret("secret:both").id).toBe("personal");
+    expect(catalog.scopeOfSecret("secret:unknown").id).toBe("personal");
+    expect(catalog.scopeOfTailnet(TEAM_TAILNET.id).id).toBe(TEAM_ID);
+    expect(catalog.scopeOfTailnet("tailnet-unknown").id).toBe("personal");
+    expect(catalog.scopeOfKnownHost(teamKey.id).id).toBe(TEAM_ID);
+    expect(catalog.scopeOfKnownHost("known-unknown").id).toBe("personal");
+  });
+
+  it("tests and connects a team tailnet with my own auth key, never the team's", async () => {
+    const { addTeam, createCatalog } = await load();
+    addTeam(TEAM_ID);
+    const scope = createCatalog().getScope(TEAM_ID)!;
+    scope.tailnets.save(TEAM_TAILNET);
+    expect(scope.tailnets.readAuthKey(TEAM_TAILNET.id)).toBeNull();
+
+    scope.memberPrefs!.writeTailnetCredentials(TEAM_TAILNET.id, { authKey: "tskey-mine" });
+
+    expect(scope.tailnets.readAuthKey(TEAM_TAILNET.id)).toBe("tskey-mine");
+    // 팀에 올리는 것에는 여전히 키가 없다.
+    expect(scope.tailnets.listPayloads()[0]).not.toHaveProperty("authKey");
+  });
+});
+
 describe("values that differ per member", () => {
   // 팀 레코드에 실리면 팀원 모두에게 간다. 즐겨찾기·agent forwarding 은 내 개인 칸(내 기기끼리),
   // 테마는 이 기기에만 둔다.
@@ -415,6 +461,51 @@ describe("writes that follow the host's vault", () => {
     expect(pruned.private.syncOutbox).toContainEqual(
       expect.objectContaining({ kind: "hostCredentials", recordId: "team-host" }),
     );
+  });
+
+  it("tells the screen which team owns each record, with the team's groups and my own username", async () => {
+    const { database, vaultRoot, addTeam, createCatalog } = await load();
+    addTeam(TEAM_ID);
+    const root = vaultRoot.teamVaultRoot(TEAM_ID);
+    new database.GroupRepository(root).create("group-t", "ops");
+    new database.HostRepository(root).create("team-host", sshDraft("shared", "ops"));
+    new database.HostRepository(root).create("team-other", sshDraft("other"));
+    const teamSnippet = new database.SnippetRepository(root).create({ label: "deploy", command: "make deploy" });
+    new database.GroupRepository().create("group-p", "ops");
+    new database.HostRepository().create("personal-host", sshDraft("mine", "ops"));
+    new database.SnippetRepository().create({ label: "mine", command: "ls" });
+    createCatalog().setMyHostCredentials("team-host", { username: "bob", password: "pw" });
+
+    const layout = createCatalog().describeTeamVaults();
+
+    expect(layout.groupsByTeamId).toEqual({ [TEAM_ID]: [expect.objectContaining({ id: "group-t", path: "ops" })] });
+    expect(layout.teamIdByHostId).toEqual({ "team-host": TEAM_ID, "team-other": TEAM_ID });
+    expect(layout.teamIdBySnippetId).toEqual({ [teamSnippet.id]: TEAM_ID });
+    // 내 사용자 이름만 — 비밀값은 표에 실리지 않는다.
+    expect(layout.myUsernameByHostId).toEqual({ "team-host": "bob" });
+    expect(JSON.stringify(layout)).not.toContain("pw");
+  });
+
+  it("shows on a team tailnet whether I have my own auth key, whatever the team record carries", async () => {
+    const { storage, addTeam, createCatalog } = await load();
+    addTeam(TEAM_ID);
+    const scope = createCatalog().getScope(TEAM_ID)!;
+    scope.tailnets.save(TEAM_TAILNET);
+    // 옛 데이터: 팀 레코드에 키가 있다고 남아 있다. 키는 늘 각자라 이 값은 쓰지 않는다.
+    storage.updateState((state) => {
+      state.teams[TEAM_ID].data.tailnets = state.teams[TEAM_ID].data.tailnets.map((tailnet) => ({
+        ...tailnet,
+        hasAuthKey: true,
+      }));
+    });
+    expect(scope.tailnets.list()).toEqual([expect.objectContaining({ id: TEAM_TAILNET.id, hasAuthKey: false })]);
+
+    scope.memberPrefs!.writeTailnetCredentials(TEAM_TAILNET.id, { authKey: "tskey-mine" });
+
+    expect(scope.tailnets.list()).toEqual([expect.objectContaining({ id: TEAM_TAILNET.id, hasAuthKey: true })]);
+    // 팀에 올리는 것은 그대로 키 없음이다.
+    expect(scope.tailnets.listPayloads()).toEqual([expect.objectContaining({ id: TEAM_TAILNET.id, hasAuthKey: false })]);
+    expect(scope.tailnets.listPayloads()[0]).not.toHaveProperty("authKey");
   });
 
   it("keeps my AWS keys and tailnet auth key for team records in my own slot, used here but never sent to the team", async () => {

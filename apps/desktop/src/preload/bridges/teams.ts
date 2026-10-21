@@ -1,11 +1,13 @@
 import type { IpcRenderer } from "electron";
 import type { DesktopApi } from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
-import { subscribeTeamsChanged } from "../events/state";
+import { subscribeTeamInviteLink, subscribeTeamsChanged } from "../events/state";
 
 export function buildTeamsBridge(ipcRenderer: IpcRenderer): DesktopApi["teams"] {
   return {
     list: () => ipcRenderer.invoke(ipcChannels.teams.list),
+    getAvailability: () => ipcRenderer.invoke(ipcChannels.teams.getAvailability),
+    getVaultIndex: () => ipcRenderer.invoke(ipcChannels.teams.getVaultIndex),
     refresh: () => ipcRenderer.invoke(ipcChannels.teams.refresh),
     create: (name) => ipcRenderer.invoke(ipcChannels.teams.create, name),
     rename: (teamId, name) => ipcRenderer.invoke(ipcChannels.teams.rename, teamId, name),
@@ -19,6 +21,8 @@ export function buildTeamsBridge(ipcRenderer: IpcRenderer): DesktopApi["teams"] 
     listInvites: (teamId) => ipcRenderer.invoke(ipcChannels.teams.listInvites, teamId),
     revokeInvite: (teamId, code) => ipcRenderer.invoke(ipcChannels.teams.revokeInvite, teamId, code),
     getInviteInfo: (link) => ipcRenderer.invoke(ipcChannels.teams.getInviteInfo, link),
+    previewInvite: (link) => ipcRenderer.invoke(ipcChannels.teams.previewInvite, link),
+    takePendingInviteLink: () => ipcRenderer.invoke(ipcChannels.teams.takePendingInviteLink),
     join: (link) => ipcRenderer.invoke(ipcChannels.teams.join, link),
     previewCopy: (request) => ipcRenderer.invoke(ipcChannels.teams.previewCopy, request),
     copy: (request) => ipcRenderer.invoke(ipcChannels.teams.copy, request),
@@ -27,5 +31,6 @@ export function buildTeamsBridge(ipcRenderer: IpcRenderer): DesktopApi["teams"] 
       ipcRenderer.invoke(ipcChannels.teams.setMyCredentials, hostId, credentials),
     clearMyCredentials: (hostId) => ipcRenderer.invoke(ipcChannels.teams.clearMyCredentials, hostId),
     onChanged: (listener) => subscribeTeamsChanged(listener),
+    onInviteLink: (listener) => subscribeTeamInviteLink(listener),
   };
 }

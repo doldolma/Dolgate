@@ -24,6 +24,12 @@ export function useAppModalViewModel() {
   const pendingMissingUsernamePrompt = useAppStore(
     (state) => state.pendingMissingUsernamePrompt,
   );
+  // 이름을 묻는 호스트가 팀 호스트인지 — 그러면 입력한 이름은 내 자격 증명에 들어간다(창 문구가 다르다).
+  const pendingMissingUsernameTeamHost = useAppStore((state) =>
+    state.pendingMissingUsernamePrompt
+      ? Boolean(state.vaultIndex?.teamIdByHostId[state.pendingMissingUsernamePrompt.hostId])
+      : false,
+  );
   const pendingStartupCommandPrompt = useAppStore(
     (state) => state.pendingStartupCommandPrompt,
   );
@@ -72,6 +78,7 @@ export function useAppModalViewModel() {
     pendingCredentialRetry,
     pendingAwsSftpConfigRetry,
     pendingMissingUsernamePrompt,
+    pendingMissingUsernameTeamHost,
     pendingStartupCommandPrompt,
     pendingInteractiveAuths,
     acceptPendingHostKeyPrompt,

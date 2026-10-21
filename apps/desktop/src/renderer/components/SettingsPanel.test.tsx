@@ -422,6 +422,26 @@ describe('SettingsPanel', () => {
     expect(onSelectSection).toHaveBeenCalledWith('aws-profiles');
   });
 
+  // 팀을 못 쓰면(로그인 안 함·옛 볼트·옛 서버) 설정 화면은 지금 그대로다.
+  it('has no Teams tab when teams cannot be used', () => {
+    renderSettingsPanel();
+    expect(screen.queryByRole('tab', { name: 'Teams' })).toBeNull();
+  });
+
+  it('puts the Teams tab right before Account when teams can be used', () => {
+    const { onSelectSection } = renderSettingsPanel({ teamsAvailable: true });
+    const tabs = screen.getAllByRole('tab').map((tab) => tab.textContent);
+    expect(tabs.slice(-3)).toEqual(['AI', 'Teams', 'Account']);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Teams' }));
+    expect(onSelectSection).toHaveBeenCalledWith('teams');
+  });
+
+  it('moves off the Teams tab when teams can no longer be used', () => {
+    const { onSelectSection } = renderSettingsPanel({ activeSection: 'teams', teamsAvailable: false });
+    expect(onSelectSection).toHaveBeenCalledWith('general');
+  });
+
   it('renders known hosts inside the security section', () => {
     const { onRemoveKnownHost } = renderSettingsPanel({ activeSection: 'security' });
 

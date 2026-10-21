@@ -10,6 +10,11 @@ export function listTailnets(): Promise<TailnetRecord[]> {
   return desktopApi.tailnet.list();
 }
 
+/** 그 팀 볼트의 tailnet. 개인은 listTailnets 다. */
+export function listTeamTailnets(teamId: string): Promise<TailnetRecord[]> {
+  return desktopApi.tailnet.list(teamId);
+}
+
 export function saveTailnet(
   input: Parameters<typeof desktopApi.tailnet.save>[0],
 ): Promise<TailnetRecord> {

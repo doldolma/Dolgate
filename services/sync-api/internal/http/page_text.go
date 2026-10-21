@@ -77,6 +77,20 @@ type pageText struct {
 	CallbackOpenApp string
 	CallbackHint    string
 
+	// --- 팀 초대 링크 페이지(로그인 없이 열린다) ---
+	InviteTitle        string
+	InviteEyebrow      string
+	InviteLede         string
+	InvitePreview      string
+	InviteOpenApp      string
+	InviteDownload     string
+	InviteHint         string
+	InviteLinkLabel    string
+	InviteCopy         string
+	InviteCopied       string
+	InviteExpiredTitle string
+	InviteExpiredBody  string
+
 	// --- 서버 오류(브라우저 인증 경로에서 평문·JSON 으로 나간다) ---
 	BadRequest            string
 	ServerError           string
@@ -150,6 +164,19 @@ var pageTextKo = pageText{
 	CallbackOpenApp: "Dolgate 열기 ↗",
 	CallbackHint:    "앱이 이미 열려 있다면 이 탭은 닫아도 됩니다.",
 
+	InviteTitle:        "Dolgate 팀 초대",
+	InviteEyebrow:      "Dolgate 팀 초대",
+	InviteLede:         "Dolgate 앱에서 열어 참여하세요.",
+	InvitePreview:      "Dolgate 팀에 초대받았습니다.",
+	InviteOpenApp:      "Dolgate 에서 열기",
+	InviteDownload:     "Dolgate 내려받기",
+	InviteHint:         "열리지 않으면 최신 Dolgate 를 설치하거나, 이 링크를 복사해 앱의 Teams 탭에 붙여 넣으세요.",
+	InviteLinkLabel:    "초대 링크",
+	InviteCopy:         "복사",
+	InviteCopied:       "복사했습니다",
+	InviteExpiredTitle: "만료된 초대 링크",
+	InviteExpiredBody:  "기한이 지났거나 취소된 링크입니다. 팀 멤버에게 새 링크를 받으세요.",
+
 	BadRequest:            "잘못된 요청입니다.",
 	ServerError:           "서버 오류가 발생했습니다.",
 	AuthFailed:            "인증에 실패했습니다.",
@@ -221,6 +248,19 @@ var pageTextEn = pageText{
 	CallbackBody:    "You are signed in. If the Dolgate app does not open on its own, press the button below to go back.",
 	CallbackOpenApp: "Open Dolgate ↗",
 	CallbackHint:    "If the app is already open, you can close this tab.",
+
+	InviteTitle:        "Dolgate team invite",
+	InviteEyebrow:      "Dolgate team invite",
+	InviteLede:         "Open it in the Dolgate app to join.",
+	InvitePreview:      "You're invited to a Dolgate team.",
+	InviteOpenApp:      "Open in Dolgate",
+	InviteDownload:     "Download Dolgate",
+	InviteHint:         "If it doesn't open, install the latest Dolgate, or copy this link and paste it into the app's Teams tab.",
+	InviteLinkLabel:    "Invite link",
+	InviteCopy:         "Copy",
+	InviteCopied:       "Copied",
+	InviteExpiredTitle: "This invite link has expired",
+	InviteExpiredBody:  "It expired or was revoked. Ask a team member for a new link.",
 
 	BadRequest:            "Bad request.",
 	ServerError:           "A server error occurred.",

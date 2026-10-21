@@ -58,6 +58,7 @@ export function useSettingsViewModel() {
   const loadSessionReplayStorageUsage = useAppStore(
     (state) => state.loadSessionReplayStorageUsage,
   );
+  const teamsAvailable = useAppStore((state) => state.teamAvailability.available);
 
   return {
     hosts,
@@ -81,5 +82,6 @@ export function useSettingsViewModel() {
     copySshPublicKey,
     installSshPublicKey,
     loadSessionReplayStorageUsage,
+    teamsAvailable,
   };
 }

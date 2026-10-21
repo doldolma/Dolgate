@@ -70,6 +70,7 @@ export interface HostCoordinator {
   ) => Promise<HostKeyProbeResult>;
   resolveJumpHostTarget: (
     host: SshHostRecord,
+    jumpSecrets?: Record<string, HostSecretInput>,
   ) => Promise<ResolvedJumpHost | undefined>;
   resolveTailnetRoute: (host: { id: string; tailnetId?: string | null }) => {
     tailnetId?: string;
@@ -624,6 +625,7 @@ export function createHostCoordinator(deps: {
   // jumpHostIds는 따르지 않는다(타깃의 체인이 권위 — 점프 호스트가 공유돼도 부작용 없음).
   const resolveJumpHostTarget = async (
     host: SshHostRecord,
+    jumpSecrets?: Record<string, HostSecretInput>,
   ): Promise<ResolvedJumpHost | undefined> => {
     const chain = normalizeJumpHostIds(host.jumpHostIds, host.jumpHostId);
     if (chain.length === 0) {
@@ -650,7 +652,8 @@ export function createHostCoordinator(deps: {
         throw new Error(t("hostIpc.jumpHostMustBeSsh"));
       }
       const trustedHostKeysBase64 = resolveTrustedHostKeys(jumpHost);
-      const auth = await resolveSshAuth(jumpHost);
+      // 이번 시도에서 요청 창에 넣은 값이 있으면 그 홉의 저장된 것보다 먼저 쓴다.
+      const auth = await resolveSshAuth(jumpHost, jumpSecrets?.[jumpHostId]);
       await ensureCertificateAuthReady(jumpHost, auth.secrets, auth.authType);
       resolved = {
         host: jumpHost.hostname,

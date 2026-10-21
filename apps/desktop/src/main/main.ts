@@ -54,6 +54,8 @@ import { SessionShareService } from './session-share-service';
 import { SessionReplayService } from './session-replay-service';
 import { SyncService } from './sync-service';
 import { TeamSyncService } from './team-sync-service';
+import { getTeamInviteInbox } from './team-invite-inbox';
+import { classifyProtocolUrl, findProtocolUrl } from './protocol-links';
 import { listStoredTeamAwsProfiles, listStoredTeamDnsOverrideVaults } from './team-vault-scope';
 import { matchCloseActiveTab, matchTabCommand } from './tab-shortcuts';
 import {
@@ -436,6 +438,27 @@ if (termiusHelperArgIndex >= 0) {
     },
   });
 
+  // 브라우저의 링크 페이지가 넘긴 초대 링크 — 작업 창 하나에 알리고 앞으로 가져온다. 그 창이 가져가 참여 카드를
+  // 띄운다. 여럿에 알리면 뒤에 있는 창이 먼저 가져가 카드가 안 보이는 곳에 뜰 수 있고, 재생·채팅 창은 카드를
+  // 띄우지 않는다. 작업 창이 없으면 다음에 열리는 작업 창이 켤 때 가져간다.
+  getTeamInviteInbox().setNotifier(() => {
+    const focused = BrowserWindow.getFocusedWindow();
+    const target =
+      focused && !focused.isDestroyed() && workspaceWindowIds.has(focused.id)
+        ? focused
+        : BrowserWindow.getAllWindows().find(
+            (window) => !window.isDestroyed() && workspaceWindowIds.has(window.id),
+          );
+    if (!target) {
+      return;
+    }
+    target.webContents.send(ipcChannels.teams.inviteLink);
+    if (target.isMinimized()) {
+      target.restore();
+    }
+    target.focus();
+  });
+
   const rewriteDnsOverridesForCurrentState = async () => {
     // 팀 볼트의 덮어쓰기도 함께 적용한다(같은 이름이면 개인 것). 켜 둔 팀 정적 덮어쓰기를 지우지 않는다.
     const dnsVaults = [
@@ -553,10 +576,6 @@ if (termiusHelperArgIndex >= 0) {
         });
       });
     }
-  }
-
-  function findProtocolUrl(argv: string[]): string | null {
-    return argv.find((value) => value.startsWith('dolgate://')) ?? null;
   }
 
   async function handleAuthCallbackUrl(rawUrl: string): Promise<void> {
@@ -774,6 +793,17 @@ if (termiusHelperArgIndex >= 0) {
 
     const protocolUrl = findProtocolUrl(argv);
     if (protocolUrl) {
+      const link = classifyProtocolUrl(protocolUrl);
+      if (link.kind !== 'auth-callback') {
+        // 팀 초대는 화면이 가져갈 때까지 둔다 — 받으면 알림이 작업 창을 앞으로 가져온다(여기서 또 앞으로 가져오면
+        // 그 사이 앞에 있던 재생 창이 다시 올라올 수 있다). 모르는 주소는 받지 않는다.
+        if (link.kind === 'team-invite') {
+          getTeamInviteInbox().receive(link.link);
+        } else {
+          focusExistingWindow();
+        }
+        return;
+      }
       // OS 가 dolgate:// 인증 콜백을 전달하려고 앱을 다시 띄운 경우다. 새 창을 열지
       // 않고 콜백만 처리한 뒤 기존 창을 앞으로 가져온다.
       pendingAuthCallbackUrl = protocolUrl;
@@ -797,6 +827,14 @@ if (termiusHelperArgIndex >= 0) {
 
   app.on('open-url', (event, url) => {
     event.preventDefault();
+    const link = classifyProtocolUrl(url);
+    if (link.kind === 'team-invite') {
+      getTeamInviteInbox().receive(link.link);
+      return;
+    }
+    if (link.kind === 'ignored') {
+      return;
+    }
     pendingAuthCallbackUrl = url;
     if (app.isReady()) {
       void handleAuthCallbackUrl(url);
@@ -943,6 +981,12 @@ if (termiusHelperArgIndex >= 0) {
       );
     }
     await createWindow();
+    // 윈도·리눅스는 앱이 꺼져 있을 때 누른 초대 링크를 처음 실행 인자로 준다(macOS 는 open-url 로 온다).
+    const startupUrl = findProtocolUrl(process.argv);
+    const startupLink = startupUrl ? classifyProtocolUrl(startupUrl) : null;
+    if (startupLink?.kind === 'team-invite') {
+      getTeamInviteInbox().receive(startupLink.link);
+    }
     void restoreDnsOverridesForStartup()
       .then(() => rewriteDnsOverridesForCurrentState())
       .catch(() => undefined);

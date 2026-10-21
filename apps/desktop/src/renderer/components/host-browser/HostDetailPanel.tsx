@@ -13,6 +13,7 @@ import {
 } from '@shared';
 import type {
   ActivityLogRecord,
+  MyHostCredentialsSummary,
   HostEnvVar,
   HostRecord,
   HostStartupCommand,
@@ -33,6 +34,7 @@ import {
   Download,
   Eye,
   EyeOff,
+  Info,
   Folder,
   FolderPlus,
   Keyboard,
@@ -56,11 +58,19 @@ import {
   hostSupportsSftp,
   hostSupportsTmux,
 } from './hostCapabilities';
-import type { HostBrowserModel } from './useHostBrowser';
+import type { HostBrowserModel, MyCredentialsApi } from './useHostBrowser';
+import {
+  MyCredentialsDialog,
+  authTypeLabel,
+  type MyCredentialsHost,
+} from '../teams/MyCredentialsDialog';
 import { useTranslation } from 'react-i18next';
 import { getFormatLocale, t } from '../../i18n';
 import { resolveLogMessage } from '../../lib/activity-log-message';
 import { HostBadge } from './HostBadge';
+import { TeamMark } from '../teams/TeamMark';
+import type { AssetTeam } from './AssetLocation';
+import { PerPersonHint } from '../teams/PerPersonHint';
 
 interface HostDetailPanelProps {
   hb: HostBrowserModel;
@@ -228,8 +238,11 @@ function ActivityRow({
   onClick,
   replayRecordingId,
   onOpenReplay,
+  team = null,
 }: {
   primary: string;
+  /** 볼트가 섞인 목록에서 이 호스트가 든 팀 — 이름 뒤에 머리글자 네모(팀 이름은 툴팁). */
+  team?: AssetTeam | null;
   secondary?: string | null;
   level?: string;
   when: string;
@@ -243,8 +256,18 @@ function ActivityRow({
     <span className="flex min-w-0 items-center gap-[0.55rem]">
       <StatusDot level={level} />
       <span className="flex min-w-0 flex-col">
-        <span className="min-w-0 truncate text-[0.82rem] font-medium text-[var(--text)]">
-          {primary}
+        <span className="flex min-w-0 items-center gap-[0.35rem]">
+          <span className="min-w-0 truncate text-[0.82rem] font-medium text-[var(--text)]">
+            {primary}
+          </span>
+          {team ? (
+            <>
+              <Tooltip label={team.name} className="shrink-0">
+                <TeamMark name={team.name} size="xs" />
+              </Tooltip>
+              <span className="sr-only">{team.name}</span>
+            </>
+          ) : null}
         </span>
         {secondary ? (
           <span className="min-w-0 truncate text-[0.72rem] text-[var(--text-soft)]">
@@ -857,7 +880,7 @@ function SectionCard({
   action,
   children,
 }: {
-  title: string;
+  title: React.ReactNode;
   action?: React.ReactNode;
   children: React.ReactNode;
 }) {
@@ -869,6 +892,107 @@ function SectionCard({
       </div>
       {children}
     </div>
+  );
+}
+
+/**
+ * 팀 호스트의 내 자격 증명(후보 C1·C1e) — Host Information 과 같은 카드·줄. 값은 안 보이고 무엇이 들어 있는지만.
+ * 비어 있으면 팀 것으로 접속한다는 한 줄과 Add.
+ */
+function MyCredentialsCard({ host, api }: { host: MyCredentialsHost; api: MyCredentialsApi }) {
+  const { t: translate } = useTranslation();
+  // undefined = 읽는 중. 못 읽으면 비어 있는 것으로 본다(편집으로 다시 둘 수 있다).
+  const [summary, setSummary] = useState<MyHostCredentialsSummary | null | undefined>(undefined);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setSummary(undefined);
+    void Promise.resolve()
+      .then(() => api.load(host.id))
+      .then(
+        (next) => {
+          if (!cancelled) {
+            setSummary(next);
+          }
+        },
+        () => {
+          if (!cancelled) {
+            setSummary(null);
+          }
+        },
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [api, host.id]);
+
+  const stored = summary
+    ? (
+        [
+          ['password', summary.hasPassword],
+          ['privateKey', summary.hasPrivateKey],
+          ['certificate', summary.hasCertificate],
+          ['passphrase', summary.hasPassphrase],
+        ] as const
+      )
+        .filter(([, has]) => has)
+        .map(([key]) => translate(`teams.myCredentials.stored.${key}`))
+    : [];
+
+  return (
+    <>
+      <SectionCard
+        title={
+          <span className="inline-flex items-center gap-[0.3rem]">
+            My credentials
+            <Tooltip label={translate('teams.myCredentials.cardHint')} multiline>
+              <Info className="h-4 w-4 text-[var(--text-soft)]" aria-hidden />
+            </Tooltip>
+          </span>
+        }
+        action={
+          summary === undefined ? null : (
+            <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
+              {summary ? (
+                <Pencil className="h-3.5 w-3.5" aria-hidden />
+              ) : (
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+              )}
+              {summary ? 'Edit' : 'Add'}
+            </Button>
+          )
+        }
+      >
+        {summary === undefined ? null : summary ? (
+          <div data-my-credentials>
+            {summary.username ? <InfoRow label="Username" value={summary.username} /> : null}
+            {summary.authType ? (
+              <InfoRow label="Auth" value={authTypeLabel(summary.authType, translate)} />
+            ) : null}
+            {summary.domain ? <InfoRow label="Domain" value={summary.domain} /> : null}
+            {stored.length > 0 ? <InfoRow label="Stored" value={stored.join(' · ')} /> : null}
+          </div>
+        ) : (
+          <p className="m-0 py-[0.35rem] text-[0.82rem] text-[var(--text-soft)]">
+            {translate('teams.myCredentials.empty')}
+          </p>
+        )}
+      </SectionCard>
+      {editing ? (
+        <MyCredentialsDialog
+          host={host}
+          summary={summary ?? null}
+          onSave={async (input) => {
+            setSummary(await api.save(host.id, input));
+          }}
+          onClear={async () => {
+            await api.clear(host.id);
+            setSummary(null);
+          }}
+          onClose={() => setEditing(false)}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -959,10 +1083,15 @@ function EmptyDetail({
     [hb.currentGroupPath, hb.favoritesFilterActive, hb.selectedGroupPaths],
   );
 
-  const scopedHostIdSet = useMemo(
-    () => collectRecentLogScopeHostIds(hb.hosts, scope),
-    [hb.hosts, scope],
-  );
+  // 볼트 안이면 그 볼트의 호스트로만 좁힌다 — 같은 경로가 다른 볼트에 있어도 섞이지 않고, 볼트 맨 위면 그 볼트 전부다.
+  const scopedHostIdSet = useMemo(() => {
+    const scopeHosts = hb.locationHosts ?? hb.hosts;
+    const ids = collectRecentLogScopeHostIds(scopeHosts, scope);
+    if (ids || !hb.currentVault) {
+      return ids;
+    }
+    return new Set(scopeHosts.map((host) => host.id));
+  }, [hb.currentVault, hb.hosts, hb.locationHosts, scope]);
 
   const recentLogs = useMemo(() => {
     const items: Array<{
@@ -1038,7 +1167,8 @@ function EmptyDetail({
       return translate('sidebar.favorites');
     }
     if (scope.kind !== 'groups') {
-      return null;
+      // 볼트 맨 위면 그 볼트로 좁혀져 있다(scopedHostIdSet) — 범위 이름도 그 볼트다.
+      return hb.currentVault?.name ?? null;
     }
     if (scope.groupPaths.length === 1) {
       return getGroupLabel(scope.groupPaths[0]);
@@ -1046,7 +1176,7 @@ function EmptyDetail({
     return translate('hostDetail.empty.recentLogsGroupCount', {
       count: scope.groupPaths.length,
     });
-  }, [scope, translate]);
+  }, [hb.currentVault, scope, translate]);
 
   return (
     <div className="flex h-full flex-col divide-y divide-[var(--border)] overflow-y-auto px-[0.9rem] pb-[1.3rem]">
@@ -1124,6 +1254,9 @@ function EmptyDetail({
               <ActivityRow
                 key={item.id}
                 primary={item.name}
+                team={
+                  hb.showsTeamMarks ? hb.teamOfAsset(`host:${item.hostId}`) : null
+                }
                 secondary={item.detail}
                 level={item.level}
                 when={item.when}
@@ -1250,6 +1383,13 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
           </h2>
         </div>
         <div className="flex shrink-0 items-center gap-[0.25rem]">
+          <PerPersonHint
+            hint={
+              hb.hasVaults && hb.teamOfAsset(`host:${host.id}`)
+                ? translate('teams.perPerson.favorite')
+                : null
+            }
+          >
           <button
             type="button"
             aria-label={translate('hostDetail.favorite', { label: host.label })}
@@ -1262,6 +1402,7 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
           >
             <Star className="h-[1.05rem] w-[1.05rem]" fill={isFavorite ? 'currentColor' : 'none'} />
           </button>
+          </PerPersonHint>
           <button
             type="button"
             aria-label={translate('hostDetail.close')}
@@ -1345,6 +1486,14 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
                 ) : null}
               </div>
             </SectionCard>
+
+            {/* 팀 호스트(비밀값으로 붙는 SSH·RDP·VNC)에만 — 나에게만 적용되는 자격 증명. */}
+            {hb.myCredentials &&
+            hb.hasVaults &&
+            hb.teamOfAsset(`host:${host.id}`) &&
+            (isSshHostRecord(host) || isRdpHostRecord(host) || isVncHostRecord(host)) ? (
+              <MyCredentialsCard key={host.id} host={host} api={hb.myCredentials} />
+            ) : null}
 
             <SectionCard title="Quick Actions">
               <div className="grid grid-cols-2 gap-[0.55rem]">

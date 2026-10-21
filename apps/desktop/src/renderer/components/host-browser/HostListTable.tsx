@@ -27,6 +27,8 @@ import {
   parseHomeAssetKey,
   partitionHomeAssetKeys,
 } from "./homeAssets";
+import { TableLocation } from "./AssetLocation";
+import { PerPersonHint } from "../teams/PerPersonHint";
 
 interface HostListTableProps {
   hb: HostBrowserModel;
@@ -310,15 +312,25 @@ function WorkspaceListTableRow({
       <span className="min-w-0 truncate text-[var(--text-soft)]">
         {summary.labels.join(" · ")}
       </span>
-      <span className="min-w-0 truncate text-[var(--text-soft)]">
-        {groupLabel}
-      </span>
+      <TableLocation
+        team={
+          hb.showsTeamMarks ? hb.teamOfAsset(`workspace:${workspace.id}`) : null
+        }
+        label={groupLabel}
+      />
       <span className="min-w-0 truncate text-[0.72rem] text-[var(--text-soft)]">
         {countLabels.join(" · ")}
       </span>
       <span className="min-w-0 truncate text-[var(--text-soft)] tabular-nums">
         {formatLastUsed(summary.lastUsedAt)}
       </span>
+      <PerPersonHint
+        hint={
+          hb.teamOfAsset(`workspace:${workspace.id}`)
+            ? translate("teams.perPerson.favorite")
+            : null
+        }
+      >
       <button
         type="button"
         aria-label={
@@ -343,6 +355,7 @@ function WorkspaceListTableRow({
           fill={workspace.favorite ? "currentColor" : "none"}
         />
       </button>
+      </PerPersonHint>
       <button
         type="button"
         aria-label={translate("savedWorkspace.moreActions", {
@@ -431,7 +444,7 @@ function HostListTableRow({
         const hostIds = partitionHomeAssetKeys(assetKeys).hostIds;
         hb.setDraggedGroupPath(null);
         hb.setDraggedAssetKeys(assetKeys);
-        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.effectAllowed = hb.dragEffectAllowed;
         event.dataTransfer.setData(
           HOME_ASSETS_DRAG_MIME_TYPE,
           JSON.stringify(assetKeys.map(parseHomeAssetKey)),
@@ -473,10 +486,11 @@ function HostListTableRow({
         {address ?? "—"}
       </span>
 
-      {/* 그룹 */}
-      <span className="min-w-0 truncate text-[var(--text-soft)]">
-        {group ? group.split("/").join(" / ") : "Ungrouped"}
-      </span>
+      {/* 그룹 — 볼트가 섞인 목록이면 팀 것에 머리글자 네모(팀 이름은 툴팁) */}
+      <TableLocation
+        team={hb.showsTeamMarks ? hb.teamOfAsset(`host:${host.id}`) : null}
+        label={group ? group.split("/").join(" / ") : "Ungrouped"}
+      />
 
       {/* 태그 */}
       <span className="flex min-w-0 items-center gap-[0.25rem]">
@@ -500,7 +514,14 @@ function HostListTableRow({
         {lastUsedAt ? formatLastUsed(lastUsedAt) : "—"}
       </span>
 
-      {/* 즐겨찾기 */}
+      {/* 즐겨찾기 — 팀 호스트면 나에게만 적용된다는 툴팁 */}
+      <PerPersonHint
+        hint={
+          hb.teamOfAsset(`host:${host.id}`)
+            ? translate("teams.perPerson.favorite")
+            : null
+        }
+      >
       <button
         type="button"
         aria-label={translate("hostList.favoriteFor", { label: host.label })}
@@ -521,6 +542,7 @@ function HostListTableRow({
           fill={isFavorite ? "currentColor" : "none"}
         />
       </button>
+      </PerPersonHint>
 
       {/* 메뉴 */}
       <button

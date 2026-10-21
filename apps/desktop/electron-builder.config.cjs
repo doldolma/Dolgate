@@ -10,10 +10,11 @@ module.exports = {
   productName: 'Dolgate',
   electronVersion: '44.7.0',
   artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
+  // dolgate: 로그인 콜백, dolgate-invite: 팀 초대 링크 페이지의 `앱 열기`(src/main/protocol-links.ts).
   protocols: [
     {
       name: 'Dolgate',
-      schemes: ['dolgate']
+      schemes: ['dolgate', 'dolgate-invite']
     }
   ],
   directories: {

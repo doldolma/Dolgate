@@ -144,6 +144,43 @@ describe("VaultCopyService", () => {
     expect(() => open(mine.body.hostCredentials[0].encrypted_payload, harness.teamKey)).toThrow();
   });
 
+  // 4-6: 워크스페이스를 팀으로 — 창의 호스트까지 팀 볼트에 들어가고, 팀 동기화가 워크스페이스도 올린다.
+  it("copies a personal workspace into a team with its panes' hosts and uploads both", async () => {
+    const harness = await createSyncedTeam();
+    await addPersonalHosts(harness);
+    const workspace = new harness.database.SavedWorkspaceRepository().create({
+      name: "Web",
+      // 저장된 워크스페이스는 창이 둘 이상이다.
+      root: {
+        id: "split",
+        kind: "split",
+        axis: "horizontal",
+        ratio: 0.5,
+        first: { id: "leaf-web", kind: "leaf", target: { kind: "host", hostId: "web", label: "web" } },
+        second: { id: "leaf-local", kind: "leaf", target: { kind: "local", label: "Local" } },
+      },
+      favorite: true,
+    });
+    const { service } = await createService();
+
+    const result = service(harness.catalog()).copy({
+      sourceVaultId: "personal",
+      targetVaultId: TEAM_ID,
+      selection: { kind: "workspaces", workspaceIds: [workspace.id] },
+    });
+
+    const team = harness.storage.getState().teams[TEAM_ID];
+    const copy = team.data.savedWorkspaces.find((record) => record.id === result.workspaceIds[workspace.id]);
+    expect(copy).toMatchObject({ name: "Web", favorite: false, root: { first: { target: { hostId: result.hostIds.web } } } });
+    expect(result.counts).toMatchObject({ workspaces: 1, hosts: 2 });
+    // 개인 원본은 그대로다.
+    expect(harness.storage.getState().data.savedWorkspaces.map((record) => record.id)).toEqual([workspace.id]);
+
+    await harness.service.pushDirty();
+    const [push] = harness.server.requestsTo("POST", `/teams/${TEAM_ID}/sync`);
+    expect(push.body.workspaces.map((record) => record.id)).toEqual([copy?.id]);
+  });
+
   it("previews what would come without writing anything", async () => {
     const harness = await createSyncedTeam();
     await addPersonalHosts(harness);

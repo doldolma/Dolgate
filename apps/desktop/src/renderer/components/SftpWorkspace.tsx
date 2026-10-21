@@ -84,7 +84,11 @@ import { ConnectionHopSteps } from "./ConnectionHopSteps";
 import { ConnectionStatusOverlay } from "./ConnectionStatusOverlay";
 import { useAppStore } from "../store/appStore";
 import { resolveConnectionStages } from "./terminal-workspace/connectionStages";
-import { ArrowLeft, ArrowRight, ArrowUp, Folder } from "../ui/icons";
+import { ArrowLeft, ArrowRight, ArrowUp, Folder, User } from "../ui/icons";
+import { TeamMark } from "./teams/TeamMark";
+import type { BrowserVault } from "./host-browser/browserVaults";
+import { withMyUsername } from "./host-browser/hostDisplay";
+import { CardLocation } from "./host-browser/AssetLocation";
 import { TerminalInteractiveAuthOverlay } from "./terminal-workspace/TerminalInteractiveAuthOverlay";
 import {
   Button,
@@ -124,6 +128,13 @@ interface SftpWorkspaceProps {
   desktopPlatform: DesktopPlatform;
   hosts: HostRecord[];
   groups: GroupRecord[];
+  /**
+   * 볼트들(개인 + 이 기기의 팀, buildBrowserVaults). 팀이 있으면 호스트 고르기의 맨 위가 볼트 고르기다 — 홈
+   * 사이드바와 같은 층. 비어 있으면(팀 없음) 지금 그대로다.
+   */
+  vaults?: readonly BrowserVault[];
+  /** 팀 호스트에 둔 내 사용자 이름 — 고르기 카드 부제에 쓴다(표시만). */
+  myUsernameByHostId?: Readonly<Record<string, string>>;
   sftp: Pick<
     SftpState,
     "localHomePath" | "leftPane" | "rightPane" | "pendingConflictDialog"
@@ -139,7 +150,11 @@ interface SftpWorkspaceProps {
   onDisconnectPane: (paneId: SftpPaneId) => Promise<void>;
   onPaneFilterChange: (paneId: SftpPaneId, query: string) => void;
   onHostSearchChange: (paneId: SftpPaneId, query: string) => void;
-  onNavigateHostGroup: (paneId: SftpPaneId, path: string | null) => void;
+  onNavigateHostGroup: (
+    paneId: SftpPaneId,
+    path: string | null,
+    vaultId?: string | null,
+  ) => void;
   onSelectHost: (paneId: SftpPaneId, hostId: string) => void;
   onConnectHost: (paneId: SftpPaneId, hostId: string) => Promise<void>;
   onOpenHostSettings?: (hostId: string) => void;
@@ -1875,11 +1890,15 @@ interface HostPickerProps {
   pane: SftpPaneState;
   groups: GroupRecord[];
   hosts: SftpConnectableHostRecord[];
+  vaults?: readonly BrowserVault[];
+  /** 팀 호스트에 둔 내 사용자 이름 — 고르기 카드 부제에 쓴다(표시만). */
+  myUsernameByHostId?: Readonly<Record<string, string>>;
   /** 이 판이 답을 기다리는 인증(호출부가 골라 준다). */
   interactiveAuth: PendingSftpInteractiveAuth | null;
   onActivatePaneSource: (sourceKind: SftpSourceKind) => Promise<void>;
   onHostSearchChange: (query: string) => void;
-  onNavigateHostGroup: (path: string | null) => void;
+  /** vaultId 는 팀이 있을 때만 준다(맨 위면 null). */
+  onNavigateHostGroup: (path: string | null, vaultId?: string | null) => void;
   onSelectHost: (hostId: string) => void;
   onConnectHost: (hostId: string) => Promise<void>;
   onOpenHostSettings?: (hostId: string) => void;
@@ -1993,6 +2012,8 @@ function HostPicker({
   pane,
   groups,
   hosts,
+  vaults = [],
+  myUsernameByHostId,
   interactiveAuth,
   onActivatePaneSource,
   onHostSearchChange,
@@ -2005,23 +2026,75 @@ function HostPicker({
   onClearInteractiveAuth,
 }: HostPickerProps) {
   const { t: translate } = useTranslation();
+  // 팀이 있으면 맨 위는 볼트 고르기다 — 같은 경로(Prod)가 개인과 팀에 있어도 한 폴더로 합쳐지지 않는다. 볼트 안에서는
+  // 그 볼트의 그룹·호스트만으로 지금의 그룹 탐색을 그대로 한다. 팀이 없으면 지금 그대로다.
+  const vaultMode = vaults.length > 0;
+  const currentVault = vaultMode && pane.hostVaultId
+    ? (vaults.find((vault) => vault.id === pane.hostVaultId) ?? null)
+    : null;
+  const atVaultTop = vaultMode && !currentVault;
+  const vaultByHostId = useMemo(() => {
+    const map = new Map<string, BrowserVault>();
+    for (const vault of vaults) {
+      for (const host of vault.hosts) {
+        map.set(host.id, vault);
+      }
+    }
+    return map;
+  }, [vaults]);
+  const scopeHosts = useMemo(
+    () =>
+      currentVault
+        ? hosts.filter((host) => vaultByHostId.get(host.id)?.id === currentVault.id)
+        : hosts,
+    [currentVault, hosts, vaultByHostId],
+  );
+  const scopeGroups = currentVault ? currentVault.groups : groups;
+  const groupPath = atVaultTop ? null : pane.hostGroupPath;
   const scopedHosts = useMemo(
-    () => filterHostsInGroupTree(hosts, pane.hostGroupPath),
-    [hosts, pane.hostGroupPath],
+    () => filterHostsInGroupTree(scopeHosts, groupPath),
+    [scopeHosts, groupPath],
   );
   const visibleGroups = useMemo(
-    () => buildVisibleGroups(groups, scopedHosts, pane.hostGroupPath),
-    [groups, pane.hostGroupPath, scopedHosts],
+    () => (atVaultTop ? [] : buildVisibleGroups(scopeGroups, scopedHosts, groupPath)),
+    [atVaultTop, scopeGroups, groupPath, scopedHosts],
   );
   const visibleHosts = useMemo(
+    () => visibleHostPickerHosts(scopeHosts, groupPath, pane.hostSearchQuery),
+    [scopeHosts, groupPath, pane.hostSearchQuery],
+  );
+  const vaultCards = useMemo(
     () =>
-      visibleHostPickerHosts(hosts, pane.hostGroupPath, pane.hostSearchQuery),
-    [hosts, pane.hostGroupPath, pane.hostSearchQuery],
+      atVaultTop
+        ? vaults.map((vault) => ({
+            vault,
+            hostCount: hosts.filter((host) => vaultByHostId.get(host.id)?.id === vault.id).length,
+          }))
+        : [],
+    [atVaultTop, hosts, vaultByHostId, vaults],
   );
-  const breadcrumbs = useMemo(
-    () => hostPickerBreadcrumbs(pane.hostGroupPath),
-    [pane.hostGroupPath],
-  );
+  const breadcrumbs = useMemo(() => {
+    const crumbs: Array<{ label: string; path: string | null; vaultId?: string | null }> =
+      hostPickerBreadcrumbs(groupPath);
+    if (!vaultMode) {
+      return crumbs;
+    }
+    const [top, ...segments] = crumbs;
+    return currentVault
+      ? [
+          { ...top!, vaultId: null },
+          { label: currentVault.name, path: null, vaultId: currentVault.id },
+          ...segments.map((crumb) => ({ ...crumb, vaultId: currentVault.id })),
+        ]
+      : [{ ...top!, vaultId: null }];
+  }, [currentVault, groupPath, vaultMode]);
+  const navigateHostGroup = (path: string | null, vaultId: string | null) => {
+    if (vaultMode) {
+      onNavigateHostGroup(path, vaultId);
+    } else {
+      onNavigateHostGroup(path);
+    }
+  };
   const [promptResponses, setPromptResponses] = useState<string[]>([]);
   const [dismissedInteractiveEndpointId, setDismissedInteractiveEndpointId] =
     useState<string | null>(null);
@@ -2180,11 +2253,14 @@ function HostPicker({
           className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[0.9rem] text-[var(--text-muted)]"
         >
           {breadcrumbs.map((crumb, index) => {
-            const isCurrent = crumb.path === pane.hostGroupPath;
-            const displayLabel = crumb.path === null ? "All Groups" : crumb.label;
+            const isCurrent =
+              crumb.path === groupPath &&
+              (!vaultMode || (crumb.vaultId ?? null) === (currentVault?.id ?? null));
+            const displayLabel =
+              crumb.path === null && !crumb.vaultId ? "All Groups" : crumb.label;
 
             return (
-              <Fragment key={crumb.path ?? "root"}>
+              <Fragment key={`${crumb.vaultId ?? ""}:${crumb.path ?? "root"}`}>
                 {index > 0 ? (
                   <span
                     aria-hidden="true"
@@ -2201,7 +2277,7 @@ function HostPicker({
                   <button
                     type="button"
                     className="rounded-[8px] px-[0.25rem] py-[0.25rem] text-left text-[var(--text-secondary)] transition-colors duration-150 hover:text-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-strong)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-panel)] disabled:cursor-default disabled:opacity-60"
-                    onClick={() => onNavigateHostGroup(crumb.path)}
+                    onClick={() => navigateHostGroup(crumb.path, crumb.vaultId ?? null)}
                     disabled={isConnecting}
                   >
                     {displayLabel}
@@ -2239,6 +2315,63 @@ function HostPicker({
         className="flex min-h-0 flex-1 flex-col gap-[0.9rem] overflow-y-auto pr-[0.25rem]"
         aria-label={`Available hosts for ${pane.id} pane`}
       >
+        {vaultCards.length > 0 ? (
+          <section aria-label={`Vaults for ${pane.id} pane`}>
+            <HostPickerSectionHeader label="Vaults" count={vaultCards.length} />
+            <div
+              data-group-grid="true"
+              className="mt-[0.7rem] grid content-start gap-[0.7rem]"
+              ref={groupGridRef}
+              style={groupGridStyle}
+            >
+              {vaultCards.map(({ vault, hostCount }) => (
+                <HostCard
+                  key={vault.id}
+                  data-vault-card={vault.id}
+                  badge={
+                    vault.kind === "team" ? (
+                      <TeamMark
+                        name={vault.name}
+                        size="lg"
+                        className="h-[2.3rem] w-[2.3rem] rounded-[10px]"
+                      />
+                    ) : (
+                      <span
+                        aria-hidden="true"
+                        className="inline-grid h-[2.3rem] w-[2.3rem] shrink-0 place-items-center rounded-[10px] bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent_88%)] text-[var(--accent-strong)]"
+                      >
+                        <User className="h-[1.05rem] w-[1.05rem]" />
+                      </span>
+                    )
+                  }
+                  title={vault.name}
+                  subtitle={`${hostCount} hosts`}
+                  groupLabel={vault.kind === "team" ? "Team" : "Vault"}
+                  disabled={isConnecting}
+                  onDoubleClick={() => {
+                    if (isConnecting) {
+                      return;
+                    }
+                    navigateHostGroup(null, vault.id);
+                  }}
+                  role="button"
+                  aria-disabled={isConnecting}
+                  tabIndex={isConnecting ? -1 : 0}
+                  onKeyDown={(event) => {
+                    if (isConnecting) {
+                      return;
+                    }
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      navigateHostGroup(null, vault.id);
+                    }
+                  }}
+                />
+              ))}
+            </div>
+          </section>
+        ) : null}
+
         {visibleGroups.length > 0 ? (
           <section aria-label={`Visible groups for ${pane.id} pane`}>
             <HostPickerSectionHeader count={visibleGroups.length} />
@@ -2262,7 +2395,7 @@ function HostPicker({
                     if (isConnecting) {
                       return;
                     }
-                    onNavigateHostGroup(group.path);
+                    navigateHostGroup(group.path, currentVault?.id ?? null);
                   }}
                   role="button"
                   aria-disabled={isConnecting}
@@ -2273,7 +2406,7 @@ function HostPicker({
                     }
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      onNavigateHostGroup(group.path);
+                      navigateHostGroup(group.path, currentVault?.id ?? null);
                     }
                   }}
                 />
@@ -2329,8 +2462,23 @@ function HostPicker({
                       />
                     }
                     title={host.label}
-                    subtitle={getHostSubtitle(host, hostSubtitleLabels())}
-                    groupLabel={host.groupName || "Ungrouped"}
+                    subtitle={getHostSubtitle(withMyUsername(host, myUsernameByHostId), hostSubtitleLabels())}
+                    groupLabel={
+                      // 맨 위는 볼트가 섞인 목록이다 — 팀 것은 "[머리글자] 팀 이름 / 그룹"(홈 카드와 같은 문법).
+                      atVaultTop ? (
+                        <CardLocation
+                          team={
+                            vaultByHostId.get(host.id)?.kind === "team"
+                              ? vaultByHostId.get(host.id)!
+                              : null
+                          }
+                          group={normalizeGroupPath(host.groupName)}
+                          ungroupedLabel="Ungrouped"
+                        />
+                      ) : (
+                        host.groupName || "Ungrouped"
+                      )
+                    }
                     onClick={() => {
                       if (isConnecting) {
                         return;
@@ -3165,6 +3313,8 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
   desktopPlatform,
   hosts,
   groups,
+  vaults,
+  myUsernameByHostId,
   sftp,
   settings,
   interactiveAuths,
@@ -3511,6 +3661,8 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                   pane={pane}
                   groups={groups}
                   hosts={connectableHosts}
+                  vaults={vaults}
+                  myUsernameByHostId={myUsernameByHostId}
                   interactiveAuth={
                     interactiveAuths.find((auth) => auth.paneId === pane.id) ?? null
                   }
@@ -3518,8 +3670,11 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                   onHostSearchChange={(query) =>
                     onHostSearchChange(pane.id, query)
                   }
-                  onNavigateHostGroup={(path) =>
-                    onNavigateHostGroup(pane.id, path)
+                  onNavigateHostGroup={(path, vaultId) =>
+                    // 볼트는 팀이 있을 때만 준다 — 팀이 없으면 지금처럼 경로만.
+                    vaultId === undefined
+                      ? onNavigateHostGroup(pane.id, path)
+                      : onNavigateHostGroup(pane.id, path, vaultId)
                   }
                   onSelectHost={(hostId) => onSelectHost(pane.id, hostId)}
                   onConnectHost={(hostId) => onConnectHost(pane.id, hostId)}

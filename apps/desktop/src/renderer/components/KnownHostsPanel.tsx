@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { isRdpHostRecord, type HostRecord, type KnownHostRecord } from '@shared';
 import {
   Badge,
@@ -12,6 +13,33 @@ import {
 } from '../ui';
 import { useTranslation } from 'react-i18next';
 import { getFormatLocale } from '../i18n';
+import { useAppStore } from '../store/appStore';
+import { groupByVault, sectionsByVault, type VaultSection } from '../lib/vault-groups';
+import { useTeamVaultLists } from '../controllers/useTeamVaultLists';
+import { listTeamKnownHosts } from '../services/desktop/known-hosts';
+import { VaultEmptyLine, VaultSectionHeader } from './teams/VaultMark';
+
+/** 볼트별 묶음(팀이 있을 때) — 머리와 그 볼트의 줄. 빈 볼트는 점선 한 줄. 여기서는 만들 것이 없어 + 가 없다. */
+function renderVaultSections<T>(
+  sections: VaultSection<T>[],
+  emptyLabel: string,
+  renderItem: (item: T, section: VaultSection<T>) => ReactNode,
+) {
+  return (
+    <div className="flex flex-col gap-[1.4rem]">
+      {sections.map((section) => (
+        <section key={section.vaultId} className="flex flex-col gap-[0.9rem]">
+          <VaultSectionHeader team={section.team} count={section.items.length} addLabel={null} />
+          {section.items.length > 0 ? (
+            section.items.map((item) => renderItem(item, section))
+          ) : (
+            <VaultEmptyLine>{emptyLabel}</VaultEmptyLine>
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
 
 interface KnownHostsPanelProps {
   records: KnownHostRecord[];
@@ -34,9 +62,69 @@ export function KnownHostsPanel({
   onRevokeRdpCertificate,
 }: KnownHostsPanelProps) {
   const { t: translate } = useTranslation();
+  const vaultIndex = useAppStore((state) => state.vaultIndex);
+  // 팀이 있으면 팀 볼트의 기록도 읽어 볼트별로 묶는다. 지운 뒤 스토어가 개인 목록을 다시 읽으면 팀 것도 다시 읽는다.
+  const { listsByTeamId } = useTeamVaultLists((teamId) => listTeamKnownHosts(teamId), records);
+  const sections = sectionsByVault(records, listsByTeamId, vaultIndex);
   // 지문을 들고 있는 RDP 호스트만. 라벨 순서는 호스트 목록이 이미 정렬된 채로 온다.
   const trustedRdpHosts = hosts.filter(
     (host) => isRdpHostRecord(host) && Boolean(host.certificateFingerprint),
+  );
+  const rdpSections = groupByVault(trustedRdpHosts, vaultIndex?.teamIdByHostId, vaultIndex);
+
+  const renderKnownHost = (record: KnownHostRecord, team: boolean) => (
+    <Card key={record.id}>
+      <CardMain>
+        <CardTitleRow>
+          <strong>
+            {record.host}:{record.port}
+          </strong>
+          <Badge tone="running">{record.algorithm}</Badge>
+        </CardTitleRow>
+        <CardMeta>
+          <span>{record.fingerprintSha256}</span>
+          {/* 팀 것은 접속할 때 기록을 고치지 않는다 — 마지막으로 본 때가 아니라 신뢰한 때다. */}
+          <span>
+            {team ? 'Trusted' : 'Last seen'}{' '}
+            {new Date(record.lastSeenAt).toLocaleString(getFormatLocale())}
+          </span>
+        </CardMeta>
+      </CardMain>
+      <CardActions>
+        <Button variant="danger" onClick={() => void onRemove(record.id)}>
+          Remove
+        </Button>
+      </CardActions>
+    </Card>
+  );
+
+  const renderRdpHost = (host: HostRecord) => (
+    <Card key={host.id}>
+      <CardMain>
+        <CardTitleRow>
+          <strong>{host.label}</strong>
+          <Badge tone="running">RDP</Badge>
+        </CardTitleRow>
+        <CardMeta>
+          <span>
+            {isRdpHostRecord(host) ? `${host.hostname}:${host.port}` : host.label}
+          </span>
+          {/* 지문은 SHA-256 이다. 인증서 확인 화면이 보여주는 값과 같은 형식이라
+              나란히 대조할 수 있다. */}
+          <span>
+            {isRdpHostRecord(host) ? host.certificateFingerprint : null}
+          </span>
+        </CardMeta>
+      </CardMain>
+      <CardActions>
+        <Button
+          variant="danger"
+          onClick={() => void onRevokeRdpCertificate(host.id)}
+        >
+          {translate('rdpCertificates.revoke')}
+        </Button>
+      </CardActions>
+    </Card>
   );
   return (
     <div className="flex flex-col gap-[1.1rem]">
@@ -50,33 +138,17 @@ export function KnownHostsPanel({
       </div>
 
       <PanelSection>
-        {records.length === 0 ? (
+        {sections ? (
+          renderVaultSections(sections, translate('knownHosts.emptyTitle'), (record, section) =>
+            renderKnownHost(record, section.team !== null),
+          )
+        ) : records.length === 0 ? (
           <EmptyState
             title={translate('knownHosts.emptyTitle')}
             description={translate('knownHosts.emptyDescription')}
           />
         ) : (
-          records.map((record) => (
-            <Card key={record.id}>
-              <CardMain>
-                <CardTitleRow>
-                  <strong>
-                    {record.host}:{record.port}
-                  </strong>
-                  <Badge tone="running">{record.algorithm}</Badge>
-                </CardTitleRow>
-                <CardMeta>
-                  <span>{record.fingerprintSha256}</span>
-                  <span>Last seen {new Date(record.lastSeenAt).toLocaleString(getFormatLocale())}</span>
-                </CardMeta>
-              </CardMain>
-              <CardActions>
-                <Button variant="danger" onClick={() => void onRemove(record.id)}>
-                  Remove
-                </Button>
-              </CardActions>
-            </Card>
-          ))
+          records.map((record) => renderKnownHost(record, false))
         )}
       </PanelSection>
 
@@ -92,40 +164,15 @@ export function KnownHostsPanel({
       </div>
 
       <PanelSection>
-        {trustedRdpHosts.length === 0 ? (
+        {rdpSections ? (
+          renderVaultSections(rdpSections, translate('rdpCertificates.emptyTitle'), renderRdpHost)
+        ) : trustedRdpHosts.length === 0 ? (
           <EmptyState
             title={translate('rdpCertificates.emptyTitle')}
             description={translate('rdpCertificates.emptyDescription')}
           />
         ) : (
-          trustedRdpHosts.map((host) => (
-            <Card key={host.id}>
-              <CardMain>
-                <CardTitleRow>
-                  <strong>{host.label}</strong>
-                  <Badge tone="running">RDP</Badge>
-                </CardTitleRow>
-                <CardMeta>
-                  <span>
-                    {isRdpHostRecord(host) ? `${host.hostname}:${host.port}` : host.label}
-                  </span>
-                  {/* 지문은 SHA-256 이다. 인증서 확인 화면이 보여주는 값과 같은 형식이라
-                      나란히 대조할 수 있다. */}
-                  <span>
-                    {isRdpHostRecord(host) ? host.certificateFingerprint : null}
-                  </span>
-                </CardMeta>
-              </CardMain>
-              <CardActions>
-                <Button
-                  variant="danger"
-                  onClick={() => void onRevokeRdpCertificate(host.id)}
-                >
-                  {translate('rdpCertificates.revoke')}
-                </Button>
-              </CardActions>
-            </Card>
-          ))
+          trustedRdpHosts.map(renderRdpHost)
         )}
       </PanelSection>
     </div>
