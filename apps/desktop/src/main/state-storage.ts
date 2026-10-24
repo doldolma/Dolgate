@@ -2370,6 +2370,19 @@ class DesktopStateStorage {
     return JSON.stringify([{ ...team.data, syncOutbox: null }, team.secure]);
   }
 
+  /**
+   * 팀 동기화가 올릴 것이 남았는지 가르는 지금 모습 — 팀 볼트는 삭제 대기열까지, 내 개인 칸은 그 대기열까지.
+   * 마지막으로 서버와 맞춘 때의 값과 같으면 올릴 것이 없다.
+   */
+  teamSyncSignatures(teamId: string): { records: string; private: string } | null {
+    this.ensureLoaded();
+    const team = this.state.teams[teamId];
+    if (!team) {
+      return null;
+    }
+    return { records: JSON.stringify([team.data, team.secure]), private: JSON.stringify(team.private) };
+  }
+
   /** 그 팀 말고 다른 볼트(개인·다른 팀)에 있는 레코드 ID. 팀 레코드를 받을 때 겹치는 것을 버리는 데 쓴다. */
   collectRecordIdsOutsideTeam(teamId: string): VaultRecordIdSets {
     this.ensureLoaded();

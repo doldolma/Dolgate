@@ -190,8 +190,8 @@ function renderVaults(
       onDuplicateHosts={vi.fn().mockResolvedValue(undefined)}
       onExportAssets={vi.fn()}
       onSetHostFavorite={vi.fn()}
-      onRemoveHost={vi.fn().mockResolvedValue(undefined)}
-      onRemoveSecret={vi.fn().mockResolvedValue(undefined)}
+      onRemoveHosts={vi.fn().mockResolvedValue(undefined)}
+      onRemoveSecrets={vi.fn().mockResolvedValue(undefined)}
       onConnectHost={vi.fn().mockResolvedValue(undefined)}
       onOpenHostContainers={vi.fn().mockResolvedValue(undefined)}
       {...callbacks}

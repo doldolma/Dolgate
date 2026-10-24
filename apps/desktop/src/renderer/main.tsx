@@ -14,10 +14,16 @@ import { RendererCrashScreen } from './components/RendererCrashScreen';
 // 배럴을 지나면 그 안의 다른 모듈이 로드 중 던지는 것만으로 바운더리까지 함께 사라진다.
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { initRendererI18n } from './i18n';
+import { startDevMeasureTrim } from './lib/dev-measure-trim';
 import { resolveRendererWindowMode } from './window-mode';
 
 // 첫 렌더보다 먼저 언어를 정해 문구가 나중에 바뀌며 깜빡이지 않게 한다.
 initRendererI18n();
+
+// 개발 빌드의 React 가 다시 그릴 때마다 남기는 기록이 쌓여 렌더러가 죽지 않게 한다(dev-measure-trim.ts).
+if (import.meta.env.DEV) {
+  startDevMeasureTrim();
+}
 
 const rendererWindowMode = resolveRendererWindowMode(window.location.search);
 

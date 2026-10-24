@@ -308,6 +308,43 @@ function resolveManagedAwsProfileNameConflicts(
   };
 }
 
+// 서버(Go time.RFC3339)가 받는 시각 모양. toISOString() 이 이것을 만든다.
+const SYNC_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * 서버가 받는 레코드인가 — id 는 빈 칸 아닌 문자열, 시각은 RFC3339. 서버는 하나라도 어긋나면 push 전체를 400 으로
+ * 거절하고 앱은 같은 것을 다시 보낸다. 그러면 그 뒤의 변경이 하나도 올라가지 않는다(2026-10-23, 옛 빌드가 지움 기록의
+ * id 자리에 배열을 썼다). 그래서 올리기 전에 거른다.
+ */
+export function isPushableSyncRecord(record: SyncRecord): boolean {
+  const deletedAt = record.deleted_at;
+  return (
+    typeof record.id === 'string' &&
+    record.id.length > 0 &&
+    typeof record.updated_at === 'string' &&
+    SYNC_TIMESTAMP_PATTERN.test(record.updated_at) &&
+    (deletedAt === undefined ||
+      deletedAt === null ||
+      deletedAt === '' ||
+      (typeof deletedAt === 'string' && SYNC_TIMESTAMP_PATTERN.test(deletedAt)))
+  );
+}
+
+/** 서버가 받지 않을 레코드를 뺀다. 지움 기록이었다면 push 가 끝난 뒤 대기열에서도 치워진다. */
+function keepPushableRecords<T extends object>(payload: T): T {
+  let dropped = 0;
+  const kept: Record<string, SyncRecord[]> = {};
+  for (const [kind, records] of Object.entries(payload as Record<string, SyncRecord[]>)) {
+    const pushable = records.filter(isPushableSyncRecord);
+    dropped += records.length - pushable.length;
+    kept[kind] = pushable;
+  }
+  if (dropped > 0) {
+    console.warn('[sync] dropped records the server would reject', { dropped });
+  }
+  return kept as T;
+}
+
 export function encodeEncryptedPayload(plaintext: string, keyBase64: string): string {
   const key = Buffer.from(keyBase64, 'base64');
   const iv = randomBytes(12);
@@ -454,6 +491,7 @@ export class SyncService {
   // 않게. 끊을 때마다 새로 만든다.
   private watchInterrupt = new AbortController();
   private onAppliedSnapshot: (() => void | Promise<void>) | null = null;
+  private onBootstrapFailed: (() => void) | null = null;
   private onPurgedSyncedCache: (() => void | Promise<void>) | null = null;
 
   constructor(
@@ -543,6 +581,14 @@ export class SyncService {
 
   setOnAppliedSnapshot(listener: (() => void | Promise<void>) | null): void {
     this.onAppliedSnapshot = listener;
+  }
+
+  /**
+   * 부트스트랩이 실패했을 때 부른다. 팀 동기화는 개인 pull 이 적용될 때(onAppliedSnapshot) 시작하는데, 개인 쪽이
+   * 계속 실패하면 그 길이 끝내 오지 않아 팀 볼트까지 통째로 멈췄다 — main 이 이것으로 팀을 따로 띄운다.
+   */
+  setOnBootstrapFailed(listener: (() => void) | null): void {
+    this.onBootstrapFailed = listener;
   }
 
   setOnPurgedSyncedCache(listener: (() => void | Promise<void>) | null): void {
@@ -730,6 +776,7 @@ export class SyncService {
         errorMessage: error instanceof Error ? error.message : t('sync.initialFailed'),
         pendingPush: true
       });
+      this.onBootstrapFailed?.();
       throw error;
     }
 
@@ -1245,7 +1292,7 @@ export class SyncService {
 
     if (!includeDeletions) {
       return {
-        payload: {
+        payload: keepPushableRecords({
           groups,
           hosts,
           secrets,
@@ -1257,7 +1304,7 @@ export class SyncService {
           preferences,
           awsProfiles,
           tailnets
-        },
+        }),
         includedDeletions: []
       };
     }
@@ -1308,7 +1355,7 @@ export class SyncService {
     }
 
     return {
-      payload: {
+      payload: keepPushableRecords({
         groups,
         hosts,
         secrets,
@@ -1320,7 +1367,7 @@ export class SyncService {
         preferences,
         awsProfiles,
         tailnets
-      },
+      }),
       includedDeletions
     };
   }

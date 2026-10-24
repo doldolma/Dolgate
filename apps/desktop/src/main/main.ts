@@ -75,6 +75,7 @@ import { registerNotificationsIpcHandlers } from './ipc/notifications';
 import { WarpgateService } from './warpgate-service';
 import { XshellImportService } from './xshell-import-service';
 import { shouldRequestSingleInstanceLock } from './app-runtime-policy';
+import { installRendererRecovery } from './renderer-recovery';
 import { logMessage, type ActivityLogMessage } from './activity-log-message';
 
 // electron-builder.config.cjs 의 appId 와 반드시 같아야 한다 —
@@ -359,6 +360,29 @@ if (termiusHelperArgIndex >= 0) {
     upsertLogRecord: upsertActivityLog,
   });
 
+  // 화면 프로세스가 죽은 창은 그 자리에서 다시 불러온다 — 까만 창에 갇히지 않게(renderer-recovery.ts). 재생·공유 채팅·
+  // 모니터 창도 같다. 새 화면이 되찾지 못하는 것(RDP·VNC 세션, SFTP, 컨테이너)은 먼저 놓는다. 터미널 세션은 남겨 둔다 —
+  // 새 화면이 탭으로 되찾는다.
+  app.on('browser-window-created', (_event, window) => {
+    installRendererRecovery(window, {
+      release: (webContentsId) => {
+        rdpManager.forgetWatcher(webContentsId);
+        rdpManager.disconnectSessionsOwnedBy(webContentsId);
+        vncManager.forgetWatcher(webContentsId);
+        vncManager.disconnectSessionsOwnedBy(webContentsId);
+        coreManager.releaseRendererResources(webContentsId);
+      },
+      onGone: ({ reason, exitCode }, outcome) => {
+        appendActivityLog({
+          level: outcome === 'reloaded' ? 'warn' : 'error',
+          category: 'audit',
+          ...logMessage(outcome === 'reloaded' ? 'mainApp.rendererReloaded' : 'mainApp.rendererGaveUp'),
+          metadata: { reason, exitCode },
+        });
+      },
+    });
+  });
+
   awsSsmTunnelService.setInProcessBackend({
     shouldUse: () => awsService.shouldUseInProcessSsm(),
     start: (input) =>
@@ -555,6 +579,11 @@ if (termiusHelperArgIndex >= 0) {
     broadcastWorkspaceChanged();
     // 팀 목록이 바뀌면 서버가 개인 리비전을 올린다 — 개인 pull 이 적용될 때마다 팀 목록을 다시 읽는다.
     // 앱을 켤 때와 볼트를 열 때도 첫 개인 pull 이 여기로 온다.
+    void teamSyncService.refreshTeams().catch(() => undefined);
+  });
+  // 개인 동기화가 실패해도 팀 동기화는 따로 띄운다. 위의 pull 적용만 기다리면 개인 쪽 실패에 팀 볼트까지 묶인다.
+  // 팀 목록 읽기는 이미 열린 팀을 다시 열지 않는다.
+  syncService.setOnBootstrapFailed(() => {
     void teamSyncService.refreshTeams().catch(() => undefined);
   });
   syncService.setOnPurgedSyncedCache(() =>

@@ -20,7 +20,7 @@ export function buildHostsBridge(
       ipcRenderer.invoke(ipcChannels.hosts.create, draft, secrets, vaultId),
     update: (id: string, draft: HostDraft, secrets?: HostSecretInput) =>
       ipcRenderer.invoke(ipcChannels.hosts.update, id, draft, secrets),
-    remove: (id: string) => ipcRenderer.invoke(ipcChannels.hosts.remove, id),
+    remove: (ids: string[]) => ipcRenderer.invoke(ipcChannels.hosts.remove, ids),
     setFavorite: (id: string, favorite: boolean) =>
       ipcRenderer.invoke(ipcChannels.hosts.setFavorite, id, favorite),
     setLoginUsername: (id: string, username: string) =>

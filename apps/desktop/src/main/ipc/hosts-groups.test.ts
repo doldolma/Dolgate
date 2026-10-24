@@ -173,7 +173,7 @@ describe("registerHostsGroupsIpcHandlers", () => {
       getHost: vi.fn(() => current),
       scopeOfHost: vi.fn(() => teamScope),
       updateHost: vi.fn((id: string, draft: object) => ({ id, ...draft })),
-      removeHost: vi.fn(),
+      removeHosts: vi.fn(() => [{ host: current, vaultId: "team-1" }]),
     };
     ctx.persistSecret.mockResolvedValue("secret:team-new");
     ctx.resolveManagedPrivateKeyPem.mockResolvedValue(undefined);
@@ -190,10 +190,37 @@ describe("registerHostsGroupsIpcHandlers", () => {
       getRegisteredHandler(ipcChannels.hosts.update)({}, "team-host", { ...draft, secretRef: "secret:mine" }),
     ).rejects.toThrow(/같은 볼트의 것만|must be in the same vault/);
 
-    await getRegisteredHandler(ipcChannels.hosts.remove)({}, "team-host");
-    expect(ctx.vaults.removeHost).toHaveBeenCalledWith("team-host");
+    await getRegisteredHandler(ipcChannels.hosts.remove)({}, ["team-host"]);
+    expect(ctx.vaults.removeHosts).toHaveBeenCalledWith(["team-host"]);
     expect(ctx.hosts.remove).not.toHaveBeenCalled();
     expect(ctx.syncOutbox.upsertDeletion).not.toHaveBeenCalled();
+  });
+
+  // 지울 때마다 동기화·창 알림을 하면 여러 개를 지우는 동안 그만큼 올리고 다시 읽는다.
+  it("removes several hosts at once, leaving a record of each and telling sync and the windows once", async () => {
+    const ctx = createContext();
+    ctx.emitWorkspaceChanged = vi.fn();
+    const web = { id: "web", label: "Web", kind: "ssh" };
+    const db = { id: "db", label: "DB", kind: "ssh" };
+    ctx.vaults = {
+      ...ctx.vaults,
+      removeHosts: vi.fn(() => [
+        { host: web, vaultId: "personal" },
+        { host: db, vaultId: "team-1" },
+      ]),
+    };
+    registerHostsGroupsIpcHandlers(ctx);
+
+    await getRegisteredHandler(ipcChannels.hosts.remove)({ sender: "window" }, ["web", "db"]);
+
+    expect(ctx.vaults.removeHosts).toHaveBeenCalledWith(["web", "db"]);
+    expect(ctx.activityLogs.append.mock.calls.map((call: unknown[]) => call[3])).toEqual([
+      expect.objectContaining({ vaultId: "personal", hostId: "web", label: "Web" }),
+      expect.objectContaining({ vaultId: "team-1", hostId: "db", label: "DB" }),
+    ]);
+    expect(ctx.queueSync).toHaveBeenCalledTimes(1);
+    expect(ctx.emitWorkspaceChanged).toHaveBeenCalledTimes(1);
+    expect(ctx.emitWorkspaceChanged).toHaveBeenCalledWith("window");
   });
 
   it("keeps an explicitly selected saved secret when creating a host", async () => {

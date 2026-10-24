@@ -198,6 +198,10 @@ export function getHostTagsToggleLabel(isExpanded: boolean, tagCount: number): s
   return isExpanded ? 'Hide tags' : `Tags (${tagCount})`;
 }
 
-export function getGroupDeleteDialogVariant(childGroupCount: number, hostCount: number): 'simple' | 'with-descendants' {
-  return childGroupCount > 0 || hostCount > 0 ? 'with-descendants' : 'simple';
+/**
+ * 그룹 삭제 창의 모양. 함께 지워질 호스트·Workspace(contentCount)가 있을 때만 그것을 남길지 묻는다. 빈 하위 그룹은
+ * 물을 거리가 아니다 — 남겨 봐야 빈 폴더다.
+ */
+export function getGroupDeleteDialogVariant(contentCount: number): 'simple' | 'with-descendants' {
+  return contentCount > 0 ? 'with-descendants' : 'simple';
 }

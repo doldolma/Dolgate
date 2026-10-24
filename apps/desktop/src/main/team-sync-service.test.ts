@@ -133,10 +133,93 @@ describe("TeamSyncService", () => {
     expect(team.data.syncOutbox).toEqual([]);
     expect(team.data.hosts.map((record) => record.label)).toEqual(["renamed"]);
 
-    // 바뀐 것이 없으면 아무것도 올리지 않는다(조건부 GET 만).
+    // 바뀐 것이 없으면 서버에 묻지도 않는다.
     harness.server.requests.length = 0;
     await harness.service.pushDirty();
-    expect(harness.server.requests.filter((request) => request.method !== "GET")).toEqual([]);
+    expect(harness.server.requests).toEqual([]);
+  });
+
+  // 옛 빌드가 지움 기록의 id 자리에 배열을 쓴 적이 있다(2026-10-23). 서버는 그런 기록 하나로 그 팀의 push 전체를
+  // 거절한다 — 빼고 올리고, 올린 뒤 대기열에서도 치운다.
+  it("leaves a malformed deletion out of the team push and clears it from the queue", async () => {
+    const harness = await createSyncedTeam();
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    harness.storage.updateState((state) => {
+      state.teams[TEAM_ID]!.data.syncOutbox.push({
+        kind: "secrets",
+        recordId: ["secret:a", "secret:b"] as unknown as string,
+        deletedAt: "2026-10-23T08:20:00.000Z",
+      });
+    });
+    new harness.database.HostRepository(harness.vaultRoot.teamVaultRoot(TEAM_ID)).update("team-a", sshDraft("renamed"));
+
+    await harness.service.pushDirty();
+
+    const [push] = harness.server.requestsTo("POST", `/teams/${TEAM_ID}/sync`);
+    expect(Object.keys(push.body)).toEqual(["hosts"]);
+    expect(push.body.hosts.map((record) => record.id)).toEqual(["team-a"]);
+    expect(harness.storage.getState().teams[TEAM_ID].data.syncOutbox).toEqual([]);
+  });
+
+  // 개인 볼트를 고쳐도 팀 동기화가 깨어난다(queueSync 가 둘 다 부른다). 묻던 때는 개인 호스트 169개를 지우는 동안
+  // 지울 때마다 팀 받기와 내 칸 받기를 한 번씩 했다.
+  it("asks the team nothing when only the personal vault changed", async () => {
+    const harness = await createSyncedTeam();
+    const personal = new harness.database.HostRepository();
+    personal.create("mine", sshDraft("mine"));
+    personal.remove("mine");
+    new harness.database.SyncOutboxRepository().upsertDeletion("hosts", "mine");
+
+    await harness.service.pushDirty();
+    expect(harness.server.requests).toEqual([]);
+
+    // 팀 것을 고치면 그때는 올린다.
+    new harness.database.HostRepository(harness.vaultRoot.teamVaultRoot(TEAM_ID)).update("team-a", sshDraft("renamed"));
+    await harness.service.pushDirty();
+    expect(harness.server.requestsTo("POST", `/teams/${TEAM_ID}/sync`)).toHaveLength(1);
+  });
+
+  it("tries a failed push again on the next call, though nothing else changed", async () => {
+    const harness = await createSyncedTeam();
+    new harness.database.HostRepository(harness.vaultRoot.teamVaultRoot(TEAM_ID)).update("team-a", sshDraft("renamed"));
+    vi.mocked(fetch).mockRejectedValueOnce(new TypeError("fetch failed"));
+    await harness.service.pushDirty();
+    expect(harness.server.requestsTo("POST", `/teams/${TEAM_ID}/sync`)).toEqual([]);
+
+    await harness.service.pushDirty();
+
+    expect(harness.server.requestsTo("POST", `/teams/${TEAM_ID}/sync`)).toHaveLength(1);
+    const rows = harness.server.teams.get(TEAM_ID)!.records.get("hosts")!;
+    expect(open(rows.get("team-a")!.encrypted_payload, harness.teamKey)).toMatchObject({ label: "renamed" });
+  });
+
+  it("asks once after a change with nothing to send, then stops asking", async () => {
+    const harness = await createSyncedTeam();
+    // 이 기기에만 두는 값만 바뀌었다(팀에 올리지 않는 칸) — 확인해 보면 올릴 것이 없다.
+    harness.storage.updateState((draft) => {
+      draft.teams[TEAM_ID].secure.tailnetAuthKeysById["tailnet-here"] = { encrypted: true, value: "a2V5" };
+    });
+
+    await harness.service.pushDirty();
+    expect(harness.server.requests.map((request) => `${request.method} ${request.path}`)).toEqual([
+      `GET /teams/${TEAM_ID}/sync`,
+      `GET /teams/${TEAM_ID}/me`,
+    ]);
+
+    harness.server.requests.length = 0;
+    await harness.service.pushDirty();
+    expect(harness.server.requests).toEqual([]);
+  });
+
+  it("asks nothing after taking in another member's change", async () => {
+    const harness = await createSyncedTeam();
+    harness.server.putRecord(TEAM_ID, "hosts", "team-c", host("team-c"), harness.teamKey);
+    await harness.tickLoops();
+    harness.server.requests.length = 0;
+
+    await harness.service.pushDirty();
+
+    expect(harness.server.requests).toEqual([]);
   });
 
   it("keeps my credentials for a team host in my private slot, sealed with my personal key", async () => {

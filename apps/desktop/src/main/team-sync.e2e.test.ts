@@ -900,4 +900,84 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
     expect(deviceA1.catalog.getHost("team-host")).toMatchObject({ label: "from-b" });
     expect((await deviceA1.teams.listMembers(teamId)).map((member) => member.email)).toEqual([accountA.email]);
   }, 60_000);
+
+  // 2026-10-23 사고: 옛 메인이 인증 정보 지움 기록의 id 자리에 배열을 썼다(새 화면이 배열을 보냈다). 서버는 push 를
+  // 통째로 400 으로 거절했고 앱은 같은 것을 다시 보냈다 — 그 뒤의 변경이 하나도 올라가지 않은 채 로그아웃이 지웠다.
+  // 잘못된 기록은 빼고 올리고, 대기열에서도 치워야 한다. 팀 볼트도 같다.
+  it("keeps uploading past a malformed deletion an old build left in the queue", async () => {
+    const account = await createAccount("p@team-e2e.test");
+    const device = await createDevice("p", account);
+    const { SyncService } = await import("./sync-service");
+    const context = {
+      userId: account.userId,
+      serverUrl: baseUrl,
+      accessToken: account.accessToken,
+      vaultKeyBase64: account.dekBase64,
+      vaultEpoch: account.epoch as number | null,
+    };
+    const auth = {
+      getState: () => ({ status: "authenticated" }),
+      getVaultStatus: () => "unlocked",
+      isVaultReadyForSync: () => true,
+      captureSyncContext: () => ({ ...context }),
+      isSyncContextCurrent: (candidate: typeof context) =>
+        candidate.userId === context.userId && candidate.vaultKeyBase64 === context.vaultKeyBase64,
+      getClientIdentificationHeaders: () => ({ ...CLIENT_HEADERS }),
+      getAccessToken: () => context.accessToken,
+      refreshSession: async () => ({ status: "authenticated" }),
+      handleVaultDekRejected: async () => undefined,
+      noteServerVaultSupport: () => undefined,
+    };
+    const { database } = device;
+    const sync = new SyncService(
+      auth as never,
+      new database.HostRepository(),
+      new database.GroupRepository(),
+      new database.PortForwardRepository(),
+      new database.DnsOverrideRepository(),
+      new database.SnippetRepository(),
+      new database.KnownHostRepository(),
+      new database.SecretMetadataRepository(),
+      new database.AwsProfileRepository(),
+      new database.SettingsRepository(),
+      device.secretStore,
+      new database.SyncOutboxRepository(),
+      new database.TailnetRepository(),
+      new database.SavedWorkspaceRepository(),
+    );
+    const draft = (label: string) => ({
+      kind: "ssh" as const,
+      label,
+      hostname: `${label}.internal`,
+      port: 22,
+      username: "ubuntu",
+      authType: "password" as const,
+    });
+    const liveIds = (body: Record<string, unknown>, kind: string) =>
+      ((body[kind] ?? []) as Array<{ id: string; deleted_at?: string | null }>)
+        .filter((record) => !record.deleted_at)
+        .map((record) => record.id)
+        .sort();
+    // 옛 메인이 쓴 모양 그대로 — 지움 기록의 id 자리에 배열.
+    const poisoned = { kind: "secrets", recordId: ["secret:a", "secret:b"] as unknown as string, deletedAt: new Date().toISOString() };
+
+    device.catalog.createHost("personal", "p-first", draft("first"), null);
+    await expect(sync.pushDirty()).resolves.toMatchObject({ status: "ready" });
+    device.storage.updateState((state) => {
+      state.data.syncOutbox.push(poisoned as never);
+    });
+    device.catalog.createHost("personal", "p-second", draft("second"), null);
+    await expect(sync.pushDirty()).resolves.toMatchObject({ status: "ready", errorMessage: null });
+    expect(liveIds((await api(account.accessToken, "GET", "/sync")).body, "hosts")).toEqual(["p-first", "p-second"]);
+    expect(device.storage.getState().data.syncOutbox).toEqual([]);
+
+    const team = await device.teams.create("P team");
+    device.storage.updateState((state) => {
+      state.teams[team.id]!.data.syncOutbox.push(poisoned as never);
+    });
+    device.catalog.createHost(team.id, "p-team-host", draft("team"), null);
+    await device.service.pushDirty();
+    expect(liveIds((await api(account.accessToken, "GET", `/teams/${team.id}/sync`)).body, "hosts")).toEqual(["p-team-host"]);
+    expect(device.storage.getTeamState(team.id)!.data.syncOutbox).toEqual([]);
+  }, 60_000);
 });

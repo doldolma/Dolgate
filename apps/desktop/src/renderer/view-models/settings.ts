@@ -47,7 +47,7 @@ export function useSettingsViewModel() {
     (state) => state.revokeRdpCertificateTrust,
   );
   const clearLogs = useAppStore((state) => state.clearLogs);
-  const removeKeychainSecret = useAppStore((state) => state.removeKeychainSecret);
+  const removeKeychainSecrets = useAppStore((state) => state.removeKeychainSecrets);
   const updateKeychainSecret = useAppStore((state) => state.updateKeychainSecret);
   const cloneKeychainSecretForHost = useAppStore(
     (state) => state.cloneKeychainSecretForHost,
@@ -75,7 +75,7 @@ export function useSettingsViewModel() {
     removeKnownHost,
     revokeRdpCertificateTrust,
     clearLogs,
-    removeKeychainSecret,
+    removeKeychainSecrets,
     updateKeychainSecret,
     cloneKeychainSecretForHost,
     generateSshKey,

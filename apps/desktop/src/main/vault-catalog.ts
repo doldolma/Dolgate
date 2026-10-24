@@ -173,8 +173,11 @@ export interface VaultCatalog {
    * 않는 쓰기(감지한 OS·인증서 지문·비밀값 참조 등)에 쓴다.
    */
   writeHost<T extends HostRecord | null>(hostId: string, write: (hosts: HostRepository) => T): T;
-  /** 호스트를 그 볼트에서 지운다 — 그 볼트의 삭제 대기열에 올리고 뺀다. */
-  removeHost(id: string): void;
+  /**
+   * 호스트들을 각자의 볼트에서 지운다 — 그 볼트의 삭제 대기열에 올리고 뺀다. 볼트마다 한 번에 쓴다. 지운 것과 그
+   * 볼트를 돌려준다(못 찾은 id 는 개인 볼트에 지움 표시만 남기고 빠진다).
+   */
+  removeHosts(ids: readonly string[]): Array<{ host: HostRecord; vaultId: string }>;
   /**
    * anchor 호스트와 같은 볼트에서만 찾는다(점프 호스트). 팀 레코드가 개인 호스트를 — 또는 그 반대를
    * — 점프로 가리켜도 따라가지 않는다.
@@ -378,10 +381,33 @@ export function createVaultCatalog(
       const record = write(team.scope.hosts);
       return (record ? overlayTeamHost(team.scope, record) : record) as typeof record;
     },
-    removeHost: (id) => {
-      const scope = findHostInTeam(id)?.scope ?? personalScope;
-      scope.syncOutbox.upsertDeletion("hosts", id);
-      scope.hosts.remove(id);
+    removeHosts: (ids) => {
+      // 볼트마다 목록을 한 번씩 읽어 임자를 가린다(개인이 이긴다, 팀끼리는 앞선 팀). id 마다 찾으면 찾을 때마다
+      // 상태를 읽는다.
+      const owners = new Map<string, { scope: VaultScope; host: HostRecord }>();
+      for (const scope of listTeamScopes().reverse()) {
+        for (const host of scope.hosts.list()) {
+          owners.set(host.id, { scope, host });
+        }
+      }
+      for (const host of personalScope.hosts.list()) {
+        owners.set(host.id, { scope: personalScope, host });
+      }
+      const idsByScope = new Map<VaultScope, string[]>();
+      const removed: Array<{ host: HostRecord; vaultId: string }> = [];
+      for (const id of new Set(ids)) {
+        const owner = owners.get(id);
+        const scope = owner?.scope ?? personalScope;
+        idsByScope.set(scope, [...(idsByScope.get(scope) ?? []), id]);
+        if (owner) {
+          removed.push({ host: owner.host, vaultId: scope.id });
+        }
+      }
+      for (const [scope, scopeIds] of idsByScope) {
+        scope.syncOutbox.upsertDeletions("hosts", scopeIds);
+        scope.hosts.removeMany(scopeIds);
+      }
+      return removed;
     },
     getHostInSameVault: (anchorHostId, id) => {
       const team = findHostInTeam(anchorHostId);

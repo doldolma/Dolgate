@@ -251,8 +251,8 @@ export function buildKeychainBridge(
       ipcRenderer.invoke(ipcChannels.keychain.load, secretRef),
     copyPassword: (secretRef: string) =>
       ipcRenderer.invoke(ipcChannels.keychain.copyPassword, secretRef),
-    remove: (secretRef: string) =>
-      ipcRenderer.invoke(ipcChannels.keychain.remove, secretRef),
+    remove: (secretRefs: string[]) =>
+      ipcRenderer.invoke(ipcChannels.keychain.remove, secretRefs),
     update: (input) => ipcRenderer.invoke(ipcChannels.keychain.update, input),
     cloneForHost: (input) =>
       ipcRenderer.invoke(ipcChannels.keychain.cloneForHost, input),

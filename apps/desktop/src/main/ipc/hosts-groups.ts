@@ -254,18 +254,20 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
     },
   );
 
-  ipcMain.handle(ipcChannels.hosts.remove, async (event, id: string) => {
-    const current = ctx.vaults.getHost(id);
-    // 지운 뒤에는 볼트를 찾을 수 없다 — 기록에 실어 팀 기록이 가른다.
-    const vaultId = ctx.vaults.scopeOfHost(id).id;
-    ctx.vaults.removeHost(id);
-    if (current) {
+  // 여러 개를 한 번에 받는다. 하나씩 부르면 지울 때마다 상태 파일 쓰기·동기화·창 알림이 한 바퀴씩 돌아서, 호스트
+  // 169개를 지우는 데 1분이 걸렸다. 기록은 호스트마다 남긴다.
+  ipcMain.handle(ipcChannels.hosts.remove, async (event, ids: string[]) => {
+    const removed = ctx.vaults.removeHosts(
+      Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [],
+    );
+    for (const { host, vaultId } of removed) {
+      // 지운 뒤에는 볼트를 찾을 수 없다 — 기록에 실어 팀 기록이 가른다.
       ctx.activityLogs.append("warn", "audit", logMessage('hostsIpc.hostDeleted'), {
         vaultId,
-        hostId: current.id,
-        label: current.label,
-        kind: current.kind,
-        target: ctx.describeHostTarget(current),
+        hostId: host.id,
+        label: host.label,
+        kind: host.kind,
+        target: ctx.describeHostTarget(host),
       });
     }
     ctx.queueSync();

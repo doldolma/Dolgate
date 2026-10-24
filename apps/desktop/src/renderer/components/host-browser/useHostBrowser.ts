@@ -651,8 +651,9 @@ export interface UseHostBrowserParams {
     workspaceId: string,
     groupPath: string | null,
   ) => Promise<unknown>;
-  onRemoveHost: (hostId: string) => Promise<void>;
-  onRemoveSecret: (secretRef: string) => Promise<void>;
+  onRemoveHosts: (hostIds: string[]) => Promise<void>;
+  /** 한 번에 지운다 — 하나씩 지우다 화면이 죽으면 반쯤 남는다. */
+  onRemoveSecrets: (secretRefs: string[]) => Promise<void>;
   onConnectHost: (hostId: string) => Promise<void>;
   onOpenHostInNewWindow?: (hostId: string) => Promise<void>;
   onConnectHostTmux?: (hostId: string) => Promise<void>;
@@ -1270,10 +1271,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
         ? t("hostBrowserEmpty.noResults")
         : t("hostBrowserEmpty.noHostsHere");
   const groupDeleteDialogVariant = groupDeleteTarget
-    ? getGroupDeleteDialogVariant(
-        groupDeleteTarget.childGroupCount,
-        groupDeleteTarget.hostCount + groupDeleteTarget.workspaceCount,
-      )
+    ? getGroupDeleteDialogVariant(groupDeleteTarget.hostCount + groupDeleteTarget.workspaceCount)
     : null;
   const hostDeleteUnusedLocalSecretRefs = useMemo(
     () =>

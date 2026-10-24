@@ -46,10 +46,12 @@ interface VaultSectionHeaderProps {
   onAdd?: () => void;
   /** 개수 옆 ⓘ — 그 묶음에만 해당하는 설명(팀 Saved Credentials 의 "멤버 모두에게" 등). */
   hint?: ReactNode;
+  /** 오른쪽, + 앞에 두는 그 볼트의 일(Saved Credentials 의 "사용하지 않는 것 삭제" 등). */
+  action?: ReactNode;
 }
 
 /** 볼트별 목록의 묶음 머리(후보 L2) — 표시·이름·개수, 오른쪽 + 가 그 볼트에 만든다. */
-export function VaultSectionHeader({ team, count, addLabel, onAdd, hint }: VaultSectionHeaderProps) {
+export function VaultSectionHeader({ team, count, addLabel, onAdd, hint, action }: VaultSectionHeaderProps) {
   const { t: translate } = useTranslation();
   return (
     <div data-vault-section={team?.id ?? 'personal'} className="flex items-center justify-between gap-4">
@@ -61,12 +63,17 @@ export function VaultSectionHeader({ team, count, addLabel, onAdd, hint }: Vault
         <span className="text-[0.82rem] text-[var(--text-soft)]">{count}</span>
         {hint}
       </span>
-      {addLabel && onAdd ? (
-        <Tooltip label={addLabel}>
-          <IconButton size="sm" aria-label={addLabel} onClick={onAdd}>
-            <Plus className="h-4 w-4" aria-hidden />
-          </IconButton>
-        </Tooltip>
+      {action || (addLabel && onAdd) ? (
+        <span className="inline-flex shrink-0 items-center gap-2">
+          {action}
+          {addLabel && onAdd ? (
+            <Tooltip label={addLabel}>
+              <IconButton size="sm" aria-label={addLabel} onClick={onAdd}>
+                <Plus className="h-4 w-4" aria-hidden />
+              </IconButton>
+            </Tooltip>
+          ) : null}
+        </span>
       ) : null}
     </div>
   );

@@ -67,7 +67,7 @@ describe("createAppStore vault index", () => {
 
     // 자격 증명을 고쳐 호스트를 다시 읽는 곳(지우기·키 만들기·설치)도 함께 맞춘다.
     index.mockResolvedValue(teamIndex("team-4", "host-e"));
-    await store.getState().removeKeychainSecret("secret-1");
+    await store.getState().removeKeychainSecrets(["secret-1"]);
     expect(store.getState().vaultIndex.teamIdByHostId).toEqual({ "host-e": "team-4" });
   });
 

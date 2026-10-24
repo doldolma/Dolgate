@@ -46,7 +46,7 @@ export function useHomeViewModel() {
     (state) => state.moveSavedWorkspaceToGroup,
   );
   const setHostFavorite = useAppStore((state) => state.setHostFavorite);
-  const removeHost = useAppStore((state) => state.removeHost);
+  const removeHosts = useAppStore((state) => state.removeHosts);
   const openLocalTerminal = useAppStore((state) => state.openLocalTerminal);
   const connectHost = useAppStore((state) => state.connectHost);
   const connectSftpHost = useAppStore((state) => state.connectSftpHost);
@@ -123,7 +123,7 @@ export function useHomeViewModel() {
     moveHostToGroup,
     moveSavedWorkspaceToGroup,
     setHostFavorite,
-    removeHost,
+    removeHosts,
     openLocalTerminal,
     connectHost,
     connectSftpHost,

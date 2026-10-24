@@ -1389,10 +1389,19 @@ export class CoreManager {
       this.windows.delete(window);
       this.windowsByWebContentsId.delete(ownerWebContentsId);
       this.disconnectSessionsOwnedBy(ownerWebContentsId);
-      void this.disconnectSftpResourcesOwnedBy(ownerWebContentsId);
-      void this.releaseContainerSubscriptionsOwnedBy(ownerWebContentsId);
-      void this.stopContainerTunnelsOwnedBy(ownerWebContentsId);
+      this.releaseRendererResources(ownerWebContentsId);
     });
+  }
+
+  /**
+   * 그 창의 화면이 쥐고 있던 것(SFTP 연결·전송, 컨테이너 구독, 임시 터널)을 놓는다. 화면 프로세스만 죽어 같은 창을
+   * 다시 불러올 때도 부른다(renderer-recovery.ts) — 새 화면은 이것들을 모른다. 터미널 세션은 놓지 않는다: 새 화면이
+   * 부트스트랩에서 이 창의 탭으로 되찾는다(listTabs).
+   */
+  releaseRendererResources(ownerWebContentsId: number): void {
+    void this.disconnectSftpResourcesOwnedBy(ownerWebContentsId);
+    void this.releaseContainerSubscriptionsOwnedBy(ownerWebContentsId);
+    void this.stopContainerTunnelsOwnedBy(ownerWebContentsId);
   }
 
   runWithSessionOwner<T>(

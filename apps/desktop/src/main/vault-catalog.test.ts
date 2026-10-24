@@ -38,7 +38,9 @@ function createRepositories(
       setFavorite: vi.fn((id: string, favorite: boolean) => ({ ...hosts.find((host) => host.id === id), favorite })),
       setTerminalTheme: vi.fn(),
       update: vi.fn((id: string, draft: HostDraft) => ({ ...hosts.find((host) => host.id === id), ...draft })),
-    } as unknown as HostRepository & Record<"setFavorite" | "setTerminalTheme" | "update", ReturnType<typeof vi.fn>>,
+      removeMany: vi.fn(),
+    } as unknown as HostRepository &
+      Record<"setFavorite" | "setTerminalTheme" | "update" | "removeMany", ReturnType<typeof vi.fn>>,
     savedWorkspaces: {
       getById: vi.fn((id: string) => workspaces.find((workspace) => workspace.id === id) ?? null),
       list: vi.fn(() => workspaces),
@@ -50,6 +52,7 @@ function createRepositories(
       save: vi.fn(),
       remove: vi.fn(),
     },
+    syncOutbox: { upsertDeletions: vi.fn() },
     memberPrefs: null,
   };
 }
@@ -248,6 +251,32 @@ describe("createVaultCatalog", () => {
       expect(catalog.getHost("team-dup")?.label).toBe("team-1-only");
       expect(catalog.scopeOfHost("team-dup").id).toBe("team-1");
       expect(catalog.listHosts().map((host) => host.label)).toEqual(["personal", "team-1-only"]);
+    });
+
+    // 여러 개를 지울 때도 목록이 보여 주는 볼트에서 지운다(개인이 이기고, 팀끼리는 앞선 팀). 볼트마다 한 번에 쓴다.
+    it("removes each host from the vault the lists show it from, once per vault", () => {
+      const personal = createRepositories([createHost("shared", "personal")]);
+      const team1 = createTeam([createHost("shared", "team-1"), createHost("team-dup", "team-1-only")]);
+      const team2 = createTeam([createHost("team-dup", "team-2"), createHost("team-2-only", "team-2")]);
+      const catalog = createVaultCatalog(
+        asScope(personal),
+        createTeams({ "team-1": asTeam(team1), "team-2": asTeam(team2) }),
+      );
+
+      const removed = catalog.removeHosts(["shared", "team-dup", "team-2-only", "gone"]);
+
+      expect(removed.map(({ host, vaultId }) => [host.label, vaultId])).toEqual([
+        ["personal", PERSONAL_VAULT_ID],
+        ["team-1-only", "team-1"],
+        ["team-2", "team-2"],
+      ]);
+      // 못 찾은 것은 개인 볼트에 지움 표시만 남긴다(하나씩 지우던 때와 같다).
+      expect(personal.syncOutbox.upsertDeletions).toHaveBeenCalledWith("hosts", ["shared", "gone"]);
+      expect(personal.hosts.removeMany).toHaveBeenCalledWith(["shared", "gone"]);
+      expect(team1.syncOutbox.upsertDeletions).toHaveBeenCalledWith("hosts", ["team-dup"]);
+      expect(team1.hosts.removeMany).toHaveBeenCalledWith(["team-dup"]);
+      expect(team2.hosts.removeMany).toHaveBeenCalledTimes(1);
+      expect(team2.hosts.removeMany).toHaveBeenCalledWith(["team-2-only"]);
     });
 
     it("follows teams coming and going and reuses one scope per team", () => {

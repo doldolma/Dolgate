@@ -1620,7 +1620,8 @@ export interface DesktopApi {
       draft: HostDraft,
       secrets?: HostSecretInput,
     ) => Promise<HostRecord>;
-    remove: (id: string) => Promise<void>;
+    /** 한 번에 지운다 — 동기화와 다른 창 알림도 한 번이다. */
+    remove: (ids: string[]) => Promise<void>;
     setFavorite: (id: string, favorite: boolean) => Promise<HostRecord | null>;
     /**
      * SSH 로 붙을 사용자 이름을 둔다(사용자 이름이 없을 때 묻는 창). 개인 호스트는 레코드에, 팀 호스트는 내
@@ -2284,7 +2285,8 @@ export interface DesktopApi {
     list: (vaultId?: string | null) => Promise<SecretMetadataRecord[]>;
     load: (secretRef: string) => Promise<LoadedManagedSecretPayload | null>;
     copyPassword: (secretRef: string) => Promise<void>;
-    remove: (secretRef: string) => Promise<void>;
+    /** 한 번에 지운다 — 동기화도 한 번이다. */
+    remove: (secretRefs: string[]) => Promise<void>;
     update: (input: KeychainSecretUpdateInput) => Promise<void>;
     cloneForHost: (input: KeychainSecretCloneInput) => Promise<void>;
   };

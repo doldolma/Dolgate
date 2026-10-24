@@ -304,21 +304,35 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
     },
   );
 
+  // 여러 개를 한 번에 받는다(호스트를 지우며 안 쓰게 된 것, 안 쓰는 것 정리). 하나씩 부르면 지울 때마다 상태 쓰기·동기화·
+  // 화면 새로 읽기가 한 바퀴씩 돌고, 그러다 화면이 죽으면 반쯤 지운 채 남았다. 볼트마다 모아 지운다.
   ipcMain.handle(
     ipcChannels.keychain.remove,
-    async (_event, secretRef: string) => {
-      // 그 볼트의 호스트만 이 비밀값을 가리킨다(볼트를 넘는 참조는 메인이 거절한다). 지움 기록을 먼저 남긴다 —
-      // 비밀값을 지우고 메타데이터를 지우기 전(기다리는 사이)에 팀 동기화가 돌면, 기록 없이 빠진 것을 서버 사본으로 되살린다.
-      const vaultId = ctx.vaults.scopeOfSecret(secretRef).id;
-      const vault = secretVaultOf(ctx, secretRef);
-      vault.syncOutbox.upsertDeletion("secrets", secretRef);
-      await vault.secrets.remove(secretRef);
-      vault.metadata.remove(secretRef);
-      vault.hosts.clearSecretRef(secretRef);
-      ctx.activityLogs.append("warn", "audit", logMessage('knownHostsIpc.secretRemoved'), {
-        vaultId,
-        secretRef,
-      });
+    async (_event, secretRefs: string[]) => {
+      const refsByVault = new Map<string, string[]>();
+      for (const secretRef of new Set(
+        Array.isArray(secretRefs) ? secretRefs.filter((ref): ref is string => typeof ref === "string") : [],
+      )) {
+        const vaultId = ctx.vaults.scopeOfSecret(secretRef).id;
+        refsByVault.set(vaultId, [...(refsByVault.get(vaultId) ?? []), secretRef]);
+      }
+      for (const [vaultId, refs] of refsByVault) {
+        // 그 볼트의 호스트만 이 비밀값을 가리킨다(볼트를 넘는 참조는 메인이 거절한다). 지움 기록을 먼저 남긴다 —
+        // 비밀값을 지우고 메타데이터를 지우기 전(기다리는 사이)에 팀 동기화가 돌면, 기록 없이 빠진 것을 서버 사본으로 되살린다.
+        const vault = secretVaultOf(ctx, refs[0]!);
+        vault.syncOutbox.upsertDeletions("secrets", refs);
+        for (const secretRef of refs) {
+          await vault.secrets.remove(secretRef);
+        }
+        vault.metadata.removeMany(refs);
+        vault.hosts.clearSecretRefs(refs);
+        for (const secretRef of refs) {
+          ctx.activityLogs.append("warn", "audit", logMessage('knownHostsIpc.secretRemoved'), {
+            vaultId,
+            secretRef,
+          });
+        }
+      }
       ctx.queueSync();
     },
   );

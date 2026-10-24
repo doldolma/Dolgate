@@ -2389,21 +2389,21 @@ describe("createAppStore sessions and auth recovery", () => {
 
     api.hosts.list = vi.fn().mockImplementation(async () => hosts);
     api.keychain.list = vi.fn().mockImplementation(async () => keychainEntries);
-    api.keychain.remove = vi.fn().mockImplementation(async (secretRef: string) => {
+    api.keychain.remove = vi.fn().mockImplementation(async (secretRefs: string[]) => {
       hosts = hosts.map((host) =>
-        isSshHostRecord(host) && host.secretRef === secretRef
+        isSshHostRecord(host) && host.secretRef && secretRefs.includes(host.secretRef)
           ? { ...host, secretRef: null, updatedAt: "2025-01-02T00:00:00.000Z" }
           : host,
       );
-      keychainEntries = keychainEntries.filter((entry) => entry.secretRef !== secretRef);
+      keychainEntries = keychainEntries.filter((entry) => !secretRefs.includes(entry.secretRef));
     });
 
     const store = createAppStore(api);
     await store.getState().bootstrap();
 
-    await store.getState().removeKeychainSecret("secret-1");
+    await store.getState().removeKeychainSecrets(["secret-1"]);
 
-    expect(api.keychain.remove).toHaveBeenCalledWith("secret-1");
+    expect(api.keychain.remove).toHaveBeenCalledWith(["secret-1"]);
     expect(api.hosts.list).toHaveBeenCalledTimes(2);
     expect(api.keychain.list).toHaveBeenCalledTimes(2);
     const refreshedHost = store.getState().hosts[0];

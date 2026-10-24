@@ -678,7 +678,23 @@ export function HomeShell({
     if (!confirmed) {
       return;
     }
-    await settingsViewModel.removeKeychainSecret(secretRef);
+    await settingsViewModel.removeKeychainSecrets([secretRef]);
+  }
+
+  // 연결된 호스트가 없는 것을 한 번에 지운다. 팀 것은 멤버 모두에게서 지워진다는 것을 함께 묻는다.
+  async function handleRemoveUnusedSecrets(
+    entries: SecretMetadataRecord[],
+    team: { id: string; name: string } | null,
+  ) {
+    const confirmed = window.confirm(
+      team
+        ? translate("home.secret.deleteUnusedTeam", { count: entries.length, team: team.name })
+        : translate("home.secret.deleteUnused", { count: entries.length }),
+    );
+    if (!confirmed) {
+      return;
+    }
+    await settingsViewModel.removeKeychainSecrets(entries.map((entry) => entry.secretRef));
   }
 
   async function handleGenerateAndInstallSshKey(
@@ -1059,8 +1075,8 @@ export function HomeShell({
               homeViewModel.moveSavedWorkspaceToGroup
             }
             onSetHostFavorite={homeViewModel.setHostFavorite}
-            onRemoveHost={homeViewModel.removeHost}
-            onRemoveSecret={settingsViewModel.removeKeychainSecret}
+            onRemoveHosts={homeViewModel.removeHosts}
+            onRemoveSecrets={settingsViewModel.removeKeychainSecrets}
             onConnectHost={async (hostId) => {
               try {
                 setHostBrowserError(null);
@@ -1250,6 +1266,7 @@ export function HomeShell({
                     settingsViewModel.revokeRdpCertificateTrust
                   }
                   onRemoveSecret={handleRemoveSecret}
+                  onRemoveUnusedSecrets={handleRemoveUnusedSecrets}
                   onEditSecret={openKeychainSecretEditor}
                   onGenerateSshKey={settingsViewModel.generateSshKey}
                   onCopySshPublicKey={settingsViewModel.copySshPublicKey}

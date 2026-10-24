@@ -56,6 +56,11 @@ interface KeychainPanelProps {
   /** 팀 볼트의 것이면 그 항목을 함께 준다 — 개인 목록(스토어)에는 없어서 부르는 쪽이 찾지 못한다. */
   onRemoveSecret: (secretRef: string, teamEntry?: SecretMetadataRecord) => Promise<void>;
   onEditSecret: (secretRef: string, teamEntry?: SecretMetadataRecord) => void;
+  /** 그 볼트에서 연결된 호스트가 없는 것을 한 번에 지운다. 팀 것이면 그 팀을 함께 준다(확인 문구가 다르다). */
+  onRemoveUnusedSecrets?: (
+    entries: SecretMetadataRecord[],
+    team: { id: string; name: string } | null,
+  ) => Promise<void>;
   onGenerateSshKey: (input: SshKeyGenerateInput) => Promise<SshKeyMaterialResult>;
   onCopySshPublicKey: (secretRef: string) => Promise<void>;
   onInstallSshPublicKey: (input: SshKeyInstallInput) => Promise<SshKeyInstallResult>;
@@ -88,6 +93,7 @@ export function KeychainPanel({
   onSearchQueryChange,
   onRemoveSecret,
   onEditSecret,
+  onRemoveUnusedSecrets,
   onGenerateSshKey,
   onCopySshPublicKey,
   onInstallSshPublicKey,
@@ -217,6 +223,38 @@ export function KeychainPanel({
   const removeSecret = (entry: SecretMetadataRecord) => {
     const teamEntry = teamEntryOf(entry);
     return teamEntry ? onRemoveSecret(entry.secretRef, teamEntry) : onRemoveSecret(entry.secretRef);
+  };
+  // 연결된 호스트가 없는 것을 한 번에 지운다 — 호스트를 지우다 끊기면 수십 개가 남는다(하나씩 지우면 그만큼 누른다).
+  // 검색으로 가려진 것도 센다. 버튼에 적힌 수가 지울 수다.
+  const renderRemoveUnused = (
+    list: readonly SecretMetadataRecord[],
+    team: { id: string; name: string } | null,
+    size: 'sm' | 'md',
+  ) => {
+    const unused = list.filter((entry) => entry.linkedHostCount === 0);
+    if (!onRemoveUnusedSecrets || unused.length === 0) {
+      return null;
+    }
+    return (
+      <Button
+        variant="danger"
+        size={size}
+        onClick={() => {
+          setCopyStatus(null);
+          onRemoveUnusedSecrets(unused, team).catch((error: unknown) => {
+            setCopyStatus({
+              tone: 'danger',
+              message:
+                error instanceof Error && error.message.trim()
+                  ? error.message
+                  : translate('keychain.removeUnusedFailed'),
+            });
+          });
+        }}
+      >
+        {translate('keychain.action.removeUnused', { count: unused.length })}
+      </Button>
+    );
   };
 
   const installTarget =
@@ -368,9 +406,14 @@ export function KeychainPanel({
             </InfoHint>
           </p>
         </div>
-        <Button variant="secondary" onClick={() => setGenerateOpen(true)}>
-          Generate SSH Key
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {/* 볼트별 묶음이 있으면 묶음 머리에 둔다. */}
+          {/* 옆 버튼과 키를 맞춘다. */}
+          {sections ? null : renderRemoveUnused(entries, null, 'md')}
+          <Button variant="secondary" onClick={() => setGenerateOpen(true)}>
+            Generate SSH Key
+          </Button>
+        </div>
       </div>
 
       {entries.length > 0 || teamEntries.length > 0 ? (
@@ -405,6 +448,16 @@ export function KeychainPanel({
                   team={section.team}
                   count={section.items.length}
                   addLabel={null}
+                  // 다시 들어와야 하는 팀은 쓸 수 없다.
+                  action={
+                    section.blocked
+                      ? null
+                      : renderRemoveUnused(
+                          section.team ? (listsByTeamId[section.team.id] ?? []) : entries,
+                          section.team,
+                          'sm',
+                        )
+                  }
                   hint={
                     // 팀 것은 함께 쓴다 — 바꾸거나 지우면 멤버 모두에게 간다(후보 S1).
                     section.team ? (

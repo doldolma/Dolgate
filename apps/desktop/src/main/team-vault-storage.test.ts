@@ -390,7 +390,7 @@ describe("writes that follow the host's vault", () => {
     expect(catalog.getHostInSameVault("team-host", "personal-bastion")).toBeNull();
     expect(catalog.getHostInSameVault("personal-bastion", "team-bastion")).toBeNull();
 
-    catalog.removeHost("team-host");
+    catalog.removeHosts(["team-host"]);
     const state = storage.getState();
     expect(state.teams[TEAM_ID].data.hosts.map((host) => host.id)).toEqual(["team-bastion"]);
     expect(state.teams[TEAM_ID].data.syncOutbox).toEqual([expect.objectContaining({ kind: "hosts", recordId: "team-host" })]);

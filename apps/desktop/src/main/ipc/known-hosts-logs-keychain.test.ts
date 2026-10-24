@@ -47,7 +47,7 @@ function createContext() {
     resolveWindowFromSender: vi.fn(),
     secretMetadata: {
       list: vi.fn(),
-      remove: vi.fn(),
+      removeMany: vi.fn(),
       getBySecretRef: vi.fn(),
       upsert: vi.fn(),
     },
@@ -58,12 +58,13 @@ function createContext() {
     },
     inspectCertificate: vi.fn(),
     hosts: {
-      clearSecretRef: vi.fn(),
+      clearSecretRefs: vi.fn(),
       getById: vi.fn(),
       updateSecretRef: vi.fn(),
     },
     syncOutbox: {
       upsertDeletion: vi.fn(),
+      upsertDeletions: vi.fn(),
     },
     hasSecretValue: vi.fn((secrets) =>
       Boolean(
@@ -497,7 +498,7 @@ describe('team vault saved credentials and host keys', () => {
           secretRef === 'secret:team' ? { secretRef, label: 'acme-db', updatedAt: 't', linkedHostCount: 2 } : null,
         ),
         list: vi.fn(() => []),
-        remove: vi.fn(),
+        removeMany: vi.fn(),
         upsert: vi.fn(),
       },
       secrets: {
@@ -505,8 +506,8 @@ describe('team vault saved credentials and host keys', () => {
         save: vi.fn(async (secretRef: string) => secretRef),
         remove: vi.fn(async () => {}),
       },
-      hosts: { clearSecretRef: vi.fn() },
-      syncOutbox: { upsertDeletion: vi.fn() },
+      hosts: { clearSecretRefs: vi.fn() },
+      syncOutbox: { upsertDeletion: vi.fn(), upsertDeletions: vi.fn() },
       knownHosts: { list: vi.fn(() => [{ id: 'kh-team' }]), remove: vi.fn() },
     };
     withVaults(ctx, { 'team-1': team });
@@ -545,18 +546,41 @@ describe('team vault saved credentials and host keys', () => {
     const { ctx, team } = createTeamContext();
     // 지움 기록이 먼저다 — 지우는 사이 팀 동기화가 돌아도 서버 사본으로 되살리지 않게(실제 앱에서 잠깐 되살아났다).
     team.secrets.remove.mockImplementation(async () => {
-      expect(team.syncOutbox.upsertDeletion).toHaveBeenCalledWith('secrets', 'secret:team');
+      expect(team.syncOutbox.upsertDeletions).toHaveBeenCalledWith('secrets', ['secret:team']);
     });
 
-    await invoke(ipcChannels.keychain.remove, 'secret:team');
+    await invoke(ipcChannels.keychain.remove, ['secret:team']);
 
     expect(team.secrets.remove).toHaveBeenCalledWith('secret:team');
-    expect(team.secretMetadata.remove).toHaveBeenCalledWith('secret:team');
-    expect(team.hosts.clearSecretRef).toHaveBeenCalledWith('secret:team');
-    expect(team.syncOutbox.upsertDeletion).toHaveBeenCalledWith('secrets', 'secret:team');
+    expect(team.secretMetadata.removeMany).toHaveBeenCalledWith(['secret:team']);
+    expect(team.hosts.clearSecretRefs).toHaveBeenCalledWith(['secret:team']);
     expect(ctx.secretStore.remove).not.toHaveBeenCalled();
-    expect(ctx.hosts.clearSecretRef).not.toHaveBeenCalled();
-    expect(ctx.syncOutbox.upsertDeletion).not.toHaveBeenCalled();
+    expect(ctx.hosts.clearSecretRefs).not.toHaveBeenCalled();
+    expect(ctx.syncOutbox.upsertDeletions).not.toHaveBeenCalled();
+  });
+
+  // 여러 개를 하나씩 지우면 지울 때마다 상태 쓰기·동기화·화면 새로 읽기가 돌고, 그러다 화면이 죽으면 반쯤 지운 채 남았다
+  // (호스트 169개를 지우며 안 쓰게 된 인증 정보 83개 중 11개만 지워졌다).
+  it('removes several credentials at once, each in its own vault, telling sync once', async () => {
+    const { ctx, team } = createTeamContext();
+    ctx.secretMetadata.getBySecretRef.mockImplementation((secretRef: string) =>
+      secretRef.startsWith('secret:mine') ? { secretRef, label: 'mine', updatedAt: 't' } : null,
+    );
+
+    await invoke(ipcChannels.keychain.remove, ['secret:mine-1', 'secret:team', 'secret:mine-2']);
+
+    expect(ctx.syncOutbox.upsertDeletions).toHaveBeenCalledWith('secrets', ['secret:mine-1', 'secret:mine-2']);
+    expect(ctx.secretStore.remove.mock.calls).toEqual([['secret:mine-1'], ['secret:mine-2']]);
+    expect(ctx.secretMetadata.removeMany).toHaveBeenCalledWith(['secret:mine-1', 'secret:mine-2']);
+    expect(ctx.hosts.clearSecretRefs).toHaveBeenCalledWith(['secret:mine-1', 'secret:mine-2']);
+    expect(team.syncOutbox.upsertDeletions).toHaveBeenCalledWith('secrets', ['secret:team']);
+    expect(team.secretMetadata.removeMany).toHaveBeenCalledWith(['secret:team']);
+    expect(ctx.activityLogs.append.mock.calls.map((call: unknown[]) => call[3])).toEqual([
+      { vaultId: 'personal', secretRef: 'secret:mine-1' },
+      { vaultId: 'personal', secretRef: 'secret:mine-2' },
+      { vaultId: 'team-1', secretRef: 'secret:team' },
+    ]);
+    expect(ctx.queueSync).toHaveBeenCalledTimes(1);
   });
 
   it('removes a team host key from the team, a personal one from the personal vault', async () => {

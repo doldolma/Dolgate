@@ -192,8 +192,12 @@ export function createSettingsSlice(deps: SliceDeps): SettingsSlice {
             await api.logs.clear();
             set({ activityLogs: [] });
           },
-    removeKeychainSecret: async (secretRef) => {
-            await api.keychain.remove(secretRef);
+    // 여러 개는 한 번에 지운다 — 하나씩 지우면 지울 때마다 메인 왕복·목록 새로 읽기가 돌고, 그러다 화면이 죽으면 반쯤 남는다.
+    removeKeychainSecrets: async (secretRefs) => {
+            if (secretRefs.length === 0) {
+              return;
+            }
+            await api.keychain.remove(secretRefs);
             await refreshHostAndKeychainState(set);
           },
     updateKeychainSecret: async (secretRef, secrets, label) => {

@@ -163,6 +163,34 @@ describe("컨테이너 임시 터널의 주인", () => {
     expect(stop).not.toHaveBeenCalledWith("container-service-tunnel:b");
   });
 
+  // 화면 프로세스만 죽고 창은 남아 다시 불러온다(renderer-recovery.ts). 터미널 탭은 새 화면이 부트스트랩에서
+  // 되찾으므로(listTabs) 끊지 않고, 새 화면이 모르는 것만 놓는다.
+  it("화면 프로세스만 죽으면 그 창이 연 터널은 정지시키고 터미널 세션은 남긴다", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const manager = new CoreManager();
+    const window = createFakeWindow(101);
+    manager.registerWindow(window as never);
+    const stop = vi
+      .spyOn(manager, "stopPortForward")
+      .mockResolvedValue(undefined as never);
+    const { sessionId } = await manager.runWithSessionOwner(101, () =>
+      manager.connectLocalSession({ cols: 120, rows: 32, title: "Terminal" }),
+    );
+    manager.registerContainerTunnelOwner("container-service-tunnel:a", {
+      ownerWebContentsId: 101,
+    });
+    const disconnect = vi.spyOn(manager, "disconnect");
+
+    manager.releaseRendererResources(101);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(stop).toHaveBeenCalledWith("container-service-tunnel:a");
+    expect(disconnect).not.toHaveBeenCalled();
+    expect(manager.listTabs(101).map((tab) => tab.sessionId)).toEqual([sessionId]);
+  });
+
   it("세션이 끝나면 그 세션이 연 터널을 정지시킨다", async () => {
     const fakeProcess = createFakeChildProcess();
     spawnMock.mockReturnValue(fakeProcess.child);

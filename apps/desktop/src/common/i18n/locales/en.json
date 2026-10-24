@@ -2265,7 +2265,9 @@
     },
     "secret": {
       "deleteLinked": "Deleting this secret unlinks it from {{count}} hosts. The hosts themselves are kept. Continue?",
-      "delete": "Delete this secret?"
+      "delete": "Delete this secret?",
+      "deleteUnused": "Delete {{count}} credentials that no host uses?",
+      "deleteUnusedTeam": "Delete {{count}} credentials that no host uses from {{team}}? They are removed for every member of the team."
     },
     "key": {
       "installedAuthorizedKeys": "Installed a new SSH key in authorized_keys on instance {{label}}.",
@@ -2423,7 +2425,8 @@
       "copyPassword": "Copy password",
       "edit": "Edit",
       "copyPublicKey": "Copy public key",
-      "installOnHost": "Install on a host"
+      "installOnHost": "Install on a host",
+      "removeUnused": "Delete {{count}} unused credentials"
     },
     "keyCreated": "Created the SSH key {{label}}.",
     "keyCreateFailed": "Could not create the SSH key.",
@@ -2440,7 +2443,8 @@
       "aboutToggle": "About team credentials",
       "shared": "Passwords and keys shared by {{team}} members",
       "changesReachAll": "Changing or deleting one changes it for every member"
-    }
+    },
+    "removeUnusedFailed": "Could not delete the credentials."
   },
   "sshKeyInstall": {
     "generateTitle": "Generate and install a new SSH key",
@@ -3425,7 +3429,9 @@
     "keychainDetail": "On Linux auto-login sessions the keyring (GNOME Keyring/KWallet) may start locked. Sign out and sign in with your password, or unlock the keyring, then restart the app.",
     "ok": "OK",
     "newWindow": "New window",
-    "newWindowDescription": "Open a new Dolgate window"
+    "newWindowDescription": "Open a new Dolgate window",
+    "rendererReloaded": "The window's content stopped unexpectedly and was reloaded.",
+    "rendererGaveUp": "The window's content stopped unexpectedly several times within a minute, so it was not reloaded automatically. Reload it with Cmd/Ctrl+R."
   },
   "runtimeCoord": {
     "preparing": "Preparing the container runtime connection for {{label}}.",

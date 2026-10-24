@@ -49,6 +49,7 @@ import {
   collectRenamedGroupPaths,
   decodeEncryptedPayload,
   encodeEncryptedPayload,
+  isPushableSyncRecord,
   rebaseSavedWorkspaceGroups,
   secretMetadataFromSyncedSecret,
 } from "./sync-service";
@@ -154,6 +155,11 @@ interface SnapshotCursor {
   etag: string | null;
   /** 마지막으로 받은 서버 사본의 레코드별 시각(`kind\0id` → ms). 올릴 것을 가르는 기준이다. */
   baseline: Map<string, number> | null;
+  /**
+   * 서버와 마지막으로 맞췄을 때 이 기기의 모습(recordsSignature·privateSignature). 지금 모습이 이것과 같으면 올릴
+   * 것이 없어서 pushDirty 가 서버에 묻지 않는다. 맞추다 실패했거나 그 사이 고쳤으면 옛 값이 남아 다음에 다시 간다.
+   */
+  settled: string | null;
 }
 
 interface WatchParts {
@@ -205,6 +211,7 @@ function buildBaseline(payload: TeamSyncPayload): Map<string, number> {
 class DeltaBuilder {
   readonly payload: TeamSyncPayload = {};
   count = 0;
+  private dropped = 0;
 
   constructor(
     private readonly baseline: Map<string, number>,
@@ -228,6 +235,14 @@ class DeltaBuilder {
   }
 
   private push(kind: string, record: SyncRecord): void {
+    // 서버가 받지 않을 레코드는 싣지 않는다 — 하나 때문에 그 팀의 push 전체가 거절된다. 지움 기록이었다면 push 가
+    // 끝난 뒤 대기열에서도 치워진다.
+    if (!isPushableSyncRecord(record)) {
+      if (this.dropped++ === 0) {
+        console.warn("[team-sync] dropped records the server would reject", { kind });
+      }
+      return;
+    }
     (this.payload[kind] ??= []).push(record);
     this.count += 1;
   }
@@ -324,10 +339,16 @@ export class TeamSyncService {
   /**
    * 로컬에서 팀 데이터·내 설정을 고쳤다. 팀마다 바뀐 것을 올린다. 줄에 선 차례가 이미 있으면 거기에
    * 붙는다. 돌려주는 Promise 는 그 차례들이 끝나면 풀린다(실패해도 던지지 않는다).
+   *
+   * 무엇을 고쳤든 불린다(개인 볼트를 고쳐도 queueSync 가 부른다). 그래서 서버와 마지막으로 맞춘 뒤 그대로인 팀은
+   * 묻지 않고 지나간다 — 남이 고친 것은 감시가 받아 온다.
    */
   pushDirty(): Promise<void> {
     return Promise.all(
       [...this.runtimes.values()].map((runtime) => {
+        if (!runtime.queuedPush && !this.hasLocalChanges(runtime)) {
+          return undefined;
+        }
         if (!runtime.queuedPush) {
           runtime.queuedPush = this.syncTeam(runtime.teamId, RECORDS_AND_PRIVATE, () => {
             runtime.queuedPush = null;
@@ -615,8 +636,8 @@ export class TeamSyncService {
       dekBase64,
       scope: createTeamVaultScope(teamId),
       abort: new AbortController(),
-      records: { etag: null, baseline: null },
-      private: { etag: null, baseline: null },
+      records: { etag: null, baseline: null, settled: null },
+      private: { etag: null, baseline: null, settled: null },
       watch: { etag: null, seen: null, pending: null },
       loop: null,
       tail: Promise.resolve(),
@@ -739,6 +760,12 @@ export class TeamSyncService {
     return true;
   }
 
+  /** 서버와 마지막으로 맞춘 뒤 이 기기에서 그 팀 볼트나 내 개인 칸이 바뀌었는지. 팀 볼트가 없으면 맞춰 본다. */
+  private hasLocalChanges(runtime: TeamRuntime): boolean {
+    const now = this.storage.teamSyncSignatures(runtime.teamId);
+    return !now || now.records !== runtime.records.settled || now.private !== runtime.private.settled;
+  }
+
   /** 팀 하나를 맞춘다 — 서버보다 새 로컬 레코드를 올리고 서버 사본을 받는다. 같은 팀끼리는 줄을 선다. */
   private syncTeam(teamId: string, parts: WatchParts, onStart?: () => void): Promise<boolean> {
     const runtime = this.runtimes.get(teamId);
@@ -805,6 +832,8 @@ export class TeamSyncService {
     const baseline = remote.payload ? buildBaseline(remote.payload) : (runtime.records.baseline ?? new Map());
     this.materializeImplicitGroups(runtime);
     const before = this.storage.teamVaultFingerprint(teamId);
+    // 올릴 것을 모으기 전의 모습이다. 모으는 사이에 고친 것은 여기에 없어서, 다음 pushDirty 가 그것을 올린다.
+    const signature = this.storage.teamSyncSignatures(teamId)?.records ?? null;
     const delta = await this.buildRecordDelta(runtime, baseline);
     if (delta.builder.count > 0) {
       await this.api.pushRecords(lease, teamId, delta.builder.payload, TEAM_SYNC_DATA_FLOOR);
@@ -813,6 +842,8 @@ export class TeamSyncService {
       remote = await this.api.getRecords(lease, teamId, null);
     }
     if (!remote.payload) {
+      // 올릴 것도 없고 서버도 그대로다 — 맞춰진 상태다.
+      runtime.records.settled = signature;
       return { applied: false, pruned: false };
     }
     assertActive(lease);
@@ -822,7 +853,12 @@ export class TeamSyncService {
       return { applied: false, pruned: false };
     }
     const rebased = this.applyRecords(runtime, remote.payload);
-    runtime.records = { etag: remote.etag, baseline: buildBaseline(remote.payload) };
+    runtime.records = {
+      etag: remote.etag,
+      baseline: buildBaseline(remote.payload),
+      // 옮긴 워크스페이스는 아직 올리지 않았다 — 맞춰진 것으로 적지 않는다.
+      settled: rebased ? null : (this.storage.teamSyncSignatures(teamId)?.records ?? null),
+    };
     if (rebased) {
       // 그룹 이름이 바뀐 것을 따라 워크스페이스 경로를 옮겼다 — 되올린다.
       this.pushDirty();
@@ -987,6 +1023,7 @@ export class TeamSyncService {
     assertActive(lease);
     this.storage.settleTeamPrivatePush(teamId, deletions);
     if (!remote.payload) {
+      runtime.private.settled = this.storage.teamSyncSignatures(teamId)?.private ?? null;
       return false;
     }
     const current = this.storage.readTeamMemberPrefs(teamId);
@@ -1021,7 +1058,11 @@ export class TeamSyncService {
       awsProfileCredentials: receiveCredentials("awsProfileCredentials"),
       tailnetCredentials: receiveCredentials("tailnetCredentials"),
     });
-    runtime.private = { etag: remote.etag, baseline: buildBaseline(payload) };
+    runtime.private = {
+      etag: remote.etag,
+      baseline: buildBaseline(payload),
+      settled: this.storage.teamSyncSignatures(teamId)?.private ?? null,
+    };
     return true;
   }
 }

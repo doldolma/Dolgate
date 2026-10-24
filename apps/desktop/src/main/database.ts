@@ -1248,10 +1248,16 @@ export class HostRepository {
   }
 
   clearSecretRef(secretRef: string): void {
+    this.clearSecretRefs([secretRef]);
+  }
+
+  /** 여러 개를 한 번에 푼다. 상태 파일은 한 번만 쓴다. */
+  clearSecretRefs(secretRefs: readonly string[]): void {
+    const cleared = new Set(secretRefs);
     const timestamp = nowIso();
     stateStorage.updateState((state) => {
       this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
-        if (!isSshHostRecord(entry) || entry.secretRef !== secretRef) {
+        if (!isSshHostRecord(entry) || !entry.secretRef || !cleared.has(entry.secretRef)) {
           return entry;
         }
         return {
@@ -1286,9 +1292,15 @@ export class HostRepository {
   }
 
   remove(id: string): void {
+    this.removeMany([id]);
+  }
+
+  /** 여러 개를 한 번에 지운다. 상태 파일은 한 번만 쓴다. */
+  removeMany(ids: readonly string[]): void {
+    const removed = new Set(ids);
     stateStorage.updateState((state) => {
       this.root.data(state).hosts = this.root.data(state).hosts
-        .filter((entry) => entry.id !== id)
+        .filter((entry) => !removed.has(entry.id))
         // Drop dangling jump-host references so a removed bastion doesn't leave
         // other hosts pointing at a host that no longer exists.
         .map((entry) => {
@@ -1296,10 +1308,10 @@ export class HostRepository {
             return entry;
           }
           const currentChain = normalizeJumpHostIds(entry.jumpHostIds, entry.jumpHostId);
-          if (!currentChain.includes(id)) {
+          if (!currentChain.some((jumpId) => removed.has(jumpId))) {
             return entry;
           }
-          const nextChain = currentChain.filter((jumpId) => jumpId !== id);
+          const nextChain = currentChain.filter((jumpId) => !removed.has(jumpId));
           return {
             ...entry,
             jumpHostId: nextChain[0] ?? null,
@@ -1308,8 +1320,10 @@ export class HostRepository {
         });
       // 이 호스트에 대해 기기 로컬로 골라 둔 모니터도 같이 버린다. 남겨 두면 없는 호스트의
       // 설정이 계속 쌓이고, 같은 id 가 재사용되면(가져오기 등) 엉뚱한 배치가 되살아난다.
-      delete state.settings.rdpMonitorsByHostId[id];
-      delete state.settings.rdpDrivesByHostId[id];
+      for (const id of removed) {
+        delete state.settings.rdpMonitorsByHostId[id];
+        delete state.settings.rdpDrivesByHostId[id];
+      }
     });
   }
 
@@ -2857,8 +2871,14 @@ export class SecretMetadataRepository {
   }
 
   remove(secretRef: string): void {
+    this.removeMany([secretRef]);
+  }
+
+  /** 여러 개를 한 번에 지운다. 상태 파일은 한 번만 쓴다. */
+  removeMany(secretRefs: readonly string[]): void {
+    const removed = new Set(secretRefs);
     stateStorage.updateState((state) => {
-      this.root.data(state).secretMetadata = this.root.data(state).secretMetadata.filter((record) => record.secretRef !== secretRef);
+      this.root.data(state).secretMetadata = this.root.data(state).secretMetadata.filter((record) => !removed.has(record.secretRef));
     });
   }
 
@@ -3013,18 +3033,31 @@ export class SyncOutboxRepository {
   }
 
   upsertDeletion(kind: SyncKind, recordId: string, deletedAt: string = nowIso()): void {
+    this.upsertDeletions(kind, [recordId], deletedAt);
+  }
+
+  /** 여러 개를 한 번에 올린다. 상태 파일은 한 번만 쓴다. */
+  upsertDeletions(kind: SyncKind, recordIds: readonly string[], deletedAt: string = nowIso()): void {
+    // id 가 문자열이 아닌 지움 기록은 쓰지 않는다 — 서버는 그런 기록 하나로 push 전체를 거절한다(옛 빌드가 배열을
+    // 넣어 동기화가 통째로 멈췄다). 하나라도 어긋나면 아무것도 쓰지 않고 던진다.
+    if (recordIds.some((recordId) => typeof recordId !== 'string' || recordId.length === 0)) {
+      throw new TypeError(`sync deletion needs string ids (${kind})`);
+    }
     stateStorage.updateState((state) => {
-      const currentIndex = this.root.data(state).syncOutbox.findIndex((entry) => entry.kind === kind && entry.recordId === recordId);
-      const nextRecord: SyncDeletionRecord = {
-        kind,
-        recordId,
-        deletedAt
-      };
-      if (currentIndex >= 0) {
-        this.root.data(state).syncOutbox[currentIndex] = nextRecord;
-        return;
+      const outbox = this.root.data(state).syncOutbox;
+      for (const recordId of recordIds) {
+        const currentIndex = outbox.findIndex((entry) => entry.kind === kind && entry.recordId === recordId);
+        const nextRecord: SyncDeletionRecord = {
+          kind,
+          recordId,
+          deletedAt
+        };
+        if (currentIndex >= 0) {
+          outbox[currentIndex] = nextRecord;
+        } else {
+          outbox.push(nextRecord);
+        }
       }
-      this.root.data(state).syncOutbox.push(nextRecord);
     });
   }
 

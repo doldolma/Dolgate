@@ -324,8 +324,8 @@ interface RenderBrowserOptions {
   onRenameGroup?: ReturnType<typeof vi.fn>;
   onMoveHostToGroup?: ReturnType<typeof vi.fn>;
   onMoveSavedWorkspaceToGroup?: ReturnType<typeof vi.fn>;
-  onRemoveHost?: ReturnType<typeof vi.fn>;
-  onRemoveSecret?: ReturnType<typeof vi.fn>;
+  onRemoveHosts?: ReturnType<typeof vi.fn>;
+  onRemoveSecrets?: ReturnType<typeof vi.fn>;
   onConnectHost?: ReturnType<typeof vi.fn>;
   onOpenHostInNewWindow?: ReturnType<typeof vi.fn>;
   onConnectHostTmux?: ReturnType<typeof vi.fn>;
@@ -378,8 +378,8 @@ function renderBrowser({
   onRenameGroup = vi.fn().mockResolvedValue(undefined),
   onMoveHostToGroup = vi.fn().mockResolvedValue(undefined),
   onMoveSavedWorkspaceToGroup = vi.fn().mockResolvedValue(undefined),
-  onRemoveHost = vi.fn().mockResolvedValue(undefined),
-  onRemoveSecret = vi.fn().mockResolvedValue(undefined),
+  onRemoveHosts = vi.fn().mockResolvedValue(undefined),
+  onRemoveSecrets = vi.fn().mockResolvedValue(undefined),
   onConnectHost = vi.fn().mockResolvedValue(undefined),
   onOpenHostInNewWindow,
   onConnectHostTmux,
@@ -447,8 +447,8 @@ function renderBrowser({
       onMoveHostToGroup={onMoveHostToGroup}
       onMoveSavedWorkspaceToGroup={onMoveSavedWorkspaceToGroup}
       onSetHostFavorite={vi.fn()}
-      onRemoveHost={onRemoveHost}
-      onRemoveSecret={onRemoveSecret}
+      onRemoveHosts={onRemoveHosts}
+      onRemoveSecrets={onRemoveSecrets}
       onConnectHost={onConnectHost}
       onOpenHostInNewWindow={onOpenHostInNewWindow}
       onConnectHostTmux={onConnectHostTmux}
@@ -607,10 +607,10 @@ describe("HostBrowser helpers", () => {
     ).toBe(true);
   });
 
-  it("chooses the right delete dialog variant based on descendant counts", () => {
-    expect(getGroupDeleteDialogVariant(0, 0)).toBe("simple");
-    expect(getGroupDeleteDialogVariant(1, 0)).toBe("with-descendants");
-    expect(getGroupDeleteDialogVariant(0, 2)).toBe("with-descendants");
+  // 남길지 물을 것은 함께 지워질 호스트·Workspace 다. 빈 하위 그룹은 남겨 봐야 빈 폴더라 묻지 않는다.
+  it("asks whether to keep what is inside only when hosts or Workspaces would go too", () => {
+    expect(getGroupDeleteDialogVariant(0)).toBe("simple");
+    expect(getGroupDeleteDialogVariant(2)).toBe("with-descendants");
   });
 
   it("shows subtree hosts when a parent group is selected", () => {
@@ -1708,11 +1708,11 @@ describe("HostBrowser unified Workspace Home", () => {
   });
 
   it("deletes mixed Assets in one confirmation and continues across kinds", async () => {
-    const onRemoveHost = vi.fn().mockResolvedValue(undefined);
+    const onRemoveHosts = vi.fn().mockResolvedValue(undefined);
     const onRemoveSavedWorkspace = vi.fn().mockResolvedValue(undefined);
     renderBrowser({
       savedWorkspaces,
-      onRemoveHost,
+      onRemoveHosts,
       onRemoveSavedWorkspace,
     });
 
@@ -1737,7 +1737,7 @@ describe("HostBrowser unified Workspace Home", () => {
     );
     await waitFor(() => {
       expect(onRemoveSavedWorkspace).toHaveBeenCalledWith("workspace-ops");
-      expect(onRemoveHost).toHaveBeenCalledWith("host-1");
+      expect(onRemoveHosts).toHaveBeenCalledWith(["host-1"]);
     });
   });
 
@@ -2525,6 +2525,79 @@ describe("HostBrowser dialogs", () => {
     expect(dbCard.dataset.hostCardState).toBe("selected");
   });
 
+  // 호스트·Workspace 가 하나도 안 걸리면 남길지 물을 것이 없다 — 빈 하위 그룹까지 바로 지운다.
+  const emptyGroups = [
+    ...groups,
+    {
+      id: "group-clients",
+      name: "Clients",
+      path: "Clients",
+      parentPath: null,
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+    },
+    {
+      id: "group-clients-old",
+      name: "Old",
+      path: "Clients/Old",
+      parentPath: "Clients",
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+    },
+  ];
+
+  it("deletes groups with no hosts or Workspaces in them without asking, empty subgroups too", async () => {
+    const onRemoveGroup = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({ groups: emptyGroups, onRemoveGroup });
+
+    fireEvent.contextMenu(
+      within(screen.getByLabelText("Group tree")).getByRole("button", { name: /^Clients/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+
+    await waitFor(() => expect(onRemoveGroup).toHaveBeenCalledWith("Clients", "delete-subtree"));
+    expect(onRemoveGroup).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("still asks when only a Workspace would go with the group", () => {
+    const onRemoveGroup = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({
+      groups: emptyGroups,
+      savedWorkspaces: [{ ...savedWorkspaces[0]!, groupName: "Clients/Old" }],
+      onRemoveGroup,
+    });
+
+    fireEvent.contextMenu(
+      within(screen.getByLabelText("Group tree")).getByRole("button", { name: /^Clients/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+
+    expect(screen.getByRole("dialog")).toHaveTextContent("하위 그룹 1개, 호스트 0개, Workspace 1개가 함께 영향을 받습니다.");
+    expect(screen.getByRole("button", { name: "하위 항목 유지" })).toBeInTheDocument();
+    expect(onRemoveGroup).not.toHaveBeenCalled();
+  });
+
+  it("shows what went wrong when deleting empty groups fails, and lets you try again", async () => {
+    const onRemoveGroup = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("그룹 저장소가 잠겼습니다"))
+      .mockResolvedValue(undefined);
+    renderBrowser({ groups: emptyGroups, onRemoveGroup });
+
+    fireEvent.contextMenu(
+      within(screen.getByLabelText("Group tree")).getByRole("button", { name: /^Clients/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("그룹 저장소가 잠겼습니다")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "삭제" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(onRemoveGroup).toHaveBeenCalledTimes(2);
+    expect(onRemoveGroup).toHaveBeenLastCalledWith("Clients", "delete-subtree");
+  });
+
   it("keeps mixed host and group selections but scopes the context menu to the clicked type", () => {
     renderBrowser({
       groups: [
@@ -2562,9 +2635,9 @@ describe("HostBrowser dialogs", () => {
   });
 
   it("shows an in-app delete dialog for selected hosts instead of calling window.confirm", async () => {
-    const onRemoveHost = vi.fn().mockResolvedValue(undefined);
+    const onRemoveHosts = vi.fn().mockResolvedValue(undefined);
     const confirmSpy = vi.spyOn(window, "confirm");
-    renderBrowser({ onRemoveHost });
+    renderBrowser({ onRemoveHosts });
 
     const appCard = screen.getByText("App").closest("article") as HTMLElement;
     const dbCard = screen.getByText("DB").closest("article") as HTMLElement;
@@ -2579,9 +2652,36 @@ describe("HostBrowser dialogs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "삭제" }));
 
+    // 고른 것을 한 번에 지운다 — 하나씩 지우면 지울 때마다 메인 왕복과 다시 그리기가 한 바퀴씩 돈다.
     await waitFor(() => {
-      expect(onRemoveHost).toHaveBeenCalledTimes(2);
+      expect(onRemoveHosts).toHaveBeenCalledTimes(1);
     });
+    expect(onRemoveHosts).toHaveBeenCalledWith(["host-1", "host-2"]);
+  });
+
+  // 실패한 뒤 "지우는 중" 으로 남으면 삭제·취소가 모두 막혀 창을 닫을 수도 없었다.
+  it("lets the delete be tried again or cancelled after it fails", async () => {
+    const onRemoveHosts = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("디스크가 가득 찼습니다"))
+      .mockResolvedValue(undefined);
+    renderBrowser({ onRemoveHosts });
+
+    const appCard = screen.getByText("App").closest("article") as HTMLElement;
+    fireEvent.click(appCard);
+    fireEvent.contextMenu(appCard);
+    fireEvent.click(screen.getByRole("button", { name: /삭제/ }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "삭제" }));
+
+    expect(await within(dialog).findByText("디스크가 가득 찼습니다")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "취소" })).toBeEnabled();
+    const retry = within(dialog).getByRole("button", { name: "삭제" });
+    expect(retry).toBeEnabled();
+
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(onRemoveHosts).toHaveBeenCalledTimes(2);
   });
 
   // 원격 화면 호스트도 같은 자격증명 저장소를 쓴다. VNC 는 이 제안에서 빠져 있어서, 호스트를
@@ -2593,8 +2693,8 @@ describe("HostBrowser dialogs", () => {
   ] as const)(
     "%s 호스트를 지울 때도 남는 자격증명을 함께 지우자고 제안한다",
     async (_kind, host, cardLabel, secretRef) => {
-      const onRemoveHost = vi.fn().mockResolvedValue(undefined);
-      const onRemoveSecret = vi.fn().mockResolvedValue(undefined);
+      const onRemoveHosts = vi.fn().mockResolvedValue(undefined);
+      const onRemoveSecrets = vi.fn().mockResolvedValue(undefined);
 
       renderBrowser({
         hosts: [...hosts, { ...host, secretRef } as HostRecord],
@@ -2611,8 +2711,8 @@ describe("HostBrowser dialogs", () => {
             updatedAt: "2025-01-01T00:00:00.000Z",
           },
         ],
-        onRemoveHost,
-        onRemoveSecret,
+        onRemoveHosts,
+        onRemoveSecrets,
       });
 
       const card = screen
@@ -2629,16 +2729,16 @@ describe("HostBrowser dialogs", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "삭제" }));
 
-      await waitFor(() => expect(onRemoveHost).toHaveBeenCalledWith(host.id));
+      await waitFor(() => expect(onRemoveHosts).toHaveBeenCalledWith([host.id]));
       await waitFor(() =>
-        expect(onRemoveSecret).toHaveBeenCalledWith(secretRef),
+        expect(onRemoveSecrets).toHaveBeenCalledWith([secretRef]),
       );
     },
   );
 
   it("offers to remove an unused local secret and keeps the checkbox enabled by default", async () => {
-    const onRemoveHost = vi.fn().mockResolvedValue(undefined);
-    const onRemoveSecret = vi.fn().mockResolvedValue(undefined);
+    const onRemoveHosts = vi.fn().mockResolvedValue(undefined);
+    const onRemoveSecrets = vi.fn().mockResolvedValue(undefined);
     const hostsWithSecret: HostRecord[] = [
       {
         ...(hosts[0] as Extract<HostRecord, { kind: "ssh" }>),
@@ -2649,8 +2749,8 @@ describe("HostBrowser dialogs", () => {
 
     renderBrowser({
       hosts: hostsWithSecret,
-      onRemoveHost,
-      onRemoveSecret,
+      onRemoveHosts,
+      onRemoveSecrets,
     });
 
     const appCard = screen.getByText("App").closest("article") as HTMLElement;
@@ -2665,9 +2765,9 @@ describe("HostBrowser dialogs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "삭제" }));
 
-    await waitFor(() => expect(onRemoveHost).toHaveBeenCalledWith("host-1"));
+    await waitFor(() => expect(onRemoveHosts).toHaveBeenCalledWith(["host-1"]));
     await waitFor(() =>
-      expect(onRemoveSecret).toHaveBeenCalledWith("secret:host-1"),
+      expect(onRemoveSecrets).toHaveBeenCalledWith(["secret:host-1"]),
     );
   });
 
@@ -2930,17 +3030,16 @@ describe("home review regressions", () => {
     } finally { detail.mockRestore(); log.mockRestore(); }
   });
 
-  it("cleans credentials of successful deletions and retains failed hosts' credentials for retry", async () => {
-    const onRemoveHost = vi.fn().mockImplementation(async (id) => {
-      if (id === "host-2") throw new Error("cannot delete B");
-    });
-    const onRemoveSecret = vi.fn().mockResolvedValue(undefined);
+  // 호스트는 한 번에 지워서 함께 성공하거나 함께 실패한다. 실패하면 어느 자격증명도 지우지 않고, 다시 누르면 지운다.
+  it("keeps the credentials when the hosts could not be deleted and cleans them on the retry", async () => {
+    const onRemoveHosts = vi.fn().mockRejectedValueOnce(new Error("cannot delete"));
+    const onRemoveSecrets = vi.fn().mockResolvedValue(undefined);
     renderBrowser({
       hosts: hosts.filter((host) => host.kind === "ssh").map((host) => ({ ...host, secretRef: `secret:${host.id}` })),
       keychainEntries: ["host-1", "host-2"].map((id) => ({ secretRef: `secret:${id}`, label: id, hasPassword: true, hasPassphrase: false, hasManagedPrivateKey: false, hasCertificate: false, linkedHostCount: 1, updatedAt: "2025-01-01T00:00:00.000Z" })),
       savedWorkspaces,
-      onRemoveHost,
-      onRemoveSecret,
+      onRemoveHosts,
+      onRemoveSecrets,
     });
     const card = (key: string) => document.querySelector(`[data-home-asset-key="${key}"]`) as HTMLElement;
     fireEvent.click(card("workspace:workspace-ops"));
@@ -2949,12 +3048,14 @@ describe("home review regressions", () => {
     fireEvent.contextMenu(card("host:host-1"));
     fireEvent.click(within(screen.getByRole("menu")).getByRole("button", { name: "삭제 (3개)" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "삭제" }));
-    await waitFor(() => expect(onRemoveSecret).toHaveBeenCalledWith("secret:host-1"));
-    expect(onRemoveSecret).not.toHaveBeenCalledWith("secret:host-2");
-    onRemoveHost.mockResolvedValue(undefined);
+    await waitFor(() => expect(onRemoveHosts).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("button", { name: "삭제" })).toBeEnabled());
+    expect(onRemoveSecrets).not.toHaveBeenCalled();
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "삭제" }));
-    await waitFor(() => expect(onRemoveSecret).toHaveBeenCalledWith("secret:host-2"));
-    expect(onRemoveSecret).toHaveBeenCalledTimes(2);
+    // 인증 정보도 한 번에 지운다 — 하나씩 지우다 화면이 죽자 83개 중 11개만 지워지고 남았다.
+    await waitFor(() => expect(onRemoveSecrets).toHaveBeenCalledTimes(1));
+    expect(onRemoveHosts).toHaveBeenLastCalledWith(["host-1", "host-2"]);
+    expect(onRemoveSecrets).toHaveBeenCalledWith(["secret:host-1", "secret:host-2"]);
   });
 
   it("shows no last-used date for a never-opened Workspace", () => {

@@ -5,6 +5,7 @@ import {
   getParentGroupPath,
   normalizeGroupPath,
   type ActivityLogRecord,
+  type GroupRemoveMode,
   type SavedWorkspaceRecord,
 } from "@shared";
 import { cn } from "../lib/cn";
@@ -59,6 +60,7 @@ import {
   getHostBrowserVisibleImportMenuLabels,
   HOST_BROWSER_IMPORT_MENU_LABELS,
   useHostBrowser,
+  type GroupDeleteTarget,
   type UseHostBrowserParams,
 } from "./host-browser/useHostBrowser";
 
@@ -258,6 +260,33 @@ export function HostBrowser({
     hb.onExportAssets(
       orderHomeAssetKeys(assetKeys, hb.visibleAssets).map(parseHomeAssetKey),
     );
+  }
+
+  /**
+   * 그룹들을 지운다. 실패하면 삭제 창에 무엇이 안 됐는지 띄운다 — 묻지 않고 지우던 길이었으면 그때 처음 창이 열려
+   * 다시 시도하거나 그만둘 수 있다.
+   */
+  async function removeGroups(target: GroupDeleteTarget, mode: GroupRemoveMode) {
+    try {
+      hb.setIsRemovingGroup(true);
+      for (const path of target.paths) {
+        await hb.removeGroupIn(path, mode, target.vaultId);
+      }
+      hb.setSelectedGroupPaths((current) =>
+        current.filter((path) => !target.paths.includes(path)),
+      );
+      hb.setGroupDeleteTarget(null);
+      hb.setGroupDeleteError(null);
+    } catch (error) {
+      hb.setGroupDeleteTarget(target);
+      hb.setGroupDeleteError(
+        error instanceof Error
+          ? error.message
+          : translate("hostBrowser.error.groupDeleteFailed"),
+      );
+    } finally {
+      hb.setIsRemovingGroup(false);
+    }
   }
 
   function requestDeleteAssets(assetKeys: readonly HomeAssetKey[]) {
@@ -778,14 +807,18 @@ export function HostBrowser({
                     type="button"
                     className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)]"
                     onClick={() => {
-                      hb.setGroupDeleteTarget(
-                        hb.buildGroupDeleteTarget(
-                          contextMenu.groupPaths,
-                          contextMenu.vaultId,
-                        ),
+                      const target = hb.buildGroupDeleteTarget(
+                        contextMenu.groupPaths,
+                        contextMenu.vaultId,
                       );
                       hb.setGroupDeleteError(null);
                       hb.setContextMenu(null);
+                      // 함께 지워질 호스트·Workspace 가 없으면 남길지 물을 것이 없다 — 빈 하위 그룹까지 바로 지운다.
+                      if (target.hostCount + target.workspaceCount === 0) {
+                        void removeGroups(target, "delete-subtree");
+                        return;
+                      }
+                      hb.setGroupDeleteTarget(target);
                     }}
                   >
                     {translate("common.delete")}
@@ -928,23 +961,21 @@ export function HostBrowser({
           onConfirm={async () => {
             try {
               hb.setIsRemovingHost(true);
-              for (const hostId of hostDeleteTarget.hostIds) {
-                await hb.onRemoveHost(hostId);
-              }
+              await hb.onRemoveHosts(hostDeleteTarget.hostIds);
             } catch (error) {
               hb.setHostDeleteError(
                 error instanceof Error
                   ? error.message
                   : translate("hostBrowser.error.hostDeleteFailed"),
               );
+              // 다시 누르거나 닫을 수 있어야 한다 — 지우는 중으로 남으면 창이 잠긴다.
+              hb.setIsRemovingHost(false);
               return;
             }
 
             try {
-              if (hb.removeUnusedSecretsOnHostDelete) {
-                for (const secretRef of hb.hostDeleteUnusedLocalSecretRefs) {
-                  await hb.onRemoveSecret(secretRef);
-                }
+              if (hb.removeUnusedSecretsOnHostDelete && hb.hostDeleteUnusedLocalSecretRefs.length > 0) {
+                await hb.onRemoveSecrets(hb.hostDeleteUnusedLocalSecretRefs);
               }
               hb.clearSelections();
               hb.setHostDeleteTarget(null);
@@ -1030,33 +1061,9 @@ export function HostBrowser({
                     variant="secondary"
                     className="min-w-0 flex-1 whitespace-nowrap"
                     disabled={hb.isRemovingGroup}
-                    onClick={async () => {
-                      try {
-                        hb.setIsRemovingGroup(true);
-                        for (const path of groupDeleteTarget.paths) {
-                          await hb.removeGroupIn(
-                            path,
-                            "reparent-descendants",
-                            groupDeleteTarget.vaultId,
-                          );
-                        }
-                        hb.setSelectedGroupPaths((current) =>
-                          current.filter(
-                            (path) => !groupDeleteTarget.paths.includes(path),
-                          ),
-                        );
-                        hb.setGroupDeleteTarget(null);
-                        hb.setGroupDeleteError(null);
-                      } catch (error) {
-                        hb.setGroupDeleteError(
-                          error instanceof Error
-                            ? error.message
-                            : translate("hostBrowser.error.groupDeleteFailed"),
-                        );
-                      } finally {
-                        hb.setIsRemovingGroup(false);
-                      }
-                    }}
+                    onClick={() =>
+                      void removeGroups(groupDeleteTarget, "reparent-descendants")
+                    }
                   >
                     {translate("hostBrowser.delete.keepChildren")}
                   </Button>
@@ -1064,78 +1071,18 @@ export function HostBrowser({
                     variant="danger"
                     className="min-w-0 flex-1 whitespace-nowrap"
                     disabled={hb.isRemovingGroup}
-                    onClick={async () => {
-                      try {
-                        hb.setIsRemovingGroup(true);
-                        await hb.removeGroupIn(
-                          groupDeleteTarget.paths[0],
-                          "delete-subtree",
-                          groupDeleteTarget.vaultId,
-                        );
-                        for (const path of groupDeleteTarget.paths.slice(1)) {
-                          await hb.removeGroupIn(
-                            path,
-                            "delete-subtree",
-                            groupDeleteTarget.vaultId,
-                          );
-                        }
-                        hb.setSelectedGroupPaths((current) =>
-                          current.filter(
-                            (path) => !groupDeleteTarget.paths.includes(path),
-                          ),
-                        );
-                        hb.setGroupDeleteTarget(null);
-                        hb.setGroupDeleteError(null);
-                      } catch (error) {
-                        hb.setGroupDeleteError(
-                          error instanceof Error
-                            ? error.message
-                            : translate("hostBrowser.error.groupDeleteFailed"),
-                        );
-                      } finally {
-                        hb.setIsRemovingGroup(false);
-                      }
-                    }}
+                    onClick={() => void removeGroups(groupDeleteTarget, "delete-subtree")}
                   >
                     {translate("hostBrowser.delete.deleteChildren")}
                   </Button>
                 </>
               ) : (
+                // 빈 그룹(하위 그룹만 있을 수 있다)은 묻지 않고 지운다 — 이 창은 그러다 실패했을 때만 열린다. 다시
+                // 누르면 처음과 같이 하위 그룹까지 지운다.
                 <Button
                   variant="danger"
                   disabled={hb.isRemovingGroup}
-                  onClick={async () => {
-                    try {
-                      hb.setIsRemovingGroup(true);
-                      await hb.removeGroupIn(
-                        groupDeleteTarget.paths[0],
-                        "reparent-descendants",
-                        groupDeleteTarget.vaultId,
-                      );
-                      for (const path of groupDeleteTarget.paths.slice(1)) {
-                        await hb.removeGroupIn(
-                          path,
-                          "reparent-descendants",
-                          groupDeleteTarget.vaultId,
-                        );
-                      }
-                      hb.setSelectedGroupPaths((current) =>
-                        current.filter(
-                          (path) => !groupDeleteTarget.paths.includes(path),
-                        ),
-                      );
-                      hb.setGroupDeleteTarget(null);
-                      hb.setGroupDeleteError(null);
-                    } catch (error) {
-                      hb.setGroupDeleteError(
-                        error instanceof Error
-                          ? error.message
-                          : translate("hostBrowser.error.groupDeleteFailed"),
-                      );
-                    } finally {
-                      hb.setIsRemovingGroup(false);
-                    }
-                  }}
+                  onClick={() => void removeGroups(groupDeleteTarget, "delete-subtree")}
                 >
                   {translate("common.delete")}
                 </Button>
@@ -1169,13 +1116,25 @@ export function HostBrowser({
           onConfirm={async () => {
             const failedKeys: HomeAssetKey[] = [];
             setIsMixedDeleting(true);
-            for (const key of mixedDeleteAssetKeys) {
-              const ref = parseHomeAssetKey(key);
+            const targets = mixedDeleteAssetKeys.map((key) => ({ key, ref: parseHomeAssetKey(key) }));
+            // Host는 한 번에 지운다 — 함께 성공하거나 함께 실패한다.
+            const hostTargets = targets.filter(({ ref }) => ref.kind === "host");
+            if (hostTargets.length > 0) {
               try {
-                if (ref.kind === "host") {
-                  await hb.onRemoveHost(ref.id);
+                await hb.onRemoveHosts(hostTargets.map(({ ref }) => ref.id));
+                for (const { ref } of hostTargets) {
                   mixedDeletedHostIds.current.add(ref.id);
-                } else if (onRemoveSavedWorkspace) {
+                }
+              } catch {
+                failedKeys.push(...hostTargets.map(({ key }) => key));
+              }
+            }
+            for (const { key, ref } of targets) {
+              if (ref.kind === "host") {
+                continue;
+              }
+              try {
+                if (onRemoveSavedWorkspace) {
                   await onRemoveSavedWorkspace(ref.id);
                 } else {
                   failedKeys.push(key);
@@ -1190,18 +1149,19 @@ export function HostBrowser({
             const remainingRefs: string[] = [];
             let secretError: unknown;
             if (mixedRemoveUnusedSecrets) {
+              const unusedRefs: string[] = [];
               for (const secretRef of mixedDeleteUnusedLocalSecretRefs) {
                 const stillUsed = latestHosts.current.some((host) =>
                   !mixedDeletedHostIds.current.has(host.id) && getHostSecretRef(host) === secretRef,
                 );
-                if (stillUsed) {
-                  remainingRefs.push(secretRef);
-                  continue;
-                }
+                (stillUsed ? remainingRefs : unusedRefs).push(secretRef);
+              }
+              // 한 번에 지운다 — 하나씩 지우다 화면이 죽자 83개 중 11개만 지워지고 남았다.
+              if (unusedRefs.length > 0) {
                 try {
-                  await hb.onRemoveSecret(secretRef);
+                  await hb.onRemoveSecrets(unusedRefs);
                 } catch (error) {
-                  remainingRefs.push(secretRef);
+                  remainingRefs.push(...unusedRefs);
                   secretError = error;
                 }
               }

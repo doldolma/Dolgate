@@ -181,3 +181,92 @@ describe('KeychainPanel with team vaults', () => {
     expect(dialog.queryByText('my-web')).toBeNull();
   });
 });
+
+// 호스트를 지우다 중간에 끊기자 안 쓰는 인증 정보가 72개 남았다 — 하나씩 지우게 두지 않는다.
+describe('KeychainPanel unused credentials', () => {
+  const UNUSED = [
+    secret({ secretRef: 'secret:a', label: 'old a', linkedHostCount: 0 }),
+    secret({ secretRef: 'secret:b', label: 'old b', linkedHostCount: 0 }),
+  ];
+  const USED = secret({ secretRef: 'secret:used', label: 'still used', linkedHostCount: 2 });
+
+  function renderWith(entries: SecretMetadataRecord[], searchQuery = '') {
+    const onRemoveUnusedSecrets = vi.fn().mockResolvedValue(undefined);
+    render(
+      <KeychainPanel
+        entries={entries}
+        hosts={[]}
+        searchQuery={searchQuery}
+        onSearchQueryChange={vi.fn()}
+        onRemoveSecret={vi.fn().mockResolvedValue(undefined)}
+        onRemoveUnusedSecrets={onRemoveUnusedSecrets}
+        onEditSecret={vi.fn()}
+        onGenerateSshKey={vi.fn().mockResolvedValue({} as never)}
+        onCopySshPublicKey={vi.fn().mockResolvedValue(undefined)}
+        onInstallSshPublicKey={vi.fn().mockResolvedValue({} as never)}
+      />,
+    );
+    return { onRemoveUnusedSecrets };
+  }
+
+  it('deletes the ones no host uses in one go, leaving the rest', () => {
+    const { onRemoveUnusedSecrets } = renderWith([USED, ...UNUSED]);
+
+    fireEvent.click(screen.getByRole('button', { name: '사용하지 않는 인증 정보 2개 삭제' }));
+
+    expect(onRemoveUnusedSecrets).toHaveBeenCalledWith(UNUSED, null);
+  });
+
+  // 검색으로 가려도 센다 — 버튼에 적힌 수가 지울 수다.
+  it('counts the ones a search hides too', () => {
+    const { onRemoveUnusedSecrets } = renderWith([USED, ...UNUSED], 'still');
+
+    fireEvent.click(screen.getByRole('button', { name: '사용하지 않는 인증 정보 2개 삭제' }));
+
+    expect(onRemoveUnusedSecrets).toHaveBeenCalledWith(UNUSED, null);
+  });
+
+  it('does not offer it when every credential is in use', () => {
+    renderWith([USED]);
+
+    expect(screen.queryByRole('button', { name: /사용하지 않는 인증 정보/ })).toBeNull();
+  });
+
+  it('offers it per vault, with that vault only', async () => {
+    appStore.setState({
+      vaultIndex: {
+        ...createEmptyVaultIndex(),
+        teams: [{ id: 'team-a', name: 'Acme Infra', role: 'owner', syncState: 'ready', syncError: null, groups: [] }],
+      },
+    });
+    const teamUnused = secret({ secretRef: 'secret:team-old', label: 'team old', linkedHostCount: 0 });
+    settingsService.listTeamSavedCredentials.mockResolvedValue([teamUnused, secret({ secretRef: 'secret:team-used', label: 'team used' })]);
+    const { onRemoveUnusedSecrets } = renderWith([USED, ...UNUSED]);
+    const section = (vaultId: string) =>
+      within(document.querySelector(`[data-vault-section="${vaultId}"]`)!.closest('section')!);
+
+    await waitFor(() => expect(section('team-a').getByText('team old')).toBeInTheDocument());
+    fireEvent.click(section('team-a').getByRole('button', { name: '사용하지 않는 인증 정보 1개 삭제' }));
+    expect(onRemoveUnusedSecrets).toHaveBeenLastCalledWith([teamUnused], expect.objectContaining({ id: 'team-a', name: 'Acme Infra' }));
+
+    fireEvent.click(section('personal').getByRole('button', { name: '사용하지 않는 인증 정보 2개 삭제' }));
+    expect(onRemoveUnusedSecrets).toHaveBeenLastCalledWith(UNUSED, null);
+  });
+
+  it('counts the ones a search hides in a vault section too', async () => {
+    appStore.setState({
+      vaultIndex: {
+        ...createEmptyVaultIndex(),
+        teams: [{ id: 'team-a', name: 'Acme Infra', role: 'owner', syncState: 'ready', syncError: null, groups: [] }],
+      },
+    });
+    settingsService.listTeamSavedCredentials.mockResolvedValue([]);
+    const { onRemoveUnusedSecrets } = renderWith([USED, ...UNUSED], 'still');
+    const personal = within(document.querySelector('[data-vault-section="personal"]')!.closest('section')!);
+
+    await waitFor(() => expect(settingsService.listTeamSavedCredentials).toHaveBeenCalled());
+    fireEvent.click(personal.getByRole('button', { name: '사용하지 않는 인증 정보 2개 삭제' }));
+
+    expect(onRemoveUnusedSecrets).toHaveBeenCalledWith(UNUSED, null);
+  });
+});

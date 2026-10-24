@@ -1011,7 +1011,8 @@ interface AppStateParts {
     hostId: string,
     detectedOs: HostDetectedOs | null,
   ) => Promise<void>;
-  removeHost: (hostId: string) => Promise<void>;
+  /** 한 번에 지운다(하나여도 배열로). */
+  removeHosts: (hostIds: string[]) => Promise<void>;
   openLocalTerminal: (cols: number, rows: number) => Promise<void>;
   connectHost: (
     hostId: string,
@@ -1295,7 +1296,8 @@ interface AppStateParts {
    */
   revokeRdpCertificateTrust: (hostId: string) => Promise<void>;
   clearLogs: () => Promise<void>;
-  removeKeychainSecret: (secretRef: string) => Promise<void>;
+  /** 한 번에 지운다(하나여도 배열로). */
+  removeKeychainSecrets: (secretRefs: string[]) => Promise<void>;
   updateKeychainSecret: (
     secretRef: string,
     secrets: HostSecretInput,
@@ -1583,7 +1585,7 @@ export type CatalogSlice = Pick<
   | "setHostFavorite"
   | "setHostTerminalTheme"
   | "setHostDetectedOs"
-  | "removeHost"
+  | "removeHosts"
 >;
 
 export type SessionSlice = Pick<
@@ -1781,7 +1783,7 @@ export type SettingsSlice = Pick<
   | "updateSettings"
   | "notifyCommandFinished"
   | "clearLogs"
-  | "removeKeychainSecret"
+  | "removeKeychainSecrets"
   | "updateKeychainSecret"
   | "cloneKeychainSecretForHost"
   | "generateSshKey"

@@ -48,6 +48,38 @@ describe("createAppStore catalog and settings", () => {
     ).toBe("kanagawa-wave");
   });
 
+  // 여러 개를 지우는 확인 창이 하나씩 지우면, 지울 때마다 메인 왕복·목록 새로 읽기·화면 다시 그리기가 한 바퀴씩
+  // 돈다. 호스트 169개에 1분이 걸렸고, 개발 빌드는 다시 그린 기록이 쌓여 렌더러가 메모리 부족으로 죽었다.
+  it("removes several hosts with one call and reads the lists back once", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    vi.mocked(api.logs.list).mockClear();
+    store.getState().openEditHostDrawer("host-1");
+
+    await store.getState().removeHosts(["host-1", "rdp-host-1"]);
+
+    expect(api.hosts.remove).toHaveBeenCalledTimes(1);
+    expect(api.hosts.remove).toHaveBeenCalledWith(["host-1", "rdp-host-1"]);
+    expect(api.logs.list).toHaveBeenCalledTimes(1);
+    expect(store.getState().hosts.map((host) => host.id)).not.toContain("host-1");
+    expect(store.getState().hosts.map((host) => host.id)).not.toContain("rdp-host-1");
+    expect(store.getState().hostDrawer).toEqual({ mode: "closed" });
+  });
+
+  it("removes several saved credentials with one call and reads the lists back once", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    vi.mocked(api.keychain.list).mockClear();
+
+    await store.getState().removeKeychainSecrets(["secret:a", "secret:b"]);
+
+    expect(api.keychain.remove).toHaveBeenCalledTimes(1);
+    expect(api.keychain.remove).toHaveBeenCalledWith(["secret:a", "secret:b"]);
+    expect(api.keychain.list).toHaveBeenCalledTimes(1);
+  });
+
   it("leaves hosts alone when the write finds no such host", async () => {
     const api = createMockApi();
     const store = createAppStore(api);

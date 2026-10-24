@@ -799,17 +799,18 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
       }));
       await syncOperationalData(set);
     },
-    removeHost: async (hostId) => {
-      await api.hosts.remove(hostId);
+    // 여러 개는 한 번에 지운다. 하나씩 지우면 지울 때마다 메인 왕복·목록 새로 읽기·다시 그리기가 한 바퀴씩 돈다.
+    removeHosts: async (hostIds) => {
+      await api.hosts.remove(hostIds);
+      const removed = new Set(hostIds);
       const currentDrawer = get().hostDrawer;
+      const pendingPrompt = get().pendingMissingUsernamePrompt;
       set({
-        hosts: get().hosts.filter((host) => host.id !== hostId),
+        hosts: get().hosts.filter((host) => !removed.has(host.id)),
         pendingMissingUsernamePrompt:
-          get().pendingMissingUsernamePrompt?.hostId === hostId
-            ? null
-            : get().pendingMissingUsernamePrompt,
+          pendingPrompt && removed.has(pendingPrompt.hostId) ? null : pendingPrompt,
         hostDrawer:
-          currentDrawer.mode === "edit" && currentDrawer.hostId === hostId
+          currentDrawer.mode === "edit" && removed.has(currentDrawer.hostId)
             ? { mode: "closed" }
             : currentDrawer,
       });

@@ -88,6 +88,10 @@ interface SettingsPanelProps {
   onRevokeRdpCertificate: (hostId: string) => Promise<void>;
   /** 팀 볼트의 것이면 그 항목을 함께 받는다(개인 목록에는 없다). */
   onRemoveSecret: (secretRef: string, teamEntry?: SecretMetadataRecord) => Promise<void>;
+  onRemoveUnusedSecrets?: (
+    entries: SecretMetadataRecord[],
+    team: { id: string; name: string } | null,
+  ) => Promise<void>;
   onEditSecret: (secretRef: string, teamEntry?: SecretMetadataRecord) => void;
   onGenerateSshKey: (input: SshKeyGenerateInput) => Promise<SshKeyMaterialResult>;
   onCopySshPublicKey: (secretRef: string) => Promise<void>;
@@ -296,6 +300,7 @@ export function SettingsPanel({
   onRemoveKnownHost,
   onRevokeRdpCertificate,
   onRemoveSecret,
+  onRemoveUnusedSecrets,
   onEditSecret,
   onGenerateSshKey,
   onCopySshPublicKey,
@@ -1689,6 +1694,7 @@ export function SettingsPanel({
           searchQuery={savedCredentialsSearchQuery}
           onSearchQueryChange={onSavedCredentialsSearchQueryChange}
           onRemoveSecret={onRemoveSecret}
+          onRemoveUnusedSecrets={onRemoveUnusedSecrets}
           onEditSecret={onEditSecret}
           onGenerateSshKey={onGenerateSshKey}
           onCopySshPublicKey={onCopySshPublicKey}
