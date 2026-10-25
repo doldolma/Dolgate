@@ -2902,3 +2902,47 @@ describe('AwsService team profile management', () => {
     );
   });
 });
+
+// 스모크 시험은 가짜 AWS 세션이라 프로필 메타데이터만 넣고 비밀값은 넣지 않는다. 프로필 id 를 비밀값까지
+// 꺼내 찾게 바뀐 뒤(팀 볼트 작업 3), 있는 프로필을 "앱 전용 프로필 없음"으로 판정해 AWS 를 쓰는 스모크
+// 넷이 모두 실패했다(실측). id 는 메타데이터로 찾는다.
+describe('AwsService 프로필 id 는 비밀값 없이 찾는다', () => {
+  const previousFakeMode = process.env.DOLSSH_E2E_FAKE_AWS_SESSION;
+
+  afterEach(() => {
+    if (previousFakeMode === undefined) {
+      delete process.env.DOLSSH_E2E_FAKE_AWS_SESSION;
+    } else {
+      process.env.DOLSSH_E2E_FAKE_AWS_SESSION = previousFakeMode;
+    }
+  });
+
+  async function serviceWithoutStoredSecret() {
+    const rootDir = await createTempAwsProfileDir();
+    const service = createManagedAwsService(rootDir, [managedStaticProfile('default')]);
+    // 메타데이터는 그대로 두고 비밀값만 없앤다 — 스모크가 심는 상태와 같다.
+    getDesktopStateStorage().updateState((state) => {
+      delete state.secure.managedAwsProfilesById['profile:default'];
+    });
+    return service;
+  }
+
+  it('가짜 AWS 세션에서 프로필 상태가 비밀값 없이도 그 프로필을 찾는다', async () => {
+    process.env.DOLSSH_E2E_FAKE_AWS_SESSION = 'process';
+    const service = await serviceWithoutStoredSecret();
+
+    await expect(service.getProfileStatus('default')).resolves.toMatchObject({
+      id: 'profile:default',
+      available: true,
+    });
+  });
+
+  it('가짜 AWS 세션에서 프로필 상세도 비밀값 없이 id 를 낸다', async () => {
+    process.env.DOLSSH_E2E_FAKE_AWS_SESSION = 'process';
+    const service = await serviceWithoutStoredSecret();
+
+    await expect(service.getProfileDetails('default')).resolves.toMatchObject({
+      id: 'profile:default',
+    });
+  });
+});

@@ -1438,6 +1438,20 @@ export class AwsService {
     return null;
   }
 
+  /**
+   * 펼친 이름으로 관리 프로필의 id 만 찾는다. 개인 것은 메타데이터만 본다 — 아래
+   * findManagedProfileByProfileName 은 비밀값까지 꺼내야 결과가 나와서, 비밀값이 없거나 못 읽으면
+   * (스모크 시험의 가짜 AWS 세션이 그렇다) 있는 프로필을 "앱 전용 프로필 없음"으로 판정했다.
+   * 팀 것은 팀 목록에서 찾는다.
+   */
+  private findManagedProfileIdByProfileName(profileName: string): string | null {
+    return (
+      this.profileRepository.getMetadataByName(profileName)?.id ??
+      this.findTeamManagedProfile((_payload, name) => name === profileName)?.payload.id ??
+      null
+    );
+  }
+
   /** 펼친 이름으로 관리 프로필을 찾는다 — 개인 것은 이름 그대로, 팀 것은 `teamAwsProfileName`. */
   private findManagedProfileByProfileName(profileName: string): ManagedAwsProfilePayload | null {
     return (
@@ -3273,7 +3287,7 @@ export class AwsService {
   ): Promise<AwsProfileStatus> {
     const profileId =
       awsRootDir === this.awsProfileRootDir
-        ? this.findManagedProfileByProfileName(profileName)?.id ?? null
+        ? this.findManagedProfileIdByProfileName(profileName)
         : null;
     if (
       awsRootDir === this.awsProfileRootDir &&
@@ -3377,7 +3391,7 @@ export class AwsService {
 
     if (isE2EFakeAwsSessionEnabled()) {
       return {
-        id: this.findManagedProfileByProfileName(normalizedProfileName)?.id ?? null,
+        id: this.findManagedProfileIdByProfileName(normalizedProfileName),
         profileName: normalizedProfileName,
         available: true,
         isSsoProfile: false,
