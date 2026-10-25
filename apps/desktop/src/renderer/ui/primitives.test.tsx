@@ -8,6 +8,7 @@ import { ModalBody, ModalFooter, ModalHeader, ModalShell } from './ModalShell';
 import { NoticeCard } from './NoticeCard';
 import { OptionCard } from './OptionCard';
 import { PanelSection } from './PanelSection';
+import { SearchableSelect } from './SearchableSelect';
 import { SplitButton, SplitButtonMain, SplitButtonMenu, SplitButtonMenuItem, SplitButtonToggle } from './SplitButton';
 import { StatusBadge } from './StatusBadge';
 import { TagInputField } from './TagInputField';
@@ -211,5 +212,31 @@ describe('renderer UI primitives', () => {
     expect(
       screen.getByText('Keep the log viewport pinned to the bottom'),
     ).toBeInTheDocument();
+  });
+
+  // 몇 개뿐인 목록(볼트 고르기)은 검색 칸 없이, 옵션마다 앞에 표시를 단다.
+  it('renders option icons and can leave the search box out', () => {
+    const onChange = vi.fn();
+    render(
+      <SearchableSelect
+        ariaLabel="Vault"
+        placeholder="Vault"
+        searchable={false}
+        value="personal"
+        options={[
+          { value: 'personal', label: 'Personal', icon: <span data-testid="mark-personal" /> },
+          { value: 'team-1', label: 'Acme Infra', icon: <span data-testid="mark-team" /> },
+        ]}
+        onChange={onChange}
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Vault' });
+    expect(trigger).toContainElement(screen.getByTestId('mark-personal'));
+    fireEvent.click(trigger);
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.getByRole('option', { name: 'Acme Infra' })).toContainElement(screen.getByTestId('mark-team'));
+    fireEvent.click(screen.getByRole('option', { name: 'Acme Infra' }));
+    expect(onChange).toHaveBeenCalledWith('team-1');
   });
 });

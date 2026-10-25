@@ -54,7 +54,7 @@ import {
   type MetricChartSeriesDefinition,
 } from "./UPlotMetricChart";
 import { ConnectionStatusOverlay } from "./ConnectionStatusOverlay";
-import { MyAwsKeyDialog } from "./teams/MyAwsKeyDialog";
+import { AwsKeyDialog } from "./teams/AwsKeyDialog";
 import { resolveConnectionStages } from "./terminal-workspace/connectionStages";
 import { useAppStore } from "../store/appStore";
 import { ConnectionHopSteps } from "./ConnectionHopSteps";
@@ -1435,11 +1435,11 @@ export function ContainersWorkspace({
   // 내 키가 없는 팀 정적 AWS 프로필로 막혔으면 넣을 곳(연결 흐름이 남긴다) — 실패 화면이 "내 키 넣기"를 낸다.
   const awsProfileIdOfHost =
     isAwsEcsHostRecord(host) || isAwsEc2HostRecord(host) ? (host.awsProfileId ?? null) : null;
-  const awsMissingMyKey = useAppStore((state) =>
-    awsProfileIdOfHost ? state.awsMissingMyKeyByProfileId[awsProfileIdOfHost] : undefined,
+  const awsMissingKey = useAppStore((state) =>
+    awsProfileIdOfHost ? state.awsMissingKeyByProfileId[awsProfileIdOfHost] : undefined,
   );
-  const clearAwsMissingMyKey = useAppStore((state) => state.clearAwsMissingMyKey);
-  const [myAwsKeyOpen, setMyAwsKeyOpen] = useState(false);
+  const clearAwsMissingKey = useAppStore((state) => state.clearAwsMissingKey);
+  const [myAwsKeyOpen, setAwsKeyOpen] = useState(false);
   const connectionFailurePresentation = useMemo(
     () =>
       tab.errorMessage
@@ -2895,8 +2895,8 @@ export function ContainersWorkspace({
             void onClose(host.id);
           }}
           // 내 키가 없는 팀 정적 AWS 프로필이면 그 자리에서 넣고 다시 붙는다(M3).
-          secondaryActionLabel={awsMissingMyKey ? translate("teams.myKey.add") : undefined}
-          onSecondaryAction={awsMissingMyKey ? () => setMyAwsKeyOpen(true) : undefined}
+          secondaryActionLabel={awsMissingKey ? translate("teams.awsKey.add") : undefined}
+          onSecondaryAction={awsMissingKey ? () => setAwsKeyOpen(true) : undefined}
         />
       ) : shouldShowConnectingOverlay ? (
         // 터미널과 같은 화면을 쓴다 — 예전에는 여기만 자기 카드를 그려서, tailnet 관문도 호스트 키
@@ -2914,13 +2914,13 @@ export function ContainersWorkspace({
         />
       ) : null}
 
-      {myAwsKeyOpen && awsMissingMyKey && awsProfileIdOfHost ? (
-        <MyAwsKeyDialog
-          missing={awsMissingMyKey}
-          onClose={() => setMyAwsKeyOpen(false)}
+      {myAwsKeyOpen && awsMissingKey && awsProfileIdOfHost ? (
+        <AwsKeyDialog
+          missing={awsMissingKey}
+          onClose={() => setAwsKeyOpen(false)}
           onSaved={() => {
-            setMyAwsKeyOpen(false);
-            clearAwsMissingMyKey(awsProfileIdOfHost);
+            setAwsKeyOpen(false);
+            clearAwsMissingKey(awsProfileIdOfHost);
             void onRetryConnection(host.id);
           }}
         />

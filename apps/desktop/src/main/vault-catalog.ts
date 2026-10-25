@@ -183,7 +183,7 @@ export interface VaultCatalog {
    * — 점프로 가리켜도 따라가지 않는다.
    */
   getHostInSameVault(anchorHostId: string, id: string): HostRecord | null;
-  /** 모든 볼트의 tailnet 설정(auth key 포함 — 팀 것은 내 auth key 가 먼저다). 코어에 넘길 때 쓴다. */
+  /** 모든 볼트의 tailnet 설정(이 기기에 둔 auth key 포함). 코어에 넘길 때 쓴다. */
   listTailnetPayloads(): TailnetPayload[];
   /** 모든 볼트에서 포트 포워딩 규칙을 id 로 찾는다(켜고 끌 때). */
   getPortForward(id: string): PortForwardRuleRecord | null;
@@ -472,15 +472,10 @@ export function createVaultCatalog(
       findInTeam((scope) => scope.tailnets.list().find((record) => record.id === id) ?? null)?.scope ?? personalScope,
     scopeOfKnownHost: (id) =>
       findInTeam((scope) => scope.knownHosts.list().find((record) => record.id === id) ?? null)?.scope ?? personalScope,
-    // 팀 tailnet 은 내 auth key 가 있으면 그것을 쓴다(내 것 → 팀 것). 이 목록은 코어에 넘기는 데만 쓴다 — 팀에
-    // 올리는 것은 팀 저장소의 listPayloads() 라 내 키가 실리지 않는다.
+    // 코어에 넘기는 데만 쓴다. 팀 것도 이 기기에 둔 auth key 가 실린다 — 비어 있으면 브라우저 로그인이다.
     listTailnetPayloads: () =>
       listAcrossVaults(
-        (scope) =>
-          scope.tailnets.listPayloads().map((payload) => {
-            const mine = scope.memberPrefs?.readTailnetCredentials(payload.id);
-            return mine ? { ...payload, authKey: mine.authKey } : payload;
-          }),
+        (scope) => scope.tailnets.listPayloads(),
         (record) => record,
       ),
     describeTeamVaults: () => {

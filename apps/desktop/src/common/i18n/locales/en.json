@@ -882,8 +882,7 @@
       "os": "OS",
       "portForward": "Forwarding",
       "portForwardStarting": "{{count}} starting",
-      "team": "Team",
-      "teamRecorded": "{{team}} · Saved to the team's history and recordings"
+      "team": "Team"
     },
     "update": {
       "checking": "Checking GitHub Releases for a new version.",
@@ -974,7 +973,7 @@
       "sameName": "The new profile name is the same as the current one.",
       "linkedNotFoundNamed": "The linked AWS profile \"{{label}}\" could not be found. Choose the profile again in the host settings.",
       "linkedNotFound": "The linked AWS profile could not be found. Choose the profile again in the host settings.",
-      "teamKeyMissing": "You haven't added your own AWS key to the team profile \"{{profile}}\". Each member adds their own key."
+      "teamKeyMissing": "This device has no AWS key for the team profile \"{{profile}}\". Keys aren't synced, so add one on each device."
     },
     "role": {
       "assumeDenied": "This role cannot be assumed with the selected source profile. Check the IAM permissions and the target role's trust policy.",
@@ -2062,7 +2061,6 @@
     "quickSsh": "Save and connect over SSH",
     "host": {
       "connect": "Connect to {{label}}",
-      "containers": "{{label}} containers",
       "recent": "Recent"
     },
     "group": {
@@ -2925,6 +2923,7 @@
       "copy": "Copy",
       "root": "Top level",
       "hostCount": "{{count}} hosts",
+      "groupCount": "{{count}} groups",
       "vault": "Vault",
       "group": "Group",
       "shareSecrets": "Also share {{count}} passwords and SSH keys",
@@ -2967,13 +2966,10 @@
     "vault": {
       "addTo": "{{action}} in {{vault}}"
     },
-    "myKey": {
-      "aboutToggle": "About your own key",
-      "awsHint": "Saved for you only. Each member adds their own key — the team gets only the profile settings.",
-      "tailnetHint": "Saved for you only. Each member adds their own auth key.",
-      "add": "Add my key",
-      "dialogTitle": "{{profile}} · My key",
-      "saveFailed": "Couldn't save your key."
+    "awsKey": {
+      "add": "Add key",
+      "dialogTitle": "{{profile}} · Key",
+      "saveFailed": "Couldn't save the key."
     }
   },
   "teamsPanel": {
@@ -2992,29 +2988,30 @@
       "error": "Couldn't sync: {{message}}"
     },
     "invites": {
+      "copy": "Copy link",
+      "copied": "Copied",
+      "copyFailed": "Couldn't copy the link.",
       "revoke": "Revoke link",
       "title": "{{name}}'s link",
       "expires": "Expires {{when}}",
       "joined": "Joined: {{count}}",
-      "created": "Created {{when}}"
+      "label": "Invite links"
     },
     "members": {
-      "you": "(you)",
-      "createdTeam": "Created the team",
+      "you": "you",
       "actions": "Member actions",
       "makeOwner": "Make owner",
       "remove": "Remove",
       "loadFailed": "Couldn't load the members.",
-      "joinedVia": "Joined via {{name}}'s link"
+      "joinedVia": "Joined via {{name}}'s link",
+      "label": "Members"
     },
     "danger": {
-      "description": "Leaving removes the team's hosts, passwords and keys from this device.",
       "leave": "Leave team",
       "delete": "Delete team"
     },
     "nameDialog": {
-      "create": "Create",
-      "placeholder": "e.g. Infra"
+      "create": "Create"
     },
     "joinDialog": {
       "next": "Next"
@@ -3025,7 +3022,7 @@
       "copied": "Link copied — it stays open for {{duration}}.",
       "copyFailed": "Couldn't copy. Copy the link below yourself.",
       "copyAgain": "Copy again",
-      "onceHint": "You can see this link only now. Make a new one if you lose it.",
+      "recopyHint": "While the link is live, you can copy it again from the invite links list.",
       "duration": {
         "hour1": "1 hour",
         "day1": "1 day",
@@ -3097,11 +3094,11 @@
       "label": "What a team vault shares",
       "edit": "Everyone in the team can see and edit what you put in it.",
       "members": "The member list shows who joined, through whose link, and when.",
-      "ownKeys": "AWS static keys and Tailscale auth keys always stay your own."
+      "ownKeys": "AWS static keys and Tailscale auth keys aren't synced — add them on each device. When you share your own, they're filled in on the device you shared from."
     },
     "hostCount": "Hosts: {{count}}",
-    "createdWhen": "Created {{when}}",
-    "teamActions": "Team actions"
+    "teamActions": "Team actions",
+    "listTitle": "Teams"
   },
   "shareChat": {
     "titleWith": "Chat history · {{title}}",
@@ -3966,6 +3963,8 @@
       "node": "This device"
     },
     "connect": "Connect",
+    "edit": "Edit",
+    "connectedWhileEditing": "This network connected while you were editing, so nothing was saved. Cancel, disconnect it, and edit again.",
     "tailnetMismatch": "This entry is for {{expected}} but it connected to {{actual}}. It looks like a different account was used — if that tailnet has a machine with the same name, you could reach the wrong one.",
     "stopTest": "Stop test",
     "removed": {
@@ -4073,7 +4072,8 @@
     "workspaceDetail": "Can't show this Workspace — {{label}}"
   },
   "hostDrawer": {
-    "kindNeedsServerUpdate": "Your sync server does not support {{kind}} hosts yet. Update the server to enable it."
+    "kindNeedsServerUpdate": "Your sync server does not support {{kind}} hosts yet. Update the server to enable it.",
+    "vault": "Vault"
   },
   "vnc": {
     "clipboardLossy": "This server only supports an ASCII clipboard — {{count}} character(s) became ?",

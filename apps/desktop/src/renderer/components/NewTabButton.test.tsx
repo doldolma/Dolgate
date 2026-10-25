@@ -286,4 +286,26 @@ describe("NewTabButton", () => {
     expect(screen.getByText("Morning checks")).toBeInTheDocument();
     expect(screen.queryByText("alpha")).not.toBeInTheDocument();
   });
+
+  // 공유로 만든 팀 호스트는 이름·주소가 개인 원본과 같다 — 팀을 적지 않으면 두 줄이 똑같아 어느 것을 여는지 모른다.
+  // 홈 검색과 같은 문법("[팀 표시] 팀 이름 · 부제")으로 적는다. 개인 것은 그대로다.
+  it("팀 호스트·팀 Workspace 에는 팀을 적고, 개인 것은 그대로 둔다", () => {
+    renderButton({
+      hosts: [sshHost("h-1", "nas"), sshHost("h-2", "nas")],
+      savedWorkspaces: [savedWorkspace("w-team", "Oracle", "2026-08-04T01:00:00.000Z")],
+      onOpenSavedWorkspace: vi.fn(),
+      vaultIndex: {
+        teams: [{ id: "t-1", name: "sample", role: "owner", syncState: "ready", syncError: null, groups: [] }],
+        teamIdByHostId: { "h-2": "t-1" },
+        teamIdByWorkspaceId: { "w-team": "t-1" },
+      },
+    });
+
+    fireEvent.click(screen.getByLabelText("새 탭"));
+    const texts = screen.getAllByRole("option").map((option) => option.textContent ?? "");
+
+    expect(texts).toContain("Oraclesample · pane 2개 · Prod · Local shell");
+    expect(texts).toContain("nasubuntu@h-1.example.com:22");
+    expect(texts).toContain("nassample · ubuntu@h-2.example.com:22");
+  });
 });

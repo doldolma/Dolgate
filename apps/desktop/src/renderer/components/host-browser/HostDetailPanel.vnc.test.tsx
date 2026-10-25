@@ -1,6 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { HostRecord, SecretMetadataRecord, SshHostRecord, VncHostRecord } from '@shared';
+import { appStore } from '../../store/appStore';
+import { createEmptyVaultIndex } from '../../store/utils/vaults';
 import { HostDetailPanel } from './HostDetailPanel';
 import type { HostBrowserModel } from './useHostBrowser';
 
@@ -10,6 +12,9 @@ import type { HostBrowserModel } from './useHostBrowser';
 
 vi.mock('../../services/desktop/tailnet', () => ({
   listTailnets: vi.fn(async () => [{ id: 'tn-corp', label: 'corp-tailnet' }]),
+  listTeamTailnets: vi.fn(async (teamId: string) =>
+    teamId === 'team-1' ? [{ id: 'tn-team', label: 'team-tailnet' }] : [],
+  ),
 }));
 
 const keychainEntries: SecretMetadataRecord[] = [
@@ -150,5 +155,18 @@ describe('HostDetailPanel — VNC Connection 탭', () => {
     renderPanel(makeHost({ sshTunnelHostId: null, tailnetId: 'tn-corp' }));
 
     expect(await screen.findByText('corp-tailnet')).toBeTruthy();
+  });
+
+  // 팀 볼트로 공유한 호스트는 tailnet 도 그 팀 볼트에 있다 — 개인 목록에서 찾으면 "설정 없음" 이 된다.
+  it('팀 호스트는 그 팀 볼트의 tailnet 이름을 보여준다', async () => {
+    appStore.setState({ vaultIndex: { ...createEmptyVaultIndex(), teamIdByHostId: { 'h-vnc': 'team-1' } } });
+    try {
+      renderPanel(makeHost({ sshTunnelHostId: null, tailnetId: 'tn-team' }));
+
+      expect(await screen.findByText('team-tailnet')).toBeTruthy();
+      expect(screen.queryByText('설정 없음 — 연결되지 않습니다')).toBeNull();
+    } finally {
+      appStore.setState({ vaultIndex: createEmptyVaultIndex() });
+    }
   });
 });

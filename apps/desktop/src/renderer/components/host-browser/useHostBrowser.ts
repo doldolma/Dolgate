@@ -666,7 +666,8 @@ export interface UseHostBrowserParams {
   onQuickConnectSsh?: (input: ParsedQuickSshCommand) => Promise<void>;
   detailTab?: "overview" | "connection";
   onDetailTabChange?: (tab: "overview" | "connection") => void;
-  onOpenReplay?: (recordingId: string) => void | Promise<void>;
+  /** teamId 를 주면 그 팀의 녹화(서버)를 연다 — 팀 호스트 상세의 다른 멤버 접속. 없으면 이 기기의 녹화다. */
+  onOpenReplay?: (recordingId: string, teamId?: string | null) => void | Promise<void>;
   onGenerateAndInstallSshKey?: (
     hostId: string,
     input: SshKeyGenerateInput,
@@ -2377,7 +2378,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     if (group) {
       params.onRequestVaultCopy?.({
         sourceVaultId: group.vaultId,
-        selection: { kind: "group", groupPath: group.path },
+        selection: { kind: "groups", groupPaths: [group.path] },
         target,
       });
     }

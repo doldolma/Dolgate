@@ -6,7 +6,7 @@ import type {
   ActivityLogRecord,
   AuthType,
   AppSettings,
-  AwsProfileMissingMyKey,
+  AwsProfileMissingKey,
   AwsEcsClusterSnapshot,
   AwsEcsServiceLogsSnapshot,
   AwsMetricHistoryPoint,
@@ -925,9 +925,9 @@ interface AppStateParts {
    * 내 키가 없어 붙지 못한 팀 정적 AWS 프로필 — 호스트가 쓰는 프로필 id 마다 키를 넣을 곳. 연결 실패 화면이 이것을
    * 보고 "내 키 넣기"를 낸다(오류 문장에 표식을 섞지 않는다). 그 프로필 상태가 다시 괜찮으면 지운다.
    */
-  awsMissingMyKeyByProfileId: Record<string, AwsProfileMissingMyKey>;
+  awsMissingKeyByProfileId: Record<string, AwsProfileMissingKey>;
   /** 내 키를 넣은 뒤 지운다. */
-  clearAwsMissingMyKey: (profileId: string) => void;
+  clearAwsMissingKey: (profileId: string) => void;
   pendingStartupCommandPrompt: PendingStartupCommandPrompt | null;
   /**
    * 지금 답을 기다리는 대화형 인증들. **대상(세션·엔드포인트)마다 하나씩** 담는다.
@@ -957,6 +957,8 @@ interface AppStateParts {
   openSettingsSection: (section: SettingsSection) => void;
   /** 새 호스트 서랍. 볼트·그룹을 안 주면 지금 위치(All 이면 개인)에 만든다. */
   openCreateHostDrawer: (target?: { vaultId: string; groupPath: string | null }) => void;
+  /** 새 호스트 서랍에서 만들 볼트를 바꾼다(서랍 맨 위 Vault). 그 볼트 맨 위에서 시작하고, 서랍은 그대로다. */
+  setCreateHostVault: (vaultId: string) => void;
   openEditHostDrawer: (hostId: string) => void;
   closeHostDrawer: () => void;
   /**
@@ -1565,6 +1567,7 @@ export type CatalogSlice = Pick<
   | "openHomeSection"
   | "openSettingsSection"
   | "openCreateHostDrawer"
+  | "setCreateHostVault"
   | "openEditHostDrawer"
   | "closeHostDrawer"
   | "navigateGroup"
@@ -1603,8 +1606,8 @@ export type SessionSlice = Pick<
   | "pendingCredentialRetry"
   | "activeCredentialRetryAttempt"
   | "pendingMissingUsernamePrompt"
-  | "awsMissingMyKeyByProfileId"
-  | "clearAwsMissingMyKey"
+  | "awsMissingKeyByProfileId"
+  | "clearAwsMissingKey"
   | "pendingStartupCommandPrompt"
   | "pendingInteractiveAuths"
   | "pendingConnectionAttempts"

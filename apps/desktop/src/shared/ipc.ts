@@ -1413,12 +1413,14 @@ export interface TeamInvite {
   createdAt: string;
   active: boolean;
   revokedAt: string | null;
+  /**
+   * 다시 복사할 링크. 링크의 비밀값은 팀 키로 잠가 링크 기록에 함께 두므로 멤버 누구나 링크가 살아 있는
+   * 동안 다시 복사한다. 쓸 수 없는 링크와 그 칸이 없는 링크(이 기능 전에 만든 것)는 null 이다.
+   */
+  link: string | null;
 }
 
-/**
- * 만든 초대 링크. 링크의 # 뒤(비밀값)는 서버에도 이 기기에도 남지 않는다 — 이때 한 번만 보여 줄 수 있고,
- * 잃으면 새로 만든다.
- */
+/** 만든 초대 링크. 같은 링크를 멤버 누구나 링크 목록(`TeamInvite.link`)에서 다시 복사할 수 있다. */
 export interface TeamInviteCreated {
   link: string;
   invite: TeamInvite;
@@ -1449,10 +1451,11 @@ export type TeamInvitePreview =
   | { status: "update-required" }
   | { status: "invalid" };
 
-/** 볼트 사이 복사에서 고른 것 — 호스트 여럿, 또는 그룹 하나(하위 그룹과 호스트 통째로). */
+/** 볼트 사이 복사에서 고른 것 — 호스트 여럿, 또는 그룹 여럿(하위 그룹과 호스트 통째로). */
 export type VaultCopySelection =
   | { kind: 'hosts'; hostIds: string[] }
-  | { kind: 'group'; groupPath: string }
+  /** 그룹마다 놓은 자리 아래에 그 이름으로 간다. 그룹과 그 안의 그룹을 함께 고르면 바깥 그룹째 한 번 복사한다. */
+  | { kind: 'groups'; groupPaths: string[] }
   /** 워크스페이스와 그 창의 호스트(호스트가 쓰는 것까지). 창은 복사본 호스트로 다시 잇는다. */
   | { kind: 'workspaces'; workspaceIds: string[] };
 
@@ -1465,8 +1468,8 @@ export interface VaultCopyRequest {
   targetGroupPath?: string | null;
   /**
    * 대상이 팀일 때 호스트의 비밀번호·SSH 키도 팀에 함께 넣는다. 기본 켬. 끄면 복사한 사람의 내 자격 증명에만
-   * 두고, 다른 멤버는 처음 접속할 때 자기 것을 넣는다. AWS 정적 프로필의 키와 tailnet auth key 는 사람의 인증
-   * 정보라 이 값과 상관없이 늘 복사한 사람의 내 칸에 간다(팀에는 설정만).
+   * 두고, 다른 멤버는 처음 접속할 때 자기 것을 넣는다. AWS 정적 키와 tailnet auth key 는 이 값과 상관없이 대상
+   * 볼트에 따라가고, 팀이면 동기화하지 않아 복사한 기기에만 있다(팀에는 설정만).
    */
   shareSecrets?: boolean;
 }
@@ -1479,7 +1482,7 @@ export interface VaultCopyCounts {
   dependencyHosts: number;
   /**
    * 비밀번호와 키 — 대상 볼트에 들어가는 것만 센다. 팀으로 갈 때는 호스트 비밀값뿐이다(AWS 정적 키·tailnet auth
-   * key 는 늘 복사한 사람의 내 칸으로 간다). 개인으로 가져올 때는 그 둘도 센다.
+   * key 는 동기화하지 않아 복사한 기기에만 있다). 개인으로 가져올 때는 그 둘도 센다.
    */
   secrets: number;
   knownHosts: number;
@@ -2213,12 +2216,12 @@ export interface DesktopApi {
   tailnet: {
     /**
      * vaultId 는 볼 볼트다. 없으면 개인, 팀 ID 면 그 팀 볼트(이 기기에 없는 팀이면 빈 목록). 팀 tailnet 의
-     * hasAuthKey 는 내 auth key 가 있는지다 — auth key 는 늘 각자 내 칸에 둔다.
+     * hasAuthKey 는 이 기기에 키가 있는지다 — 키는 팀에 올리지 않는다.
      */
     list: (vaultId?: string | null) => Promise<TailnetRecord[]>;
     /**
      * authKey 를 생략하면 기존 키를 그대로 둔다. 빈 문자열이면 지운다. vaultId 는 새 설정을 둘 볼트다(없으면 개인) —
-     * 있는 설정은 그것이 든 볼트에 그대로 둔다. 팀 것의 auth key 는 내 칸에만 간다.
+     * 있는 설정은 그것이 든 볼트에 그대로 둔다. 팀 것의 auth key 는 이 기기에만 둔다(팀에 올리지 않는다).
      */
     save: (input: {
       record: TailnetRecord;

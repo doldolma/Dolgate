@@ -852,8 +852,21 @@ func (r *Registry) DiscardInvalidIdentityIfIdle(ctx context.Context, id string) 
 func (r *Registry) Forget(ctx context.Context, id string) error {
 	existing := r.lockEntrySettled(id)
 	if existing == nil {
-		r.mu.Unlock()
-		return nil
+		// 이 실행에서 한 번도 쓰지 않은 tailnet 이다. 그래도 지난 실행의 등록이 남아 있으면 컨트롤 플레인에는
+		// 노드가 있다 — 노드를 만들어 로그아웃까지 해야 그 등록(노드키)이 살아 있는 채 남지 않는다. 등록이 정말
+		// 있는지는 노드의 Logout 이 저장된 상태로 판단한다. 설정이 없으면 만들 수도 없고, 등록된 적도 없다.
+		if r.closed {
+			r.mu.Unlock()
+			return nil
+		}
+		node, err := r.newNode(id)
+		if err != nil {
+			r.mu.Unlock()
+			return nil
+		}
+		r.generations += 1
+		existing = &entry{node: node, generation: r.generations}
+		r.entries[id] = existing
 	}
 	if existing.idle != nil {
 		existing.idle.Stop()

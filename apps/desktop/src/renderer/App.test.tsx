@@ -201,6 +201,7 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     openHomeSection: fn(),
     openSettingsSection: fn(),
     openCreateHostDrawer: fn(),
+    setCreateHostVault: fn(),
     openEditHostDrawer: fn(),
     closeHostDrawer: fn(),
     navigateGroup: fn(),

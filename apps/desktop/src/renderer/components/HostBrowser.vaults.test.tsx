@@ -220,8 +220,10 @@ describe("HostBrowser vaults", () => {
     expect(teamProd!.textContent).toBe("Prod3");
     // 볼트 줄은 그 볼트 항목 수 — 개인·팀 다 호스트 3개 + 워크스페이스 1개.
     expect(vaultRow("personal").textContent).toBe("Personal4");
-    // 팀 표시(머리글자 네모 "AI")는 aria-hidden 이지만 글자로는 남는다.
-    expect(vaultRow(TEAM).textContent).toBe("AIAcme Infra4");
+    // 볼트 표시는 선 아이콘이다 — 개인은 사람, 팀은 사람들. 머리글자는 없다.
+    expect(vaultRow(TEAM).textContent).toBe("Acme Infra4");
+    expect(vaultRow(TEAM).querySelector("svg.lucide-users")).not.toBeNull();
+    expect(vaultRow("personal").querySelector("svg.lucide-user")).not.toBeNull();
     // 다시 들어와야 하는 팀은 개수 대신 경고(툴팁에 이유).
     expect(screen.getByRole("img", { name: "이 기기에 이 팀의 키가 없습니다. 초대 링크로 다시 들어와 주세요." })).toBeInTheDocument();
   });
@@ -283,7 +285,7 @@ describe("HostBrowser vaults", () => {
     renderVaults({ activityLogs: [log("team-web"), log("my-web")] });
     const card = (assetKey: string) => document.querySelector<HTMLElement>(`[data-home-asset-key="${assetKey}"]`)!;
 
-    // 카드 아래 줄: 팀 것은 "[머리글자] 팀 이름 / 그룹", 개인 것은 그룹 그대로.
+    // 카드 아래 줄: 팀 것은 "[팀 표시] 팀 이름 / 그룹", 개인 것은 그룹 그대로.
     expect(card("host:team-web").textContent).toContain("Acme Infra / Prod / web");
     expect(card("host:team-bastion").textContent).toContain("Acme Infra / Bastion");
     expect(card("workspace:team-ws").textContent).toContain("Acme Infra / Prod");
@@ -308,7 +310,7 @@ describe("HostBrowser vaults", () => {
     renderVaults({ hostViewMode: "list" });
 
     const row = (assetKey: string) => document.querySelector<HTMLElement>(`[data-home-asset-key="${assetKey}"]`)!;
-    // 경로는 잘리지 않게 그대로, 팀 이름은 머리글자 네모의 툴팁(읽기 프로그램에는 글로).
+    // 경로는 잘리지 않게 그대로, 팀 이름은 팀 표시의 툴팁(읽기 프로그램에는 글로).
     expect(within(row("host:team-web")).getByText("Prod / web")).toBeInTheDocument();
     expect(within(row("host:team-web")).getByText("Acme Infra")).toHaveClass("sr-only");
     expect(row("host:my-web").textContent).not.toContain("Acme Infra");
@@ -554,6 +556,27 @@ describe("HostBrowser vaults", () => {
     expect(screen.getByRole("button", { name: "내보내기... (항목 3개)" })).toBeInTheDocument();
   });
 
+  // 볼트 줄의 개수 자리는 ⋯ 와 나눠 쓴다. 마우스로 줄(접기 화살표 포함)을 누른 뒤 남은 포커스로는 ⋯ 를 띄우지 않는다 —
+  // 그러면 그 줄만 개수가 사라져 다른 줄과 달라 보였다(2026-10-24). 띄우는 것은 마우스를 올렸을 때·키보드로 왔을 때·
+  // 그 볼트 메뉴가 열려 있을 때뿐이다. jsdom 은 스타일을 계산하지 않아 그 규칙(클래스)을 본다 — 화면은 실제 앱에서 쟀다.
+  it("swaps the vault count for ⋯ on hover, keyboard focus or its open menu — not after a mouse click", () => {
+    renderVaults();
+    const count = vaultRow(TEAM).lastElementChild as HTMLElement;
+    const menuButton = screen.getByRole("button", { name: "Acme Infra 메뉴" });
+
+    for (const element of [count, menuButton]) {
+      expect(element.className).not.toContain("group-focus-within/vault");
+      expect(element.className).toContain("group-has-[:focus-visible]/vault");
+    }
+    expect(menuButton).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(menuButton);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(menuButton).toHaveAttribute("aria-expanded", "true");
+    expect(count).toHaveClass("opacity-0");
+    expect(menuButton).toHaveClass("opacity-100");
+  });
+
   it("offers invite, new host, new group and team management on a team row", async () => {
     const { onOpenTeamInvite, onCreateHostInVault, onNavigateGroup, onCreateGroup, onManageTeam } = renderVaults();
     const teamRow = vaultRow(TEAM);
@@ -682,7 +705,7 @@ describe("HostBrowser copy between vaults", () => {
     fireEvent.drop(vaultRow(TEAM), { dataTransfer });
     expect(onRequestVaultCopy).toHaveBeenLastCalledWith({
       sourceVaultId: "personal",
-      selection: { kind: "group", groupPath: "Prod" },
+      selection: { kind: "groups", groupPaths: ["Prod"] },
       target: { vaultId: TEAM, groupPath: null },
     });
 
@@ -694,7 +717,7 @@ describe("HostBrowser copy between vaults", () => {
     fireEvent.drop(personalProd!, { dataTransfer });
     expect(onRequestVaultCopy).toHaveBeenLastCalledWith({
       sourceVaultId: TEAM,
-      selection: { kind: "group", groupPath: "Bastion" },
+      selection: { kind: "groups", groupPaths: ["Bastion"] },
       target: { vaultId: "personal", groupPath: "Prod" },
     });
     expect(onMoveGroup).not.toHaveBeenCalled();
@@ -774,7 +797,7 @@ describe("HostBrowser copy between vaults", () => {
     fireEvent.click(within(screen.getByRole("menu")).getByRole("button", { name: "공유…" }));
     expect(onRequestVaultCopy).toHaveBeenLastCalledWith({
       sourceVaultId: "personal",
-      selection: { kind: "group", groupPath: "Prod" },
+      selection: { kind: "groups", groupPaths: ["Prod"] },
       target: null,
     });
 
@@ -782,7 +805,25 @@ describe("HostBrowser copy between vaults", () => {
     fireEvent.click(within(screen.getByRole("menu")).getByRole("button", { name: "볼트로 복사…" }));
     expect(onRequestVaultCopy).toHaveBeenLastCalledWith({
       sourceVaultId: TEAM,
-      selection: { kind: "group", groupPath: "Prod" },
+      selection: { kind: "groups", groupPaths: ["Prod"] },
+      target: null,
+    });
+  });
+
+  it("shares several selected groups at once", () => {
+    const { onRequestVaultCopy } = renderVaults({ copy: true });
+    const [, teamProd] = groupRows("Prod");
+    const bastion = tree().getByRole("button", { name: /^Bastion/ });
+
+    fireEvent.click(teamProd!);
+    fireEvent.click(bastion, { metaKey: true });
+    fireEvent.contextMenu(bastion);
+    const copyItem = within(screen.getByRole("menu")).getByRole("button", { name: "볼트로 복사…" });
+    expect(copyItem).toBeEnabled();
+    fireEvent.click(copyItem);
+    expect(onRequestVaultCopy).toHaveBeenLastCalledWith({
+      sourceVaultId: TEAM,
+      selection: { kind: "groups", groupPaths: ["Bastion", "Prod"] },
       target: null,
     });
   });

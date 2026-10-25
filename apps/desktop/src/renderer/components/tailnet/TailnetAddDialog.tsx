@@ -107,7 +107,6 @@ export function TailnetAddDialog({
               }
               onCancelTest={() => void cancelTest(current.id)}
               onCancel={close}
-              myKey={Boolean(vaultId)}
             />
           ) : null}
         </ModalBody>

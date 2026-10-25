@@ -5,9 +5,9 @@ import { useAppStore } from '../../store/appStore';
 import { normalizeErrorMessage } from '../../store/utils/errors-and-prompts';
 import { DialogBackdrop } from '../DialogBackdrop';
 import { Button, ModalBody, ModalFooter, ModalShell } from '../../ui';
-import { History, Link, Lock } from '../../ui/icons';
+import { History, Link, Lock, Users } from '../../ui/icons';
 import { TeamDialogError } from './TeamDialogFrame';
-import { MarkSquare, TeamMark } from './TeamMark';
+import { MarkSquare } from './MarkSquare';
 
 type UnavailableReason = Extract<TeamAvailability, { available: false }>['reason'];
 
@@ -123,13 +123,19 @@ export function JoinTeamDialogHost({ onRequestLogin }: JoinTeamDialogHostProps) 
     </Button>
   );
   const warningMark = (
-    <MarkSquare size="xl" tone="warning">
+    <MarkSquare tone="warning">
       !
     </MarkSquare>
   );
   const linkMark = (
-    <MarkSquare size="xl" tone="muted">
+    <MarkSquare tone="muted">
       <Link />
+    </MarkSquare>
+  );
+  // 팀 미리보기도 다른 상태처럼 아이콘 네모 — 팀 이름은 바로 아래 제목이 말한다.
+  const teamMark = (
+    <MarkSquare>
+      <Users />
     </MarkSquare>
   );
 
@@ -158,7 +164,7 @@ export function JoinTeamDialogHost({ onRequestLogin }: JoinTeamDialogHostProps) 
       return (
         <JoinCard
           mark={
-            <MarkSquare size="xl" tone="muted">
+            <MarkSquare tone="muted">
               <Lock />
             </MarkSquare>
           }
@@ -201,7 +207,7 @@ export function JoinTeamDialogHost({ onRequestLogin }: JoinTeamDialogHostProps) 
   if (preview.status === 'ok' && preview.alreadyJoined) {
     return (
       <JoinCard
-        mark={<TeamMark name={preview.teamName} size="xl" />}
+        mark={teamMark}
         title={preview.teamName}
         onClose={close}
         footer={
@@ -239,7 +245,7 @@ export function JoinTeamDialogHost({ onRequestLogin }: JoinTeamDialogHostProps) 
     };
     return (
       <JoinCard
-        mark={<TeamMark name={preview.teamName} size="xl" />}
+        mark={teamMark}
         title={preview.teamName}
         busy={joining}
         onClose={close}

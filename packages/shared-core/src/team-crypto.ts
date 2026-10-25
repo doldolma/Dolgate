@@ -19,8 +19,12 @@ import { base64ToBytes, bytesToBase64 } from "./base64";
 //               서버에는 이 문자열의 SHA-256 hex 만 올린다.
 //   상자      = AES-256-GCM(상자 열쇠, iv, {"v":1,"teamId","teamDek","expiresAt"},
 //               AAD "dolgate-team-invite-box-v1|<팀 ID>") → base64(iv || ciphertext || tag)
+//   잠근 비밀값 = AES-256-GCM(HKDF-SHA256(팀 DEK, info "dolgate-team-invite-secret-v1|<팀 ID>"), iv,
+//               {"v":1,"secret"}, AAD "dolgate-team-invite-secret-v1|<팀 ID>") → base64(iv || ciphertext || tag)
+//               링크 기록에 상자와 함께 둔다 — 멤버는 링크가 살아 있는 동안 이것을 열어 링크를 다시 만든다.
 //
 // 상자 열쇠와 참여 토큰은 같은 S 에서 따로 뽑은 값이라, 참여 때 토큰을 보는 서버도 상자는 못 연다.
+// 잠근 비밀값은 팀 키가 있어야 열리므로 서버는 S 를 모른다 — 팀 키를 가진 멤버에게는 새로 알려 주는 것이 없다.
 // AAD 에 팀 ID 를 묶어, 서버가 다른 팀의 사본이나 상자를 내줘도 풀리지 않는다.
 // 형식은 team-test-vectors.json 이 고정한다(Node 내장 crypto 로 따로 만든 값).
 
@@ -35,6 +39,8 @@ const TEAM_INVITE_BOX_INFO = "dolgate-team-invite-box-v1";
 const TEAM_INVITE_JOIN_INFO = "dolgate-team-invite-join-v1";
 const TEAM_INVITE_BOX_AAD_PREFIX = "dolgate-team-invite-box-v1|";
 const TEAM_INVITE_BOX_VERSION = 1;
+const TEAM_INVITE_SECRET_PREFIX = "dolgate-team-invite-secret-v1|";
+const TEAM_INVITE_SECRET_VERSION = 1;
 const TEAM_INVITE_CODE_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 
 export type TeamCryptoErrorCode =
@@ -194,6 +200,57 @@ export function openTeamInviteBox(input: {
   return { teamDek, expiresAt: content.expiresAt };
 }
 
+/**
+ * 링크 비밀값을 팀 키로 잠근다(잠근 비밀값). 링크와 함께 서버에 올려, 멤버가 링크가 살아 있는 동안 목록에서
+ * 다시 복사할 수 있게 한다.
+ */
+export function sealTeamInviteSecret(input: { secret: Uint8Array; teamId: string; teamDek: Uint8Array }): string {
+  return sealTeamInviteSecretWithIv(input, randomBytes(TEAM_IV_BYTE_LENGTH));
+}
+
+// 고정 벡터 검증용으로 iv 를 받는 변형. 제품 경로는 sealTeamInviteSecret 을 쓴다.
+export function sealTeamInviteSecretWithIv(
+  input: { secret: Uint8Array; teamId: string; teamDek: Uint8Array },
+  iv: Uint8Array,
+): string {
+  assertSecret(input.secret);
+  const plaintext = utf8ToBytes(
+    JSON.stringify({ v: TEAM_INVITE_SECRET_VERSION, secret: bytesToBase64(input.secret) }),
+  );
+  const key = deriveInviteSecretKey(input.teamDek, input.teamId);
+  const sealed = gcm(key, iv, utf8ToBytes(TEAM_INVITE_SECRET_PREFIX + input.teamId)).encrypt(plaintext);
+  return bytesToBase64(concatBytes(iv, sealed));
+}
+
+/** 잠근 비밀값을 연다. 다른 팀 키·다른 팀 ID 로 잠근 것이면 "wrong-key" 다. */
+export function openTeamInviteSecret(input: { sealed: string; teamId: string; teamDek: Uint8Array }): Uint8Array {
+  const [iv, sealed] = splitSealed(input.sealed, "잘못된 링크 비밀값 형식입니다.");
+  const key = deriveInviteSecretKey(input.teamDek, input.teamId);
+  const plaintext = decryptOrThrow(key, iv, sealed, TEAM_INVITE_SECRET_PREFIX + input.teamId);
+  let content: { v?: unknown; secret?: unknown };
+  try {
+    content = JSON.parse(new TextDecoder().decode(plaintext)) as typeof content;
+  } catch {
+    throw new TeamCryptoError("malformed", "잘못된 링크 비밀값 형식입니다.");
+  }
+  if (content.v !== TEAM_INVITE_SECRET_VERSION) {
+    throw new TeamCryptoError("unsupported-version", "이 초대 링크를 열려면 앱을 업데이트해야 합니다.");
+  }
+  if (typeof content.secret !== "string") {
+    throw new TeamCryptoError("malformed", "잘못된 링크 비밀값 형식입니다.");
+  }
+  let secret: Uint8Array;
+  try {
+    secret = base64ToBytes(content.secret);
+  } catch {
+    throw new TeamCryptoError("malformed", "잘못된 링크 비밀값 형식입니다.");
+  }
+  if (secret.length !== TEAM_INVITE_SECRET_BYTE_LENGTH) {
+    throw new TeamCryptoError("malformed", "잘못된 링크 비밀값 형식입니다.");
+  }
+  return secret;
+}
+
 export function formatTeamInviteLink(serverUrl: string, code: string, secret: Uint8Array): string {
   assertSecret(secret);
   const base = serverUrl.trim().replace(/\/+$/, "");
@@ -252,6 +309,11 @@ export function parseTeamInviteLink(value: string): TeamInviteLink {
 function deriveInviteKey(secret: Uint8Array, info: string): Uint8Array {
   assertSecret(secret);
   return hkdf(sha256, secret, undefined, utf8ToBytes(info), 32);
+}
+
+function deriveInviteSecretKey(teamDek: Uint8Array, teamId: string): Uint8Array {
+  assertKey(teamDek);
+  return hkdf(sha256, teamDek, undefined, utf8ToBytes(TEAM_INVITE_SECRET_PREFIX + teamId), 32);
 }
 
 function decryptOrThrow(key: Uint8Array, iv: Uint8Array, sealed: Uint8Array, aad: string): Uint8Array {

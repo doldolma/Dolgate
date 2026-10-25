@@ -514,6 +514,9 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
     });
     await expect(deviceB.teams.join(link)).resolves.toMatchObject({ id: teamId, role: "member", syncState: "ready" });
     await deviceB.tick();
+    // B 도 A 가 만든 링크를 목록에서 다시 복사한다 — 서버의 잠근 비밀값을 B 의 팀 키로 연다.
+    const invites = await deviceB.teams.listInvites(teamId);
+    expect(invites.find((invite) => link.includes(`/invite/${invite.code}#`))?.link).toBe(link);
 
     expect(deviceB.catalog.getHost("team-host")).toMatchObject({ label: "prod", agentForwarding: null, terminalThemeId: null });
     await expect(deviceB.catalog.loadSecret(secretRef)).resolves.toContain("hunter2");
@@ -717,8 +720,9 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
     expect(opened.join("\n")).not.toContain("a-quiet-pw");
   }, 60_000);
 
-  // AWS 정적 키와 tailnet auth key 는 사람의 인증 정보라 함께 공유여도 팀에 가지 않는다 — 팀에는 설정만.
-  it("A shares an EC2 host and a tailnet host: the team gets the settings, the keys stay A's own", async () => {
+  // AWS 정적 키와 tailnet auth key 는 사람의 인증 정보라 함께 공유여도 팀에 가지 않는다 — 팀에는 설정만. 키는 동기화하지
+  // 않으니 공유한 기기(A1)에만 남아 거기서 바로 쓰고, A 의 다른 기기와 B 에는 없다.
+  it("A shares an EC2 host and a tailnet host: the team gets the settings, the keys stay on the device that shared them", async () => {
     const at = new Date().toISOString();
     new deviceA1.database.AwsProfileRepository().upsert({
       id: "a-static",
@@ -779,26 +783,27 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
     expect(opened.some((text) => text.includes(tailnetId) && text.includes("corp"))).toBe(true);
     expect(opened.join("\n")).not.toMatch(/AKIAAONLY|a-only-secret|tskey-a-only/);
 
-    // 키는 A 의 개인 칸에만, A 의 개인 DEK 로 잠겨 있다.
+    // 키는 A 의 개인 칸(/me)에도 올라가지 않는다.
     const mine = await api(accountA.accessToken, "GET", `/teams/${teamId}/me`);
-    const sealed = (kind: string) =>
-      (mine.body[kind] as Array<{ id: string; encrypted_payload: string }>).find((record) => record.id === (kind === "tailnetCredentials" ? tailnetId : profileId))!;
-    expect(decrypt(sealed("awsProfileCredentials").encrypted_payload, accountA.dekBase64)).toMatchObject({
-      credentials: { accessKeyId: "AKIAAONLY", secretAccessKey: "a-only-secret" },
-    });
-    expect(decrypt(sealed("tailnetCredentials").encrypted_payload, accountA.dekBase64)).toMatchObject({
-      credentials: { authKey: "tskey-a-only" },
-    });
-    expect(() => decrypt(sealed("tailnetCredentials").encrypted_payload, teamKey)).toThrow();
+    expect(mine.body.awsProfileCredentials ?? []).toEqual([]);
+    expect(mine.body.tailnetCredentials ?? []).toEqual([]);
 
-    // A2 는 받아 코어에 자기 키로 넘기고, B 는 키가 없다(Tailscale 은 브라우저 로그인, 정적 키는 자기 것을 넣는다).
-    expect(deviceA2.catalog.getScope(teamId)!.memberPrefs!.readAwsProfileCredentials(profileId)).toEqual({
-      accessKeyId: "AKIAAONLY",
-      secretAccessKey: "a-only-secret",
+    // 공유한 A1 에서는 키가 채워져 바로 쓴다. A 의 다른 기기(A2)와 B 에는 없다 — 거기서는 넣어야 한다(Tailscale 은
+    // 비워 두면 브라우저 로그인).
+    const keysOn = (device: typeof deviceA1) => ({
+      aws: device.catalog.getScope(teamId)!.awsProfiles.getPayloadById(profileId),
+      authKey: device.catalog.listTailnetPayloads().find((tailnet) => tailnet.id === tailnetId)?.authKey,
     });
-    expect(deviceA2.catalog.listTailnetPayloads().find((tailnet) => tailnet.id === tailnetId)?.authKey).toBe("tskey-a-only");
-    expect(deviceB.catalog.getScope(teamId)!.memberPrefs!.readAwsProfileCredentials(profileId)).toBeNull();
-    expect(deviceB.catalog.listTailnetPayloads().find((tailnet) => tailnet.id === tailnetId)?.authKey).toBeUndefined();
+    expect(keysOn(deviceA1)).toEqual({
+      aws: expect.objectContaining({ accessKeyId: "AKIAAONLY", secretAccessKey: "a-only-secret" }),
+      authKey: "tskey-a-only",
+    });
+    for (const device of [deviceA2, deviceB]) {
+      expect(keysOn(device)).toEqual({
+        aws: expect.objectContaining({ accessKeyId: "", secretAccessKey: "" }),
+        authKey: undefined,
+      });
+    }
   }, 60_000);
 
   // 팀 호스트 세션은 접속 기록과 녹화가 팀에 남는다 — 서버는 잠긴 것만 보고, B 는 받아 열어 본다.
@@ -896,6 +901,10 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
     await expect(deviceB.catalog.loadSecret(secretRef)).resolves.toBeNull();
     expect(deviceB.activeLoops()).toBe(0);
     await expect(deviceB.teams.getInviteInfo(link)).rejects.toMatchObject({ code: "team_invite_invalid" });
+    // 취소된 링크는 다시 복사할 수도 없다.
+    const invites = await deviceA1.teams.listInvites(teamId);
+    expect(invites.length).toBeGreaterThan(0);
+    expect(invites.map((invite) => invite.link)).toEqual(invites.map(() => null));
     // A 쪽은 그대로다.
     expect(deviceA1.catalog.getHost("team-host")).toMatchObject({ label: "from-b" });
     expect((await deviceA1.teams.listMembers(teamId)).map((member) => member.email)).toEqual([accountA.email]);

@@ -447,11 +447,12 @@ describe('team vault tailnets', () => {
         list: vi.fn(() => teamTailnets),
         save: vi.fn((next: TailnetRecord) => next),
         remove: vi.fn(),
-        readAuthKey: vi.fn(() => 'tskey-mine'),
+        // 팀 저장소는 키를 주지 않는다 — 팀 tailnet 은 브라우저 로그인이다.
+        readAuthKey: vi.fn(() => null),
         listPayloads: vi.fn(() => []),
       },
       syncOutbox: { upsertDeletion: vi.fn() },
-      memberPrefs: { readTailnetCredentials: vi.fn(() => null), read: vi.fn() },
+      memberPrefs: { read: vi.fn() },
     };
     withVaults(ctx, { 'team-1': team });
     registerTailnetIpcHandlers(ctx as never);
@@ -480,14 +481,16 @@ describe('team vault tailnets', () => {
     ).rejects.toThrow();
   });
 
-  it('removes a team tailnet from the team and tests it with my own auth key', async () => {
+  it('removes a team tailnet from the team and tests it without an auth key', async () => {
     const { ctx, team } = createTeamContext();
 
     await invoke(ipcChannels.tailnet.test, { id: 'net-team', controlUrl: 'https://vpn.acme.test' });
+    expect(team.tailnets.readAuthKey).toHaveBeenCalledWith('net-team');
     expect(ctx.coreManager.testTailnet).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'net-team', authKey: 'tskey-mine' }),
+      expect.objectContaining({ id: 'net-team', authKey: undefined }),
       expect.any(Function),
     );
+    // 개인 저장소의 키를 빌려 오지 않는다.
     expect(ctx.tailnets.readAuthKey).not.toHaveBeenCalled();
 
     await invoke(ipcChannels.tailnet.remove, 'net-team');

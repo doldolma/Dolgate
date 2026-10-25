@@ -1160,7 +1160,6 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                   submittingLabel={translate('awsProfiles.form.updateSubmitting')}
                   profileNameLabel={translate('awsProfiles.form.profileName')}
                   profileNameEditable={false}
-                  myKeys={Boolean(profileFormVaultId)}
                   accessKeyHelpText={
                     selectedDetails?.maskedAccessKeyId
                       ? translate('awsProfiles.form.currentAccessKey', { key: selectedDetails.maskedAccessKeyId })

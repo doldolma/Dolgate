@@ -388,8 +388,8 @@ describe("ContainersWorkspace", () => {
     expect(onClose).toHaveBeenCalledWith("host-1");
   });
 
-  // 키 없는 팀 정적 AWS 프로필(4-7 M3) — 실패 창에서 그 자리에서 내 키를 넣고 다시 붙는다.
-  it("offers to add my own key on the failure overlay of an EC2 host whose team profile has none", async () => {
+  // 이 기기에 키가 없는 팀 정적 AWS 프로필(4-7 M3) — 실패 창에서 그 자리에서 키를 넣고 다시 붙는다.
+  it("offers to add a key on the failure overlay of an EC2 host whose team profile has none here", async () => {
     const onRetryConnection = vi.fn().mockResolvedValue(undefined);
     awsImports.updateAwsProfile.mockResolvedValue(undefined);
     appStore.setState({
@@ -397,7 +397,7 @@ describe("ContainersWorkspace", () => {
         ...createEmptyVaultIndex(),
         teams: [{ id: "team-a", name: "Acme Infra", role: "owner", syncState: "ready", syncError: null, groups: [] }],
       },
-      awsMissingMyKeyByProfileId: {
+      awsMissingKeyByProfileId: {
         "team-prod": { teamId: "team-a", profileId: "team-prod", profileName: "acme-prod" },
       },
     });
@@ -423,10 +423,10 @@ describe("ContainersWorkspace", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "내 키 넣기" }));
+    fireEvent.click(screen.getByRole("button", { name: "키 넣기" }));
     const dialog = within(screen.getByRole("dialog"));
-    fireEvent.change(dialog.getByLabelText("My Access Key"), { target: { value: "AKIAMINE" } });
-    fireEvent.change(dialog.getByLabelText("My Secret"), { target: { value: "mine" } });
+    fireEvent.change(dialog.getByLabelText("Access Key"), { target: { value: "AKIAMINE" } });
+    fireEvent.change(dialog.getByLabelText("Secret"), { target: { value: "mine" } });
     fireEvent.click(dialog.getByRole("button", { name: "저장" }));
 
     await waitFor(() => expect(onRetryConnection).toHaveBeenCalledWith("host-1"));

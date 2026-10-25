@@ -52,6 +52,7 @@ function invite(overrides: Partial<TeamInvite> = {}): TeamInvite {
     createdAt: new Date(Date.now() - 24 * HOUR).toISOString(),
     active: true,
     revokedAt: null,
+    link: null,
     ...overrides,
   };
 }
@@ -69,6 +70,15 @@ function setTeams(teams: TeamVaultEntry[]) {
 
 function renderPanel() {
   return render(<TeamsPanel currentUserId="dolma" currentUserEmail="dolma@acme.dev" />);
+}
+
+/** 멤버·초대 링크 줄. */
+const rowOf = (element: HTMLElement) => element.closest('li')!;
+
+/** 팀 메뉴를 열어 그 항목을 누른다 — 나가기·삭제는 늘 보이는 단추가 아니라 메뉴에 있다. */
+function chooseTeamMenu(name: string) {
+  fireEvent.click(screen.getByRole('button', { name: '팀 메뉴' }));
+  fireEvent.click(screen.getByRole('menuitem', { name }));
 }
 
 const writeText = vi.fn();
@@ -95,21 +105,30 @@ describe('TeamsPanel', () => {
     setTeams([teamEntry()]);
     renderPanel();
 
-    const minjiRow = (await screen.findByText('minji@acme.dev')).closest('article')!;
+    const minjiRow = rowOf(await screen.findByText('minji@acme.dev'));
     expect(within(minjiRow).getByText('dolma 의 링크로 참여')).toBeInTheDocument();
-    const junRow = screen.getByText('jun@acme.dev').closest('article')!;
+    expect(within(minjiRow).getByText('Member')).toBeInTheDocument();
+    const junRow = rowOf(screen.getByText('jun@acme.dev'));
     expect(within(junRow).getByText('minji 의 링크로 참여')).toBeInTheDocument();
-    const myRow = screen.getByText('dolma@acme.dev').closest('article')!;
-    expect(within(myRow).getByText('팀을 만듦')).toBeInTheDocument();
-    expect(within(myRow).getByText('(나)')).toBeInTheDocument();
+    // 만든 사람 줄에는 어떻게 들어왔는지가 없다 — 만든 사람이다. 역할만 남는다.
+    const myRow = rowOf(screen.getByText('dolma@acme.dev'));
+    expect(within(myRow).queryByText(/링크로 참여|팀을 만듦/)).toBeNull();
+    expect(within(myRow).getByText('나')).toBeInTheDocument();
+    expect(within(myRow).getByText('Owner')).toBeInTheDocument();
+    // 멤버 줄에는 머리글자 표시가 없다 — 이메일이 바로 옆에 있다.
+    expect(within(myRow).queryByText('D')).toBeNull();
+    expect(within(minjiRow).queryByText('M')).toBeNull();
 
     // 나를 뺀 두 줄에만 메뉴가 있다.
     expect(screen.getAllByRole('button', { name: '멤버 메뉴' })).toHaveLength(2);
     expect(within(myRow).queryByRole('button', { name: '멤버 메뉴' })).toBeNull();
-    expect(screen.getByRole('button', { name: '팀 삭제' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '팀 메뉴' })).toBeInTheDocument();
-    // 머리 요약: 멤버 수와 팀을 만든 때(만든 사람이 들어온 때).
-    expect(screen.getByText('멤버 3명 · 그저께 만듦')).toBeInTheDocument();
+    // 나가기·삭제는 팀 메뉴에 있다.
+    expect(screen.queryByRole('button', { name: '팀 삭제' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '팀 나가기' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '팀 메뉴' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['이름 변경', '팀 나가기', '팀 삭제']);
+    // 머리 요약: 멤버 수와 호스트 수.
+    expect(screen.getByText('멤버 3명 · 호스트 2개')).toBeInTheDocument();
   });
 
   it('lists every team with its host count, and opens the one picked', async () => {
@@ -151,11 +170,10 @@ describe('TeamsPanel', () => {
 
     await screen.findByText('minji@acme.dev');
     expect(screen.queryByRole('button', { name: '멤버 메뉴' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '팀 삭제' })).toBeNull();
-    // 이름 변경은 소유자만 — 팀 메뉴가 없다.
-    expect(screen.queryByRole('button', { name: '팀 메뉴' })).toBeNull();
     expect(screen.getByRole('button', { name: '초대 링크' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '팀 나가기' })).toBeInTheDocument();
+    // 이름 변경·삭제는 소유자만 — 멤버의 팀 메뉴에는 나가기만 있다.
+    fireEvent.click(screen.getByRole('button', { name: '팀 메뉴' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['팀 나가기']);
   });
 
   it('lets a member leave after one confirmation, without handing anything over', async () => {
@@ -164,7 +182,7 @@ describe('TeamsPanel', () => {
     renderPanel();
     await screen.findByText('minji@acme.dev');
 
-    fireEvent.click(screen.getByRole('button', { name: '팀 나가기' }));
+    chooseTeamMenu('팀 나가기');
     const dialog = screen.getByRole('dialog', { name: 'Acme Infra 나가기' });
     expect(within(dialog).getByText(/다시 들어오려면 새 초대 링크가 필요합니다/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: '나가기' }));
@@ -179,7 +197,7 @@ describe('TeamsPanel', () => {
     renderPanel();
     await screen.findByText('minji@acme.dev');
 
-    fireEvent.click(screen.getByRole('button', { name: '팀 나가기' }));
+    chooseTeamMenu('팀 나가기');
     const dialog = screen.getByRole('dialog', { name: 'Acme Infra 나가기' });
     const successor = within(dialog).getByRole('combobox', { name: 'New owner' }) as HTMLSelectElement;
     // 가장 먼저 들어온 사람(minji)이 골라져 있다. 나는 목록에 없다.
@@ -197,7 +215,7 @@ describe('TeamsPanel', () => {
     );
   });
 
-  // 멤버 목록이 오기 전에 나가기 창을 열 수 있다(Danger zone 은 늘 보인다). 그래도 목록이 오면 가장 먼저 들어온
+  // 멤버 목록이 오기 전에 나가기 창을 열 수 있다(팀 메뉴는 늘 있다). 그래도 목록이 오면 가장 먼저 들어온
   // 사람이 골라져 있어야 한다 — 빈 칸에 막힌 단추가 되면 안 된다.
   it('picks the earliest member to hand over to even when the member list arrives after the window opens', async () => {
     let resolveMembers: (members: TeamMember[]) => void = () => undefined;
@@ -209,7 +227,7 @@ describe('TeamsPanel', () => {
     setTeams([teamEntry()]);
     renderPanel();
 
-    fireEvent.click(screen.getByRole('button', { name: '팀 나가기' }));
+    chooseTeamMenu('팀 나가기');
     const dialog = screen.getByRole('dialog', { name: 'Acme Infra 나가기' });
     resolveMembers(DOLMA_OWNS);
 
@@ -227,7 +245,7 @@ describe('TeamsPanel', () => {
     renderPanel();
     await screen.findByText('dolma@acme.dev');
 
-    fireEvent.click(screen.getByRole('button', { name: '팀 나가기' }));
+    chooseTeamMenu('팀 나가기');
     const dialog = screen.getByRole('dialog', { name: 'Acme Infra 나가기' });
     expect(within(dialog).getByText(/마지막 멤버입니다/)).toBeInTheDocument();
     // 그룹 2 · 호스트 2(다른 팀 것은 빼고) · 비밀번호와 키 4.
@@ -240,7 +258,7 @@ describe('TeamsPanel', () => {
     expect(desktopApi.teams.transferOwnership).not.toHaveBeenCalled();
   });
 
-  it('copies a new invite link right away, and shows it only while the window is open', async () => {
+  it('copies a new invite link right away, and shows it in the window only while it is open', async () => {
     setTeams([teamEntry()]);
     renderPanel();
     await screen.findByText('minji@acme.dev');
@@ -258,7 +276,7 @@ describe('TeamsPanel', () => {
 
     fireEvent.click(within(dialog).getByRole('button', { name: '닫기' }));
     expect(screen.queryByDisplayValue(LINK)).toBeNull();
-    // 다시 열면 새 링크를 만드는 창이다 — 지난 링크는 어디에도 남지 않는다.
+    // 다시 열면 새 링크를 만드는 창이다 — 지난 링크는 링크 목록에서 다시 복사한다.
     fireEvent.click(screen.getByRole('button', { name: '초대 링크' }));
     dialog = screen.getByRole('dialog', { name: 'Acme Infra 초대' });
     expect(within(dialog).getByRole('button', { name: '만들고 복사' })).toBeInTheDocument();
@@ -268,7 +286,7 @@ describe('TeamsPanel', () => {
   it('says the links are all revoked after removing a member, and offers a new one', async () => {
     setTeams([teamEntry()]);
     renderPanel();
-    const minjiRow = (await screen.findByText('minji@acme.dev')).closest('article')!;
+    const minjiRow = rowOf(await screen.findByText('minji@acme.dev'));
 
     fireEvent.click(within(minjiRow).getByRole('button', { name: '멤버 메뉴' }));
     fireEvent.click(screen.getByRole('menuitem', { name: '제거' }));
@@ -285,7 +303,7 @@ describe('TeamsPanel', () => {
   it('makes a member the owner from the row menu', async () => {
     setTeams([teamEntry()]);
     renderPanel();
-    const junRow = (await screen.findByText('jun@acme.dev')).closest('article')!;
+    const junRow = rowOf(await screen.findByText('jun@acme.dev'));
 
     fireEvent.click(within(junRow).getByRole('button', { name: '멤버 메뉴' }));
     fireEvent.click(screen.getByRole('menuitem', { name: '소유자로 지정' }));
@@ -300,7 +318,7 @@ describe('TeamsPanel', () => {
     renderPanel();
     await screen.findByText('minji@acme.dev');
 
-    fireEvent.click(screen.getByRole('button', { name: '팀 삭제' }));
+    chooseTeamMenu('팀 삭제');
     const dialog = screen.getByRole('dialog', { name: 'Acme Infra 팀 삭제' });
     expect(within(dialog).getByText('다른 멤버 2명의 화면에서도 사라집니다.')).toBeInTheDocument();
     await within(dialog).findByText('4');
@@ -317,7 +335,7 @@ describe('TeamsPanel', () => {
     setTeams([teamEntry()]);
     renderPanel();
 
-    const strip = (await screen.findByText('minji 의 링크')).closest('article')!;
+    const strip = rowOf(await screen.findByText('minji 의 링크'));
     expect(screen.getAllByRole('button', { name: '링크 취소' })).toHaveLength(1);
     expect(strip).toHaveTextContent('1명 참여');
     expect(strip).toHaveTextContent('6일 후 만료');
@@ -326,6 +344,33 @@ describe('TeamsPanel', () => {
     await waitFor(() => expect(desktopApi.teams.revokeInvite).toHaveBeenCalledWith('team-1', 'code-1'));
     // 취소한 뒤 목록을 다시 읽는다.
     await waitFor(() => expect(desktopApi.teams.listInvites).toHaveBeenCalledTimes(2));
+  });
+
+  it('copies a live link again from its row, and says when the copy fails', async () => {
+    vi.mocked(desktopApi.teams.listInvites).mockResolvedValue([
+      invite({ link: LINK }),
+      // 이 기능 전에 만든 링크 — 비밀값이 서버에 없어 다시 복사할 수 없다.
+      invite({ code: 'code-2', createdBy: 'jun', createdByEmail: 'jun@acme.dev', link: null }),
+    ]);
+    setTeams([teamEntry()]);
+    renderPanel();
+
+    const minjiLink = rowOf(await screen.findByText('minji 의 링크'));
+    expect(within(rowOf(screen.getByText('jun 의 링크'))).queryByRole('button', { name: '링크 복사' })).toBeNull();
+    expect(within(rowOf(screen.getByText('jun 의 링크'))).getByRole('button', { name: '링크 취소' })).toBeInTheDocument();
+
+    writeText.mockRejectedValueOnce(new Error('not focused'));
+    fireEvent.click(within(minjiLink).getByRole('button', { name: '링크 복사' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('링크를 복사하지 못했습니다.');
+
+    fireEvent.click(within(minjiLink).getByRole('button', { name: '링크 복사' }));
+    expect(await within(minjiLink).findByRole('button', { name: '복사됨' })).toBeInTheDocument();
+    expect(writeText).toHaveBeenLastCalledWith(LINK);
+    expect(screen.queryByRole('alert')).toBeNull();
+    // 잠깐 뒤 원래 단추로 돌아온다.
+    await waitFor(() => expect(within(minjiLink).getByRole('button', { name: '링크 복사' })).toBeInTheDocument(), {
+      timeout: 2000,
+    });
   });
 
   it('clears a failed action line when switching to another team', async () => {

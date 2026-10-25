@@ -223,6 +223,7 @@ export function TailnetSettingsPanel() {
     draft,
     setDraft,
     beginDraft,
+    beginEdit,
     testingId,
     test: handleTest,
     cancelTest: handleCancel,
@@ -318,11 +319,17 @@ export function TailnetSettingsPanel() {
 
   // 저장은 훅이 하고, 목록 재조회는 이 화면의 몫이다(훅은 레코드 목록을 모른다).
   const handleSave = useCallback(async () => {
+    // 편집은 끊겨 있을 때만 연다(카드의 편집 단추). 열어 둔 사이에 붙었으면 저장하지 않는다 —
+    // 그대로 저장하면 그 단추가 막으려던 일이 그대로 난다.
+    if (draft?.saved && statusById[draft.id]?.ready === true) {
+      setError(translate('tailnetSettings.connectedWhileEditing'));
+      return;
+    }
     const saved = await saveDraft();
     if (saved) {
       await refresh();
     }
-  }, [refresh, saveDraft]);
+  }, [draft, refresh, saveDraft, statusById, translate]);
 
   // 다시 시도는 따로 없다 — 연결 버튼이 그것이다.
   //
@@ -395,10 +402,13 @@ export function TailnetSettingsPanel() {
   const rows = useMemo(() => records.map(rowOf), [records, rowOf]);
   // 팀이 있으면 볼트별 묶음(4-6 과 같은 모양). 새 것은 묶음 머리의 + 로 그 볼트에 만든다.
   const sections = sectionsByVault(records, listsByTeamId, vaultIndex);
-  const draftVaultId = draft?.vaultId ?? PERSONAL_VAULT_ID;
+  // 목록 위(묶음 머리 아래)의 폼 자리는 새 초안 것이다. 편집 폼은 고치는 카드 자리에 열린다.
+  const addDraft = draft && !draft.saved ? draft : null;
+  const draftVaultId = addDraft?.vaultId ?? PERSONAL_VAULT_ID;
 
   const renderDraftForm = (draft: TailnetDraft) => (
     <TailnetForm
+      key={draft.id}
       draft={draft}
       status={statusById[draft.id]}
       testing={testingId === draft.id}
@@ -416,11 +426,11 @@ export function TailnetSettingsPanel() {
       }
       onCancelTest={() => void handleCancel(draft.id)}
       onCancel={() => void handleCancelDraft()}
-      myKey={Boolean(draft.vaultId)}
     />
   );
 
-  const renderRow = ({ record, status, hosts: usingHosts }: TailnetRow) => (
+  /** vaultId — 그 카드가 든 팀 볼트(개인이면 null). 편집 폼의 키 칸이 "내 auth key" 인지가 여기서 갈린다. */
+  const renderRow = ({ record, status, hosts: usingHosts }: TailnetRow, vaultId: string | null) => (
     <Card key={record.id} className="flex-col items-stretch gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <CardMain>
@@ -497,6 +507,17 @@ export function TailnetSettingsPanel() {
               {translate('tailnetSettings.connect')}
             </Button>
           )}
+          {/* 폼은 한 번에 하나다 — 초안 하나가 시험 노드 하나라, 다른 것을 열면 열려 있던 초안의 정리가 빠진다.
+              붙어 있는 동안은 열지 않는다. 쓰이는 노드의 키·서버가 바뀌면 코어는 그 노드를 기존 연결
+              밑에서 버리지 못해 폐기 대기로 두고, 그 연결들이 닫힐 때까지 이 네트워크의 새 연결을 막는다.
+              올리는 중인 것은 막지 않는다 — 그 시도는 곧 끝나고, 키가 틀려 붙지 못하는 그때가 고칠 때다. */}
+          <Button
+            variant="secondary"
+            onClick={() => beginEdit(record, vaultId)}
+            disabled={testingId !== null || draft !== null || status?.ready === true}
+          >
+            {translate('tailnetSettings.edit')}
+          </Button>
           <Button
             variant="danger"
             onClick={() => setPendingRemoval(record)}
@@ -524,6 +545,10 @@ export function TailnetSettingsPanel() {
       ) : null}
     </Card>
   );
+
+  // 고치는 중인 카드는 그 자리에 폼이 열린다.
+  const renderItem = (row: TailnetRow, vaultId: string | null) =>
+    draft?.saved && draft.id === row.record.id ? renderDraftForm(draft) : renderRow(row, vaultId);
 
   return (
     <div className="grid gap-5">
@@ -600,10 +625,14 @@ export function TailnetSettingsPanel() {
                 }
                 onAdd={() => beginDraft(section.team ? section.vaultId : null)}
               />
-              {draft && draftVaultId === section.vaultId ? renderDraftForm(draft) : null}
+              {addDraft && draftVaultId === section.vaultId ? renderDraftForm(addDraft) : null}
               {section.items.length > 0 ? (
-                <div className="grid gap-3">{section.items.map((record) => renderRow(rowOf(record)))}</div>
-              ) : draft && draftVaultId === section.vaultId ? null : (
+                <div className="grid gap-3">
+                  {section.items.map((record) =>
+                    renderItem(rowOf(record), section.team ? section.vaultId : null),
+                  )}
+                </div>
+              ) : addDraft && draftVaultId === section.vaultId ? null : (
                 <VaultEmptyLine>{translate('tailnetSettings.empty')}</VaultEmptyLine>
               )}
             </section>
@@ -611,7 +640,7 @@ export function TailnetSettingsPanel() {
         </div>
       ) : (
         <>
-          {draft ? renderDraftForm(draft) : null}
+          {addDraft ? renderDraftForm(addDraft) : null}
 
           {rows.length === 0 && !draft ? (
             // 이 기능을 처음 보는 사람의 물음은 여기서 딱 한 번 생긴다. 화면이 비어 있는 지금이
@@ -621,7 +650,9 @@ export function TailnetSettingsPanel() {
             </EmptyState>
           ) : null}
 
-          {rows.length > 0 ? <div className="grid gap-3">{rows.map(renderRow)}</div> : null}
+          {rows.length > 0 ? (
+            <div className="grid gap-3">{rows.map((row) => renderItem(row, null))}</div>
+          ) : null}
         </>
       )}
 

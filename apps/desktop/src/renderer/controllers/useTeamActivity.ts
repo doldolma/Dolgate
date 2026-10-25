@@ -18,7 +18,8 @@ function isSettled(status: TeamReplayStatus | undefined): boolean {
   return status !== undefined && status.state !== 'live';
 }
 
-function recordingIdOf(item: TeamActivityItem): string | null {
+/** 접속 줄의 녹화 ID. 접속 줄이 아니거나 녹화가 없으면 null. */
+export function recordingIdOf(item: TeamActivityItem): string | null {
   const recordingId = item.activity?.record.metadata?.recordingId;
   return item.activity?.record.kind === 'session-lifecycle' && typeof recordingId === 'string' ? recordingId : null;
 }
@@ -68,7 +69,9 @@ export function useTeamActivity(teamId: string | null): TeamActivityState {
       if (ids.size === 0) {
         return;
       }
-      const statuses = await getTeamReplayStatuses(team, [...ids]).catch(() => null);
+      const statuses = await Promise.resolve()
+        .then(() => getTeamReplayStatuses(team, [...ids]))
+        .catch(() => null);
       if (!statuses || generation !== generationRef.current) {
         return;
       }
@@ -100,7 +103,9 @@ export function useTeamActivity(teamId: string | null): TeamActivityState {
       return undefined;
     }
     setLoading(true);
-    void listTeamActivity(teamId, { limit: TEAM_ACTIVITY_PAGE_SIZE })
+    // 브리지가 없으면 동기적으로 던진다 — Promise 로 감싸야 .catch 가 잡고, 이 훅을 쓰는 화면(호스트 상세 등)이 산다.
+    void Promise.resolve()
+      .then(() => listTeamActivity(teamId, { limit: TEAM_ACTIVITY_PAGE_SIZE }))
       .then((page) => {
         if (generation !== generationRef.current) {
           return;
@@ -126,7 +131,9 @@ export function useTeamActivity(teamId: string | null): TeamActivityState {
         let after = itemsRef.current[0]?.seq ?? 0;
         const fresh: TeamActivityItem[] = [];
         for (let page = 0; page < CATCH_UP_PAGES; page += 1) {
-          const batch = await listTeamActivity(teamId, { after, limit: TEAM_ACTIVITY_PAGE_SIZE }).catch(() => null);
+          const batch = await Promise.resolve()
+            .then(() => listTeamActivity(teamId, { after, limit: TEAM_ACTIVITY_PAGE_SIZE }))
+            .catch(() => null);
           if (!batch || generation !== generationRef.current) {
             return;
           }
@@ -161,7 +168,8 @@ export function useTeamActivity(teamId: string | null): TeamActivityState {
     const generation = generationRef.current;
     loadingMoreRef.current = true;
     setLoading(true);
-    void listTeamActivity(teamId, { before: oldest.seq, limit: TEAM_ACTIVITY_PAGE_SIZE })
+    void Promise.resolve()
+      .then(() => listTeamActivity(teamId, { before: oldest.seq, limit: TEAM_ACTIVITY_PAGE_SIZE }))
       .then((page) => {
         if (generation !== generationRef.current) {
           return;

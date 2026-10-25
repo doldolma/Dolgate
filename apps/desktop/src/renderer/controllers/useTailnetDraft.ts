@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TailnetRecord } from '@shared';
 import { applyTailnetStatus, forgetTailnetStatus } from '../services/desktop/tailnet-watch';
 import {
   cancelTailnet,
@@ -16,8 +17,18 @@ export interface TailnetDraft {
   controlUrl: string;
   /** 저장할 때만 쓴다. 기존 키는 절대 내려오지 않으므로 빈 값 = "그대로 두기". */
   authKey: string;
-  /** 새 tailnet 을 둘 팀 볼트(설정의 팀 묶음 + · 팀 호스트 서랍). 없으면 개인. */
+  /** 팀 볼트 — 새 tailnet 을 둘 곳(설정의 팀 묶음 + · 팀 호스트 서랍)이나 고치는 것이 든 곳. 없으면 개인. */
   vaultId?: string;
+  /**
+   * 고치는 중인 저장된 tailnet. 있으면 편집이다.
+   *
+   * 새 auth key 를 넣으면 저장할 때 지금 등록을 푼다 — 로그아웃하고 노드키·로그인 상태를 지워, 다음 연결이 그 키로
+   * 처음부터 등록한다(saveDraft). 이미 등록된 노드는 Tailscale 이 새 키를 무시하고 옛 등록으로 붙어서, 틀린 키를
+   * 넣어도 "연결됨" 으로 보이고 다음 등록 때에야 드러났다. 폼 안에서는 시험하지 않는다 — 저장하지 않은 키가 코어에
+   * 남는다. 키를 넣지 않으면 등록은 그대로다.
+   * 취소할 때 초안처럼 노드를 지우면 안 된다 — 그 id 의 노드는 저장된 네트워크의 것이다.
+   */
+  saved?: TailnetRecord;
 }
 
 /**
@@ -101,6 +112,18 @@ export function useTailnetDraft({
     setDraft(vaultId ? { ...emptyTailnetDraft(), vaultId } : emptyTailnetDraft());
   }, []);
 
+  /** 저장된 tailnet 을 고친다. 키 칸은 비워서 연다 — 키는 렌더러로 내려오지 않는다. */
+  const beginEdit = useCallback((record: TailnetRecord, vaultId?: string | null) => {
+    setDraft({
+      id: record.id,
+      label: record.label,
+      controlUrl: record.controlUrl ?? '',
+      authKey: '',
+      ...(vaultId ? { vaultId } : {}),
+      saved: record,
+    });
+  }, []);
+
   /**
    * 연결 시험. 저장된 레코드에도 쓰므로 초안 전용이 아니다 —
    * `isDraft` 일 때만 "저장 없이 떠나면 지울 것" 으로 표시한다.
@@ -167,26 +190,50 @@ export function useTailnetDraft({
       return null;
     }
     const status = statusById[draft.id];
+    const existing = draft.saved;
+    const controlUrl = draft.controlUrl.trim() || undefined;
     const label =
-      draft.label.trim() || deriveTailnetLabel(status?.tailnetName, draft.controlUrl);
-
+      draft.label.trim() ||
+      deriveTailnetLabel(existing ? existing.tailnetName : status?.tailnetName, draft.controlUrl);
+    // 공백뿐인 값은 키가 아니다. 그대로 넘기면 "비워 두면 그대로" 를 믿고 남긴 공백이 저장된 키를
+    // 덮는다 — 코어는 공백을 지우므로 그 네트워크는 브라우저 로그인으로 바뀐다.
+    const authKey = draft.authKey.trim();
     setError(null);
+    // 저장된 것에 새 키를 넣었으면 지금 등록을 푼다 — 다음 연결이 그 키로 처음부터 등록한다(TailnetDraft.saved).
+    if (existing && authKey) {
+      forgetTailnetStatus(draft.id);
+      // 컨트롤 플레인에 닿지 못해 옛 등록을 풀지 못해도 이 기기의 노드키·로그인 상태는 지워진다. 저장은 그대로 한다.
+      await forgetTailnet(draft.id).catch(() => undefined);
+    }
     const now = new Date().toISOString();
     try {
       await saveTailnet({
-        record: {
-          id: draft.id,
-          label,
-          controlUrl: draft.controlUrl.trim() || undefined,
-          // 연결에 성공해야 저장되므로 여기서는 항상 알 수 있다. 다음 연결 때 이 값과
-          // 대조해서, 다른 계정으로 로그인해 다른 tailnet 에 붙은 것을 잡아낸다.
-          tailnetName: status?.tailnetName,
-          loginName: status?.loginName,
-          createdAt: now,
-          updatedAt: now,
-        },
+        record: existing
+          ? {
+              // 연결해서 알게 된 tailnet·계정은 그대로 둔다 — 다음 연결의 대조 기준이다. 다만 서버를
+              // 바꿨으면 그 값은 옛 서버의 것이라 비운다. 남기면 새 서버에 붙는 순간 "다른 tailnet 에
+              // 연결됐다" 는 경고가 뜨고, 고칠 길 없이 계속 남는다. 다음에 붙을 때 다시 채워진다.
+              ...existing,
+              label,
+              controlUrl,
+              ...(controlUrl === (existing.controlUrl?.trim() || undefined)
+                ? {}
+                : { tailnetName: undefined, loginName: undefined }),
+              updatedAt: now,
+            }
+          : {
+              id: draft.id,
+              label,
+              controlUrl,
+              // 연결에 성공해야 저장되므로 여기서는 항상 알 수 있다. 다음 연결 때 이 값과
+              // 대조해서, 다른 계정으로 로그인해 다른 tailnet 에 붙은 것을 잡아낸다.
+              tailnetName: status?.tailnetName,
+              loginName: status?.loginName,
+              createdAt: now,
+              updatedAt: now,
+            },
         // 빈 문자열은 "지우기"라서 그대로 넘기면 안 된다. 손대지 않았으면 생략한다.
-        authKey: draft.authKey.length > 0 ? draft.authKey : undefined,
+        authKey: authKey || undefined,
         // 볼트는 팀일 때만 싣는다 — 개인 저장은 지금과 같은 모양으로 간다.
         ...(draft.vaultId ? { vaultId: draft.vaultId } : {}),
       });
@@ -206,7 +253,9 @@ export function useTailnetDraft({
     unsavedDraftIdRef.current = null;
     setDraft(null);
     setError(null);
-    if (!abandoned || !statusRef.current[abandoned.id]) {
+    // 편집이면 지울 것이 없다. 그 id 의 노드는 저장된 네트워크의 것이라, 지우면 등록이 풀리고
+    // 로컬 상태까지 사라진다.
+    if (!abandoned || abandoned.saved || !statusRef.current[abandoned.id]) {
       return;
     }
     forgetTailnetStatus(abandoned.id);
@@ -221,6 +270,7 @@ export function useTailnetDraft({
     draft,
     setDraft,
     beginDraft,
+    beginEdit,
     testingId,
     test,
     cancelTest,

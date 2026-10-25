@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import {
   collectGroupPaths,
   deriveTeamInviteJoinToken,
@@ -66,6 +67,7 @@ import {
 import {
   stripAwsProfileKeys,
   stripHostMemberPrefs,
+  stripTailnetAuthKey,
   stripWorkspaceMemberPrefs,
   TEAM_MEMBER_CREDENTIAL_NORMALIZERS,
 } from "./team-member-prefs";
@@ -894,8 +896,13 @@ export class TeamSyncService {
     for (const record of scope.savedWorkspaces.list().map(stripWorkspaceMemberPrefs)) {
       builder.add("workspaces", record.id, record.updatedAt, record);
     }
-    for (const record of scope.tailnets.listPayloads()) builder.add("tailnets", record.id, record.updatedAt, record);
-    for (const record of scope.awsProfiles.listPayloads()) builder.add("awsProfiles", record.id, record.updatedAt, record);
+    // 키(tailnet auth key·AWS 정적 키)는 올리지 않는다 — 넣은 기기에만 둔다(team-member-prefs.ts).
+    for (const record of scope.tailnets.listPayloads()) {
+      builder.add("tailnets", record.id, record.updatedAt, stripTailnetAuthKey(record));
+    }
+    for (const record of scope.awsProfiles.listPayloads()) {
+      builder.add("awsProfiles", record.id, record.updatedAt, stripAwsProfileKeys(record));
+    }
     for (const entry of scope.secretMetadata.list()) {
       const raw = await scope.secrets.load(entry.secretRef);
       if (raw) {
@@ -940,6 +947,9 @@ export class TeamSyncService {
       .map(stripWorkspaceMemberPrefs);
     const tailnets = decode<TailnetPayload>("tailnets").filter(free(taken.tailnets));
     const awsProfiles = decode<ManagedAwsProfilePayload>("awsProfiles").filter(free(taken.awsProfiles));
+    // 키는 팀에 올리지 않으니 받은 것에는 없다. 이 기기에 넣어 둔 것(내 것을 공유하며 채운 것 포함)은 갈아 끼울 때도
+    // 그대로 둔다. 섞여 온 키(옛 앱)는 남의 것이라 담지 않는다.
+    const here = this.storage.getTeamState(teamId)?.secure;
     const secrets = decode<ManagedSecretPayload>("secrets").filter(
       (secret) => !taken.secretMetadata.has(secret.secretRef),
     );
@@ -964,7 +974,7 @@ export class TeamSyncService {
         dnsOverrides,
         snippets,
         savedWorkspaces,
-        // 로그인한 계정과 auth key 는 사람 것이다 — 섞여 와도 담지 않는다(내 것은 이 기기 칸과 내 개인 칸에 있다).
+        // 로그인한 계정과 auth key 는 사람 것이다 — 섞여 와도 담지 않는다(이 기기 것은 이 기기 칸·이 볼트에 있다).
         tailnets: tailnets.map(({ loginName: _theirs, authKey: _person, ...tailnet }) =>
           normalizeTailnetPayloadForStorage(tailnet),
         ),
@@ -980,10 +990,17 @@ export class TeamSyncService {
         managedSecretsByRef: Object.fromEntries(
           secrets.map((secret) => [secret.secretRef, encodeSecretForStorage(JSON.stringify(secret))]),
         ),
-        tailnetAuthKeysById: {},
-        // 정적 프로필의 키도 사람 것이다 — 팀 쪽에는 키 없이 담는다.
+        tailnetAuthKeysById: Object.fromEntries(
+          tailnets.flatMap((tailnet) => {
+            const key = here?.tailnetAuthKeysById[tailnet.id];
+            return key ? [[tailnet.id, key]] : [];
+          }),
+        ),
         managedAwsProfilesById: Object.fromEntries(
-          awsProfiles.map((profile) => [profile.id, encodeSecretForStorage(JSON.stringify(stripAwsProfileKeys(profile)))]),
+          awsProfiles.map((profile) => [
+            profile.id,
+            lockReceivedAwsProfile(stripAwsProfileKeys(profile), here?.managedAwsProfilesById[profile.id]),
+          ]),
         ),
       },
     );
@@ -1055,8 +1072,6 @@ export class TeamSyncService {
       hostPrefs: decode<TeamHostPrefsRecord>("hostPrefs", normalizeTeamHostPrefsRecord),
       workspacePrefs: decode<TeamWorkspacePrefsRecord>("workspacePrefs", normalizeTeamWorkspacePrefsRecord),
       hostCredentials: receiveCredentials("hostCredentials"),
-      awsProfileCredentials: receiveCredentials("awsProfileCredentials"),
-      tailnetCredentials: receiveCredentials("tailnetCredentials"),
     });
     runtime.private = {
       etag: remote.etag,
@@ -1067,12 +1082,39 @@ export class TeamSyncService {
   }
 }
 
+/**
+ * 받은 팀 AWS 프로필을 이 기기에 담을 값. 정적 프로필이면 이 기기에 있던 키를 얹는다 — 키는 팀에 올리지 않으니 받은
+ * 것에는 없다. 얹은 결과가 이 기기 것과 같으면 잠가 둔 값을 그대로 쓴다(Windows 는 같은 내용도 잠글 때마다 결과가
+ * 달라 상태 파일이 괜히 바뀐다).
+ */
+function lockReceivedAwsProfile(
+  received: ManagedAwsProfilePayload,
+  here: StoredEncryptedValue | undefined,
+): StoredEncryptedValue {
+  const local = here ? readLockedAwsProfile(here) : null;
+  const next =
+    received.kind === "static" && local?.kind === "static"
+      ? { ...received, accessKeyId: local.accessKeyId, secretAccessKey: local.secretAccessKey }
+      : received;
+  return here && isDeepStrictEqual(local, next) ? here : encodeSecretForStorage(JSON.stringify(next));
+}
+
+/** 이 기기에 잠가 둔 프로필. 풀 수 없으면(깨진 값) 없는 것으로 본다 — 받기를 막을 이유는 없다. */
+function readLockedAwsProfile(value: StoredEncryptedValue): ManagedAwsProfilePayload | null {
+  try {
+    const raw = decodeSecretFromStorage(value);
+    return raw ? (JSON.parse(raw) as ManagedAwsProfilePayload) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** 받기 전에 그 사이 내 설정을 고쳤는지 볼 몫(이 기기의 테마는 빼고). */
 function memberPrefsToCompare(prefs: TeamMemberPrefsSnapshot): unknown[] {
   return [prefs.hostPrefs, prefs.workspacePrefs, ...TEAM_PRIVATE_SECRET_KINDS.map((kind) => prefs[kind])];
 }
 
-/** 내 개인 칸에 올린 자격 증명 한 건(호스트·AWS 프로필·tailnet). */
+/** 내 개인 칸에 올린 자격 증명 한 건(호스트·AWS 프로필). */
 interface RemoteCredentials {
   id: string;
   updatedAt: string;

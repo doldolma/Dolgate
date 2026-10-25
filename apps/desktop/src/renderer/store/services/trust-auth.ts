@@ -21,6 +21,7 @@ import {
   isAwsSsoAuthenticationErrorMessage,
   isChangedHostKeyErrorMessage,
   normalizeRemoteInvokeErrorMessage,
+  vaultIdOfHost,
 } from "../utils";
 import { resolveHostTailnetId } from '../../lib/host-tailnet';
 import { t } from '../../i18n';
@@ -31,15 +32,15 @@ export function createTrustAuthServices({ api, get, set }: SliceDeps) {
   /**
    * 키 없는 팀 정적 프로필이면 그 사실을 남긴다 — 연결 실패 화면이 "내 키 넣기"를 낸다. 다시 괜찮아지면 지운다.
    */
-  const rememberMissingMyKey = (profileId: string, status: AwsProfileStatus) => {
-    const current = get().awsMissingMyKeyByProfileId;
-    if (status.missingMyKey) {
-      set({ awsMissingMyKeyByProfileId: { ...current, [profileId]: status.missingMyKey } });
+  const rememberMissingKey = (profileId: string, status: AwsProfileStatus) => {
+    const current = get().awsMissingKeyByProfileId;
+    if (status.missingKey) {
+      set({ awsMissingKeyByProfileId: { ...current, [profileId]: status.missingKey } });
       return;
     }
     if (current[profileId]) {
       const { [profileId]: _cleared, ...rest } = current;
-      set({ awsMissingMyKeyByProfileId: rest });
+      set({ awsMissingKeyByProfileId: rest });
     }
   };
 
@@ -181,9 +182,9 @@ export function createTrustAuthServices({ api, get, set }: SliceDeps) {
     const requiredProfileId = requireAwsProfileId(profileId, profileName);
     reportProgress?.(t('containersStore.checkingProfile', { profile: profileName }));
     const status = await api.aws.getProfileStatusById(requiredProfileId);
-    rememberMissingMyKey(requiredProfileId, status);
+    rememberMissingKey(requiredProfileId, status);
     // 내 키가 없는 팀 정적 프로필로는 붙지 않는다 — SDK 오류 대신 무엇을 넣어야 하는지 말한다.
-    if (status.missingMyKey) {
+    if (status.missingKey) {
       throw new Error(status.errorMessage || t('trustAuth.cliCredentialsNeeded', { profile: profileName }));
     }
     if (status.isAuthenticated || !status.isSsoProfile) {
@@ -405,7 +406,9 @@ export function createTrustAuthServices({ api, get, set }: SliceDeps) {
       throw new Error(t('sessionSvc.tailnetOffline'));
     }
 
-    const records = await api.tailnet.list();
+    // tailnet 은 호스트와 같은 볼트에 있다 — 팀 볼트로 공유한 호스트는 그 팀 볼트의 tailnet(복사본)을 쓴다.
+    // 메인의 접속 경로도 호스트의 볼트에서 찾는다(resolveTailnetRoute).
+    const records = await api.tailnet.list(vaultIdOfHost(get().vaultIndex, input.hostId));
     const record = records.find((entry) => entry.id === tailnetId);
     if (!record) {
       // 호스트는 tailnet 을 가리키는데 이 기기에는 없다. 메인도 이 상태의 연결을 거부한다.

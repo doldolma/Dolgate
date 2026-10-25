@@ -208,4 +208,21 @@ describe("createAppStore vault locations and group writes", () => {
     await store.getState().duplicateHosts(["my-web"]);
     expect(vi.mocked(api.hosts.create).mock.lastCall).toHaveLength(1);
   });
+
+  // 서랍 맨 위 Vault 로 다른 볼트를 고르면 그 볼트 맨 위에 만든다. 서랍은 그대로 열려 있다.
+  it("moves the host being created to another vault, starting at its top", async () => {
+    const { store } = await setup();
+
+    store.getState().navigateGroup("Prod", TEAM);
+    store.getState().openCreateHostDrawer();
+    store.getState().setCreateHostVault("personal");
+    expect(store.getState().hostDrawer).toEqual({ mode: "create", defaultGroupPath: null, kind: "ssh", vaultId: "personal" });
+    // 고르는 것은 만들 곳일 뿐이다 — 보고 있던 자리는 그대로다.
+    expect(store.getState()).toMatchObject({ currentVaultId: TEAM, currentGroupPath: "Prod" });
+
+    // 만드는 중이 아니면 아무 일도 없다.
+    store.getState().openEditHostDrawer("team-web");
+    store.getState().setCreateHostVault("personal");
+    expect(store.getState().hostDrawer).toEqual({ mode: "edit", hostId: "team-web" });
+  });
 });

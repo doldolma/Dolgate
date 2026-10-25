@@ -335,7 +335,8 @@ describe('HostForm', () => {
     fireEvent.click(screen.getByRole('button', { name: '추가' }));
     const dialog = within(screen.getByRole('dialog'));
     expect(dialog.getByRole('heading', { name: /Acme Infra/ })).toBeInTheDocument();
-    expect(dialog.getByLabelText('My auth key')).toBeInTheDocument();
+    // 칸은 개인 것과 같다.
+    expect(dialog.getByText('auth key')).toBeInTheDocument();
     unmount();
     appStore.setState(appStore.getInitialState(), true);
   });

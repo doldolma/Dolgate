@@ -8,7 +8,6 @@ import type { TailnetStatus } from '@shared';
 import { Button, Card, FieldGroup, Input, NoticeCard } from '../../ui';
 import { RefreshCw } from '../../ui/icons';
 import type { TailnetDraft } from '../../controllers/useTailnetDraft';
-import { MyKeyField } from '../teams/MyKeyField';
 import {
   TailnetIdentity,
   TailnetStateBadge,
@@ -39,7 +38,6 @@ export function TailnetForm({
   onTest,
   onCancelTest,
   onCancel,
-  myKey = false,
 }: {
   draft: TailnetDraft;
   status?: TailnetStatus;
@@ -51,19 +49,24 @@ export function TailnetForm({
   onTest: () => void;
   onCancelTest: () => void;
   onCancel: () => void;
-  /** 팀 tailnet 이면 auth key 는 내 칸에만 간다 — 칸 이름이 그것을 말한다(K1). */
-  myKey?: boolean;
 }) {
   const { t: translate } = useTranslation();
+  // 저장된 것을 고치는 중이면 시험하지 않고 저장한다(이유는 TailnetDraft.saved). 그래서 시험 버튼과
+  // 그 결과 칸이 없고, 저장이 열려 있다. 붙는지는 저장한 뒤 카드의 연결이나 호스트 연결이 말해 준다.
+  const editing = draft.saved !== undefined;
   const connected = connectedTailnet(status);
   const authKeyInput = (
     <>
       <Input
         type="password"
-        // 팀 것은 이름표(label)로 감싸지 않으므로 칸에 직접 이름을 준다.
-        aria-label={myKey ? 'My auth key' : undefined}
         value={draft.authKey}
-        placeholder={translate('tailnetSettings.field.authKeyPlaceholder')}
+        // 고칠 때는 칸이 늘 비어 있다(저장된 키는 내려오지 않는다). 키가 있는데 "비우면 브라우저
+        // 로그인" 이라고 하면 비워 둔 채 저장하면 키가 지워지는 것으로 읽힌다.
+        placeholder={translate(
+          editing && draft.saved?.hasAuthKey
+            ? 'hostForm.placeholder.keepBlank'
+            : 'tailnetSettings.field.authKeyPlaceholder',
+        )}
         onChange={(event) => onChange({ ...draft, authKey: event.target.value })}
       />
       {/* 1회용 키는 첫 재등록에서 막힌다. ephemeral 쪽 결과는 삭제할 때 안내한다. */}
@@ -92,14 +95,8 @@ export function TailnetForm({
           />
         </FieldGroup>
 
-        {myKey ? (
-          // 팀 tailnet 의 키 칸(K1) — ⓘ 가 이름표 밖에 있어야 이름이 입력 칸을 가리킨다.
-          <MyKeyField label="My auth key" hint={translate('teams.myKey.tailnetHint')}>
-            {authKeyInput}
-          </MyKeyField>
-        ) : (
-          <FieldGroup label={translate('tailnetSettings.field.authKey')}>{authKeyInput}</FieldGroup>
-        )}
+        {/* 팀 tailnet 도 같은 칸이다. 키는 그 볼트에 두고 팀에는 올리지 않을 뿐이다. */}
+        <FieldGroup label={translate('tailnetSettings.field.authKey')}>{authKeyInput}</FieldGroup>
       </div>
 
       {error ? (
@@ -108,7 +105,9 @@ export function TailnetForm({
         </NoticeCard>
       ) : null}
 
-      {status ? (
+      {/* 편집에서는 그리지 않는다. 이 상태는 저장된 노드의 것이라, 폼 안에 두면 이 폼이 시험한
+          결과로 읽힌다. */}
+      {status && !editing ? (
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
             <TailnetStateBadge status={status} />
@@ -122,17 +121,19 @@ export function TailnetForm({
 
       {/* 연결 결과. 손으로 채울 수 없고, 연결에 성공해야 값이 생긴다. 저장 조건이 바로
           이 값이라, 버튼이 왜 안 눌리는지 화면만 보고 알 수 있다. */}
-      <FieldGroup label={translate('tailnetSettings.field.connectedTo')}>
-        <Input
-          readOnly
-          value={connected}
-          placeholder={translate('tailnetSettings.field.connectedToPlaceholder')}
-          className="cursor-default"
-        />
-      </FieldGroup>
+      {editing ? null : (
+        <FieldGroup label={translate('tailnetSettings.field.connectedTo')}>
+          <Input
+            readOnly
+            value={connected}
+            placeholder={translate('tailnetSettings.field.connectedToPlaceholder')}
+            className="cursor-default"
+          />
+        </FieldGroup>
+      )}
 
       {/* tailnet 이름은 바로 위 읽기 전용 필드에 이미 있다. */}
-      {connected && status ? (
+      {connected && status && !editing ? (
         <TailnetIdentity
           loginName={status.loginName}
           nodeName={status.nodeName}
@@ -142,7 +143,7 @@ export function TailnetForm({
 
       <div className="flex flex-wrap justify-end gap-2">
         {/* 저장하기 전에 시험할 수 있어야 한다. 되는지 확인하고 저장하는 게 순서다. */}
-        {testing ? (
+        {editing ? null : testing ? (
           <Button variant="secondary" onClick={onCancelTest}>
             <RefreshCw className="h-4 w-4 animate-spin" aria-hidden />
             {translate('tailnetSettings.stopTest')}
@@ -158,8 +159,12 @@ export function TailnetForm({
           {translate('common.cancel')}
         </Button>
         {/* 붙는 것을 확인하기 전에 저장해 봐야 쓸 수 없는 설정이 하나 늘 뿐이다.
-            연결에 성공해야 tailnet 이름 같은 것도 알 수 있다. */}
-        <Button variant="primary" onClick={onSave} disabled={testing || !connected}>
+            연결에 성공해야 tailnet 이름 같은 것도 알 수 있다. 편집은 설정을 늘리지 않는다. */}
+        <Button
+          variant="primary"
+          onClick={onSave}
+          disabled={!editing && (testing || !connected)}
+        >
           {translate('common.save')}
         </Button>
       </div>

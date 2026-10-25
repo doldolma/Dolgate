@@ -2,7 +2,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { openTeamInviteBox, parseTeamInviteLink, unwrapTeamDek } from "@shared";
+import {
+  createTeamDek,
+  createTeamInviteSecret,
+  openTeamInviteBox,
+  parseTeamInviteLink,
+  sealTeamInviteSecret,
+  unwrapTeamDek,
+} from "@shared";
 import { createTeamHarness, PERSONAL_KEY, SERVER, sshDraft, T0 } from "./team-sync.test-support";
 
 // 팀 관리(만들기·초대 링크·참여·멤버·나가기)를 가짜 서버로 시험한다. 같은 서버의 두 계정은 서버의
@@ -170,6 +177,44 @@ describe("TeamService", () => {
 
     await harness.teams.removeMember(created.id, "user-2");
     expect((await harness.teams.listMembers(created.id)).map((member) => member.userId)).toEqual(["user-1"]);
+  });
+
+  it("lets any member copy a live invite link again, and only while the link lives", async () => {
+    const harness = await createTeamHarness(tempDir);
+    const created = await harness.teams.create("Acme");
+    const { link, invite } = await harness.teams.createInvite(created.id);
+    expect(invite.link).toBe(link);
+    // 서버에는 팀 키로 잠근 비밀값만 간다 — 링크의 비밀값 그대로는 요청 어디에도 없다.
+    const [post] = harness.server.requestsTo("POST", `/teams/${created.id}/invites`);
+    expect(post.body.sealedSecret).toEqual(expect.any(String));
+    expect(JSON.stringify(post.body)).not.toContain(link.split("#v1.")[1]);
+    expect(await harness.teams.listInvites(created.id)).toEqual([expect.objectContaining({ code: invite.code, link })]);
+
+    // 링크로 들어온 다른 계정(다른 개인 키)도 같은 링크를 다시 복사한다.
+    await harness.service.purgeAll();
+    signInAs(harness, "user-2", OTHER_PERSONAL_KEY);
+    await harness.teams.join(link);
+    expect(await harness.teams.listInvites(created.id)).toEqual([expect.objectContaining({ code: invite.code, link })]);
+
+    // 잠근 비밀값이 없거나(이 기능 전에 만든 링크) 다른 팀 키로 잠겨 열리지 않으면 그 링크만 다시 복사할 수 없다.
+    const mine = await harness.teams.createInvite(created.id);
+    const older = await harness.teams.createInvite(created.id);
+    harness.server.invites.get(older.invite.code)!.sealedSecret = null;
+    const foreign = await harness.teams.createInvite(created.id);
+    harness.server.invites.get(foreign.invite.code)!.sealedSecret = sealTeamInviteSecret({
+      secret: createTeamInviteSecret(),
+      teamId: created.id,
+      teamDek: createTeamDek(),
+    });
+    await harness.teams.revokeInvite(created.id, invite.code);
+
+    const links = Object.fromEntries((await harness.teams.listInvites(created.id)).map((item) => [item.code, item.link]));
+    expect(links).toEqual({
+      [invite.code]: null,
+      [mine.invite.code]: mine.link,
+      [older.invite.code]: null,
+      [foreign.invite.code]: null,
+    });
   });
 
   it("deletes a team and it leaves this device at once", async () => {

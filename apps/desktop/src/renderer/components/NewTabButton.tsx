@@ -18,7 +18,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import type { HostRecord, SavedWorkspaceRecord } from "@shared";
+import type { HostRecord, SavedWorkspaceRecord, VaultIndex } from "@shared";
 import {
   formatQuickSshHostLabel,
   getHostSubtitle,
@@ -34,6 +34,7 @@ import { Input } from "../ui";
 import { Columns2, Plus, SquareTerminal } from "../ui/icons";
 import { listSavedWorkspaceLeaves } from "../store/utils";
 import { cn } from "../lib/cn";
+import { teamOfVault, vaultIdOf } from "../lib/vault-groups";
 
 /** 말풍선에 담는 호스트 수. 더 담으면 목록이 길어져 "빠르게 하나" 라는 성격을 잃는다. */
 const MAX_HOSTS = 5;
@@ -47,6 +48,11 @@ interface NewTabButtonProps {
   hosts: readonly HostRecord[];
   /** 팀 호스트에 둔 내 사용자 이름 — 부제에 쓴다(표시만). */
   myUsernameByHostId?: Readonly<Record<string, string>>;
+  /**
+   * 볼트 표. 팀 것에는 부제 앞에 팀을 적는다(홈 검색과 같은 문법). 공유로 만든 팀 호스트는 이름·주소가 개인 원본과
+   * 같아서, 적지 않으면 두 줄이 똑같아 어느 것을 여는지 모른다.
+   */
+  vaultIndex?: VaultIndex | null;
   /** 호스트별 마지막 연결 시각(ms). 검색어가 없을 때 이 순서로 보여 준다. */
   lastConnectedByHostId: Map<string, number>;
   onConnectHost: (hostId: string) => void;
@@ -61,6 +67,7 @@ interface NewTabButtonProps {
 export function NewTabButton({
   hosts,
   myUsernameByHostId,
+  vaultIndex,
   lastConnectedByHostId,
   onConnectHost,
   onOpenLocalTerminal,
@@ -234,6 +241,7 @@ export function NewTabButton({
             targets: leaves.map((leaf) => leaf.target.label).join(" · "),
           }),
           keywords: leaves.map((leaf) => leaf.target.label),
+          team: teamOfVault(vaultIndex, vaultIdOf(vaultIndex?.teamIdByWorkspaceId, workspace.id)),
           Icon: Columns2,
           run: () => {
             setOpen(false);
@@ -250,6 +258,7 @@ export function NewTabButton({
         title: host.label,
         subtitle: getHostSubtitle(withMyUsername(host, myUsernameByHostId), hostSubtitleLabels()),
         keywords: [],
+        team: teamOfVault(vaultIndex, vaultIdOf(vaultIndex?.teamIdByHostId, host.id)),
         Icon: SquareTerminal,
         run: () => {
           setOpen(false);
@@ -283,6 +292,7 @@ export function NewTabButton({
     query,
     savedWorkspaces,
     translate,
+    vaultIndex,
   ]);
 
   const clampedIndex = Math.min(activeIndex, Math.max(items.length - 1, 0));

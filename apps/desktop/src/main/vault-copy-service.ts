@@ -84,8 +84,6 @@ export function toVaultCopyWrite(plan: VaultCopyPlan, now: string): VaultCopyWri
     ),
     memberSecrets: {
       hostCredentials: plan.memberCredentials.hostCredentials.map(lockMemberCredentials),
-      awsProfileCredentials: plan.memberCredentials.awsProfileCredentials.map(lockMemberCredentials),
-      tailnetCredentials: plan.memberCredentials.tailnetCredentials.map(lockMemberCredentials),
     },
     memberHostPrefs: plan.memberValues
       .filter((values) => values.favorite || values.agentForwarding)

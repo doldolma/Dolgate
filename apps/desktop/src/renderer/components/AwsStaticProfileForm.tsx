@@ -7,7 +7,6 @@ import {
   SelectField,
 } from '../ui'
 import { useTranslation } from 'react-i18next';
-import { MyKeyField } from './teams/MyKeyField'
 
 interface AwsStaticProfileFormProps {
   title?: string
@@ -21,8 +20,6 @@ interface AwsStaticProfileFormProps {
   profileNameEditable?: boolean
   testId?: string
   accessKeyHelpText?: string | null
-  /** 팀 프로필이면 키는 내 칸에만 간다 — 칸 이름이 그것을 말한다(K1). */
-  myKeys?: boolean
   onChange: (draft: AwsStaticProfileDraft) => void
   onCancel?: () => void
   onSubmit: () => void
@@ -40,14 +37,14 @@ export function AwsStaticProfileForm({
   profileNameEditable = true,
   testId,
   accessKeyHelpText = null,
-  myKeys = false,
   onChange,
   onCancel,
   onSubmit,
 }: AwsStaticProfileFormProps) {
   const { t: translate } = useTranslation();
-  const accessKeyLabel = myKeys ? 'My Access Key' : 'Access Key'
-  const secretLabel = myKeys ? 'My Secret' : 'Secret'
+  // 팀 프로필도 같은 칸이다. 키는 그 볼트에 두고 팀에는 올리지 않을 뿐이라 화면에서 가를 것이 없다.
+  const accessKeyLabel = 'Access Key'
+  const secretLabel = 'Secret'
   const accessKeyInput = (
     <div className="grid gap-2">
       <Input
@@ -131,14 +128,7 @@ export function AwsStaticProfileForm({
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        {myKeys ? (
-          // 팀 프로필의 키 칸(K1) — ⓘ 가 이름표 밖에 있어야 이름이 입력 칸을 가리킨다.
-          <MyKeyField label={accessKeyLabel} hint={translate('teams.myKey.awsHint')}>
-            {accessKeyInput}
-          </MyKeyField>
-        ) : (
-          <FieldGroup label={accessKeyLabel}>{accessKeyInput}</FieldGroup>
-        )}
+        <FieldGroup label={accessKeyLabel}>{accessKeyInput}</FieldGroup>
 
         <FieldGroup label={secretLabel}>
           <Input

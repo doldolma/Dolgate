@@ -244,14 +244,236 @@ describe('TailnetSettingsPanel', () => {
   });
 });
 
-// 설정의 볼트별 묶음(4-7). 새 tailnet 은 묶음 머리의 + 로 그 볼트에 — 팀 것의 auth key 는 내 칸에만 간다(K1).
+// 저장된 tailnet 고치기. auth key 는 렌더러로 내려오지 않으므로 칸은 늘 비어 있고, 비우면 그대로 둔다.
+describe('TailnetSettingsPanel 편집', () => {
+  const saved = createRecord({
+    hasAuthKey: true,
+    tailnetName: 'corp.ts.net',
+    loginName: 'me@corp',
+  });
+
+  beforeEach(() => {
+    for (const mock of Object.values(mocks)) {
+      mock.mockReset();
+    }
+    mocks.listTailnets.mockResolvedValue([saved]);
+    mocks.snapshotTailnets.mockResolvedValue({ statuses: [], localNodeName: 'dev' });
+    mocks.onTailnetStatus.mockReturnValue(() => {});
+    mocks.saveTailnet.mockResolvedValue(saved);
+    mocks.forgetTailnet.mockResolvedValue(undefined);
+    storeState.tailnetStatuses = {};
+    storeState.hosts = [];
+    storeState.vaultIndex = undefined;
+  });
+
+  const openEditor = async () => {
+    fireEvent.click(await screen.findByRole('button', { name: '편집' }));
+    return screen.getByPlaceholderText('비워 두면 그대로 유지') as HTMLInputElement;
+  };
+
+  it('그 카드 자리에 폼을 열고, 키 칸은 비운 채 그대로 유지된다고 알린다', async () => {
+    render(<TailnetSettingsPanel />);
+    const authKey = await openEditor();
+
+    expect(authKey.value).toBe('');
+    // 폼은 하나다 — 위쪽 추가 자리에 같은 초안이 한 번 더 열리면 안 된다.
+    expect(screen.getAllByDisplayValue('corp')).toHaveLength(1);
+    // 카드는 폼으로 바뀐다.
+    expect(screen.queryByRole('button', { name: '연결' })).toBeNull();
+    // 칸은 추가와 같다. 시험 단추는 없다 — 새 키는 저장할 때 지금 등록을 풀어, 다음 연결이 그 키로 등록한다.
+    expect(screen.getByText('Headscale 서버 (선택)')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '연결 테스트' })).toBeNull();
+    expect(screen.queryByText('연결된 Tailnet')).toBeNull();
+    // 한 번에 하나만 연다.
+    expect(screen.getByRole('button', { name: '네트워크 추가' })).toBeDisabled();
+  });
+
+  // 이미 등록된 노드는 Tailscale 이 새 키를 무시하고 옛 등록으로 붙는다 — 틀린 키를 넣어도 "연결됨" 으로 보였다.
+  // 그래서 새 키로 고치면 지금 등록을 풀고(노드키·로그인 상태를 지운다) 저장한다. 다음 연결이 그 키로 처음부터
+  // 등록한다 — 저장하면서 붙지는 않는다. 연결해서 알게 된 값은 그대로 둔다.
+  it('새 키를 넣으면 지금 등록을 풀고 저장한다 — 다음 연결이 그 키로 처음부터 등록한다', async () => {
+    render(<TailnetSettingsPanel />);
+    fireEvent.change(await openEditor(), { target: { value: '  tskey-rotated \n' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+
+    await waitFor(() => expect(mocks.saveTailnet).toHaveBeenCalledTimes(1));
+    expect(mocks.forgetTailnet).toHaveBeenCalledWith('net-1');
+    const input = mocks.saveTailnet.mock.calls[0][0];
+    expect(input.authKey).toBe('tskey-rotated');
+    expect(input.record).toMatchObject({
+      id: 'net-1',
+      label: 'corp',
+      tailnetName: 'corp.ts.net',
+      loginName: 'me@corp',
+      createdAt: saved.createdAt,
+    });
+    // 풀고 나서 저장한다. 붙는 것은 다음 연결이다.
+    expect(mocks.forgetTailnet.mock.invocationCallOrder[0]).toBeLessThan(mocks.saveTailnet.mock.invocationCallOrder[0]!);
+    expect(mocks.testTailnet).not.toHaveBeenCalled();
+    // 저장하면 목록을 다시 읽고 카드로 돌아온다.
+    await waitFor(() => expect(mocks.listTailnets).toHaveBeenCalledTimes(2));
+  });
+
+  // 컨트롤 플레인에 닿지 못해 옛 등록을 풀지 못해도 이 기기의 노드키·로그인 상태는 지워졌다. 저장은 그대로 한다.
+  it('지금 등록을 풀지 못해도 새 키는 저장한다', async () => {
+    mocks.forgetTailnet.mockRejectedValue(new Error('control plane unreachable'));
+    render(<TailnetSettingsPanel />);
+    fireEvent.change(await openEditor(), { target: { value: 'tskey-rotated' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+
+    await waitFor(() => expect(mocks.saveTailnet).toHaveBeenCalledTimes(1));
+    expect(mocks.saveTailnet.mock.calls[0][0].authKey).toBe('tskey-rotated');
+  });
+
+  it('키 칸을 비우거나 공백만 두면 저장된 키를 건드리지 않는다', async () => {
+    render(<TailnetSettingsPanel />);
+    const authKey = await openEditor();
+    fireEvent.change(screen.getByDisplayValue('corp'), { target: { value: 'corp-renamed' } });
+    fireEvent.change(authKey, { target: { value: '   ' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+
+    await waitFor(() => expect(mocks.saveTailnet).toHaveBeenCalledTimes(1));
+    const input = mocks.saveTailnet.mock.calls[0][0];
+    expect(input.authKey).toBeUndefined();
+    expect(input.record).toMatchObject({ id: 'net-1', label: 'corp-renamed' });
+    // 키를 바꾸지 않았으면 등록도 그대로다.
+    expect(mocks.forgetTailnet).not.toHaveBeenCalled();
+    expect(mocks.testTailnet).not.toHaveBeenCalled();
+  });
+
+  // 서버를 바꾸면 알고 있던 tailnet·계정은 옛 서버의 것이다. 남기면 새 서버에 붙는 순간 "다른
+  // tailnet" 경고가 뜨고 지울 길이 없다. 같은 서버면 그대로 둔다(위 테스트).
+  it('서버를 바꾸면 새 서버로 저장하고, 옛 서버에서 알게 된 tailnet·계정은 비운다', async () => {
+    mocks.listTailnets.mockResolvedValue([
+      createRecord({
+        hasAuthKey: true,
+        controlUrl: 'https://hs-old.example.com',
+        tailnetName: 'old-tailnet',
+        loginName: 'me@old',
+      }),
+    ]);
+    render(<TailnetSettingsPanel />);
+    await openEditor();
+    fireEvent.change(screen.getByDisplayValue('https://hs-old.example.com'), {
+      target: { value: ' https://hs-new.example.com ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+
+    await waitFor(() => expect(mocks.saveTailnet).toHaveBeenCalledTimes(1));
+    const { record } = mocks.saveTailnet.mock.calls[0][0];
+    expect(record).toMatchObject({ id: 'net-1', controlUrl: 'https://hs-new.example.com' });
+    expect(record.tailnetName).toBeUndefined();
+    expect(record.loginName).toBeUndefined();
+  });
+
+  // 초안을 닫을 때는 시험이 올린 노드를 지운다(상태가 있으면). 편집은 그 id 가 저장된 네트워크의
+  // 노드라, 같은 정리를 타면 등록이 풀리고 로컬 상태까지 지워진다. 키가 거부돼 고치러 들어온 바로
+  // 그 상태로 시험한다.
+  it('편집을 취소해도 저장된 네트워크의 노드는 지우지 않는다', async () => {
+    putStatus({ id: 'net-1', state: 'needsAuth', loginError: 'invalid key' });
+    render(<TailnetSettingsPanel />);
+    await openEditor();
+    // 저장된 노드의 상태를 폼 안에 그리면 이 폼이 시험한 결과로 읽힌다.
+    expect(screen.queryByText('로그인 거부됨')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+
+    expect(await screen.findByRole('button', { name: '편집' })).toBeInTheDocument();
+    expect(mocks.forgetTailnet).not.toHaveBeenCalled();
+    expect(mocks.saveTailnet).not.toHaveBeenCalled();
+  });
+
+  // 쓰이는 노드의 키·서버가 바뀌면 코어는 그 노드를 기존 연결 밑에서 버리지 못해 폐기 대기로 두고,
+  // 그 연결들이 닫힐 때까지 이 네트워크의 새 연결을 막는다. 그래서 붙어 있는 동안은 열지 않는다.
+  it('붙어 있는 동안은 편집을 열지 않는다', async () => {
+    putStatus({ id: 'net-1', state: 'running', ready: true });
+    render(<TailnetSettingsPanel />);
+
+    expect(await screen.findByRole('button', { name: '편집' })).toBeDisabled();
+  });
+
+  // 올리는 중인 것은 막지 않는다. 그 시도는 곧 끝나고, 키가 틀려 붙지 못하는 바로 그때가 고칠
+  // 때다 — 막으면 재연결을 되풀이하는 탭 때문에 단추가 켜졌다 꺼졌다 한다.
+  it('올리는 중에는 편집을 막지 않는다', async () => {
+    putStatus({ id: 'net-1', state: 'needsAuth', attempting: true });
+    render(<TailnetSettingsPanel />);
+
+    expect(await screen.findByRole('button', { name: '편집' })).toBeEnabled();
+  });
+
+  // 열어 둔 사이에 붙을 수 있다(다른 창·재연결). 그때 저장하면 막아 둔 것과 같은 일이 난다.
+  it('고치는 사이 붙었으면 저장하지 않고 알린다', async () => {
+    const { rerender } = render(<TailnetSettingsPanel />);
+    fireEvent.change(await openEditor(), { target: { value: 'tskey-rotated' } });
+
+    putStatus({
+      id: 'net-1',
+      state: 'running',
+      ready: true,
+      tailnetName: 'corp.ts.net',
+      loginName: 'me@corp',
+    });
+    rerender(<TailnetSettingsPanel />);
+    // 그 상태는 저장된 노드의 것이다 — 폼이 시험한 결과처럼 그리지 않는다(카드는 폼으로 바뀌었다).
+    expect(screen.queryByText('연결됨')).toBeNull();
+    expect(screen.queryByText('me@corp')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+
+    expect(
+      await screen.findByText(/편집하는 사이 이 네트워크가 연결돼 저장하지 않았습니다/),
+    ).toBeInTheDocument();
+    expect(mocks.saveTailnet).not.toHaveBeenCalled();
+    // 폼은 그대로다 — 무엇을 하려 했는지 보인다.
+    expect(screen.getByPlaceholderText('비워 두면 그대로 유지')).toHaveValue('tskey-rotated');
+  });
+
+  // 위의 "붙어 있으면 저장하지 않는다" 는 편집만의 규칙이다. 추가는 시험에 성공해 붙은(ready) 뒤에야
+  // 저장되므로, 이 규칙이 추가로 번지면 새 네트워크를 하나도 저장할 수 없다.
+  it('새 네트워크는 시험해 붙은 상태로 저장된다', async () => {
+    const draftId = vi
+      .spyOn(crypto, 'randomUUID')
+      .mockReturnValue('net-new' as ReturnType<typeof crypto.randomUUID>);
+    const { rerender } = render(<TailnetSettingsPanel />);
+    fireEvent.click(await screen.findByRole('button', { name: '네트워크 추가' }));
+    putStatus({ id: 'net-new', state: 'running', ready: true, tailnetName: 'lab.ts.net' });
+    rerender(<TailnetSettingsPanel />);
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+
+    await waitFor(() =>
+      expect(mocks.saveTailnet).toHaveBeenCalledWith(
+        expect.objectContaining({ record: expect.objectContaining({ id: 'net-new' }) }),
+      ),
+    );
+    draftId.mockRestore();
+  });
+
+  it('브라우저 로그인으로 등록한 것은 비우면 브라우저 로그인 그대로라고 알린다', async () => {
+    mocks.listTailnets.mockResolvedValue([createRecord({ hasAuthKey: false })]);
+    render(<TailnetSettingsPanel />);
+    fireEvent.click(await screen.findByRole('button', { name: '편집' }));
+
+    expect(screen.getByPlaceholderText('비우면 브라우저 로그인')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('비워 두면 그대로 유지')).toBeNull();
+  });
+
+  it('하나를 고치는 동안 다른 카드는 편집을 열지 않는다', async () => {
+    mocks.listTailnets.mockResolvedValue([saved, createRecord({ id: 'net-2', label: 'lab' })]);
+    render(<TailnetSettingsPanel />);
+    const [first] = await screen.findAllByRole('button', { name: '편집' });
+    fireEvent.click(first);
+
+    expect(screen.getByRole('button', { name: '편집' })).toBeDisabled();
+  });
+});
+
+// 설정의 볼트별 묶음(4-7). 새 tailnet 은 묶음 머리의 + 로 그 볼트에. 팀 tailnet 도 칸은 개인 것과 같다 — auth key 는
+// 그 볼트에 두고 팀에 올리지 않을 뿐이라 화면에서 가를 것이 없다.
 describe('TailnetSettingsPanel with team vaults', () => {
   beforeEach(() => {
     for (const mock of Object.values(mocks)) {
       mock.mockReset();
     }
     mocks.listTailnets.mockResolvedValue([createRecord()]);
-    mocks.listTeamTailnets.mockResolvedValue([createRecord({ id: 'net-team', label: 'acme-tailnet', hasAuthKey: true })]);
+    mocks.listTeamTailnets.mockResolvedValue([createRecord({ id: 'net-team', label: 'acme-tailnet', hasAuthKey: false })]);
     mocks.snapshotTailnets.mockResolvedValue({ statuses: [], localNodeName: 'dev' });
     mocks.onTailnetStatus.mockReturnValue(() => {});
     mocks.saveTailnet.mockResolvedValue(createRecord({ id: 'net-draft' }));
@@ -265,7 +487,7 @@ describe('TailnetSettingsPanel with team vaults', () => {
   const section = (vaultId: string) =>
     within(document.querySelector(`[data-vault-section="${vaultId}"]`)!.closest('section')!);
 
-  it('groups tailnets by vault and adds a team one into that team, the auth key labelled as mine', async () => {
+  it('groups tailnets by vault and adds a team one into that team, with the usual auth key field', async () => {
     const draftId = vi.spyOn(crypto, 'randomUUID').mockReturnValue('net-draft' as ReturnType<typeof crypto.randomUUID>);
     const { rerender } = render(<TailnetSettingsPanel />);
 
@@ -276,10 +498,9 @@ describe('TailnetSettingsPanel with team vaults', () => {
     expect(screen.queryByRole('button', { name: '네트워크 추가' })).toBeNull();
 
     fireEvent.click(section('team-a').getByRole('button', { name: 'Acme Infra에 네트워크 추가' }));
-    // 폼은 그 묶음 안에 열린다.
-    expect(section('team-a').getByText('My auth key')).toBeInTheDocument();
-    fireEvent.change(section('team-a').getByLabelText('My auth key'), {
-      target: { value: 'tskey-mine' },
+    // 폼은 그 묶음 안에 열린다. 칸은 개인 것과 같다.
+    fireEvent.change(section('team-a').getByPlaceholderText('비우면 브라우저 로그인'), {
+      target: { value: 'tskey-here' },
     });
     // 붙은 뒤에만 저장된다 — 시험이 올린 노드가 붙은 상태를 준다.
     putStatus({ id: 'net-draft', state: 'running', tailnetName: 'acme.ts.net' } as TailnetStatus);
@@ -288,10 +509,46 @@ describe('TailnetSettingsPanel with team vaults', () => {
 
     await waitFor(() =>
       expect(mocks.saveTailnet).toHaveBeenCalledWith(
-        expect.objectContaining({ vaultId: 'team-a', authKey: 'tskey-mine', record: expect.objectContaining({ id: 'net-draft' }) }),
+        expect.objectContaining({ vaultId: 'team-a', authKey: 'tskey-here', record: expect.objectContaining({ id: 'net-draft' }) }),
       ),
     );
     draftId.mockRestore();
+  });
+
+  // 이 기기에 키가 있으면 개인 것처럼 "auth key" 로 보이고, 고칠 때 비워 두면 그대로다.
+  it('팀 tailnet 도 개인 것과 같이 보이고 고친다 — 이 기기에 둔 키는 비워 두면 그대로', async () => {
+    mocks.listTeamTailnets.mockResolvedValue([createRecord({ id: 'net-team', label: 'acme-tailnet', hasAuthKey: true })]);
+    render(<TailnetSettingsPanel />);
+    await waitFor(() => expect(section('team-a').getByText('acme-tailnet')).toBeInTheDocument());
+    expect(section('team-a').getByText('auth key')).toBeInTheDocument();
+
+    fireEvent.click(section('team-a').getByRole('button', { name: '편집' }));
+    // 폼은 그 묶음의 그 카드 자리에 열린다.
+    fireEvent.change(section('team-a').getByDisplayValue('acme-tailnet'), { target: { value: 'acme-renamed' } });
+    expect(section('team-a').getByPlaceholderText('비워 두면 그대로 유지')).toHaveValue('');
+    fireEvent.click(section('team-a').getByRole('button', { name: '저장' }));
+
+    await waitFor(() =>
+      expect(mocks.saveTailnet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          authKey: undefined,
+          record: expect.objectContaining({ id: 'net-team', label: 'acme-renamed' }),
+        }),
+      ),
+    );
+    expect(mocks.forgetTailnet).not.toHaveBeenCalled();
+  });
+
+  // 빈 묶음의 안내 줄은 그 묶음에 새 초안이 열렸을 때만 비킨다. 편집은 그 자리를 쓰지 않는다.
+  it('팀 것을 고치는 동안에도 빈 개인 묶음은 비었다고 말한다', async () => {
+    mocks.listTailnets.mockResolvedValue([]);
+    render(<TailnetSettingsPanel />);
+    await waitFor(() => expect(section('team-a').getByText('acme-tailnet')).toBeInTheDocument());
+
+    fireEvent.click(section('team-a').getByRole('button', { name: '편집' }));
+
+    expect(section('team-a').getByDisplayValue('acme-tailnet')).toBeInTheDocument();
+    expect(section('personal').getByText('등록된 네트워크가 없습니다.')).toBeInTheDocument();
   });
 
   it('keeps a personal tailnet personal', async () => {
@@ -300,7 +557,7 @@ describe('TailnetSettingsPanel with team vaults', () => {
 
     fireEvent.click(section('personal').getByRole('button', { name: 'Personal에 네트워크 추가' }));
 
-    expect(section('personal').queryByText('My auth key')).toBeNull();
+    // 개인 것은 auth key 를 넣을 수 있다.
     expect(section('personal').getByText('auth key')).toBeInTheDocument();
   });
 });

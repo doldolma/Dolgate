@@ -295,7 +295,6 @@ export function AwsProfileCreateWizard({
           submitLabel={translate('awsWizard.static.submit')}
           submittingLabel={translate('awsWizard.static.submitting')}
           profileNameLabel={translate('awsWizard.static.profileName')}
-          myKeys={Boolean(vaultId)}
           onChange={setStaticDraft}
           onCancel={onCancel}
           onSubmit={() => {

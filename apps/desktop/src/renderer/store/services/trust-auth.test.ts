@@ -199,13 +199,13 @@ describe("ensureTrustedHost", () => {
   });
 });
 
-// 키 없는 팀 정적 AWS 프로필(4-7 M3): SDK 오류 대신 무엇을 넣어야 하는지 말하고, 실패 화면이 "내 키 넣기"를 낼 수 있게
+// 이 기기에 키가 없는 팀 정적 AWS 프로필(4-7 M3): SDK 오류 대신 무엇을 넣어야 하는지 말하고, 실패 화면이 "키 넣기"를 낼 수 있게
 // 넣을 곳을 남긴다. 다시 괜찮아지면 지운다.
-describe("missing my own key for a team AWS profile", () => {
+describe("missing key for a team AWS profile on this device", () => {
   const MISSING = { teamId: "team-a", profileId: "team-base", profileName: "base" };
 
   function setupStatus(statuses: Array<Record<string, unknown>>) {
-    let state = { hosts: [awsHost({ id: "team-ec2", awsProfileId: "team-ops" })], awsMissingMyKeyByProfileId: {} as Record<string, unknown> };
+    let state = { hosts: [awsHost({ id: "team-ec2", awsProfileId: "team-ops" })], awsMissingKeyByProfileId: {} as Record<string, unknown> };
     const getProfileStatusById = vi.fn();
     for (const status of statuses) {
       getProfileStatusById.mockResolvedValueOnce(status);
@@ -229,19 +229,19 @@ describe("missing my own key for a team AWS profile", () => {
         isSsoProfile: false,
         isAuthenticated: false,
         errorMessage: '팀 프로필 "base" 에 내 AWS 키가 없습니다. 키는 팀원마다 각자 넣습니다.',
-        missingMyKey: MISSING,
+        missingKey: MISSING,
       },
     ]);
 
     await expect(services.ensureAwsSsoProfileAuthenticationIfNeeded("team-ops", "ops")).rejects.toThrow(
       '팀 프로필 "base" 에 내 AWS 키가 없습니다.',
     );
-    expect(state().awsMissingMyKeyByProfileId).toEqual({ "team-ops": MISSING });
+    expect(state().awsMissingKeyByProfileId).toEqual({ "team-ops": MISSING });
   });
 
   it("forgets the mark once the profile is fine again", async () => {
     const { services, state } = setupStatus([
-      { id: "team-ops", profileName: "ops", available: true, isSsoProfile: false, isAuthenticated: false, missingMyKey: MISSING },
+      { id: "team-ops", profileName: "ops", available: true, isSsoProfile: false, isAuthenticated: false, missingKey: MISSING },
       { id: "team-ops", profileName: "ops", available: true, isSsoProfile: false, isAuthenticated: true },
     ]);
     await expect(services.ensureAwsSsoProfileAuthenticationIfNeeded("team-ops", "ops")).rejects.toThrow();
@@ -249,6 +249,6 @@ describe("missing my own key for a team AWS profile", () => {
     await expect(services.ensureAwsSsoProfileAuthenticationIfNeeded("team-ops", "ops")).resolves.toMatchObject({
       isAuthenticated: true,
     });
-    expect(state().awsMissingMyKeyByProfileId).toEqual({});
+    expect(state().awsMissingKeyByProfileId).toEqual({});
   });
 });

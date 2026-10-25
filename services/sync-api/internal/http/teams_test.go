@@ -245,6 +245,74 @@ func TestTeamInviteValidatesLifetimeAndRevocation(t *testing.T) {
 	}
 }
 
+// 잠근 비밀값은 멤버의 링크 목록에만 실린다 — 링크 정보·참여 응답에는 없고, 취소하면 목록에서도 빠진다.
+func TestTeamInviteSealedSecretGoesOnlyToMembers(t *testing.T) {
+	env := newWatchTestEnv(t)
+	router := env.router(t, httpserver.RouterConfig{SyncWatch: env.hub(t, time.Hour)})
+	owner := newWatchTestAccount(t, router, "sealed-http-owner@example.com")
+	member := newWatchTestAccount(t, router, "sealed-http-member@example.com")
+	joiner := newWatchTestAccount(t, router, "sealed-http-joiner@example.com")
+	teamID := createTeamOverHTTP(t, router, owner, "Acme")
+	addMemberOverHTTP(t, router, teamID, owner, member)
+
+	token := "token-" + uuid.NewString()
+	inviteBody := func(sealed string) string {
+		return fmt.Sprintf(`{"inviteBox":"sealed-team-key","sealedSecret":%q,"joinTokenHash":%q,"expiresAt":%q}`,
+			sealed, store.HashTeamJoinToken(token), time.Now().Add(time.Hour).UTC().Format(time.RFC3339))
+	}
+	expectStatus(t, teamCall(router, owner, http.MethodPost, "/teams/"+teamID+"/invites", inviteBody(strings.Repeat("a", 1025)), nil),
+		http.StatusBadRequest, "oversized sealed secret")
+	created := teamCall(router, owner, http.MethodPost, "/teams/"+teamID+"/invites", inviteBody("sealed-secret"), nil)
+	expectStatus(t, created, http.StatusCreated, "create invite")
+	var invite struct {
+		Code         string `json:"code"`
+		SealedSecret string `json:"sealedSecret"`
+	}
+	decodeJSON(t, created, &invite)
+	if invite.SealedSecret != "sealed-secret" {
+		t.Fatalf("created invite = %#v", invite)
+	}
+
+	sealedInList := func(account *watchTestAccount) (string, bool) {
+		t.Helper()
+		listed := teamCall(router, account, http.MethodGet, "/teams/"+teamID+"/invites", "", nil)
+		expectStatus(t, listed, http.StatusOK, "list invites")
+		var body struct {
+			Invites []map[string]any `json:"invites"`
+		}
+		decodeJSON(t, listed, &body)
+		for _, item := range body.Invites {
+			if item["code"] == invite.Code {
+				sealed, ok := item["sealedSecret"].(string)
+				return sealed, ok
+			}
+		}
+		t.Fatalf("invite %s missing from the list: %#v", invite.Code, body.Invites)
+		return "", false
+	}
+	if sealed, ok := sealedInList(member); !ok || sealed != "sealed-secret" {
+		t.Fatalf("member sees sealed secret %q (%v)", sealed, ok)
+	}
+
+	tokenHeader := map[string]string{"X-Dolgate-Invite-Token": token}
+	info := teamCall(router, joiner, http.MethodGet, "/invite/"+invite.Code+"/info", "", tokenHeader)
+	expectStatus(t, info, http.StatusOK, "info")
+	joined := joinOverHTTP(router, joiner, invite.Code, token)
+	expectStatus(t, joined, http.StatusOK, "join")
+	for what, recorder := range map[string]*httptest.ResponseRecorder{"info": info, "join": joined} {
+		var body map[string]any
+		decodeJSON(t, recorder, &body)
+		if _, leaked := body["sealedSecret"]; leaked {
+			t.Fatalf("%s leaked the sealed secret: %#v", what, body)
+		}
+	}
+
+	expectStatus(t, teamCall(router, member, http.MethodDelete, "/teams/"+teamID+"/invites/"+invite.Code, "", nil), http.StatusNoContent, "revoke")
+	if sealed, ok := sealedInList(owner); ok {
+		t.Fatalf("revoked invite still carries a sealed secret %q", sealed)
+	}
+}
+
 func TestTeamSyncAndPrivateSlots(t *testing.T) {
 	env := newWatchTestEnv(t)
 	router := env.router(t, httpserver.RouterConfig{SyncWatch: env.hub(t, time.Hour)})

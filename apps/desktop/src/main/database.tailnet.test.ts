@@ -469,6 +469,43 @@ describe('SSH host tailnetId survives the whitelists', () => {
     const reloaded = await reload();
     expect((reloaded.getById('rdp-1') as { tailnetId?: string | null })?.tailnetId).toBeNull();
   });
+
+  // VNC 도 같은 필드를 쓴다. 이 정리가 SSH·RDP 만 보던 사이에 VNC 가 들어와, 지운 tailnet 을 계속
+  // 가리킨 채 연결에 실패했다 — 삭제 확인창은 VNC 호스트까지 세어 "해제된다" 고 말하는데.
+  it('clears the tailnet from VNC hosts too, and moves updatedAt so it syncs', async () => {
+    const { hosts, reload } = await loadHosts();
+    const { TailnetRepository } = await import('./database');
+    const tailnets = new TailnetRepository();
+    tailnets.save(draft({ id: 'net-a' }));
+    tailnets.save(draft({ id: 'net-b' }));
+    const vncDraft = (tailnetId: string) => ({
+      kind: 'vnc' as const,
+      label: 'Lab Screen',
+      tags: [],
+      terminalThemeId: null,
+      hostname: '10.0.2.90',
+      port: 5900,
+      tailnetId,
+    });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+      hosts.create('vnc-1', vncDraft('net-a'));
+      hosts.create('vnc-2', vncDraft('net-b'));
+
+      vi.setSystemTime(new Date('2026-02-01T00:00:00.000Z'));
+      tailnets.remove('net-a');
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const reloaded = await reload();
+    const cleared = reloaded.getById('vnc-1') as { tailnetId?: string | null; updatedAt: string };
+    expect(cleared.tailnetId).toBeNull();
+    // 동기화는 updatedAt 으로 이긴다. 그대로면 다른 기기에서 옛 값이 되살아난다.
+    expect(cleared.updatedAt).toBe('2026-02-01T00:00:00.000Z');
+    expect((reloaded.getById('vnc-2') as { tailnetId?: string | null })?.tailnetId).toBe('net-b');
+  });
 });
 
 // get() 은 필드를 하나하나 나열하는 화이트리스트라, 새 설정을 빠뜨리면 저장은 되는데 읽을

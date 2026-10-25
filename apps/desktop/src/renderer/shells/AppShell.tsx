@@ -241,6 +241,7 @@ export function AppShell({
             <NewTabButton
               hosts={homeViewModel.hosts}
               myUsernameByHostId={homeViewModel.vaultIndex?.myUsernameByHostId}
+              vaultIndex={homeViewModel.vaultIndex}
               savedWorkspaces={homeViewModel.savedWorkspaces}
               onOpenSavedWorkspace={(workspaceId) =>
                 void homeViewModel.openSavedWorkspace(

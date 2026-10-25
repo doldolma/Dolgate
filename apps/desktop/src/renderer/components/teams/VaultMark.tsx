@@ -3,36 +3,40 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/cn';
 import type { VaultSectionTeam } from '../../lib/vault-groups';
 import { IconButton, Tooltip } from '../../ui';
-import { Plus, User } from '../../ui/icons';
-import { TeamMark } from './TeamMark';
+import { Plus, User, Users } from '../../ui/icons';
 
-/** 볼트 표시 — 개인은 사람 아이콘 네모, 팀은 머리글자 네모. 사이드바 볼트 줄과 같은 모양이다. */
-export function VaultMark({ team, size = 'sm' }: { team: VaultSectionTeam | null; size?: 'xs' | 'sm' }) {
-  if (team) {
-    return <TeamMark name={team.name} size={size} />;
-  }
+/**
+ * 볼트 표시 — 개인은 사람, 팀은 사람들 선 아이콘. 사이드바의 폴더 아이콘과 같은 결이다.
+ *
+ * 볼트가 섞여 보이는 곳(사이드바 볼트 줄·섞인 목록의 위치·Vault 고르기)에만 단다. 이름이 바로 옆에 있는 곳(묶음 머리·
+ * 편집 창 칩·팀 화면)에는 달지 않는다. 색은 둘레 글자를 따른다.
+ */
+export function VaultMark({
+  kind,
+  size = 'sm',
+  className,
+}: {
+  kind: 'personal' | 'team';
+  size?: 'xs' | 'sm';
+  className?: string;
+}) {
+  const Icon = kind === 'team' ? Users : User;
   return (
-    <span
+    <Icon
       aria-hidden="true"
-      className={cn(
-        'inline-grid shrink-0 place-items-center bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent_88%)] text-[var(--accent-strong)]',
-        size === 'xs' ? 'h-[14px] w-[14px] rounded-[4px]' : 'h-[1.4rem] w-[1.4rem] rounded-[7px]',
-      )}
-    >
-      <User className={size === 'xs' ? 'h-[0.55rem] w-[0.55rem]' : 'h-[0.85rem] w-[0.85rem]'} />
-    </span>
+      className={cn('shrink-0', size === 'xs' ? 'h-[0.8rem] w-[0.8rem]' : 'h-[1.05rem] w-[1.05rem]', className)}
+    />
   );
 }
 
-/** 편집 창 머리에 붙는 "어느 볼트에" 칩(후보 N2). */
+/** 편집 창 머리에 붙는 "어느 볼트에" 칩(후보 N2). 이름만 — 표시는 달지 않는다. */
 export function VaultChip({ team }: { team: VaultSectionTeam | null }) {
   const { t: translate } = useTranslation();
   return (
     <span
       data-vault-chip={team?.id ?? 'personal'}
-      className="inline-flex min-h-[1.85rem] items-center gap-[0.35rem] rounded-[8px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_94%,transparent_6%)] px-[0.6rem] py-[0.2rem] align-middle text-[0.82rem] font-semibold text-[var(--text-soft)]"
+      className="inline-flex min-h-[1.85rem] items-center rounded-[8px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_94%,transparent_6%)] px-[0.6rem] py-[0.2rem] align-middle text-[0.82rem] font-semibold text-[var(--text-soft)]"
     >
-      <VaultMark team={team} size="xs" />
       {team?.name ?? translate('sidebar.personalVault')}
     </span>
   );
@@ -50,13 +54,12 @@ interface VaultSectionHeaderProps {
   action?: ReactNode;
 }
 
-/** 볼트별 목록의 묶음 머리(후보 L2) — 표시·이름·개수, 오른쪽 + 가 그 볼트에 만든다. */
+/** 볼트별 목록의 묶음 머리(후보 L2) — 이름·개수, 오른쪽 + 가 그 볼트에 만든다. */
 export function VaultSectionHeader({ team, count, addLabel, onAdd, hint, action }: VaultSectionHeaderProps) {
   const { t: translate } = useTranslation();
   return (
     <div data-vault-section={team?.id ?? 'personal'} className="flex items-center justify-between gap-4">
       <span className="inline-flex min-w-0 items-center gap-2">
-        <VaultMark team={team} />
         <strong className="truncate text-[0.95rem] text-[var(--text)]">
           {team?.name ?? translate('sidebar.personalVault')}
         </strong>

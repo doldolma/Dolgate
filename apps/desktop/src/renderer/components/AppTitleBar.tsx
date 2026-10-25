@@ -28,7 +28,6 @@ import {
   withLocalHostDrives,
 } from "@shared";
 import { useAppStore } from "../store/appStore";
-import { TeamMark } from "./teams/TeamMark";
 import type {
   DynamicTabStripItem,
   TmuxSessionGroup,
@@ -39,7 +38,7 @@ import {
   DesktopWindowControls,
   type DesktopPlatform,
 } from "./DesktopWindowControls";
-import { listTailnets, snapshotTailnets } from "../services/desktop/tailnet";
+import { listTailnets, listTeamTailnets, snapshotTailnets } from "../services/desktop/tailnet";
 import {
   cidrPrefixLength,
   isAddressInCidr,
@@ -504,6 +503,22 @@ export function collectTailnetIdsInUse(
   return ids;
 }
 
+/** 화면에 떠 있는 팀 호스트들의 팀. 팀 호스트의 tailnet 은 그 팀 볼트에 있다(개인 목록에는 없다). */
+export function collectTeamIdsInUse(
+  tabs: Pick<TerminalTab, "hostId">[],
+  tmuxGroups: Pick<TmuxSessionGroup, "hostId">[],
+  teamIdByHostId: Readonly<Record<string, string>> | undefined,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const { hostId } of [...tabs, ...tmuxGroups]) {
+    const teamId = hostId ? teamIdByHostId?.[hostId] : undefined;
+    if (teamId) {
+      ids.add(teamId);
+    }
+  }
+  return ids;
+}
+
 function useTailnetPathLookup(
   tabs: TerminalTab[],
   tmuxGroups: TmuxSessionGroup[],
@@ -518,6 +533,11 @@ function useTailnetPathLookup(
     () => [...tailnetIdsInUse].sort().join(","),
     [tailnetIdsInUse],
   );
+  const teamIdByHostId = useAppStore((state) => state.vaultIndex?.teamIdByHostId);
+  const teamKey = useMemo(
+    () => [...collectTeamIdsInUse(tabs, tmuxGroups, teamIdByHostId)].sort().join(","),
+    [tabs, tmuxGroups, teamIdByHostId],
+  );
 
   const [labels, setLabels] = useState<Map<string, string>>(new Map());
   const [statuses, setStatuses] = useState<Map<string, TailnetStatus>>(
@@ -530,13 +550,20 @@ function useTailnetPathLookup(
       return;
     }
     let cancelled = false;
+    const teamIds = teamKey ? teamKey.split(",") : [];
     // 브리지가 없으면 이 함수들이 동기적으로 던진다 — Promise 로 감싸야 .catch 가 잡는다.
     void Promise.resolve()
-      .then(listTailnets)
-      .then((records) => {
+      .then(() =>
+        Promise.all([
+          listTailnets(),
+          // 팀 호스트의 tailnet 이름은 그 팀 볼트에 있다. 한 팀 것을 못 읽어도 나머지 이름은 보인다.
+          ...teamIds.map((teamId) => listTeamTailnets(teamId).catch(() => [])),
+        ]),
+      )
+      .then((lists) => {
         if (!cancelled) {
           setLabels(
-            new Map(records.map((record) => [record.id, record.label])),
+            new Map(lists.flat().map((record) => [record.id, record.label])),
           );
         }
       })
@@ -564,7 +591,7 @@ function useTailnetPathLookup(
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [tailnetKey]);
+  }, [tailnetKey, teamKey]);
 
   return useCallback(
     (host: HostRecord): TailnetPathInfo | null => {
@@ -866,7 +893,7 @@ export function buildTabHoverInfo(
     if (item.team) {
       rows.push({
         label: t("titleBar.hover.team"),
-        value: t("titleBar.hover.teamRecorded", { team: item.team.name }),
+        value: item.team.name,
       });
     }
     // 연결할 때 감지한 운영체제. 뱃지는 마크가 있을 때만 바뀌므로(Windows·NAS 는 글자로 남는다)
@@ -2386,9 +2413,7 @@ export function AppTitleBar({
                       onClick={() => onSelectSession(item.sessionId)}
                     >
                       <TabStatusDot state={item.dotState} />
-                      {/* 팀 호스트 세션 — 접속 기록과 녹화가 팀에 남는다(탭 hover 에서 말한다). */}
-                      {/* TabButton 은 flex 가 아니라 점처럼 표시 자체에 우측 여백을 준다. */}
-                      {item.team ? <TeamMark name={item.team.name} size="xs" className="mr-1.5 align-middle" /> : null}
+                      {/* 팀 호스트 세션인지는 탭에 표시하지 않는다 — 접속 기록·녹화가 팀에 남는다는 것은 탭 hover 에서 말한다. */}
                       <span className="truncate">{item.title}</span>
                     </TabButton>
                     <IconButton

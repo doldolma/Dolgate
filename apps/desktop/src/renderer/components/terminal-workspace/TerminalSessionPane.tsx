@@ -13,7 +13,7 @@ import {
 } from '../../lib/host-tailnet';
 import { useAppStore } from '../../store/appStore';
 import { withMyUsername } from '../host-browser/hostDisplay';
-import { cancelTailnet, listTailnets } from '../../services/desktop/tailnet';
+import { cancelTailnet, listTailnets, listTeamTailnets } from '../../services/desktop/tailnet';
 import { acquireTailnetWatch } from '../../services/desktop/tailnet-watch';
 import {
   extractDroppedAbsolutePaths,
@@ -38,7 +38,7 @@ import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SerialSessionActions } from './SerialSessionActions';
 import { TerminalSearchOverlay } from './TerminalSearchOverlay';
 import { TerminalSharePopover } from './TerminalSharePopover';
-import { MyAwsKeyDialog } from '../teams/MyAwsKeyDialog';
+import { AwsKeyDialog } from '../teams/AwsKeyDialog';
 import type { TerminalSessionPaneProps } from './types';
 import { Button, NoticeCard } from '../../ui';
 import { findHostKeyPromptForSession, resolveConnectionFailurePresentation } from '../../store/utils';
@@ -352,6 +352,10 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
    */
   const [tailnetUsesAuthKey, setTailnetUsesAuthKey] = useState<boolean | null>(null);
   const [tailnetLabel, setTailnetLabel] = useState('');
+  // 팀 호스트의 tailnet 은 그 팀 볼트에 있다(공유하면 복사본이 그 볼트로 간다).
+  const hostTeamId = useAppStore((state) =>
+    props.host ? (state.vaultIndex?.teamIdByHostId?.[props.host.id] ?? null) : null,
+  );
   useEffect(() => {
     if (!tailnetSessionPending || !tailnetIdOfHost) {
       setTailnetUsesAuthKey(null);
@@ -359,7 +363,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     }
     let cancelled = false;
     void Promise.resolve()
-      .then(listTailnets)
+      .then(() => (hostTeamId ? listTeamTailnets(hostTeamId) : listTailnets()))
       .then((records) => {
         if (!cancelled) {
           const record = records.find((entry) => entry.id === tailnetIdOfHost);
@@ -373,7 +377,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     return () => {
       cancelled = true;
     };
-  }, [tailnetIdOfHost, tailnetSessionPending]);
+  }, [hostTeamId, tailnetIdOfHost, tailnetSessionPending]);
 
   // 만료만 그 자리에서 다시 로그인해서 풀린다. 인증이 진행 중인 경우는 새 로그인을 걸면 진행
   // 중인 것을 버리게 되므로 브라우저로 보낸다.
@@ -461,12 +465,12 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     props.host && (isAwsEc2HostRecord(props.host) || isAwsEcsHostRecord(props.host))
       ? (props.host.awsProfileId ?? null)
       : null;
-  const awsMissingMyKey = useAppStore((state) =>
-    awsProfileIdOfHost ? state.awsMissingMyKeyByProfileId[awsProfileIdOfHost] : undefined,
+  const awsMissingKey = useAppStore((state) =>
+    awsProfileIdOfHost ? state.awsMissingKeyByProfileId[awsProfileIdOfHost] : undefined,
   );
-  const clearAwsMissingMyKey = useAppStore((state) => state.clearAwsMissingMyKey);
-  const [myAwsKeyOpen, setMyAwsKeyOpen] = useState(false);
-  const offerMyAwsKey = tab?.status === 'error' && Boolean(awsMissingMyKey);
+  const clearAwsMissingKey = useAppStore((state) => state.clearAwsMissingKey);
+  const [myAwsKeyOpen, setAwsKeyOpen] = useState(false);
+  const offerAwsKey = tab?.status === 'error' && Boolean(awsMissingKey);
 
   const tailnetFailureMessage =
     tab?.status === 'error'
@@ -950,27 +954,27 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
                   // 않는다 — 그 판단은 코어가 한다.
                   tailnetAuthUrl
                     ? translate('misc.reopenBrowser')
-                    : offerMyAwsKey
-                      ? translate('teams.myKey.add')
+                    : offerAwsKey
+                      ? translate('teams.awsKey.add')
                       : undefined
                 }
                 onSecondaryAction={
                   tailnetAuthUrl
                     ? () => void openExternalUrl(tailnetAuthUrl)
-                    : offerMyAwsKey
-                      ? () => setMyAwsKeyOpen(true)
+                    : offerAwsKey
+                      ? () => setAwsKeyOpen(true)
                       : undefined
                 }
               />
             ) : null}
-            {myAwsKeyOpen && awsMissingMyKey && awsProfileIdOfHost ? (
-              <MyAwsKeyDialog
-                missing={awsMissingMyKey}
-                onClose={() => setMyAwsKeyOpen(false)}
+            {myAwsKeyOpen && awsMissingKey && awsProfileIdOfHost ? (
+              <AwsKeyDialog
+                missing={awsMissingKey}
+                onClose={() => setAwsKeyOpen(false)}
                 onSaved={() => {
                   // 넣었으면 알아서 다시 붙는다(M3).
-                  setMyAwsKeyOpen(false);
-                  clearAwsMissingMyKey(awsProfileIdOfHost);
+                  setAwsKeyOpen(false);
+                  clearAwsMissingKey(awsProfileIdOfHost);
                   void onRetry?.();
                 }}
               />

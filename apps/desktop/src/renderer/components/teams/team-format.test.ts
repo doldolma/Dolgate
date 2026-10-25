@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatRelativeTime, teamMarkOf } from './team-format';
+import { formatRelativeTime } from './team-format';
 
 const NOW = Date.parse('2026-10-20T12:00:00.000Z');
 const at = (seconds: number) => new Date(NOW + seconds * 1000).toISOString();
@@ -18,14 +18,5 @@ describe('formatRelativeTime', () => {
     expect(formatRelativeTime(at(7 * DAY - 5), NOW)).toBe('7일 후');
     expect(formatRelativeTime(at(-2 * DAY), NOW)).toBe('그저께');
     expect(formatRelativeTime(at(-9 * DAY), NOW)).toBe('10월 11일');
-  });
-});
-
-describe('teamMarkOf', () => {
-  it('takes the first letters of up to two words, like the link page', () => {
-    expect(teamMarkOf('Acme Infra')).toBe('AI');
-    expect(teamMarkOf('ops night shift')).toBe('ON');
-    expect(teamMarkOf('운영팀')).toBe('운');
-    expect(teamMarkOf('   ')).toBe('?');
   });
 });

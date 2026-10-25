@@ -118,6 +118,66 @@ describe("tailnet readiness before connecting", () => {
     expect(tab?.connectionProgress?.stage).toBe("tailnet-connecting");
   });
 
+  // 팀 볼트로 공유한 호스트는 tailnet 도 그 팀 볼트에 있다(복사본, 새 id). 개인 목록만 보면 "이 기기에
+  // 없다" 로 막혔다 — 메인의 접속 경로는 팀 것을 찾는데 화면의 관문이 먼저 거절했다.
+  it("finds the tailnet of a team host in that team's vault", async () => {
+    const api = createTailnetApi();
+    vi.mocked(api.hosts.list).mockResolvedValue([
+      {
+        id: "team-host",
+        kind: "ssh",
+        label: "nas",
+        hostname: "nas",
+        port: 22,
+        username: "ubuntu",
+        authType: "password",
+        secretRef: null,
+        groupName: null,
+        terminalThemeId: null,
+        tailnetId: "team-net",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ] as never);
+    vi.mocked(api.tailnet.list).mockImplementation(async (vaultId?: string | null) =>
+      vaultId === "team-1"
+        ? ([{ id: "team-net", label: "팀망", createdAt: "2025-01-01T00:00:00.000Z", updatedAt: "2025-01-01T00:00:00.000Z" }] as never)
+        : ([{ id: "net-1", label: "회사망", createdAt: "2025-01-01T00:00:00.000Z", updatedAt: "2025-01-01T00:00:00.000Z" }] as never),
+    );
+    vi.mocked(api.teams.getVaultIndex).mockResolvedValue({
+      teams: [{ id: "team-1", name: "sample", role: "owner", syncState: "ready", syncError: null, groups: [] }],
+      teamIdByHostId: { "team-host": "team-1" },
+      teamIdByWorkspaceId: {},
+      teamIdByPortForwardId: {},
+      teamIdByDnsOverrideId: {},
+      teamIdBySnippetId: {},
+      myUsernameByHostId: {},
+    } as never);
+    let resolveTest: ((value: unknown) => void) | undefined;
+    vi.mocked(api.tailnet.test).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveTest = resolve as (value: unknown) => void;
+        }) as never,
+    );
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    void store.getState().connectHost("team-host", 120, 32);
+    await flushMicrotasks();
+
+    // 거절은 몇 박자 뒤에 탭에 닿는다 — 그 뒤를 본다.
+    await flushMicrotasks();
+    await flushMicrotasks();
+    const tab = store.getState().tabs.find((item) => item.hostId === "team-host");
+    expect(tab?.status).not.toBe("error");
+    expect(tab?.connectionProgress?.stage).toBe("tailnet-connecting");
+    expect(tab?.connectionProgress?.message).toContain("팀망");
+    expect(vi.mocked(api.tailnet.test)).toHaveBeenCalledWith(expect.objectContaining({ id: "team-net" }));
+
+    resolveTest?.({ id: "team-net", state: "running", ready: true });
+  });
+
   it("leaves hosts without a tailnet untouched", async () => {
     const api = createMockApi();
     const store = createAppStore(api);

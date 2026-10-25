@@ -10,12 +10,7 @@ import type {
   TailnetRecord,
 } from "@shared";
 import type { DesktopVaultContents } from "./state-storage";
-import type {
-  TeamAwsProfileCredentials,
-  TeamHostCredentials,
-  TeamMemberPrefs,
-  TeamTailnetCredentials,
-} from "./team-member-prefs";
+import type { TeamHostCredentials, TeamMemberPrefs } from "./team-member-prefs";
 import { assertNoOutsideReferences, planVaultCopy, type VaultCopyOptions } from "./vault-copy";
 
 // 볼트 사이 복사 계획. 비밀값은 OS 암호화 저장소에 들어가는데 시험에는 그것이 없으므로 평문 폴백을 연다.
@@ -87,13 +82,9 @@ function addSecret(vault: DesktopVaultContents, secretRef: string, password: str
 /** 그 팀에 둔 내 자격 증명(멤버 개인 칸)의 가짜. */
 function myCredentials(values: {
   hosts?: Record<string, TeamHostCredentials>;
-  awsProfiles?: Record<string, TeamAwsProfileCredentials>;
-  tailnets?: Record<string, TeamTailnetCredentials>;
 }): NonNullable<VaultCopyOptions["sourceMyCredentials"]> {
   return {
     readHostCredentials: (id) => values.hosts?.[id] ?? null,
-    readAwsProfileCredentials: (id) => values.awsProfiles?.[id] ?? null,
-    readTailnetCredentials: (id) => values.tailnets?.[id] ?? null,
   };
 }
 
@@ -144,10 +135,10 @@ function teamSource(): DesktopVaultContents {
     keyAlgorithm: "ssh-ed25519",
     updatedAt: at,
   });
-  // 키를 빼고 공유된 정적 프로필 — 팀에는 키가 없다.
-  addProfile(vault, { id: "tp-static", kind: "static", name: "team", region: null, accessKeyId: "", secretAccessKey: "", updatedAt: at });
+  // 팀에는 키 없이 공유된 정적 프로필과 tailnet — 이 기기에서 넣어 둔 키는 그 팀 볼트에 있다(팀에 올라가지 않는다).
+  addProfile(vault, { id: "tp-static", kind: "static", name: "team", region: null, accessKeyId: "AKIAHERE", secretAccessKey: "here-secret", updatedAt: at });
   vault.data.tailnets.push({ id: "tn-team", label: "team", hasAuthKey: true, createdAt: at, updatedAt: at } as TailnetRecord);
-  vault.secure.tailnetAuthKeysById["tn-team"] = plain("tskey-team");
+  vault.secure.tailnetAuthKeysById["tn-team"] = plain("tskey-here");
   return vault;
 }
 
@@ -268,7 +259,7 @@ describe("planVaultCopy", () => {
     target.data.dnsOverrides.push(linkedDns("t-dns", "dup.internal", "t-rule"));
     let sequence = 0;
 
-    const plan = planVaultCopy(source, target, { kind: "group", groupPath: "Prod" }, {
+    const plan = planVaultCopy(source, target, { kind: "groups", groupPaths: ["Prod"] }, {
       targetGroupPath: "Team",
       targetIsTeam: true,
       now: NOW,
@@ -326,18 +317,14 @@ describe("planVaultCopy", () => {
     expect(plan.memberValues).toEqual([
       { hostId: plan.hostIdMap.web, favorite: true, agentForwarding: true, terminalThemeId: "night-owl" },
     ]);
-    // 비밀번호·키를 함께 공유해도 복사한 사람의 내 칸으로 가는 것: 키 파일 경로(그 기기의 파일), AWS 정적 키와
-    // tailnet auth key(사람의 인증 정보 — 팀에는 설정만 간다).
+    // 비밀번호·키를 함께 공유해도 복사한 사람의 내 칸으로 가는 것: 키 파일 경로(그 기기의 파일).
     expect(plan.memberCredentials).toEqual({
       hostCredentials: [{ id: plan.hostIdMap.web, credentials: { privateKeyPath: "/Users/me/.ssh/id_ed25519" } }],
-      awsProfileCredentials: [{ id: staticCopy?.id, credentials: { accessKeyId: "AKIA1", secretAccessKey: "s1" } }],
-      tailnetCredentials: [{ id: tailnet.id, credentials: { authKey: "tskey-1" } }],
     });
-    expect(staticCopy).toMatchObject({ accessKeyId: "", secretAccessKey: "" });
-
-    // tailnet 은 설정만 간다 — auth key(사람의 인증 정보)와 그 기기의 로그인 계정은 두고 온다.
-    expect(tailnet).toMatchObject({ label: "corp" });
-    expect(tailnet).not.toHaveProperty("authKey");
+    // AWS 정적 키와 auth key 는 복사본에 그대로 따라간다 — 대상 팀 볼트에 두고 팀 동기화가 올리지 않으니, 공유한 이
+    // 기기에서는 바로 쓴다. 로그인 계정은 그 기기의 것이라 두고 온다.
+    expect(staticCopy).toMatchObject({ accessKeyId: "AKIA1", secretAccessKey: "s1" });
+    expect(tailnet).toMatchObject({ label: "corp", authKey: "tskey-1" });
     expect(tailnet).not.toHaveProperty("loginName");
 
     // known hosts: 복사하는 호스트의 주소만, 대상에 이미 있는 키는 빼고.
@@ -354,7 +341,7 @@ describe("planVaultCopy", () => {
       groups: 3,
       hosts: 5,
       dependencyHosts: 1,
-      // 비밀번호와 키: 호스트 비밀값 하나만 팀에 간다(AWS 정적 키·auth key 는 내 칸으로).
+      // 비밀번호와 키: 호스트 비밀값 하나만 팀에 간다(AWS 정적 키·auth key 는 이 기기에만 남는다).
       secrets: 1,
       knownHosts: 1,
       portForwards: 2,
@@ -366,9 +353,56 @@ describe("planVaultCopy", () => {
     });
   });
 
+  it("copies several groups at once, each under its own name, and a group picked with its parent once", () => {
+    const source = personalSource();
+    source.data.groups.push(group("Lab"), group("Lab/Web"));
+    source.data.hosts.push(sshHost("lab", "Lab/Web"));
+    const target = emptyVault();
+    target.data.groups.push(group("Team"));
+
+    const plan = planVaultCopy(source, target, { kind: "groups", groupPaths: ["Prod/Web", "Bastions", "Bastions"] }, {
+      targetGroupPath: "Team",
+      targetIsTeam: true,
+      now: NOW,
+    });
+
+    // 고른 그룹만 온다(Prod 의 다른 호스트는 오지 않는다). 점프 호스트 bastion 은 고른 그룹 안에 있으니 그 자리로 간다.
+    const placeOf = Object.fromEntries(
+      Object.entries(plan.hostIdMap).map(([id, copyId]) => [id, plan.hosts.find((host) => host.id === copyId)!.groupName]),
+    );
+    expect(placeOf).toEqual({ web: "Team/Web", bastion: "Team/Bastions", elsewhere: "Team/Bastions" });
+    expect(plan.counts.dependencyHosts).toBe(0);
+    expect(plan.groups.map((record) => [record.path, record.parentPath, record.sortRank])).toEqual([
+      ["Team/Bastions", "Team", null],
+      ["Team/Web", "Team", 3],
+    ]);
+
+    // 그룹과 그 안의 그룹을 함께 고르면 바깥 그룹째 한 번만 복사한다.
+    const nested = planVaultCopy(personalSource(), emptyVault(), { kind: "groups", groupPaths: ["Prod/Web", "Prod"] }, {
+      targetGroupPath: null,
+      targetIsTeam: true,
+      now: NOW,
+    });
+    expect(nested.groups.map((record) => record.path)).toEqual(["Prod", "Prod/Empty", "Prod/Web"]);
+    expect(nested.counts.hosts).toBe(5);
+
+    // 이름이 같은 두 그룹은 대상의 같은 그룹으로 합쳐진다(대상에 이미 있는 그룹과 합치는 것과 같다).
+    const sameName = planVaultCopy(source, emptyVault(), { kind: "groups", groupPaths: ["Prod/Web", "Lab/Web"] }, {
+      targetGroupPath: null,
+      targetIsTeam: true,
+      now: NOW,
+    });
+    expect(sameName.groups.map((record) => record.path)).toEqual(["Web"]);
+    expect(sameName.hosts.filter((host) => host.groupName === "Web").map((host) => host.label).sort()).toEqual(["lab", "web"]);
+
+    expect(() =>
+      planVaultCopy(personalSource(), emptyVault(), { kind: "groups", groupPaths: ["", "  "] }, { targetGroupPath: null, targetIsTeam: true }),
+    ).toThrow("vault copy needs a group path");
+  });
+
   it("shares without passwords and keys: the team gets none, and the sharer keeps them as their own", () => {
     let sequence = 0;
-    const plan = planVaultCopy(personalSource(), emptyVault(), { kind: "group", groupPath: "Prod" }, {
+    const plan = planVaultCopy(personalSource(), emptyVault(), { kind: "groups", groupPaths: ["Prod"] }, {
       targetGroupPath: null,
       targetIsTeam: true,
       shareSecrets: false,
@@ -376,19 +410,17 @@ describe("planVaultCopy", () => {
       newId: () => `new-${++sequence}`,
     });
 
-    // 팀 쪽: 호스트에는 비밀값이 없고, 정적 프로필에는 키가 없고, tailnet 에는 auth key 가 없다.
+    // 팀 쪽: 호스트에는 비밀값이 없다. AWS 정적 키와 auth key 는 이 기기에만 두니(팀 동기화가 올리지 않는다) 세지
+    // 않는다.
     for (const host of plan.hosts) {
       expect("secretRef" in host ? host.secretRef : null, host.label).toBeNull();
     }
     expect(plan.secrets).toEqual([]);
     expect(plan.secretMetadata).toEqual([]);
-    const staticCopy = plan.awsProfiles.find((profile) => profile.kind === "static");
-    expect(staticCopy).toMatchObject({ accessKeyId: "", secretAccessKey: "" });
-    expect(plan.tailnets[0]).not.toHaveProperty("authKey");
-    expect(JSON.stringify([plan.hosts, plan.secrets, plan.awsProfiles, plan.tailnets])).not.toMatch(/hunter2|AKIA1|tskey-1/);
+    expect(JSON.stringify([plan.hosts, plan.secrets])).not.toMatch(/hunter2/);
     expect(plan.counts.secrets).toBe(0);
 
-    // 복사한 사람의 내 칸: 원래 비밀번호(세 호스트가 함께 쓰던 것)·키 파일 경로·AWS 키·auth key.
+    // 복사한 사람의 내 칸: 원래 비밀번호(세 호스트가 함께 쓰던 것)·키 파일 경로.
     const mine = new Map(plan.memberCredentials.hostCredentials.map((entry) => [entry.id, entry.credentials]));
     expect(Object.fromEntries(["web", "api", "bastion", "vnc"].map((id) => [id, mine.get(plan.hostIdMap[id]) ?? null]))).toEqual({
       web: { password: "hunter2", privateKeyPath: "/Users/me/.ssh/id_ed25519" },
@@ -396,10 +428,6 @@ describe("planVaultCopy", () => {
       bastion: { password: "hunter2" },
       vnc: null,
     });
-    expect(plan.memberCredentials.awsProfileCredentials).toEqual([
-      { id: staticCopy?.id, credentials: { accessKeyId: "AKIA1", secretAccessKey: "s1" } },
-    ]);
-    expect(plan.memberCredentials.tailnetCredentials).toEqual([{ id: plan.tailnets[0].id, credentials: { authKey: "tskey-1" } }]);
   });
 
   it("copies a team host to my personal vault with my own values on it", () => {
@@ -438,8 +466,6 @@ describe("planVaultCopy", () => {
           win: { username: "alice", domain: "CORP" },
           keyed: { privateKeyPem: "ALICE-PEM" },
         },
-        awsProfiles: { "tp-static": { accessKeyId: "AKIAALICE", secretAccessKey: "alice-secret" } },
-        tailnets: { "tn-team": { authKey: "tskey-alice" } },
       }),
       now: NOW,
     });
@@ -463,18 +489,16 @@ describe("planVaultCopy", () => {
     expect(secretOf("keyed")).not.toHaveProperty("publicKeyFingerprintSha256");
     expect(secretOf("keyed")).not.toHaveProperty("keyAlgorithm");
     expect(plan.secrets).toHaveLength(5);
-    // AWS 키와 auth key 도 내 것이 먼저다.
-    expect(plan.awsProfiles).toEqual([expect.objectContaining({ accessKeyId: "AKIAALICE", secretAccessKey: "alice-secret" })]);
-    expect(plan.tailnets).toEqual([expect.objectContaining({ authKey: "tskey-alice" })]);
-    expect(plan.memberCredentials).toEqual({ hostCredentials: [], awsProfileCredentials: [], tailnetCredentials: [] });
+    // AWS 정적 키와 auth key 는 이 기기에 넣어 둔 것이 따라온다.
+    expect(plan.awsProfiles).toEqual([expect.objectContaining({ accessKeyId: "AKIAHERE", secretAccessKey: "here-secret" })]);
+    expect(plan.tailnets).toEqual([expect.objectContaining({ authKey: "tskey-here" })]);
+    expect(plan.memberCredentials).toEqual({ hostCredentials: [] });
     expect(plan.counts.secrets).toBe(7);
   });
 
   it("never turns my own credentials into a team secret when copying into another team", () => {
     const mine = myCredentials({
       hosts: { db: { username: "alice", password: "alice-pw" } },
-      awsProfiles: { "tp-static": { accessKeyId: "AKIAALICE", secretAccessKey: "alice-secret" } },
-      tailnets: { "tn-team": { authKey: "tskey-alice" } },
     });
     const copy = (shareSecrets: boolean) =>
       planVaultCopy(teamSource(), emptyVault(), { kind: "hosts", hostIds: teamHostIds }, {
@@ -485,28 +509,25 @@ describe("planVaultCopy", () => {
         now: NOW,
       });
 
-    // 함께 공유: 팀에는 원래 팀의 비밀번호·SSH 키만 들어가고, 내 것은 새 팀의 내 칸으로 간다. tailnet auth key 는
-    // 함께 공유여도 팀에 가지 않는다.
+    // 함께 공유: 팀에는 원래 팀의 비밀번호·SSH 키만 들어가고, 내 것은 새 팀의 내 칸으로 간다. AWS 정적 키와 auth
+    // key 는 이 기기의 것이 새 팀 볼트에 따라가되(올라가지 않는다) 공유하는 수에 세지 않는다.
     const shared = copy(true);
     expect(shared.secrets.map((secret) => secret.password ?? secret.privateKeyPem).sort()).toEqual([
       "TEAM-PEM",
       "team-pw",
       "team-rdp",
     ]);
-    expect(shared.tailnets[0]).not.toHaveProperty("authKey");
+    expect(shared.counts.secrets).toBe(3);
+    expect(shared.awsProfiles).toEqual([expect.objectContaining({ accessKeyId: "AKIAHERE" })]);
+    expect(shared.tailnets).toEqual([expect.objectContaining({ authKey: "tskey-here" })]);
     expect(JSON.stringify([shared.hosts, shared.secrets, shared.awsProfiles, shared.tailnets])).not.toMatch(/alice/i);
     expect(shared.memberCredentials).toEqual({
       hostCredentials: [{ id: shared.hostIdMap.db, credentials: { username: "alice", password: "alice-pw" } }],
-      awsProfileCredentials: [
-        { id: shared.awsProfiles[0].id, credentials: { accessKeyId: "AKIAALICE", secretAccessKey: "alice-secret" } },
-      ],
-      tailnetCredentials: [{ id: shared.tailnets[0].id, credentials: { authKey: "tskey-alice" } }],
     });
 
     // 빼고 공유: 팀에는 아무것도 없고, 내 칸에는 내 것이 먼저, 없으면 원래 팀 것.
     const withheld = copy(false);
     expect(withheld.secrets).toEqual([]);
-    expect(withheld.tailnets[0]).not.toHaveProperty("authKey");
     const credentialsOf = (id: string) =>
       withheld.memberCredentials.hostCredentials.find((entry) => entry.id === withheld.hostIdMap[id])?.credentials;
     expect(credentialsOf("db")).toEqual({ username: "alice", password: "alice-pw" });
@@ -514,9 +535,6 @@ describe("planVaultCopy", () => {
     expect(credentialsOf("win")).toEqual({ username: "Administrator", password: "team-rdp" });
     expect(credentialsOf("keyed")).toEqual({ privateKeyPem: "TEAM-PEM" });
     expect(credentialsOf("bare")).toBeUndefined();
-    expect(withheld.memberCredentials.tailnetCredentials).toEqual([
-      { id: withheld.tailnets[0].id, credentials: { authKey: "tskey-alice" } },
-    ]);
   });
 
   it("brings an RDP host's SSM profile along and relinks it", () => {
@@ -545,7 +563,7 @@ describe("planVaultCopy", () => {
   });
 
   it("refuses a plan whose copies would still point outside the copied set", () => {
-    const valid = planVaultCopy(personalSource(), emptyVault(), { kind: "group", groupPath: "Prod" }, {
+    const valid = planVaultCopy(personalSource(), emptyVault(), { kind: "groups", groupPaths: ["Prod"] }, {
       targetGroupPath: null,
       targetIsTeam: true,
       now: NOW,

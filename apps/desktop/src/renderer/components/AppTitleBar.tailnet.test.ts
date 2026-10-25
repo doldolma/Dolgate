@@ -3,6 +3,7 @@ import type { TailnetPeer } from '@shared';
 import type { HostRecord } from '@shared';
 import {
   collectTailnetIdsInUse,
+  collectTeamIdsInUse,
   findTailnetPeer,
   findTailnetSubnetRouter,
   shortenRouterName,
@@ -171,5 +172,18 @@ describe('collectTailnetIdsInUse', () => {
   it('ignores hosts that do not use a tailnet', () => {
     const ids = collectTailnetIdsInUse([{ hostId: 'host-3' }], [{ hostId: null }], hosts);
     expect(ids.size).toBe(0);
+  });
+});
+
+describe('collectTeamIdsInUse', () => {
+  it('collects the teams of team hosts on tabs and tmux groups only', () => {
+    const teamIdByHostId = { 'team-a-host': 'team-a', 'team-b-host': 'team-b', 'team-c-host': 'team-c' };
+    const ids = collectTeamIdsInUse(
+      [{ hostId: 'team-a-host' }, { hostId: 'my-host' }, { hostId: null } as never],
+      [{ hostId: 'team-b-host' }],
+      teamIdByHostId,
+    );
+    expect([...ids].sort()).toEqual(['team-a', 'team-b']);
+    expect(collectTeamIdsInUse([{ hostId: 'team-a-host' }], [], undefined).size).toBe(0);
   });
 });

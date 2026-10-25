@@ -74,4 +74,15 @@ describe('buildHostBrowserCommandPaletteItems', () => {
 
     expect(items.map((item) => item.id)).toContain('host:connect:h-3');
   });
+
+  // 검색 결과에는 호스트마다 연결과 SFTP 만 둔다. 컨테이너는 호스트 상세·우클릭 메뉴에서 연다 — 호스트마다 한 줄씩
+  // 늘면 같은 호스트가 세 줄을 차지해 다음 호스트가 밀려났다.
+  it('lists connect and SFTP for a host it finds — not containers', () => {
+    const model = makeModel([makeHost('h-1', 'nas')], 'nas');
+    (model as unknown as { onOpenSftp: () => void }).onOpenSftp = vi.fn();
+
+    const ids = buildHostBrowserCommandPaletteItems(model).map((item) => item.id);
+
+    expect(ids.filter((id) => id.startsWith('host:'))).toEqual(['host:connect:h-1', 'host:sftp:h-1']);
+  });
 });

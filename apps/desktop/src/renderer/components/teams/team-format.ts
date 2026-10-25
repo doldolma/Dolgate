@@ -6,16 +6,6 @@ const HOUR_SECONDS = 60 * MINUTE_SECONDS;
 const DAY_SECONDS = 24 * HOUR_SECONDS;
 
 /**
- * 팀 표시에 쓰는 머리글자 — 앞 두 낱말의 첫 글자. 서버의 링크 페이지(`teamMarkOf`)와 같은 규칙이라
- * 브라우저에서 본 표시와 앱의 표시가 같다.
- */
-export function teamMarkOf(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean).slice(0, 2);
-  const mark = words.map((word) => Array.from(word)[0] ?? '').join('');
-  return mark.toLocaleUpperCase() || '?';
-}
-
-/**
  * 지금에서 얼마나 떨어졌는지 — "어제", "2시간 전", "7일 후". 일주일이 넘으면 날짜("10월 19일")로 쓴다.
  * 정확한 때는 툴팁(`formatExactTime`)으로 본다.
  */
@@ -67,10 +57,6 @@ export function shortNameOf(email: string): string {
   return at > 0 ? email.slice(0, at) : email;
 }
 
-/** 멤버 줄의 머리글자 네모. */
-export function memberMarkOf(email: string): string {
-  return (Array.from(email.trim())[0] ?? '?').toLocaleUpperCase();
-}
 
 /** 나는 누구인가 — 계정 id 로 찾고, 없으면 이메일로 찾는다. */
 export function isCurrentMember(

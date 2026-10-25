@@ -26,15 +26,12 @@ import {
 import { buildDolgateHostBundle } from "./host-transfer-service";
 import type { DesktopVaultContents } from "./state-storage";
 import {
-  normalizeTeamAwsProfileCredentials,
   normalizeTeamHostCredentials,
   overlayHostMemberPrefs,
   stripHostMemberPrefs,
-  type TeamAwsProfileCredentials,
   type TeamHostCredentials,
   type TeamMemberPrefs,
   type TeamMemberPrefsStore,
-  type TeamTailnetCredentials,
 } from "./team-member-prefs";
 
 // 볼트 사이 복사(공유 = 복사). 원본은 그대로 두고, 고른 것과 그것이 쓰는 것(점프 호스트·비밀값·known
@@ -48,8 +45,8 @@ export interface VaultCopyOptions {
   targetIsTeam: boolean;
   /**
    * 대상이 팀일 때 호스트의 비밀번호·SSH 키를 팀에 함께 넣는다. 끄면 팀에는 넣지 않고 복사한 사람의 내 칸에
-   * 둔다 — 그 사람은 그대로 붙고, 다른 멤버는 자기 것을 넣는다. 기본 켬. AWS 정적 프로필의 키와 tailnet auth
-   * key 는 사람의 인증 정보라 이 값과 상관없이 늘 내 칸으로 간다.
+   * 둔다 — 그 사람은 그대로 붙고, 다른 멤버는 자기 것을 넣는다. 기본 켬. AWS 정적 키와 tailnet auth key 는 이 값과
+   * 상관없이 대상 볼트에 그대로 따라가고, 팀이면 동기화가 올리지 않는다(아래 6).
    */
   shareSecrets?: boolean;
   /** 원본이 팀 볼트면 내 개인 칸 — 복사본에 내 즐겨찾기·agent forwarding·테마를 얹는다. */
@@ -58,10 +55,7 @@ export interface VaultCopyOptions {
    * 원본이 팀 볼트면 그 팀에 둔 내 자격 증명. 복사본으로 따라간다 — 개인으로 가면 복사본의 비밀값이 되고,
    * 팀으로 가면 그 팀의 내 칸에 간다(팀 비밀값이 되지 않는다).
    */
-  sourceMyCredentials?: Pick<
-    TeamMemberPrefsStore,
-    "readHostCredentials" | "readAwsProfileCredentials" | "readTailnetCredentials"
-  > | null;
+  sourceMyCredentials?: Pick<TeamMemberPrefsStore, "readHostCredentials"> | null;
   now?: string;
   newId?: () => string;
 }
@@ -90,8 +84,6 @@ export interface VaultCopyPlan {
   /** 복사한 사람의 내 칸에 둘 자격 증명(대상이 팀일 때). id 는 복사본의 id 다. */
   memberCredentials: {
     hostCredentials: Array<{ id: string; credentials: TeamHostCredentials }>;
-    awsProfileCredentials: Array<{ id: string; credentials: TeamAwsProfileCredentials }>;
-    tailnetCredentials: Array<{ id: string; credentials: TeamTailnetCredentials }>;
   };
   /** 원본 호스트 id → 복사본 id. */
   hostIdMap: Record<string, string>;
@@ -146,6 +138,14 @@ const tailnetScope = (tailnetId?: string | null) => (tailnetId ?? "").trim();
 const knownHostKey = (record: KnownHostRecord) =>
   [record.host, record.port, tailnetScope(record.tailnetId), record.algorithm].join("\u0000");
 
+/** 고른 그룹들 중 바깥 것만 — 그룹과 그 안의 그룹을 함께 골랐으면 바깥 그룹째 복사한다. */
+function outermostGroupPaths(groupPaths: readonly string[]): string[] {
+  const paths = [
+    ...new Set(groupPaths.map((path) => normalizeGroupPath(path)).filter((path): path is string => Boolean(path))),
+  ];
+  return paths.filter((path) => !paths.some((other) => other !== path && isGroupWithinPath(path, other)));
+}
+
 /** 대상 볼트에 같은 이름의 AWS 프로필이 있으면 뒤에 번호를 붙인다(프로필 이름은 볼트 안에서 겹치면 안 된다). */
 function uniqueProfileName(name: string, taken: ReadonlySet<string>): string {
   if (!taken.has(name)) {
@@ -168,10 +168,13 @@ export function planVaultCopy(
   const now = options.now ?? new Date().toISOString();
   const newId = options.newId ?? randomUUID;
   const targetGroupPath = normalizeGroupPath(options.targetGroupPath);
-  const selectedGroupPath = selection.kind === "group" ? normalizeGroupPath(selection.groupPath) : null;
-  if (selection.kind === "group" && !selectedGroupPath) {
+  const selectedGroupPaths = selection.kind === "groups" ? outermostGroupPaths(selection.groupPaths) : [];
+  if (selection.kind === "groups" && selectedGroupPaths.length === 0) {
     throw new Error("vault copy needs a group path");
   }
+  /** 그 경로가 든 고른 그룹. 바깥 것만 남겼으니 많아야 하나다. */
+  const selectedRootOf = (path: string | null): string | null =>
+    path ? (selectedGroupPaths.find((root) => isGroupWithinPath(path, root)) ?? null) : null;
 
   // 1. 고른 것과 그것이 쓰는 것. 모으기는 내보내기와 같은 것을 쓴다. 워크스페이스는 창의 호스트를 고른 것으로 본다
   //    (원본 볼트에 있는 것만 — 지워진 호스트를 가리키는 창도 있다).
@@ -191,7 +194,7 @@ export function planVaultCopy(
             sourceHostIds.has(id),
           )
         : source.data.hosts
-            .filter((host) => isGroupWithinPath(normalizeGroupPath(host.groupName), selectedGroupPath))
+            .filter((host) => selectedRootOf(normalizeGroupPath(host.groupName)) !== null)
             .map((host) => host.id);
   if (selection.kind === "hosts" && rootHostIds.length === 0) {
     throw new Error("vault copy needs at least one host");
@@ -218,12 +221,13 @@ export function planVaultCopy(
     profileMap.set(profile.id, { id: newId(), name });
   }
 
-  // 3. 자리. 고른 그룹 안의 것은 그 그룹 이름부터 놓은 자리 아래로, 나머지(고른 호스트·딸려 온 호스트)는
+  // 3. 자리. 고른 그룹 안의 것은 저마다 그 그룹 이름부터 놓은 자리 아래로, 나머지(고른 호스트·딸려 온 호스트)는
   //    놓은 자리에 둔다.
-  const selectedGroupParent = selectedGroupPath ? getParentGroupPath(selectedGroupPath) : null;
   const reroot = (path: string | null): string | null => {
-    if (selectedGroupPath && path && isGroupWithinPath(path, selectedGroupPath)) {
-      const relative = selectedGroupParent ? path.slice(selectedGroupParent.length + 1) : path;
+    const root = selectedRootOf(path);
+    if (root && path) {
+      const rootParent = getParentGroupPath(root);
+      const relative = rootParent ? path.slice(rootParent.length + 1) : path;
       return targetGroupPath ? `${targetGroupPath}/${relative}` : relative;
     }
     return targetGroupPath;
@@ -395,15 +399,15 @@ export function planVaultCopy(
       neededPaths.add(current);
     }
   };
-  if (selectedGroupPath) {
-    addWithAncestors(reroot(selectedGroupPath));
-    for (const group of source.data.groups) {
-      if (isGroupWithinPath(group.path, selectedGroupPath)) {
-        const newPath = reroot(group.path);
-        addWithAncestors(newPath);
-        if (newPath) {
-          sourceGroupByNewPath.set(newPath, group);
-        }
+  for (const root of selectedGroupPaths) {
+    addWithAncestors(reroot(root));
+  }
+  for (const group of source.data.groups) {
+    if (selectedRootOf(group.path)) {
+      const newPath = reroot(group.path);
+      addWithAncestors(newPath);
+      if (newPath) {
+        sourceGroupByNewPath.set(newPath, group);
       }
     }
   }
@@ -437,28 +441,15 @@ export function planVaultCopy(
     ...ownSecrets,
   ];
   const secretMetadata = secrets.map((secret) => projectSecretMetadata(secret, { linkedHostCount: 0, updatedAt: now }));
-  // AWS 정적 프로필의 키와 tailnet auth key 는 사람의 인증 정보다(IAM 키는 그 사람으로 찍히고, auth key 는 그
-  // 사람 기기를 tailnet 에 넣는다). 팀에는 설정만 보내고 키는 늘 복사한 사람의 내 칸에 둔다 — 내 것이 먼저, 없으면
-  // 원래 것. 개인으로 가져올 때는 내 것이 먼저다.
-  const memberAwsProfileCredentials: VaultCopyPlan["memberCredentials"]["awsProfileCredentials"] = [];
+  // AWS 정적 키와 tailnet auth key 는 그대로 따라간다. 대상 볼트에 개인 것과 똑같이 두고, 팀이면 팀 동기화가 올리지
+  // 않을 뿐이다(team-member-prefs.ts) — 그래서 내 것을 팀으로 공유한 이 기기에서는 바로 쓴다. 팀에서 가져올 때는 이
+  // 기기에 넣어 둔 키가 따라온다.
   const awsProfiles = (bundle?.awsProfiles ?? []).map((profile): ManagedAwsProfilePayload => {
     const mapped = profileMap.get(profile.id) as { id: string; name: string };
     const base = { ...profile, id: mapped.id, name: mapped.name, updatedAt: now };
-    if (base.kind === "role") {
-      return { ...base, sourceProfileId: profileMap.get(base.sourceProfileId)?.id ?? base.sourceProfileId };
-    }
-    if (base.kind !== "static") {
-      return base;
-    }
-    const myKeys = mine?.readAwsProfileCredentials(profile.id) ?? null;
-    if (!options.targetIsTeam) {
-      return myKeys ? { ...base, ...myKeys } : base;
-    }
-    const keep = myKeys ?? normalizeTeamAwsProfileCredentials(base);
-    if (keep) {
-      memberAwsProfileCredentials.push({ id: base.id, credentials: keep });
-    }
-    return { ...base, accessKeyId: "", secretAccessKey: "" };
+    return base.kind === "role"
+      ? { ...base, sourceProfileId: profileMap.get(base.sourceProfileId)?.id ?? base.sourceProfileId }
+      : base;
   });
   const snippets = (bundle?.snippets ?? []).map((snippet) => ({
     ...snippet,
@@ -466,22 +457,15 @@ export function planVaultCopy(
     createdAt: now,
     updatedAt: now,
   }));
-  // 마지막으로 인증한 계정(loginName)은 그 기기의 것이라 옮기지 않는다.
-  const memberTailnetCredentials: VaultCopyPlan["memberCredentials"]["tailnetCredentials"] = [];
-  const tailnets = (bundle?.tailnets ?? []).map(({ loginName: _loginName, authKey, ...tailnet }): TailnetPayload => {
-    const copy = { ...tailnet, id: tailnetIdMap.get(tailnet.id) as string, createdAt: now, updatedAt: now };
-    const myKey = mine?.readTailnetCredentials(tailnet.id) ?? null;
-    const vaultKey = authKey?.trim() ? { authKey: authKey.trim() } : null;
-    if (!options.targetIsTeam) {
-      const key = myKey ?? vaultKey;
-      return key ? { ...copy, authKey: key.authKey } : copy;
-    }
-    const keep = myKey ?? vaultKey;
-    if (keep) {
-      memberTailnetCredentials.push({ id: copy.id, credentials: keep });
-    }
-    return copy;
-  });
+  // 마지막으로 인증한 계정(loginName)은 그 기기의 것이라 옮기지 않는다. auth key 는 위 AWS 키와 같다.
+  const tailnets = (bundle?.tailnets ?? []).map(
+    ({ loginName: _loginName, ...tailnet }): TailnetPayload => ({
+      ...tailnet,
+      id: tailnetIdMap.get(tailnet.id) as string,
+      createdAt: now,
+      updatedAt: now,
+    }),
+  );
   const portForwards = (bundle?.portForwards ?? []).map(
     (rule) =>
       ({
@@ -584,8 +568,6 @@ export function planVaultCopy(
     memberValues,
     memberCredentials: {
       hostCredentials: memberHostCredentials,
-      awsProfileCredentials: memberAwsProfileCredentials,
-      tailnetCredentials: memberTailnetCredentials,
     },
     hostIdMap: Object.fromEntries(hostIdMap),
     workspaceIdMap: Object.fromEntries(workspaceIdMap),
@@ -593,11 +575,15 @@ export function planVaultCopy(
       groups: groups.length,
       hosts: hosts.length,
       dependencyHosts: sourceHosts.filter((host) => !rootHostIds.includes(host.id)).length,
-      // 비밀번호와 키 — 대상 볼트에 들어가는 것만 센다.
+      // 비밀번호와 키 — 대상 볼트에 들어가는 것만 센다. 팀으로 갈 때 AWS·tailnet 키는 이 기기에만 두니 세지 않는다
+      // (복사 창이 이 수를 "함께 공유" 로 보여 준다).
       secrets:
         secrets.length +
-        awsProfiles.filter((profile) => profile.kind === "static" && normalizeTeamAwsProfileCredentials(profile)).length +
-        tailnets.filter((tailnet) => Boolean(tailnet.authKey)).length,
+        (options.targetIsTeam
+          ? 0
+          : awsProfiles.filter(
+              (profile) => profile.kind === "static" && profile.accessKeyId.trim() && profile.secretAccessKey.trim(),
+            ).length + tailnets.filter((tailnet) => tailnet.authKey?.trim()).length),
       knownHosts: knownHosts.length,
       portForwards: portForwards.length,
       dnsOverrides: dnsOverrides.length,

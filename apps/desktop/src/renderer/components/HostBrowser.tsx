@@ -199,7 +199,7 @@ export function HostBrowser({
       ? hb.getAssetKeysInGroupTrees(contextMenu.groupPaths, contextMenu.vaultId)
       : [];
   // 볼트 줄 메뉴의 볼트. 다시 들어와야 하는 팀은 팀 키가 없어 쓸 수 없으니 "팀 관리" 만 남긴다.
-  // 볼트 사이 복사(공유) — 한 볼트의 호스트들·워크스페이스들이나 그룹 하나, 넣을 다른 볼트가 있을 때만 메뉴에 보인다.
+  // 볼트 사이 복사(공유) — 한 볼트의 호스트들·워크스페이스들·그룹들, 넣을 다른 볼트가 있을 때만 메뉴에 보인다.
   const assetCopy =
     contextMenu?.kind === "asset" ? hb.copySelectionOfAssets(contextMenuAssetKeys) : null;
   const assetCopySourceVaultId = assetCopy?.sourceVaultId ?? null;
@@ -760,16 +760,12 @@ export function HostBrowser({
                     <button
                       type="button"
                       className="flex w-full items-center gap-[0.7rem] rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
-                      disabled={contextMenu.groupPaths.length !== 1}
+                      disabled={contextMenu.groupPaths.length === 0}
                       onClick={() => {
-                        const groupPath = contextMenu.groupPaths[0];
                         hb.setContextMenu(null);
-                        if (!groupPath) {
-                          return;
-                        }
                         hb.requestVaultCopy({
                           sourceVaultId: contextMenu.vaultId,
-                          selection: { kind: "group", groupPath },
+                          selection: { kind: "groups", groupPaths: contextMenu.groupPaths },
                           target: null,
                         });
                       }}

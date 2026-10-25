@@ -1,4 +1,4 @@
-import { forwardRef } from 'react';
+import { forwardRef, useEffect } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GroupRecord, HostDraft, HostRecord, SavedWorkspaceRecord, VaultIndex } from '@shared';
@@ -17,10 +17,15 @@ vi.mock('../store/appStore', async () =>
 let drawerProps: Record<string, unknown> = {};
 // 렌더마다 받은 것 — 한 번이라도 다른 팀 목록을 받았는지 보려면 마지막 것만으로는 모자란다.
 const drawerRenders: Array<Record<string, unknown>> = [];
+// 서랍이 내려갔다 다시 뜨면 폼에 적어 둔 것이 사라진다 — 몇 번 떴는지 센다.
+let drawerMounts = 0;
 vi.mock('../components/HostDrawer', () => ({
   HostDrawer: forwardRef((props: Record<string, unknown>, _ref) => {
     drawerProps = props;
     drawerRenders.push(props);
+    useEffect(() => {
+      drawerMounts += 1;
+    }, []);
     return <div data-testid="host-drawer" />;
   }),
 }));
@@ -104,6 +109,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   drawerProps = {};
   drawerRenders.length = 0;
+  drawerMounts = 0;
   vi.stubGlobal(
     'ResizeObserver',
     class {
@@ -189,6 +195,81 @@ describe('HomeShell vaults', () => {
     });
     // 만들기는 서랍이 연 볼트(팀)로 간다.
     expect(vi.mocked(desktopApi.hosts.create).mock.lastCall?.[2]).toBe(TEAM);
+  });
+
+  // 서랍 맨 위 Vault 로 만들 곳을 바꾼다. 고르기는 그 볼트 것으로 바뀌고, 그 팀 자격 증명을 읽는 동안에도 서랍은
+  // 그대로다(내려갔다 뜨면 적어 둔 것이 사라진다). 만들기는 고른 볼트로 간다.
+  it('moves the new host to the vault picked at the top of the drawer', async () => {
+    vi.mocked(desktopApi.hosts.create).mockImplementation(
+      async (draft) => ({ ...(draft as object), id: 'new-host' }) as HostRecord,
+    );
+    let resolveTeam: (entries: unknown) => void = () => undefined;
+    vi.mocked(desktopApi.keychain.list).mockImplementation((vaultId?: string | null) =>
+      vaultId === TEAM
+        ? (new Promise((resolve) => {
+            resolveTeam = resolve;
+          }) as never)
+        : (Promise.resolve([]) as never),
+    );
+    appStore.setState({ groups: [group('pg-prod', 'Prod'), group('pg-home', 'Home')] });
+    render(<Home />);
+    act(() => appStore.getState().navigateGroup('Home', 'personal'));
+    act(() => appStore.getState().openCreateHostDrawer());
+    await waitFor(() => expect(screen.getByTestId('host-drawer')).toBeInTheDocument());
+    expect(drawerProps).toMatchObject({ mode: 'create', vaultId: null, defaultGroupPath: 'Home' });
+    expect(drawerProps.vaultChoices).toEqual([
+      { id: 'personal', team: null },
+      { id: TEAM, team: { id: TEAM, name: 'Acme Infra' } },
+    ]);
+
+    act(() => (drawerProps.onVaultChange as (vaultId: string) => void)(TEAM));
+
+    expect(drawerProps).toMatchObject({ vaultId: TEAM, defaultGroupPath: null });
+    // 개인 자격 증명을 팀 서랍에 넘기지 않는다 — 다 읽기 전에는 빈 목록이다.
+    expect(drawerProps.keychainEntries).toEqual([]);
+    const values = (options: unknown) => (options as Array<{ value: string | null }>).map((option) => option.value);
+    expect(values(drawerProps.groupOptions)).toEqual([null, 'Prod']);
+    await waitFor(() => expect(desktopApi.keychain.list).toHaveBeenCalledWith(TEAM));
+    await act(async () => resolveTeam([{ secretRef: 'secret:team', label: 'Team key' }]));
+    expect(drawerProps.keychainEntries).toEqual([expect.objectContaining({ secretRef: 'secret:team' })]);
+    await waitFor(() => expect(drawerProps.tailnetOptions).toEqual([{ id: 'team-tailnet', label: 'Team tailnet' }]));
+    expect(drawerMounts).toBe(1);
+
+    const draft = { kind: 'ssh', label: 'db', hostname: 'db.acme.dev', port: 22, username: 'ops', authType: 'password', groupName: '', tags: [] } as unknown as HostDraft;
+    await act(async () => {
+      await (drawerProps.onSubmit as (draft: HostDraft) => Promise<void>)(draft);
+    });
+    expect(vi.mocked(desktopApi.hosts.create).mock.lastCall?.[2]).toBe(TEAM);
+    // 보고 있던 자리는 그대로다.
+    expect(appStore.getState()).toMatchObject({ currentVaultId: 'personal', currentGroupPath: 'Home' });
+
+    // 개인으로 되돌리면 개인에 만든다.
+    act(() => appStore.getState().openCreateHostDrawer({ vaultId: TEAM, groupPath: null }));
+    await waitFor(() => expect(screen.getByTestId('host-drawer')).toBeInTheDocument());
+    act(() => (drawerProps.onVaultChange as (vaultId: string) => void)('personal'));
+    expect(drawerProps.vaultId).toBeNull();
+    await act(async () => {
+      await (drawerProps.onSubmit as (draft: HostDraft) => Promise<void>)(draft);
+    });
+    expect(vi.mocked(desktopApi.hosts.create).mock.lastCall).toHaveLength(2);
+  });
+
+  it("doesn't offer a team you have to rejoin", async () => {
+    const index = {
+      ...vaultIndex(),
+      teams: [
+        ...vaultIndex().teams,
+        { id: 'team-2', name: 'Beta Ops', role: 'member', syncState: 'needs-rejoin', syncError: null, groups: [] },
+      ],
+    } as VaultIndex;
+    vi.mocked(desktopApi.teams.getVaultIndex).mockResolvedValue(index);
+    appStore.setState({ vaultIndex: index });
+    render(<Home />);
+
+    act(() => appStore.getState().openCreateHostDrawer({ vaultId: 'personal', groupPath: null }));
+    await waitFor(() => expect(screen.getByTestId('host-drawer')).toBeInTheDocument());
+
+    expect((drawerProps.vaultChoices as Array<{ id: string }>).map((choice) => choice.id)).toEqual(['personal', TEAM]);
   });
 
   it('opens the team in settings from the vault menu', () => {
@@ -537,10 +618,55 @@ describe('HomeShell vaults', () => {
 
     await waitFor(() =>
       expect(desktopApi.teams.copy).toHaveBeenCalledWith(
-        expect.objectContaining({ selection: { kind: 'group', groupPath: 'Prod' }, targetGroupPath: 'Prod' }),
+        expect.objectContaining({ selection: { kind: 'groups', groupPaths: ['Prod'] }, targetGroupPath: 'Prod' }),
       ),
     );
     await waitFor(() => expect(appStore.getState()).toMatchObject({ currentVaultId: TEAM, currentGroupPath: 'Prod/Prod' }));
+  });
+
+  it('shares several selected groups from the menu and then shows where they went', async () => {
+    const counts = {
+      groups: 2,
+      hosts: 2,
+      dependencyHosts: 0,
+      secrets: 0,
+      knownHosts: 0,
+      portForwards: 0,
+      dnsOverrides: 0,
+      snippets: 0,
+      awsProfiles: 0,
+      tailnets: 0,
+      workspaces: 0,
+    };
+    vi.mocked(desktopApi.teams.previewCopy).mockResolvedValue(counts);
+    vi.mocked(desktopApi.teams.listMembers).mockResolvedValue([]);
+    vi.mocked(desktopApi.teams.copy).mockResolvedValue({
+      hostIds: { 'my-web': 'copy-1', 'my-home': 'copy-2' },
+      workspaceIds: {},
+      counts,
+    });
+    const hosts = [host('my-web', 'Prod'), host('my-home', 'Home'), host('team-web', 'Prod')];
+    appStore.setState({ hosts, groups: [group('pg-prod', 'Prod'), group('pg-home', 'Home')] });
+    render(<Home />);
+
+    const [personalProd] = prodRows();
+    const home = tree().getByRole('button', { name: /^Home(\s*\d+)?$/ });
+    fireEvent.click(personalProd!);
+    fireEvent.click(home, { metaKey: true });
+    fireEvent.contextMenu(home);
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('button', { name: '공유…' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Acme Infra 에 공유' });
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '공유' })).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole('button', { name: '공유' }));
+
+    await waitFor(() =>
+      expect(desktopApi.teams.copy).toHaveBeenCalledWith(
+        expect.objectContaining({ selection: { kind: 'groups', groupPaths: ['Home', 'Prod'] }, targetGroupPath: null }),
+      ),
+    );
+    // 여러 그룹은 놓은 자리(여기서는 팀 맨 위)로 간다 — 그룹마다 그 아래에 있다.
+    await waitFor(() => expect(appStore.getState()).toMatchObject({ currentVaultId: TEAM, currentGroupPath: null }));
   });
 
   it('keeps my credentials for a team host from its detail card, and shows my name right away', async () => {

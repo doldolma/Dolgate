@@ -4,6 +4,7 @@ import type {
   HostRecord,
   ManagedAwsProfilePayload,
   SavedWorkspaceRecord,
+  TailnetPayload,
   TerminalThemeId,
 } from "@shared";
 import type {
@@ -87,53 +88,28 @@ export function hasCredentialSecret(credentials: TeamHostCredentials): boolean {
   );
 }
 
-/** 팀 AWS 정적 프로필에 쓰는 내 키(멤버 개인 칸). 펼칠 때 내 것 → 팀 것 순이다. */
-export interface TeamAwsProfileCredentials {
-  accessKeyId: string;
-  secretAccessKey: string;
-}
-
-/** 팀 tailnet 에 쓰는 내 auth key(멤버 개인 칸). 코어에 넘길 때 내 것 → 팀 것 순이다. */
-export interface TeamTailnetCredentials {
-  authKey: string;
-}
-
-/** 두 키가 다 있어야 쓸 수 있다. 아니면 null. */
-export function normalizeTeamAwsProfileCredentials(value: unknown): TeamAwsProfileCredentials | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const source = value as Record<string, unknown>;
-  const accessKeyId = typeof source.accessKeyId === "string" ? source.accessKeyId.trim() : "";
-  const secretAccessKey = typeof source.secretAccessKey === "string" ? source.secretAccessKey.trim() : "";
-  return accessKeyId && secretAccessKey ? { accessKeyId, secretAccessKey } : null;
-}
-
-export function normalizeTeamTailnetCredentials(value: unknown): TeamTailnetCredentials | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const authKey = (value as Record<string, unknown>).authKey;
-  return typeof authKey === "string" && authKey.trim() ? { authKey: authKey.trim() } : null;
-}
-
-/**
- * 팀 레코드에 실을 AWS 프로필 — 정적 프로필의 키는 사람의 인증 정보라 뺀다(각자 내 칸에 둔다). 팀에는 이름·리전
- * 같은 설정만 간다.
+/*
+ * 키 — 정적 AWS 프로필의 키와 tailnet 의 auth key — 는 개인 볼트와 똑같이 그 볼트에 두고, 팀에는 올리지 않는다.
+ * 사람의 인증 정보라(IAM 키로 한 일은 그 키 주인으로 남고, auth key 는 그 사람 기기를 tailnet 에 넣는다) 팀원에게
+ * 갈 수 없고, 내 다른 기기에도 따라가지 않는다 — 넣은 기기(또는 내 것을 공유한 기기)에만 있다. 올릴 때 여기서 빼고,
+ * 받을 때는 팀 동기화가 이 기기에 있던 키를 지킨다.
  */
+
+/** 팀에 올릴 AWS 프로필 — 정적 프로필의 키를 뺀다. 팀에는 이름·리전 같은 설정만 간다. */
 export function stripAwsProfileKeys(payload: ManagedAwsProfilePayload): ManagedAwsProfilePayload {
   return payload.kind === "static" ? { ...payload, accessKeyId: "", secretAccessKey: "" } : payload;
+}
+
+/** 팀에 올릴 tailnet — auth key 를 뺀다. 키가 있는지(hasAuthKey)도 그 기기의 사정이라 싣지 않는다. */
+export function stripTailnetAuthKey({ authKey: _here, ...payload }: TailnetPayload): TailnetPayload {
+  return { ...payload, hasAuthKey: false };
 }
 
 /** 멤버 개인 칸에 잠가 두는 내 자격 증명의 종류마다 값 모양. 저장·동기화가 같은 것으로 정규화한다. */
 export const TEAM_MEMBER_CREDENTIAL_NORMALIZERS: {
   hostCredentials: (value: unknown) => TeamHostCredentials | null;
-  awsProfileCredentials: (value: unknown) => TeamAwsProfileCredentials | null;
-  tailnetCredentials: (value: unknown) => TeamTailnetCredentials | null;
 } = {
   hostCredentials: normalizeTeamHostCredentials,
-  awsProfileCredentials: normalizeTeamAwsProfileCredentials,
-  tailnetCredentials: normalizeTeamTailnetCredentials,
 };
 
 /** 팀 볼트 하나의 사람마다 다른 값을 두는 곳(멤버 개인 칸·이 기기). */
@@ -146,12 +122,6 @@ export interface TeamMemberPrefsStore {
   readHostCredentials(hostId: string): TeamHostCredentials | null;
   /** 내 자격 증명을 둔다. null 이면 지운다(내 다른 기기에서도). */
   writeHostCredentials(hostId: string, credentials: TeamHostCredentials | null): void;
-  /** 그 팀 AWS 정적 프로필에 둔 내 키. 없으면 null. */
-  readAwsProfileCredentials(profileId: string): TeamAwsProfileCredentials | null;
-  writeAwsProfileCredentials(profileId: string, credentials: TeamAwsProfileCredentials | null): void;
-  /** 그 팀 tailnet 에 둔 내 auth key. 없으면 null. */
-  readTailnetCredentials(tailnetId: string): TeamTailnetCredentials | null;
-  writeTailnetCredentials(tailnetId: string, credentials: TeamTailnetCredentials | null): void;
 }
 
 export function stripHostMemberPrefs(host: HostRecord): HostRecord {

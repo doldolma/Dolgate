@@ -2,12 +2,11 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TeamMember, VaultCopyCounts, VaultCopyRequest } from '@shared';
 import { Button, SelectField, ToggleSwitch, Tooltip } from '../../ui';
-import { ArrowRight, Info, User } from '../../ui/icons';
+import { ArrowRight, Info } from '../../ui/icons';
 import type { BrowserVault } from '../host-browser/browserVaults';
 import type { VaultCopyDraft } from '../host-browser/useHostBrowser';
 import { TeamContentCountTiles } from './TeamContentCounts';
 import { TeamDialogError, TeamDialogFrame } from './TeamDialogFrame';
-import { TeamMark } from './TeamMark';
 import { useDialogAction } from './useDialogAction';
 
 interface VaultCopyDialogProps {
@@ -46,20 +45,10 @@ function defaultTarget(vaults: readonly BrowserVault[], sourceVaultId: string): 
   return vault ? { vaultId: vault.id, groupPath: null } : null;
 }
 
-/** 어디서·어디로 칸 — 볼트 표시 + 이름. 사이드바 볼트 줄과 같은 표시를 쓴다. */
-function LocationChip({ vault, children }: { vault: BrowserVault | null; children: ReactNode }) {
+/** 어디서·어디로 칸 — 볼트 이름이 글에 들어 있어 볼트 표시는 달지 않는다. */
+function LocationChip({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-flex min-w-0 items-center gap-[0.45rem] rounded-[10px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_90%,transparent_10%)] px-3 py-2 text-[0.86rem] text-[var(--text)]">
-      {vault?.kind === 'team' ? (
-        <TeamMark name={vault.name} size="sm" />
-      ) : (
-        <span
-          aria-hidden="true"
-          className="inline-grid h-[1.4rem] w-[1.4rem] shrink-0 place-items-center rounded-[7px] bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent_88%)] text-[var(--accent-strong)]"
-        >
-          <User className="h-[0.85rem] w-[0.85rem]" />
-        </span>
-      )}
+    <span className="inline-flex min-w-0 items-center rounded-[10px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_90%,transparent_10%)] px-3 py-2 text-[0.86rem] text-[var(--text)]">
       <span className="min-w-0 truncate">{children}</span>
     </span>
   );
@@ -159,8 +148,10 @@ export function VaultCopyDialog({
   const sourceName = source?.name ?? '';
   const targetName = targetVault?.name ?? '';
   const what =
-    draft.selection.kind === 'group'
-      ? prettyPath(draft.selection.groupPath)
+    draft.selection.kind === 'groups'
+      ? draft.selection.groupPaths.length === 1
+        ? prettyPath(draft.selection.groupPaths[0]!)
+        : translate('teams.copy.groupCount', { count: draft.selection.groupPaths.length })
       : draft.selection.kind === 'workspaces'
         ? draft.selection.workspaceIds.length === 1
           ? (workspaceLabelOf?.(draft.selection.workspaceIds[0]!) ?? translate('teams.copy.workspaceCount', { count: 1 }))
@@ -247,11 +238,11 @@ export function VaultCopyDialog({
         </div>
       ) : null}
       <div className="flex flex-wrap items-center gap-2" data-vault-copy-route>
-        <LocationChip vault={source}>
+        <LocationChip>
           {sourceName} / {what}
         </LocationChip>
         <ArrowRight className="h-4 w-4 shrink-0 text-[var(--text-soft)]" aria-hidden />
-        <LocationChip vault={targetVault}>
+        <LocationChip>
           {target?.groupPath ? (
             `${targetName} / ${prettyPath(target.groupPath)}`
           ) : (

@@ -92,6 +92,8 @@ interface FakeInvite {
   code: string;
   teamId: string;
   box: string;
+  /** 팀 키로 잠근 링크 비밀값. 취소되면 상자처럼 지운다. */
+  sealedSecret: string | null;
   tokenHash: string;
   expiresAt: string;
   createdBy: string;
@@ -322,6 +324,7 @@ export class FakeTeamServer {
       for (const invite of this.invites.values()) {
         if (invite.teamId === team.id) {
           invite.revokedAt ??= new Date().toISOString();
+          invite.sealedSecret = null;
         }
       }
       team.infoRevision += 1;
@@ -331,6 +334,7 @@ export class FakeTeamServer {
       const invite = this.invites.get(path.split("/")[1]);
       if (invite?.teamId === team.id) {
         invite.revokedAt ??= new Date().toISOString();
+        invite.sealedSecret = null;
       }
       team.infoRevision += 1;
       return noContent();
@@ -386,6 +390,7 @@ export class FakeTeamServer {
           code,
           teamId: team.id,
           box: String(body.inviteBox),
+          sealedSecret: typeof body.sealedSecret === "string" && body.sealedSecret ? body.sealedSecret : null,
           tokenHash: String(body.joinTokenHash),
           expiresAt: String(body.expiresAt),
           createdBy: this.userId,
@@ -461,6 +466,7 @@ export class FakeTeamServer {
   }
 
   private inviteJson(invite: FakeInvite) {
+    const active = invite.revokedAt === null && Date.parse(invite.expiresAt) > Date.now();
     return {
       code: invite.code,
       createdBy: invite.createdBy,
@@ -468,8 +474,10 @@ export class FakeTeamServer {
       expiresAt: invite.expiresAt,
       useCount: invite.useCount,
       createdAt: T0,
-      active: invite.revokedAt === null && Date.parse(invite.expiresAt) > Date.now(),
+      active,
       ...(invite.revokedAt ? { revokedAt: invite.revokedAt } : {}),
+      // 서버처럼 살아 있는 링크에만 싣는다.
+      ...(active && invite.sealedSecret ? { sealedSecret: invite.sealedSecret } : {}),
     };
   }
 }

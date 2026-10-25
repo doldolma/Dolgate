@@ -2598,6 +2598,46 @@ describe("HostBrowser dialogs", () => {
     expect(onRemoveGroup).toHaveBeenLastCalledWith("Clients", "delete-subtree");
   });
 
+  // 사이드바 줄에 커서를 올렸을 때의 배경. 강조된 줄(지금 위치·고른 것)에는 없어야 한다.
+  const ROW_HOVER_BACKGROUND = "hover:bg-[color-mix(in_srgb,var(--surface-elevated)_72%,transparent_28%)]";
+
+  // 여러 개 고른 그룹은 고른 카드와 같은 선택 색이어야 한다. 예전 배경(surface-elevated 66%)은 마우스를 올린 색과
+  // 거의 같고 라이트 테마에선 사이드바 배경과 구분되지 않아, 오른쪽 최근 로그가 "그룹 N개" 로 좁혀져도 무엇을 골랐는지
+  // 보이지 않았다.
+  it("shows groups picked with Ctrl in the selection colour, apart from where you are", () => {
+    renderBrowser({
+      groups: [
+        ...groups,
+        {
+          id: "group-3",
+          name: "Clients",
+          path: "Clients",
+          parentPath: null,
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const tree = within(screen.getByLabelText("Group tree"));
+    const servers = tree.getByRole("button", { name: /Servers/ });
+    const clients = tree.getByRole("button", { name: /Clients/ });
+
+    fireEvent.click(servers, { ctrlKey: true });
+    fireEvent.click(clients, { ctrlKey: true });
+
+    for (const row of [servers, clients]) {
+      expect(row).toHaveAttribute("data-group-tree-state", "selected");
+      expect(row).toHaveClass("bg-[var(--selection-tint)]");
+      // 테두리는 지금 위치에만 둔다 — 고른 것과 들어가 있는 곳은 구분돼야 한다.
+      expect(row).not.toHaveClass("border-[var(--selection-border)]");
+      // 커서를 올려도 선택 색을 지킨다. 올린 색이 덮으면 고르지 않은 줄과 똑같아 보였다.
+      expect(row).not.toHaveClass(ROW_HOVER_BACKGROUND);
+    }
+    // 지금 위치(전체)도 그 색을 지키고, 고르지 않은 줄만 밝아진다.
+    expect(tree.getByRole("button", { name: /All/ })).not.toHaveClass(ROW_HOVER_BACKGROUND);
+    expect(tree.getByRole("button", { name: /Nested/ })).toHaveClass(ROW_HOVER_BACKGROUND);
+  });
+
   it("keeps mixed host and group selections but scopes the context menu to the clicked type", () => {
     renderBrowser({
       groups: [

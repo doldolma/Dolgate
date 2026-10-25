@@ -1,12 +1,12 @@
-import type { HostDraft, HostRecord, SavedWorkspaceRecord } from "@shared";
+import type { HostDraft, HostRecord, ManagedAwsProfilePayload, SavedWorkspaceRecord, TailnetPayload } from "@shared";
 import { describe, expect, it } from "vitest";
 import {
-  normalizeTeamAwsProfileCredentials,
-  normalizeTeamTailnetCredentials,
   overlayHostMemberPrefs,
   overlayWorkspaceMemberPrefs,
   splitHostDraftMemberPrefs,
+  stripAwsProfileKeys,
   stripHostMemberPrefs,
+  stripTailnetAuthKey,
   stripWorkspaceMemberPrefs,
   type TeamMemberPrefs,
 } from "./team-member-prefs";
@@ -113,15 +113,37 @@ describe("team member prefs", () => {
     ).toMatchObject({ favorite: true, lastOpenedAt: "2026-10-19T05:00:00.000Z" });
   });
 
-  // 내 키는 정적 프로필의 키를 통째로 갈아 끼운다 — 한쪽만 있는 것을 받으면 팀 키를 반쪽으로 덮어 못 붙는다.
-  it("takes my AWS keys only as a full pair and my auth key only when it is there", () => {
-    expect(normalizeTeamAwsProfileCredentials({ accessKeyId: " AKIAMINE ", secretAccessKey: " mine " })).toEqual({
+  // 키는 팀에 올리지 않는다 — 넣은 기기에만 있다. 키가 있는지(hasAuthKey)도 그 기기의 사정이라 싣지 않는다.
+  it("takes the keys off what goes up to the team, and nothing else", () => {
+    const aws: ManagedAwsProfilePayload = {
+      id: "aws-1",
+      kind: "static",
+      name: "prod",
+      region: "ap-northeast-2",
       accessKeyId: "AKIAMINE",
       secretAccessKey: "mine",
+      updatedAt: "2026-10-19T00:00:00.000Z",
+    };
+    expect(stripAwsProfileKeys(aws)).toEqual({ ...aws, accessKeyId: "", secretAccessKey: "" });
+    const sso = { id: "aws-2", kind: "sso", name: "sso", updatedAt: aws.updatedAt } as ManagedAwsProfilePayload;
+    expect(stripAwsProfileKeys(sso)).toBe(sso);
+
+    const tailnet: TailnetPayload = {
+      id: "tn-1",
+      label: "corp",
+      controlUrl: "https://hs.example.com",
+      hasAuthKey: true,
+      authKey: "tskey-mine",
+      createdAt: aws.updatedAt,
+      updatedAt: aws.updatedAt,
+    };
+    expect(stripTailnetAuthKey(tailnet)).toEqual({
+      id: "tn-1",
+      label: "corp",
+      controlUrl: "https://hs.example.com",
+      hasAuthKey: false,
+      createdAt: aws.updatedAt,
+      updatedAt: aws.updatedAt,
     });
-    expect(normalizeTeamAwsProfileCredentials({ accessKeyId: "AKIAMINE", secretAccessKey: "" })).toBeNull();
-    expect(normalizeTeamAwsProfileCredentials({ accessKeyId: "", secretAccessKey: "mine" })).toBeNull();
-    expect(normalizeTeamTailnetCredentials({ authKey: " tskey-mine " })).toEqual({ authKey: "tskey-mine" });
-    expect(normalizeTeamTailnetCredentials({ authKey: "  " })).toBeNull();
   });
 });

@@ -79,6 +79,9 @@ import {
 import { OfflineModeBanner } from "./OfflineModeBanner";
 import { useTranslation } from "react-i18next";
 
+// 팀 자격 증명을 읽는 동안 새 호스트 서랍에 주는 빈 목록. 렌더마다 새 배열이면 폼의 효과가 매번 다시 돈다.
+const NO_KEYCHAIN_ENTRIES: SecretMetadataRecord[] = [];
+
 interface HomeShellProps {
   active: boolean;
   /**
@@ -276,6 +279,18 @@ export function HomeShell({
     return browserVaults.find((vault) => vault.id === vaultId) ?? null;
   }, [browserVaults, homeViewModel.hostDrawer]);
   const drawerTeamId = drawerVault?.kind === "team" ? drawerVault.id : null;
+  // 새 호스트 서랍 맨 위 Vault 의 후보. 다시 들어와야 하는 팀에는 만들 수 없다(볼트 줄 메뉴와 같다). 지금 고른 볼트는
+  // 그래도 둔다 — 빠지면 고르기가 빈칸으로 보인다.
+  const createVaultChoices = useMemo(() => {
+    const drawer = homeViewModel.hostDrawer;
+    const chosenVaultId = drawer.mode === "create" ? drawer.vaultId : null;
+    return browserVaults
+      .filter((vault) => vault.blocked !== "needs-rejoin" || vault.id === chosenVaultId)
+      .map((vault) => ({
+        id: vault.id,
+        team: vault.kind === "team" ? { id: vault.id, name: vault.name } : null,
+      }));
+  }, [browserVaults, homeViewModel.hostDrawer]);
   const groupOptions = useMemo(
     () =>
       buildGroupOptions(
@@ -593,14 +608,14 @@ export function HomeShell({
   }
 
   /**
-   * 복사가 끝나면 복사본이 있는 곳을 보여 준다 — 그 볼트의 놓은 그룹(그룹째 복사면 복사된 그룹)으로 가서 첫
-   * 복사본을 고른다. 편집 중이면 떠나기 전에 묻는다(다른 이동과 같다).
+   * 복사가 끝나면 복사본이 있는 곳을 보여 준다 — 그 볼트의 놓은 그룹(그룹 하나를 복사했으면 복사된 그룹)으로 가서
+   * 첫 복사본을 고른다. 편집 중이면 떠나기 전에 묻는다(다른 이동과 같다).
    */
   function showVaultCopies(request: VaultCopyRequest, result: VaultCopyResult) {
     const { selection } = request;
     const groupPath =
-      selection.kind === "group"
-        ? [request.targetGroupPath, getGroupLabel(selection.groupPath)]
+      selection.kind === "groups" && selection.groupPaths.length === 1
+        ? [request.targetGroupPath, getGroupLabel(selection.groupPaths[0]!)]
             .filter(Boolean)
             .join("/")
         : (request.targetGroupPath ?? "");
@@ -739,19 +754,26 @@ export function HomeShell({
   // 호스트 편집/생성 폼은 별도 오버레이가 아니라 우측 상세 영역(HostBrowser aside) 안에 표시한다.
   // 팀 호스트는 그 팀의 자격 증명을 다 읽은 뒤에 띄운다. 폼은 고른 자격 증명이 목록에 없으면 "새 자격 증명"으로
   // 되돌리므로, 빈 목록으로 먼저 뜨면 저장된 팀 비밀번호가 풀린 채로 보이고 그대로 저장하면 호스트에서 떨어진다.
-  const hostEditor = isDrawerOpen && drawerKeychainEntries ? (
+  // 만들 때는 기다리지 않는다 — 풀릴 자격 증명이 없고, 서랍 맨 위에서 볼트를 바꿀 때마다 서랍이 내려갔다 뜨면
+  // 적어 둔 것이 사라진다. 다 읽으면 고를 목록이 채워진다.
+  const hostEditorKeychainEntries =
+    drawerKeychainEntries ??
+    (homeViewModel.hostDrawer.mode === "create" ? NO_KEYCHAIN_ENTRIES : null);
+  const hostEditor = isDrawerOpen && hostEditorKeychainEntries ? (
     <HostDrawer
       ref={hostDrawerRef}
       open={isDrawerOpen}
       mode={homeViewModel.hostDrawer.mode === "create" ? "create" : "edit"}
       host={currentHost}
-      keychainEntries={drawerKeychainEntries}
+      keychainEntries={hostEditorKeychainEntries}
       groupOptions={groupOptions}
       jumpHostOptions={jumpHostOptions}
       jumpHostTailnetNames={jumpHostTailnetNames}
       tailnetOptions={tailnetOptions}
       snippets={drawerSnippets}
       vaultId={drawerTeamId}
+      vaultChoices={createVaultChoices}
+      onVaultChange={homeViewModel.setCreateHostVault}
       defaultGroupPath={
         homeViewModel.hostDrawer.mode === "create"
           ? homeViewModel.hostDrawer.defaultGroupPath

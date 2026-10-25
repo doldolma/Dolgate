@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../lib/cn';
 import { Badge } from './Badge';
 import { ChevronDown } from './icons';
@@ -14,6 +14,8 @@ export interface SearchableSelectOption {
   badge?: string;
   /** Explicit search haystack. Falls back to label + description + value. */
   searchText?: string;
+  /** Optional leading mark (e.g. a vault's icon). Shown before the label. */
+  icon?: ReactNode;
 }
 
 interface SearchableSelectProps {
@@ -30,6 +32,8 @@ interface SearchableSelectProps {
   onChange: (value: string) => void;
   disabled?: boolean;
   className?: string;
+  /** Hide the search box — for a handful of options (e.g. vaults). Defaults to true. */
+  searchable?: boolean;
 }
 
 function optionHaystack(option: SearchableSelectOption): string {
@@ -40,6 +44,25 @@ function optionHaystack(option: SearchableSelectOption): string {
     .filter((field): field is string => Boolean(field))
     .join(' ')
     .toLowerCase();
+}
+
+function OptionLabel({ option }: { option: SearchableSelectOption }) {
+  const text = (
+    <div className="grid min-w-0 gap-[0.25rem]">
+      <span className="truncate text-[0.9rem] text-[var(--text)]">{option.label}</span>
+      {option.description ? (
+        <span className="truncate text-[0.82rem] text-[var(--text-soft)]">{option.description}</span>
+      ) : null}
+    </div>
+  );
+  return option.icon ? (
+    <div className="flex min-w-0 items-center gap-[0.55rem]">
+      {option.icon}
+      {text}
+    </div>
+  ) : (
+    text
+  );
 }
 
 /**
@@ -59,6 +82,7 @@ export function SearchableSelect({
   onChange,
   disabled = false,
   className,
+  searchable = true,
 }: SearchableSelectProps) {
   const { t: translate } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
@@ -136,14 +160,7 @@ export function SearchableSelect({
       >
         {selected ? (
           <div className="flex min-w-0 flex-1 items-center justify-between gap-[0.7rem]">
-            <div className="grid min-w-0 gap-[0.25rem]">
-              <span className="truncate text-[0.9rem] text-[var(--text)]">{selected.label}</span>
-              {selected.description ? (
-                <span className="truncate text-[0.82rem] text-[var(--text-soft)]">
-                  {selected.description}
-                </span>
-              ) : null}
-            </div>
+            <OptionLabel option={selected} />
             {selected.badge ? <Badge className="shrink-0">{selected.badge}</Badge> : null}
           </div>
         ) : (
@@ -160,14 +177,16 @@ export function SearchableSelect({
           aria-label={translate('select.optionsAria', { label: ariaLabel })}
           className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-[5] grid max-h-[280px] gap-[0.4rem] overflow-y-auto rounded-[10px] border border-[var(--border)] bg-[var(--dialog-surface)] p-[0.55rem] shadow-[0_18px_42px_rgba(16,26,40,0.18)]"
         >
-          <Input
-            ref={searchInputRef}
-            aria-label={searchAriaLabel ?? translate('select.searchAria', { label: ariaLabel })}
-            placeholder={searchPlaceholder ?? translate('select.search')}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            className="min-h-9 rounded-[10px] px-[0.7rem] py-[0.55rem] text-[0.9rem]"
-          />
+          {searchable ? (
+            <Input
+              ref={searchInputRef}
+              aria-label={searchAriaLabel ?? translate('select.searchAria', { label: ariaLabel })}
+              placeholder={searchPlaceholder ?? translate('select.search')}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="min-h-9 rounded-[10px] px-[0.7rem] py-[0.55rem] text-[0.9rem]"
+            />
+          ) : null}
           {visibleOptions.length > 0 ? (
             visibleOptions.map((option) => (
               <button
@@ -186,14 +205,7 @@ export function SearchableSelect({
                     'border-[color-mix(in_srgb,var(--accent-strong)_38%,var(--border))] bg-[color-mix(in_srgb,var(--dialog-surface)_76%,var(--accent-strong)_24%)]',
                 )}
               >
-                <div className="grid min-w-0 gap-[0.25rem]">
-                  <span className="truncate text-[0.9rem] text-[var(--text)]">{option.label}</span>
-                  {option.description ? (
-                    <span className="truncate text-[0.82rem] text-[var(--text-soft)]">
-                      {option.description}
-                    </span>
-                  ) : null}
-                </div>
+                <OptionLabel option={option} />
                 {option.badge ? <Badge className="shrink-0">{option.badge}</Badge> : null}
               </button>
             ))

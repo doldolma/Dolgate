@@ -301,6 +301,36 @@ function createDraft(
   };
 }
 
+/**
+ * 만들던 호스트를 다른 볼트로 옮길 때의 draft.
+ *
+ * 적어 둔 것(이름·주소·포트·계정·태그·환경 변수…)은 그대로 두고, 앞 볼트 안의 것을 가리키던 고른 값만 비운다 — 그룹·
+ * 저장된 자격 증명·점프 호스트·tailnet·스니펫·SSH 터널은 볼트마다 따로라, 두면 새 볼트에 없는 것을 가리킨 채 저장된다.
+ * 그룹은 새 볼트에서 시작할 그룹으로 간다.
+ */
+function detachDraftFromVault(draft: HostDraft, groupPath: string | null): HostDraft {
+  const groupName = groupPath ?? '';
+  if (isSshHostDraft(draft)) {
+    return {
+      ...draft,
+      groupName,
+      secretRef: null,
+      jumpHostId: null,
+      jumpHostIds: null,
+      tailnetId: null,
+      // 적어 넣은 명령은 남긴다. 스니펫만 볼트에 든다.
+      startupCommand: draft.startupCommand?.type === 'snippet' ? null : (draft.startupCommand ?? null),
+    };
+  }
+  if (isRdpHostDraft(draft)) {
+    return { ...draft, groupName, secretRef: null, tailnetId: null };
+  }
+  if (isVncHostDraft(draft)) {
+    return { ...draft, groupName, secretRef: null, tailnetId: null, sshTunnelHostId: null };
+  }
+  return { ...draft, groupName };
+}
+
 function normalizeTagToken(value: string): string {
   return value.trim();
 }
@@ -738,6 +768,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const saveTimerRef = useRef<number | null>(null);
   const lastHydratedHostIdRef = useRef<string | null>(null);
   const lastHydratedHostKeyRef = useRef<string | null>(null);
+  // 만드는 중에 볼트만 바뀌었는지 가리려고 직전 볼트·종류를 둔다. 고칠 때는 null 이다.
+  const creatingRef = useRef<{ vaultId: string | null; kind: string } | null>(null);
   const isTagInputComposingRef = useRef(false);
   const skipNextTagBlurCommitRef = useRef(false);
   const [draft, setDraft] = useState<HostDraft>(createDraft(defaultGroupPath, createKind));
@@ -1032,6 +1064,16 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     }
 
     if (!host) {
+      const previous = creatingRef.current;
+      creatingRef.current = { vaultId, kind: createKind };
+      // 서랍 맨 위에서 볼트만 바꿨다 — 새 폼으로 비우지 않는다.
+      if (previous && previous.kind === createKind && previous.vaultId !== vaultId) {
+        setDraft((current) => detachDraftFromVault(current, defaultGroupPath));
+        setSelectedSecretRef('');
+        setCredentialMode('new');
+        setAddedTailnets([]);
+        return;
+      }
       setDraft(createDraft(defaultGroupPath, createKind));
       setPassword('');
       setPassphrase('');
@@ -1052,6 +1094,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       return;
     }
 
+    creatingRef.current = null;
     const nextHydrationKey = buildHostHydrationKey(host);
     const isNewHost = lastHydratedHostIdRef.current !== host.id;
     const hasHostRevisionChanged = lastHydratedHostKeyRef.current !== nextHydrationKey;
@@ -1252,7 +1295,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     setLastSavedSubmissionKey(nextSubmissionKey);
     lastHydratedHostIdRef.current = host.id;
     lastHydratedHostKeyRef.current = nextHydrationKey;
-  }, [createKind, defaultGroupPath, host, isEditDirty, saveInFlight]);
+  }, [createKind, defaultGroupPath, host, isEditDirty, saveInFlight, vaultId]);
 
   useEffect(() => {
     if (!sshDraft) {

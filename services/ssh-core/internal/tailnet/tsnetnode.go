@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -740,17 +741,76 @@ func mapBackendState(backend string) State {
 	}
 }
 
-// Logout 은 등록 자체를 버린다. 컨트롤 플레인이 노드를 지우므로 다음 기동은 처음부터
-// 인증한다.
+// Logout 은 등록 자체를 버린다. 노드키가 만료되므로 다음 기동은 처음부터 인증한다. 기기 목록에서
+// 지우는 것은 아니다 — 일반(비 ephemeral) 노드는 만료된 채 목록에 남고, 지우는 것은 관리자가 한다.
 func (n *tsnetNode) Logout(ctx context.Context) error {
-	// 기동한 적 없는 노드는 컨트롤 플레인에 존재하지 않는다. 로그아웃하려고 굳이 기동하면
-	// 등록을 만들었다가 지우는 꼴이 된다.
+	// 이 실행에서 기동하지 않은 노드라도 지난 실행의 등록이 상태 파일에 남아 있으면 컨트롤 플레인에는 노드가
+	// 있다. 그 등록으로만 기동해 로그아웃한다. 상태 파일이 없으면 등록된 적도 없다.
 	if !n.hasStarted() {
-		return nil
+		if !hasSavedState(n.dir) {
+			return nil
+		}
+		ctx, cancel := context.WithTimeout(ctx, savedRegistrationLogoutTimeout)
+		defer cancel()
+		// auth key 는 떼어 낸다. 저장된 등록이 이미 풀려 로그인이 필요한 상태면, 키가 있으면 tsnet 이 그 키로 새로
+		// 등록해 버린다 — 지우려고 기동했는데 등록을 하나 만들고, 한 번만 쓰는 키라면 그 키까지 써 버린다.
+		n.server.AuthKey = ""
+		if err := n.ensureStarted(ctx); err != nil {
+			// 저장된 상태로 기동하지 못하면(깨진 상태 파일 등) 그 등록을 풀 방법이 없다. 로컬 상태는 호출자가 그대로
+			// 지운다 — 등록 해제 전체를 실패로 만들 이유는 없다.
+			return nil
+		}
+		client, err := n.server.LocalClient()
+		if err != nil {
+			return fmt.Errorf("tailnet: local client: %w", err)
+		}
+		return logoutSavedRegistration(ctx, client)
 	}
 	client, err := n.server.LocalClient()
 	if err != nil {
 		return fmt.Errorf("tailnet: local client: %w", err)
+	}
+	if err := client.Logout(ctx); err != nil {
+		return fmt.Errorf("tailnet: logout: %w", err)
+	}
+	return nil
+}
+
+// savedRegistrationLogoutTimeout 은 지난 실행의 등록으로 기동해 로그아웃하기까지 기다리는 한도다. 컨트롤
+// 플레인에 닿지 못하면 이만큼 기다린 뒤 포기한다 — 로컬 상태는 호출자가 그대로 지운다.
+const savedRegistrationLogoutTimeout = 20 * time.Second
+
+// hasSavedState 는 이 tailnet 의 상태 파일이 남아 있는지다. 기동한 적이 있으면 tsnet 이 이 파일에 등록을 남긴다.
+func hasSavedState(dir string) bool {
+	info, err := os.Stat(filepath.Join(dir, "tailscaled.state"))
+	return err == nil && info.Mode().IsRegular() && info.Size() > 0
+}
+
+// logoutClient 는 저장된 등록을 지울 때 쓰는 부분만 좁힌 것이다. 진짜 백엔드 없이 기다림·건너뜀 규칙을 시험한다.
+type logoutClient interface {
+	Status(ctx context.Context) (*ipnstate.Status, error)
+	Logout(ctx context.Context) error
+}
+
+// logoutSavedRegistration 은 저장된 상태로 막 기동한 노드를 로그아웃한다. 백엔드가 상태를 보고하기 전에 로그아웃하면
+// 컨트롤 플레인에 닿지 못한 채 로컬만 지워지므로 그때까지 기다린다. 로그인이 필요한 상태면 지울 등록이 없다.
+func logoutSavedRegistration(ctx context.Context, client logoutClient) error {
+	for {
+		status, err := client.Status(ctx)
+		if err != nil {
+			return fmt.Errorf("tailnet: status: %w", err)
+		}
+		if strings.TrimSpace(status.BackendState) == ipn.NeedsLogin.String() {
+			return nil
+		}
+		if backendHasReported(status.BackendState) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("tailnet: backend did not start: %w", ctx.Err())
+		case <-time.After(nodeStatusPollInterval):
+		}
 	}
 	if err := client.Logout(ctx); err != nil {
 		return fmt.Errorf("tailnet: logout: %w", err)

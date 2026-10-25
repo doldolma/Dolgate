@@ -755,7 +755,7 @@ describe('AwsProfilesPanel', () => {
   })
 })
 
-// 설정의 볼트별 묶음(4-7). 팀 프로필은 그 팀에 만들고 고친다 — 정적 키 칸은 "내 키"다(K1).
+// 설정의 볼트별 묶음(4-7). 팀 프로필은 그 팀에 만들고 고친다 — 정적 키 칸은 개인 것과 같다(키는 그 볼트에 두고 팀에 올리지 않는다).
 describe('AwsProfilesPanel with team vaults', () => {
   const TEAM = 'team-a'
   const teamDetails: Record<string, AwsProfileDetails> = {
@@ -804,7 +804,7 @@ describe('AwsProfilesPanel with team vaults', () => {
   const section = (vaultId: string) =>
     within(document.querySelector(`[data-vault-section="${vaultId}"]`)!.closest('section')!)
 
-  it("lists each vault's profiles and makes a new one in the team from the team's +, keys labelled as mine", async () => {
+  it("lists each vault's profiles and makes a new one in the team from the team's +, with the usual key fields", async () => {
     const { api } = installTeamApi()
     render(<AwsProfilesPanel hosts={[]} />)
 
@@ -819,8 +819,8 @@ describe('AwsProfilesPanel with team vaults', () => {
     const dialog = within(screen.getByText('AWS 프로필 생성').closest('[class*="shadow-[var(--shadow-floating)]"]') as HTMLElement)
     expect(dialog.getByText('Acme Infra 에 저장합니다. 팀원 모두가 이 프로필을 씁니다.')).toBeInTheDocument()
     fireEvent.change(dialog.getByLabelText('새 프로필명'), { target: { value: 'acme-dev' } })
-    fireEvent.change(dialog.getByLabelText('My Access Key'), { target: { value: 'AKIAMINE' } })
-    fireEvent.change(dialog.getByLabelText('My Secret'), { target: { value: 'mine' } })
+    fireEvent.change(dialog.getByLabelText('Access Key'), { target: { value: 'AKIAMINE' } })
+    fireEvent.change(dialog.getByLabelText('Secret'), { target: { value: 'mine' } })
     fireEvent.click(dialog.getByRole('button', { name: '프로필 저장' }))
 
     await waitFor(() =>
@@ -843,10 +843,10 @@ describe('AwsProfilesPanel with team vaults', () => {
     fireEvent.click(section(TEAM).getByRole('button', { name: /acme-prod/ }))
     await screen.findByRole('heading', { name: 'acme-prod' })
 
-    // 내 키만 바꾼다 — 키 칸은 "내 키".
+    // 키만 바꾼다.
     fireEvent.click(screen.getByRole('button', { name: '수정' }))
-    fireEvent.change(screen.getByLabelText('My Access Key'), { target: { value: 'AKIANEW' } })
-    fireEvent.change(screen.getByLabelText('My Secret'), { target: { value: 'new-secret' } })
+    fireEvent.change(screen.getByLabelText('Access Key'), { target: { value: 'AKIANEW' } })
+    fireEvent.change(screen.getByLabelText('Secret'), { target: { value: 'new-secret' } })
     fireEvent.click(screen.getByRole('button', { name: '프로필 업데이트' }))
     await waitFor(() =>
       expect(api.aws.updateProfile).toHaveBeenCalledWith(

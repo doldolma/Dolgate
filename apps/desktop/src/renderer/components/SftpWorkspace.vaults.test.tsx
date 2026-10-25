@@ -184,7 +184,7 @@ describe("SFTP host picker with team vaults", () => {
     expect(document.querySelector(`[data-vault-card="${TEAM}"]`)!.textContent).toContain("2 hosts");
     // 합쳐진 "Prod" 폴더는 없다.
     expect(picker.queryAllByText("Prod").filter((el) => el.closest("[data-group-card]"))).toHaveLength(0);
-    // 맨 위의 호스트 목록은 볼트가 섞인 곳이라 팀 것에 "[머리글자] 팀 이름 / 그룹".
+    // 맨 위의 호스트 목록은 볼트가 섞인 곳이라 팀 것에 "[팀 표시] 팀 이름 / 그룹".
     expect(hostCard("team-web").textContent).toContain("Acme Infra / Prod");
     expect(hostCard("my-web").textContent).not.toContain("Acme Infra");
   });

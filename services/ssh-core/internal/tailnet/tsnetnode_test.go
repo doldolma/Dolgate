@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -601,5 +603,73 @@ func TestStartWithCancelPassesTheResultThrough(t *testing.T) {
 	err := startWithCancel(context.Background(), func() error { return failure })
 	if !errors.Is(err, failure) {
 		t.Errorf("err = %v, want it to wrap the start failure", err)
+	}
+}
+
+// fakeLogoutClient 는 저장된 등록을 로그아웃할 때 백엔드가 보고하는 상태 순서를 흉내 낸다.
+type fakeLogoutClient struct {
+	states  []string
+	calls   int
+	logouts int
+}
+
+func (c *fakeLogoutClient) Status(context.Context) (*ipnstate.Status, error) {
+	index := c.calls
+	if index >= len(c.states) {
+		index = len(c.states) - 1
+	}
+	c.calls += 1
+	return &ipnstate.Status{BackendState: c.states[index]}, nil
+}
+
+func (c *fakeLogoutClient) Logout(context.Context) error {
+	c.logouts += 1
+	return nil
+}
+
+// 지난 실행의 등록으로 기동한 노드는 백엔드가 상태를 내놓은 뒤에 로그아웃해야 컨트롤 플레인에 닿는다.
+func TestLogoutSavedRegistrationWaitsForTheBackend(t *testing.T) {
+	client := &fakeLogoutClient{states: []string{"NoState", "NoState", "Starting"}}
+
+	if err := logoutSavedRegistration(context.Background(), client); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	if client.logouts != 1 {
+		t.Errorf("logouts = %d, want 1", client.logouts)
+	}
+	if client.calls != 3 {
+		t.Errorf("status was read %d times, want 3 (until the backend reported)", client.calls)
+	}
+}
+
+// 로그인이 필요한 상태면 컨트롤 플레인에 지울 노드가 없다. 로그아웃하지 않는다.
+func TestLogoutSavedRegistrationSkipsWhenNotRegistered(t *testing.T) {
+	client := &fakeLogoutClient{states: []string{"NoState", "NeedsLogin"}}
+
+	if err := logoutSavedRegistration(context.Background(), client); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	if client.logouts != 0 {
+		t.Errorf("logged out a node that was never registered (%d)", client.logouts)
+	}
+}
+
+// 상태 파일이 없거나 비었으면 이 tailnet 은 이 기기에서 등록된 적이 없다.
+func TestHasSavedStateLooksForTheStateFile(t *testing.T) {
+	dir := t.TempDir()
+	if hasSavedState(dir) {
+		t.Fatal("an empty directory has no saved state")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tailscaled.state"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if hasSavedState(dir) {
+		t.Fatal("an empty state file is not a saved registration")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tailscaled.state"), []byte(`{"_profiles":"x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !hasSavedState(dir) {
+		t.Fatal("a written state file is a saved registration")
 	}
 }

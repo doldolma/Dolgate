@@ -629,8 +629,8 @@ describe("AwsEcsWorkspace", () => {
     expect(onRefresh).toHaveBeenCalledTimes(2);
   });
 
-  // 키 없는 팀 정적 프로필(4-7 M3) — 그 자리에서 내 키를 넣고 다시 읽는다. 설정으로 보내지 않는다.
-  it("offers to add my own key for a team profile that has none, then loads the cluster again", async () => {
+  // 이 기기에 키가 없는 팀 정적 프로필(4-7 M3) — 그 자리에서 키를 넣고 다시 읽는다. 설정으로 보내지 않는다.
+  it("offers to add a key for a team profile that has none here, then loads the cluster again", async () => {
     const onRefresh = vi.fn().mockResolvedValue(undefined);
     awsImports.updateAwsProfile.mockResolvedValue(undefined);
     appStore.setState({
@@ -638,7 +638,7 @@ describe("AwsEcsWorkspace", () => {
         ...createEmptyVaultIndex(),
         teams: [{ id: "team-a", name: "Acme Infra", role: "owner", syncState: "ready", syncError: null, groups: [] }],
       },
-      awsMissingMyKeyByProfileId: {
+      awsMissingKeyByProfileId: {
         "team-prod": { teamId: "team-a", profileId: "team-prod", profileName: "acme-prod" },
       },
     });
@@ -657,17 +657,17 @@ describe("AwsEcsWorkspace", () => {
       />,
     );
 
-    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "내 키 넣기" }));
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "키 넣기" }));
     const dialog = within(screen.getByRole("dialog"));
-    fireEvent.change(dialog.getByLabelText("My Access Key"), { target: { value: "AKIAMINE" } });
-    fireEvent.change(dialog.getByLabelText("My Secret"), { target: { value: "mine" } });
+    fireEvent.change(dialog.getByLabelText("Access Key"), { target: { value: "AKIAMINE" } });
+    fireEvent.change(dialog.getByLabelText("Secret"), { target: { value: "mine" } });
     fireEvent.click(dialog.getByRole("button", { name: "저장" }));
 
     await waitFor(() => expect(onRefresh).toHaveBeenCalledWith("ecs-host-1"));
     expect(awsImports.updateAwsProfile).toHaveBeenCalledWith(
       expect.objectContaining({ profileName: "acme-prod", vaultId: "team-a" }),
     );
-    expect(appStore.getState().awsMissingMyKeyByProfileId).toEqual({});
+    expect(appStore.getState().awsMissingKeyByProfileId).toEqual({});
     appStore.setState(appStore.getInitialState(), true);
   });
 

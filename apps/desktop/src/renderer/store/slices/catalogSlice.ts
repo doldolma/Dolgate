@@ -369,6 +369,14 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
         },
       });
     },
+    // 만들 곳만 바꾼다 — 보고 있던 자리는 그대로다. 그룹 경로는 볼트 안의 것이라 새 볼트의 맨 위로 간다.
+    setCreateHostVault: (vaultId) => {
+      const drawer = get().hostDrawer;
+      if (drawer.mode !== "create" || drawer.vaultId === vaultId) {
+        return;
+      }
+      set({ hostDrawer: { ...drawer, vaultId, defaultGroupPath: null } });
+    },
     openEditHostDrawer: (hostId) =>
       set({
         activeWorkspaceTab: "home",

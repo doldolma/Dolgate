@@ -96,15 +96,14 @@ export type StoredEncryptedValue = {
 
 /**
  * 멤버 개인 칸에 잠가 두는 내 자격 증명의 종류 — 팀 호스트의 내 자격 증명(사용자 이름·인증 방식·비밀값·키
- * 파일 경로), 팀 AWS 정적 프로필의 내 키, 팀 tailnet 의 내 auth key. 값은 이 기기에서 safeStorage 로 잠가
- * 두고, 서버에는 내 개인 DEK 로 잠가 올린다 — 팀원도 서버도 못 본다.
+ * 파일 경로). 값은 이 기기에서 safeStorage 로 잠가 두고, 서버에는 내 개인 DEK 로 잠가 올린다 — 팀원도 서버도
+ * 못 본다.
+ *
+ * AWS 정적 키와 tailnet auth key 는 여기 없다. 개인 볼트와 똑같이 그 팀 볼트(secure)에 두고 동기화하지 않는다
+ * (team-member-prefs.ts).
  */
-export type TeamPrivateSecretKind = 'hostCredentials' | 'awsProfileCredentials' | 'tailnetCredentials';
-export const TEAM_PRIVATE_SECRET_KINDS: readonly TeamPrivateSecretKind[] = [
-  'hostCredentials',
-  'awsProfileCredentials',
-  'tailnetCredentials'
-];
+export type TeamPrivateSecretKind = 'hostCredentials';
+export const TEAM_PRIVATE_SECRET_KINDS: readonly TeamPrivateSecretKind[] = ['hostCredentials'];
 
 /** 팀 개인 칸의 레코드 종류. 서버에는 이 이름 그대로 올라간다. */
 export type TeamPrivateKind = 'hostPrefs' | 'workspacePrefs' | TeamPrivateSecretKind;
@@ -833,8 +832,6 @@ export function createTeamState(info: DesktopTeamState['info']): DesktopTeamStat
       hostPrefs: [],
       workspacePrefs: [],
       hostCredentials: [],
-      awsProfileCredentials: [],
-      tailnetCredentials: [],
       syncOutbox: []
     },
     local: { terminalThemeByHostId: {}, tailnetLoginNameById: {} },
@@ -1745,8 +1742,6 @@ function normalizeTeamState(value: unknown): DesktopTeamState | null {
             .filter((entry): entry is TeamWorkspacePrefsRecord => entry !== null)
         : [],
       hostCredentials: normalizeTeamPrivateSecretRecords(privateSection.hostCredentials),
-      awsProfileCredentials: normalizeTeamPrivateSecretRecords(privateSection.awsProfileCredentials),
-      tailnetCredentials: normalizeTeamPrivateSecretRecords(privateSection.tailnetCredentials),
       syncOutbox: Array.isArray(privateSection.syncOutbox)
         ? privateSection.syncOutbox.filter(
             (entry): entry is TeamPrivateDeletionRecord =>
@@ -2183,8 +2178,6 @@ class DesktopStateStorage {
       hostPrefs: team.private.hostPrefs,
       workspacePrefs: team.private.workspacePrefs,
       hostCredentials: team.private.hostCredentials,
-      awsProfileCredentials: team.private.awsProfileCredentials,
-      tailnetCredentials: team.private.tailnetCredentials,
       terminalThemeByHostId: team.local.terminalThemeByHostId
     });
   }
@@ -2431,7 +2424,7 @@ class DesktopStateStorage {
   }
 
   /**
-   * 팀 레코드에서 사라진 호스트·워크스페이스·AWS 프로필·tailnet 의 내 값을 지운다. 개인 칸은 지움 표시를
+   * 팀 레코드에서 사라진 호스트·워크스페이스의 내 값을 지운다. 개인 칸은 지움 표시를
    * 남겨 내 다른 기기도 지우게 한다. 지운 것이 있으면 true.
    */
   pruneTeamMemberPrefs(teamId: string): boolean {
@@ -2444,9 +2437,7 @@ class DesktopStateStorage {
     const workspaceIds = new Set(team.data.savedWorkspaces.map((workspace) => workspace.id));
     // 내 자격 증명은 그것을 쓰는 팀 레코드가 남아 있을 때만 둔다.
     const liveIdsBySecretKind: Record<TeamPrivateSecretKind, ReadonlySet<string>> = {
-      hostCredentials: hostIds,
-      awsProfileCredentials: new Set(team.data.awsProfiles.map((profile) => profile.id)),
-      tailnetCredentials: new Set(team.data.tailnets.map((tailnet) => tailnet.id))
+      hostCredentials: hostIds
     };
     const goneHostPrefs = team.private.hostPrefs.filter((record) => !hostIds.has(record.id));
     const goneWorkspacePrefs = team.private.workspacePrefs.filter((record) => !workspaceIds.has(record.id));

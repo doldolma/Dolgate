@@ -3,10 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { HostRepository, SavedWorkspaceRepository } from "./database";
 import type { TeamHostPrefsRecord, TeamWorkspacePrefsRecord } from "./state-storage";
 import type {
-  TeamAwsProfileCredentials,
   TeamHostCredentials,
   TeamMemberPrefsStore,
-  TeamTailnetCredentials,
 } from "./team-member-prefs";
 import {
   createVaultCatalog,
@@ -69,8 +67,6 @@ function createMemberPrefs(
   const workspaces = new Map((initial.workspaces ?? []).map((record) => [record.id, record]));
   const themes: Record<string, TerminalThemeId> = { ...initial.themes };
   const credentials = new Map<string, TeamHostCredentials>();
-  const awsCredentials = new Map<string, TeamAwsProfileCredentials>();
-  const tailnetCredentials = new Map<string, TeamTailnetCredentials>();
   const keep = <T>(map: Map<string, T>) =>
     vi.fn((id: string, value: T | null) => {
       if (value) {
@@ -109,10 +105,6 @@ function createMemberPrefs(
     }),
     readHostCredentials: vi.fn((hostId: string) => credentials.get(hostId) ?? null),
     writeHostCredentials: keep(credentials),
-    readAwsProfileCredentials: vi.fn((profileId: string) => awsCredentials.get(profileId) ?? null),
-    writeAwsProfileCredentials: keep(awsCredentials),
-    readTailnetCredentials: vi.fn((tailnetId: string) => tailnetCredentials.get(tailnetId) ?? null),
-    writeTailnetCredentials: keep(tailnetCredentials),
   };
   return store satisfies TeamMemberPrefsStore;
 }

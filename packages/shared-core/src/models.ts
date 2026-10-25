@@ -2138,10 +2138,10 @@ export const AWS_PROFILE_REGION_OPTIONS = [
 ] as const;
 
 /**
- * 내 키가 없어 붙을 수 없는 팀 정적 프로필 — 키를 넣을 곳(assume role 이면 그 원본). 팀에는 설정만 가고 정적 키는
- * 늘 각자 넣는다.
+ * 이 기기에 키가 없어 붙을 수 없는 팀 정적 프로필 — 키를 넣을 곳(assume role 이면 그 원본). 팀에는 설정만 가고 정적
+ * 키는 동기화하지 않아 기기마다 넣는다.
  */
-export interface AwsProfileMissingMyKey {
+export interface AwsProfileMissingKey {
   teamId: string;
   profileId: string;
   /** 팀에서의 원래 이름(화면에 보이는 이름). */
@@ -2158,8 +2158,8 @@ export interface AwsProfileStatus {
   accountId?: string | null;
   arn?: string | null;
   errorMessage?: string | null;
-  /** 있으면 이 프로필로는 내 키를 넣기 전까지 붙을 수 없다. */
-  missingMyKey?: AwsProfileMissingMyKey | null;
+  /** 있으면 이 프로필로는 이 기기에 키를 넣기 전까지 붙을 수 없다. */
+  missingKey?: AwsProfileMissingKey | null;
 }
 
 export interface AwsProfileDetails extends AwsProfileStatus {

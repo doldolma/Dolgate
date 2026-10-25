@@ -30,7 +30,7 @@ import {
 import { SnippetEditDialog } from '../../SnippetEditDialog';
 import { useSessionScopedState } from '../../../lib/session-scoped-state';
 import { teamOfVault, vaultIdOf } from '../../../lib/vault-groups';
-import { TeamMark } from '../../teams/TeamMark';
+import { VaultMark } from '../../teams/VaultMark';
 import { useSessionSnippets } from '../useSessionSnippets';
 import type { SessionPanelSender } from './useSessionPanelTarget';
 
@@ -86,7 +86,7 @@ export function SessionPanelSnippets({ sessionId, sender }: SessionPanelSnippets
     return (
       <span className="inline-flex max-w-full items-center gap-[0.3rem]">
         <Tooltip label={team.name} className="shrink-0">
-          <TeamMark name={team.name} size="xs" />
+          <VaultMark kind="team" size="xs" />
         </Tooltip>
         <span className="sr-only">{team.name}</span>
         <span className="min-w-0 truncate">{text}</span>

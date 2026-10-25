@@ -7,8 +7,10 @@ import {
   hashTeamInviteJoinToken,
   isTeamCryptoError,
   normalizeServerUrl,
+  openTeamInviteSecret,
   parseTeamInviteLink,
   sealTeamInviteBox,
+  sealTeamInviteSecret,
   unwrapTeamDek,
   wrapTeamDek,
   type TeamInvite,
@@ -152,7 +154,8 @@ export class TeamService {
 
   /**
    * 초대 링크를 만든다. 비밀값 S 로 팀 키를 상자에 봉해 올리고, 서버에는 참여 토큰의 해시만 둔다. S 는
-   * 링크의 # 뒤에만 있다 — 서버에도 이 기기에도 남지 않는다.
+   * 팀 키로 잠가(잠근 비밀값) 함께 올린다 — 서버는 못 열고, 멤버는 링크가 살아 있는 동안 목록에서 다시
+   * 복사한다.
    */
   async createInvite(teamId: string, options?: { expiresInHours?: number }): Promise<TeamInviteCreated> {
     const lease = this.requireLease();
@@ -167,16 +170,25 @@ export class TeamService {
     const teamDek = unwrapTeamDek(wrapped, lease.personalDek, teamId);
     const secret = createTeamInviteSecret();
     const expiresAt = new Date(Date.now() + hours * HOUR_MS).toISOString();
-    const invite = await this.api.createInvite(lease, teamId, {
+    const { sealedSecret: _sealedSecret, ...invite } = await this.api.createInvite(lease, teamId, {
       inviteBox: sealTeamInviteBox({ secret, teamId, teamDek, expiresAt }),
+      sealedSecret: sealTeamInviteSecret({ secret, teamId, teamDek }),
       joinTokenHash: hashTeamInviteJoinToken(deriveTeamInviteJoinToken(secret)),
       expiresAt,
     });
-    return { invite, link: formatTeamInviteLink(lease.serverUrl, invite.code, secret) };
+    const link = formatTeamInviteLink(lease.serverUrl, invite.code, secret);
+    return { invite: { ...invite, link }, link };
   }
 
+  /** 링크 목록. 살아 있는 링크는 잠근 비밀값을 팀 키로 열어 링크를 다시 만든다. */
   async listInvites(teamId: string): Promise<TeamInvite[]> {
-    return this.api.listInvites(this.requireLease(), teamId);
+    const lease = this.requireLease();
+    const invites = await this.api.listInvites(lease, teamId);
+    const teamDek = invites.some((invite) => invite.sealedSecret) ? this.teamDekOf(teamId, lease) : null;
+    return invites.map(({ sealedSecret, ...invite }) => ({
+      ...invite,
+      link: sealedSecret && teamDek ? reopenInviteLink(lease.serverUrl, teamId, teamDek, invite.code, sealedSecret) : null,
+    }));
   }
 
   async revokeInvite(teamId: string, code: string): Promise<void> {
@@ -240,6 +252,19 @@ export class TeamService {
     };
   }
 
+  /** 이 기기의 팀 키. 사본이 없거나(다시 참여해야 함) 풀리지 않으면 null 이다. */
+  private teamDekOf(teamId: string, lease: ManagementLease): Uint8Array | null {
+    const wrapped = this.storage.getTeamState(teamId)?.info.wrappedTeamDek;
+    if (!wrapped) {
+      return null;
+    }
+    try {
+      return unwrapTeamDek(wrapped, lease.personalDek, teamId);
+    } catch {
+      return null;
+    }
+  }
+
   private require(teamId: string): TeamListItem {
     const team = this.list().find((candidate) => candidate.id === teamId);
     if (!team) {
@@ -262,6 +287,24 @@ function requireName(name: string): string {
     throw new Error(t("teams.nameRequired"));
   }
   return trimmed;
+}
+
+/**
+ * 잠근 비밀값으로 링크를 다시 만든다. 열리지 않으면(다른 팀 키·잘린 값·새 형식) null 이다 — 그 링크만 다시
+ * 복사할 수 없을 뿐 목록은 그대로 보인다.
+ */
+function reopenInviteLink(
+  serverUrl: string,
+  teamId: string,
+  teamDek: Uint8Array,
+  code: string,
+  sealed: string,
+): string | null {
+  try {
+    return formatTeamInviteLink(serverUrl, code, openTeamInviteSecret({ sealed, teamId, teamDek }));
+  } catch {
+    return null;
+  }
 }
 
 /** 링크에 든 서버 주소의 호스트(참여 카드가 "이 팀은 … 에 있습니다"로 보인다). */

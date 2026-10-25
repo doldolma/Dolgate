@@ -106,20 +106,20 @@ describe('TailnetAddDialog', () => {
     });
   });
 
-  // 팀 호스트의 서랍에서 열면 그 팀에 만든다(4-7) — 머리에 볼트 칩, auth key 는 내 칸에만.
-  it('creates the tailnet in the team of a team host, the auth key labelled as mine', async () => {
+  // 팀 호스트의 서랍에서 열면 그 팀에 만든다(4-7) — 머리에 볼트 칩. 칸은 개인 것과 같다(auth key 는 그 볼트에 두고
+  // 팀에 올리지 않는다).
+  it('creates the tailnet in the team of a team host, with the usual auth key field', async () => {
     mocks.saveTailnet.mockResolvedValue(undefined);
     markConnected('acme.ts.net');
 
     render(<TailnetAddDialog vaultId="team-a" onClose={vi.fn()} onAdded={vi.fn()} />);
 
     expect(screen.getByRole('heading', { name: /Acme Infra/ })).toBeInTheDocument();
-    expect(screen.getByText('My auth key')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('My auth key'), { target: { value: 'tskey-mine' } });
+    fireEvent.change(screen.getByPlaceholderText('비우면 브라우저 로그인'), { target: { value: 'tskey-here' } });
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
 
     await waitFor(() =>
-      expect(mocks.saveTailnet).toHaveBeenCalledWith(expect.objectContaining({ vaultId: 'team-a', authKey: 'tskey-mine' })),
+      expect(mocks.saveTailnet).toHaveBeenCalledWith(expect.objectContaining({ vaultId: 'team-a', authKey: 'tskey-here' })),
     );
   });
 
@@ -128,11 +128,12 @@ describe('TailnetAddDialog', () => {
     markConnected();
 
     render(<TailnetAddDialog onClose={vi.fn()} onAdded={vi.fn()} />);
+    // 개인 것은 auth key 를 넣을 수 있다.
+    expect(screen.getByText('auth key')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '저장' }));
 
     await waitFor(() => expect(mocks.saveTailnet).toHaveBeenCalled());
     expect(mocks.saveTailnet.mock.calls[0]![0]).not.toHaveProperty('vaultId');
-    expect(screen.queryByText('My auth key')).toBeNull();
   });
 
   // 시험은 **진짜 노드를 올린다.** 저장하지 않고 닫으면 그 노드가 유령으로 남는다.

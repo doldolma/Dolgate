@@ -1,3 +1,4 @@
+import { createCipheriv, hkdfSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   createTeamDek,
@@ -6,9 +7,12 @@ import {
   formatTeamInviteLink,
   hashTeamInviteJoinToken,
   openTeamInviteBox,
+  openTeamInviteSecret,
   parseTeamInviteLink,
   sealTeamInviteBox,
   sealTeamInviteBoxWithIv,
+  sealTeamInviteSecret,
+  sealTeamInviteSecretWithIv,
   TeamCryptoError,
   unwrapTeamDek,
   wrapTeamDek,
@@ -114,5 +118,52 @@ describe("team invite links", () => {
     ]) {
       expectTeamCryptoError(() => parseTeamInviteLink(broken), "malformed");
     }
+  });
+});
+
+describe("sealed invite secrets", () => {
+  it("matches the shared sealed-secret vectors", () => {
+    for (const vector of teamTestVectors.inviteSecret) {
+      const teamDek = bytes(vector.teamDekBase64);
+      const secret = bytes(vector.secretBase64);
+      expect(sealTeamInviteSecretWithIv({ secret, teamId: vector.teamId, teamDek }, bytes(vector.ivBase64))).toBe(vector.sealedBase64);
+      const opened = openTeamInviteSecret({ sealed: vector.sealedBase64, teamId: vector.teamId, teamDek });
+      expect(Buffer.from(opened).toString("base64")).toBe(vector.secretBase64);
+    }
+  });
+
+  it("opens only with the team's own key and id", () => {
+    const [vector] = teamTestVectors.inviteSecret;
+    const teamDek = bytes(vector.teamDekBase64);
+    expectTeamCryptoError(() => openTeamInviteSecret({ sealed: vector.sealedBase64, teamId: vector.teamId, teamDek: createTeamDek() }), "wrong-key");
+    // 서버가 다른 팀의 것을 내줘도 그 팀 ID 로는 열리지 않는다.
+    expectTeamCryptoError(() => openTeamInviteSecret({ sealed: vector.sealedBase64, teamId: "another-team", teamDek }), "wrong-key");
+    expectTeamCryptoError(() => openTeamInviteSecret({ sealed: "not base64!", teamId: vector.teamId, teamDek }), "malformed");
+  });
+
+  it("asks for an update when the sealed secret is a newer format", () => {
+    const [vector] = teamTestVectors.inviteSecret;
+    const aad = Buffer.from(`dolgate-team-invite-secret-v1|${vector.teamId}`, "utf8");
+    const key = Buffer.from(hkdfSync("sha256", bytes(vector.teamDekBase64), Buffer.alloc(0), aad, 32));
+    const iv = Buffer.alloc(12, 1);
+    const cipher = createCipheriv("aes-256-gcm", key, iv);
+    cipher.setAAD(aad);
+    const plaintext = Buffer.from(JSON.stringify({ v: 2, secret: vector.secretBase64 }), "utf8");
+    const sealed = Buffer.concat([iv, cipher.update(plaintext), cipher.final(), cipher.getAuthTag()]).toString("base64");
+    expectTeamCryptoError(
+      () => openTeamInviteSecret({ sealed, teamId: vector.teamId, teamDek: bytes(vector.teamDekBase64) }),
+      "unsupported-version",
+    );
+  });
+
+  it("round-trips fresh values without carrying the secret in the clear", () => {
+    const secret = createTeamInviteSecret();
+    const teamDek = createTeamDek();
+    const sealed = sealTeamInviteSecret({ secret, teamId: "team-1", teamDek });
+    expect(openTeamInviteSecret({ sealed, teamId: "team-1", teamDek })).toEqual(secret);
+    expect(sealTeamInviteSecret({ secret, teamId: "team-1", teamDek })).not.toBe(sealed);
+    const sealedBytes = Buffer.from(sealed, "base64");
+    expect(sealedBytes.includes(Buffer.from(secret))).toBe(false);
+    expect(sealed).not.toContain(Buffer.from(secret).toString("base64"));
   });
 });

@@ -21,9 +21,12 @@ import type {
   SecretMetadataRecord,
   SnippetRecord,
   SshHostRecord,
+  TeamActivityItem,
+  TeamReplayStatus,
   VncHostRecord,
 } from '@shared';
-import { listTailnets } from '../../services/desktop/tailnet';
+import { listTailnets, listTeamTailnets } from '../../services/desktop/tailnet';
+import { useTeamsRecentActivity } from '../../controllers/useTeamsRecentActivity';
 import { listAwsProfiles } from '../../services/desktop/imports';
 import { cn } from '../../lib/cn';
 import { collectRecentLogScopeHostIds, resolveRecentLogScope } from './recentLogScope';
@@ -68,7 +71,7 @@ import { useTranslation } from 'react-i18next';
 import { getFormatLocale, t } from '../../i18n';
 import { resolveLogMessage } from '../../lib/activity-log-message';
 import { HostBadge } from './HostBadge';
-import { TeamMark } from '../teams/TeamMark';
+import { VaultMark } from '../teams/VaultMark';
 import type { AssetTeam } from './AssetLocation';
 import { PerPersonHint } from '../teams/PerPersonHint';
 
@@ -182,6 +185,82 @@ function getReplayRecordingId(log: ActivityLogRecord): string | null {
     : null;
 }
 
+/** 상세의 활동 한 줄 — 이 기기의 기록이거나, 팀 호스트면 그 팀의 기록(서버)이다. */
+interface HostActivityEntry {
+  key: string;
+  log: ActivityLogRecord;
+  /** 팀 기록에서 온 줄을 남긴 멤버. 이 기기의 기록이면 null. */
+  author: string | null;
+  /** Replay 로 열 녹화. 팀 줄이면 teamId 가 있다(서버의 녹화). */
+  replay: { recordingId: string; teamId: string | null } | null;
+}
+
+/** 팀 기록 줄의 Replay — 서버에 그 녹화의 구간이 있을 때만(기록 화면과 같은 규칙). 진행 중인 접속도 연다. */
+function getTeamReplayRecordingId(
+  log: ActivityLogRecord,
+  statuses: ReadonlyMap<string, TeamReplayStatus>,
+): string | null {
+  if (log.kind !== 'session-lifecycle') {
+    return null;
+  }
+  const metadata = log.metadata as { hasReplay?: boolean; recordingId?: string } | null;
+  const recordingId = typeof metadata?.recordingId === 'string' ? metadata.recordingId : null;
+  if (!recordingId || metadata?.hasReplay === false) {
+    return null;
+  }
+  const status = statuses.get(recordingId);
+  return status && status.state !== 'deleted' && status.segmentCount > 0 ? recordingId : null;
+}
+
+/**
+ * 호스트 활동 목록(호스트 상세의 Recent Activity·홈의 최근 로그). 팀 기록(서버)도 넣는다 — 이 기기 기록만 보면 다른
+ * 멤버가 붙은 것과 그 녹화가 보이지 않아, 다른 계정에서는 그 호스트에 아무 일도 없었던 것처럼 보였다. 내 접속은 이
+ * 기기 기록과 같은 줄이라 이 기기 것만 남긴다(이 기기의 녹화를 연다). 같은 접속의 시작·끝은 가장 최근 것 하나다.
+ */
+export function buildActivityEntries(input: {
+  localLogs: readonly ActivityLogRecord[];
+  /** 넣을 호스트. 호스트를 가리키지 않는 기록은 넣지 않는다. */
+  includeHost: (hostId: string) => boolean;
+  teams: ReadonlyArray<{ teamId: string; items: readonly TeamActivityItem[] }>;
+  replayStatuses: ReadonlyMap<string, TeamReplayStatus>;
+}): HostActivityEntry[] {
+  const includes = (log: ActivityLogRecord) => {
+    const hostId = getLogHostId(log);
+    return hostId !== null && input.includeHost(hostId);
+  };
+  const local = input.localLogs.filter(includes);
+  const entries: HostActivityEntry[] = local.slice(0, 40).map((log) => {
+    const recordingId = getReplayRecordingId(log);
+    return { key: log.id, log, author: null, replay: recordingId ? { recordingId, teamId: null } : null };
+  });
+  if (input.teams.length === 0) {
+    return entries;
+  }
+  const localIds = new Set(local.map((log) => log.id));
+  const seen = new Set<string>();
+  for (const { teamId, items } of input.teams) {
+    for (const item of items) {
+      const record = item.activity?.record;
+      if (!record || !includes(record) || localIds.has(record.id)) {
+        continue;
+      }
+      const key = `${item.authorUserId}:${record.id}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      const recordingId = getTeamReplayRecordingId(record, input.replayStatuses);
+      entries.push({
+        key,
+        log: record,
+        author: item.authorEmail,
+        replay: recordingId ? { recordingId, teamId } : null,
+      });
+    }
+  }
+  return entries.sort((left, right) => right.log.createdAt.localeCompare(left.log.createdAt)).slice(0, 40);
+}
+
 /** 로그 레벨 → 상태 점 색(토큰). info/성공은 녹색, warn 앰버, error 적색. */
 function getLogStatusColor(level?: string): string {
   if (level === 'error') {
@@ -241,7 +320,7 @@ function ActivityRow({
   team = null,
 }: {
   primary: string;
-  /** 볼트가 섞인 목록에서 이 호스트가 든 팀 — 이름 뒤에 머리글자 네모(팀 이름은 툴팁). */
+  /** 볼트가 섞인 목록에서 이 호스트가 든 팀 — 이름 뒤에 팀 표시(팀 이름은 툴팁). */
   team?: AssetTeam | null;
   secondary?: string | null;
   level?: string;
@@ -263,7 +342,7 @@ function ActivityRow({
           {team ? (
             <>
               <Tooltip label={team.name} className="shrink-0">
-                <TeamMark name={team.name} size="xs" />
+                <VaultMark kind="team" size="xs" />
               </Tooltip>
               <span className="sr-only">{team.name}</span>
             </>
@@ -1093,72 +1172,72 @@ function EmptyDetail({
     return new Set(scopeHosts.map((host) => host.id));
   }, [hb.currentVault, hb.hosts, hb.locationHosts, scope]);
 
-  const recentLogs = useMemo(() => {
-    const items: Array<{
-      id: string;
-      hostId: string;
-      name: string;
-      detail: string;
-      when: string;
-      duration: string | null;
-      level?: string;
-      replayRecordingId?: string | null;
-    }> = [];
-    for (const log of hb.activityLogs ?? []) {
-      const hostId = getLogHostId(log);
-      if (!hostId) {
-        continue;
-      }
-      if (scopedHostIdSet && !scopedHostIdSet.has(hostId)) {
-        continue;
-      }
-      const metadata = log.metadata as {
-        hostLabel?: string;
-        label?: string;
-        title?: string;
-        connectionKind?: string;
-        awsTransport?: string;
-        tmux?: boolean;
-        durationMs?: number | null;
-        commandCount?: number | null;
-      } | null;
-      // 이름: 현재 호스트 목록 우선(최신 라벨), 없으면 로그 메타데이터(세션=hostLabel,
-      // 감사 로그=label, 그 외=title) 순. UUID(hostId) 노출은 최후 수단.
-      const name =
-        hb.hosts.find((entry) => entry.id === hostId)?.label ??
-        metadata?.hostLabel ??
-        metadata?.label ??
-        metadata?.title ??
-        hostId;
-      // 부제: 세션 로그는 연결 타입(SSH/AWS SSM 등), 그 외는 로그 메시지(무슨 일인지).
-      const detail = metadata?.connectionKind
-        ? getConnectionKindLabel(metadata.connectionKind, metadata.tmux, metadata.awsTransport)
-        : resolveLogMessage(log, translate);
-      /**
-       * 명령 수는 **셸 통합이 붙은 세션에만** 있다. 없는 세션에 "명령 0개" 를 적으면 아무것도
-       * 안 한 것처럼 보이는데, 사실은 세지 못한 것이다 — 값이 없으면 그 조각을 뺀다.
-       */
-      const commandCount = metadata?.commandCount;
-      const detailWithCount =
-        typeof commandCount === 'number' && Number.isFinite(commandCount)
-          ? `${detail} · ${translate('hostDetail.commandCount', { count: commandCount })}`
-          : detail;
-      items.push({
-        id: log.id,
-        hostId,
-        name,
-        detail: detailWithCount,
-        when: log.createdAt,
-        duration: formatSessionDuration(metadata?.durationMs),
-        level: log.level,
-        replayRecordingId: getReplayRecordingId(log),
-      });
-      if (items.length >= 6) {
-        break;
-      }
-    }
-    return items;
-  }, [hb.activityLogs, hb.hosts, scopedHostIdSet, translate]);
+  // 범위 안 팀 호스트의 팀 기록(서버) — 다른 멤버의 접속과 녹화. 볼트 안이면 그 볼트가 팀일 때만, 전체·즐겨찾기면 내 팀
+  // 전부. 다시 들어와야 하는 팀은 열 수 없어 묻지 않는다.
+  const scopeTeamIds = useMemo(() => {
+    const vaults = hb.currentVault ? [hb.currentVault] : (hb.vaultTrees ?? []).map((tree) => tree.vault);
+    return vaults.flatMap((vault) =>
+      vault?.kind === 'team' && vault.blocked !== 'needs-rejoin' ? [vault.id] : [],
+    );
+  }, [hb.currentVault, hb.vaultTrees]);
+  const teamActivity = useTeamsRecentActivity(scopeTeamIds);
+
+  const recentLogs = useMemo(
+    () =>
+      buildActivityEntries({
+        localLogs: hb.activityLogs ?? [],
+        includeHost: (hostId) => !scopedHostIdSet || scopedHostIdSet.has(hostId),
+        teams: teamActivity.teams,
+        replayStatuses: teamActivity.replayStatuses,
+      })
+        .slice(0, 6)
+        .map(({ key, log, author, replay }) => {
+          const hostId = getLogHostId(log) ?? '';
+          const metadata = log.metadata as {
+            hostLabel?: string;
+            label?: string;
+            title?: string;
+            connectionKind?: string;
+            awsTransport?: string;
+            tmux?: boolean;
+            durationMs?: number | null;
+            commandCount?: number | null;
+          } | null;
+          // 이름: 현재 호스트 목록 우선(최신 라벨), 없으면 로그 메타데이터(세션=hostLabel,
+          // 감사 로그=label, 그 외=title) 순. UUID(hostId) 노출은 최후 수단.
+          const name =
+            hb.hosts.find((entry) => entry.id === hostId)?.label ??
+            metadata?.hostLabel ??
+            metadata?.label ??
+            metadata?.title ??
+            hostId;
+          // 부제: 세션 로그는 연결 타입(SSH/AWS SSM 등), 그 외는 로그 메시지(무슨 일인지).
+          const detail = metadata?.connectionKind
+            ? getConnectionKindLabel(metadata.connectionKind, metadata.tmux, metadata.awsTransport)
+            : resolveLogMessage(log, translate);
+          /**
+           * 명령 수는 **셸 통합이 붙은 세션에만** 있다. 없는 세션에 "명령 0개" 를 적으면 아무것도
+           * 안 한 것처럼 보이는데, 사실은 세지 못한 것이다 — 값이 없으면 그 조각을 뺀다.
+           */
+          const commandCount = metadata?.commandCount;
+          const detailWithCount =
+            typeof commandCount === 'number' && Number.isFinite(commandCount)
+              ? `${detail} · ${translate('hostDetail.commandCount', { count: commandCount })}`
+              : detail;
+          return {
+            id: key,
+            hostId,
+            name,
+            // 팀 기록 줄은 누가 남겼는지를 뒤에 붙인다.
+            detail: author ? `${detailWithCount} · ${author}` : detailWithCount,
+            when: log.createdAt,
+            duration: formatSessionDuration(metadata?.durationMs),
+            level: log.level,
+            replay,
+          };
+        }),
+    [hb.activityLogs, hb.hosts, scopedHostIdSet, teamActivity, translate],
+  );
 
   // 섹션 제목에 범위를 적는다. 목록이 짧아진 이유를 화면에서 알 수 있어야 한다.
   const scopeLabel = useMemo(() => {
@@ -1262,8 +1341,15 @@ function EmptyDetail({
                 when={item.when}
                 duration={item.duration}
                 onClick={() => hb.selectSingleHost(item.hostId)}
-                replayRecordingId={item.replayRecordingId}
-                onOpenReplay={hb.onOpenReplay}
+                replayRecordingId={item.replay?.recordingId ?? null}
+                onOpenReplay={
+                  hb.onOpenReplay && item.replay
+                    ? (recordingId) => {
+                        const teamId = item.replay?.teamId;
+                        void (teamId ? hb.onOpenReplay?.(recordingId, teamId) : hb.onOpenReplay?.(recordingId));
+                      }
+                    : undefined
+                }
               />
             ))}
           </div>
@@ -1306,11 +1392,15 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
    * 한 번 스친다 — 정상 상태를 이상 상태로 보여주는 셈이다.
    */
   const [tailnetsLoaded, setTailnetsLoaded] = useState(false);
+  // 팀 볼트로 공유한 호스트는 tailnet 도 그 팀 볼트에 있다(복사본). 개인 목록에서 찾으면 "설정 없음" 이 된다.
+  const hostTeamId = useAppStore((state) =>
+    selectedHostId ? (state.vaultIndex?.teamIdByHostId?.[selectedHostId] ?? null) : null,
+  );
   useEffect(() => {
     let cancelled = false;
     // 브리지가 없으면 listTailnets 가 동기적으로 던진다 — Promise 로 감싸야 .catch 가 잡는다.
     void Promise.resolve()
-      .then(listTailnets)
+      .then(() => (hostTeamId ? listTeamTailnets(hostTeamId) : listTailnets()))
       .then((records) => {
         if (!cancelled) {
           setTailnets(records.map((record) => ({ id: record.id, label: record.label })));
@@ -1326,7 +1416,7 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
     return () => {
       cancelled = true;
     };
-  }, [selectedHostId]);
+  }, [selectedHostId, hostTeamId]);
 
   // AWS 프로파일 이름은 설정에서 바뀔 수 있다. 레코드에 적힌 이름을 그대로 보여주면 이름을 바꾼
   // 뒤에도 옛 이름이 남아, 실제 접속(id 로 현재 이름을 찾는다)과 화면이 서로 다른 말을 한다.
@@ -1348,14 +1438,21 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
     };
   }, [selectedHostId]);
 
-  const hostActivity = useMemo(() => {
-    if (!host) {
-      return [] as ActivityLogRecord[];
-    }
-    return (hb.activityLogs ?? [])
-      .filter((log) => getLogHostId(log) === host.id)
-      .slice(0, 40);
-  }, [hb.activityLogs, host]);
+  // 팀 호스트면 그 팀의 기록(서버)도 받는다 — 다른 멤버의 접속과 녹화. 개인 호스트면 아무것도 하지 않는다.
+  const hostTeamIds = useMemo(() => (hostTeamId ? [hostTeamId] : []), [hostTeamId]);
+  const teamActivity = useTeamsRecentActivity(hostTeamIds);
+  const hostActivity = useMemo(
+    () =>
+      host
+        ? buildActivityEntries({
+            localLogs: hb.activityLogs ?? [],
+            includeHost: (hostId) => hostId === host.id,
+            teams: teamActivity.teams,
+            replayStatuses: teamActivity.replayStatuses,
+          })
+        : [],
+    [hb.activityLogs, host, teamActivity],
+  );
 
   if (!host) {
     return <EmptyDetail hb={hb} tmuxPrefixKey={tmuxPrefixKey} />;
@@ -1548,7 +1645,7 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
 
             {hostActivity.length > 0 ? (
               <SectionCard title="Recent Activity">
-                <ActivityList logs={hostActivity.slice(0, 6)} onOpenReplay={hb.onOpenReplay} />
+                <ActivityList entries={hostActivity.slice(0, 6)} onOpenReplay={hb.onOpenReplay} />
               </SectionCard>
             ) : null}
           </>
@@ -1594,16 +1691,16 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
 }
 
 function ActivityList({
-  logs,
+  entries,
   onOpenReplay,
 }: {
-  logs: ActivityLogRecord[];
-  onOpenReplay?: (recordingId: string) => void;
+  entries: HostActivityEntry[];
+  onOpenReplay?: (recordingId: string, teamId?: string | null) => void;
 }) {
   const { t: translate } = useTranslation();
   return (
     <div className="flex flex-col">
-      {logs.map((log) => {
+      {entries.map(({ key, log, author, replay }) => {
         const metadata = log.metadata as {
           connectionKind?: string;
           awsTransport?: string;
@@ -1625,8 +1722,9 @@ function ActivityList({
               })
             : getConnectionKindLabel(metadata?.connectionKind, metadata?.tmux, metadata?.awsTransport)
           : resolveLogMessage(log, translate);
-        // 실패 사유만 부제로 노출(정상 종료의 기술적 사유는 노이즈라 숨김).
-        const secondary = isError ? metadata?.disconnectReason ?? null : null;
+        // 실패 사유만 부제로 노출(정상 종료의 기술적 사유는 노이즈라 숨김). 팀 기록 줄은 누가 남겼는지를 앞에 둔다.
+        const reason = isError ? metadata?.disconnectReason ?? null : null;
+        const secondary = [author, reason].filter(Boolean).join(' · ') || null;
         // 최근 로그 카드와 같은 규칙: 센 값이 있을 때만 붙인다(없음 ≠ 0회).
         const commandCount = metadata?.commandCount;
         const primaryWithCount =
@@ -1635,14 +1733,19 @@ function ActivityList({
             : primary;
         return (
           <ActivityRow
-            key={log.id}
+            key={key}
             primary={primaryWithCount}
             secondary={secondary}
             level={log.level}
             when={log.createdAt}
             duration={isSession ? formatSessionDuration(metadata?.durationMs) : null}
-            replayRecordingId={getReplayRecordingId(log)}
-            onOpenReplay={onOpenReplay}
+            replayRecordingId={replay?.recordingId ?? null}
+            onOpenReplay={
+              onOpenReplay && replay
+                ? (recordingId) =>
+                    replay.teamId ? onOpenReplay(recordingId, replay.teamId) : onOpenReplay(recordingId)
+                : undefined
+            }
           />
         );
       })}

@@ -336,6 +336,87 @@ func TestTeamInviteRejectsExpiredAndRevokedLinks(t *testing.T) {
 	}
 }
 
+// 잠근 비밀값은 링크를 쓸 수 있는 동안만 멤버에게 간다 — 취소·기한·멤버 제거와 함께 지워진다.
+func TestTeamInviteSealedSecretLivesWithTheLink(t *testing.T) {
+	for _, testCase := range storeTestCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			store := testCase.open(t)
+			ctx := context.Background()
+			owner := createTeamTestUser(t, store, "sealed-owner@example.com", true)
+			member := createTeamTestUser(t, store, "sealed-member@example.com", true)
+			outsider := createTeamTestUser(t, store, "sealed-outsider@example.com", true)
+			teamID := createTestTeam(t, store, owner, "Acme")
+			inviteTestMember(t, store, teamID, owner, member)
+
+			create := func(token string, sealed string, lifetime time.Duration) TeamInvite {
+				t.Helper()
+				invite, err := store.CreateTeamInvite(ctx, CreateTeamInviteInput{
+					TeamID: teamID, CreatedBy: owner.ID, InviteBox: "box", SealedSecret: sealed,
+					JoinTokenHash: HashTeamJoinToken(token), ExpiresAt: time.Now().Add(lifetime),
+				})
+				if err != nil {
+					t.Fatalf("CreateTeamInvite(%s) error = %v", token, err)
+				}
+				return invite
+			}
+			live := create("live", "sealed-live", time.Hour)
+			if live.SealedSecret != "sealed-live" {
+				t.Fatalf("created invite = %#v", live)
+			}
+			// 이 칸을 모르는 앱이 만든 링크 — 다시 복사할 수 없을 뿐 그대로 쓴다.
+			plain := create("plain", "", time.Hour)
+			expired := create("expired", "sealed-expired", -time.Minute)
+			if expired.SealedSecret != "" {
+				t.Fatalf("expired invite came back with its sealed secret")
+			}
+			revoked := create("revoked", "sealed-revoked", time.Hour)
+			if err := store.RevokeTeamInvite(ctx, teamID, member.ID, revoked.Code); err != nil {
+				t.Fatalf("RevokeTeamInvite() error = %v", err)
+			}
+
+			sealedByCode := func(actor teamTestUser) map[string]string {
+				t.Helper()
+				invites, err := store.ListTeamInvites(ctx, teamID, actor.ID)
+				if err != nil {
+					t.Fatalf("ListTeamInvites() error = %v", err)
+				}
+				sealed := map[string]string{}
+				for _, invite := range invites {
+					sealed[invite.Code] = invite.SealedSecret
+				}
+				return sealed
+			}
+			// 만든 사람이 아닌 멤버도 받는다. 기한이 지난 것은 정리 전이어도 내주지 않는다.
+			for _, actor := range []teamTestUser{owner, member} {
+				sealed := sealedByCode(actor)
+				if sealed[live.Code] != "sealed-live" || sealed[plain.Code] != "" || sealed[expired.Code] != "" || sealed[revoked.Code] != "" {
+					t.Fatalf("sealed secrets for %s = %#v", actor.Email, sealed)
+				}
+			}
+			if _, err := store.ListTeamInvites(ctx, teamID, outsider.ID); !errors.Is(err, ErrTeamNotFound) {
+				t.Fatalf("outsider list error = %v, want ErrTeamNotFound", err)
+			}
+			// 취소하면 그 자리에서, 기한이 지나면 정리 작업이 지운다.
+			if count := countTeamRows(t, store, &teamInviteRow{}, "code = ? AND sealed_secret IS NOT NULL", revoked.Code); count != 0 {
+				t.Fatalf("revoked invite kept its sealed secret")
+			}
+			store.allowImmediateSweep(teamInviteRow{}.TableName())
+			store.sweepExpiredTeamInviteBoxes()
+			if count := countTeamRows(t, store, &teamInviteRow{}, "code = ? AND sealed_secret IS NOT NULL", expired.Code); count != 0 {
+				t.Fatalf("expired invite kept its sealed secret after the sweep")
+			}
+			if count := countTeamRows(t, store, &teamInviteRow{}, "code = ? AND sealed_secret IS NOT NULL", live.Code); count != 1 {
+				t.Fatalf("live invite lost its sealed secret in the sweep")
+			}
+			// 참여 응답에는 상자만 있다.
+			joined, err := store.JoinTeam(ctx, live.Code, "live", outsider.ID)
+			if err != nil || joined.InviteBox != "box" {
+				t.Fatalf("JoinTeam() = %#v, %v", joined, err)
+			}
+		})
+	}
+}
+
 func TestTeamOwnerOnlyActionsAndMembership(t *testing.T) {
 	for _, testCase := range storeTestCases() {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -424,8 +505,8 @@ func TestTeamRemovalIsAtomicAndRevokesEveryLink(t *testing.T) {
 			}
 			knownToken := "member-knows-this"
 			known, err := store.CreateTeamInvite(ctx, CreateTeamInviteInput{
-				TeamID: teamID, CreatedBy: member.ID, InviteBox: "box", JoinTokenHash: HashTeamJoinToken(knownToken),
-				ExpiresAt: time.Now().Add(time.Hour),
+				TeamID: teamID, CreatedBy: member.ID, InviteBox: "box", SealedSecret: "sealed",
+				JoinTokenHash: HashTeamJoinToken(knownToken), ExpiresAt: time.Now().Add(time.Hour),
 			})
 			if err != nil {
 				t.Fatalf("CreateTeamInvite() error = %v", err)
@@ -452,7 +533,7 @@ func TestTeamRemovalIsAtomicAndRevokesEveryLink(t *testing.T) {
 			if count := countTeamRows(t, store, &teamMemberPrivateRow{}, "team_id = ? AND user_id = ?", teamID, member.ID); count != 1 {
 				t.Fatalf("private records after failed removal = %d, want 1", count)
 			}
-			if count := countTeamRows(t, store, &teamInviteRow{}, "code = ? AND invite_box IS NOT NULL AND revoked_at IS NULL", known.Code); count != 1 {
+			if count := countTeamRows(t, store, &teamInviteRow{}, "code = ? AND invite_box IS NOT NULL AND sealed_secret IS NOT NULL AND revoked_at IS NULL", known.Code); count != 1 {
 				t.Fatalf("invite changed after failed removal")
 			}
 
@@ -465,7 +546,7 @@ func TestTeamRemovalIsAtomicAndRevokesEveryLink(t *testing.T) {
 			if count := countTeamRows(t, store, &teamMemberPrivateRow{}, "team_id = ? AND user_id = ?", teamID, member.ID); count != 0 {
 				t.Fatalf("private records survived removal: %d", count)
 			}
-			if count := countTeamRows(t, store, &teamInviteRow{}, "team_id = ? AND (invite_box IS NOT NULL OR revoked_at IS NULL)", teamID); count != 0 {
+			if count := countTeamRows(t, store, &teamInviteRow{}, "team_id = ? AND (invite_box IS NOT NULL OR sealed_secret IS NOT NULL OR revoked_at IS NULL)", teamID); count != 0 {
 				t.Fatalf("%d invites still usable after removal", count)
 			}
 			// 뺀 사람이 아는 링크로는 되돌아오지 못한다.

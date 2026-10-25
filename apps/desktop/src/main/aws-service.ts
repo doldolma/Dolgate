@@ -37,7 +37,7 @@ import type {
   AwsExternalProfileImportResult,
   AwsProfileRegionUpdateInput,
   AwsProfileKind,
-  AwsProfileMissingMyKey,
+  AwsProfileMissingKey,
   AwsProfileRenameInput,
   AwsSsoProfileAccountOption,
   AwsSsoProfilePrepareInput,
@@ -1839,10 +1839,11 @@ export class AwsService {
   }
 
   /**
-   * 내 키가 없어 붙을 수 없는 팀 정적 프로필(키는 늘 각자 넣는다 — 팀에는 설정만 간다). assume role 이면 같은 팀의
+   * 이 기기에 키가 없어 붙을 수 없는 팀 정적 프로필(키는 동기화하지 않아 기기마다 넣는다 — 팀에는 설정만 간다).
+   * assume role 이면 같은 팀의
    * 원본을 본다. 펼친 이름으로 찾는다 — 개인 것이거나 키가 있으면 null.
    */
-  private findTeamProfileMissingMyKey(profileName: string): AwsProfileMissingMyKey | null {
+  private findTeamProfileMissingKey(profileName: string): AwsProfileMissingKey | null {
     for (const team of this.teamProfileSource()) {
       const payload = team.payloads.find(
         (item) => teamAwsProfileName(team.teamId, item.name) === profileName,
@@ -1933,7 +1934,7 @@ export class AwsService {
       for (const payload of sortedPayloads) {
         const name = nameOf(payload);
         if (payload.kind === "static") {
-          // 키를 빼고 공유한 팀 프로필에 내 키도 없으면 키 줄을 쓰지 않는다(빈 키로 붙지 않게).
+          // 이 기기에 키가 없는 팀 프로필이면 키 줄을 쓰지 않는다(빈 키로 붙지 않게).
           if (payload.accessKeyId.trim() && payload.secretAccessKey.trim()) {
             credentialSections.push(
               `[${name}]`,
@@ -2859,7 +2860,7 @@ export class AwsService {
       secretAccessKey: input.secretAccessKey.trim(),
       updatedAt: new Date().toISOString(),
     };
-    // 팀 저장소는 키를 내 칸으로 보내고 팀에는 설정만 둔다(TeamAwsProfileRepository).
+    // 팀 볼트도 개인과 같이 키를 그 볼트에 둔다. 팀에 올리지 않는 것은 팀 동기화가 한다.
     profiles.upsert(payload);
     await this.materializeManagedProfiles();
   }
@@ -3302,10 +3303,10 @@ export class AwsService {
       };
     }
 
-    // 키 없이 공유된 팀 정적 프로필에 내 키도 없으면 붙을 수 없다. SDK 오류 대신 무엇을 넣어야 하는지 말한다.
-    const missingMyKey =
-      awsRootDir === this.awsProfileRootDir ? this.findTeamProfileMissingMyKey(profileName) : null;
-    if (missingMyKey) {
+    // 이 기기에 키가 없는 팀 정적 프로필은 붙을 수 없다. SDK 오류 대신 무엇을 넣어야 하는지 말한다.
+    const missingKey =
+      awsRootDir === this.awsProfileRootDir ? this.findTeamProfileMissingKey(profileName) : null;
+    if (missingKey) {
       return {
         id: profileId,
         profileName,
@@ -3313,8 +3314,8 @@ export class AwsService {
         isSsoProfile: false,
         isAuthenticated: false,
         configuredRegion: (await this.readConfigValue(profileName, "region", awsRootDir)) || null,
-        errorMessage: t('aws.profile.teamKeyMissing', { profile: missingMyKey.profileName }),
-        missingMyKey,
+        errorMessage: t('aws.profile.teamKeyMissing', { profile: missingKey.profileName }),
+        missingKey,
       };
     }
 
@@ -3521,7 +3522,7 @@ export class AwsService {
     if (!currentProfile || currentProfile.kind !== "static") {
       throw new Error(t('aws.profile.accessKeyOnly'));
     }
-    // 리전을 보내지 않으면(내 키만 넣는 창) 지금 리전을 그대로 둔다 — 팀 것의 리전은 팀 설정이다.
+    // 리전을 보내지 않으면(키만 넣는 창) 지금 리전을 그대로 둔다 — 팀 것의 리전은 팀 설정이다.
     const region =
       input.region === undefined ? currentProfile.region ?? null : input.region?.trim() || null;
 
@@ -3557,7 +3558,7 @@ export class AwsService {
       throw new Error(t('aws.profile.notFound'));
     }
 
-    // 팀 정적 프로필이면 읽은 것에 키가 없다 — 저장소가 빈 키를 내 칸에 쓰지 않으니 내 키는 그대로다.
+    // 읽은 것에 이 기기의 키가 들어 있어 그대로 다시 쓴다(팀 것도 같다).
     profiles.upsert({
       ...currentProfile,
       region,

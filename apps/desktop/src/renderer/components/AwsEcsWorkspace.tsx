@@ -82,7 +82,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { getFormatLocale, t } from '../i18n';
 import { useAppStore } from "../store/appStore";
-import { MyAwsKeyDialog } from "./teams/MyAwsKeyDialog";
+import { AwsKeyDialog } from "./teams/AwsKeyDialog";
 import { hostSubtitleLabels } from '../../common/shared-messages';
 
 interface AwsEcsWorkspaceProps {
@@ -820,11 +820,11 @@ export function AwsEcsWorkspace({
 
   // 내 키가 없는 팀 정적 AWS 프로필로 막혔으면 넣을 곳(연결 흐름이 남긴다) — 그 자리에서 넣고 다시 읽는다(M3).
   const awsProfileIdOfHost = isAwsEcsHostRecord(host) ? (host.awsProfileId ?? null) : null;
-  const awsMissingMyKey = useAppStore((state) =>
-    awsProfileIdOfHost ? state.awsMissingMyKeyByProfileId[awsProfileIdOfHost] : undefined,
+  const awsMissingKey = useAppStore((state) =>
+    awsProfileIdOfHost ? state.awsMissingKeyByProfileId[awsProfileIdOfHost] : undefined,
   );
-  const clearAwsMissingMyKey = useAppStore((state) => state.clearAwsMissingMyKey);
-  const [myAwsKeyOpen, setMyAwsKeyOpen] = useState(false);
+  const clearAwsMissingKey = useAppStore((state) => state.clearAwsMissingKey);
+  const [myAwsKeyOpen, setAwsKeyOpen] = useState(false);
 
   useEffect(() => {
     serviceContextsRef.current = serviceContexts;
@@ -1945,10 +1945,10 @@ export function AwsEcsWorkspace({
       {tab.errorMessage ? (
         <NoticeCard tone="danger" role="alert">
           <p>{tab.errorMessage}</p>
-          {awsMissingMyKey ? (
+          {awsMissingKey ? (
             <div className="mt-1 flex flex-wrap items-center gap-2">
-              <Button type="button" variant="primary" size="sm" onClick={() => setMyAwsKeyOpen(true)}>
-                {translate("teams.myKey.add")}
+              <Button type="button" variant="primary" size="sm" onClick={() => setAwsKeyOpen(true)}>
+                {translate("teams.awsKey.add")}
               </Button>
             </div>
           ) : null}
@@ -1984,13 +1984,13 @@ export function AwsEcsWorkspace({
         </NoticeCard>
       ) : null}
 
-      {myAwsKeyOpen && awsMissingMyKey && awsProfileIdOfHost ? (
-        <MyAwsKeyDialog
-          missing={awsMissingMyKey}
-          onClose={() => setMyAwsKeyOpen(false)}
+      {myAwsKeyOpen && awsMissingKey && awsProfileIdOfHost ? (
+        <AwsKeyDialog
+          missing={awsMissingKey}
+          onClose={() => setAwsKeyOpen(false)}
           onSaved={() => {
-            setMyAwsKeyOpen(false);
-            clearAwsMissingMyKey(awsProfileIdOfHost);
+            setAwsKeyOpen(false);
+            clearAwsMissingKey(awsProfileIdOfHost);
             void handleRefresh();
           }}
         />

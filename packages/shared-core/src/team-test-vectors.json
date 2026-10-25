@@ -43,5 +43,21 @@
       "code": "Zz09_-ab",
       "link": "https://dolgate.example.org/sync/invite/Zz09_-ab#v1.AQ4bKDVCT1xpdoOQnaq3xNHe6_gFEh8sOUZTYG16h5Q"
     }
+  ],
+  "inviteSecret": [
+    {
+      "teamId": "3f2c8a9e-4b1d-4c6e-9a7b-1d2e3f405162",
+      "teamDekBase64": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+      "secretBase64": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU=",
+      "ivBase64": "d3d3d3d3d3d3d3d3",
+      "sealedBase64": "d3d3d3d3d3d3d3d3HU/AlgXGthe5P+RSOWeR6kES+C+pXglVvq+/PSloq/WLBtm55WmJuLdmwwxjuFeg6yrFJqiMex/AMt9T7tgk6VJY7a6jMYUEqXhsatJ9hw=="
+    },
+    {
+      "teamId": "00000000-0000-4000-8000-000000000001",
+      "teamDekBase64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+      "secretBase64": "AQ4bKDVCT1xpdoOQnaq3xNHe6/gFEh8sOUZTYG16h5Q=",
+      "ivBase64": "AxgtQldsgZarwNXq",
+      "sealedBase64": "AxgtQldsgZarwNXqV5pMYNKj4aFxZMzKfiE7lgIHuhaWpFOa8PfkO9EYktC40wIcmY1uhSmXytdh426ajqvHGbn0C0MMJH8mDfV9PqOJbchMJCAIp+A5yYtPcg=="
+    }
   ]
 }

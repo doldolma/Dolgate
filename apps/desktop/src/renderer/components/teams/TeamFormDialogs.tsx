@@ -57,7 +57,6 @@ export function TeamNameDialog({ mode, initialName = '', onSubmit, onClose }: Te
             aria-label="Team name"
             autoFocus
             maxLength={TEAM_NAME_MAX_LENGTH}
-            placeholder={translate('teamsPanel.nameDialog.placeholder')}
             value={name}
             onChange={(event) => setName(event.target.value)}
           />

@@ -1,7 +1,7 @@
 import type { LucideIcon } from "../ui/icons";
 import { cn } from "../lib/cn";
 import { useTranslation } from "react-i18next";
-import { TeamMark } from "./teams/TeamMark";
+import { VaultMark } from "./teams/VaultMark";
 
 export type CommandPaletteItemGroup =
   | "navigation"
@@ -19,7 +19,7 @@ export interface CommandPaletteItem {
   keywords: string[];
   Icon?: LucideIcon;
   disabledReason?: string;
-  /** 팀 것이면 그 팀 — 부제목 앞에 "[머리글자] 팀 이름 · " 으로 보인다(홈 카드 아래 줄과 같은 문법). */
+  /** 팀 것이면 그 팀 — 부제목 앞에 "[팀 표시] 팀 이름 · " 으로 보인다(홈 카드 아래 줄과 같은 문법). */
   team?: { name: string } | null;
   run: () => void | Promise<void>;
 }
@@ -124,7 +124,7 @@ export function CommandPalette({
                       </span>
                       {item.team && !item.disabledReason ? (
                         <span className="flex min-w-0 items-center gap-[0.35rem] text-[0.76rem] font-medium text-[var(--text-muted)]">
-                          <TeamMark name={item.team.name} size="xs" />
+                          <VaultMark kind="team" size="xs" />
                           <span className="min-w-0 truncate">
                             {item.subtitle
                               ? `${item.team.name} · ${item.subtitle}`

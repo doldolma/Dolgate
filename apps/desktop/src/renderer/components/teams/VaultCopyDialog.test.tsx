@@ -130,7 +130,7 @@ describe('VaultCopyDialog', () => {
   it('copies team things to Personal without the switch or the member line', async () => {
     const props = renderDialog({
       sourceVaultId: TEAM,
-      selection: { kind: 'group', groupPath: 'Prod/web' },
+      selection: { kind: 'groups', groupPaths: ['Prod/web'] },
       target: { vaultId: 'personal', groupPath: 'Prod' },
     });
 
@@ -149,9 +149,26 @@ describe('VaultCopyDialog', () => {
       expect(props.onCopy).toHaveBeenCalledWith({
         sourceVaultId: TEAM,
         targetVaultId: 'personal',
-        selection: { kind: 'group', groupPath: 'Prod/web' },
+        selection: { kind: 'groups', groupPaths: ['Prod/web'] },
         targetGroupPath: 'Prod',
       }),
+    );
+  });
+
+  it('names several groups by their count', async () => {
+    const props = renderDialog({
+      sourceVaultId: 'personal',
+      selection: { kind: 'groups', groupPaths: ['Prod', 'Home', 'Lab'] },
+      target: { vaultId: TEAM, groupPath: null },
+    });
+
+    expect(document.querySelector('[data-vault-copy-route]')!.textContent).toContain('Personal / 그룹 3개');
+    await waitFor(() => expect(dialog().getByRole('button', { name: '공유' })).toBeEnabled());
+    fireEvent.click(dialog().getByRole('button', { name: '공유' }));
+    await waitFor(() =>
+      expect(props.onCopy).toHaveBeenCalledWith(
+        expect.objectContaining({ selection: { kind: 'groups', groupPaths: ['Prod', 'Home', 'Lab'] } }),
+      ),
     );
   });
 

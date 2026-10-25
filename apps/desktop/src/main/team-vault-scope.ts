@@ -1,4 +1,4 @@
-import type { ManagedAwsProfilePayload, TailnetPayload, TailnetRecord, TerminalThemeId } from "@shared";
+import type { TailnetPayload, TailnetRecord, TerminalThemeId } from "@shared";
 import {
   AwsProfileRepository,
   DnsOverrideRepository,
@@ -22,14 +22,10 @@ import {
   type TeamWorkspacePrefsPatch,
 } from "./state-storage";
 import {
-  normalizeTeamAwsProfileCredentials,
-  stripAwsProfileKeys,
   TEAM_MEMBER_CREDENTIAL_NORMALIZERS,
-  type TeamAwsProfileCredentials,
   type TeamHostCredentials,
   type TeamMemberPrefs,
   type TeamMemberPrefsStore,
-  type TeamTailnetCredentials,
 } from "./team-member-prefs";
 import type { TeamVaultScope, TeamVaultSource, VaultSecretStore } from "./vault-catalog";
 import { teamVaultRoot } from "./vault-root";
@@ -43,94 +39,44 @@ class TeamKnownHostRepository extends KnownHostRepository {
 }
 
 /**
- * 팀 볼트의 tailnet 은 사람 것을 레코드에 두지 않는다.
- * - 로그인한 계정(loginName)은 기기마다라 이 기기 칸에 두고 읽을 때만 얹는다 — 팀에 올리면 멤버마다 자기
- *   계정으로 공유 레코드를 서로 덮어쓴다.
- * - auth key 는 그 사람 기기를 tailnet 에 넣는 인증 정보라 내 개인 칸에 둔다. 코어에 넘길 때 카탈로그가 얹는다.
+ * 팀 볼트의 tailnet. 로그인한 계정(loginName)은 기기마다라 이 기기 칸에 두고 읽을 때만 얹는다 — 팀에 올리면 멤버마다
+ * 자기 계정으로 공유 레코드를 서로 덮어쓴다.
+ *
+ * auth key 는 개인 저장소와 똑같이 이 볼트에 둔다. 팀에 올리지 않을 뿐이다 — 올릴 때 빼고 받을 때 이 기기 것을
+ * 지키는 것은 팀 동기화가 한다(stripTailnetAuthKey). 그래서 여기서는 키를 따로 다루지 않는다.
  */
 class TeamTailnetRepository extends TailnetRepository {
-  constructor(
-    private readonly teamId: string,
-    private readonly mine: TeamMemberPrefsStore,
-  ) {
+  constructor(private readonly teamId: string) {
     super(teamVaultRoot(teamId));
   }
 
   /**
-   * 이 기기의 사람에게 보이는 모양 — 로그인 계정은 이 기기 것을, 키가 있는지(hasAuthKey)는 내 auth key 가
-   * 있는지를 얹는다. auth key 는 늘 각자 내 칸에 두므로 팀 레코드의 값은 쓰지 않는다.
+   * 이 기기에서 보이는 모양 — 로그인 계정과 키가 있는지(hasAuthKey)는 이 기기 것이다. 받은 팀 레코드에는 키가 없다고
+   * 적혀 오므로 레코드 값을 믿지 않는다.
    */
   list(): TailnetRecord[] {
     const loginNames = getDesktopStateStorage().readTeamTailnetLoginNames(this.teamId);
     return super.list().map(({ loginName: _stored, ...record }) => {
-      const mine = { ...record, hasAuthKey: this.mine.readTailnetCredentials(record.id) !== null };
-      return loginNames[record.id] ? { ...mine, loginName: loginNames[record.id] } : mine;
+      const here = { ...record, hasAuthKey: this.readAuthKey(record.id) !== null };
+      return loginNames[record.id] ? { ...here, loginName: loginNames[record.id] } : here;
     });
   }
 
   save(record: TailnetRecord, authKey?: string): TailnetRecord {
     const { loginName, ...shared } = record;
     getDesktopStateStorage().setTeamTailnetLoginName(this.teamId, record.id, loginName ?? null);
-    // undefined 면 지금 키를 그대로 둔다(개인 저장소와 같은 뜻). 빈 값이면 내 칸에서 지운다.
-    if (authKey !== undefined) {
-      const trimmed = authKey.trim();
-      this.mine.writeTailnetCredentials(record.id, trimmed ? { authKey: trimmed } : null);
-    }
-    // 팀 비밀 칸에는 키를 두지 않는다 — 늘 지운다.
-    super.save(shared, "");
+    super.save(shared, authKey);
     return this.list().find((item) => item.id === record.id) ?? record;
   }
 
   remove(id: string): void {
     super.remove(id);
     getDesktopStateStorage().setTeamTailnetLoginName(this.teamId, id, null);
-    this.mine.writeTailnetCredentials(id, null);
   }
 
-  /** 시험·연결에 쓸 키 — 팀 것은 늘 내 auth key 다(팀 칸에는 키를 두지 않는다). */
-  readAuthKey(id: string): string | null {
-    return this.mine.readTailnetCredentials(id)?.authKey ?? null;
-  }
-
-  /** 팀에 올리는 것 — 이 기기의 계정도, auth key 도 싣지 않는다. */
+  /** 이 기기의 계정은 싣지 않는다 — 코어에는 필요 없고, 팀에 올라가면 안 된다. */
   listPayloads(): TailnetPayload[] {
-    return super
-      .listPayloads()
-      .map(({ loginName: _mine, authKey: _person, ...payload }) => ({ ...payload, hasAuthKey: false }));
-  }
-}
-
-/**
- * 팀 볼트의 AWS 프로필. 정적 프로필의 키는 사람의 인증 정보라 팀 레코드에 두지 않고 내 개인 칸에 둔다 — 팀에는
- * 이름·리전 같은 설정만 간다. 이 기기에서 펼칠 때는 내 키를 얹는다(listStoredTeamAwsProfiles).
- */
-class TeamAwsProfileRepository extends AwsProfileRepository {
-  constructor(
-    teamId: string,
-    private readonly mine: TeamMemberPrefsStore,
-  ) {
-    super(teamVaultRoot(teamId));
-  }
-
-  upsert(payload: ManagedAwsProfilePayload): ManagedAwsProfilePayload {
-    if (payload.kind === "static") {
-      const keys = normalizeTeamAwsProfileCredentials(payload);
-      if (keys) {
-        this.mine.writeAwsProfileCredentials(payload.id, keys);
-      }
-    }
-    return super.upsert(stripAwsProfileKeys(payload));
-  }
-
-  remove(id: string): void {
-    super.remove(id);
-    this.mine.writeAwsProfileCredentials(id, null);
-  }
-
-  /** 팀 쪽에 키가 남아 있어도(옛 데이터) 읽을 때 뺀다. 목록(listPayloads)도 이것을 거친다. */
-  getPayloadById(id: string): ManagedAwsProfilePayload | null {
-    const payload = super.getPayloadById(id);
-    return payload ? stripAwsProfileKeys(payload) : null;
+    return super.listPayloads().map(({ loginName: _mine, ...payload }) => payload);
   }
 }
 
@@ -186,22 +132,6 @@ class StoredTeamMemberPrefs implements TeamMemberPrefsStore {
     this.writeSecret("hostCredentials", hostId, credentials);
   }
 
-  readAwsProfileCredentials(profileId: string): TeamAwsProfileCredentials | null {
-    return this.readSecret("awsProfileCredentials", profileId);
-  }
-
-  writeAwsProfileCredentials(profileId: string, credentials: TeamAwsProfileCredentials | null): void {
-    this.writeSecret("awsProfileCredentials", profileId, credentials);
-  }
-
-  readTailnetCredentials(tailnetId: string): TeamTailnetCredentials | null {
-    return this.readSecret("tailnetCredentials", tailnetId);
-  }
-
-  writeTailnetCredentials(tailnetId: string, credentials: TeamTailnetCredentials | null): void {
-    this.writeSecret("tailnetCredentials", tailnetId, credentials);
-  }
-
   private readSecret<K extends TeamPrivateSecretKind>(
     kind: K,
     recordId: string,
@@ -230,14 +160,15 @@ export function createTeamVaultScope(teamId: string): Omit<TeamVaultScope, "id">
   return {
     hosts: new HostRepository(root),
     groups: new GroupRepository(root),
-    tailnets: new TeamTailnetRepository(teamId, memberPrefs),
+    tailnets: new TeamTailnetRepository(teamId),
     portForwards: new PortForwardRepository(root),
     dnsOverrides: new DnsOverrideRepository(root),
     snippets: new SnippetRepository(root),
     savedWorkspaces: new SavedWorkspaceRepository(root),
     knownHosts: new TeamKnownHostRepository(root),
     secretMetadata: new SecretMetadataRepository(root),
-    awsProfiles: new TeamAwsProfileRepository(teamId, memberPrefs),
+    // 정적 프로필의 키도 개인 저장소와 똑같이 이 볼트에 둔다. 팀에 올리지 않는 것은 팀 동기화가 한다(stripAwsProfileKeys).
+    awsProfiles: new AwsProfileRepository(root),
     syncOutbox: new SyncOutboxRepository(root),
     secrets: new TeamSecretStore(teamId),
     memberPrefs,
@@ -253,23 +184,13 @@ export function createStoredTeamVaults(): TeamVaultSource {
 }
 
 /**
- * 상태 파일에 있는 팀들의 관리 AWS 프로필. AWS 서비스가 펼치기와 접속 때 개인 것 다음으로 본다. 정적
- * 프로필은 내 키가 있으면 그것을 얹는다(내 것 → 팀 것). 이 목록은 이 기기에서 펼치는 데만 쓴다 — 팀에
- * 올리는 것은 저장소의 `listPayloads()` 라 내 키가 실리지 않는다.
+ * 상태 파일에 있는 팀들의 관리 AWS 프로필. AWS 서비스가 펼치기와 접속 때 개인 것 다음으로 본다. 정적 프로필의 키는
+ * 이 기기에 넣어 둔 것이다(팀에는 올라가지 않는다) — 없으면 비어 있고, AWS 서비스가 키를 넣으라고 알린다.
  */
 export function listStoredTeamAwsProfiles(): TeamManagedAwsProfiles[] {
   return getDesktopStateStorage()
     .listTeamIds()
-    .map((teamId) => {
-      const scope = createTeamVaultScope(teamId);
-      return {
-        teamId,
-        payloads: scope.awsProfiles.listPayloads().map((payload) => {
-          const mine = payload.kind === "static" ? scope.memberPrefs.readAwsProfileCredentials(payload.id) : null;
-          return mine && payload.kind === "static" ? { ...payload, ...mine } : payload;
-        }),
-      };
-    });
+    .map((teamId) => ({ teamId, payloads: createTeamVaultScope(teamId).awsProfiles.listPayloads() }));
 }
 
 /** 상태 파일에 있는 팀들의 DNS 덮어쓰기와 포트 포워딩 규칙. 적용할 때 개인 것 뒤에 둔다. */

@@ -134,7 +134,7 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
   // 다시 떠도 CoreManager 가 이 제공자를 다시 불러 복구한다.
   ctx.coreManager.setTailnetConfigProvider(() => buildTailnetConfigs(ctx));
 
-  // 설정 화면이 볼트를 골라 본다. 팀 tailnet 의 hasAuthKey 는 내 auth key 가 있는지다(팀 저장소가 얹는다).
+  // 설정 화면이 볼트를 골라 본다. 팀 tailnet 의 hasAuthKey 는 이 기기에 키가 있는지다(키는 팀에 올리지 않는다).
   ipcMain.handle(
     ipcChannels.tailnet.list,
     async (_event, vaultId?: string | null): Promise<TailnetRecord[]> => {
@@ -146,7 +146,7 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.tailnet.save,
     async (_event, input: TailnetSaveInput): Promise<TailnetRecord> => {
-      // 팀 것의 auth key 는 팀 저장소가 내 칸으로 보낸다 — 팀에는 설정만 간다.
+      // 팀 것도 키는 그 볼트에 둔다. 팀에 올리지 않는 것은 팀 동기화가 한다.
       const vault = tailnetVaultForSave(ctx, input);
       const saved =
         vault === "personal"
@@ -210,7 +210,7 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
       // 저장 전에도 시험할 수 있어야 하므로, 방금 입력한 키가 딸려 오면 그것을 쓴다.
       // 그 외에는 렌더러가 키를 갖고 있지 않으니 여기서 읽어 넣는다. 키가 위로 올라오는 건
       // 저장과 같은 방향이라 "키는 렌더러로 내려보내지 않는다"는 원칙과 무관하다.
-      // 팀 것은 내 auth key 를 읽는다(팀 저장소가 내 칸에서 준다).
+      // 팀 것도 이 기기에 둔 키를 쓴다. 없으면 브라우저 로그인이다.
       const typedAuthKey = request.authKey?.trim();
       const vault = typedAuthKey ? "personal" : tailnetVaultOf(ctx, request.id);
       const authKey = typedAuthKey

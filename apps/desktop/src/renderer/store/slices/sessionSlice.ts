@@ -297,7 +297,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     pendingCredentialRetry: null,
     activeCredentialRetryAttempt: null,
     pendingMissingUsernamePrompt: null,
-    awsMissingMyKeyByProfileId: {},
+    awsMissingKeyByProfileId: {},
     pendingStartupCommandPrompt: null,
     pendingInteractiveAuths: [],
     pendingConnectionAttempts: [],
@@ -2632,13 +2632,13 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     },
     dismissPendingMissingUsernamePrompt: () =>
       set({ pendingMissingUsernamePrompt: null }),
-    clearAwsMissingMyKey: (profileId) => {
-      const current = get().awsMissingMyKeyByProfileId;
+    clearAwsMissingKey: (profileId) => {
+      const current = get().awsMissingKeyByProfileId;
       if (!current[profileId]) {
         return;
       }
       const { [profileId]: _cleared, ...rest } = current;
-      set({ awsMissingMyKeyByProfileId: rest });
+      set({ awsMissingKeyByProfileId: rest });
     },
     submitMissingUsernamePrompt: async ({ username }) => {
       const pending = get().pendingMissingUsernamePrompt;

@@ -22,12 +22,10 @@ import {
   Star,
   TriangleAlert,
   UnfoldVertical,
-  User,
   type LucideIcon,
 } from "../../ui/icons";
 import { Tooltip } from "../../ui";
-import { MarkSquare } from "../teams/TeamMark";
-import { teamMarkOf } from "../teams/team-format";
+import { VaultMark } from "../teams/VaultMark";
 import { groupTreeKey } from "./browserVaults";
 import {
   GROUP_DRAG_MIME_TYPE,
@@ -56,6 +54,11 @@ interface HomeSidebarProps {
   workspaceCount: number;
   favoriteWorkspaceCount: number;
 }
+
+// 사이드바 줄에 커서를 올렸을 때의 색. 강조되지 않은 줄에만 준다 — 지금 위치·고른 줄에까지 주면 커서를 올리는
+// 동안 강조 색이 덮여 다른 줄과 똑같아 보인다(호스트 카드·태그도 강조된 것은 커서에 색을 바꾸지 않는다).
+const ROW_HOVER =
+  "hover:bg-[color-mix(in_srgb,var(--surface-elevated)_72%,transparent_28%)] hover:text-[var(--text)]";
 
 const SECTION_ITEMS: Array<{
   section: HomeSection;
@@ -99,6 +102,11 @@ export function HomeSidebar({
   } = hb;
   // 팀이 없으면 비어 있다 — 볼트 줄 없이 지금처럼 그린다.
   const vaultTrees = hb.vaultTrees ?? [];
+  const allHostsActive =
+    activeSection === "hosts" &&
+    currentGroupPath === null &&
+    (hb.currentVaultId ?? null) === null &&
+    !favoritesFilterActive;
 
   const [isGroupMenuOpen, setIsGroupMenuOpen] = useState(false);
   const groupMenuRef = useRef<HTMLDivElement | null>(null);
@@ -271,12 +279,10 @@ export function HomeSidebar({
         <button
           type="button"
           className={cn(
-            "flex w-full min-w-0 items-center gap-[0.55rem] rounded-[10px] border border-transparent bg-transparent px-[0.55rem] py-[0.4rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color] duration-140 hover:bg-[color-mix(in_srgb,var(--surface-elevated)_72%,transparent_28%)] hover:text-[var(--text)]",
-            activeSection === "hosts" &&
-              currentGroupPath === null &&
-              (hb.currentVaultId ?? null) === null &&
-              !favoritesFilterActive &&
-              "border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]",
+            "flex w-full min-w-0 items-center gap-[0.55rem] rounded-[10px] border border-transparent bg-transparent px-[0.55rem] py-[0.4rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color] duration-140",
+            allHostsActive
+              ? "border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]"
+              : !isRootDragTarget && ROW_HOVER,
             isRootDragTarget &&
               "border-[var(--selection-border)] bg-[var(--selection-tint-strong)]",
           )}
@@ -384,10 +390,10 @@ export function HomeSidebar({
           type="button"
           aria-label={translate("sidebar.favorites")}
           className={cn(
-            "flex w-full min-w-0 items-center gap-[0.55rem] rounded-[10px] border border-transparent bg-transparent px-[0.55rem] py-[0.4rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color] duration-140 hover:bg-[color-mix(in_srgb,var(--surface-elevated)_72%,transparent_28%)] hover:text-[var(--text)]",
-            activeSection === "hosts" &&
-              favoritesFilterActive &&
-              "border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]",
+            "flex w-full min-w-0 items-center gap-[0.55rem] rounded-[10px] border border-transparent bg-transparent px-[0.55rem] py-[0.4rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color] duration-140",
+            activeSection === "hosts" && favoritesFilterActive
+              ? "border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]"
+              : ROW_HOVER,
           )}
           onClick={() => {
             onSelectSection?.("hosts");
@@ -581,13 +587,14 @@ function GroupTreeItem({
       <button
         type="button"
         className={cn(
-          "flex w-full min-w-0 items-center gap-[0.4rem] rounded-[10px] border border-transparent bg-transparent px-[0.55rem] py-[0.4rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color] duration-140 hover:bg-[color-mix(in_srgb,var(--surface-elevated)_72%,transparent_28%)] hover:text-[var(--text)]",
+          "flex w-full min-w-0 items-center gap-[0.4rem] rounded-[10px] border border-transparent bg-transparent px-[0.55rem] py-[0.4rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color] duration-140",
+          !isActive && !isSelected && hb.dragTargetGroupPath !== rowKey && ROW_HOVER,
           isActive &&
             "border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]",
           !hb.currentGroupPath && isSelected && "text-[var(--text)]",
-          isSelected &&
-            !isActive &&
-            "bg-[color-mix(in_srgb,var(--surface-elevated)_66%,transparent_34%)]",
+          // 고른 카드와 같은 선택 색이다. 테두리와 강조 글자색은 지금 위치에만 둔다 — 고른 것과 들어가 있는 곳이
+          // 구분돼야 한다. 예전 배경(surface-elevated 66%)은 라이트 테마에서 사이드바와 거의 같아 보이지 않았다.
+          isSelected && !isActive && "bg-[var(--selection-tint)]",
           hb.dragTargetGroupPath === rowKey &&
             "border-[var(--selection-border)] bg-[var(--selection-tint-strong)]",
           // 놓일 자리 표시. 행 위/아래에 2px 액센트 선을 의사요소로 얹는다 — 실제
@@ -859,6 +866,9 @@ function VaultSection({
   const menuLabel = translate("sidebar.vaultMenu", { name: vault.name });
   const openMenu = (x: number, y: number) =>
     hb.setContextMenu({ kind: "vault", vaultId: vault.id, x, y });
+  // 메뉴가 열려 있는 동안은 ⋯ 를 그대로 둔다 — 마우스가 메뉴로 옮겨 가도 메뉴가 나온 단추는 보여야 한다.
+  const menuOpen =
+    hb.contextMenu?.kind === "vault" && hb.contextMenu.vaultId === vault.id;
 
   return (
     <>
@@ -884,7 +894,8 @@ function VaultSection({
           type="button"
           data-vault-id={vault.id}
           className={cn(
-            "flex w-full min-w-0 items-center gap-[0.5rem] rounded-[10px] border border-transparent bg-transparent px-[0.55rem] py-[0.4rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color] duration-140 hover:bg-[color-mix(in_srgb,var(--surface-elevated)_72%,transparent_28%)] hover:text-[var(--text)]",
+            "flex w-full min-w-0 items-center gap-[0.5rem] rounded-[10px] border border-transparent bg-transparent px-[0.55rem] py-[0.4rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color] duration-140",
+            !isActive && hb.vaultDragTargetId !== vault.id && ROW_HOVER,
             isActive &&
               "border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]",
             hb.vaultDragTargetId === vault.id &&
@@ -983,22 +994,22 @@ function VaultSection({
             }
           }}
         >
-          {vault.kind === "personal" ? (
-            <span
-              aria-hidden="true"
-              className="inline-grid h-[1.4rem] w-[1.4rem] shrink-0 place-items-center rounded-[7px] bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent_88%)] text-[var(--accent-strong)]"
-            >
-              <User className="h-[0.85rem] w-[0.85rem]" />
-            </span>
-          ) : (
-            <MarkSquare size="sm" tone={vault.blocked ? "muted" : "accent"}>
-              {teamMarkOf(vault.name)}
-            </MarkSquare>
-          )}
+          {/* 그룹 줄의 폴더 아이콘과 같은 색 규칙. 막힌 팀은 흐리게 — 무엇이 막혔는지는 오른쪽 경고가 말한다. */}
+          <VaultMark
+            kind={vault.kind}
+            className={
+              isActive
+                ? "text-[var(--accent-strong)]"
+                : vault.blocked
+                  ? "text-[var(--text-muted)]"
+                  : "text-[color-mix(in_srgb,var(--accent-strong)_64%,var(--text-muted)_36%)]"
+            }
+          />
           <span className="min-w-0 flex-1 truncate font-semibold text-[var(--text)]">
             {vault.name}
           </span>
-          {/* 개수 자리는 폭을 정해 둔다 — 줄에 올리면 같은 자리에 ⋯ 이 뜬다. 막힌 팀은 그 자리에 경고(툴팁). */}
+          {/* 개수 자리는 폭을 정해 둔다 — 줄에 올리거나 키보드로 오거나 메뉴가 열려 있으면 같은 자리에 ⋯ 이 뜬다. 마우스로
+              누른 뒤 남은 포커스로는 띄우지 않는다(그 줄만 개수가 사라져 보인다). 막힌 팀은 그 자리에 경고(툴팁). */}
           {blockedLabel ? (
             <Tooltip label={blockedLabel} multiline className="shrink-0">
               <span
@@ -1012,7 +1023,12 @@ function VaultSection({
           ) : hb.dropIntent === "copy" && hb.vaultDragTargetId === vault.id ? (
             <CopyDropChip />
           ) : (
-            <span className="w-[1.4rem] shrink-0 text-right text-[0.7rem] font-semibold text-[var(--text-muted)] transition-opacity duration-140 group-focus-within/vault:opacity-0 group-hover/vault:opacity-0">
+            <span
+              className={cn(
+                "w-[1.4rem] shrink-0 text-right text-[0.7rem] font-semibold text-[var(--text-muted)] transition-opacity duration-140 group-has-[:focus-visible]/vault:opacity-0 group-hover/vault:opacity-0",
+                menuOpen && "opacity-0",
+              )}
+            >
               {tree.assetCount}
             </span>
           )}
@@ -1024,7 +1040,11 @@ function VaultSection({
             aria-label={menuLabel}
             title={menuLabel}
             aria-haspopup="menu"
-            className="absolute right-[0.55rem] top-1/2 inline-grid h-[1.4rem] w-[1.4rem] -translate-y-1/2 place-items-center rounded-[7px] text-[var(--text-soft)] opacity-0 transition-[opacity,background-color,color] duration-140 hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] hover:text-[var(--text)] focus-visible:opacity-100 group-focus-within/vault:opacity-100 group-hover/vault:opacity-100"
+            aria-expanded={menuOpen}
+            className={cn(
+              "absolute right-[0.55rem] top-1/2 inline-grid h-[1.4rem] w-[1.4rem] -translate-y-1/2 place-items-center rounded-[7px] text-[var(--text-soft)] opacity-0 transition-[opacity,background-color,color] duration-140 hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] hover:text-[var(--text)] focus-visible:opacity-100 group-has-[:focus-visible]/vault:opacity-100 group-hover/vault:opacity-100",
+              menuOpen && "opacity-100",
+            )}
             onClick={(event) => {
               event.stopPropagation();
               const bounds = event.currentTarget.getBoundingClientRect();

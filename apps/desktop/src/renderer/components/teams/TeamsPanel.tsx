@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { Fragment, useEffect, useEffectEvent, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TeamInvite, TeamMember, TeamRole } from '@shared';
 import { useAppStore } from '../../store/appStore';
@@ -7,11 +7,6 @@ import { cn } from '../../lib/cn';
 import {
   Badge,
   Button,
-  Card,
-  CardActions,
-  CardMain,
-  CardMeta,
-  CardTitleRow,
   EmptyState,
   IconButton,
   InfoHint,
@@ -22,22 +17,30 @@ import {
   SplitButtonMenuItem,
   Tooltip,
 } from '../../ui';
-import { Crown, Link, LogIn, LogOut, MoreVertical, Pencil, Plus, Trash2, UserMinus } from '../../ui/icons';
+import { Check, Copy, Crown, Link, LogIn, LogOut, MoreVertical, Pencil, Plus, Trash2, UserMinus } from '../../ui/icons';
+import { copyText } from './copy-text';
 import { InviteLinkDialog } from './InviteLinkDialog';
 import { DeleteTeamDialog, LeaveTeamDialog } from './TeamExitDialogs';
 import { JoinWithLinkDialog, MakeOwnerDialog, RemoveMemberDialog, TeamNameDialog } from './TeamFormDialogs';
-import { MarkSquare, TeamMark } from './TeamMark';
-import { formatExactTime, formatRelativeTime, isCurrentMember, memberMarkOf, shortNameOf } from './team-format';
+import { formatExactTime, formatRelativeTime, isCurrentMember, shortNameOf } from './team-format';
 
-// AWS Profiles 탭과 같은 두 칸 — 왼쪽 목록 판·오른쪽 상세 판, 목록 항목의 고른·안 고른 모양.
+// AWS Profiles 탭과 같은 두 칸 — 왼쪽 목록 판·오른쪽 상세 판.
 const PANEL_CLASS =
   'grid content-start gap-3 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.3rem] shadow-[var(--shadow-soft)]';
+// 목록 항목은 팀 이름과 호스트 수 두 줄이다. 역할은 오른쪽 팀 이름 옆에만 둔다.
 const LIST_ITEM_CLASS =
-  'grid gap-3 rounded-[12px] border px-4 py-4 text-left transition-[border-color,background-color,box-shadow] duration-150';
+  'flex min-w-0 items-center gap-2.5 rounded-[10px] border px-3 py-2.5 text-left transition-[border-color,background-color] duration-150';
 const LIST_ITEM_SELECTED_CLASS =
-  'border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] bg-[color-mix(in_srgb,var(--accent-strong)_12%,var(--surface))] shadow-[0_14px_28px_rgba(16,26,42,0.08)]';
+  'border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[var(--selection-tint)]';
 const LIST_ITEM_IDLE_CLASS =
-  'border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_84%,transparent_16%)]';
+  'border-transparent hover:bg-[color-mix(in_srgb,var(--surface-muted)_84%,transparent_16%)]';
+// 초대 링크·멤버 목록 — 테두리 하나 안의 줄들. 줄마다 카드를 두면 몇 줄 안 되는데도 덩어리만 보였다.
+const ROWS_CLASS =
+  'm-0 grid list-none divide-y divide-[var(--border)] rounded-[10px] border border-[var(--border)] p-0';
+const ROW_CLASS = 'flex min-w-0 items-center gap-3 px-3.5 py-2.5';
+const ROWS_LABEL_CLASS = 'text-[0.8rem] font-medium text-[var(--text-soft)]';
+// 이름 옆에 붙는 작은 칩. 기본 Badge(상태 표시용)는 글줄보다 높아 이름 옆에서 튀었다.
+const ROLE_BADGE_CLASS = 'min-h-0 px-[0.45rem] py-0 text-[0.7rem] font-medium leading-[1.15rem]';
 
 /** 열린 창. 팀에 대한 창은 연 순간의 팀을 붙잡는다 — 그 사이 팀이 사라져 다른 팀을 건드리지 않게. */
 type TeamsDialog =
@@ -88,10 +91,12 @@ interface MenuAction {
   label: string;
   icon: ReactNode;
   danger?: boolean;
+  /** 앞 항목들과 줄로 나눈다(지우기처럼 되돌릴 수 없는 것). */
+  separatorBefore?: boolean;
   onSelect: () => void;
 }
 
-/** ⋯ 단추와 그 메뉴. 팀 메뉴(이름 변경)와 멤버 줄 메뉴(소유자로 지정·제거)가 같이 쓴다. */
+/** ⋯ 단추와 그 메뉴. 팀 메뉴(이름 변경·나가기·삭제)와 멤버 줄 메뉴(소유자로 지정·제거)가 같이 쓴다. */
 function ActionsMenu({ label, size, actions }: { label: string; size: 'sm' | 'md'; actions: MenuAction[] }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -111,18 +116,20 @@ function ActionsMenu({ label, size, actions }: { label: string; size: 'sm' | 'md
       {open ? (
         <SplitButtonMenu role="menu" aria-label={label} className="min-w-[11rem]">
           {actions.map((action) => (
-            <SplitButtonMenuItem
-              key={action.key}
-              role="menuitem"
-              className={action.danger ? 'text-[var(--danger-text)]' : undefined}
-              onClick={() => {
-                setOpen(false);
-                action.onSelect();
-              }}
-            >
-              {action.icon}
-              {action.label}
-            </SplitButtonMenuItem>
+            <Fragment key={action.key}>
+              {action.separatorBefore ? <div role="separator" className="my-1 h-px bg-[var(--border)]" /> : null}
+              <SplitButtonMenuItem
+                role="menuitem"
+                className={action.danger ? 'text-[var(--danger-text)]' : undefined}
+                onClick={() => {
+                  setOpen(false);
+                  action.onSelect();
+                }}
+              >
+                {action.icon}
+                {action.label}
+              </SplitButtonMenuItem>
+            </Fragment>
           ))}
         </SplitButtonMenu>
       ) : null}
@@ -138,13 +145,67 @@ function RelativeTime({ iso }: { iso: string }) {
   );
 }
 
+/** 링크 줄의 `링크 복사`. 복사하면 잠깐 `복사됨` 으로 바뀐다. */
+function CopyLinkButton({ link, onResult }: { link: string; onResult: (copied: boolean) => void }) {
+  const { t: translate } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 사라진 뒤에 타이머가 상태를 바꾸지 않게.
+  useEffect(
+    () => () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    },
+    [],
+  );
+  return (
+    <Button
+      variant="secondary"
+      size="sm"
+      className="shrink-0"
+      onClick={() =>
+        void copyText(link).then((done) => {
+          onResult(done);
+          if (!done) {
+            return;
+          }
+          setCopied(true);
+          if (timerRef.current) {
+            clearTimeout(timerRef.current);
+          }
+          timerRef.current = setTimeout(() => setCopied(false), 1200);
+        })
+      }
+    >
+      {/* 두 모양을 겹쳐 두고 하나만 보인다 — 단추 너비가 바뀌어 옆 단추가 흔들리지 않게. */}
+      <span className="grid justify-items-center">
+        <span
+          aria-hidden={copied}
+          className={cn('col-start-1 row-start-1 inline-flex items-center gap-2', copied && 'invisible')}
+        >
+          <Copy className="h-4 w-4" aria-hidden="true" />
+          {translate('teamsPanel.invites.copy')}
+        </span>
+        <span
+          aria-hidden={!copied}
+          className={cn('col-start-1 row-start-1 inline-flex items-center gap-2', !copied && 'invisible')}
+        >
+          <Check className="h-4 w-4 text-[var(--success-text)]" aria-hidden="true" />
+          {translate('teamsPanel.invites.copied')}
+        </span>
+      </span>
+    </Button>
+  );
+}
+
 function RoleBadge({ role, className }: { role: TeamRole; className?: string }) {
   return role === 'owner' ? (
-    <Badge tone="starting" className={className}>
+    <Badge tone="starting" className={cn(ROLE_BADGE_CLASS, className)}>
       Owner
     </Badge>
   ) : (
-    <Badge className={className}>Member</Badge>
+    <Badge className={cn(ROLE_BADGE_CLASS, className)}>Member</Badge>
   );
 }
 
@@ -445,24 +506,55 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
   const isOwner = team.role === 'owner';
   const shownRoster = rosterFor(team.id);
   const activeInvites = shownRoster?.invites.filter((invite) => invite.active) ?? [];
-  const creator = shownRoster?.members.find((member) => member.addedBy === member.userId) ?? null;
   const summary = [
     shownRoster ? translate('teamsPanel.memberCount', { count: shownRoster.members.length }) : null,
-    creator ? translate('teamsPanel.createdWhen', { when: formatRelativeTime(creator.addedAt) }) : null,
+    translate('teamsPanel.hostCount', { count: hostCountOf(team.id) }),
   ]
     .filter(Boolean)
     .join(' · ');
+  // 나가기·지우기는 늘 보이는 단추 대신 팀 메뉴에 둔다. 무엇이 사라지는지는 그 확인 창이 수와 함께 알린다.
+  const teamActions: MenuAction[] = [
+    ...(isOwner
+      ? [
+          {
+            key: 'rename',
+            label: translate('common.rename'),
+            icon: <Pencil className="h-4 w-4 text-[var(--text-soft)]" aria-hidden="true" />,
+            onSelect: () => setDialog({ kind: 'rename', teamId: team.id, teamName: team.name }),
+          },
+        ]
+      : []),
+    {
+      key: 'leave',
+      label: translate('teamsPanel.danger.leave'),
+      icon: <LogOut className="h-4 w-4 text-[var(--text-soft)]" aria-hidden="true" />,
+      onSelect: () => setDialog({ kind: 'leave', teamId: team.id, teamName: team.name }),
+    },
+    ...(isOwner
+      ? [
+          {
+            key: 'delete',
+            label: translate('teamsPanel.danger.delete'),
+            icon: <Trash2 className="h-4 w-4" aria-hidden="true" />,
+            danger: true,
+            separatorBefore: true,
+            onSelect: () => setDialog({ kind: 'delete', teamId: team.id, teamName: team.name }),
+          },
+        ]
+      : []),
+  ];
 
   return (
     <div className="grid gap-5">
       {header}
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
-        <section className={PANEL_CLASS}>
-          <div className="flex items-center justify-between gap-3">
-            <strong>Teams</strong>
-            <Badge tone="neutral">{teams.length}</Badge>
+      {/* 목록 판은 제 내용만큼만 — 오른쪽 높이에 맞춰 늘면 빈 판이 크게 남는다. */}
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+        <section className={cn(PANEL_CLASS, 'gap-2 p-2.5')}>
+          <div className="flex items-center justify-between gap-3 px-1.5 pt-1 text-[0.8rem] text-[var(--text-soft)]">
+            <span>{translate('teamsPanel.listTitle')}</span>
+            <span>{teams.length}</span>
           </div>
-          <div className="grid content-start gap-3">
+          <div className="grid content-start gap-1">
             {teams.map((candidate) => {
               const selected = candidate.id === team.id;
               return (
@@ -473,17 +565,13 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
                   className={cn(LIST_ITEM_CLASS, selected ? LIST_ITEM_SELECTED_CLASS : LIST_ITEM_IDLE_CLASS)}
                   onClick={() => selectTeamInPanel(candidate.id)}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="flex min-w-0 items-center gap-2.5">
-                      <TeamMark name={candidate.name} size="md" />
-                      <strong className="min-w-0 break-all text-[1rem] leading-[1.35] text-[var(--text)]">
-                        {candidate.name}
-                      </strong>
+                  <span className="grid min-w-0 gap-0.5">
+                    <strong className="min-w-0 break-all text-[0.95rem] leading-[1.3] text-[var(--text)]">
+                      {candidate.name}
+                    </strong>
+                    <span className="text-[0.8rem] text-[var(--text-soft)]">
+                      {translate('teamsPanel.hostCount', { count: hostCountOf(candidate.id) })}
                     </span>
-                    <RoleBadge role={candidate.role} className="shrink-0" />
-                  </div>
-                  <span className="text-[0.82rem] text-[var(--text-soft)]">
-                    {translate('teamsPanel.hostCount', { count: hostCountOf(candidate.id) })}
                   </span>
                 </button>
               );
@@ -494,13 +582,12 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
         <section className={cn(PANEL_CLASS, 'gap-[1.1rem]')}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex min-w-0 items-center gap-3.5">
-              <TeamMark name={team.name} size="lg" />
               <div className="grid min-w-0 gap-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h4 className="m-0 break-all text-[1.15rem]">{team.name}</h4>
                   <RoleBadge role={team.role} />
                 </div>
-                {summary ? <p className="m-0 text-[0.9rem] text-[var(--text-soft)]">{summary}</p> : null}
+                <p className="m-0 text-[0.85rem] text-[var(--text-soft)]">{summary}</p>
               </div>
             </div>
             <div className="flex flex-wrap gap-3">
@@ -511,20 +598,7 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
                 <Link className="h-4 w-4" aria-hidden="true" />
                 {translate('teamsPanel.inviteLink')}
               </Button>
-              {isOwner ? (
-                <ActionsMenu
-                  label={translate('teamsPanel.teamActions')}
-                  size="md"
-                  actions={[
-                    {
-                      key: 'rename',
-                      label: translate('common.rename'),
-                      icon: <Pencil className="h-4 w-4 text-[var(--text-soft)]" aria-hidden="true" />,
-                      onSelect: () => setDialog({ kind: 'rename', teamId: team.id, teamName: team.name }),
-                    },
-                  ]}
-                />
-              ) : null}
+              <ActionsMenu label={translate('teamsPanel.teamActions')} size="md" actions={teamActions} />
             </div>
           </div>
 
@@ -543,39 +617,39 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
           ) : null}
 
           {activeInvites.length > 0 ? (
-            <div className="grid gap-3">
-              <SectionLabel className="mb-0">Invite links</SectionLabel>
-              {activeInvites.map((invite) => (
-                <Card key={invite.code} tone="muted">
-                  <div className="flex min-w-0 flex-1 items-center gap-3">
-                    <MarkSquare size="md">
-                      <Link />
-                    </MarkSquare>
-                    <CardMain>
-                      <CardTitleRow>
-                        <strong>
-                          {translate('teamsPanel.invites.title', {
-                            name: invite.createdByEmail ? shortNameOf(invite.createdByEmail) : '—',
-                          })}
-                        </strong>
+            <div className="grid gap-2">
+              <span className={ROWS_LABEL_CLASS}>{translate('teamsPanel.invites.label')}</span>
+              <ul aria-label={translate('teamsPanel.invites.label')} className={ROWS_CLASS}>
+                {activeInvites.map((invite) => (
+                  <li key={invite.code} className={ROW_CLASS}>
+                    <Link className="h-4 w-4 shrink-0 text-[var(--text-soft)]" aria-hidden="true" />
+                    <div className="grid min-w-0 flex-1 gap-0.5">
+                      <span className="text-[0.9rem] text-[var(--text)]">
+                        {translate('teamsPanel.invites.title', {
+                          name: invite.createdByEmail ? shortNameOf(invite.createdByEmail) : '—',
+                        })}
+                      </span>
+                      <span className="flex flex-wrap gap-x-1.5 text-[0.8rem] text-[var(--text-soft)]">
                         <Tooltip label={formatExactTime(invite.expiresAt)}>
-                          <Badge>
+                          <span>
                             {translate('teamsPanel.invites.expires', { when: formatRelativeTime(invite.expiresAt) })}
-                          </Badge>
+                          </span>
                         </Tooltip>
-                      </CardTitleRow>
-                      <CardMeta>
+                        <span aria-hidden="true">·</span>
                         <span>{translate('teamsPanel.invites.joined', { count: invite.useCount })}</span>
-                        <span>
-                          {translate('teamsPanel.invites.created', { when: formatRelativeTime(invite.createdAt) })}
-                        </span>
-                      </CardMeta>
-                    </CardMain>
-                  </div>
-                  <CardActions>
+                      </span>
+                    </div>
+                    {/* 이 기능 전에 만든 링크는 비밀값이 서버에 없어 다시 복사할 수 없다 — 단추를 두지 않는다. */}
+                    {invite.link ? (
+                      <CopyLinkButton
+                        link={invite.link}
+                        onResult={(copied) => setActionError(copied ? null : translate('teamsPanel.invites.copyFailed'))}
+                      />
+                    ) : null}
                     <Button
                       variant="secondary"
                       size="sm"
+                      className="shrink-0"
                       onClick={() =>
                         void runAction(async () => {
                           await revokeTeamInvite(team.id, invite.code);
@@ -585,9 +659,9 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
                     >
                       {translate('teamsPanel.invites.revoke')}
                     </Button>
-                  </CardActions>
-                </Card>
-              ))}
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
 
@@ -598,95 +672,76 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
           ) : null}
 
           {shownRoster ? (
-            <div className="grid gap-3">
-              <SectionLabel className="mb-0">Members</SectionLabel>
-              {shownRoster.members.map((member) => {
-                const me = isMe(member);
-                return (
-                  <Card key={member.userId} tone="muted">
-                    <div className="flex min-w-0 flex-1 items-center gap-3">
-                      <MarkSquare tone="muted">{memberMarkOf(member.email)}</MarkSquare>
-                      <CardMain>
-                        <CardTitleRow>
-                          <strong className="min-w-0 break-all">{member.email}</strong>
-                          {member.role === 'owner' ? <Badge tone="starting">Owner</Badge> : null}
+            <div className="grid gap-2">
+              <span className={ROWS_LABEL_CLASS}>{translate('teamsPanel.members.label')}</span>
+              <ul aria-label={translate('teamsPanel.members.label')} className={ROWS_CLASS}>
+                {shownRoster.members.map((member) => {
+                  const me = isMe(member);
+                  return (
+                    <li key={member.userId} className={ROW_CLASS}>
+                      <div className="grid min-w-0 flex-1 gap-0.5">
+                        <span className="flex min-w-0 items-baseline gap-1.5">
+                          <span className="min-w-0 break-all text-[0.9rem] text-[var(--text)]">{member.email}</span>
                           {me ? (
-                            <span className="text-[0.85rem] text-[var(--text-soft)]">
+                            <span className="shrink-0 text-[0.78rem] text-[var(--text-soft)]">
                               {translate('teamsPanel.members.you')}
                             </span>
                           ) : null}
-                        </CardTitleRow>
-                        <CardMeta>
-                          {member.addedBy === member.userId ? (
-                            <span>{translate('teamsPanel.members.createdTeam')}</span>
-                          ) : member.addedByEmail ? (
-                            <Tooltip label={member.addedByEmail}>
-                              <span>
-                                {translate('teamsPanel.members.joinedVia', {
-                                  name: shortNameOf(member.addedByEmail),
-                                })}
-                              </span>
-                            </Tooltip>
-                          ) : (
-                            <span>—</span>
-                          )}
-                          <RelativeTime iso={member.addedAt} />
-                        </CardMeta>
-                      </CardMain>
-                    </div>
-                    {isOwner && !me ? (
-                      <CardActions>
-                        <ActionsMenu
-                          label={translate('teamsPanel.members.actions')}
-                          size="sm"
-                          actions={[
-                            {
-                              key: 'make-owner',
-                              label: translate('teamsPanel.members.makeOwner'),
-                              icon: <Crown className="h-4 w-4 text-[var(--text-soft)]" aria-hidden="true" />,
-                              onSelect: () => setDialog({ kind: 'make-owner', teamId: team.id, member }),
-                            },
-                            {
-                              key: 'remove',
-                              label: translate('teamsPanel.members.remove'),
-                              icon: <UserMinus className="h-4 w-4" aria-hidden="true" />,
-                              danger: true,
-                              onSelect: () =>
-                                setDialog({ kind: 'remove-member', teamId: team.id, teamName: team.name, member }),
-                            },
-                          ]}
-                        />
-                      </CardActions>
-                    ) : null}
-                  </Card>
-                );
-              })}
+                        </span>
+                        {/* 누구의 링크로 언제 들어왔는지 — 알림이 없어서 링크가 샌 것을 여기서 알아챈다. 만든 사람은
+                            들어온 길이 없으니 비운다. */}
+                        {member.addedBy === member.userId ? null : (
+                          <span className="flex flex-wrap gap-x-1.5 text-[0.8rem] text-[var(--text-soft)]">
+                            {member.addedByEmail ? (
+                              <>
+                                <Tooltip label={member.addedByEmail}>
+                                  <span>
+                                    {translate('teamsPanel.members.joinedVia', {
+                                      name: shortNameOf(member.addedByEmail),
+                                    })}
+                                  </span>
+                                </Tooltip>
+                                <span aria-hidden="true">·</span>
+                              </>
+                            ) : null}
+                            <RelativeTime iso={member.addedAt} />
+                          </span>
+                        )}
+                      </div>
+                      <RoleBadge role={member.role} className="shrink-0" />
+                      {isOwner ? (
+                        me ? (
+                          // 다른 줄의 ⋯ 자리를 비워 역할 칩이 한 줄로 선다.
+                          <span className="w-8 shrink-0" aria-hidden="true" />
+                        ) : (
+                          <ActionsMenu
+                            label={translate('teamsPanel.members.actions')}
+                            size="sm"
+                            actions={[
+                              {
+                                key: 'make-owner',
+                                label: translate('teamsPanel.members.makeOwner'),
+                                icon: <Crown className="h-4 w-4 text-[var(--text-soft)]" aria-hidden="true" />,
+                                onSelect: () => setDialog({ kind: 'make-owner', teamId: team.id, member }),
+                              },
+                              {
+                                key: 'remove',
+                                label: translate('teamsPanel.members.remove'),
+                                icon: <UserMinus className="h-4 w-4" aria-hidden="true" />,
+                                danger: true,
+                                onSelect: () =>
+                                  setDialog({ kind: 'remove-member', teamId: team.id, teamName: team.name, member }),
+                              },
+                            ]}
+                          />
+                        )
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           ) : null}
-
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
-            <span className="text-[0.85rem] text-[var(--text-soft)]">{translate('teamsPanel.danger.description')}</span>
-            <div className="flex flex-wrap gap-[0.55rem]">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setDialog({ kind: 'leave', teamId: team.id, teamName: team.name })}
-              >
-                <LogOut className="h-4 w-4" aria-hidden="true" />
-                {translate('teamsPanel.danger.leave')}
-              </Button>
-              {isOwner ? (
-                <Button
-                  variant="danger"
-                  size="sm"
-                  onClick={() => setDialog({ kind: 'delete', teamId: team.id, teamName: team.name })}
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden="true" />
-                  {translate('teamsPanel.danger.delete')}
-                </Button>
-              ) : null}
-            </div>
-          </div>
         </section>
       </div>
       {dialogView}

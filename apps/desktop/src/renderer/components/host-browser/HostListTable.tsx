@@ -486,7 +486,7 @@ function HostListTableRow({
         {address ?? "—"}
       </span>
 
-      {/* 그룹 — 볼트가 섞인 목록이면 팀 것에 머리글자 네모(팀 이름은 툴팁) */}
+      {/* 그룹 — 볼트가 섞인 목록이면 팀 것에 팀 표시(팀 이름은 툴팁) */}
       <TableLocation
         team={hb.showsTeamMarks ? hb.teamOfAsset(`host:${host.id}`) : null}
         label={group ? group.split("/").join(" / ") : "Ungrouped"}

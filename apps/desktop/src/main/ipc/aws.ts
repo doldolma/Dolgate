@@ -60,7 +60,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
     );
   };
 
-  // 설정 화면이 볼트를 골라 본다. 팀 프로필은 이름·id 만 — 정적 프로필의 키는 늘 각자 내 칸에 있다.
+  // 설정 화면이 볼트를 골라 본다. 팀 프로필은 이름·id 만 — 정적 프로필의 키는 이 기기에만 있다.
   ipcMain.handle(ipcChannels.aws.listProfiles, async (_event, vaultId?: string | null) => {
     const vault = resolveListedVault(ctx.vaults, vaultId);
     if (vault === "personal") {

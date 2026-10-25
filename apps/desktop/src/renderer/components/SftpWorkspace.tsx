@@ -84,8 +84,8 @@ import { ConnectionHopSteps } from "./ConnectionHopSteps";
 import { ConnectionStatusOverlay } from "./ConnectionStatusOverlay";
 import { useAppStore } from "../store/appStore";
 import { resolveConnectionStages } from "./terminal-workspace/connectionStages";
-import { ArrowLeft, ArrowRight, ArrowUp, Folder, User } from "../ui/icons";
-import { TeamMark } from "./teams/TeamMark";
+import { ArrowLeft, ArrowRight, ArrowUp, Folder } from "../ui/icons";
+import { VaultMark } from "./teams/VaultMark";
 import type { BrowserVault } from "./host-browser/browserVaults";
 import { withMyUsername } from "./host-browser/hostDisplay";
 import { CardLocation } from "./host-browser/AssetLocation";
@@ -2328,22 +2328,9 @@ function HostPicker({
                 <HostCard
                   key={vault.id}
                   data-vault-card={vault.id}
-                  badge={
-                    vault.kind === "team" ? (
-                      <TeamMark
-                        name={vault.name}
-                        size="lg"
-                        className="h-[2.3rem] w-[2.3rem] rounded-[10px]"
-                      />
-                    ) : (
-                      <span
-                        aria-hidden="true"
-                        className="inline-grid h-[2.3rem] w-[2.3rem] shrink-0 place-items-center rounded-[10px] bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent_88%)] text-[var(--accent-strong)]"
-                      >
-                        <User className="h-[1.05rem] w-[1.05rem]" />
-                      </span>
-                    )
-                  }
+                  // 그룹 카드의 폴더처럼 카드 칸에 선 아이콘을 넣는다.
+                  badgeLabel={<VaultMark kind={vault.kind} />}
+                  badgeMarker="vault"
                   title={vault.name}
                   subtitle={`${hostCount} hosts`}
                   groupLabel={vault.kind === "team" ? "Team" : "Vault"}
@@ -2464,7 +2451,7 @@ function HostPicker({
                     title={host.label}
                     subtitle={getHostSubtitle(withMyUsername(host, myUsernameByHostId), hostSubtitleLabels())}
                     groupLabel={
-                      // 맨 위는 볼트가 섞인 목록이다 — 팀 것은 "[머리글자] 팀 이름 / 그룹"(홈 카드와 같은 문법).
+                      // 맨 위는 볼트가 섞인 목록이다 — 팀 것은 "[팀 표시] 팀 이름 / 그룹"(홈 카드와 같은 문법).
                       atVaultTop ? (
                         <CardLocation
                           team={

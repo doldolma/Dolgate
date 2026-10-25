@@ -33,6 +33,8 @@ const (
 	teamWrappedKeyMaxBytes  = 4096
 	teamInviteBoxMaxBytes   = 8192
 	teamInviteTokenMaxBytes = 512
+	// teamInviteSealedSecretMaxBytes 는 팀 키로 잠근 링크 비밀값(32B + 형식, 실제 120자쯤)의 상한이다.
+	teamInviteSealedSecretMaxBytes = 1024
 	// teamInviteMaxLifetime 은 링크 기한으로 고를 수 있는 가장 긴 값(30일)에 시계 차이를 조금 더한 것이다.
 	teamInviteMaxLifetime = 30*24*time.Hour + 5*time.Minute
 )
@@ -263,7 +265,9 @@ func registerTeamRoutes(
 	team.POST("/invites", func(ctx *gin.Context) {
 		teamID := ctx.Param("teamId")
 		var request struct {
-			InviteBox     string `json:"inviteBox"`
+			InviteBox string `json:"inviteBox"`
+			// SealedSecret 은 링크 비밀값을 팀 키로 잠근 것이다 — 멤버가 링크를 다시 복사할 때 쓴다. 없어도 된다.
+			SealedSecret  string `json:"sealedSecret"`
 			JoinTokenHash string `json:"joinTokenHash"`
 			ExpiresAt     string `json:"expiresAt"`
 		}
@@ -275,6 +279,7 @@ func registerTeamRoutes(
 		now := time.Now().UTC()
 		if err != nil || !expiresAt.After(now) || expiresAt.Sub(now) > teamInviteMaxLifetime ||
 			!validOpaque(request.InviteBox, teamInviteBoxMaxBytes) ||
+			len(request.SealedSecret) > teamInviteSealedSecretMaxBytes ||
 			!teamJoinTokenHashPattern.MatchString(request.JoinTokenHash) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "잘못된 요청입니다."})
 			return
@@ -283,6 +288,7 @@ func registerTeamRoutes(
 			TeamID:        teamID,
 			CreatedBy:     ctx.GetString("userId"),
 			InviteBox:     request.InviteBox,
+			SealedSecret:  request.SealedSecret,
 			JoinTokenHash: request.JoinTokenHash,
 			ExpiresAt:     expiresAt,
 		})
@@ -561,6 +567,9 @@ func teamInviteJSON(invite storepkg.TeamInvite) gin.H {
 	}
 	if invite.RevokedAt != nil {
 		body["revokedAt"] = invite.RevokedAt.UTC().Format(time.RFC3339)
+	}
+	if invite.SealedSecret != "" {
+		body["sealedSecret"] = invite.SealedSecret
 	}
 	return body
 }

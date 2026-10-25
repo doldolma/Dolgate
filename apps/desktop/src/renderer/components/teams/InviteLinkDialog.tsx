@@ -4,6 +4,7 @@ import type { TeamInviteCreated } from '@shared';
 import { cn } from '../../lib/cn';
 import { Button, Input, Tooltip } from '../../ui';
 import { Check, Copy, Info } from '../../ui/icons';
+import { copyText } from './copy-text';
 import { TeamDialogError, TeamDialogFrame } from './TeamDialogFrame';
 import { useDialogAction } from './useDialogAction';
 
@@ -25,15 +26,6 @@ const SEGMENT_CLASS =
 // FieldGroup 의 칸 이름과 같은 모양.
 const FIELD_LABEL_CLASS = 'text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]';
 
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 interface InviteLinkDialogProps {
   teamName: string;
   onCreate: (expiresInHours: number) => Promise<TeamInviteCreated>;
@@ -43,8 +35,8 @@ interface InviteLinkDialogProps {
 /**
  * 초대 링크 만들기 — 기한만 고르고, 만들면서 바로 복사한다.
  *
- * 링크의 # 뒤(비밀값)는 서버에도 이 기기에도 남지 않아서 이 창을 닫으면 다시 볼 수 없다. 그래서 만든 뒤에도
- * 링크를 창에 두고 `다시 복사` 를 준다.
+ * 만든 뒤에도 링크를 창에 두고 `다시 복사` 를 준다(첫 복사가 실패했을 때). 창을 닫은 뒤에는 링크 목록에서
+ * 다시 복사한다.
  */
 export function InviteLinkDialog({ teamName, onCreate, onClose }: InviteLinkDialogProps) {
   const { t: translate } = useTranslation();
@@ -100,8 +92,8 @@ export function InviteLinkDialog({ teamName, onCreate, onClose }: InviteLinkDial
           <div className="grid gap-[0.55rem]">
             <span className={cn(FIELD_LABEL_CLASS, 'flex items-center gap-1.5')}>
               Link
-              <Tooltip label={translate('teamsPanel.invite.onceHint')}>
-                <Info className="h-3.5 w-3.5" aria-label={translate('teamsPanel.invite.onceHint')} />
+              <Tooltip label={translate('teamsPanel.invite.recopyHint')}>
+                <Info className="h-3.5 w-3.5" aria-label={translate('teamsPanel.invite.recopyHint')} />
               </Tooltip>
             </span>
             <div className="flex items-center gap-2">

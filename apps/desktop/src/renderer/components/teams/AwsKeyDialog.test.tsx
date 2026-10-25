@@ -2,9 +2,9 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { appStore } from '../../store/appStore';
 import { createEmptyVaultIndex } from '../../store/utils';
-import { MyAwsKeyDialog } from './MyAwsKeyDialog';
+import { AwsKeyDialog } from './AwsKeyDialog';
 
-// 키 없는 팀 정적 AWS 프로필에 내 키를 넣는 창(M3). 리전은 팀 설정이라 보내지 않는다.
+// 이 기기에 키가 없는 팀 정적 AWS 프로필에 키를 넣는 창(M3). 리전은 팀 설정이라 보내지 않는다.
 
 const imports = vi.hoisted(() => ({ updateAwsProfile: vi.fn() }));
 vi.mock('../../services/desktop/imports', () => imports);
@@ -23,20 +23,20 @@ beforeEach(() => {
 
 function renderDialog() {
   const props = { onClose: vi.fn(), onSaved: vi.fn() };
-  render(<MyAwsKeyDialog missing={MISSING} {...props} />);
+  render(<AwsKeyDialog missing={MISSING} {...props} />);
   return { ...props, dialog: within(screen.getByRole('dialog')) };
 }
 
-describe('MyAwsKeyDialog', () => {
-  it('saves only my keys into the team profile, without touching its region', async () => {
+describe('AwsKeyDialog', () => {
+  it('saves only the keys into the team profile, without touching its region', async () => {
     imports.updateAwsProfile.mockResolvedValue(undefined);
     const { dialog, onSaved } = renderDialog();
 
-    expect(dialog.getByRole('heading')).toHaveTextContent('acme-prod · 내 키');
+    expect(dialog.getByRole('heading')).toHaveTextContent('acme-prod · 키');
     expect(dialog.getByRole('heading')).toHaveTextContent('Acme Infra');
     expect(dialog.getByRole('button', { name: '저장' })).toBeDisabled();
-    fireEvent.change(dialog.getByLabelText('My Access Key'), { target: { value: 'AKIAMINE' } });
-    fireEvent.change(dialog.getByLabelText('My Secret'), { target: { value: 'mine' } });
+    fireEvent.change(dialog.getByLabelText('Access Key'), { target: { value: 'AKIAMINE' } });
+    fireEvent.change(dialog.getByLabelText('Secret'), { target: { value: 'mine' } });
     fireEvent.click(dialog.getByRole('button', { name: '저장' }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
@@ -53,8 +53,8 @@ describe('MyAwsKeyDialog', () => {
     imports.updateAwsProfile.mockRejectedValue(new Error('The security token included in the request is invalid.'));
     const { dialog, onSaved, onClose } = renderDialog();
 
-    fireEvent.change(dialog.getByLabelText('My Access Key'), { target: { value: 'AKIAWRONG' } });
-    fireEvent.change(dialog.getByLabelText('My Secret'), { target: { value: 'wrong' } });
+    fireEvent.change(dialog.getByLabelText('Access Key'), { target: { value: 'AKIAWRONG' } });
+    fireEvent.change(dialog.getByLabelText('Secret'), { target: { value: 'wrong' } });
     fireEvent.click(dialog.getByRole('button', { name: '저장' }));
 
     expect(await dialog.findByRole('alert')).toHaveTextContent('The security token included in the request is invalid.');

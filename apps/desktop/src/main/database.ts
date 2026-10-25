@@ -1666,10 +1666,10 @@ export class TailnetRepository {
       // 않는 id 를 계속 가리켜 연결할 수 없으므로, 같은 저장 트랜잭션에서 일반 네트워크로
       // 되돌린다. updatedAt 도 움직여야 이 변경이 다른 기기로 동기화된다.
       this.root.data(state).hosts = this.root.data(state).hosts.map((host) => {
-        // SSH 와 RDP 가 같은 필드를 쓴다. 한쪽만 정리하면 그 종류만 없는 tailnet 을 가리킨 채
-        // 남아 연결할 수 없다.
+        // SSH·RDP·VNC 가 같은 필드를 쓴다. 하나라도 빠뜨리면 그 종류만 없는 tailnet 을 가리킨 채
+        // 남아 연결할 수 없다 — VNC 가 실제로 그렇게 빠져 있었다.
         if (
-          (!isSshHostRecord(host) && !isRdpHostRecord(host)) ||
+          (!isSshHostRecord(host) && !isRdpHostRecord(host) && !isVncHostRecord(host)) ||
           host.tailnetId?.trim() !== id
         ) {
           return host;

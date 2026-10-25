@@ -882,8 +882,7 @@
       "os": "운영체제",
       "portForward": "포워딩",
       "portForwardStarting": "{{count}}개 시작 중",
-      "team": "팀",
-      "teamRecorded": "{{team}} · 팀 기록·녹화에 남습니다"
+      "team": "팀"
     },
     "update": {
       "checking": "GitHub Releases에서 새 버전을 확인하고 있습니다.",
@@ -974,7 +973,7 @@
       "sameName": "새 프로필명이 기존 프로필명과 같습니다.",
       "linkedNotFoundNamed": "연결된 AWS 프로필 \"{{label}}\"을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.",
       "linkedNotFound": "연결된 AWS 프로필을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.",
-      "teamKeyMissing": "팀 프로필 \"{{profile}}\" 에 내 AWS 키가 없습니다. 키는 팀원마다 각자 넣습니다."
+      "teamKeyMissing": "팀 프로필 \"{{profile}}\" 에 이 기기의 AWS 키가 없습니다. 키는 동기화되지 않아 기기마다 넣습니다."
     },
     "role": {
       "assumeDenied": "선택한 source profile로 이 Role을 Assume할 수 없습니다. IAM 권한과 대상 role trust policy를 확인해 주세요.",
@@ -2062,7 +2061,6 @@
     "quickSsh": "저장하고 SSH 연결",
     "host": {
       "connect": "{{label}} 연결",
-      "containers": "{{label}} 컨테이너",
       "recent": "최근 접속"
     },
     "group": {
@@ -2925,6 +2923,7 @@
       "copy": "복사",
       "root": "맨 위",
       "hostCount": "호스트 {{count}}개",
+      "groupCount": "그룹 {{count}}개",
       "vault": "Vault",
       "group": "Group",
       "shareSecrets": "비밀번호·SSH 키 {{count}}개도 함께 공유",
@@ -2967,13 +2966,10 @@
     "vault": {
       "addTo": "{{vault}}에 {{action}}"
     },
-    "myKey": {
-      "aboutToggle": "내 키 설명",
-      "awsHint": "나에게만 저장됩니다. 팀원은 각자 자기 키를 넣고, 팀에는 프로필 설정만 갑니다.",
-      "tailnetHint": "나에게만 저장됩니다. 팀원은 각자 자기 auth key 를 넣습니다.",
-      "add": "내 키 넣기",
-      "dialogTitle": "{{profile}} · 내 키",
-      "saveFailed": "내 키를 저장하지 못했습니다."
+    "awsKey": {
+      "add": "키 넣기",
+      "dialogTitle": "{{profile}} · 키",
+      "saveFailed": "키를 저장하지 못했습니다."
     }
   },
   "teamsPanel": {
@@ -2992,29 +2988,30 @@
       "error": "동기화하지 못했습니다: {{message}}"
     },
     "invites": {
+      "copy": "링크 복사",
+      "copied": "복사됨",
+      "copyFailed": "링크를 복사하지 못했습니다.",
       "revoke": "링크 취소",
       "title": "{{name}} 의 링크",
       "expires": "{{when}} 만료",
       "joined": "{{count}}명 참여",
-      "created": "{{when}} 만듦"
+      "label": "초대 링크"
     },
     "members": {
-      "you": "(나)",
-      "createdTeam": "팀을 만듦",
+      "you": "나",
       "actions": "멤버 메뉴",
       "makeOwner": "소유자로 지정",
       "remove": "제거",
       "loadFailed": "멤버 목록을 읽지 못했습니다.",
-      "joinedVia": "{{name}} 의 링크로 참여"
+      "joinedVia": "{{name}} 의 링크로 참여",
+      "label": "멤버"
     },
     "danger": {
-      "description": "나가면 이 기기에서 팀의 호스트·비밀번호·키가 사라집니다.",
       "leave": "팀 나가기",
       "delete": "팀 삭제"
     },
     "nameDialog": {
-      "create": "만들기",
-      "placeholder": "예: 인프라팀"
+      "create": "만들기"
     },
     "joinDialog": {
       "next": "다음"
@@ -3025,7 +3022,7 @@
       "copied": "링크를 복사했습니다 — {{duration}} 동안 열립니다.",
       "copyFailed": "복사하지 못했습니다. 아래 링크를 직접 복사하세요.",
       "copyAgain": "다시 복사",
-      "onceHint": "이 링크는 지금만 볼 수 있습니다. 잃으면 새로 만드세요.",
+      "recopyHint": "링크가 살아 있는 동안 초대 링크 목록에서 다시 복사할 수 있습니다.",
       "duration": {
         "hour1": "1시간",
         "day1": "1일",
@@ -3097,11 +3094,11 @@
       "label": "팀 볼트에 넣으면",
       "edit": "팀에 넣은 것은 팀원 모두가 보고 고칠 수 있습니다.",
       "members": "링크로 들어온 사람은 누구의 링크로 언제 들어왔는지 멤버 목록에 남습니다.",
-      "ownKeys": "AWS 정적 키와 Tailscale auth key 는 늘 각자의 것을 씁니다."
+      "ownKeys": "AWS 정적 키와 Tailscale auth key 는 동기화되지 않아 기기마다 따로 넣습니다. 내 것을 공유하면 공유한 기기에는 채워 둡니다."
     },
     "hostCount": "호스트 {{count}}개",
-    "createdWhen": "{{when}} 만듦",
-    "teamActions": "팀 메뉴"
+    "teamActions": "팀 메뉴",
+    "listTitle": "팀"
   },
   "shareChat": {
     "titleWith": "채팅 기록 · {{title}}",
@@ -3966,6 +3963,8 @@
       "node": "이 기기"
     },
     "connect": "연결",
+    "edit": "편집",
+    "connectedWhileEditing": "편집하는 사이 이 네트워크가 연결돼 저장하지 않았습니다. 취소한 뒤 연결을 종료하고 다시 고쳐 주세요.",
     "tailnetMismatch": "이 설정은 {{expected}} 용인데 {{actual}} 에 연결됐습니다. 다른 계정으로 로그인한 것 같습니다 — 이 tailnet 에 같은 이름의 다른 기기가 있으면 엉뚱한 곳에 연결될 수 있습니다.",
     "stopTest": "테스트 중단",
     "removed": {
@@ -4073,7 +4072,8 @@
     "workspaceDetail": "이 Workspace 를 표시할 수 없습니다 — {{label}}"
   },
   "hostDrawer": {
-    "kindNeedsServerUpdate": "동기화 서버가 {{kind}} 호스트를 지원하지 않습니다. 서버를 업데이트하면 열립니다."
+    "kindNeedsServerUpdate": "동기화 서버가 {{kind}} 호스트를 지원하지 않습니다. 서버를 업데이트하면 열립니다.",
+    "vault": "Vault"
   },
   "vnc": {
     "clipboardLossy": "이 서버는 ASCII 클립보드만 지원합니다 — 담을 수 없는 글자 {{count}}개가 ? 로 바뀌었습니다",

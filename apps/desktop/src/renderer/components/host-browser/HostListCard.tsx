@@ -34,7 +34,7 @@ interface HostListCardProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
   lastUsedAt?: number;
   /** Opens the host action menu at the given viewport coords (the ⋮ button). */
   onOpenMenu?: (coords: { x: number; y: number }) => void;
-  /** 볼트가 섞인 목록에서 이 호스트가 든 팀. 아래 줄에 "[머리글자] 팀 이름 / 그룹" 으로 보인다. */
+  /** 볼트가 섞인 목록에서 이 호스트가 든 팀. 아래 줄에 "[팀 표시] 팀 이름 / 그룹" 으로 보인다. */
   team?: AssetTeam | null;
   /** 팀 호스트면 즐겨찾기가 나에게만 적용된다는 툴팁. */
   favoriteHint?: string | null;

@@ -1,10 +1,6 @@
 import { getHostSearchText, getHostSubtitle } from '@shared';
 import type { HostRecord } from '@shared';
-import {
-  hostSupportsContainers,
-  hostSupportsSftp,
-  hostSupportsTerminalConnect,
-} from './hostCapabilities';
+import { hostSupportsSftp, hostSupportsTerminalConnect } from './hostCapabilities';
 import { matchesKeyboardLayoutQuery } from '../../lib/keyboard-layout-search';
 import {
   formatQuickSshHostLabel,
@@ -217,6 +213,8 @@ export function buildHostBrowserCommandPaletteItems(
         .sort(compareHostsByRecentThenName(hb.lastConnectedByHostId))
     : getDefaultHostCandidates(hb);
 
+  // 호스트마다 연결·SFTP 두 줄만 둔다. 컨테이너는 호스트 상세·우클릭 메뉴에서 연다 — 한 줄 더 두면 같은 호스트가 세 줄을
+  // 차지해 다음 호스트가 밀려난다.
   const hostItems: CommandPaletteItem[] = [];
   hostMatches.slice(0, MAX_PALETTE_HOSTS).forEach((host) => skipBrokenHost(host, undefined, () => {
     if (hostSupportsTerminalConnect(host)) {
@@ -245,18 +243,6 @@ export function buildHostBrowserCommandPaletteItems(
         team: hb.hasVaults ? hb.teamOfAsset(`host:${host.id}`) : null,
         Icon: Folder,
         run: () => hb.onOpenSftp?.(host.id),
-      });
-    }
-    if (hostSupportsContainers(host)) {
-      hostItems.push({
-        id: `host:containers:${host.id}`,
-        group: 'host',
-        title: t('palette.host.containers', { label: host.label }),
-        subtitle: getHostPaletteSubtitle(withMyUsername(host, hb.myUsernameByHostId)),
-        keywords: ['containers', 'docker', 'podman', host.label, getHostPaletteText(host)],
-        team: hb.hasVaults ? hb.teamOfAsset(`host:${host.id}`) : null,
-        Icon: Container,
-        run: () => hb.withLeaveHostEditor(() => void hb.onOpenHostContainers(host.id)),
       });
     }
   }));

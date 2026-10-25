@@ -105,6 +105,9 @@ type teamInviteRow struct {
 	// invite_box 는 링크의 비밀값(# 뒤, 서버는 모른다)으로 잠근 팀 키다. 기한이 지나거나 취소되면
 	// 지운다 — DB 가 새고 옛 링크가 채팅에 남아 있어도 팀 키가 나오지 않게. 행은 목록용으로 남긴다.
 	InviteBox *string `gorm:"column:invite_box;type:text"`
+	// sealed_secret 은 그 비밀값을 팀 키로 잠근 것이다(서버는 팀 키가 없어 못 연다). 멤버가 목록에서 링크를
+	// 다시 복사할 때 앱이 연다. 상자와 함께 지운다 — 쓸 수 없는 링크는 다시 복사할 까닭도 없다.
+	SealedSecret *string `gorm:"column:sealed_secret;type:text"`
 	// join_token_hash 는 참여 토큰의 SHA-256(hex)이다. 토큰은 상자 열쇠와 따로 뽑은 값이라, 서버가
 	// 참여 때 토큰을 봐도 상자는 못 연다.
 	JoinTokenHash string     `gorm:"column:join_token_hash;not null;type:varchar(64)"`
@@ -203,9 +206,11 @@ type TeamMember struct {
 }
 
 type CreateTeamInviteInput struct {
-	TeamID        string
-	CreatedBy     string
-	InviteBox     string
+	TeamID    string
+	CreatedBy string
+	InviteBox string
+	// SealedSecret 은 없을 수 있다 — 이 칸을 모르는 앱이 만든 링크는 다시 복사할 수 없을 뿐이다.
+	SealedSecret  string
 	JoinTokenHash string
 	ExpiresAt     time.Time
 }
@@ -220,6 +225,8 @@ type TeamInvite struct {
 	CreatedAt      time.Time
 	// Active 는 지금 이 링크로 들어올 수 있는지다(상자가 있고, 기한 전이고, 취소되지 않음).
 	Active bool
+	// SealedSecret 은 링크 비밀값을 팀 키로 잠근 것이다. 살아 있는 링크에만 있다.
+	SealedSecret string
 }
 
 // TeamInviteInfo 는 참여 카드에 보이는 것이다. 상자는 없다 — 상자는 참여할 때만 준다.
@@ -435,7 +442,7 @@ func bumpTeamInfoRevisionTx(tx *gorm.DB, teamID string, extra map[string]any) er
 func revokeTeamInvitesTx(tx *gorm.DB, teamID string, now time.Time) error {
 	return tx.Model(&teamInviteRow{}).
 		Where("team_id = ? AND revoked_at IS NULL", teamID).
-		Updates(map[string]any{"invite_box": nil, "revoked_at": now}).Error
+		Updates(map[string]any{"invite_box": nil, "sealed_secret": nil, "revoked_at": now}).Error
 }
 
 // removeTeamMemberTx 는 멤버 하나의 사본·접근·개인 칸과 그 팀의 링크를 지운다. 호출자가 팀 행을
@@ -889,6 +896,10 @@ func (s *GormStore) CreateTeamInvite(ctx context.Context, input CreateTeamInvite
 			ExpiresAt:     input.ExpiresAt.UTC(),
 			CreatedAt:     now,
 		}
+		if input.SealedSecret != "" {
+			sealed := input.SealedSecret
+			row.SealedSecret = &sealed
+		}
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
@@ -898,6 +909,9 @@ func (s *GormStore) CreateTeamInvite(ctx context.Context, input CreateTeamInvite
 			ExpiresAt: row.ExpiresAt,
 			CreatedAt: now,
 			Active:    row.ExpiresAt.After(now),
+		}
+		if invite.Active {
+			invite.SealedSecret = input.SealedSecret
 		}
 		return bumpTeamInfoRevisionTx(tx, input.TeamID, nil)
 	})
@@ -918,6 +932,7 @@ func (s *GormStore) ListTeamInvites(ctx context.Context, teamID string, actorID 
 		CreatedBy      string
 		CreatedByEmail *string
 		HasBox         int
+		SealedSecret   *string
 		ExpiresAt      time.Time
 		UseCount       int64
 		RevokedAt      *time.Time
@@ -925,7 +940,7 @@ func (s *GormStore) ListTeamInvites(ctx context.Context, teamID string, actorID 
 	}
 	var rows []inviteRow
 	if err := db.Table("team_invites").
-		Select("team_invites.code AS code, team_invites.created_by AS created_by, users.email AS created_by_email, CASE WHEN team_invites.invite_box IS NULL THEN 0 ELSE 1 END AS has_box, team_invites.expires_at AS expires_at, team_invites.use_count AS use_count, team_invites.revoked_at AS revoked_at, team_invites.created_at AS created_at").
+		Select("team_invites.code AS code, team_invites.created_by AS created_by, users.email AS created_by_email, CASE WHEN team_invites.invite_box IS NULL THEN 0 ELSE 1 END AS has_box, team_invites.sealed_secret AS sealed_secret, team_invites.expires_at AS expires_at, team_invites.use_count AS use_count, team_invites.revoked_at AS revoked_at, team_invites.created_at AS created_at").
 		Joins("LEFT JOIN users ON users.id = team_invites.created_by").
 		Where("team_invites.team_id = ?", teamID).
 		Order("team_invites.created_at DESC, team_invites.code ASC").
@@ -946,6 +961,10 @@ func (s *GormStore) ListTeamInvites(ctx context.Context, teamID string, actorID 
 		}
 		if row.CreatedByEmail != nil {
 			invite.CreatedByEmail = *row.CreatedByEmail
+		}
+		// 기한이 막 지나 정리 전인 링크의 것도 내주지 않는다.
+		if invite.Active && row.SealedSecret != nil {
+			invite.SealedSecret = *row.SealedSecret
 		}
 		invites = append(invites, invite)
 	}
@@ -973,7 +992,7 @@ func (s *GormStore) RevokeTeamInvite(ctx context.Context, teamID string, actorID
 		}
 		if err := tx.Model(&teamInviteRow{}).
 			Where("code = ?", code).
-			Updates(map[string]any{"invite_box": nil, "revoked_at": time.Now().UTC()}).Error; err != nil {
+			Updates(map[string]any{"invite_box": nil, "sealed_secret": nil, "revoked_at": time.Now().UTC()}).Error; err != nil {
 			return err
 		}
 		return bumpTeamInfoRevisionTx(tx, teamID, nil)
@@ -1531,8 +1550,8 @@ func (s *GormStore) TouchSyncRevisions(ctx context.Context, userIDs []string) er
 	return firstErr
 }
 
-// sweepExpiredTeamInviteBoxes 는 기한이 지난 링크의 상자를 지운다(행은 목록용으로 남긴다). 쓰기 경로에
-// 얹어 간격을 두고 돈다 — sweepExpired 와 같은 방식이다.
+// sweepExpiredTeamInviteBoxes 는 기한이 지난 링크의 상자와 잠근 비밀값을 지운다(행은 목록용으로
+// 남긴다). 쓰기 경로에 얹어 간격을 두고 돈다 — sweepExpired 와 같은 방식이다.
 func (s *GormStore) sweepExpiredTeamInviteBoxes() {
 	now := time.Now().UTC()
 	table := teamInviteRow{}.TableName()
@@ -1541,7 +1560,7 @@ func (s *GormStore) sweepExpiredTeamInviteBoxes() {
 	}
 	var codes []string
 	if err := s.db.Model(&teamInviteRow{}).
-		Where("invite_box IS NOT NULL AND expires_at < ?", now).
+		Where("(invite_box IS NOT NULL OR sealed_secret IS NOT NULL) AND expires_at < ?", now).
 		Limit(expiredRowSweepBatch).
 		Pluck("code", &codes).Error; err != nil {
 		log.Printf("store: 지난 초대 상자 조회 실패: %v", err)
@@ -1552,7 +1571,7 @@ func (s *GormStore) sweepExpiredTeamInviteBoxes() {
 	}
 	if err := s.db.Model(&teamInviteRow{}).
 		Where("code IN ?", codes).
-		Update("invite_box", nil).Error; err != nil {
+		Updates(map[string]any{"invite_box": nil, "sealed_secret": nil}).Error; err != nil {
 		log.Printf("store: 지난 초대 상자 정리 실패: %v", err)
 		return
 	}

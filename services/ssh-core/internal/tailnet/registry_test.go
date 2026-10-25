@@ -472,11 +472,41 @@ func TestForgetClosesEvenWhenLogoutFails(t *testing.T) {
 	}
 }
 
+// 설정이 없는 tailnet 은 노드를 만들 수 없다 — 등록된 적도 없으니 지울 것도 없다.
 func TestForgetUnknownTailnetIsNotAnError(t *testing.T) {
-	registry, _, _ := newTestRegistry(t)
+	registry := NewRegistry(func(id string) (Node, error) {
+		return nil, errors.New("tailnet is not configured")
+	}, Options{})
+	t.Cleanup(func() { _ = registry.Close() })
 
 	if err := registry.Forget(context.Background(), "never-registered"); err != nil {
 		t.Errorf("forget on an unknown tailnet returned %v, want nil", err)
+	}
+}
+
+// 이 실행에서 한 번도 쓰지 않은 tailnet 에도 지난 실행의 등록이 남아 있을 수 있다. 노드를 만들어 로그아웃까지 해야
+// 그 등록(노드키)이 살아 있는 채 남지 않는다(등록이 정말 있는지는 노드의 Logout 이 저장된 상태로 판단한다).
+func TestForgetLogsOutATailnetNotUsedThisRun(t *testing.T) {
+	registry, _, nodes := newTestRegistry(t)
+
+	if err := registry.Forget(context.Background(), "corp"); err != nil {
+		t.Fatalf("forget: %v", err)
+	}
+	forgotten := nodes["corp"]
+	if forgotten == nil {
+		t.Fatal("forget made no node to log out the saved registration")
+	}
+	if got := forgotten.order(); len(got) != 3 ||
+		got[0] != "logout" || got[1] != "close" || got[2] != "purge" {
+		t.Errorf("operations were %v, want [logout close purge]", got)
+	}
+
+	// 해체가 끝나면 항목도 없다 — 다음 Acquire 는 새 노드로 처음부터 시작한다.
+	if _, err := registry.Acquire("corp"); err != nil {
+		t.Fatalf("acquire after forget: %v", err)
+	}
+	if nodes["corp"] == forgotten {
+		t.Error("acquire after forget reused the forgotten node")
 	}
 }
 

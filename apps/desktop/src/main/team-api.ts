@@ -79,6 +79,14 @@ export interface TeamSummary {
 /** 링크 정보(GET /invite/:code/info). 참여 카드의 "이미 들어가 있음"은 앱이 얹는다. */
 export type TeamInviteLookup = Omit<TeamInviteInfo, "alreadyJoined">;
 
+/**
+ * 서버의 링크 기록. 다시 복사할 링크는 앱이 잠근 비밀값을 팀 키로 열어 만든다 — 잠근 비밀값은 살아 있는
+ * 링크에만 온다.
+ */
+export interface TeamInviteSummary extends Omit<TeamInvite, "link"> {
+  sealedSecret: string | null;
+}
+
 export interface TeamJoinResult {
   teamId: string;
   teamName: string;
@@ -203,14 +211,14 @@ export class TeamApi {
   async createInvite(
     lease: TeamRequestLease,
     teamId: string,
-    input: { inviteBox: string; joinTokenHash: string; expiresAt: string },
-  ): Promise<TeamInvite> {
+    input: { inviteBox: string; sealedSecret: string; joinTokenHash: string; expiresAt: string },
+  ): Promise<TeamInviteSummary> {
     return toInviteSummary(
       await this.json<RawInviteSummary>(lease, "POST", `${teamPath(teamId)}/invites`, { body: input }),
     );
   }
 
-  async listInvites(lease: TeamRequestLease, teamId: string): Promise<TeamInvite[]> {
+  async listInvites(lease: TeamRequestLease, teamId: string): Promise<TeamInviteSummary[]> {
     const body = await this.json<{ invites?: RawInviteSummary[] }>(lease, "GET", `${teamPath(teamId)}/invites`);
     return (body.invites ?? []).map(toInviteSummary);
   }
@@ -587,8 +595,9 @@ interface RawTeamSummary {
   createdAt?: string;
 }
 
-interface RawInviteSummary extends Omit<TeamInvite, "revokedAt"> {
+interface RawInviteSummary extends Omit<TeamInvite, "revokedAt" | "link"> {
   revokedAt?: string;
+  sealedSecret?: string;
 }
 
 function toTeamSummary(raw: RawTeamSummary): TeamSummary {
@@ -604,8 +613,8 @@ function toTeamSummary(raw: RawTeamSummary): TeamSummary {
   };
 }
 
-function toInviteSummary(raw: RawInviteSummary): TeamInvite {
-  return { ...raw, revokedAt: raw.revokedAt ?? null };
+function toInviteSummary(raw: RawInviteSummary): TeamInviteSummary {
+  return { ...raw, revokedAt: raw.revokedAt ?? null, sealedSecret: raw.sealedSecret || null };
 }
 
 function teamPath(teamId: string): string {
