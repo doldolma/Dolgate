@@ -385,6 +385,57 @@ describe('LogsPanel', () => {
     expect(screen.getByText('opening SSM data channel: websocket: bad handshake')).toBeInTheDocument();
   });
 
+  // 앱이 꺼져 끝을 못 적은 줄은 다음 실행 때 닫힌다(interrupted-sessions). 끝 시각을 모르면 비워 둔다 — "연결 중"이나
+  // 0초로 보이면 아직 붙어 있거나 아무것도 안 한 것처럼 읽힌다.
+  it('leaves the end and the duration blank on a row that ended at an unknown time', () => {
+    render(
+      <LogsPanel
+        logs={[
+          createLifecycleLog({
+            sessionId: 'crashed-1',
+            hostId: 'host-2',
+            hostLabel: 'bastion',
+            title: 'bastion',
+            connectionKind: 'ssh',
+            connectedAt: '2026-03-29T00:00:00.000Z',
+            disconnectedAt: null,
+            durationMs: null,
+            status: 'closed',
+            disconnectReason: '앱이 꺼져 끊겼습니다.',
+          }),
+          createPortForwardLifecycleLog({
+            ruleId: 'rule-1',
+            ruleLabel: 'db tunnel',
+            hostId: 'host-2',
+            hostLabel: 'bastion',
+            transport: 'ssh',
+            mode: 'local',
+            bindAddress: '127.0.0.1',
+            bindPort: 15432,
+            targetSummary: 'db:5432',
+            startedAt: '2026-03-29T00:00:00.000Z',
+            stoppedAt: null,
+            durationMs: null,
+            status: 'closed',
+            endReason: '앱이 꺼져 끊겼습니다.',
+          }),
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    for (const name of ['bastion', 'db tunnel']) {
+      const card = screen.getAllByText(name)[0]!.closest('article') as HTMLElement;
+      expect(within(card).getByText('Closed')).toBeInTheDocument();
+      expect(within(card).getAllByText('—')).toHaveLength(2);
+      expect(within(card).queryByText('연결 중')).not.toBeInTheDocument();
+      expect(within(card).queryByText('포워딩 중')).not.toBeInTheDocument();
+      expect(within(card).queryByText('0초')).not.toBeInTheDocument();
+      expect(within(card).getByText('앱이 꺼져 끊겼습니다.')).toBeInTheDocument();
+    }
+  });
+
   it('keeps generic logs rendering metadata details', () => {
     render(
       <LogsPanel

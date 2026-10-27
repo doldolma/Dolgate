@@ -120,7 +120,8 @@ export type VncSessionEvent =
        */
       failure?: string | null;
     }
-  | { type: 'closed'; sessionId: string };
+  /** 세션이 끝났다. notice 는 앱이 닫은 까닭(팀에서 빠짐 등) — 있으면 화면이 탭을 남기고 이 문구를 보인다. */
+  | { type: 'closed'; sessionId: string; notice?: string };
 
 /**
  * 렌더러 → vnc-core 입력.

@@ -103,6 +103,7 @@ describe("TeamService", () => {
       teamName: "Acme",
       inviterEmail: "user-1@example.com",
       memberCount: 1,
+      role: "member",
       expiresAt: invite.expiresAt,
       alreadyJoined: false,
     });
@@ -146,7 +147,8 @@ describe("TeamService", () => {
 
     await harness.teams.transferOwnership(created.id, "user-2");
     expect(harness.server.teams.get(created.id)!.members.get("user-2")!.role).toBe("owner");
-    expect(harness.teams.list()[0]).toMatchObject({ role: "member" });
+    // 옛 소유자는 관리자가 된다.
+    expect(harness.teams.list()[0]).toMatchObject({ role: "admin" });
 
     harness.onChanged.mockClear();
     await harness.teams.leave(created.id);
@@ -179,7 +181,7 @@ describe("TeamService", () => {
     expect((await harness.teams.listMembers(created.id)).map((member) => member.userId)).toEqual(["user-1"]);
   });
 
-  it("lets any member copy a live invite link again, and only while the link lives", async () => {
+  it("lets admins copy a live invite link again, and only while the link lives", async () => {
     const harness = await createTeamHarness(tempDir);
     const created = await harness.teams.create("Acme");
     const { link, invite } = await harness.teams.createInvite(created.id);
@@ -190,10 +192,13 @@ describe("TeamService", () => {
     expect(JSON.stringify(post.body)).not.toContain(link.split("#v1.")[1]);
     expect(await harness.teams.listInvites(created.id)).toEqual([expect.objectContaining({ code: invite.code, link })]);
 
-    // 링크로 들어온 다른 계정(다른 개인 키)도 같은 링크를 다시 복사한다.
+    // 링크로 들어온 다른 계정(다른 개인 키)은 멤버로는 링크 목록을 받지 못한다 — 링크는 관리자 이상의 일이다.
     await harness.service.purgeAll();
     signInAs(harness, "user-2", OTHER_PERSONAL_KEY);
     await harness.teams.join(link);
+    await expect(harness.teams.listInvites(created.id)).rejects.toThrow("팀 관리자만 할 수 있습니다.");
+    // 소유자가 관리자로 올리면 자기 팀 키로 같은 링크를 다시 복사한다.
+    harness.server.teams.get(created.id)!.members.get("user-2")!.role = "admin";
     expect(await harness.teams.listInvites(created.id)).toEqual([expect.objectContaining({ code: invite.code, link })]);
 
     // 잠근 비밀값이 없거나(이 기능 전에 만든 링크) 다른 팀 키로 잠겨 열리지 않으면 그 링크만 다시 복사할 수 없다.
@@ -215,6 +220,39 @@ describe("TeamService", () => {
       [older.invite.code]: null,
       [foreign.invite.code]: null,
     });
+  });
+
+  it("invites with a role, joins as that role, and lets an admin change roles while a viewer cannot invite", async () => {
+    const harness = await createTeamHarness(tempDir);
+    const created = await harness.teams.create("Acme");
+    const { link } = await harness.teams.createInvite(created.id, { role: "viewer" });
+    const [post] = harness.server.requestsTo("POST", `/teams/${created.id}/invites`);
+    expect(post.body.role).toBe("viewer");
+    expect(await harness.teams.listInvites(created.id)).toEqual([expect.objectContaining({ role: "viewer" })]);
+    // 역할 칸을 모르는 서버의 링크는 멤버 링크로 읽는다.
+    const older = await harness.teams.createInvite(created.id);
+    delete (harness.server.invites.get(older.invite.code) as { role?: string }).role;
+    expect((await harness.teams.listInvites(created.id)).find((item) => item.code === older.invite.code)?.role).toBe("member");
+    await harness.teams.revokeInvite(created.id, older.invite.code);
+
+    await harness.service.purgeAll();
+    signInAs(harness, "user-2", OTHER_PERSONAL_KEY);
+    // 참여 카드가 역할을 미리 알리고, 들어오면 그 역할이다 — 팀 목록을 다시 읽기 전에도.
+    await expect(harness.teams.previewInvite(link)).resolves.toMatchObject({ status: "ok", role: "viewer" });
+    await expect(harness.teams.join(link)).resolves.toMatchObject({ id: created.id, role: "viewer" });
+    // 읽기 전용은 링크를 만들지 못한다(서버가 거절하고, 앱 언어 문구로 알린다).
+    await expect(harness.teams.createInvite(created.id)).rejects.toThrow("팀 관리자만 할 수 있습니다.");
+
+    // 소유자가 읽기 전용을 멤버로 올린다.
+    await harness.service.purgeAll();
+    signInAs(harness, "user-1", PERSONAL_KEY);
+    await harness.service.refreshTeams();
+    await harness.teams.setMemberRole(created.id, "user-2", "member");
+    const [put] = harness.server.requestsTo("PUT", `/teams/${created.id}/members/user-2/role`);
+    expect(put.body).toEqual({ role: "member" });
+    expect(harness.server.teams.get(created.id)!.members.get("user-2")!.role).toBe("member");
+    // 소유자 자리는 역할 바꾸기로 바뀌지 않는다.
+    await expect(harness.teams.setMemberRole(created.id, "user-1", "admin")).rejects.toThrow("줄 수 없는 역할입니다.");
   });
 
   it("deletes a team and it leaves this device at once", async () => {
@@ -246,6 +284,7 @@ describe("TeamService", () => {
       teamName: "Acme",
       inviterEmail: "user-1@example.com",
       memberCount: 1,
+      role: "member",
       expiresAt: invite.expiresAt,
       alreadyJoined: false,
     });

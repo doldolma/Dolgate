@@ -1,6 +1,7 @@
 import type {
   DnsOverrideRecord,
   GroupRecord,
+  HostDetectedOs,
   HostDraft,
   HostRecord,
   PortForwardRuleRecord,
@@ -78,6 +79,8 @@ export type TeamVaultScope = VaultScope & { readonly memberPrefs: TeamMemberPref
 export interface TeamVaultSource {
   listTeamIds(): string[];
   createScope(teamId: string): Omit<TeamVaultScope, "id">;
+  /** 그 팀 볼트를 이 사람이 고칠 수 있는지(멤버 이상). 없으면 고칠 수 있다고 본다. */
+  canEdit?(teamId: string): boolean;
 }
 
 /** 개인 볼트의 묶음. main 이 만든 저장소들(의존성 묶음)에서 볼트 저장소만 고른다. */
@@ -173,6 +176,15 @@ export interface VaultCatalog {
    * 않는 쓰기(감지한 OS·인증서 지문·비밀값 참조 등)에 쓴다.
    */
   writeHost<T extends HostRecord | null>(hostId: string, write: (hosts: HostRepository) => T): T;
+  /** 이 볼트를 고칠 수 있는지. 개인은 늘 그렇고, 팀은 역할을 본다(읽기 전용이면 아니다). */
+  canEditVault(vaultId: string): boolean;
+  /**
+   * 접속하며 신뢰한 RDP 서버 인증서 지문을 둔다(null 이면 해제). 레코드에 쓰되, 읽기 전용 팀 호스트는 내 칸에 둔다 —
+   * 팀 레코드를 쓰지 못한다. 팀 레코드에 쓸 때는 내 칸에 남은 옛 지문을 지운다(얹을 때 내 것이 이기므로).
+   */
+  setHostRdpCertificateFingerprint(hostId: string, fingerprint: string | null): HostRecord | null;
+  /** 접속하며 알아낸 OS 를 둔다. 읽기 전용 팀 호스트면 쓰지 않는다 — 꾸밈 정보다. */
+  setHostDetectedOs(hostId: string, detectedOs: HostDetectedOs | null): HostRecord | null;
   /**
    * 호스트들을 각자의 볼트에서 지운다 — 그 볼트의 삭제 대기열에 올리고 뺀다. 볼트마다 한 번에 쓴다. 지운 것과 그
    * 볼트를 돌려준다(못 찾은 id 는 개인 볼트에 지움 표시만 남기고 빠진다).
@@ -320,6 +332,7 @@ export function createVaultCatalog(
   };
 
   const findHostInTeam = (id: string) => findInTeam((scope) => scope.hosts.getById(id));
+  const canEditTeam = (teamId: string): boolean => teams.canEdit?.(teamId) ?? true;
 
   /**
    * 팀 호스트에 내 값을 얹는다(즐겨찾기·agent forwarding·테마). 팀 레코드에 사용자 이름이 비어 있으면 내
@@ -380,6 +393,34 @@ export function createVaultCatalog(
       }
       const record = write(team.scope.hosts);
       return (record ? overlayTeamHost(team.scope, record) : record) as typeof record;
+    },
+    canEditVault: (vaultId) => vaultId === PERSONAL_VAULT_ID || canEditTeam(vaultId),
+    setHostRdpCertificateFingerprint: (hostId, fingerprint) => {
+      const team = findHostInTeam(hostId);
+      if (!team) {
+        return personalScope.hosts.updateRdpCertificateFingerprint(hostId, fingerprint);
+      }
+      const mine = team.scope.memberPrefs.read().hosts.get(hostId)?.rdpCertificateFingerprint ?? null;
+      if (!canEditTeam(team.scope.id)) {
+        team.scope.memberPrefs.updateHost(hostId, { rdpCertificateFingerprint: fingerprint });
+        return overlayTeamHost(team.scope, team.record);
+      }
+      const record = team.scope.hosts.updateRdpCertificateFingerprint(hostId, fingerprint);
+      if (mine !== null) {
+        team.scope.memberPrefs.updateHost(hostId, { rdpCertificateFingerprint: null });
+      }
+      return record ? overlayTeamHost(team.scope, record) : record;
+    },
+    setHostDetectedOs: (hostId, detectedOs) => {
+      const team = findHostInTeam(hostId);
+      if (!team) {
+        return personalScope.hosts.setDetectedOs(hostId, detectedOs);
+      }
+      if (!canEditTeam(team.scope.id)) {
+        return overlayTeamHost(team.scope, team.record);
+      }
+      const record = team.scope.hosts.setDetectedOs(hostId, detectedOs);
+      return record ? overlayTeamHost(team.scope, record) : record;
     },
     removeHosts: (ids) => {
       // 볼트마다 목록을 한 번씩 읽어 임자를 가린다(개인이 이긴다, 팀끼리는 앞선 팀). id 마다 찾으면 찾을 때마다

@@ -351,6 +351,7 @@ export class TeamHistoryService {
           state: replay.state,
           authorEmail: replay.authorEmail,
           segmentCount: replay.segmentCount,
+          viewable: replay.viewable === true,
         });
       }
     }

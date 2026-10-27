@@ -24,8 +24,17 @@ var (
 	// ErrTeamNotFound 는 팀이 없거나 요청한 사람이 멤버가 아닌 경우다. 둘을 구분하지 않는다 —
 	// 멤버가 아닌 사람에게는 팀이 있는지조차 알리지 않는다.
 	ErrTeamNotFound = errors.New("team not found")
-	// ErrTeamOwnerOnly 는 소유자만 하는 일(제거·소유권 넘기기·이름 바꾸기·팀 삭제)을 멤버가 하려는 경우다.
+	// ErrTeamOwnerOnly 는 소유자만 하는 일(소유권 넘기기·이름 바꾸기·팀 삭제, 관리자를 빼거나 바꾸기)을
+	// 다른 역할이 하려는 경우다.
 	ErrTeamOwnerOnly = errors.New("team owner only")
+	// ErrTeamAdminOnly 는 관리자 이상이 하는 일(초대 링크·멤버 빼기·역할 바꾸기·이전 판 보기)을 멤버나
+	// 읽기 전용이 하려는 경우다.
+	ErrTeamAdminOnly = errors.New("team admin only")
+	// ErrTeamReadOnly 는 읽기 전용 멤버가 팀 레코드를 바꾸려는 경우다.
+	ErrTeamReadOnly = errors.New("team read only")
+	// ErrTeamRoleInvalid 는 그 자리에 줄 수 없는 역할이다 — 모르는 값, 링크에 관리자, 역할 바꾸기로 소유자를
+	// 주거나 소유자의 역할을 바꾸기.
+	ErrTeamRoleInvalid = errors.New("team role invalid")
 	// ErrTeamExists 는 앱이 만든 팀 ID 가 이미 있는 경우다.
 	ErrTeamExists = errors.New("team already exists")
 	// ErrTeamOwnerMustTransfer 는 다른 멤버가 남아 있는데 소유자가 나가거나 자기를 빼려는 경우다.
@@ -42,10 +51,63 @@ var (
 	ErrTeamAlreadyMember = errors.New("already a team member")
 )
 
+// 팀 역할 넷. 소유자는 한 명이다. 읽기 전용은 보고 접속만 한다 — 팀 레코드는 못 바꾸지만, 접속하려면
+// 비밀값을 풀어야 하므로 팀 키는 다른 멤버와 같이 갖는다.
 const (
 	TeamRoleOwner  = "owner"
+	TeamRoleAdmin  = "admin"
 	TeamRoleMember = "member"
+	TeamRoleViewer = "viewer"
 )
+
+// teamRoleRank 는 역할의 서열이다. 클수록 할 수 있는 일이 많다. 모르는 값은 0 이라 아무 검사도 통과하지 못한다.
+func teamRoleRank(role string) int {
+	switch role {
+	case TeamRoleOwner:
+		return 4
+	case TeamRoleAdmin:
+		return 3
+	case TeamRoleMember:
+		return 2
+	case TeamRoleViewer:
+		return 1
+	}
+	return 0
+}
+
+// teamRoleAtLeast 는 role 이 minimum 이상인지다.
+func teamRoleAtLeast(role string, minimum string) bool {
+	rank := teamRoleRank(role)
+	return rank > 0 && rank >= teamRoleRank(minimum)
+}
+
+// teamRoleDenied 는 minimum 에 못 미칠 때 돌려줄 오류다.
+func teamRoleDenied(minimum string) error {
+	switch minimum {
+	case TeamRoleOwner:
+		return ErrTeamOwnerOnly
+	case TeamRoleAdmin:
+		return ErrTeamAdminOnly
+	default:
+		return ErrTeamReadOnly
+	}
+}
+
+// teamInviteRoleOrDefault 는 링크에 실을 역할이다. 비우면 멤버다. 관리자는 링크로 주지 않는다 — 들어온 뒤
+// 소유자가 올린다.
+func teamInviteRoleOrDefault(role string) (string, error) {
+	switch role {
+	case "":
+		return TeamRoleMember, nil
+	case TeamRoleMember, TeamRoleViewer:
+		return role, nil
+	}
+	return "", ErrTeamRoleInvalid
+}
+
+// teamSuccessorOrder 는 소유자가 빠질 때 이을 사람의 순서다 — 관리자 → 멤버 → 읽기 전용, 같은 역할이면
+// 먼저 들어온 사람. 역할 이름은 상수라 SQL 에 그대로 넣는다.
+const teamSuccessorOrder = "CASE role WHEN '" + TeamRoleAdmin + "' THEN 0 WHEN '" + TeamRoleMember + "' THEN 1 ELSE 2 END, added_at ASC, user_id ASC"
 
 // defaultTeamHistoryRetention 은 이전 판을 남겨 두는 기간의 기본값이다(설정 teams.historyRetentionDays).
 const defaultTeamHistoryRetention = 90 * 24 * time.Hour
@@ -88,7 +150,7 @@ type teamMemberRow struct {
 	JoinedVia *string `gorm:"column:joined_via;type:varchar(64)"`
 	// added_by 는 그 초대 링크를 만든 멤버다. 팀을 만든 사람은 자기 자신이다.
 	AddedBy string `gorm:"column:added_by;not null;type:varchar(191)"`
-	// added_at 은 소유자가 빠질 때 누가 이을지 정한다 — 가장 먼저 들어온 멤버가 잇는다.
+	// added_at 은 소유자가 빠질 때 누가 이을지 정한다 — 역할이 같으면 먼저 들어온 사람이 잇는다(teamSuccessorOrder).
 	AddedAt time.Time `gorm:"column:added_at;not null"`
 	// private_revision 은 이 멤버의 개인 칸이 바뀔 때마다 +1 이다. 팀 감시가 그 멤버의 기기만 깨운다.
 	PrivateRevision int64 `gorm:"column:private_revision;not null;default:0"`
@@ -110,11 +172,13 @@ type teamInviteRow struct {
 	SealedSecret *string `gorm:"column:sealed_secret;type:text"`
 	// join_token_hash 는 참여 토큰의 SHA-256(hex)이다. 토큰은 상자 열쇠와 따로 뽑은 값이라, 서버가
 	// 참여 때 토큰을 봐도 상자는 못 연다.
-	JoinTokenHash string     `gorm:"column:join_token_hash;not null;type:varchar(64)"`
-	ExpiresAt     time.Time  `gorm:"column:expires_at;not null;index"`
-	UseCount      int64      `gorm:"column:use_count;not null;default:0"`
-	RevokedAt     *time.Time `gorm:"column:revoked_at"`
-	CreatedAt     time.Time  `gorm:"column:created_at;not null"`
+	JoinTokenHash string `gorm:"column:join_token_hash;not null;type:varchar(64)"`
+	// role 은 이 링크로 들어오는 사람의 역할이다(멤버·읽기 전용).
+	Role      string     `gorm:"column:role;not null;type:varchar(16);default:'member'"`
+	ExpiresAt time.Time  `gorm:"column:expires_at;not null;index"`
+	UseCount  int64      `gorm:"column:use_count;not null;default:0"`
+	RevokedAt *time.Time `gorm:"column:revoked_at"`
+	CreatedAt time.Time  `gorm:"column:created_at;not null"`
 }
 
 func (teamInviteRow) TableName() string {
@@ -153,11 +217,11 @@ func (teamSyncRecordRow) TableName() string {
 	return "team_sync_records"
 }
 
-// teamRecordHistoryRow 는 덮어쓰이거나 지워진 팀 레코드의 이전 판이다(암호문 그대로). 소유자가
-// 이것으로 되돌린다(화면은 제품 2단계). 보존 기간이 지나면 지운다.
+// teamRecordHistoryRow 는 덮어쓰이거나 지워진 팀 레코드의 이전 판이다(암호문 그대로). 관리자 이상이
+// 목록을 받아 앱에서 풀고, 보통 올리기로 되살린다. 보존 기간이 지나면 지운다.
 type teamRecordHistoryRow struct {
-	Seq              int64      `gorm:"column:seq;primaryKey;autoIncrement"`
-	TeamID           string     `gorm:"column:team_id;not null;index:idx_team_record_history_record,priority:1;type:varchar(191)"`
+	Seq              int64      `gorm:"column:seq;primaryKey;autoIncrement;index:idx_team_record_history_team_seq,priority:2"`
+	TeamID           string     `gorm:"column:team_id;not null;index:idx_team_record_history_record,priority:1;index:idx_team_record_history_team_seq,priority:1;type:varchar(191)"`
 	Kind             string     `gorm:"column:kind;not null;index:idx_team_record_history_record,priority:2;type:varchar(64)"`
 	RecordID         string     `gorm:"column:record_id;not null;index:idx_team_record_history_record,priority:3;type:varchar(191)"`
 	EncryptedPayload string     `gorm:"column:encrypted_payload;not null;type:text"`
@@ -167,6 +231,9 @@ type teamRecordHistoryRow struct {
 	UpdatedBy string    `gorm:"column:updated_by;not null;type:varchar(191)"`
 	ChangedBy string    `gorm:"column:changed_by;not null;type:varchar(191)"`
 	ChangedAt time.Time `gorm:"column:changed_at;not null;index"`
+	// Deleted 는 이 판을 밀어낸 올리기가 그 레코드를 지웠는지다(아니면 고쳤다). deleted_at 은 이 판 자신의
+	// 지운 시각이라 다르다 — 지운 표시는 빈 암호문이라 판으로 남지 않으므로, 지웠는지는 여기에만 남는다.
+	Deleted bool `gorm:"column:deleted;not null;default:false"`
 }
 
 func (teamRecordHistoryRow) TableName() string {
@@ -213,12 +280,15 @@ type CreateTeamInviteInput struct {
 	SealedSecret  string
 	JoinTokenHash string
 	ExpiresAt     time.Time
+	// Role 은 들어올 사람의 역할이다(멤버·읽기 전용). 비우면 멤버다.
+	Role string
 }
 
 type TeamInvite struct {
 	Code           string
 	CreatedBy      string
 	CreatedByEmail string
+	Role           string
 	ExpiresAt      time.Time
 	UseCount       int64
 	RevokedAt      *time.Time
@@ -235,7 +305,9 @@ type TeamInviteInfo struct {
 	TeamName     string
 	InviterEmail string
 	MemberCount  int
-	ExpiresAt    time.Time
+	// Role 은 이 링크로 들어가면 받을 역할이다 — 참여 카드가 미리 알린다.
+	Role      string
+	ExpiresAt time.Time
 }
 
 // TeamInvitePage 는 로그인 없이 여는 링크 페이지에 보일 것 — 팀 이름뿐이다(초대한 사람은 앱의 참여 카드에서).
@@ -247,6 +319,8 @@ type TeamJoinResult struct {
 	TeamID    string
 	TeamName  string
 	InviteBox string
+	// Role 은 들어온(이미 들어와 있던) 사람의 역할이다 — 앱이 팀 목록을 다시 읽기 전에도 맞는 역할로 보이게.
+	Role string
 	// Rejoined 는 사본을 올리기 전에 끊긴 멤버가 상자를 다시 받은 경우다.
 	Rejoined bool
 }
@@ -277,6 +351,34 @@ type TeamWatchKey struct {
 	UserID string
 }
 
+// TeamRecordVersion 은 이전 판 하나다(암호문 그대로). 같은 올리기에서 밀려난 판들은 ChangedBy·ChangedAt 이
+// 같다 — 앱은 그것으로 "한 번에 바뀐 묶음"을 짓는다.
+type TeamRecordVersion struct {
+	Seq              int64
+	Kind             string
+	RecordID         string
+	EncryptedPayload string
+	UpdatedAt        time.Time
+	DeletedAt        *time.Time
+	// UpdatedBy 는 그 판을 쓴 사람, ChangedBy 는 그 판을 밀어낸(덮어쓰거나 지운) 사람이다.
+	UpdatedBy      string
+	UpdatedByEmail string
+	ChangedBy      string
+	ChangedByEmail string
+	ChangedAt      time.Time
+	// Deleted 는 밀어낸 올리기가 지운 것인지다(아니면 고쳤다).
+	Deleted bool
+}
+
+// TeamRecordVersionQuery 는 이전 판 목록이다. 최신부터, Before(순번) 앞부터 준다. Kind·RecordID 를 주면 그
+// 레코드의 판만 준다.
+type TeamRecordVersionQuery struct {
+	Before   int64
+	Limit    int
+	Kind     string
+	RecordID string
+}
+
 // TeamStore 는 팀 볼트 저장 기능이다. Store 가 품는다.
 //
 // 잠금 순서 전역 규칙: users → teams → 팀 하위 표. 개인 DEK 로 잠근 것을 올리는 길(팀 만들기·
@@ -292,6 +394,8 @@ type TeamStore interface {
 	DeleteTeam(ctx context.Context, teamID string, actorID string) ([]string, error)
 	ListTeamMembers(ctx context.Context, teamID string, actorID string) ([]TeamMember, error)
 	RemoveTeamMember(ctx context.Context, teamID string, actorID string, targetID string) error
+	// SetTeamMemberRole 은 멤버의 역할을 관리자·멤버·읽기 전용 가운데 하나로 바꾼다. 소유자는 넘기기로만 바뀐다.
+	SetTeamMemberRole(ctx context.Context, teamID string, actorID string, targetID string, role string) error
 	LeaveTeam(ctx context.Context, teamID string, userID string) (TeamLeaveResult, error)
 	PutTeamMemberKey(ctx context.Context, teamID string, userID string, wrappedTeamDek string, vaultEpoch int64) error
 
@@ -309,6 +413,8 @@ type TeamStore interface {
 	RaiseTeamDataFloor(ctx context.Context, teamID string, floor int) error
 	GetTeamPrivateSnapshot(ctx context.Context, teamID string, userID string) (int64, syncmodel.Payload, error)
 	ApplyTeamPrivateRecords(ctx context.Context, teamID string, userID string, payload syncmodel.Payload, vaultEpoch int64) (int64, error)
+	// ListTeamRecordVersions 는 이전 판 목록이다(관리자 이상). 되살리기는 앱이 그 판을 보통 올리기로 다시 쓴다.
+	ListTeamRecordVersions(ctx context.Context, teamID string, actorID string, query TeamRecordVersionQuery) ([]TeamRecordVersion, error)
 
 	// GetTeamWatchRevisions 는 팀 감시 묶음 확인용이다 — 그 팀들의 멤버마다 감시 값을 준다. 멤버가
 	// 아니게 된 키는 결과에 없다.
@@ -454,6 +560,13 @@ func removeTeamMemberTx(tx *gorm.DB, teamID string, userID string, now time.Time
 	if err := tx.Where("team_id = ? AND user_id = ?", teamID, userID).Delete(&teamMemberRow{}).Error; err != nil {
 		return err
 	}
+	// 빠진 사람의 진행 중 녹화는 끊김으로 닫는다 — 그 사람의 앱은 이제 이 팀에 끝을 알릴 수 없다. 두면 재생 창에
+	// "진행 중"으로 남고, 24시간 정리(cutStaleTeamReplays)가 닫을 때까지 녹화 한도 정리에서도 빠진다.
+	if err := tx.Model(&teamReplayRow{}).
+		Where("team_id = ? AND author_user_id = ? AND state = ?", teamID, userID, TeamReplayLive).
+		UpdateColumns(map[string]any{"state": TeamReplayCut, "ended_at": now}).Error; err != nil {
+		return err
+	}
 	if err := revokeTeamInvitesTx(tx, teamID, now); err != nil {
 		return err
 	}
@@ -482,7 +595,7 @@ func deleteTeamDataTx(tx *gorm.DB, teamID string) error {
 }
 
 // leaveAllTeamsTx 는 볼트 초기화·회원 탈퇴 트랜잭션 안에서 그 사람을 모든 팀에서 뺀다. 호출자가
-// 사용자 행을 먼저 잠근다(잠금 순서 users → teams). 소유자였으면 가장 먼저 들어온 멤버가 잇고,
+// 사용자 행을 먼저 잠근다(잠금 순서 users → teams). 소유자였으면 teamSuccessorOrder 순으로 잇고,
 // 마지막 한 명이었으면 팀째 지운다. reason 은 팀 기록에 남는 까닭이다(teamEventReason*).
 func (s *GormStore) leaveAllTeamsTx(tx *gorm.DB, userID string, reason string) error {
 	var teamIDs []string
@@ -509,7 +622,7 @@ func (s *GormStore) leaveAllTeamsTx(tx *gorm.DB, userID string, reason string) e
 		}
 		var successor teamMemberRow
 		successorErr := s.forUpdate(tx).Where("team_id = ? AND user_id <> ?", teamID, userID).
-			Order("added_at ASC, user_id ASC").
+			Order(teamSuccessorOrder).
 			Take(&successor).Error
 		if errors.Is(successorErr, gorm.ErrRecordNotFound) {
 			if err := deleteTeamDataTx(tx, teamID); err != nil {
@@ -670,19 +783,26 @@ func countTeamMembers(db *gorm.DB, teamIDs []string) (map[string]int, error) {
 	return counts, nil
 }
 
-// requireTeamOwnerTx 는 팀 행을 잠그고 actor 가 그 팀의 소유자인지 본다.
-func (s *GormStore) requireTeamOwnerTx(tx *gorm.DB, teamID string, actorID string) error {
+// requireTeamRoleTx 는 팀 행을 잠그고 actor 가 그 팀에서 minimum 이상의 역할인지 본다. 통과하면 actor 의
+// 멤버 행을 준다. 역할을 바꾸는 쓰기도 팀 행을 잠그므로, 잠근 뒤의 읽기는 늘 지금 역할이다.
+func (s *GormStore) requireTeamRoleTx(tx *gorm.DB, teamID string, actorID string, minimum string) (teamMemberRow, error) {
 	if _, err := s.lockTeamRowTx(tx, teamID); err != nil {
-		return err
+		return teamMemberRow{}, err
 	}
 	actor, err := getTeamMemberTx(tx, teamID, actorID)
 	if err != nil {
-		return err
+		return teamMemberRow{}, err
 	}
-	if actor.Role != TeamRoleOwner {
-		return ErrTeamOwnerOnly
+	if !teamRoleAtLeast(actor.Role, minimum) {
+		return teamMemberRow{}, teamRoleDenied(minimum)
 	}
-	return nil
+	return actor, nil
+}
+
+// requireTeamOwnerTx 는 팀 행을 잠그고 actor 가 그 팀의 소유자인지 본다.
+func (s *GormStore) requireTeamOwnerTx(tx *gorm.DB, teamID string, actorID string) error {
+	_, err := s.requireTeamRoleTx(tx, teamID, actorID, TeamRoleOwner)
+	return err
 }
 
 func (s *GormStore) RenameTeam(ctx context.Context, teamID string, actorID string, name string) error {
@@ -709,9 +829,10 @@ func (s *GormStore) TransferTeamOwnership(ctx context.Context, teamID string, ac
 			return err
 		}
 		// 넘기기는 역할만 바꾼다. 키는 오가지 않는다 — 소유자는 관리 권한이지 더 많이 보는 자리가 아니다.
+		// 옛 소유자는 관리자가 된다(관리하던 사람이다). 넘기고 나가도 된다.
 		if err := tx.Model(&teamMemberRow{}).
 			Where("team_id = ? AND user_id = ?", teamID, actorID).
-			Update("role", TeamRoleMember).Error; err != nil {
+			Update("role", TeamRoleAdmin).Error; err != nil {
 			return err
 		}
 		if err := tx.Model(&teamMemberRow{}).
@@ -791,18 +912,24 @@ func (s *GormStore) ListTeamMembers(ctx context.Context, teamID string, actorID 
 
 func (s *GormStore) RemoveTeamMember(ctx context.Context, teamID string, actorID string, targetID string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := s.requireTeamOwnerTx(tx, teamID, actorID); err != nil {
+		actor, err := s.requireTeamRoleTx(tx, teamID, actorID, TeamRoleAdmin)
+		if err != nil {
 			return err
 		}
-		if targetID == actorID {
+		if targetID == actorID && actor.Role == TeamRoleOwner {
 			// 소유자는 자기를 빼지 않는다 — 넘기고 나간다.
 			return ErrTeamOwnerMustTransfer
 		}
-		if _, err := getTeamMemberTx(tx, teamID, targetID); err != nil {
+		target, err := getTeamMemberTx(tx, teamID, targetID)
+		if err != nil {
 			if errors.Is(err, ErrTeamNotFound) {
 				return ErrTeamMemberNotFound
 			}
 			return err
+		}
+		// 관리자는 멤버·읽기 전용만 뺀다. 관리자(자기 포함)와 소유자를 빼는 것은 소유자 몫이다.
+		if actor.Role != TeamRoleOwner && teamRoleAtLeast(target.Role, TeamRoleAdmin) {
+			return ErrTeamOwnerOnly
 		}
 		now := time.Now().UTC()
 		if err := removeTeamMemberTx(tx, teamID, targetID, now); err != nil {
@@ -811,6 +938,47 @@ func (s *GormStore) RemoveTeamMember(ctx context.Context, teamID string, actorID
 		return s.appendServerTeamEventTx(tx, teamID, actorID, teamServerEvent{
 			Type: teamEventMemberRemoved, UserID: targetID, ByUserID: actorID,
 		}, now)
+	})
+}
+
+func (s *GormStore) SetTeamMemberRole(ctx context.Context, teamID string, actorID string, targetID string, role string) error {
+	if role != TeamRoleAdmin && role != TeamRoleMember && role != TeamRoleViewer {
+		return ErrTeamRoleInvalid
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		actor, err := s.requireTeamRoleTx(tx, teamID, actorID, TeamRoleAdmin)
+		if err != nil {
+			return err
+		}
+		target, err := getTeamMemberTx(tx, teamID, targetID)
+		if err != nil {
+			if errors.Is(err, ErrTeamNotFound) {
+				return ErrTeamMemberNotFound
+			}
+			return err
+		}
+		if target.Role == TeamRoleOwner {
+			// 소유자에게는 다른 역할을 줄 수 없다 — 소유자 자리는 넘기기로만 바뀐다.
+			return ErrTeamRoleInvalid
+		}
+		// 관리자는 멤버 ↔ 읽기 전용만 바꾼다. 관리자로 올리거나 관리자를 바꾸는 것(자기 포함)은 소유자 몫이다.
+		if actor.Role != TeamRoleOwner && (role == TeamRoleAdmin || target.Role == TeamRoleAdmin) {
+			return ErrTeamOwnerOnly
+		}
+		if target.Role == role {
+			return nil
+		}
+		if err := tx.Model(&teamMemberRow{}).
+			Where("team_id = ? AND user_id = ?", teamID, targetID).
+			Update("role", role).Error; err != nil {
+			return err
+		}
+		if err := s.appendServerTeamEventTx(tx, teamID, actorID, teamServerEvent{
+			Type: teamEventRoleChanged, UserID: targetID, ByUserID: actorID, Role: role,
+		}, time.Now().UTC()); err != nil {
+			return err
+		}
+		return bumpTeamInfoRevisionTx(tx, teamID, nil)
 	})
 }
 
@@ -871,15 +1039,16 @@ func (s *GormStore) PutTeamMemberKey(ctx context.Context, teamID string, userID 
 }
 
 func (s *GormStore) CreateTeamInvite(ctx context.Context, input CreateTeamInviteInput) (TeamInvite, error) {
+	role, err := teamInviteRoleOrDefault(input.Role)
+	if err != nil {
+		return TeamInvite{}, err
+	}
 	now := time.Now().UTC()
 	var invite TeamInvite
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 팀 행을 잠가 멤버 제거(링크를 모두 지운다)와 직렬화한다 — 빠지는 사람이 그 틈에 만든
-		// 링크가 살아남지 않게.
-		if _, err := s.lockTeamRowTx(tx, input.TeamID); err != nil {
-			return err
-		}
-		if _, err := getTeamMemberTx(tx, input.TeamID, input.CreatedBy); err != nil {
+		// 링크가 살아남지 않게. 링크는 관리자 이상만 만든다.
+		if _, err := s.requireTeamRoleTx(tx, input.TeamID, input.CreatedBy, TeamRoleAdmin); err != nil {
 			return err
 		}
 		code, err := newTeamInviteCode()
@@ -893,6 +1062,7 @@ func (s *GormStore) CreateTeamInvite(ctx context.Context, input CreateTeamInvite
 			CreatedBy:     input.CreatedBy,
 			InviteBox:     &box,
 			JoinTokenHash: input.JoinTokenHash,
+			Role:          role,
 			ExpiresAt:     input.ExpiresAt.UTC(),
 			CreatedAt:     now,
 		}
@@ -906,6 +1076,7 @@ func (s *GormStore) CreateTeamInvite(ctx context.Context, input CreateTeamInvite
 		invite = TeamInvite{
 			Code:      code,
 			CreatedBy: input.CreatedBy,
+			Role:      role,
 			ExpiresAt: row.ExpiresAt,
 			CreatedAt: now,
 			Active:    row.ExpiresAt.After(now),
@@ -924,13 +1095,19 @@ func (s *GormStore) CreateTeamInvite(ctx context.Context, input CreateTeamInvite
 
 func (s *GormStore) ListTeamInvites(ctx context.Context, teamID string, actorID string) ([]TeamInvite, error) {
 	db := s.db.WithContext(ctx)
-	if _, err := getTeamMemberTx(db, teamID, actorID); err != nil {
+	actor, err := getTeamMemberTx(db, teamID, actorID)
+	if err != nil {
 		return nil, err
+	}
+	// 링크(다시 복사할 비밀값까지)는 링크를 만드는 사람, 곧 관리자 이상만 본다.
+	if !teamRoleAtLeast(actor.Role, TeamRoleAdmin) {
+		return nil, ErrTeamAdminOnly
 	}
 	type inviteRow struct {
 		Code           string
 		CreatedBy      string
 		CreatedByEmail *string
+		Role           string
 		HasBox         int
 		SealedSecret   *string
 		ExpiresAt      time.Time
@@ -940,7 +1117,7 @@ func (s *GormStore) ListTeamInvites(ctx context.Context, teamID string, actorID 
 	}
 	var rows []inviteRow
 	if err := db.Table("team_invites").
-		Select("team_invites.code AS code, team_invites.created_by AS created_by, users.email AS created_by_email, CASE WHEN team_invites.invite_box IS NULL THEN 0 ELSE 1 END AS has_box, team_invites.sealed_secret AS sealed_secret, team_invites.expires_at AS expires_at, team_invites.use_count AS use_count, team_invites.revoked_at AS revoked_at, team_invites.created_at AS created_at").
+		Select("team_invites.code AS code, team_invites.created_by AS created_by, users.email AS created_by_email, team_invites.role AS role, CASE WHEN team_invites.invite_box IS NULL THEN 0 ELSE 1 END AS has_box, team_invites.sealed_secret AS sealed_secret, team_invites.expires_at AS expires_at, team_invites.use_count AS use_count, team_invites.revoked_at AS revoked_at, team_invites.created_at AS created_at").
 		Joins("LEFT JOIN users ON users.id = team_invites.created_by").
 		Where("team_invites.team_id = ?", teamID).
 		Order("team_invites.created_at DESC, team_invites.code ASC").
@@ -953,6 +1130,7 @@ func (s *GormStore) ListTeamInvites(ctx context.Context, teamID string, actorID 
 		invite := TeamInvite{
 			Code:      row.Code,
 			CreatedBy: row.CreatedBy,
+			Role:      storedTeamInviteRole(row.Role),
 			ExpiresAt: row.ExpiresAt.UTC(),
 			UseCount:  row.UseCount,
 			RevokedAt: utcTimePointer(row.RevokedAt),
@@ -973,11 +1151,8 @@ func (s *GormStore) ListTeamInvites(ctx context.Context, teamID string, actorID 
 
 func (s *GormStore) RevokeTeamInvite(ctx context.Context, teamID string, actorID string, code string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if _, err := s.lockTeamRowTx(tx, teamID); err != nil {
-			return err
-		}
-		// 취소는 멤버 누구나 한다 — 멤버는 믿는 사이다.
-		if _, err := getTeamMemberTx(tx, teamID, actorID); err != nil {
+		// 취소는 링크를 만드는 사람, 곧 관리자 이상이 한다.
+		if _, err := s.requireTeamRoleTx(tx, teamID, actorID, TeamRoleAdmin); err != nil {
 			return err
 		}
 		var invite teamInviteRow
@@ -997,6 +1172,14 @@ func (s *GormStore) RevokeTeamInvite(ctx context.Context, teamID string, actorID
 		}
 		return bumpTeamInfoRevisionTx(tx, teamID, nil)
 	})
+}
+
+// storedTeamInviteRole 은 링크 행에 적힌 역할이다. 멤버·읽기 전용이 아니면(이 칸 전에 만든 링크 등) 멤버로 본다.
+func storedTeamInviteRole(role string) string {
+	if role == TeamRoleViewer {
+		return TeamRoleViewer
+	}
+	return TeamRoleMember
 }
 
 // liveInvite 는 아직 쓸 수 있는 링크인지다 — 상자가 있고, 취소되지 않았고, 기한 안이다.
@@ -1044,6 +1227,7 @@ func (s *GormStore) GetTeamInviteInfo(ctx context.Context, code string, joinToke
 		TeamID:      team.ID,
 		TeamName:    team.Name,
 		MemberCount: counts[team.ID],
+		Role:        storedTeamInviteRole(invite.Role),
 		ExpiresAt:   invite.ExpiresAt.UTC(),
 	}
 	var inviter userRow
@@ -1121,16 +1305,19 @@ func (s *GormStore) JoinTeam(ctx context.Context, code string, joinToken string,
 			}
 			// 참여 직후 사본을 올리기 전에 끊긴 경우다 — 상자만 다시 준다.
 			result.Rejoined = true
+			result.Role = existing.Role
 			return nil
 		}
 		if !errors.Is(err, ErrTeamNotFound) {
 			return err
 		}
 		joinedVia := invite.Code
+		role := storedTeamInviteRole(invite.Role)
+		result.Role = role
 		member := teamMemberRow{
 			TeamID:    team.ID,
 			UserID:    userID,
-			Role:      TeamRoleMember,
+			Role:      role,
 			JoinedVia: &joinedVia,
 			AddedBy:   invite.CreatedBy,
 			AddedAt:   now,
@@ -1145,7 +1332,7 @@ func (s *GormStore) JoinTeam(ctx context.Context, code string, joinToken string,
 		}
 		// 링크로 들어온 사람은 반드시 팀 기록에 남는다 — 누구의 링크로 들어왔는지까지.
 		if err := s.appendServerTeamEventTx(tx, team.ID, userID, teamServerEvent{
-			Type: teamEventMemberJoined, UserID: userID, ByUserID: invite.CreatedBy,
+			Type: teamEventMemberJoined, UserID: userID, ByUserID: invite.CreatedBy, Role: role,
 		}, now); err != nil {
 			return err
 		}
@@ -1240,8 +1427,8 @@ func (s *GormStore) GetTeamSyncSnapshot(ctx context.Context, teamID string, user
 
 // ApplyTeamPushRecords 는 팀 레코드를 개인 push 와 같은 규칙(레코드 단위로 나중에 쓴 쪽, 같은 내용의
 // 재-push 는 변경 아님)으로 반영하고 팀 리비전을 돌려준다. 덮어쓰거나 지우기 직전의 판은 이전 판
-// 표로 옮긴다 — 개인 쪽은 지우면 빈 암호문으로 덮여 내용이 사라지지만, 팀은 소유자가 되돌릴 수 있어야
-// 한다.
+// 표로 옮긴다 — 개인 쪽은 지우면 빈 암호문으로 덮여 내용이 사라지지만, 팀은 관리자가 되살릴 수 있어야
+// 한다. 읽기 전용 멤버는 올리지 못한다.
 func (s *GormStore) ApplyTeamPushRecords(ctx context.Context, teamID string, userID string, payload syncmodel.Payload) (int64, error) {
 	if err := payload.Validate(); err != nil {
 		return 0, fmt.Errorf("%w: %v", ErrBadSyncRecord, err)
@@ -1254,8 +1441,12 @@ func (s *GormStore) ApplyTeamPushRecords(ctx context.Context, teamID string, use
 		if err != nil {
 			return err
 		}
-		if _, err := getTeamMemberTx(tx, teamID, userID); err != nil {
+		member, err := getTeamMemberTx(tx, teamID, userID)
+		if err != nil {
 			return err
+		}
+		if !teamRoleAtLeast(member.Role, TeamRoleMember) {
+			return ErrTeamReadOnly
 		}
 		total := 0
 		for _, kind := range kinds {
@@ -1331,6 +1522,7 @@ func upsertTeamRecordsTx(tx *gorm.DB, teamID string, userID string, kind syncmod
 					UpdatedBy:        current.UpdatedBy,
 					ChangedBy:        userID,
 					ChangedAt:        now,
+					Deleted:          row.DeletedAt != nil,
 				}
 				if err := tx.Create(&history).Error; err != nil {
 					return written, err
@@ -1578,6 +1770,65 @@ func (s *GormStore) sweepExpiredTeamInviteBoxes() {
 	if len(codes) >= expiredRowSweepBatch {
 		s.allowImmediateSweep(table)
 	}
+}
+
+const (
+	teamRecordVersionListDefault = 100
+	teamRecordVersionListMax     = 500
+)
+
+func (s *GormStore) ListTeamRecordVersions(ctx context.Context, teamID string, actorID string, query TeamRecordVersionQuery) ([]TeamRecordVersion, error) {
+	db := s.db.WithContext(ctx)
+	actor, err := getTeamMemberTx(db, teamID, actorID)
+	if err != nil {
+		return nil, err
+	}
+	// 이전 판을 보는 것은 되살리기를 하는 사람, 곧 관리자 이상이다.
+	if !teamRoleAtLeast(actor.Role, TeamRoleAdmin) {
+		return nil, ErrTeamAdminOnly
+	}
+	limit := query.Limit
+	if limit <= 0 {
+		limit = teamRecordVersionListDefault
+	}
+	limit = min(limit, teamRecordVersionListMax)
+	scope := db.Where("team_id = ?", teamID)
+	if query.Before > 0 {
+		scope = scope.Where("seq < ?", query.Before)
+	}
+	if query.Kind != "" || query.RecordID != "" {
+		scope = scope.Where("kind = ? AND record_id = ?", query.Kind, query.RecordID)
+	}
+	var rows []teamRecordHistoryRow
+	if err := scope.Order("seq DESC").Limit(limit).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	userIDs := make([]string, 0, len(rows)*2)
+	for _, row := range rows {
+		userIDs = append(userIDs, row.UpdatedBy, row.ChangedBy)
+	}
+	emails, err := teamUserEmailsTx(db, userIDs...)
+	if err != nil {
+		return nil, err
+	}
+	versions := make([]TeamRecordVersion, 0, len(rows))
+	for _, row := range rows {
+		versions = append(versions, TeamRecordVersion{
+			Seq:              row.Seq,
+			Kind:             row.Kind,
+			RecordID:         row.RecordID,
+			EncryptedPayload: row.EncryptedPayload,
+			UpdatedAt:        row.UpdatedAt.UTC(),
+			DeletedAt:        utcTimePointer(row.DeletedAt),
+			UpdatedBy:        row.UpdatedBy,
+			UpdatedByEmail:   emails[row.UpdatedBy],
+			ChangedBy:        row.ChangedBy,
+			ChangedByEmail:   emails[row.ChangedBy],
+			ChangedAt:        row.ChangedAt.UTC(),
+			Deleted:          row.Deleted,
+		})
+	}
+	return versions, nil
 }
 
 // sweepTeamRecordHistory 는 보존 기간이 지난 이전 판을 지운다. 팀 push 뒤에 간격을 두고 돈다.

@@ -74,6 +74,7 @@ import { HostBadge } from './HostBadge';
 import { VaultMark } from '../teams/VaultMark';
 import type { AssetTeam } from './AssetLocation';
 import { PerPersonHint } from '../teams/PerPersonHint';
+import { memberLeavesOf, withMemberLeftEnd } from '../teams/team-member-left';
 
 interface HostDetailPanelProps {
   hb: HostBrowserModel;
@@ -193,13 +194,18 @@ interface HostActivityEntry {
   author: string | null;
   /** Replay 로 열 녹화. 팀 줄이면 teamId 가 있다(서버의 녹화). */
   replay: { recordingId: string; teamId: string | null } | null;
+  /** 팀 녹화가 있지만 나는 볼 수 없다(관리자도, 녹화한 사람도 아니다) — Replay 를 끄고 까닭을 툴팁으로. */
+  replayForbidden: boolean;
 }
 
-/** 팀 기록 줄의 Replay — 서버에 그 녹화의 구간이 있을 때만(기록 화면과 같은 규칙). 진행 중인 접속도 연다. */
-function getTeamReplayRecordingId(
+/**
+ * 팀 기록 줄의 녹화 — 서버에 그 녹화의 구간이 있을 때만(기록 화면과 같은 규칙). 진행 중인 접속도 연다. 내가 볼 수
+ * 없는 녹화(viewable 거짓)도 돌려준다 — 화면이 꺼진 Replay 로 까닭을 말한다.
+ */
+function getTeamReplay(
   log: ActivityLogRecord,
   statuses: ReadonlyMap<string, TeamReplayStatus>,
-): string | null {
+): { recordingId: string; viewable: boolean } | null {
   if (log.kind !== 'session-lifecycle') {
     return null;
   }
@@ -209,7 +215,9 @@ function getTeamReplayRecordingId(
     return null;
   }
   const status = statuses.get(recordingId);
-  return status && status.state !== 'deleted' && status.segmentCount > 0 ? recordingId : null;
+  return status && status.state !== 'deleted' && status.segmentCount > 0
+    ? { recordingId, viewable: status.viewable }
+    : null;
 }
 
 /**
@@ -231,14 +239,23 @@ export function buildActivityEntries(input: {
   const local = input.localLogs.filter(includes);
   const entries: HostActivityEntry[] = local.slice(0, 40).map((log) => {
     const recordingId = getReplayRecordingId(log);
-    return { key: log.id, log, author: null, replay: recordingId ? { recordingId, teamId: null } : null };
+    return {
+      key: log.id,
+      log,
+      author: null,
+      replay: recordingId ? { recordingId, teamId: null } : null,
+      replayForbidden: false,
+    };
   });
   if (input.teams.length === 0) {
     return entries;
   }
   const localIds = new Set(local.map((log) => log.id));
   const seen = new Set<string>();
+  const leftReason = t('teamLogs.memberLeftEnd');
   for (const { teamId, items } of input.teams) {
+    // 시작만 있는 줄은 남긴 사람이 그 뒤에 팀에서 빠졌으면 그때 끝난 것으로 보인다(기록 화면과 같은 규칙).
+    const leaves = memberLeavesOf(items);
     for (const item of items) {
       const record = item.activity?.record;
       if (!record || !includes(record) || localIds.has(record.id)) {
@@ -249,12 +266,13 @@ export function buildActivityEntries(input: {
         continue;
       }
       seen.add(key);
-      const recordingId = getTeamReplayRecordingId(record, input.replayStatuses);
+      const teamReplay = getTeamReplay(record, input.replayStatuses);
       entries.push({
         key,
-        log: record,
+        log: withMemberLeftEnd(record, item, leaves, leftReason),
         author: item.authorEmail,
-        replay: recordingId ? { recordingId, teamId } : null,
+        replay: teamReplay?.viewable ? { recordingId: teamReplay.recordingId, teamId } : null,
+        replayForbidden: teamReplay?.viewable === false,
       });
     }
   }
@@ -317,6 +335,7 @@ function ActivityRow({
   onClick,
   replayRecordingId,
   onOpenReplay,
+  replayForbiddenReason = null,
   team = null,
 }: {
   primary: string;
@@ -330,6 +349,8 @@ function ActivityRow({
   onClick?: () => void;
   replayRecordingId?: string | null;
   onOpenReplay?: (recordingId: string) => void;
+  /** 녹화가 있지만 볼 수 없는 까닭 — 있으면 꺼진 Replay 에 툴팁으로 단다. */
+  replayForbiddenReason?: string | null;
 }) {
   const textContent = (
     <span className="flex min-w-0 items-center gap-[0.55rem]">
@@ -382,6 +403,19 @@ function ActivityRow({
           <Play className="h-[0.8rem] w-[0.8rem]" aria-hidden />
           Replay
         </button>
+      ) : replayForbiddenReason ? (
+        // 왜 못 여는지 말해 준다(기록 화면의 꺼진 Replay 와 같은 규칙). 비활성 단추만 두면 고장으로 읽는다.
+        <Tooltip label={replayForbiddenReason} multiline className="shrink-0 cursor-not-allowed">
+          <button
+            type="button"
+            disabled
+            aria-label={`Replay — ${replayForbiddenReason}`}
+            className="inline-flex shrink-0 items-center gap-[0.3rem] rounded-[8px] border border-[var(--border)] px-[0.5rem] py-[0.3rem] text-[0.72rem] font-semibold text-[var(--text-soft)] opacity-50"
+          >
+            <Play className="h-[0.8rem] w-[0.8rem]" aria-hidden />
+            Replay
+          </button>
+        </Tooltip>
       ) : null}
       {/**
        * 오른쪽 열은 [얼마나 이어졌나 / 언제였나] 두 줄이다.
@@ -1191,7 +1225,7 @@ function EmptyDetail({
         replayStatuses: teamActivity.replayStatuses,
       })
         .slice(0, 6)
-        .map(({ key, log, author, replay }) => {
+        .map(({ key, log, author, replay, replayForbidden }) => {
           const hostId = getLogHostId(log) ?? '';
           const metadata = log.metadata as {
             hostLabel?: string;
@@ -1234,6 +1268,7 @@ function EmptyDetail({
             duration: formatSessionDuration(metadata?.durationMs),
             level: log.level,
             replay,
+            replayForbidden,
           };
         }),
     [hb.activityLogs, hb.hosts, scopedHostIdSet, teamActivity, translate],
@@ -1288,10 +1323,13 @@ function EmptyDetail({
             <SquareTerminal className="h-[0.95rem] w-[0.95rem]" />
             {translate('hostDetail.empty.localTerminal')}
           </Button>
-          <Button variant="secondary" size="sm" onClick={hb.openCreateGroupModal}>
-            <FolderPlus className="h-[0.95rem] w-[0.95rem]" />
-            {translate('hostDetail.empty.newGroup')}
-          </Button>
+          {/* 지금 위치(읽기 전용 팀)에 만들 수 없으면 숨긴다 — 그룹은 지금 위치의 볼트에 만든다. */}
+          {hb.isReadOnlyVault(hb.currentVaultId) ? null : (
+            <Button variant="secondary" size="sm" onClick={hb.openCreateGroupModal}>
+              <FolderPlus className="h-[0.95rem] w-[0.95rem]" />
+              {translate('hostDetail.empty.newGroup')}
+            </Button>
+          )}
           <Button variant="secondary" size="sm" onClick={() => setShortcutsOpen(true)}>
             <Keyboard className="h-[0.95rem] w-[0.95rem]" />
             {translate('hostDetail.empty.shortcuts')}
@@ -1342,6 +1380,7 @@ function EmptyDetail({
                 duration={item.duration}
                 onClick={() => hb.selectSingleHost(item.hostId)}
                 replayRecordingId={item.replay?.recordingId ?? null}
+                replayForbiddenReason={item.replayForbidden ? translate('teamLogs.replayForbidden') : null}
                 onOpenReplay={
                   hb.onOpenReplay && item.replay
                     ? (recordingId) => {
@@ -1459,6 +1498,8 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
   }
 
   const isFavorite = favoriteHostIdSet.has(host.id);
+  // 내가 읽기 전용인 팀의 호스트 — 고치는 길(Edit·Edit Host·공개 키 올리기)을 숨긴다. 접속·SFTP·내 자격 증명은 그대로.
+  const readOnly = hb.isReadOnlyAsset(`host:${host.id}`);
   const region = getHostRegion(host);
   const address = getHostAddress(host);
   // 경유 계층 행들. Overview·Connection 이 **같은 행**을 쓴다(라벨·값·순서가 갈리지 않게).
@@ -1541,10 +1582,12 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
             <SectionCard
               title="Host Information"
               action={
-                <Button size="sm" variant="secondary" onClick={() => hb.onEditHost(host.id)}>
-                  <Pencil className="h-3.5 w-3.5" aria-hidden />
-                  Edit
-                </Button>
+                readOnly ? null : (
+                  <Button size="sm" variant="secondary" onClick={() => hb.onEditHost(host.id)}>
+                    <Pencil className="h-3.5 w-3.5" aria-hidden />
+                    Edit
+                  </Button>
+                )
               }
             >
               <div>
@@ -1598,10 +1641,12 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
                   <SquareTerminal className="h-4 w-4" aria-hidden />
                   Connect
                 </Button>
-                <Button variant="secondary" size="sm" onClick={() => hb.onEditHost(host.id)}>
-                  <Pencil className="h-4 w-4" aria-hidden />
-                  Edit Host
-                </Button>
+                {readOnly ? null : (
+                  <Button variant="secondary" size="sm" onClick={() => hb.onEditHost(host.id)}>
+                    <Pencil className="h-4 w-4" aria-hidden />
+                    Edit Host
+                  </Button>
+                )}
                 {hostSupportsSftp(host) && hb.onOpenSftp ? (
                   <Button variant="secondary" size="sm" onClick={() => hb.onOpenSftp?.(host.id)}>
                     <Folder className="h-4 w-4" aria-hidden />
@@ -1628,7 +1673,8 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
                     Containers
                   </Button>
                 ) : null}
-                {(isSshHostRecord(host) || isAwsEc2HostRecord(host)) &&
+                {!readOnly &&
+                (isSshHostRecord(host) || isAwsEc2HostRecord(host)) &&
                 hb.onGenerateAndInstallSshKey &&
                 hb.onInstallSshPublicKey ? (
                   <Button
@@ -1700,7 +1746,7 @@ function ActivityList({
   const { t: translate } = useTranslation();
   return (
     <div className="flex flex-col">
-      {entries.map(({ key, log, author, replay }) => {
+      {entries.map(({ key, log, author, replay, replayForbidden }) => {
         const metadata = log.metadata as {
           connectionKind?: string;
           awsTransport?: string;
@@ -1740,6 +1786,7 @@ function ActivityList({
             when={log.createdAt}
             duration={isSession ? formatSessionDuration(metadata?.durationMs) : null}
             replayRecordingId={replay?.recordingId ?? null}
+            replayForbiddenReason={replayForbidden ? translate('teamLogs.replayForbidden') : null}
             onOpenReplay={
               onOpenReplay && replay
                 ? (recordingId) =>

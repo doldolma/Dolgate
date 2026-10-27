@@ -1218,6 +1218,7 @@
     "shutdownSession": "앱 종료로 세션이 정리되었습니다.",
     "shutdownSftp": "앱 종료로 SFTP 연결이 정리되었습니다.",
     "shutdownContainers": "앱 종료로 Containers 연결이 정리되었습니다.",
+    "interruptedByAppExit": "앱이 꺼져 끊겼습니다.",
     "transferFailed": "전송에 실패했습니다.",
     "noReadPermission": "원본 파일을 읽을 권한이 없습니다.",
     "noOverwritePermission": "기존 항목을 덮어쓰거나 삭제할 권한이 없습니다.",
@@ -2885,11 +2886,18 @@
     "inviteOtherTeam": "다른 팀의 초대 링크입니다.",
     "needsUnlockedVault": "로그인하고 동기화 암호를 입력한 뒤에 팀을 쓸 수 있습니다.",
     "notOnDevice": "이 기기에 없는 팀입니다.",
+    "readOnly": "읽기 전용 팀입니다. 이 팀의 것은 고칠 수 없습니다.",
     "contextChanged": "로그인 계정 또는 서버가 변경되어 팀 작업을 취소했습니다.",
     "copied": "{{hosts}}개 호스트를 다른 볼트로 복사했습니다.",
     "myCredentialsTeamOnly": "내 자격 증명은 팀 호스트에만 둘 수 있습니다.",
     "myCredentialsSaved": "팀 호스트에 쓸 내 자격 증명을 저장했습니다.",
     "myCredentialsCleared": "팀 호스트에 쓰던 내 자격 증명을 지웠습니다.",
+    "restored": "팀 볼트에서 {{count}}개를 복원했습니다.",
+    "restoreGone": "이 변경은 보존 기간이 지나 복원할 수 없습니다.",
+    "connectionsClosed": {
+      "notice": "팀에서 빠져 이 연결을 닫았습니다.",
+      "log": "{{team}} 팀에서 빠져 그 팀 호스트의 연결 {{count}}개를 닫았습니다."
+    },
     "api": {
       "inviteInvalid": "초대 링크가 만료되었거나 올바르지 않습니다.",
       "notFound": "팀을 찾을 수 없습니다.",
@@ -2901,7 +2909,11 @@
       "alreadyMember": "이미 이 팀의 멤버입니다.",
       "exists": "이미 있는 팀입니다.",
       "replayNotFound": "팀 녹화를 찾을 수 없습니다.",
-      "replayDeleted": "팀 녹화 한도로 지워진 녹화입니다."
+      "replayDeleted": "팀 녹화 한도로 지워진 녹화입니다.",
+      "adminOnly": "팀 관리자만 할 수 있습니다.",
+      "readOnly": "읽기 전용 멤버는 팀 데이터를 바꿀 수 없습니다.",
+      "roleInvalid": "줄 수 없는 역할입니다.",
+      "replayForbidden": "녹화는 팀 관리자와 녹화한 사람만 볼 수 있습니다."
     },
     "crossVault": {
       "jumpHost": "점프 호스트는 같은 볼트의 호스트만 쓸 수 있습니다.",
@@ -2970,7 +2982,8 @@
       "add": "키 넣기",
       "dialogTitle": "{{profile}} · 키",
       "saveFailed": "키를 저장하지 못했습니다."
-    }
+    },
+    "viewerHint": "Viewer — 보고 접속만 할 수 있습니다"
   },
   "teamsPanel": {
     "empty": {
@@ -3032,20 +3045,19 @@
     },
     "remove": {
       "title": "{{email}} 제거",
-      "body": "팀에서 빠지고 이 팀의 데이터를 더 받지 못합니다. 이 팀의 초대 링크도 모두 취소됩니다.",
+      "body": "팀에서 빠지고 이 팀의 데이터를 더 받지 못하며, 그 사람의 열린 연결도 닫힙니다. 이 팀의 초대 링크도 모두 취소됩니다.",
       "done": "뺐습니다 — 초대 링크가 모두 취소됐습니다."
     },
     "makeOwner": {
       "title": "{{email}} 에게 소유권 넘기기",
-      "body": "이름 변경·멤버 제거·팀 삭제는 소유자만 할 수 있습니다. 넘기면 나는 멤버가 됩니다.",
+      "body": "이름 바꾸기·팀 삭제와 관리자 바꾸기는 소유자만 할 수 있습니다. 넘기면 나는 관리자가 됩니다.",
       "confirm": "넘기기"
     },
     "leave": {
       "title": "{{team}} 나가기",
-      "member": "이 기기에서 팀의 호스트·비밀번호·키가 사라집니다. 다시 들어오려면 새 초대 링크가 필요합니다.",
-      "owner": "소유자는 다른 멤버에게 넘기고 나갑니다.",
-      "earliest": "가장 먼저 들어옴",
-      "last": "마지막 멤버입니다. 나가면 팀과 그 안의 것이 모두 지워집니다.",
+      "member": "이 기기에서 팀의 호스트·비밀번호·키가 사라지고, 그 호스트에 열린 연결도 닫힙니다. 다시 들어오려면 새 초대 링크가 필요합니다.",
+      "owner": "소유자는 다른 멤버에게 넘기고 나갑니다. 나가면 이 팀 호스트에 열린 연결도 닫힙니다.",
+      "last": "마지막 멤버입니다. 나가면 팀과 그 안의 것이 모두 지워지고, 열린 연결도 닫힙니다.",
       "copyFirst": "남기고 싶은 것은 먼저 개인 볼트로 복사하세요.",
       "confirm": "나가기",
       "transferAndLeave": "넘기고 나가기",
@@ -3053,8 +3065,8 @@
     },
     "delete": {
       "title": "{{team}} 팀 삭제",
-      "others": "다른 멤버 {{count}}명의 화면에서도 사라집니다.",
-      "alone": "이 팀에 다른 멤버는 없습니다.",
+      "others": "다른 멤버 {{count}}명의 화면에서도 사라지고, 모두의 열린 연결이 닫힙니다.",
+      "alone": "이 팀에 다른 멤버는 없습니다. 이 팀 호스트에 열린 연결은 닫힙니다.",
       "copyFirst": "남기고 싶은 것은 지우기 전에 각자 개인 볼트로 복사하세요."
     },
     "counts": {
@@ -3086,19 +3098,27 @@
       "unsupportedVaultBody": "팀은 동기화 암호로 잠그는 새 볼트에서 쓸 수 있습니다. 볼트를 옮긴 뒤 다시 여세요.",
       "serverUnsupportedTitle": "이 서버는 팀을 지원하지 않습니다",
       "serverUnsupportedBody": "동기화 서버를 최신 버전으로 올리면 쓸 수 있습니다.",
-      "history": "이 팀 호스트의 접속 기록과 터미널 녹화는 멤버 모두가 봅니다."
+      "history": "이 팀 호스트의 접속 기록은 멤버 모두가, 터미널 녹화는 관리자와 녹화한 사람이 봅니다.",
+      "viewer": "Viewer 로 들어갑니다 — 보고 접속만 할 수 있습니다."
     },
     "actionFailed": "팀 작업을 마치지 못했습니다.",
     "intro": "팀원과 호스트·비밀번호를 함께 씁니다. 서버는 내용을 볼 수 없습니다.",
     "about": {
       "label": "팀 볼트에 넣으면",
-      "edit": "팀에 넣은 것은 팀원 모두가 보고 고칠 수 있습니다.",
+      "edit": "Member 이상은 팀에 넣은 것을 보고 고칩니다. Viewer 는 보고 접속만 합니다.",
       "members": "링크로 들어온 사람은 누구의 링크로 언제 들어왔는지 멤버 목록에 남습니다.",
       "ownKeys": "AWS 정적 키와 Tailscale auth key 는 동기화되지 않아 기기마다 따로 넣습니다. 내 것을 공유하면 공유한 기기에는 채워 둡니다."
     },
     "hostCount": "호스트 {{count}}개",
     "teamActions": "팀 메뉴",
-    "listTitle": "팀"
+    "listTitle": "팀",
+    "roles": {
+      "label": "역할마다 할 수 있는 것",
+      "owner": "팀 이름 바꾸기·소유권 넘기기·팀 삭제까지 합니다.",
+      "admin": "초대 링크·멤버 빼기·역할 바꾸기·복원을 하고, 모두의 녹화를 봅니다.",
+      "member": "호스트를 고치고 지우고 팀으로 공유해 넣습니다.",
+      "viewer": "보고 접속만 합니다. 팀의 것은 고치지 못합니다."
+    }
   },
   "shareChat": {
     "titleWith": "채팅 기록 · {{title}}",
@@ -4376,6 +4396,82 @@
     "replayPending": "아직 올라오는 중입니다 — 녹화한 사람의 앱이 보내는 중이거나 오프라인입니다",
     "loadFailed": "팀 기록을 불러오지 못했습니다",
     "loading": "팀 기록을 불러오는 중입니다",
-    "emptyDescription": "이 팀 볼트의 접속·변경 기록이 여기에 쌓입니다."
+    "emptyDescription": "이 팀 볼트의 접속·변경 기록이 여기에 쌓입니다.",
+    "memberJoinedAs": "{{email}} 님이 {{role}} 로 팀에 들어왔습니다",
+    "roleChanged": "{{by}} 님이 {{email}} 님의 역할을 {{role}} 로 바꿨습니다",
+    "replayForbidden": "녹화는 관리자와 녹화한 사람만 볼 수 있습니다",
+    "memberLeftEnd": "팀에서 빠져 연결이 끝났습니다."
+  },
+  "teamChanges": {
+    "tabsLabel": "기록 보기",
+    "about": {
+      "label": "바뀐 것과 복원",
+      "body": "팀 볼트에서 수정·삭제된 것을 보존 기간(기본 90일) 동안 복원할 수 있습니다.",
+      "together": "복원하면 그때 함께 바뀐 것과, 그것이 쓰던 것(비밀번호·점프 호스트 등)이 지워졌으면 그것도 함께 돌아옵니다.",
+      "admins": "관리자만 봅니다."
+    },
+    "searchPlaceholder": "Name, member",
+    "loading": "바뀐 것을 불러오는 중입니다",
+    "loadFailed": "바뀐 것을 불러오지 못했습니다",
+    "emptyTitle": "복원할 것이 없습니다",
+    "emptyDescription": "보존 기간(기본 90일) 동안 이 팀 볼트에서 수정·삭제된 것이 없습니다.",
+    "one": "{{name}} {{kind}}",
+    "many": "{{kind}} {{count}}개",
+    "kind": {
+      "groups": "그룹",
+      "hosts": "호스트",
+      "secrets": "비밀번호",
+      "portForwards": "포워딩",
+      "dnsOverrides": "DNS 덮어쓰기",
+      "knownHosts": "호스트 키",
+      "snippets": "스니펫",
+      "workspaces": "Workspace",
+      "tailnets": "tailnet",
+      "awsProfiles": "AWS 프로필"
+    },
+    "kinds": {
+      "groups": "그룹",
+      "hosts": "호스트",
+      "secrets": "비밀번호",
+      "portForwards": "포워딩",
+      "dnsOverrides": "DNS 덮어쓰기",
+      "knownHosts": "호스트 키",
+      "snippets": "스니펫",
+      "workspaces": "Workspace",
+      "tailnets": "tailnet",
+      "awsProfiles": "AWS 프로필"
+    },
+    "title": {
+      "deleted": "{{what}} 삭제했습니다.",
+      "edited": "{{what}} 수정했습니다.",
+      "mixed": "{{edited}} 수정하고 {{deleted}} 삭제했습니다."
+    },
+    "badge": {
+      "deleted": "삭제",
+      "edited": "수정"
+    },
+    "unreadable": "(열 수 없음)",
+    "nowLabel": "지금 {{name}}",
+    "more": "외 {{count}}개",
+    "changedLater": "이후 다시 수정됨",
+    "changedLaterHint": "복원하면 그 뒤의 변경을 덮습니다. 복원할 때 물어봅니다.",
+    "restore": "복원",
+    "restored": "복원됨",
+    "restoredHint": "지금 내용과 같습니다",
+    "result": {
+      "restored": "{{count}}개를 복원했습니다 — {{names}}",
+      "dependencies": "함께 돌아온 것: {{names}}",
+      "skippedOtherVault": "건너뛴 것: {{names}} — 다른 볼트에 같은 것이 있습니다.",
+      "skippedUnreadable": "건너뛴 것: {{names}} — 이 앱이 열 수 없습니다.",
+      "nothing": "이미 지금 내용과 같습니다.",
+      "failed": "복원하지 못했습니다"
+    },
+    "confirm": {
+      "title": "{{what}} 복원",
+      "lead": "복원하면 그 뒤에 바뀐 것을 덮습니다.",
+      "changedBy": "{{name}} — {{by}} 님이 {{when}}에 다시 바꿨습니다",
+      "recreated": "{{name}} — 그 뒤에 다시 만들어졌습니다",
+      "overwrite": "덮고 복원"
+    }
   }
 }

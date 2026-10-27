@@ -118,6 +118,12 @@ interface LocalRecordingMeta extends SessionReplayRecording {
   teamId?: string;
 }
 
+/** 앱이 꺼져 끝나지 못한 녹화 — 메타를 채울 접속 줄의 값. */
+export type InterruptedRecording = Omit<
+  SessionReplayRecording,
+  "disconnectedAt" | "durationMs" | "initialCols" | "initialRows"
+>;
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -569,6 +575,69 @@ export class SessionReplayService {
 
   setOnRecordingsPruned(handler: () => void): void {
     this.onRecordingsPruned = handler;
+  }
+
+  /**
+   * 앱이 꺼져 끝나지 못한 녹화를 다시 볼 수 있게 메타를 채우고 그 끝을 돌려준다. 메타는 녹화가 끝날 때 쓰므로 그런
+   * 녹화는 녹화 파일만 남는다 — 메타가 없으면 '있는 녹화'에서 빠져 Replay 가 꺼지고, 보존 한도 정리도 메타만 보아
+   * 파일이 끝내 남았다.
+   *
+   * 끝은 녹화 파일을 마지막으로 쓴 시각이다(팀 녹화의 끊김 마감과 같다). 처음 화면 크기는 어디에도 남지 않아 기본
+   * 크기로 시작하고, 녹화 안의 크기 바꿈이 이어 맞춘다. 메타가 이미 있으면 그 끝을, 녹화 파일이 없으면 null 이다.
+   */
+  recoverInterruptedRecording(
+    recording: InterruptedRecording,
+  ): { disconnectedAt: string; durationMs: number } | null {
+    const scope = this.activeScope;
+    if (!scope || this.isRecordingActive(recording.recordingId)) {
+      return null;
+    }
+    const directory = scope.replayDirectoryPath;
+    const metaPath = this.getMetaPath(recording.recordingId, directory);
+    if (existsSync(metaPath)) {
+      try {
+        const meta = this.loadRecordingMeta(recording.recordingId, directory);
+        return { disconnectedAt: meta.disconnectedAt, durationMs: meta.durationMs };
+      } catch {
+        return null;
+      }
+    }
+    let lastWrittenMs: number | null = null;
+    for (const filePath of [
+      this.getEventsGzipPath(recording.recordingId, directory),
+      this.getEventsPath(recording.recordingId, directory),
+    ]) {
+      try {
+        lastWrittenMs = statSync(filePath).mtimeMs;
+        break;
+      } catch {
+        // 없으면 옛 형식을 본다.
+      }
+    }
+    if (lastWrittenMs === null) {
+      return null;
+    }
+    const connectedAtMs = Date.parse(recording.connectedAt);
+    const disconnectedAt = new Date(lastWrittenMs).toISOString();
+    const durationMs = Number.isFinite(connectedAtMs) ? Math.max(0, Math.round(lastWrittenMs - connectedAtMs)) : 0;
+    const teamId = recording.hostId ? this.teamOfHost(recording.hostId) : null;
+    const meta: LocalRecordingMeta = {
+      recordingId: recording.recordingId,
+      sessionId: recording.sessionId,
+      hostId: recording.hostId,
+      hostLabel: recording.hostLabel,
+      title: recording.title,
+      connectionDetails: recording.connectionDetails ?? null,
+      connectionKind: recording.connectionKind,
+      connectedAt: recording.connectedAt,
+      disconnectedAt,
+      durationMs,
+      initialCols: DEFAULT_REPLAY_COLS,
+      initialRows: DEFAULT_REPLAY_ROWS,
+      ...(teamId ? { teamId } : {}),
+    };
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf8");
+    return { disconnectedAt, durationMs };
   }
 
   // 현재 scope의 리플레이 디렉토리가 디스크에서 차지하는 용량(설정 화면 표시용).

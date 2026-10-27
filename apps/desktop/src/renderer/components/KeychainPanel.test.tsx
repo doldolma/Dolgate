@@ -270,3 +270,47 @@ describe('KeychainPanel unused credentials', () => {
     expect(onRemoveUnusedSecrets).toHaveBeenCalledWith(UNUSED, null);
   });
 });
+
+// 7-3: 내가 읽기 전용(Viewer)인 팀 — 쓰기(비밀번호 복사·호스트에 설치)만 남고 편집·삭제·한 번에 지우기는 닫힌다.
+describe('KeychainPanel with a read-only team', () => {
+  it("keeps copying and installing a team credential, and drops editing, deleting and removing unused", async () => {
+    appStore.setState({
+      vaultIndex: {
+        ...createEmptyVaultIndex(),
+        teams: [{ id: 'team-a', name: 'Acme Infra', role: 'viewer', syncState: 'ready', syncError: null, groups: [] }],
+      },
+    });
+    const teamEntry = secret({ secretRef: 'secret:team', label: 'acme db', hasManagedPrivateKey: true });
+    settingsService.listTeamSavedCredentials.mockResolvedValue([
+      teamEntry,
+      secret({ secretRef: 'secret:team-old', label: 'team old', linkedHostCount: 0 }),
+    ]);
+    render(
+      <KeychainPanel
+        entries={[secret({ secretRef: 'secret:mine', label: 'my login', linkedHostCount: 0 })]}
+        hosts={[]}
+        searchQuery=""
+        onSearchQueryChange={vi.fn()}
+        onRemoveSecret={vi.fn().mockResolvedValue(undefined)}
+        onRemoveUnusedSecrets={vi.fn().mockResolvedValue(undefined)}
+        onEditSecret={vi.fn()}
+        onGenerateSshKey={vi.fn().mockResolvedValue({} as never)}
+        onCopySshPublicKey={vi.fn().mockResolvedValue(undefined)}
+        onInstallSshPublicKey={vi.fn().mockResolvedValue({} as never)}
+      />,
+    );
+    const section = (vaultId: string) =>
+      within(document.querySelector(`[data-vault-section="${vaultId}"]`)!.closest('section')!);
+    await waitFor(() => expect(section('team-a').getByText('acme db')).toBeInTheDocument());
+
+    const card = within(section('team-a').getByText('acme db').closest('article, li, div[class*="rounded"]') as HTMLElement);
+    expect(card.getByRole('button', { name: '비밀번호 복사' })).toBeInTheDocument();
+    expect(card.getByRole('button', { name: '호스트에 설치' })).toBeInTheDocument();
+    expect(section('team-a').queryByRole('button', { name: '편집' })).toBeNull();
+    expect(section('team-a').queryByRole('button', { name: '삭제' })).toBeNull();
+    expect(section('team-a').queryByRole('button', { name: /사용하지 않는 인증 정보/ })).toBeNull();
+    // 개인 것은 그대로다.
+    expect(section('personal').getByRole('button', { name: '편집' })).toBeInTheDocument();
+    expect(section('personal').getByRole('button', { name: '사용하지 않는 인증 정보 1개 삭제' })).toBeInTheDocument();
+  });
+});

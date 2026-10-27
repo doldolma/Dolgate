@@ -282,7 +282,14 @@ describe("values that differ per member", () => {
       }),
     ]);
     expect(team.private.hostPrefs).toEqual([
-      { id: "team-host", favorite: true, agentForwarding: true, updatedAt: expect.any(String) },
+      {
+        id: "team-host",
+        favorite: true,
+        agentForwarding: true,
+        rdpCertificateFingerprint: null,
+        knownHosts: [],
+        updatedAt: expect.any(String),
+      },
     ]);
     expect(team.sync.privatePendingPush).toBe(true);
     // 테마는 개인 칸에도 없다 — 이 기기에만 있다.

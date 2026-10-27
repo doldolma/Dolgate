@@ -250,3 +250,53 @@ describe('VaultCopyDialog workspaces', () => {
     );
   });
 });
+
+// 7-3: 내가 읽기 전용(Viewer)인 팀에는 복사해 넣지 않는다 — 그 팀에서 꺼내 오는 것은 된다.
+describe('VaultCopyDialog with a read-only team', () => {
+  const VIEWER = 'team-viewer';
+
+  function renderWith(draft: VaultCopyDraft) {
+    const browserVaults = buildBrowserVaults({
+      hosts: [{ id: 'my-web', label: 'my-web', groupName: null } as HostRecord],
+      groups: [],
+      savedWorkspaces: [],
+      vaultIndex: {
+        ...createEmptyVaultIndex(),
+        // 읽기 전용 팀이 먼저 — 처음 대상으로 그 팀을 고르지 않는지 본다.
+        teams: [
+          { id: VIEWER, name: 'Read Only Co', role: 'viewer', syncState: 'ready', syncError: null, groups: [] },
+          { id: TEAM, name: 'Acme Infra', role: 'member', syncState: 'ready', syncError: null, groups: [] },
+        ],
+      },
+      personalName: 'Personal',
+    });
+    render(
+      <VaultCopyDialog
+        vaults={browserVaults}
+        draft={draft}
+        hostLabelOf={() => 'my-web'}
+        workspaceLabelOf={() => null}
+        onPreview={vi.fn(() => Promise.resolve(counts()))}
+        onListMembers={vi.fn(() => Promise.resolve([member('me')]))}
+        onCopy={vi.fn().mockResolvedValue(undefined)}
+        onClose={vi.fn()}
+      />,
+    );
+  }
+
+  it('never offers the read-only team as where to copy to', () => {
+    renderWith({ ...hostsDraft, target: null });
+
+    const [vaultSelect] = dialog().getAllByRole('combobox') as HTMLSelectElement[];
+    expect(vaultSelect!.value).toBe(TEAM);
+    expect([...vaultSelect!.options].map((option) => option.textContent)).toEqual(['Acme Infra']);
+  });
+
+  it('copies out of the read-only team into your own vault', () => {
+    renderWith({ sourceVaultId: VIEWER, selection: { kind: 'hosts', hostIds: ['my-web'] }, target: null });
+
+    const [vaultSelect] = dialog().getAllByRole('combobox') as HTMLSelectElement[];
+    expect(vaultSelect!.value).toBe('personal');
+    expect([...vaultSelect!.options].map((option) => option.textContent)).toEqual(['Personal', 'Acme Infra']);
+  });
+});

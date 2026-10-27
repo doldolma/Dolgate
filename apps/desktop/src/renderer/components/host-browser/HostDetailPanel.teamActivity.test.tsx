@@ -87,6 +87,9 @@ function renderHost(hostId: string, activityLogs: ActivityLogRecord[]) {
     onOpenReplay,
     onCreateHost: vi.fn(),
     onSelectSection: vi.fn(),
+    // 읽기 전용 팀(Viewer)이 아닌 볼트 — 편집 길이 열려 있다.
+    isReadOnlyVault: () => false,
+    isReadOnlyAsset: () => false,
   } as unknown as HostBrowserModel;
   render(<HostDetailPanel hb={hb} />);
   return { onOpenReplay };
@@ -109,8 +112,8 @@ describe('HostDetailPanel — 팀 호스트의 Recent Activity', () => {
       teamItem(1, ALICE, sessionRecord('rec-other', 'h-elsewhere', '2026-10-24T07:00:00.000Z', {}), 'end'),
     ]);
     vi.mocked(getTeamReplayStatuses).mockResolvedValue([
-      { recordingId: 'r-theirs', state: 'ended', authorEmail: ALICE.email, segmentCount: 3 },
-      { recordingId: 'r-mine', state: 'ended', authorEmail: ME.email, segmentCount: 2 },
+      { recordingId: 'r-theirs', state: 'ended', authorEmail: ALICE.email, segmentCount: 3, viewable: true },
+      { recordingId: 'r-mine', state: 'ended', authorEmail: ME.email, segmentCount: 2, viewable: true },
     ]);
     const { onOpenReplay } = renderHost('h-team', [mine]);
 
@@ -126,6 +129,22 @@ describe('HostDetailPanel — 팀 호스트의 Recent Activity', () => {
     // 내 줄은 이 기기의 녹화를 연다.
     fireEvent.click(replays[1]!);
     expect(onOpenReplay).toHaveBeenLastCalledWith('r-mine');
+  });
+
+  // 녹화는 관리자 이상과 녹화한 사람만 받는다(7-1) — 열지 말고 꺼진 Replay 로 까닭을 말한다(기록 화면과 같은 규칙).
+  it("turns Replay off with the reason for a team recording you may not view", async () => {
+    const theirs = sessionRecord('rec-theirs', 'h-team', '2026-10-24T09:00:00.000Z', { recordingId: 'r-theirs', hasReplay: true });
+    vi.mocked(listTeamActivity).mockResolvedValue([teamItem(4, ALICE, theirs, 'end')]);
+    vi.mocked(getTeamReplayStatuses).mockResolvedValue([
+      { recordingId: 'r-theirs', state: 'ended', authorEmail: ALICE.email, segmentCount: 3, viewable: false },
+    ]);
+    const { onOpenReplay } = renderHost('h-team', []);
+
+    const replay = await screen.findByRole('button', { name: 'Replay — 녹화는 관리자와 녹화한 사람만 볼 수 있습니다' });
+    expect(replay).toBeDisabled();
+    fireEvent.click(replay);
+    expect(onOpenReplay).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '세션 Replay 보기' })).toBeNull();
   });
 
   it('keeps a team session without Replay until its recording is on the server', async () => {
@@ -181,6 +200,9 @@ describe('HostDetailPanel — 최근 로그의 팀 기록', () => {
       onCreateHost: vi.fn(),
       onSelectSection: vi.fn(),
       ...location,
+      // 읽기 전용 팀(Viewer)이 아닌 볼트 — 편집 길이 열려 있다.
+      isReadOnlyVault: () => false,
+      isReadOnlyAsset: () => false,
     } as unknown as HostBrowserModel;
     render(<HostDetailPanel hb={hb} />);
     return { onOpenReplay };
@@ -194,7 +216,7 @@ describe('HostDetailPanel — 최근 로그의 팀 기록', () => {
       teamItem(3, ALICE, { ...theirs, metadata: { ...theirs.metadata, status: 'connected' } }, 'start'),
     ]);
     vi.mocked(getTeamReplayStatuses).mockResolvedValue([
-      { recordingId: 'r-theirs', state: 'ended', authorEmail: ALICE.email, segmentCount: 3 },
+      { recordingId: 'r-theirs', state: 'ended', authorEmail: ALICE.email, segmentCount: 3, viewable: true },
     ]);
     const { onOpenReplay } = renderRecent({}, [mine]);
 

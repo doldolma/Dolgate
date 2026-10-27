@@ -487,6 +487,70 @@ describe("VncManager", () => {
   });
 
   // 코어가 죽으면 붙어 있던 세션은 전부 끝난 것으로 알려야 한다. 안 그러면 탭이 살아 있는 척한다.
+  describe("팀에서 빠짐·종료", () => {
+    const NOTICE = "팀에서 빠져 이 연결을 닫았습니다.";
+
+    function connectedManager(hostIds: string[]) {
+      const core = fakeCore();
+      const window = windowStub(1);
+      const records: Array<{ id: string; metadata: Record<string, unknown> }> = [];
+      const manager = new VncManager({
+        getWindows: () => [window],
+        spawnProcess: () => core.child,
+        resolveLaunchConfig: () => ({ command: "vnc-core", args: [], cwd: "." }),
+        upsertLogRecord: (record) => records.push(record as unknown as { id: string; metadata: Record<string, unknown> }),
+      });
+      for (const hostId of hostIds) {
+        const sessionId = `sess-${hostId}`;
+        void manager.connect(
+          { sessionId, host: "10.0.0.6", port: 5900 },
+          { hostId, hostLabel: hostId, title: hostId, connectionDetails: "10.0.0.6 · 5900" },
+        );
+        const request = requestsIn(core.written).at(-1)!;
+        core.emit(
+          encodeControlFrameOf({
+            type: "connected",
+            requestId: request.id,
+            sessionId,
+            payload: { desktopWidth: 1024, desktopHeight: 768, name: hostId },
+          }),
+        );
+      }
+      const rowsOf = (hostId: string) => records.filter((record) => record.metadata.hostId === hostId);
+      const closedEvents = () =>
+        window.webContents.send.mock.calls
+          .filter((call) => call[0] === ipcChannels.vnc.event && (call[1] as { type: string }).type === "closed")
+          .map((call) => call[1]);
+      return { core, manager, rowsOf, closedEvents };
+    }
+
+    it("주어진 호스트의 세션만 까닭과 함께 닫고, 기록은 한 번만 마감한다", () => {
+      const { core, manager, rowsOf, closedEvents } = connectedManager(["team-host", "my-host"]);
+
+      expect(manager.closeHostSessions(new Set(["team-host"]), NOTICE)).toBe(1);
+
+      expect(closedEvents()).toEqual([{ type: "closed", sessionId: "sess-team-host", notice: NOTICE }]);
+      expect(requestsIn(core.written).at(-1)).toMatchObject({ type: "disconnectVnc", sessionId: "sess-team-host" });
+      expect(rowsOf("team-host").at(-1)?.metadata).toMatchObject({ status: "closed", disconnectReason: NOTICE });
+
+      const rowCount = rowsOf("team-host").length;
+      core.emit(encodeControlFrameOf({ type: "closed", sessionId: "sess-team-host" }));
+      expect(rowsOf("team-host")).toHaveLength(rowCount);
+      expect(rowsOf("my-host").at(-1)?.metadata).toMatchObject({ status: "connected" });
+      expect(manager.closeHostSessions(new Set(["team-host"]), NOTICE)).toBe(0);
+    });
+
+    it("앱을 끄거나 로그아웃하면 열린 세션의 기록을 정상 닫힘으로 마감한다", () => {
+      const { manager, rowsOf, closedEvents } = connectedManager(["my-host"]);
+
+      manager.shutdown();
+
+      expect(rowsOf("my-host").at(-1)?.metadata).toMatchObject({ status: "closed" });
+      expect(typeof rowsOf("my-host").at(-1)?.metadata.durationMs).toBe("number");
+      expect(closedEvents()).toEqual([{ type: "closed", sessionId: "sess-my-host" }]);
+    });
+  });
+
   it("코어가 죽으면 세션을 닫고 기다리는 약속을 깨뜨린다", async () => {
     const core = fakeCore();
     const window = windowStub(1);

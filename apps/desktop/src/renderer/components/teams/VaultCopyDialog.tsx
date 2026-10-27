@@ -36,9 +36,14 @@ const EXTRA_KEYS = [
 
 const prettyPath = (path: string) => path.split('/').join(' / ');
 
-/** 처음 대상 — 개인에서는 첫 팀, 팀에서는 개인. 막힌 팀은 고를 수 없다. */
+/** 복사해 넣을 수 있는 볼트 — 막힌 팀과 내가 읽기 전용인 팀은 고를 수 없다(꺼내 오는 것은 된다). */
+function canCopyInto(vault: BrowserVault, sourceVaultId: string): boolean {
+  return vault.id !== sourceVaultId && !vault.blocked && !vault.readOnly;
+}
+
+/** 처음 대상 — 개인에서는 첫 팀, 팀에서는 개인. 막힌 팀·읽기 전용 팀은 고를 수 없다. */
 function defaultTarget(vaults: readonly BrowserVault[], sourceVaultId: string): VaultCopyDraft['target'] {
-  const candidates = vaults.filter((vault) => vault.id !== sourceVaultId && !vault.blocked);
+  const candidates = vaults.filter((vault) => canCopyInto(vault, sourceVaultId));
   const source = vaults.find((vault) => vault.id === sourceVaultId);
   const preferredKind = source?.kind === 'personal' ? 'team' : 'personal';
   const vault = candidates.find((entry) => entry.kind === preferredKind) ?? candidates[0];
@@ -168,7 +173,7 @@ export function VaultCopyDialog({
     .filter(Boolean)
     .join(' ');
 
-  const pickable = vaults.filter((vault) => vault.id !== draft.sourceVaultId && !vault.blocked);
+  const pickable = vaults.filter((vault) => canCopyInto(vault, draft.sourceVaultId));
   const pickableGroups = [...(targetVault?.groups ?? [])].sort((left, right) => left.path.localeCompare(right.path));
   // 로컬 창만 있는 워크스페이스는 호스트 없이도 복사할 것이 있다.
   const canCopy = Boolean(target && counts && counts.hosts + counts.groups + (counts.workspaces ?? 0) > 0 && !busy);

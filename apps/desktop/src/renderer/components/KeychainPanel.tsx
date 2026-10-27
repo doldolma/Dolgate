@@ -44,7 +44,7 @@ import { useTranslation } from 'react-i18next';
 import { getFormatLocale, t } from '../i18n';
 import { useAppStore } from '../store/appStore';
 import { useTeamVaultLists } from '../controllers/useTeamVaultLists';
-import { sectionsByVault, vaultIdOf } from '../lib/vault-groups';
+import { isReadOnlyVault, sectionsByVault, vaultIdOf } from '../lib/vault-groups';
 import { PERSONAL_VAULT_ID } from '../store/utils/vaults';
 import { VaultEmptyLine, VaultSectionHeader } from './teams/VaultMark';
 
@@ -324,6 +324,12 @@ export function KeychainPanel({
     setSelectedInstallHostIds([]);
   };
 
+  // 읽기 전용 팀의 것은 쓰기만(복사·공개 키 올리기) — 고치기·지우기는 닫는다.
+  const isReadOnlyEntry = (entry: SecretMetadataRecord) => {
+    const teamId = teamIdBySecretRef[entry.secretRef];
+    return teamId ? isReadOnlyVault(vaultIndex, teamId) : false;
+  };
+
   const renderEntry = (entry: SecretMetadataRecord) => (
     <Card key={entry.secretRef}>
       <CardMain>
@@ -364,9 +370,11 @@ export function KeychainPanel({
             {translate(copyingSecretRef === entry.secretRef ? 'keychain.action.copying' : 'keychain.action.copyPassword')}
           </Button>
         ) : null}
-        <Button variant="secondary" onClick={() => editSecret(entry)}>
-          {translate('keychain.action.edit')}
-        </Button>
+        {isReadOnlyEntry(entry) ? null : (
+          <Button variant="secondary" onClick={() => editSecret(entry)}>
+            {translate('keychain.action.edit')}
+          </Button>
+        )}
         {entry.hasManagedPrivateKey ? (
           <>
             <Button
@@ -381,9 +389,11 @@ export function KeychainPanel({
             </Button>
           </>
         ) : null}
-        <Button variant="danger" onClick={() => void removeSecret(entry)}>
-          {translate('common.delete')}
-        </Button>
+        {isReadOnlyEntry(entry) ? null : (
+          <Button variant="danger" onClick={() => void removeSecret(entry)}>
+            {translate('common.delete')}
+          </Button>
+        )}
       </CardActions>
     </Card>
   );
@@ -450,7 +460,7 @@ export function KeychainPanel({
                   addLabel={null}
                   // 다시 들어와야 하는 팀은 쓸 수 없다.
                   action={
-                    section.blocked
+                    section.blocked || section.readOnly
                       ? null
                       : renderRemoveUnused(
                           section.team ? (listsByTeamId[section.team.id] ?? []) : entries,

@@ -32,6 +32,9 @@ var (
 	ErrTeamReplayDeleted = errors.New("team replay deleted")
 	// ErrTeamReplayAuthorOnly 는 녹화한 사람이 아닌 멤버가 그 녹화에 올리려는 경우다.
 	ErrTeamReplayAuthorOnly = errors.New("team replay author only")
+	// ErrTeamReplayForbidden 은 관리자 아래 역할(멤버·읽기 전용)이 남의 녹화를 받으려는 경우다. 녹화는
+	// 관리자 이상과 녹화한 사람만 본다.
+	ErrTeamReplayForbidden = errors.New("team replay forbidden")
 	// ErrTeamReplayClosed 는 끝난 녹화에 구간을 더 올리려는 경우다.
 	ErrTeamReplayClosed = errors.New("team replay closed")
 	// ErrTeamReplayTooLarge 는 녹화 하나가 한 개 최대를 넘게 되는 경우다. 구간이 넘기면 그 녹화는 잘린다 —
@@ -217,6 +220,9 @@ type TeamReplay struct {
 	CreatedAt      time.Time
 	LastActivityAt time.Time
 	EndedAt        *time.Time
+	// Viewable 은 묻는 사람이 이 녹화를 받아 볼 수 있는지다(관리자 이상이거나 녹화한 사람). 목록은 못 보는
+	// 녹화도 주므로, 화면이 왜 못 여는지 알린다.
+	Viewable bool
 }
 
 type TeamReplaySegmentInfo struct {
@@ -368,6 +374,8 @@ type teamServerEvent struct {
 	ByUserID string `json:"byUserId,omitempty"`
 	ByEmail  string `json:"byEmail,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+	// Role 은 들어온 사람의 역할(member_joined)이나 바뀐 역할(role_changed)이다.
+	Role string `json:"role,omitempty"`
 }
 
 const (
@@ -377,6 +385,7 @@ const (
 	teamEventMemberLeft    = "member_left"
 	teamEventMemberRemoved = "member_removed"
 	teamEventOwnerChanged  = "owner_changed"
+	teamEventRoleChanged   = "role_changed"
 
 	// 멤버가 스스로 나가지 않고 빠진 까닭(member_left)과, 소유자가 저절로 바뀐 까닭(owner_changed).
 	teamEventReasonVaultReset     = "vault_reset"
@@ -728,6 +737,8 @@ func (s *GormStore) StartTeamReplay(ctx context.Context, teamID string, userID s
 	if rotated {
 		s.sweepTeamReplaysNow()
 	}
+	// 시작하는 사람은 녹화한 사람이다.
+	replay.Viewable = true
 	return replay, nil
 }
 
@@ -935,7 +946,8 @@ func (s *GormStore) CompleteTeamReplay(ctx context.Context, teamID string, userI
 
 func (s *GormStore) ListTeamReplays(ctx context.Context, teamID string, userID string, query TeamReplayQuery) ([]TeamReplay, error) {
 	db := s.db.WithContext(ctx)
-	if _, err := getTeamMemberTx(db, teamID, userID); err != nil {
+	member, err := getTeamMemberTx(db, teamID, userID)
+	if err != nil {
 		return nil, err
 	}
 	scope := db.Where("team_id = ?", teamID)
@@ -964,14 +976,23 @@ func (s *GormStore) ListTeamReplays(ctx context.Context, teamID string, userID s
 	}
 	replays := make([]TeamReplay, 0, len(rows))
 	for _, row := range rows {
-		replays = append(replays, teamReplayFromRow(row))
+		replay := teamReplayFromRow(row)
+		replay.Viewable = teamReplayViewable(row, userID, member.Role)
+		replays = append(replays, replay)
 	}
 	return replays, nil
 }
 
-// readableTeamReplay 는 읽기 전에 멤버와 녹화를 본다. 지워진 녹화는 ErrTeamReplayDeleted 다.
+// teamReplayViewable 은 그 사람이 녹화를 받아 볼 수 있는지다 — 관리자 이상이거나 녹화한 사람.
+func teamReplayViewable(row teamReplayRow, userID string, role string) bool {
+	return teamRoleAtLeast(role, TeamRoleAdmin) || row.AuthorUserID == userID
+}
+
+// readableTeamReplay 는 읽기 전에 멤버와 녹화를 본다. 지워진 녹화는 ErrTeamReplayDeleted, 볼 수 없는
+// 녹화(관리자 아래 역할이 남의 녹화)는 ErrTeamReplayForbidden 이다.
 func readableTeamReplay(db *gorm.DB, teamID string, userID string, recordingID string) (teamReplayRow, error) {
-	if _, err := getTeamMemberTx(db, teamID, userID); err != nil {
+	member, err := getTeamMemberTx(db, teamID, userID)
+	if err != nil {
 		return teamReplayRow{}, err
 	}
 	replay, err := getTeamReplayTx(db, teamID, recordingID)
@@ -980,6 +1001,9 @@ func readableTeamReplay(db *gorm.DB, teamID string, userID string, recordingID s
 	}
 	if replay.State == TeamReplayDeleted {
 		return teamReplayRow{}, ErrTeamReplayDeleted
+	}
+	if !teamReplayViewable(replay, userID, member.Role) {
+		return teamReplayRow{}, ErrTeamReplayForbidden
 	}
 	return replay, nil
 }
@@ -992,6 +1016,7 @@ func (s *GormStore) GetTeamReplay(ctx context.Context, teamID string, userID str
 			return err
 		}
 		detail.TeamReplay = teamReplayFromRow(replay)
+		detail.Viewable = true
 		detail.StartMeta = replay.StartMeta
 		if replay.EndMeta != nil {
 			detail.EndMeta = *replay.EndMeta

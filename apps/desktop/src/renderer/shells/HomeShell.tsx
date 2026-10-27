@@ -30,7 +30,7 @@ import type {
   MyCredentialsApi,
   VaultCopyDraft,
 } from "../components/host-browser/useHostBrowser";
-import { isTeamVaultId, PERSONAL_VAULT_ID } from "../store/utils";
+import { isReadOnlyHost, isTeamVaultId, PERSONAL_VAULT_ID } from "../store/utils";
 import { listTeamSavedCredentials } from "../services/desktop/settings";
 import { HostDrawer, type HostDrawerHandle } from "../components/HostDrawer";
 import { HostEditSwitchConfirmDialog } from "../components/HostEditSwitchConfirmDialog";
@@ -279,13 +279,16 @@ export function HomeShell({
     return browserVaults.find((vault) => vault.id === vaultId) ?? null;
   }, [browserVaults, homeViewModel.hostDrawer]);
   const drawerTeamId = drawerVault?.kind === "team" ? drawerVault.id : null;
-  // 새 호스트 서랍 맨 위 Vault 의 후보. 다시 들어와야 하는 팀에는 만들 수 없다(볼트 줄 메뉴와 같다). 지금 고른 볼트는
-  // 그래도 둔다 — 빠지면 고르기가 빈칸으로 보인다.
+  // 새 호스트 서랍 맨 위 Vault 의 후보. 다시 들어와야 하는 팀과 내가 읽기 전용인 팀에는 만들 수 없다(볼트 줄 메뉴와
+  // 같다). 지금 고른 볼트는 그래도 둔다 — 빠지면 고르기가 빈칸으로 보인다.
   const createVaultChoices = useMemo(() => {
     const drawer = homeViewModel.hostDrawer;
     const chosenVaultId = drawer.mode === "create" ? drawer.vaultId : null;
     return browserVaults
-      .filter((vault) => vault.blocked !== "needs-rejoin" || vault.id === chosenVaultId)
+      .filter(
+        (vault) =>
+          (vault.blocked !== "needs-rejoin" && !vault.readOnly) || vault.id === chosenVaultId,
+      )
       .map((vault) => ({
         id: vault.id,
         team: vault.kind === "team" ? { id: vault.id, name: vault.name } : null,
@@ -527,10 +530,17 @@ export function HomeShell({
     setSelectedHostId(hostId);
   }
 
-  /** 편집 대상을 이 호스트로 옮긴다. 목록 하이라이트는 selectedHostId 를 따라온다. */
+  /**
+   * 편집 대상을 이 호스트로 옮긴다. 목록 하이라이트는 selectedHostId 를 따라온다. 읽기 전용 팀의 호스트는 고칠 수
+   * 없으니 편집 창을 닫고 그 호스트의 상세를 보인다(내 사용자 이름 같은 내 값은 상세의 내 자격 증명에서 넣는다).
+   */
   function switchEditTargetTo(hostId: string) {
     resetHostBrowserMessages();
     setSelectedHostId(hostId);
+    if (isReadOnlyHost(homeViewModel.vaultIndex, hostId)) {
+      homeViewModel.closeHostDrawer();
+      return;
+    }
     homeViewModel.openEditHostDrawer(hostId);
   }
 
@@ -1099,6 +1109,7 @@ export function HomeShell({
             onSetHostFavorite={homeViewModel.setHostFavorite}
             onRemoveHosts={homeViewModel.removeHosts}
             onRemoveSecrets={settingsViewModel.removeKeychainSecrets}
+            loadTeamSavedCredentials={readTeamKeychain}
             onConnectHost={async (hostId) => {
               try {
                 setHostBrowserError(null);

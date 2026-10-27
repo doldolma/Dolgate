@@ -66,15 +66,16 @@ import {
   normalizeHostEnvVars,
   normalizeJumpHostIds,
   normalizeSavedWorkspaceRecord,
-  normalizeSftpBrowserColumnWidths
+  normalizeSftpBrowserColumnWidths,
+  normalizeTeamRole
 } from '@shared';
-import type { HostDetectedOs, SyncKind } from '@shared';
+import type { HostDetectedOs, SyncKind, TeamRole } from '@shared';
 import { normalizeAppLanguage } from '../common/i18n/locale';
 import {
   resolveLocalHistoryScope,
   type LocalHistoryOwner
 } from './local-history-scope';
-import { PERSONAL_VAULT_ID, TeamVaultNotFoundError } from './vault-root';
+import { assertTeamVaultEditable, PERSONAL_VAULT_ID, TeamVaultNotFoundError } from './vault-root';
 
 const STORAGE_DIRNAME = 'storage';
 const STATE_FILE_NAME = 'state.json';
@@ -129,6 +130,13 @@ export interface TeamHostPrefsRecord {
   id: string;
   favorite: boolean | null;
   agentForwarding: boolean | null;
+  /**
+   * 읽기 전용 멤버가 이 RDP 호스트에서 신뢰한 서버 인증서 지문. 팀 레코드에 쓰지 못해 내 칸에 두고, 화면과 접속에는
+   * 팀 것 대신 이것을 쓴다(overlayHostMemberPrefs).
+   */
+  rdpCertificateFingerprint: string | null;
+  /** 읽기 전용 멤버가 이 호스트로 접속하며 신뢰한 호스트 키 — 위와 같은 까닭으로 내 칸에 둔다. */
+  knownHosts: KnownHostRecord[];
   updatedAt: string;
 }
 
@@ -151,6 +159,8 @@ export interface TeamPrivateDeletionRecord {
 export interface TeamHostPrefsPatch {
   favorite?: boolean | null;
   agentForwarding?: boolean | null;
+  rdpCertificateFingerprint?: string | null;
+  knownHosts?: KnownHostRecord[];
 }
 
 /** 팀 워크스페이스에 대한 내 설정을 고칠 때 넘기는 값. 빠진 칸은 그대로 둔다. */
@@ -175,7 +185,7 @@ export interface TeamMemberPrefsSnapshot extends Record<TeamPrivateSecretKind, T
 export interface DesktopTeamState {
   info: {
     name: string;
-    role: 'owner' | 'member';
+    role: TeamRole;
     /** 내 개인 DEK 로 감싼 팀 키(서버 GET /teams 값). 링크로 들어와 아직 안 올렸으면 null. */
     wrappedTeamDek: string | null;
     dataFloor: number;
@@ -837,6 +847,24 @@ export function createTeamState(info: DesktopTeamState['info']): DesktopTeamStat
     local: { terminalThemeByHostId: {}, tailnetLoginNameById: {} },
     sync: { pendingPush: false, privatePendingPush: false, updatedAt: timestamp }
   };
+}
+
+type KeyedRecord = { id?: string; secretRef?: string };
+
+/** 레코드 목록에 같은 id 의 것은 갈아 끼우고 없는 것은 뒤에 더한다. 비밀값 메타데이터의 id 는 secretRef 다. */
+function upsertById<T extends KeyedRecord>(
+  current: readonly T[],
+  incoming: readonly T[],
+  bySecretRef: boolean
+): T[] {
+  if (incoming.length === 0) {
+    return [...current];
+  }
+  const idOf = (record: T) => (bySecretRef ? record.secretRef : record.id);
+  const replaced = new Map(incoming.map((record) => [idOf(record), record]));
+  const kept = current.map((record) => replaced.get(idOf(record)) ?? record);
+  const present = new Set(current.map(idOf));
+  return [...kept, ...incoming.filter((record) => !present.has(idOf(record)))];
 }
 
 /** 쓸 볼트의 비밀값 맵. teamId 가 null 이면 개인이고, 이 기기에 없는 팀이면 던진다. */
@@ -1719,7 +1747,7 @@ function normalizeTeamState(value: unknown): DesktopTeamState | null {
   return {
     info: {
       name: info.name,
-      role: info.role === 'owner' ? 'owner' : 'member',
+      role: normalizeTeamRole(info.role),
       wrappedTeamDek: typeof info.wrappedTeamDek === 'string' && info.wrappedTeamDek ? info.wrappedTeamDek : null,
       dataFloor: typeof info.dataFloor === 'number' && Number.isSafeInteger(info.dataFloor) && info.dataFloor > 0 ? info.dataFloor : 0,
       updatedAt: typeof info.updatedAt === 'string' ? info.updatedAt : fallbackTimestamp
@@ -1783,6 +1811,43 @@ export function normalizeTeamHostPrefsRecord(value: unknown): TeamHostPrefsRecor
     id: value.id,
     favorite: value.favorite === true ? true : null,
     agentForwarding: value.agentForwarding === true ? true : null,
+    rdpCertificateFingerprint:
+      typeof value.rdpCertificateFingerprint === 'string' && value.rdpCertificateFingerprint
+        ? value.rdpCertificateFingerprint
+        : null,
+    knownHosts: Array.isArray(value.knownHosts)
+      ? value.knownHosts.map(normalizeKnownHostRecord).filter((entry): entry is KnownHostRecord => entry !== null)
+      : [],
+    updatedAt: value.updatedAt
+  };
+}
+
+/** 호스트 키 기록 하나(내 칸에서 읽을 때). 빠진 칸이 있으면 버린다 — 접속 판단에 쓰는 값이다. */
+function normalizeKnownHostRecord(value: unknown): KnownHostRecord | null {
+  if (
+    !isObject(value) ||
+    typeof value.id !== 'string' ||
+    !value.id ||
+    typeof value.host !== 'string' ||
+    typeof value.port !== 'number' ||
+    typeof value.algorithm !== 'string' ||
+    typeof value.publicKeyBase64 !== 'string' ||
+    typeof value.fingerprintSha256 !== 'string' ||
+    typeof value.createdAt !== 'string' ||
+    typeof value.updatedAt !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    id: value.id,
+    ...(typeof value.tailnetId === 'string' && value.tailnetId ? { tailnetId: value.tailnetId } : {}),
+    host: value.host,
+    port: value.port,
+    algorithm: value.algorithm,
+    publicKeyBase64: value.publicKeyBase64,
+    fingerprintSha256: value.fingerprintSha256,
+    createdAt: value.createdAt,
+    lastSeenAt: typeof value.lastSeenAt === 'string' ? value.lastSeenAt : value.updatedAt,
     updatedAt: value.updatedAt
   };
 }
@@ -1935,22 +2000,29 @@ class DesktopStateStorage {
   }
 
   upsertActivityLog(record: ActivityLogRecord): ActivityLogRecord {
+    return this.upsertActivityLogs([record])[0];
+  }
+
+  /** 여러 줄을 한 번에 고쳐 쓴다. 기록 파일은 한 번만 쓴다. */
+  upsertActivityLogs(records: readonly ActivityLogRecord[]): ActivityLogRecord[] {
     this.ensureLoaded();
-    if (!this.activityLogFilePath) {
-      return deepClone(record);
+    if (!this.activityLogFilePath || records.length === 0) {
+      return records.map((record) => deepClone(record));
     }
-    const currentIndex = this.activityLogs.findIndex((entry) => entry.id === record.id);
-    if (currentIndex >= 0) {
-      this.activityLogs[currentIndex] = { ...record };
-    } else {
-      this.activityLogs.unshift(record);
+    for (const record of records) {
+      const currentIndex = this.activityLogs.findIndex((entry) => entry.id === record.id);
+      if (currentIndex >= 0) {
+        this.activityLogs[currentIndex] = { ...record };
+      } else {
+        this.activityLogs.unshift(record);
+      }
     }
     this.activityLogs.sort(compareIsoDesc);
     if (this.activityLogs.length > MAX_ACTIVITY_LOGS) {
       this.activityLogs = this.activityLogs.slice(0, MAX_ACTIVITY_LOGS);
     }
     this.rewriteLogsFile();
-    return deepClone(record);
+    return records.map((record) => deepClone(record));
   }
 
   clearActivityLogs(): void {
@@ -2080,12 +2152,15 @@ class DesktopStateStorage {
       throw new Error(`team vault secrets must be secret:* refs: ${secretRef}`);
     }
     this.updateState((draft) => {
+      // 팀 비밀값은 팀에 올라간다 — 읽기 전용이면 서버가 거절할 것을 여기서 먼저 막는다.
+      assertTeamVaultEditable(draft, teamId);
       vaultSecureDraft(draft, teamId).managedSecretsByRef[secretRef] = { ...record };
     });
   }
 
   deleteTeamSecret(teamId: string, secretRef: string): void {
     this.updateState((draft) => {
+      assertTeamVaultEditable(draft, teamId);
       delete vaultSecureDraft(draft, teamId).managedSecretsByRef[secretRef];
     });
   }
@@ -2110,6 +2185,10 @@ class DesktopStateStorage {
    */
   applyVaultCopy(vaultId: string, write: VaultCopyWrite): void {
     this.updateState((draft) => {
+      if (vaultId !== PERSONAL_VAULT_ID) {
+        // 읽기 전용 팀으로는 복사해 넣지 못한다(팀에서 꺼내는 것은 된다).
+        assertTeamVaultEditable(draft, vaultId);
+      }
       const team = vaultId === PERSONAL_VAULT_ID ? null : this.requireTeam(vaultId, draft);
       const data = team ? team.data : draft.data;
       const secure = team ? team.secure : draft.secure;
@@ -2167,6 +2246,36 @@ class DesktopStateStorage {
     });
   }
 
+  /**
+   * 되살린 팀 레코드를 그 팀 볼트에 그 id 로 다시 넣는다(있으면 갈아 끼운다). 그 레코드들의 지움 대기열은 치운다 —
+   * 아직 올리지 못한 지움이 남아 있으면 다음 올리기가 되살린 것을 다시 지운다. 한꺼번에 바꿔 끼우므로 도중에
+   * 실패하면 아무것도 바뀌지 않는다.
+   */
+  restoreTeamRecords(
+    teamId: string,
+    write: { records: Omit<DesktopVaultData, 'syncOutbox'>; secure: DesktopVaultSecure },
+    restored: ReadonlyArray<{ kind: string; recordId: string }>
+  ): void {
+    this.updateState((draft) => {
+      assertTeamVaultEditable(draft, teamId);
+      const team = this.requireTeam(teamId, draft);
+      const next = { ...team.data };
+      for (const key of VAULT_RECORD_KEYS) {
+        next[key] = upsertById(
+          team.data[key] as readonly KeyedRecord[],
+          write.records[key] as readonly KeyedRecord[],
+          key === 'secretMetadata'
+        ) as never;
+      }
+      const cleared = new Set(restored.map(({ kind, recordId }) => `${kind}\u0000${recordId}`));
+      next.syncOutbox = team.data.syncOutbox.filter((entry) => !cleared.has(`${entry.kind}\u0000${entry.recordId}`));
+      team.data = next;
+      Object.assign(team.secure.managedSecretsByRef, write.secure.managedSecretsByRef);
+      Object.assign(team.secure.managedAwsProfilesById, write.secure.managedAwsProfilesById);
+      Object.assign(team.secure.tailnetAuthKeysById, write.secure.tailnetAuthKeysById);
+    });
+  }
+
   /** 팀 볼트에서 사람마다 다른 값. 모르는 팀이면 null. */
   readTeamMemberPrefs(teamId: string): TeamMemberPrefsSnapshot | null {
     this.ensureLoaded();
@@ -2194,14 +2303,31 @@ class DesktopStateStorage {
         : patch.agentForwarding === true
           ? true
           : null;
-    if ((current?.favorite ?? null) === favorite && (current?.agentForwarding ?? null) === agentForwarding) {
+    const rdpCertificateFingerprint =
+      patch.rdpCertificateFingerprint === undefined
+        ? (current?.rdpCertificateFingerprint ?? null)
+        : patch.rdpCertificateFingerprint || null;
+    const knownHosts = patch.knownHosts === undefined ? (current?.knownHosts ?? []) : patch.knownHosts;
+    if (
+      (current?.favorite ?? null) === favorite &&
+      (current?.agentForwarding ?? null) === agentForwarding &&
+      (current?.rdpCertificateFingerprint ?? null) === rdpCertificateFingerprint &&
+      JSON.stringify(current?.knownHosts ?? []) === JSON.stringify(knownHosts)
+    ) {
       return;
     }
     this.updateState((draft) => {
       const team = this.requireTeam(teamId, draft);
       team.private.hostPrefs = [
         ...team.private.hostPrefs.filter((record) => record.id !== hostId),
-        { id: hostId, favorite, agentForwarding, updatedAt: nowIso() }
+        {
+          id: hostId,
+          favorite,
+          agentForwarding,
+          rdpCertificateFingerprint,
+          knownHosts: knownHosts.map((record) => ({ ...record })),
+          updatedAt: nowIso()
+        }
       ];
       this.markTeamPrivateChanged(team, 'hostPrefs', hostId);
     });

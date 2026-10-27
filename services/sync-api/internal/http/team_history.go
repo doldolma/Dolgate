@@ -37,6 +37,9 @@ const (
 	teamReplayListDefault         = 50
 	teamReplayListMax             = 100
 	teamReplayIDsMax              = 200
+	// teamVersionList* 는 이전 판 목록(GET /teams/:id/versions) 한 번의 양이다.
+	teamVersionListDefault = 100
+	teamVersionListMax     = 500
 	// teamReplayReadMaxBytes·Items 는 구간·덧붙임을 묶어 받는 응답 하나의 상한이다.
 	teamReplayReadMaxBytes = 4 << 20
 	teamReplayReadMaxItems = 256
@@ -330,6 +333,7 @@ func teamReplayJSON(replay storepkg.TeamReplay) gin.H {
 		"totalBytes":     replay.TotalBytes,
 		"createdAt":      replay.CreatedAt.UTC().Format(time.RFC3339Nano),
 		"lastActivityAt": replay.LastActivityAt.UTC().Format(time.RFC3339Nano),
+		"viewable":       replay.Viewable,
 	}
 	if replay.EndedAt != nil {
 		body["endedAt"] = replay.EndedAt.UTC().Format(time.RFC3339Nano)

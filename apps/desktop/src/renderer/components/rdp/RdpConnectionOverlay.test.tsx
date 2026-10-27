@@ -79,6 +79,21 @@ describe('RdpConnectionOverlay', () => {
     expect(screen.getByText('connect: TCP connect: refused')).toBeTruthy();
   });
 
+  // 팀에서 빠져 앱이 닫은 세션 — 다시 붙을 호스트가 없으니 다시 시도를 두지 않고 까닭만 보인다.
+  it('offers no retry for a session the app closed with a reason', () => {
+    seedTab({
+      status: 'error',
+      errorMessage: '팀에서 빠져 이 연결을 닫았습니다.',
+      connectionProgress: { stage: 'connecting', message: '팀에서 빠져 이 연결을 닫았습니다.', blockingKind: 'none', retryable: false },
+    } as Partial<TerminalTab>);
+
+    render(<RdpConnectionOverlay sessionId="rdp-s1" />);
+
+    expect(screen.getByText('팀에서 빠져 이 연결을 닫았습니다.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy();
+  });
+
   // 인증서 확인 화면과 겹쳐 보이던 버그. 둘 다 pane 을 덮는데 이 오버레이가 나중에 렌더되는
   // 형제라 위에 깔리고, 배경이 반투명이라 아래 프롬프트가 비쳐 두 창이 겹쳐 보였다. 재시도 버튼이
   // 있는 상태에서는 프롬프트 클릭까지 막혔다.

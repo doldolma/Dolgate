@@ -1218,6 +1218,7 @@
     "shutdownSession": "The session was closed because the app is exiting.",
     "shutdownSftp": "The SFTP connection was closed because the app is exiting.",
     "shutdownContainers": "The Containers connection was closed because the app is exiting.",
+    "interruptedByAppExit": "Cut off because the app stopped unexpectedly.",
     "transferFailed": "The transfer failed.",
     "noReadPermission": "There is no permission to read the source file.",
     "noOverwritePermission": "There is no permission to overwrite or delete the existing item.",
@@ -2885,11 +2886,18 @@
     "inviteOtherTeam": "This invite link is for a different team.",
     "needsUnlockedVault": "Sign in and enter your sync passphrase to use teams.",
     "notOnDevice": "This team isn't on this device.",
+    "readOnly": "This team is read-only for you. You can't change its items.",
     "contextChanged": "The team operation was cancelled because the account or server changed.",
     "copied": "Copied {{hosts}} hosts to another vault.",
     "myCredentialsTeamOnly": "My credentials are only for team hosts.",
     "myCredentialsSaved": "Saved my credentials for a team host.",
     "myCredentialsCleared": "Removed my credentials for a team host.",
+    "restored": "Restored {{count}} items in the team vault.",
+    "restoreGone": "This change is past the retention period and can't be restored.",
+    "connectionsClosed": {
+      "notice": "Closed because you are no longer in the team.",
+      "log": "No longer in {{team}} — closed {{count}} connections to its hosts."
+    },
     "api": {
       "inviteInvalid": "This invite link has expired or is invalid.",
       "notFound": "Team not found.",
@@ -2901,7 +2909,11 @@
       "alreadyMember": "Already a member of this team.",
       "exists": "This team already exists.",
       "replayNotFound": "Team recording not found.",
-      "replayDeleted": "This recording was removed by the team's recording limit."
+      "replayDeleted": "This recording was removed by the team's recording limit.",
+      "adminOnly": "Only team admins can do this.",
+      "readOnly": "Read-only members can't change team data.",
+      "roleInvalid": "That role can't be given here.",
+      "replayForbidden": "Only team admins and the person who recorded it can view this recording."
     },
     "crossVault": {
       "jumpHost": "A jump host must be in the same vault.",
@@ -2970,7 +2982,8 @@
       "add": "Add key",
       "dialogTitle": "{{profile}} · Key",
       "saveFailed": "Couldn't save the key."
-    }
+    },
+    "viewerHint": "Viewer — you can view and connect only"
   },
   "teamsPanel": {
     "empty": {
@@ -3032,20 +3045,19 @@
     },
     "remove": {
       "title": "Remove {{email}}",
-      "body": "They leave the team and stop receiving its data. All of this team's invite links are revoked too.",
+      "body": "They leave the team, stop receiving its data, and their open connections to its hosts close. All of this team's invite links are revoked too.",
       "done": "Removed — all invite links were revoked."
     },
     "makeOwner": {
       "title": "Make {{email}} the owner",
-      "body": "Only the owner can rename the team, remove members, and delete it. You become a member.",
+      "body": "Only the owner can rename or delete the team and change admins. You become an admin.",
       "confirm": "Transfer"
     },
     "leave": {
       "title": "Leave {{team}}",
-      "member": "The team's hosts, passwords and keys disappear from this device. You'll need a new invite link to come back.",
-      "owner": "As the owner, you hand the team over before you leave.",
-      "earliest": "Joined first",
-      "last": "You're the last member. Leaving deletes the team and everything in it.",
+      "member": "The team's hosts, passwords and keys disappear from this device, and open connections to them close. You'll need a new invite link to come back.",
+      "owner": "As the owner, you hand the team over before you leave. Open connections to its hosts close when you leave.",
+      "last": "You're the last member. Leaving deletes the team and everything in it, and closes open connections to its hosts.",
       "copyFirst": "Copy anything you want to keep to your personal vault first.",
       "confirm": "Leave",
       "transferAndLeave": "Hand over and leave",
@@ -3053,8 +3065,8 @@
     },
     "delete": {
       "title": "Delete {{team}}",
-      "others": "It also disappears for the other members ({{count}}).",
-      "alone": "No one else is in this team.",
+      "others": "It also disappears for the other members ({{count}}), and everyone's open connections to its hosts close.",
+      "alone": "No one else is in this team. Open connections to its hosts close.",
       "copyFirst": "Before you delete it, everyone should copy what they want to keep to their personal vault."
     },
     "counts": {
@@ -3086,19 +3098,27 @@
       "unsupportedVaultBody": "Teams work with the new vault locked by a sync passphrase. Move your vault, then open the link again.",
       "serverUnsupportedTitle": "This server doesn't support teams",
       "serverUnsupportedBody": "Update the sync server to use teams.",
-      "history": "Every member can see the activity and terminal recordings of this team's hosts."
+      "history": "Every member sees the activity of this team's hosts; terminal recordings are visible to admins and to whoever recorded them.",
+      "viewer": "You join as a Viewer — you can view and connect only."
     },
     "actionFailed": "Couldn't finish the team action.",
     "intro": "Share hosts and passwords with your team. The server can't read them.",
     "about": {
       "label": "What a team vault shares",
-      "edit": "Everyone in the team can see and edit what you put in it.",
+      "edit": "Members and above can see and edit what's in the team. Viewers can only view and connect.",
       "members": "The member list shows who joined, through whose link, and when.",
       "ownKeys": "AWS static keys and Tailscale auth keys aren't synced — add them on each device. When you share your own, they're filled in on the device you shared from."
     },
     "hostCount": "Hosts: {{count}}",
     "teamActions": "Team actions",
-    "listTitle": "Teams"
+    "listTitle": "Teams",
+    "roles": {
+      "label": "What each role can do",
+      "owner": "Also renames the team, transfers ownership and deletes the team.",
+      "admin": "Makes invite links, removes members, changes roles, restores changes and sees everyone's recordings.",
+      "member": "Edits and deletes hosts and shares into the team.",
+      "viewer": "Views and connects only. Can't change the team's items."
+    }
   },
   "shareChat": {
     "titleWith": "Chat history · {{title}}",
@@ -4376,6 +4396,82 @@
     "replayPending": "Still uploading — the recorder's app is sending it or is offline",
     "loadFailed": "Couldn't load the team's history",
     "loading": "Loading the team's history",
-    "emptyDescription": "Connections and changes in this team vault show up here."
+    "emptyDescription": "Connections and changes in this team vault show up here.",
+    "memberJoinedAs": "{{email}} joined the team as {{role}}",
+    "roleChanged": "{{by}} changed {{email}}'s role to {{role}}",
+    "replayForbidden": "Only team admins and the person who recorded it can view this recording",
+    "memberLeftEnd": "Ended when this member left the team."
+  },
+  "teamChanges": {
+    "tabsLabel": "Log view",
+    "about": {
+      "label": "Changes and restore",
+      "body": "Edits and deletions in the team vault can be restored for the retention period (90 days by default).",
+      "together": "Restoring brings back what changed with it, and anything it uses (passwords, jump hosts and so on) if that was deleted.",
+      "admins": "Only admins see this."
+    },
+    "searchPlaceholder": "Name, member",
+    "loading": "Loading changes",
+    "loadFailed": "Couldn't load changes",
+    "emptyTitle": "Nothing to restore",
+    "emptyDescription": "Nothing in this team vault was edited or deleted within the retention period (90 days by default).",
+    "one": "the {{name}} {{kind}}",
+    "many": "{{count}} {{kind}}",
+    "kind": {
+      "groups": "group",
+      "hosts": "host",
+      "secrets": "password",
+      "portForwards": "port forward",
+      "dnsOverrides": "DNS override",
+      "knownHosts": "host key",
+      "snippets": "snippet",
+      "workspaces": "Workspace",
+      "tailnets": "tailnet",
+      "awsProfiles": "AWS profile"
+    },
+    "kinds": {
+      "groups": "groups",
+      "hosts": "hosts",
+      "secrets": "passwords",
+      "portForwards": "port forwards",
+      "dnsOverrides": "DNS overrides",
+      "knownHosts": "host keys",
+      "snippets": "snippets",
+      "workspaces": "Workspaces",
+      "tailnets": "tailnets",
+      "awsProfiles": "AWS profiles"
+    },
+    "title": {
+      "deleted": "Deleted {{what}}.",
+      "edited": "Edited {{what}}.",
+      "mixed": "Edited {{edited}} and deleted {{deleted}}."
+    },
+    "badge": {
+      "deleted": "Deleted",
+      "edited": "Edited"
+    },
+    "unreadable": "(can't open)",
+    "nowLabel": "now {{name}}",
+    "more": "and {{count}} more",
+    "changedLater": "Changed again later",
+    "changedLaterHint": "Restoring overwrites the later change. You'll be asked when you restore.",
+    "restore": "Restore",
+    "restored": "Restored",
+    "restoredHint": "Same as it is now",
+    "result": {
+      "restored": "Restored {{count}} — {{names}}",
+      "dependencies": "Came back with it: {{names}}",
+      "skippedOtherVault": "Skipped: {{names}} — another vault has the same item.",
+      "skippedUnreadable": "Skipped: {{names}} — this app can't open it.",
+      "nothing": "Already the same as now.",
+      "failed": "Couldn't restore"
+    },
+    "confirm": {
+      "title": "Restore {{what}}",
+      "lead": "Restoring overwrites what changed after it.",
+      "changedBy": "{{name}} — {{by}} changed it again at {{when}}",
+      "recreated": "{{name}} — made again after it",
+      "overwrite": "Overwrite and restore"
+    }
   }
 }

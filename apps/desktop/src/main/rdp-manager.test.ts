@@ -618,6 +618,52 @@ describe("session lifecycle logs", () => {
     expect(typeof closed.durationMs).toBe("number");
   });
 
+  it("closes only the given hosts' sessions, telling the window why", async () => {
+    const NOTICE = "팀에서 빠져 이 연결을 닫았습니다.";
+    const { manager, core, sent, logs } = createManager();
+    const team = manager.connect("sess-team", CONNECT, { ...LIFECYCLE, hostId: "team-host" });
+    core.emit(connectedFrame((core.requests()[0].metadata as unknown as { id: string }).id, "sess-team"));
+    await team;
+    const mine = manager.connect("sess-mine", CONNECT, LIFECYCLE);
+    core.emit(connectedFrame((core.requests()[1].metadata as unknown as { id: string }).id, "sess-mine"));
+    await mine;
+
+    expect(manager.closeHostSessions(new Set(["team-host"]), NOTICE)).toBe(1);
+
+    const closedEvents = sent
+      .filter((entry) => entry.channel === "rdp:event" && (entry.payload as { type: string }).type === "closed")
+      .map((entry) => entry.payload);
+    expect(closedEvents).toEqual([
+      { type: "closed", sessionId: "sess-team", graceful: true, reason: NOTICE, notice: NOTICE },
+    ]);
+    const requests = core.requests().map((frame) => frame.metadata as unknown as { type: string; sessionId?: string });
+    expect(requests.at(-1)).toMatchObject({ type: "disconnect", sessionId: "sess-team" });
+    const teamRows = () => logs.filter((record) => metadataOf(record).hostId === "team-host");
+    expect(metadataOf(teamRows().at(-1)!)).toMatchObject({ status: "closed", disconnectReason: NOTICE });
+
+    // 코어의 닫힘이 뒤따라와도 기록은 한 번만 마감된다. 개인 세션은 그대로다.
+    const rowCount = teamRows().length;
+    core.emit(closedFrame("sess-team", "bye"));
+    expect(teamRows()).toHaveLength(rowCount);
+    expect(metadataOf(teamRows().at(-1)!).disconnectReason).toBe(NOTICE);
+    expect(metadataOf(logs.filter((record) => metadataOf(record).hostId === "host-1").at(-1)!).status).toBe(
+      "connected",
+    );
+    expect(manager.closeHostSessions(new Set(["team-host"]), NOTICE)).toBe(0);
+  });
+
+  it("closes the rows of open sessions when shutting down", async () => {
+    const { manager, core, logs } = createManager();
+    const pending = manager.connect("sess-1", CONNECT, LIFECYCLE);
+    core.emit(connectedFrame((core.requests()[0].metadata as unknown as { id: string }).id, "sess-1"));
+    await pending;
+
+    manager.shutdown();
+
+    expect(metadataOf(logs.at(-1)!)).toMatchObject({ status: "closed" });
+    expect(typeof metadataOf(logs.at(-1)!).durationMs).toBe("number");
+  });
+
   it("gives each reconnect attempt its own log row", async () => {
     const { manager, core, logs } = createManager();
 

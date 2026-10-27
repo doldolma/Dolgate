@@ -35,6 +35,8 @@ interface WorkspaceDetailPanelProps {
   onDelete: (workspace: SavedWorkspaceRecord) => void;
   /** 팀 워크스페이스면 즐겨찾기가 나에게만 적용된다는 툴팁. */
   favoriteHint?: string | null;
+  /** 내가 읽기 전용인 팀의 것 — 열기만 남기고 이름 바꾸기·복제·지우기를 숨긴다. */
+  readOnly?: boolean;
 }
 
 export function WorkspaceDetailPanel({
@@ -47,6 +49,7 @@ export function WorkspaceDetailPanel({
   onToggleFavorite,
   onDelete,
   favoriteHint = null,
+  readOnly = false,
 }: WorkspaceDetailPanelProps) {
   const { t } = useTranslation();
   const formatLocale = getFormatLocale();
@@ -164,25 +167,32 @@ export function WorkspaceDetailPanel({
           />
 
           <div className="mt-[0.8rem] grid grid-cols-2 gap-2">
-            <Button onClick={() => void onOpen(workspace.id)}>
+            <Button
+              className={readOnly ? "col-span-2" : undefined}
+              onClick={() => void onOpen(workspace.id)}
+            >
               <Play className="h-4 w-4" aria-hidden="true" />
               {t("savedWorkspace.open")}
             </Button>
-            <Button variant="secondary" onClick={() => onRename(workspace)}>
-              <Pencil className="h-4 w-4" aria-hidden="true" />
-              {t("common.rename")}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => void onDuplicate(workspace.id)}
-            >
-              <Copy className="h-4 w-4" aria-hidden="true" />
-              {t("common.duplicate")}
-            </Button>
-            <Button variant="danger" onClick={() => onDelete(workspace)}>
-              <Trash2 className="h-4 w-4" aria-hidden="true" />
-              {t("common.delete")}
-            </Button>
+            {readOnly ? null : (
+              <>
+                <Button variant="secondary" onClick={() => onRename(workspace)}>
+                  <Pencil className="h-4 w-4" aria-hidden="true" />
+                  {t("common.rename")}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => void onDuplicate(workspace.id)}
+                >
+                  <Copy className="h-4 w-4" aria-hidden="true" />
+                  {t("common.duplicate")}
+                </Button>
+                <Button variant="danger" onClick={() => onDelete(workspace)}>
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  {t("common.delete")}
+                </Button>
+              </>
+            )}
           </div>
         </section>
 

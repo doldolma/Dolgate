@@ -214,6 +214,27 @@ func registerTeamRoutes(
 		ctx.JSON(http.StatusOK, gin.H{"members": items})
 	})
 
+	// 역할 바꾸기 — 관리자·멤버·읽기 전용 가운데 하나로. 소유자는 넘기기(POST /owner)로만 바뀐다. 바뀐 사람의
+	// 다른 기기는 팀 목록(GET /teams)의 역할을 다시 읽는다.
+	team.PUT("/members/:userId/role", func(ctx *gin.Context) {
+		teamID := ctx.Param("teamId")
+		targetID := ctx.Param("userId")
+		var request struct {
+			Role string `json:"role"`
+		}
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
+			return
+		}
+		if err := dataStore.SetTeamMemberRole(ctx.Request.Context(), teamID, ctx.GetString("userId"), targetID, request.Role); err != nil {
+			respondTeamError(ctx, err)
+			return
+		}
+		syncWatch.notifyTeam(teamID)
+		touchPersonal(ctx, targetID)
+		ctx.Status(http.StatusNoContent)
+	})
+
 	team.POST("/members/:userId/remove", func(ctx *gin.Context) {
 		teamID := ctx.Param("teamId")
 		targetID := ctx.Param("userId")
@@ -266,10 +287,12 @@ func registerTeamRoutes(
 		teamID := ctx.Param("teamId")
 		var request struct {
 			InviteBox string `json:"inviteBox"`
-			// SealedSecret 은 링크 비밀값을 팀 키로 잠근 것이다 — 멤버가 링크를 다시 복사할 때 쓴다. 없어도 된다.
+			// SealedSecret 은 링크 비밀값을 팀 키로 잠근 것이다 — 관리자가 링크를 다시 복사할 때 쓴다. 없어도 된다.
 			SealedSecret  string `json:"sealedSecret"`
 			JoinTokenHash string `json:"joinTokenHash"`
 			ExpiresAt     string `json:"expiresAt"`
+			// Role 은 들어올 사람의 역할이다(member·viewer). 비우면 member.
+			Role string `json:"role"`
 		}
 		if err := ctx.ShouldBindJSON(&request); err != nil {
 			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
@@ -291,6 +314,7 @@ func registerTeamRoutes(
 			SealedSecret:  request.SealedSecret,
 			JoinTokenHash: request.JoinTokenHash,
 			ExpiresAt:     expiresAt,
+			Role:          request.Role,
 		})
 		if err != nil {
 			respondTeamError(ctx, err)
@@ -461,6 +485,43 @@ func registerTeamRoutes(
 		}
 	})
 
+	// 이전 판 목록(관리자 이상) — 암호문 그대로. 앱이 풀어 "한 번에 바뀐 묶음"으로 보이고, 되살리기는 그 판을
+	// 보통 올리기(POST /sync)로 다시 쓴다. kind·recordId 를 함께 주면 그 레코드의 판만 준다.
+	data.GET("/versions", func(ctx *gin.Context) {
+		query := storepkg.TeamRecordVersionQuery{
+			Kind:     strings.TrimSpace(ctx.Query("kind")),
+			RecordID: strings.TrimSpace(ctx.Query("recordId")),
+		}
+		if (query.Kind == "") != (query.RecordID == "") {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "잘못된 요청입니다."})
+			return
+		}
+		if raw := strings.TrimSpace(ctx.Query("before")); raw != "" {
+			before, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || before <= 0 {
+				ctx.JSON(http.StatusBadRequest, gin.H{"error": "잘못된 요청입니다."})
+				return
+			}
+			query.Before = before
+		}
+		limit, ok := parseTeamHistoryLimit(ctx.Query("limit"), teamVersionListDefault, teamVersionListMax)
+		if !ok {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "잘못된 요청입니다."})
+			return
+		}
+		query.Limit = limit
+		versions, err := dataStore.ListTeamRecordVersions(ctx.Request.Context(), ctx.Param("teamId"), ctx.GetString("userId"), query)
+		if err != nil {
+			respondTeamError(ctx, err)
+			return
+		}
+		items := make([]gin.H, 0, len(versions))
+		for _, version := range versions {
+			items = append(items, teamRecordVersionJSON(version))
+		}
+		ctx.JSON(http.StatusOK, gin.H{"versions": items})
+	})
+
 	registerTeamHistoryRoutes(data, dataStore)
 
 	// 링크 페이지 — 로그인 없이 열린다. 팀 이름만 보이고(초대한 사람은 앱의 참여 카드에서), `앱 열기` 는 페이지
@@ -498,6 +559,7 @@ func registerTeamRoutes(
 			"teamName":     info.TeamName,
 			"inviterEmail": info.InviterEmail,
 			"memberCount":  info.MemberCount,
+			"role":         info.Role,
 			"expiresAt":    info.ExpiresAt.UTC().Format(time.RFC3339),
 		})
 	})
@@ -524,6 +586,7 @@ func registerTeamRoutes(
 			"teamName":  result.TeamName,
 			"inviteBox": result.InviteBox,
 			"rejoined":  result.Rejoined,
+			"role":      result.Role,
 		})
 	})
 }
@@ -560,6 +623,7 @@ func teamInviteJSON(invite storepkg.TeamInvite) gin.H {
 		"code":           invite.Code,
 		"createdBy":      invite.CreatedBy,
 		"createdByEmail": invite.CreatedByEmail,
+		"role":           invite.Role,
 		"expiresAt":      invite.ExpiresAt.UTC().Format(time.RFC3339),
 		"useCount":       invite.UseCount,
 		"createdAt":      invite.CreatedAt.UTC().Format(time.RFC3339),
@@ -570,6 +634,27 @@ func teamInviteJSON(invite storepkg.TeamInvite) gin.H {
 	}
 	if invite.SealedSecret != "" {
 		body["sealedSecret"] = invite.SealedSecret
+	}
+	return body
+}
+
+func teamRecordVersionJSON(version storepkg.TeamRecordVersion) gin.H {
+	body := gin.H{
+		"seq":              version.Seq,
+		"kind":             version.Kind,
+		"recordId":         version.RecordID,
+		"encryptedPayload": version.EncryptedPayload,
+		"updatedAt":        version.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		"updatedBy":        version.UpdatedBy,
+		"updatedByEmail":   version.UpdatedByEmail,
+		"changedBy":        version.ChangedBy,
+		"changedByEmail":   version.ChangedByEmail,
+		"changedAt":        version.ChangedAt.UTC().Format(time.RFC3339Nano),
+		// 그 판을 밀어낸 올리기가 지운 것인지(아니면 고쳤다). deletedAt 은 그 판 자신의 지운 시각이다.
+		"deleted": version.Deleted,
+	}
+	if version.DeletedAt != nil {
+		body["deletedAt"] = version.DeletedAt.UTC().Format(time.RFC3339Nano)
 	}
 	return body
 }
@@ -595,6 +680,12 @@ func respondTeamError(ctx *gin.Context, err error) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "팀을 찾을 수 없습니다.", "code": "team_not_found"})
 	case errors.Is(err, storepkg.ErrTeamOwnerOnly):
 		ctx.JSON(http.StatusForbidden, gin.H{"error": "팀 소유자만 할 수 있습니다.", "code": "team_owner_only"})
+	case errors.Is(err, storepkg.ErrTeamAdminOnly):
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "팀 관리자만 할 수 있습니다.", "code": "team_admin_only"})
+	case errors.Is(err, storepkg.ErrTeamReadOnly):
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "읽기 전용 멤버는 팀 데이터를 바꿀 수 없습니다.", "code": "team_read_only"})
+	case errors.Is(err, storepkg.ErrTeamRoleInvalid):
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "줄 수 없는 역할입니다.", "code": "team_role_invalid"})
 	case errors.Is(err, storepkg.ErrTeamOwnerMustTransfer):
 		ctx.JSON(http.StatusConflict, gin.H{"error": "다른 멤버가 남아 있으면 소유권을 넘긴 뒤에 나갈 수 있습니다.", "code": "team_owner_must_transfer"})
 	case errors.Is(err, storepkg.ErrTeamMemberNotFound):
@@ -617,6 +708,8 @@ func respondTeamError(ctx *gin.Context, err error) {
 		ctx.JSON(http.StatusGone, gin.H{"error": "팀 녹화 한도로 지워진 녹화입니다.", "code": "team_replay_deleted"})
 	case errors.Is(err, storepkg.ErrTeamReplayAuthorOnly):
 		ctx.JSON(http.StatusForbidden, gin.H{"error": "녹화한 사람만 올릴 수 있습니다.", "code": "team_replay_author_only"})
+	case errors.Is(err, storepkg.ErrTeamReplayForbidden):
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "녹화는 팀 관리자와 녹화한 사람만 볼 수 있습니다.", "code": "team_replay_forbidden"})
 	case errors.Is(err, storepkg.ErrTeamReplayClosed):
 		ctx.JSON(http.StatusConflict, gin.H{"error": "이미 끝난 녹화입니다.", "code": "team_replay_closed"})
 	case errors.Is(err, storepkg.ErrTeamReplayTooLarge):

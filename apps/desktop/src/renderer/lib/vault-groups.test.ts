@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { VaultIndex } from '@shared';
 import { createEmptyVaultIndex } from '../store/utils';
-import { groupByVault, orderByVault, sectionsByVault, teamOfVault } from './vault-groups';
+import { groupByVault, isReadOnlyVault, orderByVault, sectionsByVault, teamOfVault } from './vault-groups';
 
 // 볼트별 목록 묶기(4-6). 표에 없는 레코드는 개인 것이다.
 
@@ -80,5 +80,38 @@ describe('sectionsByVault', () => {
       ['team-b', 'Blocked Co', true, []],
       ['team-c', 'Cloud Ops', false, ['c1']],
     ]);
+  });
+});
+
+// 7-3: 내가 읽기 전용(Viewer)인 팀 — 묶음은 + 를 내지 않고(readOnly), 줄은 편집 단추를 내지 않는다(isReadOnlyVault).
+describe('read-only vaults', () => {
+  function viewerIndex(): VaultIndex {
+    const base = index();
+    return { ...base, teams: base.teams.map((team) => (team.id === 'team-c' ? { ...team, role: 'viewer' as const } : team)) };
+  }
+
+  it('marks the sections of teams you only view', () => {
+    const grouped = groupByVault([item('x')], { x: 'team-c' }, viewerIndex());
+    expect(grouped?.map((section) => [section.vaultId, section.readOnly])).toEqual([
+      ['personal', false],
+      ['team-a', false],
+      ['team-b', false],
+      ['team-c', true],
+    ]);
+    const read = sectionsByVault([item('p')], { 'team-c': [item('t')] }, viewerIndex());
+    expect(read?.map((section) => [section.vaultId, section.readOnly])).toEqual([
+      ['personal', false],
+      ['team-a', false],
+      ['team-b', false],
+      ['team-c', true],
+    ]);
+  });
+
+  it('says a row is read-only only for a team you view, never for your own or an unknown one', () => {
+    expect(isReadOnlyVault(viewerIndex(), 'team-c')).toBe(true);
+    expect(isReadOnlyVault(viewerIndex(), 'team-a')).toBe(false);
+    expect(isReadOnlyVault(viewerIndex(), 'personal')).toBe(false);
+    expect(isReadOnlyVault(viewerIndex(), 'team-gone')).toBe(false);
+    expect(isReadOnlyVault(null, 'team-c')).toBe(false);
   });
 });

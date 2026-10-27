@@ -17,6 +17,7 @@ const OK: TeamInvitePreview = {
   teamName: 'Acme Infra',
   inviterEmail: 'dolma@acme.dev',
   memberCount: 3,
+  role: 'member',
   expiresAt: '2026-10-27T00:00:00.000Z',
   alreadyJoined: false,
 };
@@ -54,11 +55,13 @@ describe('JoinTeamDialogHost', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Acme Infra' });
     expect(within(dialog).getByText('dolma@acme.dev 님의 초대 · 멤버 3명')).toBeInTheDocument();
     expect(within(dialog).getByText(/서버는 내용을 볼 수 없습니다/)).toBeInTheDocument();
-    // 들어가기 전에 안다 — 팀 호스트의 접속 기록과 녹화는 멤버 모두가 본다.
+    // 들어가기 전에 안다 — 팀 호스트의 접속 기록은 멤버 모두가, 녹화는 관리자와 녹화한 사람이 본다.
     expect(
-      within(dialog).getByText('이 팀 호스트의 접속 기록과 터미널 녹화는 멤버 모두가 봅니다.'),
+      within(dialog).getByText('이 팀 호스트의 접속 기록은 멤버 모두가, 터미널 녹화는 관리자와 녹화한 사람이 봅니다.'),
     ).toBeInTheDocument();
     expect(desktopApi.teams.previewInvite).toHaveBeenCalledWith(LINK);
+    // Member 링크는 역할을 따로 말하지 않는다(역할 전과 같다).
+    expect(within(dialog).queryByText(/Viewer 로 들어갑니다/)).toBeNull();
 
     fireEvent.click(within(dialog).getByRole('button', { name: '참여' }));
 
@@ -70,6 +73,16 @@ describe('JoinTeamDialogHost', () => {
       settingsSection: 'teams',
       teamsPanelTeamId: 'team-1',
     });
+  });
+
+  // 읽기 전용 링크면 들어가기 전에 그것부터 말한다(후보 J1).
+  it('says first that a viewer link lets you only view and connect', async () => {
+    vi.mocked(desktopApi.teams.previewInvite).mockResolvedValue({ ...OK, role: 'viewer' });
+    renderHost();
+    const dialog = await screen.findByRole('dialog', { name: 'Acme Infra' });
+
+    const lines = within(dialog).getAllByText(/./, { selector: 'p > span' }).map((line) => line.textContent);
+    expect(lines[0]).toBe('Viewer 로 들어갑니다 — 보고 접속만 할 수 있습니다.');
   });
 
   it('keeps the card and says why when joining fails', async () => {

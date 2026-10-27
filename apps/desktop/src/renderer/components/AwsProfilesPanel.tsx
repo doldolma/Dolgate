@@ -10,9 +10,10 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAwsProfilesController } from '../controllers/useImportControllers'
 import { cn } from '../lib/cn'
-import { sectionsByVault, teamOfVault } from '../lib/vault-groups'
+import { isReadOnlyVault, sectionsByVault, teamOfVault } from '../lib/vault-groups'
 import { useAppStore } from '../store/appStore'
 import { VaultChip, VaultEmptyLine, VaultSectionHeader } from './teams/VaultMark'
+import { AwsKeyDialog } from './teams/AwsKeyDialog'
 import { DialogBackdrop } from './DialogBackdrop'
 import { AwsExternalProfileImportDialog } from './AwsExternalProfileImportDialog'
 import { AwsProfileCreateWizard } from './AwsProfileCreateWizard'
@@ -371,6 +372,9 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
     : null
   const selectedProfileSummary = selectedEntry?.profile ?? null
   const selectedTeam = selectedEntry?.vaultId ? teamOfVault(vaultIndex, selectedEntry.vaultId) : null
+  // 읽기 전용 팀의 프로필은 쓰기만 한다 — 이름·리전·지우기는 닫고, 정적 프로필은 내 키만 넣는다(키는 기기마다다).
+  const selectedReadOnly = selectedEntry?.vaultId ? isReadOnlyVault(vaultIndex, selectedEntry.vaultId) : false
+  const [myKeyOpen, setMyKeyOpen] = useState(false)
   const formTeam = profileFormVaultId ? teamOfVault(vaultIndex, profileFormVaultId) : null
   // 팀이 있으면 왼쪽 목록을 볼트별로 묶는다(4-6 과 같은 모양) — 새 프로필은 묶음 머리의 + 로 그 볼트에.
   const profileSections = sectionsByVault(
@@ -907,9 +911,9 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                   <VaultSectionHeader
                     team={section.team}
                     count={section.items.length}
-                    // 막힌 팀에는 만들지 않는다.
+                    // 막힌 팀과 읽기 전용 팀에는 만들지 않는다.
                     addLabel={
-                      section.blocked
+                      section.blocked || section.readOnly
                         ? null
                         : translate('teams.vault.addTo', {
                             vault: section.team?.name ?? translate('sidebar.personalVault'),
@@ -973,27 +977,29 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                 </div>
 
                 <div className="flex flex-wrap gap-3">
-                  <Button
-                    variant="secondary"
-                    disabled={
-                      isLoadingProfileList ||
-                      isRefreshingProfileDetails ||
-                      isSavingProfile ||
-                      isSavingRegion ||
-                      isRenaming ||
-                      isDeleting ||
-                      isLoggingIn
-                    }
-                    onClick={() => {
-                      setRenameDraft(selectedDetails.profileName)
-                      setRenameError(null)
-                      setIsRenameOpen(true)
-                    }}
-                  >
-                    {translate('awsProfiles.action.rename')}
-                  </Button>
+                  {selectedReadOnly ? null : (
+                    <Button
+                      variant="secondary"
+                      disabled={
+                        isLoadingProfileList ||
+                        isRefreshingProfileDetails ||
+                        isSavingProfile ||
+                        isSavingRegion ||
+                        isRenaming ||
+                        isDeleting ||
+                        isLoggingIn
+                      }
+                      onClick={() => {
+                        setRenameDraft(selectedDetails.profileName)
+                        setRenameError(null)
+                        setIsRenameOpen(true)
+                      }}
+                    >
+                      {translate('awsProfiles.action.rename')}
+                    </Button>
+                  )}
 
-                  {canEditAwsProfileRegion(selectedDetails.kind) ? (
+                  {!selectedReadOnly && canEditAwsProfileRegion(selectedDetails.kind) ? (
                     <Button
                       variant="secondary"
                       disabled={
@@ -1023,9 +1029,9 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                         isDeleting ||
                         isLoggingIn
                       }
-                      onClick={openEditDialog}
+                      onClick={selectedReadOnly ? () => setMyKeyOpen(true) : openEditDialog}
                     >
-                      {translate('awsProfiles.action.edit')}
+                      {translate(selectedReadOnly ? 'teams.awsKey.add' : 'awsProfiles.action.edit')}
                     </Button>
                   ) : null}
 
@@ -1049,24 +1055,26 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                     </Button>
                   ) : null}
 
-                  <Button
-                    variant="danger"
-                    disabled={
-                      isLoadingProfileList ||
-                      isRefreshingProfileDetails ||
-                      isSavingProfile ||
-                      isSavingRegion ||
-                      isRenaming ||
-                      isDeleting ||
-                      isLoggingIn
-                    }
-                    onClick={() => {
-                      setDeleteError(null)
-                      setIsDeleteOpen(true)
-                    }}
-                  >
-                    {translate('common.delete')}
-                  </Button>
+                  {selectedReadOnly ? null : (
+                    <Button
+                      variant="danger"
+                      disabled={
+                        isLoadingProfileList ||
+                        isRefreshingProfileDetails ||
+                        isSavingProfile ||
+                        isSavingRegion ||
+                        isRenaming ||
+                        isDeleting ||
+                        isLoggingIn
+                      }
+                      onClick={() => {
+                        setDeleteError(null)
+                        setIsDeleteOpen(true)
+                      }}
+                    >
+                      {translate('common.delete')}
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -1361,6 +1369,22 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
         getExternalProfileDetails={getExternalAwsProfileDetails}
         importExternalProfiles={importExternalAwsProfiles}
       />
+
+      {/* 읽기 전용 팀의 정적 프로필 — 이 기기에 쓸 내 키만 넣는다(연결 실패 화면의 키 넣기와 같은 창). */}
+      {myKeyOpen && selectedReadOnly && selectedEntry?.vaultId ? (
+        <AwsKeyDialog
+          missing={{
+            teamId: selectedEntry.vaultId,
+            profileId: selectedEntry.profile.id ?? selectedEntry.profile.name,
+            profileName: selectedEntry.profile.name,
+          }}
+          onClose={() => setMyKeyOpen(false)}
+          onSaved={() => {
+            setMyKeyOpen(false)
+            void refreshProfiles(selectedEntry.key)
+          }}
+        />
+      ) : null}
     </div>
   )
 }

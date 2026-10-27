@@ -44,6 +44,9 @@ vi.mock("electron", () => ({
   },
 }));
 
+/** 처음 받은 팀(호스트 team-a·team-b)을 잊을 때 받는 알림 — 지우기 직전에, 그 팀 호스트의 id 와 함께. */
+const FORGOTTEN = [{ teamId: TEAM_ID, hostIds: ["team-a", "team-b"], stillStored: true }];
+
 const createHarness = () => createTeamHarness(tempDir);
 const createSyncedTeam = (hosts?: HostRecord[]) => createSyncedTeamIn(tempDir, hosts);
 
@@ -494,6 +497,153 @@ describe("TeamSyncService", () => {
     expect(catalog.getHost("team-a")).toMatchObject({ favorite: true });
   });
 
+  it("only pulls for a read-only member: nothing goes up, leftovers go back to the server's copy, my own slot still goes up", async () => {
+    const harness = await createSyncedTeam();
+    const root = harness.vaultRoot.teamVaultRoot(TEAM_ID);
+    // 멤버였을 때 고쳐 둔 것이 올라가기 전에 읽기 전용이 됐다.
+    new harness.database.HostRepository(root).update("team-a", sshDraft("edited while member"));
+    new harness.database.SyncOutboxRepository(root).upsertDeletion("hosts", "team-b");
+    harness.server.teams.get(TEAM_ID)!.members.get("user-1")!.role = "viewer";
+    harness.storage.upsertTeamInfo(TEAM_ID, { ...harness.storage.getTeamState(TEAM_ID)!.info, role: "viewer" });
+    harness.catalog().setHostFavorite("team-a", true);
+
+    await harness.service.pushDirty();
+
+    expect(harness.server.requestsTo("POST", `/teams/${TEAM_ID}/sync`)).toEqual([]);
+    const team = harness.storage.getState().teams[TEAM_ID];
+    expect(team.data.hosts.map((record) => record.label).sort()).toEqual(["team-a", "team-b"]);
+    expect(team.data.syncOutbox).toEqual([]);
+    // 내 칸은 읽기 전용도 올린다 — 서버도 받는다.
+    expect(harness.server.requestsTo("PUT", `/teams/${TEAM_ID}/me`)).toHaveLength(1);
+    expect(harness.catalog().getHost("team-a")).toMatchObject({ favorite: true, label: "team-a" });
+
+    // 맞춰진 뒤에는 묻지도 않는다.
+    harness.server.requests.length = 0;
+    await harness.service.pushDirty();
+    expect(harness.server.requests).toEqual([]);
+  });
+
+  it("makes no group records for a read-only member, where a member would", async () => {
+    const harness = await createSyncedTeam([host("team-a", { groupName: "ops" })]);
+    const team = harness.server.teams.get(TEAM_ID)!;
+    // 다음 받기에서, 멤버는 호스트만 있던 그룹 경로를 그룹 레코드로 만들어 올린다.
+    harness.server.putRecord(TEAM_ID, "hosts", "team-c", host("team-c"), harness.teamKey);
+    await harness.tickLoops();
+    expect(harness.storage.getState().teams[TEAM_ID].data.groups.map((group) => group.path)).toEqual(["ops"]);
+    expect(harness.server.requestsTo("POST", `/teams/${TEAM_ID}/sync`)).toHaveLength(1);
+
+    // 읽기 전용이 되면 서버에 있는 그대로 받기만 한다 — 그룹 레코드를 만들지도, 올리지도 않는다.
+    team.records.delete("groups");
+    team.members.get("user-1")!.role = "viewer";
+    team.infoRevision += 1;
+    await harness.tickLoops();
+    expect(harness.storage.getTeamState(TEAM_ID)?.info.role).toBe("viewer");
+    harness.server.requests.length = 0;
+    harness.server.putRecord(TEAM_ID, "hosts", "team-d", host("team-d"), harness.teamKey);
+    await harness.tickLoops();
+    expect(harness.storage.getState().teams[TEAM_ID].data.groups).toEqual([]);
+    // 맞춰진 뒤의 받기는 한 번이다 — 그룹을 만들었다가 서버 것으로 되돌리느라 다시 받지 않는다.
+    harness.server.requests.length = 0;
+    harness.server.putRecord(TEAM_ID, "hosts", "team-e", host("team-e"), harness.teamKey);
+    await harness.tickLoops();
+    expect(harness.server.requestsTo("GET", `/teams/${TEAM_ID}/sync`)).toHaveLength(1);
+    expect(harness.storage.getState().teams[TEAM_ID].data.hosts.map((record) => record.id).sort()).toEqual([
+      "team-a",
+      "team-c",
+      "team-d",
+      "team-e",
+    ]);
+    expect(harness.server.requestsTo("POST", `/teams/${TEAM_ID}/sync`)).toEqual([]);
+  });
+
+  it("takes in a host key my other device trusted while read-only, and uses it here", async () => {
+    const harness = await createSyncedTeam();
+    harness.server.teams.get(TEAM_ID)!.members.get("user-1")!.role = "viewer";
+    harness.storage.upsertTeamInfo(TEAM_ID, { ...harness.storage.getTeamState(TEAM_ID)!.info, role: "viewer" });
+    const trusted = {
+      id: "kh-mine",
+      host: "team-a.example.com",
+      port: 22,
+      algorithm: "ssh-ed25519",
+      publicKeyBase64: "AAAA-mine",
+      fingerprintSha256: "SHA256:mine",
+      createdAt: "2026-10-26T00:00:00.000Z",
+      lastSeenAt: "2026-10-26T00:00:00.000Z",
+      updatedAt: "2026-10-26T00:00:00.000Z",
+    };
+    harness.server.putPrivate(
+      TEAM_ID,
+      "hostPrefs",
+      "team-a",
+      { id: "team-a", favorite: null, agentForwarding: null, knownHosts: [trusted], updatedAt: "2026-10-26T00:00:00.000Z" },
+      "2026-10-26T00:00:00.000Z",
+    );
+
+    await harness.tickLoops();
+
+    const knownHosts = harness.catalog().scopeOfHost("team-a").knownHosts;
+    expect(knownHosts.getByHostPortAlgorithm("team-a.example.com", 22, "ssh-ed25519")).toEqual(trusted);
+  });
+
+  it("joins a read-only link as read-only at once, and takes the role the server gives when the join finishes later", async () => {
+    const harness = await createHarness();
+    const teamDek = createTeamDek();
+    const secret = createTeamInviteSecret();
+    const team = harness.server.addTeam(TEAM_ID, "Acme", null);
+    team.members.set("owner-1", harness.server.newMember("owner", "owner-wrapped"));
+    harness.server.invites.set("viewer-code", {
+      code: "viewer-code",
+      teamId: TEAM_ID,
+      box: sealTeamInviteBox({ secret, teamId: TEAM_ID, teamDek, expiresAt: "2099-01-01T00:00:00.000Z" }),
+      sealedSecret: null,
+      role: "viewer",
+      tokenHash: hashTeamInviteJoinToken(deriveTeamInviteJoinToken(secret)),
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      createdBy: "owner-1",
+      revokedAt: null,
+      useCount: 0,
+    });
+    const link = formatTeamInviteLink(SERVER, "viewer-code", secret);
+    // 팀 키 사본을 올리다 끊긴다 — 참여는 다음에 마저 한다.
+    harness.server.failNextKeyUpload = true;
+    await expect(harness.service.joinWithLink(link)).rejects.toThrow();
+    expect(harness.storage.getTeamState(TEAM_ID)?.info.role).toBe("viewer");
+
+    // 그 사이 소유자가 멤버로 올렸다. 마저 들어갈 때 서버가 지금 역할을 준다.
+    team.members.get("user-1")!.role = "member";
+    await harness.service.refreshTeams();
+    expect(harness.storage.getTeamState(TEAM_ID)?.info).toMatchObject({ role: "member", wrappedTeamDek: expect.any(String) });
+  });
+
+  it("keeps the role the server gave at the join, even if the link changed after the join card", async () => {
+    const harness = await createHarness();
+    const teamDek = createTeamDek();
+    const secret = createTeamInviteSecret();
+    const team = harness.server.addTeam(TEAM_ID, "Acme", null);
+    team.members.set("owner-1", harness.server.newMember("owner", "owner-wrapped"));
+    const invite = {
+      code: "changing-code",
+      teamId: TEAM_ID,
+      box: sealTeamInviteBox({ secret, teamId: TEAM_ID, teamDek, expiresAt: "2099-01-01T00:00:00.000Z" }),
+      sealedSecret: null,
+      role: "viewer" as const,
+      tokenHash: hashTeamInviteJoinToken(deriveTeamInviteJoinToken(secret)),
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      createdBy: "owner-1",
+      revokedAt: null,
+      useCount: 0,
+    };
+    harness.server.invites.set(invite.code, invite);
+    // 참여 카드(읽기 전용)를 받은 뒤, 들어가기 직전에 서버 쪽 역할이 바뀐다.
+    harness.server.beforeJoin = () => {
+      harness.server.invites.get(invite.code)!.role = "member";
+    };
+
+    await harness.service.joinWithLink(formatTeamInviteLink(SERVER, invite.code, secret));
+
+    expect(harness.storage.getTeamState(TEAM_ID)?.info.role).toBe("member");
+  });
+
   it("forgets a team the server no longer lists, along with its pending join link", async () => {
     const harness = await createSyncedTeam();
     await harness.secretStore.save(harness.pendingTeamJoinAccount(TEAM_ID), "leftover");
@@ -505,6 +655,8 @@ describe("TeamSyncService", () => {
     await expect(harness.secretStore.load(harness.pendingTeamJoinAccount(TEAM_ID))).resolves.toBeNull();
     expect(harness.activeLoops()).toBe(0);
     expect(harness.onChanged).toHaveBeenCalled();
+    // 지우기 직전에 그 팀 호스트를 실어 알린다 — 그 호스트의 열린 연결을 닫는다(main.ts).
+    expect(harness.forgotten).toEqual(FORGOTTEN);
   });
 
   it("wipes every team's local copy and pending links on sign-out", async () => {
@@ -514,6 +666,7 @@ describe("TeamSyncService", () => {
 
     await harness.service.purgeAll();
 
+    expect(harness.forgotten).toEqual(FORGOTTEN);
     expect(harness.storage.getState().teams).toEqual({});
     await expect(harness.secretStore.load(harness.pendingTeamJoinAccount(TEAM_ID))).resolves.toBeNull();
     expect(harness.activeLoops()).toBe(0);
@@ -531,6 +684,16 @@ describe("TeamSyncService", () => {
     expect(harness.storage.getState().teams).toEqual({});
     expect(harness.activeLoops()).toBe(0);
     expect(harness.service.listStatuses()).toEqual({});
+    expect(harness.forgotten).toEqual(FORGOTTEN);
+  });
+
+  it("tells which hosts it forgets when the team is left or deleted here", async () => {
+    const harness = await createSyncedTeam();
+
+    await harness.service.forgetTeamLocally(TEAM_ID);
+
+    expect(harness.forgotten).toEqual(FORGOTTEN);
+    expect(harness.storage.getState().teams).toEqual({});
   });
 
   it("finishes joining on the next start when the key upload did not happen", async () => {
@@ -545,6 +708,7 @@ describe("TeamSyncService", () => {
       teamId: TEAM_ID,
       box: sealTeamInviteBox({ secret, teamId: TEAM_ID, teamDek, expiresAt: "2099-01-01T00:00:00.000Z" }),
       sealedSecret: null,
+      role: "member",
       tokenHash: hashTeamInviteJoinToken(deriveTeamInviteJoinToken(secret)),
       expiresAt: "2099-01-01T00:00:00.000Z",
       createdBy: "owner-1",
@@ -810,6 +974,7 @@ describe("TeamSyncService feature paths", () => {
         teamId,
         box: sealTeamInviteBox({ secret, teamId, teamDek: createTeamDek(), expiresAt: boxExpiresAt }),
         sealedSecret: null,
+        role: "member",
         tokenHash: hashTeamInviteJoinToken(deriveTeamInviteJoinToken(secret)),
         expiresAt: inviteExpiresAt,
         createdBy: "owner-1",

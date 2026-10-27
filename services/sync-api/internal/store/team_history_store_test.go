@@ -173,6 +173,155 @@ func TestTeamEventsKeepTheNewestWithinTheLimit(t *testing.T) {
 	}
 }
 
+// 빠진 사람의 앱은 그 팀에 녹화 끝을 알릴 수 없다 — 빠지는 순간 서버가 그 사람의 진행 중 녹화를 끊김으로 닫는다.
+// 내보냄·나가기·볼트 초기화(회원 탈퇴도 같은 길) 모두. 남은 사람의 것과 이미 끝난 것은 그대로다.
+func TestLeavingMembersLiveReplaysAreCut(t *testing.T) {
+	for _, testCase := range storeTestCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			store := testCase.open(t)
+			ctx := context.Background()
+			owner := createTeamTestUser(t, store, "cut-owner@example.com", true)
+			bob := createTeamTestUser(t, store, "cut-bob@example.com", true)
+			carol := createTeamTestUser(t, store, "cut-carol@example.com", true)
+			dave := createTeamTestUser(t, store, "cut-dave@example.com", true)
+			teamID := createTestTeam(t, store, owner, "Acme")
+			for _, member := range []teamTestUser{bob, carol, dave} {
+				inviteTestMember(t, store, teamID, owner, member)
+			}
+			ownerLive := startTestReplay(t, store, teamID, owner)
+			putTestSegment(t, store, teamID, owner, ownerLive, 0, 64)
+			bobLive := startTestReplay(t, store, teamID, bob)
+			putTestSegment(t, store, teamID, bob, bobLive, 0, 64)
+			bobEnded := startTestReplay(t, store, teamID, bob)
+			if err := store.CompleteTeamReplay(ctx, teamID, bob.ID, bobEnded, TeamReplayCompleteInput{EndMeta: "end", LastSegment: -1}); err != nil {
+				t.Fatalf("CompleteTeamReplay() error = %v", err)
+			}
+			carolLive := startTestReplay(t, store, teamID, carol)
+			daveLive := startTestReplay(t, store, teamID, dave)
+			// 다른 팀에도 있는 사람 — 그 팀의 녹화는 그 팀에 그대로 남는다.
+			betaID := createTestTeam(t, store, owner, "Beta")
+			inviteTestMember(t, store, betaID, owner, bob)
+			bobBeta := startTestReplay(t, store, betaID, bob)
+			endedAt := func(recordingID string) *time.Time {
+				var replay teamReplayRow
+				if err := store.db.Where("team_id = ? AND recording_id = ?", teamID, recordingID).Take(&replay).Error; err != nil {
+					t.Fatalf("read replay: %v", err)
+				}
+				return replay.EndedAt
+			}
+
+			if err := store.RemoveTeamMember(ctx, teamID, owner.ID, bob.ID); err != nil {
+				t.Fatalf("RemoveTeamMember() error = %v", err)
+			}
+			requireTeamReplayState(t, store, teamID, bobLive, TeamReplayCut)
+			if endedAt(bobLive) == nil {
+				t.Fatalf("a cut replay needs ended_at")
+			}
+			requireTeamReplayState(t, store, teamID, bobEnded, TeamReplayEnded)
+			requireTeamReplayState(t, store, teamID, ownerLive, TeamReplayLive)
+			requireTeamReplayState(t, store, teamID, carolLive, TeamReplayLive)
+			requireTeamReplayState(t, store, teamID, daveLive, TeamReplayLive)
+			requireTeamReplayState(t, store, betaID, bobBeta, TeamReplayLive)
+
+			if _, err := store.LeaveTeam(ctx, teamID, carol.ID); err != nil {
+				t.Fatalf("LeaveTeam() error = %v", err)
+			}
+			requireTeamReplayState(t, store, teamID, carolLive, TeamReplayCut)
+
+			epoch, err := store.GetUserVaultEpoch(ctx, dave.ID)
+			if err != nil {
+				t.Fatalf("GetUserVaultEpoch() error = %v", err)
+			}
+			if _, err := store.ResetUserVault(ctx, dave.ID, epoch); err != nil {
+				t.Fatalf("ResetUserVault() error = %v", err)
+			}
+			requireTeamReplayState(t, store, teamID, daveLive, TeamReplayCut)
+			requireTeamReplayState(t, store, teamID, ownerLive, TeamReplayLive)
+			// 끊김도 남은 녹화다 — 팀 합계는 그대로 맞는다. 남은 사람은 볼 수 있다.
+			requireTeamReplayTotals(t, store, teamID)
+			replays, err := store.ListTeamReplays(ctx, teamID, owner.ID, TeamReplayQuery{RecordingIDs: []string{bobLive, carolLive, daveLive}})
+			if err != nil {
+				t.Fatalf("ListTeamReplays() error = %v", err)
+			}
+			if len(replays) != 3 {
+				t.Fatalf("listed = %d replays, want 3", len(replays))
+			}
+			for _, replay := range replays {
+				if replay.State != TeamReplayCut {
+					t.Fatalf("listed replay %s state = %q, want cut", replay.RecordingID, replay.State)
+				}
+			}
+		})
+	}
+}
+
+// 구간을 올리는 중에 빠져도 교착 없이 끝난다 — 둘 다 팀 행을 먼저 잠근다. 빠진 뒤의 올리기는 멤버가 아니라는 오류만
+// 받고, 그 사람의 녹화는 하나도 진행 중으로 남지 않는다. 잠금 경쟁은 MariaDB 로 반복해 돌려야 드러난다.
+func TestRemovingAMemberWhileTheyUploadLeavesNoLiveReplay(t *testing.T) {
+	for _, testCase := range storeTestCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			store := testCase.open(t)
+			ctx := context.Background()
+			owner := createTeamTestUser(t, store, "race-cut-owner@example.com", true)
+			member := createTeamTestUser(t, store, "race-cut-member@example.com", true)
+			teamID := createTestTeam(t, store, owner, "Acme")
+			inviteTestMember(t, store, teamID, owner, member)
+			recordings := []string{
+				startTestReplay(t, store, teamID, member),
+				startTestReplay(t, store, teamID, member),
+				startTestReplay(t, store, teamID, member),
+			}
+
+			errs := make(chan error, 16)
+			var workers sync.WaitGroup
+			start := make(chan struct{})
+			for _, recordingID := range recordings {
+				recordingID := recordingID
+				workers.Add(1)
+				go func() {
+					defer workers.Done()
+					<-start
+					for index := int64(0); index < 200; index++ {
+						err := store.PutTeamReplaySegment(ctx, teamID, member.ID, recordingID, index, "i", []byte("segment"))
+						if err != nil {
+							if !errors.Is(err, ErrTeamNotFound) {
+								errs <- fmt.Errorf("upload %s #%d: %w", recordingID, index, err)
+							}
+							return
+						}
+					}
+				}()
+			}
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				<-start
+				time.Sleep(5 * time.Millisecond)
+				if err := store.RemoveTeamMember(ctx, teamID, owner.ID, member.ID); err != nil {
+					errs <- fmt.Errorf("remove: %w", err)
+				}
+			}()
+			close(start)
+			workers.Wait()
+			close(errs)
+			for err := range errs {
+				t.Fatal(err)
+			}
+			for _, recordingID := range recordings {
+				var replay teamReplayRow
+				if err := store.db.Where("team_id = ? AND recording_id = ?", teamID, recordingID).Take(&replay).Error; err != nil {
+					t.Fatalf("read replay: %v", err)
+				}
+				// 200 개를 다 올리기 전에 빠졌으면 끊김, 다 올렸어도 끝을 못 알렸으니 끊김이다.
+				if replay.State != TeamReplayCut {
+					t.Fatalf("replay %s state = %q, want cut", recordingID, replay.State)
+				}
+			}
+			requireTeamReplayTotals(t, store, teamID)
+		})
+	}
+}
+
 func TestTeamMemberChangesAreRecordedByTheServer(t *testing.T) {
 	for _, testCase := range storeTestCases() {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -184,6 +333,10 @@ func TestTeamMemberChangesAreRecordedByTheServer(t *testing.T) {
 			dave := createTeamTestUser(t, store, "changes-dave@example.com", true)
 			teamID := createTestTeam(t, store, owner, "Acme")
 			inviteTestMember(t, store, teamID, owner, bob)
+			// 링크는 관리자 이상이 만든다 — bob 을 관리자로 올려 bob 의 링크로 carol 을 들인다.
+			if err := store.SetTeamMemberRole(ctx, teamID, owner.ID, bob.ID, TeamRoleAdmin); err != nil {
+				t.Fatalf("SetTeamMemberRole() error = %v", err)
+			}
 			time.Sleep(10 * time.Millisecond)
 			inviteTestMember(t, store, teamID, bob, carol)
 			inviteTestMember(t, store, teamID, owner, dave)
@@ -193,8 +346,8 @@ func TestTeamMemberChangesAreRecordedByTheServer(t *testing.T) {
 				t.Fatalf("dave append: %v", err)
 			}
 			// 실패한 일은 기록도 남기지 않는다.
-			if err := store.RemoveTeamMember(ctx, teamID, bob.ID, dave.ID); !errors.Is(err, ErrTeamOwnerOnly) {
-				t.Fatalf("member removing = %v, want ErrTeamOwnerOnly", err)
+			if err := store.RemoveTeamMember(ctx, teamID, carol.ID, dave.ID); !errors.Is(err, ErrTeamAdminOnly) {
+				t.Fatalf("member removing = %v, want ErrTeamAdminOnly", err)
 			}
 			if err := store.RemoveTeamMember(ctx, teamID, owner.ID, dave.ID); err != nil {
 				t.Fatalf("RemoveTeamMember() error = %v", err)
@@ -216,9 +369,10 @@ func TestTeamMemberChangesAreRecordedByTheServer(t *testing.T) {
 
 			got := readServerTeamEvents(t, store, teamID, carol)
 			want := []teamServerEvent{
-				{Type: teamEventMemberJoined, UserID: bob.ID, Email: bob.Email, ByUserID: owner.ID, ByEmail: owner.Email},
-				{Type: teamEventMemberJoined, UserID: carol.ID, Email: carol.Email, ByUserID: bob.ID, ByEmail: bob.Email},
-				{Type: teamEventMemberJoined, UserID: dave.ID, Email: dave.Email, ByUserID: owner.ID, ByEmail: owner.Email},
+				{Type: teamEventMemberJoined, UserID: bob.ID, Email: bob.Email, ByUserID: owner.ID, ByEmail: owner.Email, Role: TeamRoleMember},
+				{Type: teamEventRoleChanged, UserID: bob.ID, Email: bob.Email, ByUserID: owner.ID, ByEmail: owner.Email, Role: TeamRoleAdmin},
+				{Type: teamEventMemberJoined, UserID: carol.ID, Email: carol.Email, ByUserID: bob.ID, ByEmail: bob.Email, Role: TeamRoleMember},
+				{Type: teamEventMemberJoined, UserID: dave.ID, Email: dave.Email, ByUserID: owner.ID, ByEmail: owner.Email, Role: TeamRoleMember},
 				{Type: teamEventMemberRemoved, UserID: dave.ID, Email: dave.Email, ByUserID: owner.ID, ByEmail: owner.Email},
 				{Type: teamEventOwnerChanged, UserID: bob.ID, Email: bob.Email, ByUserID: owner.ID, ByEmail: owner.Email},
 				{Type: teamEventMemberLeft, UserID: owner.ID, Email: owner.Email},
@@ -519,11 +673,11 @@ func TestTeamReplayExtras(t *testing.T) {
 			}
 			requireTeamReplayState(t, store, teamID, recordingID, TeamReplayEnded)
 
-			detail, err := store.GetTeamReplay(ctx, teamID, member.ID, recordingID)
+			detail, err := store.GetTeamReplay(ctx, teamID, owner.ID, recordingID)
 			if err != nil || len(detail.Extras) != 2 || detail.Extras[0].Kind != "commands" || detail.Extras[1].Kind != "snapshot" {
 				t.Fatalf("extras in detail = %#v, %v", detail.Extras, err)
 			}
-			commands, err := store.ReadTeamReplayExtras(ctx, teamID, member.ID, recordingID, "commands", 0, 10, 1<<20)
+			commands, err := store.ReadTeamReplayExtras(ctx, teamID, owner.ID, recordingID, "commands", 0, 10, 1<<20)
 			if err != nil || len(commands) != 1 || string(commands[0].Data) != "cmd-0" {
 				t.Fatalf("commands = %#v, %v", commands, err)
 			}

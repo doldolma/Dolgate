@@ -1,7 +1,7 @@
 import type { HostDraft, HostRecord, SavedWorkspaceRecord, TerminalThemeId } from "@shared";
 import { describe, expect, it, vi } from "vitest";
 import type { HostRepository, SavedWorkspaceRepository } from "./database";
-import type { TeamHostPrefsRecord, TeamWorkspacePrefsRecord } from "./state-storage";
+import type { TeamHostPrefsPatch, TeamHostPrefsRecord, TeamWorkspacePrefsRecord } from "./state-storage";
 import type {
   TeamHostCredentials,
   TeamMemberPrefsStore,
@@ -77,13 +77,18 @@ function createMemberPrefs(
     });
   const store = {
     read: vi.fn(() => ({ hosts: new Map(hosts), workspaces: new Map(workspaces), terminalThemeByHostId: { ...themes } })),
-    updateHost: vi.fn((hostId: string, patch: { favorite?: boolean | null; agentForwarding?: boolean | null }) => {
+    updateHost: vi.fn((hostId: string, patch: TeamHostPrefsPatch) => {
       const current = hosts.get(hostId);
       hosts.set(hostId, {
         id: hostId,
         favorite: patch.favorite === undefined ? (current?.favorite ?? null) : patch.favorite ? true : null,
         agentForwarding:
           patch.agentForwarding === undefined ? (current?.agentForwarding ?? null) : patch.agentForwarding ? true : null,
+        rdpCertificateFingerprint:
+          patch.rdpCertificateFingerprint === undefined
+            ? (current?.rdpCertificateFingerprint ?? null)
+            : patch.rdpCertificateFingerprint || null,
+        knownHosts: patch.knownHosts ?? current?.knownHosts ?? [],
         updatedAt: "now",
       });
     }),
@@ -340,7 +345,7 @@ describe("createVaultCatalog", () => {
       const other = createHost("host-b", "b", { favorite: true, agentForwarding: true, terminalThemeId: "dolssh-light" } as never);
       const personalHost = createHost("host-p", "p", { favorite: true, terminalThemeId: "dolssh-light" } as never);
       const prefs = createMemberPrefs({
-        hosts: [{ id: "host-a", favorite: true, agentForwarding: null, updatedAt: "t" }],
+        hosts: [{ id: "host-a", favorite: true, agentForwarding: null, rdpCertificateFingerprint: null, knownHosts: [], updatedAt: "t" }],
         themes: { "host-a": "dolssh-dark" },
       });
       const catalog = createVaultCatalog(

@@ -81,6 +81,36 @@ describe("buildBrowserVaults", () => {
   });
 });
 
+// 7-3: 내가 읽기 전용(Viewer)인 팀 — 화면이 그 볼트의 편집 길을 닫는다. 모르는 역할도 읽기 전용으로 본다.
+describe("buildBrowserVaults read-only", () => {
+  it("marks only the teams you can't edit, and never your own vault", () => {
+    const vaults = buildBrowserVaults({
+      hosts: [],
+      groups: [],
+      savedWorkspaces: [],
+      vaultIndex: index({
+        teams: (["owner", "admin", "member", "viewer"] as const).map((role) => ({
+          id: `team-${role}`,
+          name: role,
+          role,
+          syncState: "ready" as const,
+          syncError: null,
+          groups: [],
+        })),
+      }),
+      personalName: "Personal",
+    });
+
+    expect(vaults.map((vault) => [vault.id, vault.readOnly])).toEqual([
+      ["personal", false],
+      ["team-owner", false],
+      ["team-admin", false],
+      ["team-member", false],
+      ["team-viewer", true],
+    ]);
+  });
+});
+
 describe("groupTreeKey", () => {
   it("keeps personal paths as they are and sets team paths apart", () => {
     expect(groupTreeKey("personal", "Prod/web")).toBe("Prod/web");

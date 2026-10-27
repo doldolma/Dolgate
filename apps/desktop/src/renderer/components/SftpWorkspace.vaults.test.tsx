@@ -5,6 +5,7 @@ import {
   type AppSettings,
   type GroupRecord,
   type HostRecord,
+  type TeamRole,
   type VaultIndex,
 } from "@shared";
 import type { SftpPaneState, SftpState } from "../store/types";
@@ -42,11 +43,11 @@ const group = (id: string, path: string) =>
 const hosts = [host("my-web", "Prod"), host("my-db", "Prod/db"), host("team-web", "Prod"), host("team-api", "Bastion")];
 const personalGroups = [group("pg-prod", "Prod"), group("pg-db", "Prod/db"), group("pg-home", "Home")];
 
-function vaultIndex(): VaultIndex {
+function vaultIndex(teamRole: TeamRole = "owner"): VaultIndex {
   return {
     ...createEmptyVaultIndex(),
     teams: [
-      { id: TEAM, name: "Acme Infra", role: "owner", syncState: "ready", syncError: null, groups: [group("tg-prod", "Prod"), group("tg-bastion", "Bastion")] },
+      { id: TEAM, name: "Acme Infra", role: teamRole, syncState: "ready", syncError: null, groups: [group("tg-prod", "Prod"), group("tg-bastion", "Bastion")] },
     ],
     teamIdByHostId: { "team-web": TEAM, "team-api": TEAM },
   };
@@ -100,14 +101,22 @@ afterEach(() => {
 
 function renderPicker(
   pane: Partial<SftpPaneState> = {},
-  options: { teams?: boolean; myUsernameByHostId?: Record<string, string> } = {},
+  options: {
+    teams?: boolean;
+    myUsernameByHostId?: Record<string, string>;
+    /** 이 팀(Acme Infra)에서 내 역할. */
+    teamRole?: TeamRole;
+    hosts?: HostRecord[];
+    onOpenHostSettings?: (hostId: string) => void;
+  } = {},
 ) {
   const onNavigateHostGroup = vi.fn();
+  const paneHosts = options.hosts ?? hosts;
   const vaults = buildBrowserVaults({
-    hosts,
+    hosts: paneHosts,
     groups: personalGroups,
     savedWorkspaces: [],
-    vaultIndex: options.teams === false ? createEmptyVaultIndex() : vaultIndex(),
+    vaultIndex: options.teams === false ? createEmptyVaultIndex() : vaultIndex(options.teamRole),
     personalName: "Personal",
   });
   const sftp = {
@@ -122,7 +131,7 @@ function renderPicker(
   render(
     <SftpWorkspace
       desktopPlatform="darwin"
-      hosts={hosts}
+      hosts={paneHosts}
       groups={personalGroups}
       vaults={vaults}
       myUsernameByHostId={options.myUsernameByHostId}
@@ -137,6 +146,7 @@ function renderPicker(
       onNavigateHostGroup={onNavigateHostGroup}
       onSelectHost={vi.fn()}
       onConnectHost={noop}
+      onOpenHostSettings={options.onOpenHostSettings}
       onOpenEntry={noop}
       onRefreshPane={noop}
       onNavigateBack={noop}
@@ -241,5 +251,38 @@ describe("SFTP host picker with team vaults", () => {
     fireEvent.doubleClick(prod);
     // 지금처럼 볼트 없이 부른다.
     expect(onNavigateHostGroup).toHaveBeenLastCalledWith("right", "Prod");
+  });
+});
+
+// 7-3: 읽기 전용(Viewer) 팀의 AWS 호스트가 SFTP 에서 실패하면 다시 시도·복사만 — 설정 고치기(편집 창)는 내밀지 않는다.
+describe("SFTP AWS failure card with a read-only team", () => {
+  const teamEc2 = {
+    ...host("team-api", "Bastion"),
+    kind: "aws-ec2",
+    awsProfileName: "acme",
+    awsRegion: "us-east-1",
+    awsInstanceId: "i-0abc",
+  } as unknown as HostRecord;
+  const ec2Hosts = hosts.map((entry) => (entry.id === "team-api" ? teamEc2 : entry));
+  const failed = {
+    selectedHostId: "team-api",
+    connectionDiagnostic: {
+      endpointId: "ep-1",
+      hostId: "team-api",
+      stage: "connecting",
+      message: "no SSH user",
+      reasonCode: "missing-username",
+    },
+  } as unknown as Partial<SftpPaneState>;
+
+  it("offers editing the SSH settings on a team you edit", () => {
+    renderPicker(failed, { hosts: ec2Hosts, onOpenHostSettings: vi.fn() });
+    expect(screen.getByRole("button", { name: "SSH 설정 수정" })).toBeInTheDocument();
+  });
+
+  it("doesn't offer editing on a team you only view", () => {
+    renderPicker(failed, { hosts: ec2Hosts, teamRole: "viewer", onOpenHostSettings: vi.fn() });
+    expect(screen.getByRole("alert")).toHaveTextContent("no SSH user");
+    expect(screen.queryByRole("button", { name: "SSH 설정 수정" })).toBeNull();
   });
 });

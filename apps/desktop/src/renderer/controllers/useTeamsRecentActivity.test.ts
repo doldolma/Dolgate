@@ -43,7 +43,7 @@ describe('useTeamsRecentActivity', () => {
   it('reads each team with the recordings it shows, and asks nothing without teams', async () => {
     vi.mocked(listTeamActivity).mockResolvedValue([sessionItem(1, 'r-1')]);
     vi.mocked(getTeamReplayStatuses).mockResolvedValue([
-      { recordingId: 'r-1', state: 'ended', authorEmail: 'alice@acme.dev', segmentCount: 2 },
+      { recordingId: 'r-1', state: 'ended', authorEmail: 'alice@acme.dev', segmentCount: 2, viewable: true },
     ]);
 
     const { result, rerender } = renderHook(({ ids }) => useTeamsRecentActivity(ids), {

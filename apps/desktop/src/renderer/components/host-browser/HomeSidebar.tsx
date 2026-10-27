@@ -8,6 +8,7 @@ import {
   ArrowLeftRight,
   Check,
   ChevronRight,
+  Eye,
   EyeOff,
   FoldVertical,
   Folder,
@@ -142,15 +143,18 @@ export function HomeSidebar({
           Groups
         </span>
         <div className="flex items-center gap-[0.35rem]">
-          <button
-            type="button"
-            aria-label="New Group"
-            title="New Group"
-            className="inline-grid h-[1.6rem] w-[1.6rem] place-items-center rounded-[8px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] text-[0.9rem] leading-none text-[var(--text-soft)] transition-colors duration-140 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border)_70%)] hover:text-[var(--accent-strong)]"
-            onClick={hb.openCreateGroupModal}
-          >
-            <Plus className="h-[1rem] w-[1rem]" />
-          </button>
+          {/* 새 그룹은 지금 위치의 볼트에 만든다 — 읽기 전용 팀을 보고 있으면 만들 곳이 없어 숨긴다. */}
+          {hb.isReadOnlyVault(hb.currentVaultId) ? null : (
+            <button
+              type="button"
+              aria-label="New Group"
+              title="New Group"
+              className="inline-grid h-[1.6rem] w-[1.6rem] place-items-center rounded-[8px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] text-[0.9rem] leading-none text-[var(--text-soft)] transition-colors duration-140 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border)_70%)] hover:text-[var(--accent-strong)]"
+              onClick={hb.openCreateGroupModal}
+            >
+              <Plus className="h-[1rem] w-[1rem]" />
+            </button>
+          )}
           <div className="relative" ref={groupMenuRef}>
             <button
               type="button"
@@ -730,9 +734,11 @@ function GroupTreeItem({
             }
             return;
           }
+          // 읽기 전용 팀 안에서는 옮기지 않는다 — dragover 를 받지 않아 보통은 오지 않지만, 놓기에서도 거른다.
           if (
             !draggedGroup ||
             draggedGroup.vaultId !== vaultId ||
+            hb.isReadOnlyVault(vaultId) ||
             !hb.canReparentGroup(draggedGroup.path, group.path)
           ) {
             return;
@@ -863,6 +869,7 @@ function VaultSection({
       : vault.blocked === "outdated"
         ? translate("teamsPanel.sync.outdated")
         : null;
+  const viewerLabel = vault.readOnly ? translate("teams.viewerHint") : null;
   const menuLabel = translate("sidebar.vaultMenu", { name: vault.name });
   const openMenu = (x: number, y: number) =>
     hb.setContextMenu({ kind: "vault", vaultId: vault.id, x, y });
@@ -971,6 +978,7 @@ function VaultSection({
             if (
               !draggedGroup ||
               draggedGroup.vaultId !== vault.id ||
+              vault.readOnly ||
               !hb.canReparentGroup(draggedGroup.path, null)
             ) {
               return;
@@ -1005,8 +1013,22 @@ function VaultSection({
                   : "text-[color-mix(in_srgb,var(--accent-strong)_64%,var(--text-muted)_36%)]"
             }
           />
-          <span className="min-w-0 flex-1 truncate font-semibold text-[var(--text)]">
-            {vault.name}
+          {/* 읽기 전용 팀은 이름 뒤에 흐린 눈 하나(V1) — 무엇인지는 툴팁이 말한다. 편집 길은 메뉴에서 이미 닫혀 있다. */}
+          <span className="flex min-w-0 flex-1 items-center gap-[0.35rem]">
+            <span className="min-w-0 truncate font-semibold text-[var(--text)]">
+              {vault.name}
+            </span>
+            {viewerLabel ? (
+              <Tooltip label={viewerLabel} className="shrink-0">
+                <span
+                  role="img"
+                  aria-label={viewerLabel}
+                  className="inline-flex text-[var(--text-muted)]"
+                >
+                  <Eye className="h-[0.85rem] w-[0.85rem]" aria-hidden="true" />
+                </span>
+              </Tooltip>
+            ) : null}
           </span>
           {/* 개수 자리는 폭을 정해 둔다 — 줄에 올리거나 키보드로 오거나 메뉴가 열려 있으면 같은 자리에 ⋯ 이 뜬다. 마우스로
               누른 뒤 남은 포커스로는 띄우지 않는다(그 줄만 개수가 사라져 보인다). 막힌 팀은 그 자리에 경고(툴팁). */}

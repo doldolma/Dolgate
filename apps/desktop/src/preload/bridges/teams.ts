@@ -16,6 +16,7 @@ export function buildTeamsBridge(ipcRenderer: IpcRenderer): DesktopApi["teams"] 
       ipcRenderer.invoke(ipcChannels.teams.transferOwnership, teamId, userId),
     listMembers: (teamId) => ipcRenderer.invoke(ipcChannels.teams.listMembers, teamId),
     removeMember: (teamId, userId) => ipcRenderer.invoke(ipcChannels.teams.removeMember, teamId, userId),
+    setMemberRole: (teamId, userId, role) => ipcRenderer.invoke(ipcChannels.teams.setMemberRole, teamId, userId, role),
     leave: (teamId) => ipcRenderer.invoke(ipcChannels.teams.leave, teamId),
     createInvite: (teamId, options) => ipcRenderer.invoke(ipcChannels.teams.createInvite, teamId, options),
     listInvites: (teamId) => ipcRenderer.invoke(ipcChannels.teams.listInvites, teamId),
@@ -33,6 +34,9 @@ export function buildTeamsBridge(ipcRenderer: IpcRenderer): DesktopApi["teams"] 
     listActivity: (teamId, query) => ipcRenderer.invoke(ipcChannels.teams.listActivity, teamId, query),
     getReplayStatuses: (teamId, recordingIds) =>
       ipcRenderer.invoke(ipcChannels.teams.getReplayStatuses, teamId, recordingIds),
+    listChanges: (teamId, query) => ipcRenderer.invoke(ipcChannels.teams.listChanges, teamId, query),
+    restoreChange: (teamId, change, options) =>
+      ipcRenderer.invoke(ipcChannels.teams.restoreChange, teamId, change, options),
     onChanged: (listener) => subscribeTeamsChanged(listener),
     onInviteLink: (listener) => subscribeTeamInviteLink(listener),
   };

@@ -8,7 +8,7 @@
 import { useMemo, useState } from 'react';
 import type { HostRecord, SnippetDraft, SnippetRecord, VaultIndex } from '@shared';
 import { countHostsUsingSnippet, parseSnippetVariables } from '../lib/snippet';
-import { groupByVault, teamOfVault, vaultIdOf } from '../lib/vault-groups';
+import { groupByVault, isReadOnlyVault, teamOfVault, vaultIdOf } from '../lib/vault-groups';
 import { Badge, Button, EmptyState, Input } from '../ui';
 import { useTranslation } from 'react-i18next';
 import { SnippetEditDialog } from './SnippetEditDialog';
@@ -97,10 +97,12 @@ export function SnippetsPanel({
                 {translate('snippets.insert')}
               </Button>
             ) : null}
-            {/* 삭제는 편집 폼 안에 있다 — 이유는 SnippetEditDialog 의 onRemove 주석. */}
-            <Button variant="secondary" onClick={() => setEditing({ snippet })}>
-              {translate('snippets.edit')}
-            </Button>
+            {/* 삭제는 편집 폼 안에 있다 — 이유는 SnippetEditDialog 의 onRemove 주석. 읽기 전용 팀의 것은 넣기만 한다. */}
+            {isReadOnlyVault(vaultIndex, vaultIdOf(vaultIndex?.teamIdBySnippetId, snippet.id)) ? null : (
+              <Button variant="secondary" onClick={() => setEditing({ snippet })}>
+                {translate('snippets.edit')}
+              </Button>
+            )}
           </div>
         </div>
         <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-[10px] bg-[color-mix(in_srgb,var(--app-bg)_60%,transparent_40%)] px-[0.9rem] py-[0.55rem] font-mono text-[0.82rem] text-[var(--text)]">
@@ -148,7 +150,7 @@ export function SnippetsPanel({
                   team={section.team}
                   count={section.items.length}
                   addLabel={
-                    section.blocked
+                    section.blocked || section.readOnly
                       ? null
                       : translate('teams.vault.addTo', {
                           vault: section.team?.name ?? translate('sidebar.personalVault'),

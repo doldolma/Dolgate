@@ -145,6 +145,10 @@ export function overlayHostMemberPrefs(host: HostRecord, prefs: TeamMemberPrefs)
       agentForwarding: mine?.agentForwarding === true ? true : null,
     };
   }
+  if (host.kind === "rdp" && mine?.rdpCertificateFingerprint) {
+    // 읽기 전용일 때 내가 신뢰한 인증서다 — 팀 레코드에 쓰지 못해 내 칸에 있다.
+    return { ...host, favorite, terminalThemeId, certificateFingerprint: mine.rdpCertificateFingerprint };
+  }
   return { ...host, favorite, terminalThemeId };
 }
 

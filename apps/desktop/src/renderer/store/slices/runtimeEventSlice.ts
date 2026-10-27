@@ -486,6 +486,41 @@ function updateSessionContainerTunnels(
   return changed ? next : current;
 }
 
+/**
+ * 메인이 까닭과 함께 닫은 세션(팀에서 빠짐 — core-manager.closeHostConnections, RDP·VNC 의 closeHostSessions)의
+ * 탭. 끊김으로 남기고 까닭을 보인다 — 그냥 지우면 창이 이유도 없이 사라진다. 그 호스트는 곧 이 기기에서 사라지므로
+ * 되살리지 않고 다시 시도 단추도 없다.
+ */
+function keepTabClosedWithNotice(
+  state: AppState,
+  sessionId: string,
+  notice: string,
+): Partial<AppState> {
+  return {
+    tabs: state.tabs.map(
+      (tab): TerminalTab =>
+        tab.sessionId === sessionId
+          ? {
+              ...tab,
+              status: "error" as const,
+              errorMessage: notice,
+              errorFailure: null,
+              connectionProgress: resolveErrorProgress(notice, false),
+              lastEventAt: new Date().toISOString(),
+            }
+          : tab,
+    ),
+    pendingConnectionAttempts: state.pendingConnectionAttempts.filter(
+      (attempt) => attempt.sessionId !== sessionId,
+    ),
+  };
+}
+
+/** 닫힌 이벤트에 실린, 메인이 닫은 까닭. 없으면 빈 문자열. */
+function closedNoticeOf(payload: Record<string, unknown> | undefined): string {
+  return typeof payload?.closedNotice === "string" ? payload.closedNotice.trim() : "";
+}
+
 export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
   const { api, set, get } = deps;
   const services = createRuntimeEventServices(deps);
@@ -518,6 +553,8 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
         stableId: string;
         hostId: string;
       } | null;
+      // 메인이 까닭과 함께 닫은 탭 — 걸려 있던 재연결 예약을 거둔다.
+      let cancelFor: string | null = null as string | null;
 
       // 세션이 끝나면 hover 의 "연결 경과" 시각을 지운다. 자동 재연결이 같은
       // sessionId 를 재사용하므로, 안 지우면 재연결 후에도 옛 시각부터 센다.
@@ -584,6 +621,11 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
         }
 
         if (event.type === "closed") {
+          // 메인이 까닭과 함께 닫았다(팀에서 빠짐). 되살리지 않는다.
+          if (event.notice) {
+            cancelFor = tab.stableId;
+            return keepTabClosedWithNotice(state, event.sessionId, event.notice);
+          }
           // rdp-core 는 실패 시 error 다음에 항상 closed 를 보낸다. 무조건 지우면 방금
           // 띄운 에러가 스쳐 지나가 사용자가 이유를 못 본다. 에러 상태면 남겨 둔다
           // (재연결 예약도 그 error 에서 이미 판단했다).
@@ -619,6 +661,9 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
           meta: { hostId: scheduleFor.hostId },
         });
       }
+      if (cancelFor) {
+        cancelReconnect(cancelFor, "closed-notice");
+      }
     },
     /**
      * VNC 세션 이벤트. RDP 와 같은 이유로 SSH 기계를 타지 않는다.
@@ -635,6 +680,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
         stableId: string;
         hostId: string;
       } | null;
+      let cancelFor: string | null = null as string | null;
 
       if (event.type === "error" || event.type === "closed") {
         clearSessionCwd(event.sessionId);
@@ -718,6 +764,11 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
         }
 
         if (event.type === "closed") {
+          // 메인이 까닭과 함께 닫았다(팀에서 빠짐). 되살리지 않는다.
+          if (event.notice) {
+            cancelFor = tab.stableId;
+            return keepTabClosedWithNotice(state, event.sessionId, event.notice);
+          }
           // 실패 뒤에는 error 다음에 closed 가 온다. 무조건 지우면 방금 띄운 이유가 스쳐 지나간다.
           if (tab.status === "error") {
             return state;
@@ -744,6 +795,9 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
           key: scheduleFor.stableId,
           meta: { hostId: scheduleFor.hostId },
         });
+      }
+      if (cancelFor) {
+        cancelReconnect(cancelFor, "closed-notice");
       }
     },
     handleCoreEvent: (event) => {
@@ -1414,6 +1468,9 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
             event.type === "containersDisconnected" ||
             event.type === "containersError"
           ) {
+            // 메인이 까닭과 함께 닫았다(팀에서 빠짐) — 컨테이너 화면에 까닭을 보인다.
+            const containersClosedNotice =
+              event.type === "containersDisconnected" ? closedNoticeOf(event.payload) : "";
             set((state) => {
               const currentTab = findContainersTab(state, containerHostId);
               return {
@@ -1432,6 +1489,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                         event.type === "containersConnected"
                           ? currentTab.connectionProgress
                           : null,
+                      ...(containersClosedNotice ? { errorMessage: containersClosedNotice } : {}),
                     })
                   : state.containerTabs,
               };
@@ -1819,6 +1877,33 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
           // keepalive 없음). 연결돼 있던 pane(endpoint 존재) 또는 진행 중 재연결의
           // transient 에러면 백오프 재연결. 영구 오류는 제외.
           const sftpPaneId = resolveSftpPaneIdByEndpoint(get(), endpointId);
+          // 메인이 까닭과 함께 닫았다(팀에서 빠짐). 그 호스트는 곧 사라지므로 되살리지 않고, 창을 호스트 고르기로
+          // 돌려 까닭을 보인다 — 그대로 두면 끊긴 목록이 살아 있는 것처럼 남는다.
+          const sftpClosedNotice =
+            event.type === "sftpDisconnected" ? closedNoticeOf(event.payload) : "";
+          if (sftpClosedNotice) {
+            if (sftpPaneId) {
+              cancelReconnect(sftpPaneId, "closed-notice");
+            }
+            set((state) => {
+              const paneId = resolveSftpPaneIdByEndpoint(state, endpointId);
+              return {
+                pendingInteractiveAuths: clearEndpointPendingInteractiveAuth(
+                  state.pendingInteractiveAuths,
+                  endpointId,
+                ),
+                ...(paneId
+                  ? {
+                      sftp: updatePaneState(state, paneId, {
+                        ...buildSftpHostPickerPane(getPane(state, paneId)),
+                        errorMessage: sftpClosedNotice,
+                      }),
+                    }
+                  : {}),
+              };
+            });
+            return;
+          }
           const sftpPaneBefore = sftpPaneId ? getPane(get(), sftpPaneId) : null;
           const sftpActiveReconnect = sftpPaneId
             ? isReconnecting(sftpPaneId)
@@ -2065,6 +2150,27 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
               : state.tabs,
           };
         });
+        return;
+      }
+
+      // 메인이 까닭과 함께 닫은 세션(팀에서 빠짐). 그 호스트는 곧 사라지므로 되살리지 않는다 — 재연결 판정보다 먼저 본다.
+      const closedNotice =
+        event.type === "closed" ? closedNoticeOf(event.payload) : "";
+      if (closedNotice) {
+        forgetConnectAttemptSecrets(sessionId);
+        const noticeGroup = get().tmuxGroups.find(
+          (group) => group.controlSessionId === sessionId,
+        );
+        if (noticeGroup) {
+          cancelReconnect(noticeGroup.id, "closed-notice");
+          get().applyTmuxGroupReconnectGaveUp(noticeGroup.id, closedNotice, false);
+          return;
+        }
+        const noticeTab = get().tabs.find((tab) => tab.sessionId === sessionId);
+        if (noticeTab) {
+          cancelReconnect(noticeTab.stableId, "closed-notice");
+        }
+        set((state) => keepTabClosedWithNotice(state, sessionId, closedNotice));
         return;
       }
 

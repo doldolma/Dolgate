@@ -9,6 +9,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -325,6 +326,93 @@ describe("SessionReplayService", () => {
     );
 
     expect((await readRecording(service, recordingId)).entries).toHaveLength(50);
+  });
+
+  describe("recovering a recording the app never finished", () => {
+    function crashedRecording(recordingId: string, lastWrittenAt: string) {
+      const { replayDirectoryPath } = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+      mkdirSync(replayDirectoryPath, { recursive: true });
+      const lines = Array.from({ length: 50 }, (_, index) =>
+        JSON.stringify({ type: "output", atMs: index * 10, dataBase64: Buffer.from(`l${index}`).toString("base64") }),
+      ).join("\n");
+      // 메타 없이, 비운 지점에서 끝나고 마무리가 없는 녹화 파일만 — 앱이 죽은 자리와 같다.
+      const eventsPath = path.join(replayDirectoryPath, `${recordingId}.events.jsonl.gz`);
+      writeFileSync(eventsPath, gzipSync(`${lines}\n`, { finishFlush: zlibConstants.Z_SYNC_FLUSH }));
+      const at = new Date(lastWrittenAt);
+      utimesSync(eventsPath, at, at);
+      return path.join(replayDirectoryPath, `${recordingId}.meta.json`);
+    }
+
+    function createService() {
+      const service = activateService(
+        new SessionReplayService(
+          { get: () => ({ sessionReplayRetentionCount: 100 }) } as never,
+          { getSessionLifecycleState: vi.fn(() => createLifecycleState()), attachSessionRecording: vi.fn() } as never,
+        ),
+      );
+      service.setTeamOfHost((hostId) => (hostId === "team-host" ? "team-1" : null));
+      return service;
+    }
+
+    const RECORDING = {
+      recordingId: "crashed",
+      sessionId: "session-1",
+      hostId: "team-host",
+      hostLabel: "prod-web",
+      title: "prod-web",
+      connectionDetails: "10.0.0.5 · 22 · ops",
+      connectionKind: "ssh" as const,
+      connectedAt: "2026-03-29T00:00:00.000Z",
+    };
+
+    it("writes the meta from the row and the file, so the recording counts and plays again", async () => {
+      const service = createService();
+      const metaPath = crashedRecording("crashed", "2026-03-29T00:10:00.000Z");
+      expect(service.listExistingRecordingIds().has("crashed")).toBe(false);
+
+      expect(service.recoverInterruptedRecording(RECORDING)).toEqual({
+        disconnectedAt: "2026-03-29T00:10:00.000Z",
+        durationMs: 600_000,
+      });
+
+      expect(JSON.parse(readFileSync(metaPath, "utf8"))).toEqual({
+        ...RECORDING,
+        disconnectedAt: "2026-03-29T00:10:00.000Z",
+        durationMs: 600_000,
+        initialCols: 120,
+        initialRows: 32,
+        teamId: "team-1",
+      });
+      expect(service.listExistingRecordingIds().has("crashed")).toBe(true);
+      expect((await readRecording(service, "crashed")).entries).toHaveLength(50);
+      // 다시 불러도 같은 끝이다(메타를 읽는다).
+      expect(service.recoverInterruptedRecording(RECORDING)).toEqual({
+        disconnectedAt: "2026-03-29T00:10:00.000Z",
+        durationMs: 600_000,
+      });
+    });
+
+    it("leaves the team out of a personal host's meta", () => {
+      const service = createService();
+      const metaPath = crashedRecording("crashed", "2026-03-29T00:00:30.000Z");
+
+      service.recoverInterruptedRecording({ ...RECORDING, hostId: "my-host" });
+
+      expect(JSON.parse(readFileSync(metaPath, "utf8"))).not.toHaveProperty("teamId");
+    });
+
+    it("gives up without a recording file, and never touches one that is still recording", () => {
+      const service = createService();
+      expect(service.recoverInterruptedRecording(RECORDING)).toBeNull();
+
+      service.handleTerminalEvent({ type: "connected", sessionId: "session-1", payload: { status: "connected" } } as never);
+      const live = service.listExistingRecordingIds();
+      const [recordingId] = [...live];
+      expect(service.recoverInterruptedRecording({ ...RECORDING, recordingId })).toBeNull();
+      const { replayDirectoryPath } = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+      expect(existsSync(path.join(replayDirectoryPath, `${recordingId}.meta.json`))).toBe(false);
+      void service.shutdown();
+    });
   });
 
   it("records remote session output and resize events, then persists a replay on close", async () => {

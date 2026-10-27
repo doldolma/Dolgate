@@ -38,6 +38,7 @@ export function TailnetForm({
   onTest,
   onCancelTest,
   onCancel,
+  keyOnly = false,
 }: {
   draft: TailnetDraft;
   status?: TailnetStatus;
@@ -49,6 +50,8 @@ export function TailnetForm({
   onTest: () => void;
   onCancelTest: () => void;
   onCancel: () => void;
+  /** 내가 읽기 전용인 팀의 tailnet — 이름·서버는 팀 설정이라 잠그고 내 auth key 만 바꾼다(키는 기기마다다). */
+  keyOnly?: boolean;
 }) {
   const { t: translate } = useTranslation();
   // 저장된 것을 고치는 중이면 시험하지 않고 저장한다(이유는 TailnetDraft.saved). 그래서 시험 버튼과
@@ -83,6 +86,7 @@ export function TailnetForm({
           <Input
             value={draft.label}
             placeholder={translate('tailnetSettings.field.labelPlaceholder')}
+            disabled={keyOnly}
             onChange={(event) => onChange({ ...draft, label: event.target.value })}
           />
         </FieldGroup>
@@ -91,6 +95,7 @@ export function TailnetForm({
           <Input
             value={draft.controlUrl}
             placeholder={translate('tailnetSettings.field.controlUrlPlaceholder')}
+            disabled={keyOnly}
             onChange={(event) => onChange({ ...draft, controlUrl: event.target.value })}
           />
         </FieldGroup>

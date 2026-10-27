@@ -29,7 +29,7 @@ import {
 } from '../SnippetVariablesDialog';
 import { SnippetEditDialog } from '../../SnippetEditDialog';
 import { useSessionScopedState } from '../../../lib/session-scoped-state';
-import { teamOfVault, vaultIdOf } from '../../../lib/vault-groups';
+import { isReadOnlyVault, teamOfVault, vaultIdOf } from '../../../lib/vault-groups';
 import { VaultMark } from '../../teams/VaultMark';
 import { useSessionSnippets } from '../useSessionSnippets';
 import type { SessionPanelSender } from './useSessionPanelTarget';
@@ -173,7 +173,12 @@ export function SessionPanelSnippets({ sessionId, sender }: SessionPanelSnippets
                 onCopy={() => sender.copy(snippet.command)}
                 onInsert={() => start(snippet.command, 'insert')}
                 onRun={() => start(snippet.command, 'run')}
-                onEdit={() => setEditing({ snippet })}
+                // 읽기 전용 팀의 스니펫은 넣고 돌리기만 한다(새 스니펫은 개인에 만든다).
+                onEdit={
+                  isReadOnlyVault(vaultIndex, vaultIdOf(vaultIndex?.teamIdBySnippetId, snippet.id))
+                    ? undefined
+                    : () => setEditing({ snippet })
+                }
               />
             );
           })

@@ -1027,6 +1027,9 @@ const stateStorage = {
   upsertActivityLog: (
     record: Parameters<ReturnType<typeof getDesktopStateStorage>["upsertActivityLog"]>[0]
   ) => getDesktopStateStorage().upsertActivityLog(record),
+  upsertActivityLogs: (
+    records: Parameters<ReturnType<typeof getDesktopStateStorage>["upsertActivityLogs"]>[0]
+  ) => getDesktopStateStorage().upsertActivityLogs(records),
   listActivityLogs: () => getDesktopStateStorage().listActivityLogs(),
   clearActivityLogs: () => getDesktopStateStorage().clearActivityLogs(),
   reconcileReplayFlags: (existingRecordingIds: ReadonlySet<string>) =>
@@ -1056,7 +1059,7 @@ export class HostRepository {
     const timestamp = nowIso();
     const record = toHostRecord(id, draft, secretRef ?? null, timestamp);
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts.push(record);
+      this.root.edit(state).hosts.push(record);
     });
     return record;
   }
@@ -1069,7 +1072,7 @@ export class HostRepository {
 
     const record = toHostRecord(id, draft, secretRef ?? null, nowIso(), current);
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => (entry.id === id ? record : entry));
+      this.root.edit(state).hosts = this.root.edit(state).hosts.map((entry) => (entry.id === id ? record : entry));
     });
     return record;
   }
@@ -1083,7 +1086,7 @@ export class HostRepository {
   setDetectedOs(id: string, detectedOs: HostDetectedOs | null): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
+      this.root.edit(state).hosts = this.root.edit(state).hosts.map((entry) => {
         if (entry.id !== id) {
           return entry;
         }
@@ -1101,7 +1104,7 @@ export class HostRepository {
   setTerminalTheme(id: string, terminalThemeId: TerminalThemeId | null): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
+      this.root.edit(state).hosts = this.root.edit(state).hosts.map((entry) => {
         if (entry.id !== id) {
           return entry;
         }
@@ -1122,7 +1125,7 @@ export class HostRepository {
     }
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
+      this.root.edit(state).hosts = this.root.edit(state).hosts.map((entry) => {
         if (entry.id !== id || entry.kind !== 'ssh') {
           return entry;
         }
@@ -1136,7 +1139,7 @@ export class HostRepository {
   setFavorite(id: string, favorite: boolean): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
+      this.root.edit(state).hosts = this.root.edit(state).hosts.map((entry) => {
         if (entry.id !== id) {
           return entry;
         }
@@ -1156,7 +1159,7 @@ export class HostRepository {
   updateRdpCertificateFingerprint(id: string, fingerprint: string | null): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
+      this.root.edit(state).hosts = this.root.edit(state).hosts.map((entry) => {
         if (entry.id !== id || entry.kind !== 'rdp') {
           return entry;
         }
@@ -1181,7 +1184,7 @@ export class HostRepository {
   fillRdpAwsSsmProfileId(id: string, profileId: string): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
+      this.root.edit(state).hosts = this.root.edit(state).hosts.map((entry) => {
         if (entry.id !== id || entry.kind !== 'rdp' || !entry.awsSsm) {
           return entry;
         }
@@ -1201,7 +1204,7 @@ export class HostRepository {
   updateSecretRef(id: string, secretRef: string | null): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
+      this.root.edit(state).hosts = this.root.edit(state).hosts.map((entry) => {
         if (entry.id !== id || !isSshHostRecord(entry)) {
           return entry;
         }
@@ -1227,7 +1230,7 @@ export class HostRepository {
   ): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
+      this.root.edit(state).hosts = this.root.edit(state).hosts.map((entry) => {
         if (entry.id !== id || !isSshHostRecord(entry)) {
           return entry;
         }
@@ -1256,7 +1259,7 @@ export class HostRepository {
     const cleared = new Set(secretRefs);
     const timestamp = nowIso();
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
+      this.root.edit(state).hosts = this.root.edit(state).hosts.map((entry) => {
         if (!isSshHostRecord(entry) || !entry.secretRef || !cleared.has(entry.secretRef)) {
           return entry;
         }
@@ -1275,7 +1278,7 @@ export class HostRepository {
     const updated: HostRecord[] = [];
     const timestamp = nowIso();
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
+      this.root.edit(state).hosts = this.root.edit(state).hosts.map((entry) => {
         if (
           (entry.kind !== 'ssh' && entry.kind !== 'aws-ec2' && entry.kind !== 'warpgate-ssh') ||
           entry.startupCommand?.type !== 'snippet' ||
@@ -1299,7 +1302,7 @@ export class HostRepository {
   removeMany(ids: readonly string[]): void {
     const removed = new Set(ids);
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts = this.root.data(state).hosts
+      this.root.edit(state).hosts = this.root.edit(state).hosts
         .filter((entry) => !removed.has(entry.id))
         // Drop dangling jump-host references so a removed bastion doesn't leave
         // other hosts pointing at a host that no longer exists.
@@ -1329,7 +1332,7 @@ export class HostRepository {
 
   replaceAll(records: HostRecord[]): void {
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts = records.map(normalizeIncomingHostRecord);
+      this.root.edit(state).hosts = records.map(normalizeIncomingHostRecord);
     });
   }
 
@@ -1337,7 +1340,7 @@ export class HostRepository {
     const updatedHosts: HostRecord[] = [];
     const timestamp = nowIso();
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
+      this.root.edit(state).hosts = this.root.edit(state).hosts.map((entry) => {
         if (
           (entry.kind !== 'aws-ec2' && entry.kind !== 'aws-ecs') ||
           entry.awsProfileId !== profileId ||
@@ -1365,7 +1368,7 @@ export class HostRepository {
     const timestamp = nowIso();
 
     stateStorage.updateState((state) => {
-      this.root.data(state).hosts = this.root.data(state).hosts.map((entry) => {
+      this.root.edit(state).hosts = this.root.edit(state).hosts.map((entry) => {
         if (entry.kind !== 'aws-ec2' && entry.kind !== 'aws-ecs') {
           return entry;
         }
@@ -1438,7 +1441,7 @@ export class GroupRepository {
     });
 
     stateStorage.updateState((state) => {
-      this.root.data(state).groups.push(created);
+      this.root.edit(state).groups.push(created);
     });
     return created;
   }
@@ -1476,18 +1479,18 @@ export class GroupRepository {
     let nextPath = '';
     const timestamp = nowIso();
     const nextState = stateStorage.updateState((state) => {
-      const result = mutate(this.root.data(state).groups, this.root.data(state).hosts, {
+      const result = mutate(this.root.edit(state).groups, this.root.edit(state).hosts, {
         timestamp,
         normalizeHost: normalizeIncomingHostRecord,
         // 이름 변경·이동도 Workspace 만 남은 경로에서 거부됐다(삭제와 같은 원인).
         pathAlsoOccupied: hasSavedWorkspaceWithinGroup(
-          this.root.data(state).savedWorkspaces,
+          this.root.edit(state).savedWorkspaces,
           normalizeGroupPath(targetPath)
         )
       });
-      this.root.data(state).groups = result.groups;
-      this.root.data(state).hosts = result.hosts;
-      this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.map((workspace) => {
+      this.root.edit(state).groups = result.groups;
+      this.root.edit(state).hosts = result.hosts;
+      this.root.edit(state).savedWorkspaces = this.root.edit(state).savedWorkspaces.map((workspace) => {
         const groupName = rebaseGroupPath(
           normalizeGroupPath(workspace.groupName),
           targetPath,
@@ -1522,19 +1525,19 @@ export class GroupRepository {
     const normalizedTargetPath = normalizeGroupPath(targetPath);
     const timestamp = nowIso();
     const nextState = stateStorage.updateState((state) => {
-      const result = removeGroupFrom(this.root.data(state).groups, this.root.data(state).hosts, targetPath, mode, {
+      const result = removeGroupFrom(this.root.edit(state).groups, this.root.edit(state).hosts, targetPath, mode, {
         timestamp,
         normalizeHost: normalizeIncomingHostRecord,
         // 저장된 Workspace 만 남은 경로도 점유된 것으로 알려 준다(pathAlsoOccupied 주석 참고).
         pathAlsoOccupied: hasSavedWorkspaceWithinGroup(
-          this.root.data(state).savedWorkspaces,
+          this.root.edit(state).savedWorkspaces,
           normalizedTargetPath
         )
       });
-      this.root.data(state).groups = result.groups;
-      this.root.data(state).hosts = result.hosts;
+      this.root.edit(state).groups = result.groups;
+      this.root.edit(state).hosts = result.hosts;
       if (normalizedTargetPath && mode === 'delete-subtree') {
-        const removed = this.root.data(state).savedWorkspaces.filter((workspace) =>
+        const removed = this.root.edit(state).savedWorkspaces.filter((workspace) =>
           isGroupWithinPath(
             normalizeGroupPath(workspace.groupName),
             normalizedTargetPath,
@@ -1542,11 +1545,11 @@ export class GroupRepository {
         );
         removedWorkspaceIds = removed.map((workspace) => workspace.id);
         const removedWorkspaceIdSet = new Set(removedWorkspaceIds);
-        this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.filter(
+        this.root.edit(state).savedWorkspaces = this.root.edit(state).savedWorkspaces.filter(
           (workspace) => !removedWorkspaceIdSet.has(workspace.id),
         );
       } else if (normalizedTargetPath) {
-        this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.map((workspace) => {
+        this.root.edit(state).savedWorkspaces = this.root.edit(state).savedWorkspaces.map((workspace) => {
           const currentGroupName = normalizeGroupPath(workspace.groupName);
           const groupName = stripRemovedGroupSegment(
             currentGroupName,
@@ -1584,7 +1587,7 @@ export class GroupRepository {
     const rankById = new Map(assignments.map((entry) => [entry.id, entry.sortRank]));
     const timestamp = nowIso();
     const nextState = stateStorage.updateState((state) => {
-      this.root.data(state).groups = this.root.data(state).groups.map((record) => {
+      this.root.edit(state).groups = this.root.edit(state).groups.map((record) => {
         const nextRank = rankById.get(record.id);
         if (nextRank === undefined || record.sortRank === nextRank) {
           return record;
@@ -1597,7 +1600,7 @@ export class GroupRepository {
 
   replaceAll(records: GroupRecord[]): void {
     stateStorage.updateState((state) => {
-      this.root.data(state).groups = records.map((record) => ({
+      this.root.edit(state).groups = records.map((record) => ({
         ...record,
         parentPath: normalizeGroupPath(record.parentPath)
       }));
@@ -1631,7 +1634,7 @@ export class TailnetRepository {
       }
 
       const hasAuthKey = Boolean(this.root.secure(state).tailnetAuthKeysById[record.id]);
-      const existing = this.root.data(state).tailnets.find((item) => item.id === record.id);
+      const existing = this.root.edit(state).tailnets.find((item) => item.id === record.id);
       const next: TailnetRecord = {
         ...record,
         hasAuthKey,
@@ -1649,23 +1652,37 @@ export class TailnetRepository {
         updatedAt: now,
       };
 
-      this.root.data(state).tailnets = existing
-        ? this.root.data(state).tailnets.map((item) => (item.id === record.id ? next : item))
-        : [...this.root.data(state).tailnets, next];
+      this.root.edit(state).tailnets = existing
+        ? this.root.edit(state).tailnets.map((item) => (item.id === record.id ? next : item))
+        : [...this.root.edit(state).tailnets, next];
     });
 
     return this.list().find((item) => item.id === record.id) ?? record;
   }
 
+  /**
+   * 이 기기의 auth key 만 바꾼다(빈 값이면 지운다) — 레코드는 그대로다. 키는 동기화하지 않는 이 기기의 것이라, 팀
+   * 레코드를 못 쓰는 읽기 전용 멤버도 자기 키를 넣는다. 레코드에 hasAuthKey 를 적는 개인 볼트는 save 를 쓴다.
+   */
+  setAuthKey(id: string, authKey: string): void {
+    stateStorage.updateState((state) => {
+      if (authKey.length > 0) {
+        this.root.secure(state).tailnetAuthKeysById[id] = encodeSecretForStorage(authKey);
+      } else {
+        delete this.root.secure(state).tailnetAuthKeysById[id];
+      }
+    });
+  }
+
   remove(id: string): void {
     const timestamp = nowIso();
     stateStorage.updateState((state) => {
-      this.root.data(state).tailnets = this.root.data(state).tailnets.filter((item) => item.id !== id);
+      this.root.edit(state).tailnets = this.root.edit(state).tailnets.filter((item) => item.id !== id);
       delete this.root.secure(state).tailnetAuthKeysById[id];
       // Tailnet 설정과 호스트의 경유 설정은 하나의 관계다. 설정만 지우면 호스트가 존재하지
       // 않는 id 를 계속 가리켜 연결할 수 없으므로, 같은 저장 트랜잭션에서 일반 네트워크로
       // 되돌린다. updatedAt 도 움직여야 이 변경이 다른 기기로 동기화된다.
-      this.root.data(state).hosts = this.root.data(state).hosts.map((host) => {
+      this.root.edit(state).hosts = this.root.edit(state).hosts.map((host) => {
         // SSH·RDP·VNC 가 같은 필드를 쓴다. 하나라도 빠뜨리면 그 종류만 없는 tailnet 을 가리킨 채
         // 남아 연결할 수 없다 — VNC 가 실제로 그렇게 빠져 있었다.
         if (
@@ -1705,7 +1722,7 @@ export class TailnetRepository {
   replaceAll(payloads: TailnetPayload[]): void {
     stateStorage.updateState((state) => {
       const keys: Record<string, StoredEncryptedValue> = {};
-      this.root.data(state).tailnets = payloads.map((payload) => {
+      this.root.edit(state).tailnets = payloads.map((payload) => {
         const record = normalizeTailnetPayloadForStorage(payload);
         const { authKey } = payload;
         if (authKey) {
@@ -2190,7 +2207,7 @@ export class PortForwardRepository {
     const timestamp = nowIso();
     const record = this.toRecord(randomUUID(), draft, timestamp, timestamp);
     stateStorage.updateState((state) => {
-      this.root.data(state).portForwards.push(record);
+      this.root.edit(state).portForwards.push(record);
     });
     return record;
   }
@@ -2204,20 +2221,20 @@ export class PortForwardRepository {
     const record = this.toRecord(id, draft, current.createdAt, nowIso());
 
     stateStorage.updateState((state) => {
-      this.root.data(state).portForwards = this.root.data(state).portForwards.map((entry) => (entry.id === id ? record : entry));
+      this.root.edit(state).portForwards = this.root.edit(state).portForwards.map((entry) => (entry.id === id ? record : entry));
     });
     return record;
   }
 
   remove(id: string): void {
     stateStorage.updateState((state) => {
-      this.root.data(state).portForwards = this.root.data(state).portForwards.filter((entry) => entry.id !== id);
+      this.root.edit(state).portForwards = this.root.edit(state).portForwards.filter((entry) => entry.id !== id);
     });
   }
 
   replaceAll(records: PortForwardRuleRecord[]): void {
     stateStorage.updateState((state) => {
-      this.root.data(state).portForwards = records.map((record) => ({ ...record }));
+      this.root.edit(state).portForwards = records.map((record) => ({ ...record }));
     });
   }
 
@@ -2302,7 +2319,7 @@ export class DnsOverrideRepository {
     const timestamp = nowIso();
     const record = this.toRecord(randomUUID(), draft, timestamp, timestamp, portForwards);
     stateStorage.updateState((state) => {
-      this.root.data(state).dnsOverrides.push(record);
+      this.root.edit(state).dnsOverrides.push(record);
     });
     return record;
   }
@@ -2315,20 +2332,20 @@ export class DnsOverrideRepository {
 
     const record = this.toRecord(id, draft, current.createdAt, nowIso(), portForwards);
     stateStorage.updateState((state) => {
-      this.root.data(state).dnsOverrides = this.root.data(state).dnsOverrides.map((entry) => (entry.id === id ? record : entry));
+      this.root.edit(state).dnsOverrides = this.root.edit(state).dnsOverrides.map((entry) => (entry.id === id ? record : entry));
     });
     return record;
   }
 
   remove(id: string): void {
     stateStorage.updateState((state) => {
-      this.root.data(state).dnsOverrides = this.root.data(state).dnsOverrides.filter((entry) => entry.id !== id);
+      this.root.edit(state).dnsOverrides = this.root.edit(state).dnsOverrides.filter((entry) => entry.id !== id);
     });
   }
 
   replaceAll(records: DnsOverrideRecord[]): void {
     stateStorage.updateState((state) => {
-      this.root.data(state).dnsOverrides = records
+      this.root.edit(state).dnsOverrides = records
         .map(normalizeIncomingDnsOverrideRecord)
         .filter((record): record is DnsOverrideRecord => record !== null)
         .sort(compareDnsOverrides);
@@ -2442,7 +2459,7 @@ export class SnippetRepository {
     const timestamp = nowIso();
     const record = toSnippetRecord(randomUUID(), draft, timestamp, timestamp);
     stateStorage.updateState((state) => {
-      this.root.data(state).snippets.push(record);
+      this.root.edit(state).snippets.push(record);
     });
     return record;
   }
@@ -2454,20 +2471,20 @@ export class SnippetRepository {
     }
     const record = toSnippetRecord(id, draft, current.createdAt, nowIso());
     stateStorage.updateState((state) => {
-      this.root.data(state).snippets = this.root.data(state).snippets.map((entry) => (entry.id === id ? record : entry));
+      this.root.edit(state).snippets = this.root.edit(state).snippets.map((entry) => (entry.id === id ? record : entry));
     });
     return record;
   }
 
   remove(id: string): void {
     stateStorage.updateState((state) => {
-      this.root.data(state).snippets = this.root.data(state).snippets.filter((entry) => entry.id !== id);
+      this.root.edit(state).snippets = this.root.edit(state).snippets.filter((entry) => entry.id !== id);
     });
   }
 
   replaceAll(records: SnippetRecord[]): void {
     stateStorage.updateState((state) => {
-      this.root.data(state).snippets = records.map(normalizeIncomingSnippetRecord).sort(compareSnippets);
+      this.root.edit(state).snippets = records.map(normalizeIncomingSnippetRecord).sort(compareSnippets);
     });
   }
 }
@@ -2511,7 +2528,7 @@ export class SavedWorkspaceRepository {
       throw new Error('Invalid saved workspace');
     }
     stateStorage.updateState((state) => {
-      this.root.data(state).savedWorkspaces.push(record);
+      this.root.edit(state).savedWorkspaces.push(record);
     });
     return record;
   }
@@ -2531,7 +2548,7 @@ export class SavedWorkspaceRepository {
       updatedAt: nowIso(),
     };
     stateStorage.updateState((state) => {
-      this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.map((entry) =>
+      this.root.edit(state).savedWorkspaces = this.root.edit(state).savedWorkspaces.map((entry) =>
         entry.id === id ? record : entry,
       );
     });
@@ -2549,7 +2566,7 @@ export class SavedWorkspaceRepository {
       updatedAt: nowIso(),
     };
     stateStorage.updateState((state) => {
-      this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.map((entry) =>
+      this.root.edit(state).savedWorkspaces = this.root.edit(state).savedWorkspaces.map((entry) =>
         entry.id === id ? record : entry,
       );
     });
@@ -2567,7 +2584,7 @@ export class SavedWorkspaceRepository {
       updatedAt: nowIso(),
     };
     stateStorage.updateState((state) => {
-      this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.map((entry) =>
+      this.root.edit(state).savedWorkspaces = this.root.edit(state).savedWorkspaces.map((entry) =>
         entry.id === id ? record : entry,
       );
     });
@@ -2586,7 +2603,7 @@ export class SavedWorkspaceRepository {
       // 기기별 사용 기록은 Workspace 내용의 LWW 수정 시각을 올리지 않는다.
     };
     stateStorage.updateState((state) => {
-      this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.map((entry) =>
+      this.root.edit(state).savedWorkspaces = this.root.edit(state).savedWorkspaces.map((entry) =>
         entry.id === id ? record : entry,
       );
     });
@@ -2595,13 +2612,13 @@ export class SavedWorkspaceRepository {
 
   remove(id: string): void {
     stateStorage.updateState((state) => {
-      this.root.data(state).savedWorkspaces = this.root.data(state).savedWorkspaces.filter((entry) => entry.id !== id);
+      this.root.edit(state).savedWorkspaces = this.root.edit(state).savedWorkspaces.filter((entry) => entry.id !== id);
     });
   }
 
   replaceAll(records: SavedWorkspaceRecord[]): void {
     stateStorage.updateState((state) => {
-      this.root.data(state).savedWorkspaces = records
+      this.root.edit(state).savedWorkspaces = records
         .map(normalizeSavedWorkspaceRecord)
         .filter((entry): entry is SavedWorkspaceRecord => entry !== null)
         .sort(compareSavedWorkspaces);
@@ -2615,7 +2632,7 @@ export class SavedWorkspaceRepository {
  * 이 비교가 곧 보안 경계다. 느슨하게 맞추면 tailnet 안에서 신뢰한 키가 일반 네트워크의
  * 같은 이름 호스트에도 적용되고, 그 반대도 된다.
  */
-function normalizeTailnetScope(tailnetId?: string | null): string {
+export function normalizeTailnetScope(tailnetId?: string | null): string {
   return (tailnetId ?? '').trim();
 }
 
@@ -2699,10 +2716,10 @@ export class KnownHostRepository {
 
     stateStorage.updateState((state) => {
       if (current) {
-        this.root.data(state).knownHosts = this.root.data(state).knownHosts.map((entry) => (entry.id === current.id ? record : entry));
+        this.root.edit(state).knownHosts = this.root.edit(state).knownHosts.map((entry) => (entry.id === current.id ? record : entry));
         return;
       }
-      this.root.data(state).knownHosts.push(record);
+      this.root.edit(state).knownHosts.push(record);
     });
     return record;
   }
@@ -2711,7 +2728,7 @@ export class KnownHostRepository {
     const timestamp = nowIso();
     const scope = normalizeTailnetScope(tailnetId);
     stateStorage.updateState((state) => {
-      this.root.data(state).knownHosts = this.root.data(state).knownHosts.map((entry) => {
+      this.root.edit(state).knownHosts = this.root.edit(state).knownHosts.map((entry) => {
         if (
           normalizeTailnetScope(entry.tailnetId) !== scope ||
           entry.host !== host ||
@@ -2731,13 +2748,13 @@ export class KnownHostRepository {
 
   remove(id: string): void {
     stateStorage.updateState((state) => {
-      this.root.data(state).knownHosts = this.root.data(state).knownHosts.filter((entry) => entry.id !== id);
+      this.root.edit(state).knownHosts = this.root.edit(state).knownHosts.filter((entry) => entry.id !== id);
     });
   }
 
   replaceAll(records: KnownHostRecord[]): void {
     stateStorage.updateState((state) => {
-      this.root.data(state).knownHosts = records.map((record) => ({ ...record }));
+      this.root.edit(state).knownHosts = records.map((record) => ({ ...record }));
     });
   }
 }
@@ -2804,6 +2821,11 @@ export class ActivityLogRepository {
     return this.notifyObserver(stateStorage.upsertActivityLog(record));
   }
 
+  /** 여러 줄을 한 번에 고쳐 쓴다(기록 파일은 한 번만 쓴다). */
+  upsertMany(records: readonly ActivityLogRecord[]): ActivityLogRecord[] {
+    return stateStorage.upsertActivityLogs(records).map((record) => this.notifyObserver(record));
+  }
+
   clear(): void {
     stateStorage.clearActivityLogs();
   }
@@ -2858,15 +2880,15 @@ export class SecretMetadataRepository {
         updatedAt: timestamp
       };
 
-      const currentIndex = this.root.data(state).secretMetadata.findIndex((record) => record.secretRef === input.secretRef);
+      const currentIndex = this.root.edit(state).secretMetadata.findIndex((record) => record.secretRef === input.secretRef);
       if (currentIndex >= 0) {
-        this.root.data(state).secretMetadata[currentIndex] = {
-          ...this.root.data(state).secretMetadata[currentIndex],
+        this.root.edit(state).secretMetadata[currentIndex] = {
+          ...this.root.edit(state).secretMetadata[currentIndex],
           ...nextRecord
         };
         return;
       }
-      this.root.data(state).secretMetadata.push(nextRecord);
+      this.root.edit(state).secretMetadata.push(nextRecord);
     });
   }
 
@@ -2878,7 +2900,7 @@ export class SecretMetadataRepository {
   removeMany(secretRefs: readonly string[]): void {
     const removed = new Set(secretRefs);
     stateStorage.updateState((state) => {
-      this.root.data(state).secretMetadata = this.root.data(state).secretMetadata.filter((record) => !removed.has(record.secretRef));
+      this.root.edit(state).secretMetadata = this.root.edit(state).secretMetadata.filter((record) => !removed.has(record.secretRef));
     });
   }
 
@@ -2899,7 +2921,7 @@ export class SecretMetadataRepository {
         ...record,
         linkedHostCount: 0
       }));
-      this.root.data(state).secretMetadata = nextRecords;
+      this.root.edit(state).secretMetadata = nextRecords;
     });
   }
 }
@@ -2970,11 +2992,11 @@ export class AwsProfileRepository {
     const nextMetadata = this.toMetadata(nextPayload);
 
     stateStorage.updateState((state) => {
-      const currentIndex = this.root.data(state).awsProfiles.findIndex((record) => record.id === nextMetadata.id);
+      const currentIndex = this.root.edit(state).awsProfiles.findIndex((record) => record.id === nextMetadata.id);
       if (currentIndex >= 0) {
-        this.root.data(state).awsProfiles[currentIndex] = nextMetadata;
+        this.root.edit(state).awsProfiles[currentIndex] = nextMetadata;
       } else {
-        this.root.data(state).awsProfiles.push(nextMetadata);
+        this.root.edit(state).awsProfiles.push(nextMetadata);
       }
     });
     stateStorage.writeManagedAwsProfileValue(
@@ -2987,7 +3009,7 @@ export class AwsProfileRepository {
 
   remove(id: string): void {
     stateStorage.updateState((state) => {
-      this.root.data(state).awsProfiles = this.root.data(state).awsProfiles.filter((record) => record.id !== id);
+      this.root.edit(state).awsProfiles = this.root.edit(state).awsProfiles.filter((record) => record.id !== id);
     });
     stateStorage.deleteManagedAwsProfileValue(id, this.root.teamId);
   }
@@ -3001,7 +3023,7 @@ export class AwsProfileRepository {
     const nextIds = new Set(nextMetadata.map((record) => record.id));
 
     stateStorage.updateState((state) => {
-      this.root.data(state).awsProfiles = nextMetadata;
+      this.root.edit(state).awsProfiles = nextMetadata;
       for (const profileId of Object.keys(this.root.secure(state).managedAwsProfilesById)) {
         if (!nextIds.has(profileId)) {
           delete this.root.secure(state).managedAwsProfilesById[profileId];

@@ -1,18 +1,26 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
 import { vi } from "vitest";
 import {
+  canChangeTeamRole,
+  canEditTeamVault,
+  canManageTeam,
+  canRemoveTeamMember,
   createTeamDek,
   hashTeamInviteJoinToken,
   wrapTeamDek,
   type HostRecord,
   type SyncWatchLoopOptions,
+  type TeamAssignableRole,
+  type TeamInviteRole,
+  type TeamRole,
 } from "@shared";
 
 /*
  * 시험용: 팀 API 를 흉내 내는 가짜 서버와, 그것에 붙인 팀 동기화·팀 관리 묶음.
  *
  * 서버는 services/sync-api 의 팀 경로와 같은 모양으로 답한다 — 레코드는 나중에 쓴 쪽이 이기고, ETag 는
- * 리비전이며, 멤버가 아니면 404 다. 사용자는 `userId` 를 바꿔 갈아 끼운다(같은 서버의 다른 계정).
+ * 리비전이며, 멤버가 아니면 404 다. 역할 규칙(읽기 전용 올리기 거절, 관리자 이상의 초대·빼기·역할 바꾸기·이전
+ * 판)도 서버와 같다. 사용자는 `userId` 를 바꿔 갈아 끼운다(같은 서버의 다른 계정).
  *
  * electron 목과 임시 폴더는 시험 파일이 세운다(vi.mock 은 시험 파일에서만 끌어올려진다).
  */
@@ -72,7 +80,7 @@ type Row = { id: string; encrypted_payload: string; updated_at: string; deleted_
 type Rows = Map<string, Map<string, Row>>;
 
 export interface FakeMember {
-  role: "owner" | "member";
+  role: TeamRole;
   wrapped: string;
   addedAt: string;
   privateRevision: number;
@@ -86,6 +94,24 @@ export interface FakeTeam {
   infoRevision: number;
   records: Rows;
   members: Map<string, FakeMember>;
+  /** 레코드마다 지금 판을 쓴 사람(`종류:id`). */
+  updatedBy: Map<string, string>;
+  /** 덮어쓰이거나 지워진 판(내용이 있던 것만) — 서버의 team_record_history. */
+  versions: FakeVersion[];
+}
+
+export interface FakeVersion {
+  seq: number;
+  kind: string;
+  recordId: string;
+  encryptedPayload: string;
+  updatedAt: string;
+  deletedAt?: string;
+  updatedBy: string;
+  changedBy: string;
+  changedAt: string;
+  /** 밀어낸 올리기가 지운 것인지. */
+  deleted: boolean;
 }
 
 interface FakeInvite {
@@ -97,6 +123,7 @@ interface FakeInvite {
   tokenHash: string;
   expiresAt: string;
   createdBy: string;
+  role: TeamInviteRole;
   revokedAt: string | null;
   useCount: number;
 }
@@ -116,7 +143,11 @@ function noContent(): Response {
   return new Response(null, { status: 204 });
 }
 
-function upsert(rows: Rows, payload: Record<string, Row[]>): number {
+function upsert(
+  rows: Rows,
+  payload: Record<string, Row[]>,
+  onReplace?: (kind: string, current: Row, next: Row) => void,
+): number {
   let written = 0;
   for (const [kind, records] of Object.entries(payload)) {
     const byId = rows.get(kind) ?? new Map<string, Row>();
@@ -134,6 +165,9 @@ function upsert(rows: Rows, payload: Record<string, Row[]>): number {
       ) {
         continue;
       }
+      if (current) {
+        onReplace?.(kind, current, record);
+      }
       byId.set(record.id, { ...record });
       written += 1;
     }
@@ -146,6 +180,11 @@ function snapshot(rows: Rows): Record<string, Row[]> {
 }
 
 const OWNER_ONLY = { error: "팀 소유자만 할 수 있습니다.", code: "team_owner_only" };
+const ADMIN_ONLY = { error: "팀 관리자만 할 수 있습니다.", code: "team_admin_only" };
+const READ_ONLY = { error: "읽기 전용 멤버는 팀 데이터를 바꿀 수 없습니다.", code: "team_read_only" };
+const ROLE_INVALID = { error: "줄 수 없는 역할입니다.", code: "team_role_invalid" };
+const MEMBER_NOT_FOUND = { error: "이 팀의 멤버가 아닙니다.", code: "team_member_not_found" };
+const MUST_TRANSFER = { error: "소유권을 먼저 넘기세요.", code: "team_owner_must_transfer" };
 
 export class FakeTeamServer {
   readonly teams = new Map<string, FakeTeam>();
@@ -156,15 +195,27 @@ export class FakeTeamServer {
   beforeRecordsResponse: (() => void) | null = null;
   /** 내 개인 칸을 200 으로 답하기 직전에 한 번 부른다(위와 같은 쓰임). */
   beforePrivateResponse: (() => void) | null = null;
+  /** 링크로 들어오기를 처리하기 직전에 한 번 부른다 — 참여 카드와 참여 사이에 바뀐 것을 끼워 넣는다. */
+  beforeJoin: (() => void) | null = null;
   failNextKeyUpload = false;
   failNextList = false;
   /** 이 팀들의 데이터 경로는 "앱을 업데이트하세요"(426)로 답한다 — 팀 데이터 수준을 못 따라오는 앱. */
   readonly outdatedTeams = new Set<string>();
   /** 개인 칸 올리기를 볼트 세대 거절(409)로 답한다 — 다른 기기가 볼트를 초기화한 뒤의 옛 DEK. */
   rejectPrivateEpoch = false;
+  private lastChangedAtMs = 0;
 
   addTeam(id: string, name: string, wrapped: string | null): FakeTeam {
-    const team: FakeTeam = { id, name, revision: 0, infoRevision: 1, records: new Map(), members: new Map() };
+    const team: FakeTeam = {
+      id,
+      name,
+      revision: 0,
+      infoRevision: 1,
+      records: new Map(),
+      members: new Map(),
+      updatedBy: new Map(),
+      versions: [],
+    };
     if (wrapped !== null) {
       team.members.set(this.userId, this.newMember("owner", wrapped));
     }
@@ -172,24 +223,80 @@ export class FakeTeamServer {
     return team;
   }
 
-  newMember(role: "owner" | "member", wrapped = ""): FakeMember {
+  newMember(role: TeamRole, wrapped = ""): FakeMember {
     return { role, wrapped, addedAt: T0, privateRevision: 0, private: new Map() };
   }
 
   /** 다른 멤버(또는 내 다른 기기)가 올린 것처럼 레코드를 둔다. */
-  putRecord(teamId: string, kind: string, id: string, value: unknown, keyBase64: string, updatedAt = T0): void {
-    const team = this.teams.get(teamId)!;
-    if (upsert(team.records, { [kind]: [{ id, encrypted_payload: seal(value, keyBase64), updated_at: updatedAt }] }) > 0) {
-      team.revision += 1;
+  putRecord(
+    teamId: string,
+    kind: string,
+    id: string,
+    value: unknown,
+    keyBase64: string,
+    updatedAt = T0,
+    by = this.userId,
+  ): void {
+    this.pushRows(this.teams.get(teamId)!, { [kind]: [{ id, encrypted_payload: seal(value, keyBase64), updated_at: updatedAt }] }, by);
+  }
+
+  /**
+   * 다른 멤버가 한 번에 올린 것처럼 여러 레코드를 쓴다 — value 가 없으면 지움이다. 한 올리기라 밀려난 판들의 시각이
+   * 같다(서버에서 한 묶음).
+   */
+  pushBatch(
+    teamId: string,
+    records: Array<{ kind: string; id: string; value?: unknown; at: string }>,
+    keyBase64: string,
+    by = this.userId,
+  ): void {
+    const payload: Record<string, Row[]> = {};
+    for (const record of records) {
+      (payload[record.kind] ??= []).push(
+        record.value === undefined
+          ? { id: record.id, encrypted_payload: "", updated_at: record.at, deleted_at: record.at }
+          : { id: record.id, encrypted_payload: seal(record.value, keyBase64), updated_at: record.at },
+      );
     }
+    this.pushRows(this.teams.get(teamId)!, payload, by);
   }
 
   /** 다른 멤버가 지운 것처럼 지움 표시를 둔다. */
-  deleteRecord(teamId: string, kind: string, id: string, deletedAt: string): void {
-    const team = this.teams.get(teamId)!;
-    if (upsert(team.records, { [kind]: [{ id, encrypted_payload: "", updated_at: deletedAt, deleted_at: deletedAt }] }) > 0) {
+  deleteRecord(teamId: string, kind: string, id: string, deletedAt: string, by = this.userId): void {
+    this.pushRows(this.teams.get(teamId)!, { [kind]: [{ id, encrypted_payload: "", updated_at: deletedAt, deleted_at: deletedAt }] }, by);
+  }
+
+  /** 팀 레코드 올리기(서버의 ApplyTeamPushRecords) — 밀려난 판 가운데 내용이 있던 것은 이전 판으로 남긴다. */
+  private pushRows(team: FakeTeam, payload: Record<string, Row[]>, by: string): number {
+    // 올리기마다 다른 시각 — 서버는 마이크로초까지 남겨 한 올리기의 판만 같은 시각이다. 같은 밀리초에 두 번 올리면
+    // 한 묶음으로 보이지 않게 1ms 씩 민다.
+    this.lastChangedAtMs = Math.max(Date.now(), this.lastChangedAtMs + 1);
+    const changedAt = new Date(this.lastChangedAtMs).toISOString();
+    const written = upsert(team.records, payload, (kind, current, next) => {
+      if (current.encrypted_payload) {
+        team.versions.push({
+          seq: team.versions.length + 1,
+          kind,
+          recordId: current.id,
+          encryptedPayload: current.encrypted_payload,
+          updatedAt: current.updated_at,
+          ...(current.deleted_at ? { deletedAt: current.deleted_at } : {}),
+          updatedBy: team.updatedBy.get(`${kind}:${current.id}`) ?? by,
+          changedBy: by,
+          changedAt,
+          deleted: Boolean(next.deleted_at),
+        });
+      }
+    });
+    for (const [kind, records] of Object.entries(payload)) {
+      for (const record of records) {
+        team.updatedBy.set(`${kind}:${record.id}`, by);
+      }
+    }
+    if (written > 0) {
       team.revision += 1;
     }
+    return written;
   }
 
   putPrivate(teamId: string, kind: string, id: string, value: unknown, updatedAt: string): void {
@@ -232,7 +339,7 @@ export class FakeTeamServer {
           426,
         );
       }
-      return this.handleTeam(team, member, `${method} ${parts.slice(2).join("/")}`, headers, body);
+      return this.handleTeam(team, member, `${method} ${parts.slice(2).join("/")}`, headers, body, url.searchParams);
     }
     return json({ error: "not found" }, 404);
   }
@@ -290,17 +397,27 @@ export class FakeTeamServer {
         teamName: team.name,
         inviterEmail: `${invite.createdBy}@example.com`,
         memberCount: team.members.size,
+        role: invite.role,
         expiresAt: invite.expiresAt,
       });
     }
     if (action === "join" && method === "POST") {
+      const hook = this.beforeJoin;
+      this.beforeJoin = null;
+      hook?.();
       const existing = team.members.get(this.userId);
       if (!existing) {
-        team.members.set(this.userId, this.newMember("member"));
+        team.members.set(this.userId, this.newMember(invite.role));
         team.infoRevision += 1;
         invite.useCount += 1;
       }
-      return json({ teamId: team.id, teamName: team.name, inviteBox: invite.box, rejoined: Boolean(existing) });
+      return json({
+        teamId: team.id,
+        teamName: team.name,
+        inviteBox: invite.box,
+        rejoined: Boolean(existing),
+        role: team.members.get(this.userId)!.role,
+      });
     }
     return json({ error: "not found" }, 404);
   }
@@ -311,16 +428,53 @@ export class FakeTeamServer {
     route: string,
     headers: Headers,
     body: Record<string, unknown> & Record<string, Row[]>,
+    query: URLSearchParams = new URLSearchParams(),
   ): Response {
     const ifNoneMatch = headers.get("If-None-Match");
     const isOwner = member.role === "owner";
+    const isAdmin = canManageTeam(member.role);
     const [verb, ...rest] = route.split(" ");
     const path = rest.join(" ");
-    if (verb === "POST" && path.startsWith("members/") && path.endsWith("/remove")) {
-      if (!isOwner) {
+    if (verb === "PUT" && path.startsWith("members/") && path.endsWith("/role")) {
+      if (!isAdmin) {
+        return json(ADMIN_ONLY, 403);
+      }
+      const role = String(body.role ?? "") as TeamAssignableRole;
+      if (role !== "admin" && role !== "member" && role !== "viewer") {
+        return json(ROLE_INVALID, 400);
+      }
+      const target = team.members.get(path.split("/")[1]);
+      if (!target) {
+        return json(MEMBER_NOT_FOUND, 404);
+      }
+      if (target.role === "owner") {
+        return json(ROLE_INVALID, 400);
+      }
+      if (!canChangeTeamRole(member.role, target.role, role)) {
         return json(OWNER_ONLY, 403);
       }
-      team.members.delete(path.split("/")[1]);
+      if (target.role !== role) {
+        target.role = role;
+        team.infoRevision += 1;
+      }
+      return noContent();
+    }
+    if (verb === "POST" && path.startsWith("members/") && path.endsWith("/remove")) {
+      if (!isAdmin) {
+        return json(ADMIN_ONLY, 403);
+      }
+      const targetId = path.split("/")[1];
+      const target = team.members.get(targetId);
+      if (!target) {
+        return json(MEMBER_NOT_FOUND, 404);
+      }
+      if (targetId === this.userId && isOwner) {
+        return json(MUST_TRANSFER, 409);
+      }
+      if (!canRemoveTeamMember(member.role, target.role)) {
+        return json(OWNER_ONLY, 403);
+      }
+      team.members.delete(targetId);
       for (const invite of this.invites.values()) {
         if (invite.teamId === team.id) {
           invite.revokedAt ??= new Date().toISOString();
@@ -331,6 +485,9 @@ export class FakeTeamServer {
       return noContent();
     }
     if (verb === "DELETE" && path.startsWith("invites/")) {
+      if (!isAdmin) {
+        return json(ADMIN_ONLY, 403);
+      }
       const invite = this.invites.get(path.split("/")[1]);
       if (invite?.teamId === team.id) {
         invite.revokedAt ??= new Date().toISOString();
@@ -338,6 +495,24 @@ export class FakeTeamServer {
       }
       team.infoRevision += 1;
       return noContent();
+    }
+    if (verb === "GET" && path === "versions") {
+      if (!isAdmin) {
+        return json(ADMIN_ONLY, 403);
+      }
+      // 서버와 같이 최신부터, before 앞을 limit 만큼, kind·recordId 를 주면 그 레코드만.
+      const before = Number(query.get("before") ?? 0);
+      const limit = Number(query.get("limit") ?? 100);
+      const kind = query.get("kind");
+      const recordId = query.get("recordId");
+      return json({
+        versions: [...team.versions]
+          .reverse()
+          .filter((version) => !before || version.seq < before)
+          .filter((version) => !kind || (version.kind === kind && version.recordId === recordId))
+          .slice(0, limit)
+          .map((version) => ({ ...version, updatedByEmail: `${version.updatedBy}@example.com`, changedByEmail: `${version.changedBy}@example.com` })),
+      });
     }
     switch (route) {
       case "PATCH ":
@@ -358,7 +533,8 @@ export class FakeTeamServer {
         if (!isOwner || !target) {
           return json(OWNER_ONLY, 403);
         }
-        member.role = "member";
+        // 옛 소유자는 관리자가 된다.
+        member.role = "admin";
         target.role = "owner";
         team.infoRevision += 1;
         return noContent();
@@ -385,6 +561,13 @@ export class FakeTeamServer {
         }
         return json({ teamDeleted: team.members.size === 0 });
       case "POST invites": {
+        if (!isAdmin) {
+          return json(ADMIN_ONLY, 403);
+        }
+        const role = String(body.role ?? "member") as TeamInviteRole;
+        if (role !== "member" && role !== "viewer") {
+          return json(ROLE_INVALID, 400);
+        }
         const code = `code-${randomUUID().slice(0, 8)}`;
         this.invites.set(code, {
           code,
@@ -394,6 +577,7 @@ export class FakeTeamServer {
           tokenHash: String(body.joinTokenHash),
           expiresAt: String(body.expiresAt),
           createdBy: this.userId,
+          role,
           revokedAt: null,
           useCount: 0,
         });
@@ -401,6 +585,9 @@ export class FakeTeamServer {
         return json(this.inviteJson(this.invites.get(code)!), 201);
       }
       case "GET invites":
+        if (!isAdmin) {
+          return json(ADMIN_ONLY, 403);
+        }
         return json({
           invites: [...this.invites.values()]
             .filter((invite) => invite.teamId === team.id)
@@ -417,9 +604,10 @@ export class FakeTeamServer {
         return json(snapshot(team.records), 200, { etag });
       }
       case "POST sync":
-        if (upsert(team.records, body) > 0) {
-          team.revision += 1;
+        if (!canEditTeamVault(member.role)) {
+          return json(READ_ONLY, 403);
         }
+        this.pushRows(team, body, this.userId);
         return json({ revision: team.revision }, 202);
       case "GET me": {
         const etag = `"${member.privateRevision}"`;
@@ -471,6 +659,7 @@ export class FakeTeamServer {
       code: invite.code,
       createdBy: invite.createdBy,
       createdByEmail: `${invite.createdBy}@example.com`,
+      role: invite.role,
       expiresAt: invite.expiresAt,
       useCount: invite.useCount,
       createdAt: T0,
@@ -524,11 +713,20 @@ export async function createTeamHarness(dataDir: string) {
   };
   const loops: Array<{ options: SyncWatchLoopOptions; stopped: boolean }> = [];
   const onChanged = vi.fn();
+  /** 팀을 잊을 때마다 — 받은 그 팀 호스트의 id 와, 그때 팀 볼트가 아직 있었는지(지우기 직전이어야 한다). */
+  const forgotten: Array<{ teamId: string; hostIds: string[]; stillStored: boolean }> = [];
   const secretStore = new SecretStore();
   const service = new TeamSyncService({
     auth,
     secretStore,
     onChanged,
+    onTeamForgotten: (teamId, hostIds) => {
+      forgotten.push({
+        teamId,
+        hostIds: [...hostIds].sort(),
+        stillStored: stateStorage.getDesktopStateStorage().getTeamState(teamId) !== null,
+      });
+    },
     startWatchLoop: (options) => {
       const entry = { options, stopped: false };
       loops.push(entry);
@@ -586,6 +784,7 @@ export async function createTeamHarness(dataDir: string) {
     tickLoops,
     activeLoops,
     onChanged,
+    forgotten,
     secretStore,
     pendingTeamJoinAccount,
     catalog,

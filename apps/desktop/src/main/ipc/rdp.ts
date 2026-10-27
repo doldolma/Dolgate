@@ -79,7 +79,7 @@ export function registerRdpIpcHandlers(
           if (!host || !isRdpHostRecord(host)) {
             return;
           }
-          ctx.vaults.writeHost(hostId, (hosts) => hosts.updateRdpCertificateFingerprint(hostId, fingerprint));
+          ctx.vaults.setHostRdpCertificateFingerprint(hostId, fingerprint);
           ctx.activityLogs.append("info", "audit", "RDP certificate trusted", {
             hostId,
             fingerprint,
@@ -116,7 +116,7 @@ export function registerRdpIpcHandlers(
         // 이미 없다. 감사 로그에 빈 해제를 남기지 않는다.
         return host;
       }
-      const next = ctx.vaults.writeHost(hostId, (hosts) => hosts.updateRdpCertificateFingerprint(hostId, null));
+      const next = ctx.vaults.setHostRdpCertificateFingerprint(hostId, null);
       ctx.activityLogs.append("warn", "audit", logMessage('rdpIpc.certificateTrustRevoked'), {
         hostId,
         label: host.label,

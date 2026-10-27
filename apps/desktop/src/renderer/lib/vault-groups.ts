@@ -1,7 +1,7 @@
 // 볼트별 목록 묶기(포트 포워딩·DNS 덮어쓰기·스니펫). 레코드 모양은 그대로 두고, 볼트 표(VaultIndex)의 팀 id 표로
 // 어느 볼트 것인지 안다 — 표에 없으면 개인 것이다.
 
-import type { VaultIndex } from '@shared';
+import { canEditTeamVault, type VaultIndex } from '@shared';
 import { PERSONAL_VAULT_ID } from '../store/utils/vaults';
 
 /** 묶음 머리에 보일 팀. 개인 묶음은 null. */
@@ -17,6 +17,8 @@ export interface VaultSection<T> {
   team: VaultSectionTeam | null;
   /** 동기화가 막힌 팀(다시 들어와야 함·업데이트 필요) — 여기에는 만들지 않는다. */
   blocked: boolean;
+  /** 내가 읽기 전용(Viewer)인 팀 — 만들지도 고치지도 않는다. 쓰기(시작·켜기·내 키)는 그대로다. */
+  readOnly: boolean;
   items: T[];
 }
 
@@ -40,6 +42,9 @@ function isBlockedTeam(team: VaultIndex['teams'][number]): boolean {
   return team.syncState === 'needs-rejoin' || team.syncState === 'outdated';
 }
 
+// 줄마다 편집 단추를 둘지 — 묶음(readOnly)과 같은 판단을 줄의 볼트로 한다.
+export { isReadOnlyVault } from '../store/utils/vaults';
+
 /**
  * 레코드를 볼트별로 묶는다 — 개인 먼저, 그다음 볼트 표의 팀 순서. 빈 볼트도 묶음으로 둔다(머리의 + 로 거기에
  * 만든다). 볼트 안의 순서는 받은 순서 그대로다. **팀이 없으면 null** — 화면은 묶음 없이 지금처럼 그린다.
@@ -53,11 +58,12 @@ export function groupByVault<T extends { id: string }>(
     return null;
   }
   const sections: VaultSection<T>[] = [
-    { vaultId: PERSONAL_VAULT_ID, team: null, blocked: false, items: [] },
+    { vaultId: PERSONAL_VAULT_ID, team: null, blocked: false, readOnly: false, items: [] },
     ...index.teams.map((team) => ({
       vaultId: team.id,
       team: { id: team.id, name: team.name },
       blocked: isBlockedTeam(team),
+      readOnly: !canEditTeamVault(team.role),
       items: [] as T[],
     })),
   ];
@@ -82,11 +88,12 @@ export function sectionsByVault<T>(
     return null;
   }
   return [
-    { vaultId: PERSONAL_VAULT_ID, team: null, blocked: false, items: [...personal] },
+    { vaultId: PERSONAL_VAULT_ID, team: null, blocked: false, readOnly: false, items: [...personal] },
     ...index.teams.map((team) => ({
       vaultId: team.id,
       team: { id: team.id, name: team.name },
       blocked: isBlockedTeam(team),
+      readOnly: !canEditTeamVault(team.role),
       items: [...(byTeamId[team.id] ?? [])],
     })),
   ];

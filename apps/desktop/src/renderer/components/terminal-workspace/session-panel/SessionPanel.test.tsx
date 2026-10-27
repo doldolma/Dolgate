@@ -690,6 +690,14 @@ describe('SessionPanel 스니펫 — 볼트', () => {
     expect(commands()).toEqual(['df -h', 'systemctl restart app']);
     expect(screen.queryByText('Acme Infra')).toBeNull();
   });
+
+  // 7-3: 읽기 전용(Viewer) 팀의 스니펫은 넣고 돌리기만 — 편집이 없다. 개인 것은 그대로다.
+  it("drops Edit on a read-only team's snippet", () => {
+    renderFor('team-web', { vaultIndex: { ...vaultIndex, teams: [{ ...vaultIndex.teams[0], role: 'viewer' }] } });
+
+    expect(commands()).toEqual(['systemctl restart app', 'df -h']);
+    expect(screen.getAllByRole('button', { name: '스니펫 편집' })).toHaveLength(1);
+  });
 });
 
 // 목록 관리를 패널에서도 한다. 예전에는 여기서 "관리" 버튼으로 홈 화면으로 보내 버려서, 스니펫

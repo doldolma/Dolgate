@@ -11,6 +11,7 @@ import {
   type TeamActivityBody,
 } from "@shared";
 import { deriveTeamEventId, resolveLogTeamId, TeamHistoryService } from "./team-history-service";
+import { closeInterruptedSessions } from "./interrupted-sessions";
 import { TeamApiError, type RawTeamEvent, type RawTeamReplay } from "./team-api";
 
 const TEAM = "6f0b6a6e-6b0c-4f43-9a55-2c9b9a2f1e01";
@@ -138,6 +139,32 @@ describe("TeamHistoryService mirroring", () => {
       deriveTeamEventId("session-log-1|start"),
       deriveTeamEventId("session-log-1|end"),
     ]);
+  });
+
+  // 앱이 꺼져 끝을 못 적은 팀 호스트의 줄은 다음 실행 때 닫히고(interrupted-sessions), 그 끝이 보통 쓰기 길로 팀에 간다.
+  it("sends the end of a team session the next run closed after the app stopped", async () => {
+    const { service, runTimers, sentBodies } = createHarness();
+    service.activate(tempScope());
+    service.mirror(sessionRecord("connected"));
+    await runTimers();
+
+    closeInterruptedSessions({
+      logs: {
+        list: () => [sessionRecord("connected")],
+        upsertMany: (records) => records.map((record) => (service.mirror(record), record)),
+      },
+      recordings: { recoverInterruptedRecording: () => null },
+      startedBeforeMs: Date.parse("2026-10-21T02:00:00.000Z"),
+    });
+    await runTimers();
+
+    const bodies = sentBodies();
+    expect(bodies.map((body) => body.phase)).toEqual(["start", "end"]);
+    expect(bodies[1].record.metadata).toMatchObject({
+      status: "closed",
+      disconnectedAt: null,
+      disconnectReason: "앱이 꺼져 끊겼습니다.",
+    });
   });
 
   // 접속 줄은 붙자마자 쓰이고, 녹화 ID 는 곧이어 붙는다 — 팀 쪽 진행 중인 접속에서도 Replay 를 열 수 있어야 한다.
@@ -298,11 +325,18 @@ describe("TeamHistoryService reading", () => {
   it("asks the server about the recordings shown on screen", async () => {
     const { service, api } = createHarness();
     api.listTeamReplays.mockResolvedValue([
-      { recordingId: "6f0b6a6e-6b0c-4f43-9a55-2c9b9a2f1e09", state: "deleted", authorEmail: "a@example.com" } as RawTeamReplay,
+      { recordingId: "6f0b6a6e-6b0c-4f43-9a55-2c9b9a2f1e09", state: "deleted", authorEmail: "a@example.com", viewable: true } as RawTeamReplay,
+      // 남의 녹화(관리자 아래 역할)와, 그 칸을 모르는 서버의 녹화는 볼 수 없는 것으로 본다.
+      { recordingId: "7a1c7b7f-7c1d-4f54-8b66-3d0c0b3f2f1a", state: "ended", authorEmail: "b@example.com", viewable: false } as RawTeamReplay,
+      { recordingId: "8b2d8c8a-8d2e-4a65-9c77-4e1d1c4a3a2b", state: "ended", authorEmail: "c@example.com" } as RawTeamReplay,
     ]);
     const statuses = await service.getReplayStatuses(TEAM, ["6f0b6a6e-6b0c-4f43-9a55-2c9b9a2f1e09", "not-a-uuid"]);
     expect(api.listTeamReplays).toHaveBeenCalledWith(expect.anything(), TEAM, { ids: ["6f0b6a6e-6b0c-4f43-9a55-2c9b9a2f1e09"] });
-    expect(statuses).toEqual([{ recordingId: "6f0b6a6e-6b0c-4f43-9a55-2c9b9a2f1e09", state: "deleted", authorEmail: "a@example.com" }]);
+    expect(statuses).toEqual([
+      { recordingId: "6f0b6a6e-6b0c-4f43-9a55-2c9b9a2f1e09", state: "deleted", authorEmail: "a@example.com", viewable: true },
+      { recordingId: "7a1c7b7f-7c1d-4f54-8b66-3d0c0b3f2f1a", state: "ended", authorEmail: "b@example.com", viewable: false },
+      { recordingId: "8b2d8c8a-8d2e-4a65-9c77-4e1d1c4a3a2b", state: "ended", authorEmail: "c@example.com", viewable: false },
+    ]);
   });
 
   it("refuses to read a team that is not open on this device", async () => {

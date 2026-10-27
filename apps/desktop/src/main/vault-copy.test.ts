@@ -434,7 +434,7 @@ describe("planVaultCopy", () => {
     const source = emptyVault();
     source.data.hosts.push(sshHost("team-host", "Shared"));
     const myValues: TeamMemberPrefs = {
-      hosts: new Map([["team-host", { id: "team-host", favorite: true, agentForwarding: true, updatedAt: at }]]),
+      hosts: new Map([["team-host", { id: "team-host", favorite: true, agentForwarding: true, rdpCertificateFingerprint: null, knownHosts: [], updatedAt: at }]]),
       workspaces: new Map(),
       terminalThemeByHostId: { "team-host": "night-owl" },
     };

@@ -43,6 +43,9 @@ function makeModel(hosts: HostRecord[], searchQuery = ''): HostBrowserModel {
     onOpenHostContainers: vi.fn(),
     onCreateHost: vi.fn(),
     onEditHost: vi.fn(),
+    // 읽기 전용 팀(Viewer)이 아닌 볼트 — 편집 길이 열려 있다.
+    isReadOnlyVault: () => false,
+    isReadOnlyAsset: () => false,
   } as unknown as HostBrowserModel;
 }
 

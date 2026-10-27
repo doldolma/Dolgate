@@ -1,5 +1,28 @@
-import type { TeamMember } from '@shared';
+import type { TeamMember, TeamRole } from '@shared';
 import { getFormatLocale } from '../../i18n';
+
+/** 역할 이름 — 짧은 라벨이라 영어 그대로 둔다(칩·메뉴·창이 같은 말을 쓴다). */
+export const TEAM_ROLE_LABELS: Readonly<Record<TeamRole, string>> = {
+  owner: 'Owner',
+  admin: 'Admin',
+  member: 'Member',
+  viewer: 'Viewer',
+};
+
+const SUCCESSION_RANK: Readonly<Record<TeamRole, number>> = { owner: 0, admin: 0, member: 1, viewer: 2 };
+
+/**
+ * 소유자를 이을 순서 — 서버가 소유자가 빠질 때 고르는 순서와 같다(관리자 → 멤버 → 읽기 전용, 같은 역할이면 먼저
+ * 들어온 사람). 나가기 창은 이 순서의 첫 사람을 골라 둔다.
+ */
+export function orderBySuccession(members: readonly TeamMember[]): TeamMember[] {
+  return [...members].sort(
+    (left, right) =>
+      SUCCESSION_RANK[left.role] - SUCCESSION_RANK[right.role] ||
+      left.addedAt.localeCompare(right.addedAt) ||
+      left.userId.localeCompare(right.userId),
+  );
+}
 
 const MINUTE_SECONDS = 60;
 const HOUR_SECONDS = 60 * MINUTE_SECONDS;

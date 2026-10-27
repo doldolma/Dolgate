@@ -91,6 +91,8 @@ export function toVaultCopyWrite(plan: VaultCopyPlan, now: string): VaultCopyWri
         id: values.hostId,
         favorite: values.favorite,
         agentForwarding: values.agentForwarding,
+        rdpCertificateFingerprint: null,
+        knownHosts: [],
         updatedAt: now,
       })),
     terminalThemeByHostId: Object.fromEntries(

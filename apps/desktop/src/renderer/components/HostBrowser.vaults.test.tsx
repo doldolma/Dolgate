@@ -1,10 +1,27 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { GroupRecord, HostRecord, SavedWorkspaceRecord, VaultIndex } from "@shared";
+import type { GroupRecord, HostRecord, SavedWorkspaceRecord, SecretMetadataRecord, TeamRole, VaultIndex } from "@shared";
 import { HostBrowser } from "./HostBrowser";
 import { buildBrowserVaults } from "./host-browser/browserVaults";
 import type { MyCredentialsApi } from "./host-browser/useHostBrowser";
 import { createEmptyVaultIndex } from "../store/utils";
+
+// 삭제 창이 렌더마다 받은 것 — "칸이 켜진 채 뜬다"는 창의 첫 화면에서 봐야 한다(나중에 효과가 켜 주면 한 박자 늦다).
+// 진짜 창을 그대로 그린다.
+const deleteDialogRenders: Array<{ unusedLocalSecretCount: number; removeUnusedSecrets: boolean }> = [];
+vi.mock("./HostDeleteConfirmDialog", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./HostDeleteConfirmDialog")>();
+  return {
+    ...actual,
+    HostDeleteConfirmDialog: (props: Parameters<typeof actual.HostDeleteConfirmDialog>[0]) => {
+      deleteDialogRenders.push({
+        unusedLocalSecretCount: props.unusedLocalSecretCount,
+        removeUnusedSecrets: props.removeUnusedSecrets,
+      });
+      return <actual.HostDeleteConfirmDialog {...props} />;
+    },
+  };
+});
 
 // 팀이 있으면 사이드바 맨 윗단이 볼트다(개인 + 팀). 같은 경로 `Prod` 가 개인과 팀에 다 있어도 따로 접히고·골라지고·
 // 이름이 바뀌고·옮겨진다. 볼트 사이로 놓으면 옮기기가 아니라 복사(공유)를 묻는다 — 묻는 창을 열 콜백이 없으면 아무
@@ -74,14 +91,14 @@ const hosts = [
 ];
 const personalGroups = [group("pg-prod", "Prod"), group("pg-db", "Prod/db")];
 
-function vaultIndex(): VaultIndex {
+function vaultIndex(teamRole: TeamRole = "owner"): VaultIndex {
   return {
     ...createEmptyVaultIndex(),
     teams: [
       {
         id: TEAM,
         name: "Acme Infra",
-        role: "owner",
+        role: teamRole,
         syncState: "ready",
         syncError: null,
         groups: [group("tg-prod", "Prod"), group("tg-web", "Prod/web"), group("tg-bastion", "Bastion")],
@@ -101,6 +118,7 @@ class NoopResizeObserver {
 
 beforeEach(() => {
   vi.stubGlobal("ResizeObserver", NoopResizeObserver);
+  deleteDialogRenders.length = 0;
 });
 
 afterEach(() => {
@@ -135,6 +153,14 @@ function renderVaults(
     copy?: boolean;
     myCredentials?: MyCredentialsApi;
     myUsernameByHostId?: Record<string, string>;
+    /** 이 팀(Acme Infra)에서 내 역할. */
+    teamRole?: TeamRole;
+    /** 호스트 id → 그 호스트가 쓰는 저장된 인증 정보. */
+    secretRefs?: Record<string, string>;
+    /** 개인 볼트의 저장된 인증 정보. */
+    keychainEntries?: SecretMetadataRecord[];
+    /** 팀 볼트의 저장된 인증 정보를 읽는 길(홈이 넘긴다). */
+    loadTeamSavedCredentials?: (teamId: string) => Promise<SecretMetadataRecord[]>;
   } = {},
 ) {
   const callbacks = {
@@ -152,24 +178,30 @@ function renderVaults(
     onRequestVaultCopy: options.copy ? vi.fn() : undefined,
     myCredentials: options.myCredentials,
     myUsernameByHostId: options.myUsernameByHostId,
+    onRemoveHosts: vi.fn().mockResolvedValue(undefined),
+    onRemoveSecrets: vi.fn().mockResolvedValue(undefined),
+    loadTeamSavedCredentials: options.loadTeamSavedCredentials,
   };
+  const browserHosts = hosts.map((entry) =>
+    options.secretRefs?.[entry.id] ? ({ ...entry, secretRef: options.secretRefs[entry.id] } as HostRecord) : entry,
+  );
   const savedWorkspaces = [teamWorkspace, personalWorkspace];
   const vaults = buildBrowserVaults({
-    hosts,
+    hosts: browserHosts,
     groups: personalGroups,
     savedWorkspaces,
-    vaultIndex: options.teams === false ? createEmptyVaultIndex() : vaultIndex(),
+    vaultIndex: options.teams === false ? createEmptyVaultIndex() : vaultIndex(options.teamRole),
     personalName: "Personal",
   });
   render(
     <HostBrowser
       desktopPlatform="darwin"
-      hosts={hosts}
+      hosts={browserHosts}
       groups={personalGroups}
       savedWorkspaces={savedWorkspaces}
       vaults={vaults}
       currentVaultId={options.currentVaultId ?? null}
-      keychainEntries={[]}
+      keychainEntries={options.keychainEntries ?? []}
       currentGroupPath={options.currentGroupPath ?? null}
       selectedHostId={options.selectedHostId ?? null}
       activityLogs={options.activityLogs ?? []}
@@ -190,8 +222,6 @@ function renderVaults(
       onDuplicateHosts={vi.fn().mockResolvedValue(undefined)}
       onExportAssets={vi.fn()}
       onSetHostFavorite={vi.fn()}
-      onRemoveHosts={vi.fn().mockResolvedValue(undefined)}
-      onRemoveSecrets={vi.fn().mockResolvedValue(undefined)}
       onConnectHost={vi.fn().mockResolvedValue(undefined)}
       onOpenHostContainers={vi.fn().mockResolvedValue(undefined)}
       {...callbacks}
@@ -967,5 +997,200 @@ describe("HostBrowser my credentials on team hosts", () => {
     expect(texts.filter((text) => text.startsWith("team-web")).every((text) => text.includes("deploy@team-web.example.com"))).toBe(true);
     // 내 이름이 없는 호스트는 레코드 이름 그대로.
     expect(texts.filter((text) => text.startsWith("my-web")).every((text) => text.includes("ubuntu@my-web.example.com"))).toBe(true);
+  });
+});
+
+// 7-3: 역할 — 초대는 관리자 이상, 읽기 전용(Viewer) 팀은 만들고 고치고 옮기고 지우는 길이 없다.
+describe("HostBrowser vaults — roles", () => {
+  const menuItems = () =>
+    within(screen.getByRole("menu")).getAllByRole("button").map((button) => button.textContent);
+
+  it("offers the invite link on a team row to admins and up only", () => {
+    renderVaults({ teamRole: "member" });
+    fireEvent.contextMenu(vaultRow(TEAM));
+    expect(menuItems()).toEqual(["새 호스트", "새 그룹", "팀 관리"]);
+    fireEvent.click(document.body);
+  });
+
+  it("offers the invite link to an admin", () => {
+    renderVaults({ teamRole: "admin" });
+    fireEvent.contextMenu(vaultRow(TEAM));
+    expect(menuItems()).toEqual(["초대 링크", "새 호스트", "새 그룹", "팀 관리"]);
+  });
+
+  it("leaves only Open on a read-only team's workspace, in its detail and its menu", () => {
+    renderVaults({ teamRole: "viewer", currentVaultId: TEAM, currentGroupPath: "Prod" });
+    const card = document.querySelector<HTMLElement>('[data-home-asset-key="workspace:team-ws"]')!;
+
+    fireEvent.click(card);
+    const detail = within(screen.getByRole("button", { name: "Workspace 열기" }).closest("section")!);
+    for (const name of ["이름 변경", "복제", "삭제"]) {
+      expect(detail.queryByRole("button", { name })).toBeNull();
+    }
+
+    fireEvent.contextMenu(card);
+    const items = menuItems();
+    expect(items).not.toContain("Workspace 이름 변경");
+    expect(items).not.toContain("복제");
+    expect(items).not.toContain("삭제");
+  });
+
+  it("hides New Group in the empty detail while you look inside a read-only team", () => {
+    renderVaults({ teamRole: "viewer", currentVaultId: TEAM });
+    expect(screen.queryByRole("button", { name: "새 그룹" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New Group" })).toBeNull();
+  });
+
+  it("keeps New Group in your own vault", () => {
+    renderVaults({ teamRole: "viewer", currentVaultId: "personal" });
+    expect(screen.getByRole("button", { name: "새 그룹" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New Group" })).toBeInTheDocument();
+  });
+
+  it("doesn't move a read-only team's subgroup to the team's top by dropping it on the team row", async () => {
+    const { onMoveGroup } = renderVaults({ teamRole: "viewer" });
+    const web = tree().getByRole("button", { name: /^web/ });
+
+    const dataTransfer = createDataTransfer();
+    fireEvent.dragStart(web, { dataTransfer });
+    expect(fireEvent.dragOver(vaultRow(TEAM), { dataTransfer })).toBe(true);
+    fireEvent.drop(vaultRow(TEAM), { dataTransfer });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onMoveGroup).not.toHaveBeenCalled();
+  });
+
+  it("doesn't reorder or nest a read-only team's groups by dragging", async () => {
+    const { onMoveGroup, onReorderGroup } = renderVaults({ teamRole: "viewer" });
+    const [, teamProd] = groupRows("Prod");
+    const bastion = groupRows("Bastion")[0]!;
+
+    const dataTransfer = createDataTransfer();
+    fireEvent.dragStart(bastion, { dataTransfer });
+    expect(fireEvent.dragOver(teamProd!, { dataTransfer })).toBe(true);
+    fireEvent.drop(teamProd!, { dataTransfer });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onMoveGroup).not.toHaveBeenCalled();
+    expect(onReorderGroup).not.toHaveBeenCalled();
+  });
+});
+
+// 팀 호스트를 지울 때도 "안 쓰게 되는 인증 정보"를 센다. 개인 목록(keychainEntries)에는 팀 것이 없어서, 그 호스트만 쓰던
+// 팀 비밀번호가 "함께 삭제"에 나오지 않고 팀에 남았다. 팀 것은 창을 열기 전에 그 팀에서 읽는다.
+describe("HostBrowser deleting team hosts", () => {
+  const credential = (secretRef: string, label: string): SecretMetadataRecord => ({
+    secretRef,
+    label,
+    hasPassword: true,
+    hasPassphrase: false,
+    hasManagedPrivateKey: false,
+    hasCertificate: false,
+    linkedHostCount: 1,
+    updatedAt: "2025-01-01T00:00:00.000Z",
+  });
+  const cardOf = (hostId: string) =>
+    document.querySelector<HTMLElement>(`article[data-home-asset-key="host:${hostId}"]`)!;
+  const openDelete = (hostId: string, name = "삭제") => {
+    fireEvent.contextMenu(cardOf(hostId));
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("button", { name }));
+  };
+  const alsoDelete = (count: number) => ({ name: `더 이상 사용되지 않는 저장된 인증 정보 ${count}개도 함께 삭제` });
+  const confirmDelete = () =>
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "삭제" }));
+
+  it("offers the team password only that host used, checked, and deletes it by its team secretRef", async () => {
+    const loadTeamSavedCredentials = vi
+      .fn()
+      .mockResolvedValue([credential("secret:team-api", "API password"), credential("secret:team-web", "Web password")]);
+    const { onRemoveHosts, onRemoveSecrets } = renderVaults({
+      secretRefs: { "team-api": "secret:team-api", "team-web": "secret:team-web" },
+      loadTeamSavedCredentials,
+    });
+
+    openDelete("team-api");
+    expect(await screen.findByRole("checkbox", alsoDelete(1))).toBeChecked();
+    // 팀 것을 읽은 뒤에 열려도 창의 첫 화면부터 켜져 있다.
+    expect(deleteDialogRenders[0]).toEqual({ unusedLocalSecretCount: 1, removeUnusedSecrets: true });
+    expect(loadTeamSavedCredentials).toHaveBeenCalledTimes(1);
+    expect(loadTeamSavedCredentials).toHaveBeenCalledWith(TEAM);
+
+    confirmDelete();
+    await waitFor(() => expect(onRemoveSecrets).toHaveBeenCalledWith(["secret:team-api"]));
+    expect(onRemoveHosts).toHaveBeenCalledWith(["team-api"]);
+  });
+
+  it("keeps a team password another team host still uses", async () => {
+    const loadTeamSavedCredentials = vi.fn().mockResolvedValue([credential("secret:team-shared", "Shared password")]);
+    const { onRemoveHosts, onRemoveSecrets } = renderVaults({
+      secretRefs: { "team-api": "secret:team-shared", "team-web": "secret:team-shared" },
+      loadTeamSavedCredentials,
+    });
+
+    openDelete("team-api");
+    const dialog = await screen.findByRole("dialog");
+    expect(loadTeamSavedCredentials).toHaveBeenCalledWith(TEAM);
+    expect(within(dialog).queryByRole("checkbox")).toBeNull();
+
+    confirmDelete();
+    await waitFor(() => expect(onRemoveHosts).toHaveBeenCalledWith(["team-api"]));
+    expect(onRemoveSecrets).not.toHaveBeenCalled();
+  });
+
+  it("counts personal and team passwords together when deleting several hosts", async () => {
+    const loadTeamSavedCredentials = vi.fn().mockResolvedValue([credential("secret:team-api", "API password")]);
+    const { onRemoveHosts, onRemoveSecrets } = renderVaults({
+      secretRefs: { "my-web": "secret:my-web", "team-api": "secret:team-api" },
+      keychainEntries: [credential("secret:my-web", "Web password")],
+      loadTeamSavedCredentials,
+    });
+
+    fireEvent.click(cardOf("my-web"));
+    fireEvent.click(cardOf("team-api"), { metaKey: true });
+    openDelete("team-api", "삭제 (2개)");
+    expect(await screen.findByRole("checkbox", alsoDelete(2))).toBeChecked();
+    expect(deleteDialogRenders[0]).toEqual({ unusedLocalSecretCount: 2, removeUnusedSecrets: true });
+
+    confirmDelete();
+    await waitFor(() => expect(onRemoveSecrets).toHaveBeenCalledTimes(1));
+    expect([...onRemoveSecrets.mock.calls[0]![0]].sort()).toEqual(["secret:my-web", "secret:team-api"]);
+    expect([...onRemoveHosts.mock.calls[0]![0]].sort()).toEqual(["my-web", "team-api"]);
+  });
+
+  it("still asks, counting what it can, when a team's credentials can't be read", async () => {
+    const loadTeamSavedCredentials = vi.fn().mockRejectedValue(new Error("locked"));
+    const { onRemoveSecrets } = renderVaults({
+      secretRefs: { "my-web": "secret:my-web", "team-api": "secret:team-api" },
+      keychainEntries: [credential("secret:my-web", "Web password")],
+      loadTeamSavedCredentials,
+    });
+
+    fireEvent.click(cardOf("my-web"));
+    fireEvent.click(cardOf("team-api"), { metaKey: true });
+    openDelete("team-api", "삭제 (2개)");
+    expect(await screen.findByRole("checkbox", alsoDelete(1))).toBeChecked();
+
+    confirmDelete();
+    await waitFor(() => expect(onRemoveSecrets).toHaveBeenCalledWith(["secret:my-web"]));
+  });
+
+  it("reads no team when only personal hosts are deleted, and asks right away as before", () => {
+    const loadTeamSavedCredentials = vi.fn().mockResolvedValue([]);
+    renderVaults({
+      secretRefs: { "my-web": "secret:my-web" },
+      keychainEntries: [credential("secret:my-web", "Web password")],
+      loadTeamSavedCredentials,
+    });
+
+    openDelete("my-web");
+    expect(screen.getByRole("checkbox", alsoDelete(1))).toBeChecked();
+    expect(loadTeamSavedCredentials).not.toHaveBeenCalled();
+  });
+
+  it("counts personal ones only when home gives no way to read team credentials", () => {
+    renderVaults({ secretRefs: { "team-api": "secret:team-api" } });
+
+    openDelete("team-api");
+    expect(within(screen.getByRole("dialog")).queryByRole("checkbox")).toBeNull();
   });
 });

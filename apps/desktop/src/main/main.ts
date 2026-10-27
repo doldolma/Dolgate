@@ -77,6 +77,8 @@ import { XshellImportService } from './xshell-import-service';
 import { shouldRequestSingleInstanceLock } from './app-runtime-policy';
 import { installRendererRecovery } from './renderer-recovery';
 import { logMessage, type ActivityLogMessage } from './activity-log-message';
+import { closeTeamConnections } from './team-connections';
+import { closeInterruptedSessions } from './interrupted-sessions';
 
 // electron-builder.config.cjs 의 appId 와 반드시 같아야 한다 —
 // main.app-user-model-id.test.ts 가 두 값을 비교해 고정한다.
@@ -486,7 +488,19 @@ if (termiusHelperArgIndex >= 0) {
   const teamSyncService = new TeamSyncService({
     auth: authService,
     secretStore,
-    onTeamForgotten: (teamId) => {
+    onTeamForgotten: (teamId, hostIds) => {
+      // 팀 볼트를 지우기 직전이다 — 그 팀 호스트의 열린 연결을 닫는다(빠진 사람의 접근을 바로 끊는다). 로그아웃이면 이미
+      // 다 닫혀 닫을 것이 없다.
+      closeTeamConnections(
+        teamId,
+        hostIds,
+        [
+          { close: (hostIds, notice) => coreManager.closeHostConnections(hostIds, notice) },
+          { close: (hostIds, notice) => rdpManager.closeHostSessions(hostIds, notice) },
+          { close: (hostIds, notice) => vncManager.closeHostSessions(hostIds, notice) },
+        ],
+        (message, metadata) => activityLogRepository.append('warn', 'audit', message, metadata),
+      );
       teamHistoryService.forgetTeam(teamId);
       teamReplayUploads.forgetTeam(teamId);
       teamReplayViewer.forgetTeam(teamId);
@@ -615,6 +629,21 @@ if (termiusHelperArgIndex >= 0) {
       teamHistoryService.deactivate();
       teamReplayUploads.deactivate();
       teamReplayViewer.deactivate();
+    }
+    // 앱이 꺼져 끝나지 못한 줄을 닫는다. 팀 기록을 연 뒤라 팀 호스트의 줄이면 팀 기록에도 끝이 가고, 팀 녹화 올리기를
+    // 연 뒤라 다 보내지 않은 녹화를 보존 정리가 지우지 않는다.
+    try {
+      const { recoveredRecordings } = closeInterruptedSessions({
+        logs: activityLogRepository,
+        recordings: sessionReplayService,
+        startedBeforeMs: Date.now() - process.uptime() * 1000,
+      });
+      if (recoveredRecordings > 0) {
+        // 메타를 채운 녹화도 이제 보존 한도 안에서 센다.
+        sessionReplayService.prune();
+      }
+    } catch (error) {
+      console.warn('[activity-log] could not close interrupted sessions', error);
     }
   });
 
@@ -933,6 +962,7 @@ if (termiusHelperArgIndex >= 0) {
     // 인증 세션이 사라지면 SSH/SFTP/포워딩 런타임도 함께 정리해서 로그인 게이트 뒤에 연결이 남지 않게 한다.
     await sessionReplayService.shutdown();
     rdpManager.shutdown();
+    vncManager.shutdown();
     await sessionShareService.shutdown();
     await awsSsmTunnelService.shutdown();
     await coreManager.shutdown({ finalizePortForwardsAsStopped: true });
@@ -1136,6 +1166,7 @@ if (termiusHelperArgIndex >= 0) {
     ]);
     // 사이드카는 동기 종료라 비동기 정리 체인에 끼울 필요가 없다.
     rdpManager.shutdown();
+    vncManager.shutdown();
     void Promise.all([recordingsClosed, sessionShareService.shutdown()]).finally(() => {
       void awsSsmTunnelService.shutdown().finally(() => {
         void coreManager

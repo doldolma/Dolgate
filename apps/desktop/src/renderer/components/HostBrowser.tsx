@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
+  canManageTeam,
   getHostSecretRef,
   getParentGroupPath,
   normalizeGroupPath,
   type ActivityLogRecord,
   type GroupRemoveMode,
   type SavedWorkspaceRecord,
+  type SecretMetadataRecord,
 } from "@shared";
 import { cn } from "../lib/cn";
 import { DialogBackdrop } from "./DialogBackdrop";
@@ -211,7 +213,19 @@ export function HostBrowser({
     contextMenu?.kind === "vault"
       ? (hb.vaults?.find((vault) => vault.id === contextMenu.vaultId) ?? null)
       : null;
-  const contextMenuVaultWritable = contextMenuVault?.blocked !== "needs-rejoin";
+  // 읽기 전용 팀에도 만들지 않는다(다시 들어와야 하는 팀처럼 "팀 관리" 만 남는다). 초대 링크는 관리자 이상만.
+  const contextMenuVaultWritable =
+    contextMenuVault?.blocked !== "needs-rejoin" && contextMenuVault?.readOnly !== true;
+  const contextMenuVaultInvitable =
+    contextMenuVault?.kind === "team" &&
+    contextMenuVault.blocked !== "needs-rejoin" &&
+    contextMenuVault.role !== null &&
+    canManageTeam(contextMenuVault.role);
+  // 읽기 전용 팀의 것은 고치고 지우고 복제하지 않는다 — 접속·볼트로 복사(꺼내기)·내보내기만 남는다.
+  const contextMenuAssetsReadOnly =
+    contextMenu?.kind === "asset" && contextMenuAssetKeys.some((key) => hb.isReadOnlyAsset(key));
+  const contextMenuGroupReadOnly =
+    contextMenu?.kind === "group" && hb.isReadOnlyVault(contextMenu.vaultId);
 
   function openAssets(assetKeys: readonly HomeAssetKey[]) {
     hb.setContextMenu(null);
@@ -291,9 +305,26 @@ export function HostBrowser({
 
   function requestDeleteAssets(assetKeys: readonly HomeAssetKey[]) {
     const ordered = orderHomeAssetKeys(assetKeys, hb.visibleAssets);
-    const { hostIds, workspaceIds } = partitionHomeAssetKeys(ordered);
+    const { hostIds } = partitionHomeAssetKeys(ordered);
     hb.setContextMenu(null);
+    // 팀 호스트가 있으면 그 팀의 인증 정보를 먼저 읽고 창을 연다 — 개인 목록에는 팀 것이 없어 "안 쓰게 되는 인증
+    // 정보"를 셀 수 없었다(팀 비밀번호가 남았다). 이 기기 안의 읽기라 창이 늦게 뜨지 않는다.
+    const teamIds = hb.teamIdsOfHosts(hostIds);
+    if (teamIds.length > 0) {
+      void hb.loadTeamCredentials(teamIds).then((teamCredentials) => openDeleteDialog(ordered, teamCredentials));
+      return;
+    }
+    openDeleteDialog(ordered, []);
+  }
+
+  function openDeleteDialog(ordered: HomeAssetKey[], teamCredentials: SecretMetadataRecord[]) {
+    const { hostIds, workspaceIds } = partitionHomeAssetKeys(ordered);
     if (hostIds.length === 1 && workspaceIds.length === 0) {
+      hb.setHostDeleteTeamCredentials(teamCredentials);
+      // 칸은 창이 뜨는 첫 화면부터 맞게 켠다 — 팀 것을 읽고 나서 열면 hb 의 효과가 한 박자 늦게 켠다.
+      hb.setRemoveUnusedSecretsOnHostDelete(
+        hb.getUnusedLocalSecretRefsAfterHostDeletion(hostIds, teamCredentials).length > 0,
+      );
       hb.setHostDeleteTarget(hb.buildHostDeleteTarget(hostIds));
       hb.setHostDeleteError(null);
       return;
@@ -307,11 +338,10 @@ export function HostBrowser({
       }
       return;
     }
-    setMixedRemoveUnusedSecrets(
-      hb.getUnusedLocalSecretRefsAfterHostDeletion(hostIds).length > 0,
-    );
+    const unusedSecretRefs = hb.getUnusedLocalSecretRefsAfterHostDeletion(hostIds, teamCredentials);
+    setMixedRemoveUnusedSecrets(unusedSecretRefs.length > 0);
     mixedDeletedHostIds.current = new Set();
-    setMixedDeleteUnusedLocalSecretRefs(hb.getUnusedLocalSecretRefsAfterHostDeletion(hostIds));
+    setMixedDeleteUnusedLocalSecretRefs(unusedSecretRefs);
     setMixedDeleteAssetKeys(ordered);
     setMixedDeleteError(null);
   }
@@ -403,6 +433,7 @@ export function HostBrowser({
                     ? translate("teams.perPerson.favorite")
                     : null
                 }
+                readOnly={hb.isReadOnlyAsset(`workspace:${selectedWorkspace.id}`)}
               />
             ) : (
               <HostDetailPanel hb={hb} tmuxPrefixKey={tmuxPrefixKey} />
@@ -555,7 +586,7 @@ export function HostBrowser({
                   />
 
                   {/* 관리 */}
-                  {contextMenuHostIds.length === 1 ? (
+                  {contextMenuHostIds.length === 1 && !contextMenuAssetsReadOnly ? (
                     <button
                       type="button"
                       className={CTX_ITEM}
@@ -575,7 +606,7 @@ export function HostBrowser({
                         : translate("hostBrowser.menu.edit")}
                     </button>
                   ) : null}
-                  {contextMenuWorkspaces.length === 1 ? (
+                  {contextMenuWorkspaces.length === 1 && !contextMenuAssetsReadOnly ? (
                     <button
                       type="button"
                       className={CTX_ITEM}
@@ -593,20 +624,22 @@ export function HostBrowser({
                         : translate("homeAssets.menu.renameWorkspace")}
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    className={CTX_ITEM}
-                    onClick={() => {
-                      void duplicateAssets(contextMenuAssetKeys);
-                    }}
-                  >
-                    <Copy className={CTX_ICON} aria-hidden />
-                    {contextMenuAssetKeys.length === 1
-                      ? translate("common.duplicate")
-                      : translate("hostBrowser.menu.copyMany", {
-                          count: contextMenuAssetKeys.length,
-                        })}
-                  </button>
+                  {contextMenuAssetsReadOnly ? null : (
+                    <button
+                      type="button"
+                      className={CTX_ITEM}
+                      onClick={() => {
+                        void duplicateAssets(contextMenuAssetKeys);
+                      }}
+                    >
+                      <Copy className={CTX_ICON} aria-hidden />
+                      {contextMenuAssetKeys.length === 1
+                        ? translate("common.duplicate")
+                        : translate("hostBrowser.menu.copyMany", {
+                            count: contextMenuAssetKeys.length,
+                          })}
+                    </button>
+                  )}
                   {showAssetCopy && assetCopy ? (
                     <button
                       type="button"
@@ -638,32 +671,34 @@ export function HostBrowser({
                         })}
                   </button>
 
-                  <div
-                    role="separator"
-                    className="my-[0.35rem] h-px bg-[var(--border)]"
-                  />
+                  {contextMenuAssetsReadOnly ? null : (
+                    <>
+                      <div
+                        role="separator"
+                        className="my-[0.35rem] h-px bg-[var(--border)]"
+                      />
 
-                  <button
-                    type="button"
-                    className={CTX_DANGER}
-                    onClick={() => requestDeleteAssets(contextMenuAssetKeys)}
-                  >
-                    <Trash2
-                      className="h-[1.05rem] w-[1.05rem] shrink-0"
-                      aria-hidden
-                    />
-                    {contextMenuAssetKeys.length === 1
-                      ? translate("common.delete")
-                      : translate("homeAssets.menu.deleteMany", {
-                          count: contextMenuAssetKeys.length,
-                        })}
-                  </button>
+                      <button
+                        type="button"
+                        className={CTX_DANGER}
+                        onClick={() => requestDeleteAssets(contextMenuAssetKeys)}
+                      >
+                        <Trash2
+                          className="h-[1.05rem] w-[1.05rem] shrink-0"
+                          aria-hidden
+                        />
+                        {contextMenuAssetKeys.length === 1
+                          ? translate("common.delete")
+                          : translate("homeAssets.menu.deleteMany", {
+                              count: contextMenuAssetKeys.length,
+                            })}
+                      </button>
+                    </>
+                  )}
                 </>
               ) : contextMenu.kind === "vault" ? (
                 <>
-                  {contextMenuVault?.kind === "team" &&
-                  contextMenuVaultWritable &&
-                  hb.onOpenTeamInvite ? (
+                  {contextMenuVaultInvitable && hb.onOpenTeamInvite ? (
                     <button
                       type="button"
                       className={CTX_ITEM}
@@ -698,7 +733,7 @@ export function HostBrowser({
                   ) : null}
                   {isTeamVaultId(contextMenu.vaultId) && hb.onManageTeam ? (
                     <>
-                      {contextMenuVaultWritable ? (
+                      {contextMenuVaultWritable || contextMenuVaultInvitable ? (
                         <div
                           role="separator"
                           className="my-[0.35rem] h-px bg-[var(--border)]"
@@ -720,42 +755,47 @@ export function HostBrowser({
                 </>
               ) : (
                 <>
-                  <button
-                    type="button"
-                    className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
-                    disabled={contextMenu.groupPaths.length !== 1}
-                    onClick={() => {
-                      const targetGroupPath = contextMenu.groupPaths[0];
-                      hb.setContextMenu(null);
-                      if (!targetGroupPath) {
-                        return;
-                      }
-                      hb.openCreateSubgroupModal(
-                        targetGroupPath,
-                        contextMenu.vaultId,
-                      );
-                    }}
-                  >
-                    {translate("hostBrowser.menu.newSubgroup")}
-                  </button>
-                  <button
-                    type="button"
-                    className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
-                    disabled={contextMenu.groupPaths.length !== 1}
-                    onClick={() => {
-                      const targetGroupPath = contextMenu.groupPaths[0];
-                      hb.setContextMenu(null);
-                      if (!targetGroupPath) {
-                        return;
-                      }
-                      hb.openRenameGroupModal(
-                        targetGroupPath,
-                        contextMenu.vaultId,
-                      );
-                    }}
-                  >
-                    {translate("hostBrowser.menu.rename")}
-                  </button>
+                  {/* 읽기 전용 팀의 그룹은 만들고 이름 바꾸고 지우지 않는다 — 볼트로 복사(꺼내기)·내보내기만. */}
+                  {contextMenuGroupReadOnly ? null : (
+                    <>
+                      <button
+                        type="button"
+                        className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                        disabled={contextMenu.groupPaths.length !== 1}
+                        onClick={() => {
+                          const targetGroupPath = contextMenu.groupPaths[0];
+                          hb.setContextMenu(null);
+                          if (!targetGroupPath) {
+                            return;
+                          }
+                          hb.openCreateSubgroupModal(
+                            targetGroupPath,
+                            contextMenu.vaultId,
+                          );
+                        }}
+                      >
+                        {translate("hostBrowser.menu.newSubgroup")}
+                      </button>
+                      <button
+                        type="button"
+                        className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                        disabled={contextMenu.groupPaths.length !== 1}
+                        onClick={() => {
+                          const targetGroupPath = contextMenu.groupPaths[0];
+                          hb.setContextMenu(null);
+                          if (!targetGroupPath) {
+                            return;
+                          }
+                          hb.openRenameGroupModal(
+                            targetGroupPath,
+                            contextMenu.vaultId,
+                          );
+                        }}
+                      >
+                        {translate("hostBrowser.menu.rename")}
+                      </button>
+                    </>
+                  )}
                   {showGroupCopy ? (
                     <button
                       type="button"
@@ -794,31 +834,35 @@ export function HostBrowser({
                     })}
                   </button>
 
-                  <div
-                    role="separator"
-                    className="my-[0.35rem] h-px bg-[var(--border)]"
-                  />
+                  {contextMenuGroupReadOnly ? null : (
+                    <>
+                      <div
+                        role="separator"
+                        className="my-[0.35rem] h-px bg-[var(--border)]"
+                      />
 
-                  <button
-                    type="button"
-                    className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)]"
-                    onClick={() => {
-                      const target = hb.buildGroupDeleteTarget(
-                        contextMenu.groupPaths,
-                        contextMenu.vaultId,
-                      );
-                      hb.setGroupDeleteError(null);
-                      hb.setContextMenu(null);
-                      // 함께 지워질 호스트·Workspace 가 없으면 남길지 물을 것이 없다 — 빈 하위 그룹까지 바로 지운다.
-                      if (target.hostCount + target.workspaceCount === 0) {
-                        void removeGroups(target, "delete-subtree");
-                        return;
-                      }
-                      hb.setGroupDeleteTarget(target);
-                    }}
-                  >
-                    {translate("common.delete")}
-                  </button>
+                      <button
+                        type="button"
+                        className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)]"
+                        onClick={() => {
+                          const target = hb.buildGroupDeleteTarget(
+                            contextMenu.groupPaths,
+                            contextMenu.vaultId,
+                          );
+                          hb.setGroupDeleteError(null);
+                          hb.setContextMenu(null);
+                          // 함께 지워질 호스트·Workspace 가 없으면 남길지 물을 것이 없다 — 빈 하위 그룹까지 바로 지운다.
+                          if (target.hostCount + target.workspaceCount === 0) {
+                            void removeGroups(target, "delete-subtree");
+                            return;
+                          }
+                          hb.setGroupDeleteTarget(target);
+                        }}
+                      >
+                        {translate("common.delete")}
+                      </button>
+                    </>
+                  )}
                 </>
               )}
             </div>,

@@ -252,6 +252,21 @@ export class RdpManager {
     }
   }
 
+  /**
+   * 이 호스트들의 세션을 닫는다(팀에서 빠지면 그 팀 호스트의 것). 닫힘을 까닭과 함께 먼저 알리고 끊는다 — 코어의 닫힘이
+   * 뒤따라와도 화면은 이미 까닭을 보이고 있고, 기록은 한 번만 마감된다. 닫은 세션 수를 돌려준다.
+   */
+  closeHostSessions(hostIds: ReadonlySet<string>, notice: string): number {
+    const sessionIds = Array.from(this.lifecycleBySession)
+      .filter(([, lifecycle]) => hostIds.has(lifecycle.hostId))
+      .map(([sessionId]) => sessionId);
+    for (const sessionId of sessionIds) {
+      this.emitEvent({ type: "closed", sessionId, graceful: true, reason: notice, notice });
+      this.disconnect(sessionId);
+    }
+    return sessionIds.length;
+  }
+
   disconnect(sessionId: string): void {
     this.ownerBySession.delete(sessionId);
     if (!this.process || !this.sessions.has(sessionId)) {
@@ -412,8 +427,12 @@ export class RdpManager {
     );
   }
 
-  // 앱 종료 시 사이드카를 남기지 않는다.
+  // 앱 종료·로그아웃 때 사이드카를 남기지 않는다. 열려 있던 세션의 기록은 정상 닫힘으로 마감한다 — 안 그러면 그
+  // 연결이 기록에 "접속 중"인 채로 남는다(코어 관리자의 종료와 같다).
   shutdown(): void {
+    for (const sessionId of Array.from(this.lifecycleBySession.keys())) {
+      this.emitEvent({ type: "closed", sessionId, graceful: true });
+    }
     this.rejectAllPending(new Error("RDP core shutting down"));
     this.sessions.clear();
     this.process?.stdin.end();

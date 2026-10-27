@@ -152,7 +152,7 @@ import {
   createEmptyVaultIndex,
   TEAMS_SIGNED_OUT,
 } from "../utils";
-import { PERSONAL_VAULT_ID, isTeamVaultId, vaultIdOfHost } from "../utils";
+import { PERSONAL_VAULT_ID, isReadOnlyHost, isReadOnlyVault, isTeamVaultId, vaultIdOfHost } from "../utils";
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
 import { releaseTerminalUploadEndpoints } from "../services/sftp";
 
@@ -357,15 +357,18 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
     // 종류(SSH·Serial·RDP)는 드로어 안 셀렉터가 정한다 — 여기서는 기본값만 정해 준다.
     openCreateHostDrawer: (target) => {
       const state = get();
-      // 지금 위치에 만든다. All 이면 개인 맨 위다(팀이 없을 때와 같다).
+      // 지금 위치에 만든다. All 이면 개인 맨 위다(팀이 없을 때와 같다). 읽기 전용 팀을 보고 있으면 그 팀에는 만들 수
+      // 없으니 개인 맨 위다 — 서랍 맨 위 Vault 가 개인으로 보인다.
+      const vaultId = target?.vaultId ?? state.currentVaultId ?? PERSONAL_VAULT_ID;
+      const writable = !isReadOnlyVault(state.vaultIndex, vaultId);
       set({
         activeWorkspaceTab: "home",
         homeSection: "hosts",
         hostDrawer: {
           mode: "create",
-          defaultGroupPath: target ? target.groupPath : state.currentGroupPath,
+          defaultGroupPath: writable ? (target ? target.groupPath : state.currentGroupPath) : null,
           kind: "ssh",
-          vaultId: target?.vaultId ?? state.currentVaultId ?? PERSONAL_VAULT_ID,
+          vaultId: writable ? vaultId : PERSONAL_VAULT_ID,
         },
       });
     },
@@ -377,12 +380,18 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
       }
       set({ hostDrawer: { ...drawer, vaultId, defaultGroupPath: null } });
     },
-    openEditHostDrawer: (hostId) =>
+    openEditHostDrawer: (hostId) => {
+      // 읽기 전용 팀의 호스트는 고칠 수 없다 — 편집 창을 열지 않는다. 화면의 편집 길은 이미 닫혀 있고, 이것은 그 뒤의
+      // 마지막 문이다(열어 두면 저장할 때 메인이 거절한다).
+      if (isReadOnlyHost(get().vaultIndex, hostId)) {
+        return;
+      }
       set({
         activeWorkspaceTab: "home",
         homeSection: "hosts",
         hostDrawer: { mode: "edit", hostId },
-      }),
+      });
+    },
     closeHostDrawer: () => set({ hostDrawer: { mode: "closed" } }),
     navigateGroup: (path, vaultId) => {
       const nextPath = normalizeGroupPath(path);

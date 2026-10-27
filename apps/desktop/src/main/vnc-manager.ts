@@ -214,6 +214,24 @@ export class VncManager {
     }
   }
 
+  /**
+   * 이 호스트들의 세션을 닫는다(팀에서 빠지면 그 팀 호스트의 것). 기록을 그 까닭으로 마감하고 닫힘을 까닭과 함께
+   * 먼저 알린 뒤 끊는다 — 코어의 닫힘이 뒤따라와도 기록은 한 번만 마감되고 화면은 이미 까닭을 보인다. 닫은 세션 수를
+   * 돌려준다.
+   */
+  closeHostSessions(hostIds: ReadonlySet<string>, notice: string): number {
+    const sessionIds = Array.from(this.lifecycleBySession)
+      .filter(([, lifecycle]) => hostIds.has(lifecycle.hostId))
+      .map(([sessionId]) => sessionId);
+    for (const sessionId of sessionIds) {
+      this.finalizeLifecycle(sessionId, "closed", notice);
+      this.lifecycleBySession.delete(sessionId);
+      this.emitEvent({ type: "closed", sessionId, notice });
+      this.disconnect(sessionId);
+    }
+    return sessionIds.length;
+  }
+
   disconnect(sessionId: string): void {
     this.ownerBySession.delete(sessionId);
     this.sessions.delete(sessionId);
@@ -321,7 +339,19 @@ export class VncManager {
     );
   }
 
+  /**
+   * 앱 종료·로그아웃 때 사이드카를 남기지 않는다. 열려 있던 세션의 기록은 정상 닫힘으로 먼저 마감한다 — 프로세스가
+   * 끝나며 "VNC core exited" 오류로 남지 않게(코어 관리자의 종료와 같다).
+   */
   shutdown(): void {
+    for (const sessionId of Array.from(this.lifecycleBySession.keys())) {
+      this.finalizeLifecycle(sessionId, "closed", null);
+      this.emitEvent({ type: "closed", sessionId });
+    }
+    this.lifecycleBySession.clear();
+    this.sessions.clear();
+    this.connectedBySession.clear();
+    this.ownerBySession.clear();
     if (!this.process) {
       return;
     }

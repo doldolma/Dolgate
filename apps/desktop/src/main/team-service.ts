@@ -17,9 +17,12 @@ import {
   type TeamInviteCreated,
   type TeamInviteInfo,
   type TeamInvitePreview,
+  type TeamAssignableRole,
   type TeamAvailability,
+  type TeamInviteRole,
   type TeamListItem,
   type TeamMember,
+  type TeamRole,
 } from "@shared";
 import { t } from "./i18n";
 import { getDesktopStateStorage } from "./state-storage";
@@ -136,7 +139,8 @@ export class TeamService {
 
   async transferOwnership(teamId: string, userId: string): Promise<void> {
     await this.api.transferOwnership(this.requireLease(), teamId, userId);
-    this.patchInfo(teamId, { role: "member" });
+    // 옛 소유자는 관리자가 된다(서버와 같은 규칙).
+    this.patchInfo(teamId, { role: "admin" });
   }
 
   async listMembers(teamId: string): Promise<TeamMember[]> {
@@ -145,6 +149,11 @@ export class TeamService {
 
   async removeMember(teamId: string, userId: string): Promise<void> {
     await this.api.removeMember(this.requireLease(), teamId, userId);
+  }
+
+  /** 멤버의 역할을 바꾼다. 바뀐 사람의 기기는 팀 감시로 알고 팀 목록을 다시 읽는다. */
+  async setMemberRole(teamId: string, userId: string, role: TeamAssignableRole): Promise<void> {
+    await this.api.setMemberRole(this.requireLease(), teamId, userId, role);
   }
 
   async leave(teamId: string): Promise<void> {
@@ -157,7 +166,10 @@ export class TeamService {
    * 팀 키로 잠가(잠근 비밀값) 함께 올린다 — 서버는 못 열고, 멤버는 링크가 살아 있는 동안 목록에서 다시
    * 복사한다.
    */
-  async createInvite(teamId: string, options?: { expiresInHours?: number }): Promise<TeamInviteCreated> {
+  async createInvite(
+    teamId: string,
+    options?: { expiresInHours?: number; role?: TeamInviteRole },
+  ): Promise<TeamInviteCreated> {
     const lease = this.requireLease();
     const hours = options?.expiresInHours ?? DEFAULT_TEAM_INVITE_HOURS;
     if (!Number.isInteger(hours) || hours < 1 || hours > MAX_TEAM_INVITE_HOURS) {
@@ -175,6 +187,7 @@ export class TeamService {
       sealedSecret: sealTeamInviteSecret({ secret, teamId, teamDek }),
       joinTokenHash: hashTeamInviteJoinToken(deriveTeamInviteJoinToken(secret)),
       expiresAt,
+      role: options?.role ?? "member",
     });
     const link = formatTeamInviteLink(lease.serverUrl, invite.code, secret);
     return { invite: { ...invite, link }, link };
@@ -273,7 +286,7 @@ export class TeamService {
     return team;
   }
 
-  private patchInfo(teamId: string, patch: { name?: string; role?: "owner" | "member" }): void {
+  private patchInfo(teamId: string, patch: { name?: string; role?: TeamRole }): void {
     const info = this.storage.getTeamState(teamId)?.info;
     if (info && this.storage.upsertTeamInfo(teamId, { ...info, ...patch, updatedAt: new Date().toISOString() })) {
       this.teamSync.notifyChanged();

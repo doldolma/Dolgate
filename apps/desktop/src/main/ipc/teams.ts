@@ -4,7 +4,12 @@ import type {
   MyHostCredentialsSummary,
   TeamActivityItem,
   TeamActivityQuery,
+  TeamAssignableRole,
+  TeamChangeRef,
+  TeamChangesPage,
+  TeamInviteRole,
   TeamReplayStatus,
+  TeamRestoreOutcome,
   VaultCopyRequest,
   VaultIndex,
 } from "@shared";
@@ -39,10 +44,15 @@ export function registerTeamsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(ipcChannels.teams.removeMember, async (_event, teamId: string, userId: string) =>
     ctx.teams.removeMember(teamId, userId),
   );
+  ipcMain.handle(
+    ipcChannels.teams.setMemberRole,
+    async (_event, teamId: string, userId: string, role: TeamAssignableRole) => ctx.teams.setMemberRole(teamId, userId, role),
+  );
   ipcMain.handle(ipcChannels.teams.leave, async (_event, teamId: string) => ctx.teams.leave(teamId));
   ipcMain.handle(
     ipcChannels.teams.createInvite,
-    async (_event, teamId: string, options?: { expiresInHours?: number }) => ctx.teams.createInvite(teamId, options),
+    async (_event, teamId: string, options?: { expiresInHours?: number; role?: TeamInviteRole }) =>
+      ctx.teams.createInvite(teamId, options),
   );
   ipcMain.handle(ipcChannels.teams.listInvites, async (_event, teamId: string) => ctx.teams.listInvites(teamId));
   ipcMain.handle(ipcChannels.teams.revokeInvite, async (_event, teamId: string, code: string) =>
@@ -111,6 +121,41 @@ export function registerTeamsIpcHandlers(ctx: MainIpcContext): void {
           )
         : [],
   );
+  // 바뀐 것과 복원(관리자 이상 — 서버도 막는다).
+  ipcMain.handle(
+    ipcChannels.teams.listChanges,
+    async (_event, teamId: string, query?: { before?: unknown }): Promise<TeamChangesPage> =>
+      ctx.teamRestore
+        ? ctx.teamRestore.listChanges(teamId, {
+            before: typeof query?.before === "number" && Number.isSafeInteger(query.before) ? query.before : undefined,
+          })
+        : { sets: [], nextBefore: null },
+  );
+  ipcMain.handle(
+    ipcChannels.teams.restoreChange,
+    async (_event, teamId: string, change: unknown, options?: { overwrite?: unknown }): Promise<TeamRestoreOutcome> => {
+      if (!ctx.teamRestore) {
+        throw new Error("team restore is not available");
+      }
+      return ctx.teamRestore.restoreChange(teamId, parseTeamChangeRef(change), { overwrite: options?.overwrite === true });
+    },
+  );
+}
+
+/** 화면이 넘긴 묶음 — 목록이 준 그대로여야 한다. */
+function parseTeamChangeRef(value: unknown): TeamChangeRef {
+  const change = (value ?? {}) as Partial<Record<keyof TeamChangeRef, unknown>>;
+  const { firstSeq, lastSeq, changedBy, changedAt } = change;
+  if (
+    !Number.isSafeInteger(firstSeq) ||
+    !Number.isSafeInteger(lastSeq) ||
+    (firstSeq as number) > (lastSeq as number) ||
+    typeof changedBy !== "string" ||
+    typeof changedAt !== "string"
+  ) {
+    throw new Error("invalid team change");
+  }
+  return { firstSeq: firstSeq as number, lastSeq: lastSeq as number, changedBy, changedAt };
 }
 
 /**

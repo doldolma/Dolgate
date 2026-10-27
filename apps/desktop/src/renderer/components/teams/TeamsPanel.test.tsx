@@ -47,6 +47,7 @@ function invite(overrides: Partial<TeamInvite> = {}): TeamInvite {
     code: 'code-1',
     createdBy: 'minji',
     createdByEmail: 'minji@acme.dev',
+    role: 'member',
     expiresAt: new Date(Date.now() + 6 * 24 * HOUR).toISOString(),
     useCount: 1,
     createdAt: new Date(Date.now() - 24 * HOUR).toISOString(),
@@ -163,14 +164,18 @@ describe('TeamsPanel', () => {
     await waitFor(() => expect(desktopApi.teams.rename).toHaveBeenCalledWith('team-1', 'Acme Ops'));
   });
 
-  it('gives a member no member menus and no delete, but invite and leave', async () => {
+  it('gives a member no member menus, no invite and no delete — only leave', async () => {
     vi.mocked(desktopApi.teams.listMembers).mockResolvedValue(MINJI_OWNS);
+    // 링크 목록은 관리자 이상의 일이라 서버가 멤버에게는 거절한다 — 멤버 목록은 그래도 보인다.
+    vi.mocked(desktopApi.teams.listInvites).mockRejectedValue(new Error('팀 관리자만 할 수 있습니다.'));
     setTeams([teamEntry({ role: 'member' })]);
     renderPanel();
 
     await screen.findByText('minji@acme.dev');
+    expect(desktopApi.teams.listInvites).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: '멤버 메뉴' })).toBeNull();
-    expect(screen.getByRole('button', { name: '초대 링크' })).toBeInTheDocument();
+    // 초대 링크도 관리자 이상이다(서버가 막는다) — 멤버에게는 단추가 없다.
+    expect(screen.queryByRole('button', { name: '초대 링크' })).toBeNull();
     // 이름 변경·삭제는 소유자만 — 멤버의 팀 메뉴에는 나가기만 있다.
     fireEvent.click(screen.getByRole('button', { name: '팀 메뉴' }));
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['팀 나가기']);
@@ -185,6 +190,8 @@ describe('TeamsPanel', () => {
     chooseTeamMenu('팀 나가기');
     const dialog = screen.getByRole('dialog', { name: 'Acme Infra 나가기' });
     expect(within(dialog).getByText(/다시 들어오려면 새 초대 링크가 필요합니다/)).toBeInTheDocument();
+    // 나가면 그 팀 호스트의 열린 연결이 닫힌다 — 미리 말한다.
+    expect(within(dialog).getByText(/그 호스트에 열린 연결도 닫힙니다/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: '나가기' }));
 
     await waitFor(() => expect(desktopApi.teams.leave).toHaveBeenCalledWith('team-1'));
@@ -200,11 +207,11 @@ describe('TeamsPanel', () => {
     chooseTeamMenu('팀 나가기');
     const dialog = screen.getByRole('dialog', { name: 'Acme Infra 나가기' });
     const successor = within(dialog).getByRole('combobox', { name: 'New owner' }) as HTMLSelectElement;
-    // 가장 먼저 들어온 사람(minji)이 골라져 있다. 나는 목록에 없다.
+    // 같은 역할이면 가장 먼저 들어온 사람(minji)이 골라져 있다. 나는 목록에 없고, 이름 옆에 역할이 보인다.
     expect(successor.value).toBe('minji');
     expect(within(successor).getAllByRole('option').map((option) => option.textContent)).toEqual([
-      'minji@acme.dev · 가장 먼저 들어옴',
-      'jun@acme.dev',
+      'minji@acme.dev · Member',
+      'jun@acme.dev · Member',
     ]);
     fireEvent.click(within(dialog).getByRole('button', { name: '넘기고 나가기' }));
 
@@ -266,11 +273,14 @@ describe('TeamsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '초대 링크' }));
     let dialog = screen.getByRole('dialog', { name: 'Acme Infra 초대' });
     expect(within(dialog).getByRole('radio', { name: '7일' })).toHaveAttribute('aria-checked', 'true');
+    // 역할은 고르지 않았으면 Member — 역할이 생기기 전과 같은 링크다.
+    expect(within(dialog).getByRole('radiogroup', { name: 'Role' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('radio', { name: 'Member' })).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(within(dialog).getByRole('radio', { name: '1일' }));
     fireEvent.click(within(dialog).getByRole('button', { name: '만들고 복사' }));
 
     expect(await within(dialog).findByText('링크를 복사했습니다 — 1일 동안 열립니다.')).toBeInTheDocument();
-    expect(desktopApi.teams.createInvite).toHaveBeenCalledWith('team-1', { expiresInHours: 24 });
+    expect(desktopApi.teams.createInvite).toHaveBeenCalledWith('team-1', { expiresInHours: 24, role: 'member' });
     expect(writeText).toHaveBeenCalledWith(LINK);
     expect(within(dialog).getByRole('textbox', { name: 'Invite link' })).toHaveValue(LINK);
 
@@ -320,7 +330,7 @@ describe('TeamsPanel', () => {
 
     chooseTeamMenu('팀 삭제');
     const dialog = screen.getByRole('dialog', { name: 'Acme Infra 팀 삭제' });
-    expect(within(dialog).getByText('다른 멤버 2명의 화면에서도 사라집니다.')).toBeInTheDocument();
+    expect(within(dialog).getByText('다른 멤버 2명의 화면에서도 사라지고, 모두의 열린 연결이 닫힙니다.')).toBeInTheDocument();
     await within(dialog).findByText('4');
     fireEvent.click(within(dialog).getByRole('button', { name: '팀 삭제' }));
 
@@ -439,5 +449,183 @@ describe('TeamsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '만들기' }));
     await waitFor(() => expect(desktopApi.teams.create).toHaveBeenCalledWith('Infra'));
     expect(appStore.getState().teamsPanelTeamId).toBe('team-new');
+  });
+});
+
+/**
+ * 역할 넷(7-3) — 칩, ⋯ 메뉴 맨 위의 Role 셋(R1), '멤버' 머리의 ⓘ(R5), 링크의 역할(I1·IL), 잇는 순서. 화면은 서버와 같은
+ * 규칙으로 길만 닫는다(막는 것은 서버다).
+ */
+describe('TeamsPanel roles', () => {
+  // 나는 dolma. 다른 사람은 역할마다 한 명씩 — 소유자 owner1(내가 소유자가 아니면), 관리자 sora, 멤버 minji, 읽기 전용 jun.
+  function rosterFor(myRole: TeamMember['role']): TeamMember[] {
+    return [
+      ...(myRole === 'owner' ? [] : [member('owner1', 'owner', 'owner1', 48)]),
+      member('dolma', myRole, myRole === 'owner' ? 'dolma' : 'owner1', 40),
+      member('sora', 'admin', 'dolma', 30),
+      member('minji', 'member', 'dolma', 20),
+      member('jun', 'viewer', 'minji', 10),
+    ];
+  }
+
+  /** 그 줄의 멤버 메뉴 항목(고른 역할은 ✓). 메뉴가 없으면 null. */
+  function memberMenuOf(email: string): string[] | null {
+    const row = rowOf(screen.getByText(email));
+    const button = within(row).queryByRole('button', { name: '멤버 메뉴' });
+    if (!button) {
+      return null;
+    }
+    fireEvent.click(button);
+    const items = [...within(row).getByRole('menu').querySelectorAll('[role="menuitem"],[role="menuitemradio"]')].map(
+      (item) => (item.getAttribute('aria-checked') === 'true' ? `${item.textContent} ✓` : (item.textContent ?? '')),
+    );
+    fireEvent.click(button);
+    return items;
+  }
+
+  it('shows four role chips, and what each role does behind the ⓘ next to Members', async () => {
+    vi.mocked(desktopApi.teams.listMembers).mockResolvedValue(rosterFor('owner'));
+    setTeams([teamEntry()]);
+    renderPanel();
+    await screen.findByText('minji@acme.dev');
+
+    expect(within(rowOf(screen.getByText('dolma@acme.dev'))).getByText('Owner')).toBeInTheDocument();
+    expect(within(rowOf(screen.getByText('sora@acme.dev'))).getByText('Admin')).toBeInTheDocument();
+    expect(within(rowOf(screen.getByText('minji@acme.dev'))).getByText('Member')).toBeInTheDocument();
+    expect(within(rowOf(screen.getByText('jun@acme.dev'))).getByText('Viewer')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '역할마다 할 수 있는 것' }));
+    const hint = screen.getByRole('tooltip');
+    for (const role of ['Owner', 'Admin', 'Member', 'Viewer']) {
+      expect(within(hint).getByText(role)).toBeInTheDocument();
+    }
+    expect(hint).toHaveTextContent('보고 접속만 합니다. 팀의 것은 고치지 못합니다.');
+  });
+
+  // 서버와 같은 규칙: 소유자는 누구든 Admin 까지 바꾸고 넘기고 빼고, 관리자는 Member ↔ Viewer 만 바꾸고 그 둘만 뺀다.
+  it.each([
+    [
+      'owner',
+      {
+        'sora@acme.dev': ['Admin ✓', 'Member', 'Viewer', '소유자로 지정', '제거'],
+        'minji@acme.dev': ['Admin', 'Member ✓', 'Viewer', '소유자로 지정', '제거'],
+        'jun@acme.dev': ['Admin', 'Member', 'Viewer ✓', '소유자로 지정', '제거'],
+      },
+    ],
+    [
+      'admin',
+      {
+        'owner1@acme.dev': null,
+        'sora@acme.dev': null,
+        'minji@acme.dev': ['Member ✓', 'Viewer', '제거'],
+        'jun@acme.dev': ['Member', 'Viewer ✓', '제거'],
+      },
+    ],
+    ['member', { 'owner1@acme.dev': null, 'sora@acme.dev': null, 'minji@acme.dev': null, 'jun@acme.dev': null }],
+    ['viewer', { 'owner1@acme.dev': null, 'sora@acme.dev': null, 'minji@acme.dev': null, 'jun@acme.dev': null }],
+  ] as const)('gives the %s the member menus its role allows', async (myRole, expected) => {
+    vi.mocked(desktopApi.teams.listMembers).mockResolvedValue(rosterFor(myRole));
+    setTeams([teamEntry({ role: myRole })]);
+    renderPanel();
+    await screen.findByText('minji@acme.dev');
+
+    for (const [email, items] of Object.entries(expected)) {
+      expect({ email, items: memberMenuOf(email) }).toEqual({ email, items });
+    }
+    // 내 줄에는 메뉴가 없다.
+    expect(memberMenuOf('dolma@acme.dev')).toBeNull();
+    // 초대 링크 단추와 링크 목록은 관리자 이상만.
+    const manages = myRole === 'owner' || myRole === 'admin';
+    expect(Boolean(screen.queryByRole('button', { name: '초대 링크' }))).toBe(manages);
+    expect(vi.mocked(desktopApi.teams.listInvites).mock.calls.length > 0).toBe(manages);
+  });
+
+  it('changes a role from the member menu, reads the members again, and ignores the role they already have', async () => {
+    vi.mocked(desktopApi.teams.listMembers).mockResolvedValue(rosterFor('owner'));
+    vi.mocked(desktopApi.teams.setMemberRole).mockResolvedValue(undefined);
+    setTeams([teamEntry()]);
+    renderPanel();
+    const row = rowOf(await screen.findByText('minji@acme.dev'));
+    const reads = vi.mocked(desktopApi.teams.listMembers).mock.calls.length;
+
+    fireEvent.click(within(row).getByRole('button', { name: '멤버 메뉴' }));
+    fireEvent.click(within(row).getByRole('menuitemradio', { name: 'Member' }));
+    expect(desktopApi.teams.setMemberRole).not.toHaveBeenCalled();
+
+    fireEvent.click(within(row).getByRole('button', { name: '멤버 메뉴' }));
+    fireEvent.click(within(row).getByRole('menuitemradio', { name: 'Viewer' }));
+    await waitFor(() => expect(desktopApi.teams.setMemberRole).toHaveBeenCalledWith('team-1', 'minji', 'viewer'));
+    await waitFor(() => expect(vi.mocked(desktopApi.teams.listMembers).mock.calls.length).toBeGreaterThan(reads));
+  });
+
+  it('says why a role change failed', async () => {
+    vi.mocked(desktopApi.teams.listMembers).mockResolvedValue(rosterFor('owner'));
+    vi.mocked(desktopApi.teams.setMemberRole).mockRejectedValue(new Error('줄 수 없는 역할입니다.'));
+    setTeams([teamEntry()]);
+    renderPanel();
+    const row = rowOf(await screen.findByText('jun@acme.dev'));
+
+    fireEvent.click(within(row).getByRole('button', { name: '멤버 메뉴' }));
+    fireEvent.click(within(row).getByRole('menuitemradio', { name: 'Admin' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('줄 수 없는 역할입니다.');
+  });
+
+  it('shows which role each invite link gives, and makes a viewer link when Viewer is picked', async () => {
+    vi.mocked(desktopApi.teams.listInvites).mockResolvedValue([
+      invite({ code: 'v-link', role: 'viewer' }),
+      invite({ code: 'm-link', role: 'member', createdByEmail: 'dolma@acme.dev' }),
+    ]);
+    setTeams([teamEntry()]);
+    renderPanel();
+
+    const links = await screen.findByRole('list', { name: '초대 링크' });
+    const [viewerLink, memberLink] = within(links).getAllByRole('listitem');
+    expect(within(viewerLink!).getByText('Viewer')).toBeInTheDocument();
+    expect(within(memberLink!).getByText('Member')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '초대 링크' }));
+    const dialog = screen.getByRole('dialog', { name: 'Acme Infra 초대' });
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Viewer' }));
+    expect(within(dialog).getByRole('radio', { name: 'Viewer' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(within(dialog).getByRole('button', { name: '만들고 복사' }));
+
+    await waitFor(() =>
+      expect(desktopApi.teams.createInvite).toHaveBeenCalledWith('team-1', { expiresInHours: 168, role: 'viewer' }),
+    );
+  });
+
+  it('hands over to an admin first even when they joined later, like the server', async () => {
+    vi.mocked(desktopApi.teams.listMembers).mockResolvedValue([
+      member('dolma', 'owner', 'dolma', 48),
+      member('jun', 'viewer', 'dolma', 40),
+      member('minji', 'member', 'dolma', 30),
+      member('sora', 'admin', 'minji', 2),
+    ]);
+    setTeams([teamEntry()]);
+    renderPanel();
+    await screen.findByText('minji@acme.dev');
+
+    chooseTeamMenu('팀 나가기');
+    const dialog = screen.getByRole('dialog', { name: 'Acme Infra 나가기' });
+    const successor = within(dialog).getByRole('combobox', { name: 'New owner' }) as HTMLSelectElement;
+    expect(successor.value).toBe('sora');
+    expect(within(successor).getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'sora@acme.dev · Admin',
+      'minji@acme.dev · Member',
+      'jun@acme.dev · Viewer',
+    ]);
+  });
+
+  it('tells the owner they become an admin after handing over', async () => {
+    setTeams([teamEntry()]);
+    renderPanel();
+    const row = rowOf(await screen.findByText('minji@acme.dev'));
+
+    fireEvent.click(within(row).getByRole('button', { name: '멤버 메뉴' }));
+    fireEvent.click(within(row).getByRole('menuitem', { name: '소유자로 지정' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'minji@acme.dev 에게 소유권 넘기기' });
+    expect(dialog).toHaveTextContent('넘기면 나는 관리자가 됩니다.');
   });
 });

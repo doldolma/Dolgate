@@ -68,7 +68,7 @@ function serverItem(seq: number, createdAt: string, overrides: Partial<TeamActiv
 }
 
 function status(recordingId: string, state: TeamReplayStatus['state'], segmentCount = 3): TeamReplayStatus {
-  return { recordingId, state, authorEmail: 'b@example.com', segmentCount };
+  return { recordingId, state, authorEmail: 'b@example.com', segmentCount, viewable: true };
 }
 
 function renderPanel(onOpenReplay = vi.fn().mockResolvedValue(undefined)) {
@@ -166,6 +166,42 @@ describe('LogsPanel — team history', () => {
     expect(pending).toBeDisabled();
   });
 
+  // 녹화는 관리자 이상과 녹화한 사람만 받는다(7-1) — 서버가 내주지 않으니 열지 말고 까닭을 말한다.
+  it("doesn't open a team recording you may not view, and says why", async () => {
+    mocks.listTeamActivity.mockResolvedValue([activityItem(1, sessionLog('theirs', { status: 'closed' }), 'end')]);
+    mocks.getTeamReplayStatuses.mockResolvedValue([{ ...status('rec-theirs', 'ended'), viewable: false }]);
+    const onOpenReplay = renderPanel();
+    chooseTeam();
+
+    const forbidden = await screen.findByRole('button', { name: 'Replay — 녹화는 관리자와 녹화한 사람만 볼 수 있습니다' });
+    expect(forbidden).toBeDisabled();
+    fireEvent.click(forbidden);
+    expect(onOpenReplay).not.toHaveBeenCalled();
+    fireEvent.mouseEnter(forbidden.parentElement!);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('녹화는 관리자와 녹화한 사람만 볼 수 있습니다');
+  });
+
+  it('says who changed whose role, and the role someone joined as', async () => {
+    mocks.listTeamActivity.mockResolvedValue([
+      serverItem(3, '2026-10-21T02:00:00.000Z', {
+        memberChange: { type: 'role_changed', userId: 'user-c', email: 'c@example.com', byEmail: 'a@example.com', role: 'admin' },
+      }),
+      serverItem(2, '2026-10-21T01:00:00.000Z', {
+        memberChange: { type: 'member_joined', userId: 'user-d', email: 'd@example.com', role: 'viewer' },
+      }),
+      serverItem(1, '2026-10-21T00:00:00.000Z', {
+        memberChange: { type: 'member_joined', userId: 'user-e', email: 'e@example.com', role: 'member' },
+      }),
+    ]);
+    renderPanel();
+    chooseTeam();
+
+    expect(await screen.findByText('a@example.com 님이 c@example.com 님의 역할을 Admin 로 바꿨습니다')).toBeInTheDocument();
+    expect(screen.getByText('d@example.com 님이 Viewer 로 팀에 들어왔습니다')).toBeInTheDocument();
+    // Member 로 들어온 것은 역할 전과 같은 문구다.
+    expect(screen.getByText('e@example.com 님이 팀에 들어왔습니다')).toBeInTheDocument();
+  });
+
   it('takes new rows every 30 seconds and older ones once scrolled to the end', async () => {
     const intervals: Array<() => void> = [];
     vi.spyOn(window, 'setInterval').mockImplementation(((callback: () => void) => {
@@ -208,6 +244,30 @@ describe('LogsPanel — team history', () => {
     });
     expect(await screen.findByText('web-old')).toBeInTheDocument();
     expect(mocks.listTeamActivity).toHaveBeenLastCalledWith('team-1', { before: 101, limit: 100 });
+  });
+
+  // 빠진 사람의 앱은 열린 연결을 닫지만 그 끝을 팀에 올릴 수 없다 — 시작만 있는 줄은 그때 끝난 것으로 보인다.
+  it('ends a session left open by someone who then left the team, at the time they left', async () => {
+    const started = sessionLog('s1', { connectedAt: '2026-10-21T01:00:00.000Z' });
+    const stillOpen = { ...sessionLog('s2', { connectedAt: '2026-10-21T03:00:00.000Z' }), createdAt: '2026-10-21T03:00:00.000Z' };
+    mocks.listTeamActivity.mockResolvedValue([
+      { ...activityItem(4, stillOpen, 'start'), authorUserId: 'user-d', authorEmail: 'd@example.com' },
+      serverItem(3, '2026-10-21T01:30:00.000Z', {
+        memberChange: { type: 'member_removed', userId: 'user-b', email: 'b@example.com', byUserId: 'user-a', byEmail: 'a@example.com' },
+      }),
+      activityItem(2, started, 'start'),
+    ]);
+    renderPanel();
+    chooseTeam();
+
+    const leftCard = (await screen.findByText('web-s1')).closest('article') as HTMLElement;
+    expect(within(leftCard).getByText('Closed')).toBeInTheDocument();
+    expect(within(leftCard).getByText('팀에서 빠져 연결이 끝났습니다.')).toBeInTheDocument();
+    expect(within(leftCard).getByText('30분 0초')).toBeInTheDocument();
+    // 아직 팀에 있는 사람의 열린 접속은 그대로다.
+    const openCard = screen.getByText('web-s2').closest('article') as HTMLElement;
+    expect(within(openCard).getByText('Connected')).toBeInTheDocument();
+    expect(within(openCard).queryByText('팀에서 빠져 연결이 끝났습니다.')).not.toBeInTheDocument();
   });
 
   it('asks for an update on rows written by a newer app', async () => {

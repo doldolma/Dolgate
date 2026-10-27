@@ -128,6 +128,23 @@ describe("VncConnectionOverlay", () => {
     expect(retryVncConnection).toHaveBeenCalledWith("vnc-1");
   });
 
+  // 팀에서 빠져 앱이 닫은 세션 — 다시 붙을 호스트가 없으니 다시 시도를 두지 않는다.
+  it("앱이 까닭과 함께 닫은 세션에는 Retry 가 없다", () => {
+    seed(
+      {
+        status: "error",
+        errorMessage: "팀에서 빠져 이 연결을 닫았습니다.",
+        connectionProgress: { stage: "connecting", message: "팀에서 빠져 이 연결을 닫았습니다.", retryable: false },
+      },
+      {},
+    );
+
+    render(<VncConnectionOverlay sessionId="vnc-1" />);
+
+    expect(screen.getByText("팀에서 빠져 이 연결을 닫았습니다.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
   it("tailnet 호스트는 그 관문을 단계로 보여준다", () => {
     // 한 줄 진행 문구로는 "연결하는 중" 밖에 말할 수 없다. tailnet 인증이 아직 안 끝났는지,
     // 넷맵에 대상이 없는지 알아야 한다 — 그게 안 보이면 그냥 멈춘 것처럼 보인다.

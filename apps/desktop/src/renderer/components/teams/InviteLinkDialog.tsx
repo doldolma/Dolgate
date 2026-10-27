@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { TeamInviteCreated } from '@shared';
+import type { TeamInviteCreated, TeamInviteRole } from '@shared';
 import { cn } from '../../lib/cn';
 import { Button, Input, Tooltip } from '../../ui';
 import { Check, Copy, Info } from '../../ui/icons';
@@ -17,6 +17,12 @@ const EXPIRY_CHOICES = [
 ] as const;
 const DEFAULT_EXPIRY_HOURS = 7 * 24;
 
+/** 링크로 줄 수 있는 역할(관리자는 들어온 뒤에 소유자가 올린다). 처음은 Member — 역할 전과 같다. */
+const ROLE_CHOICES: ReadonlyArray<{ role: TeamInviteRole; label: string }> = [
+  { role: 'member', label: 'Member' },
+  { role: 'viewer', label: 'Viewer' },
+];
+
 // 호스트 종류 고르기와 같은 모양의 칸 나눔(네모).
 const SEGMENT_TRACK_CLASS =
   'grid auto-cols-fr grid-flow-col gap-[0.15rem] rounded-[10px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.2rem]';
@@ -28,12 +34,57 @@ const FIELD_LABEL_CLASS = 'text-[0.82rem] font-semibold uppercase tracking-[0.12
 
 interface InviteLinkDialogProps {
   teamName: string;
-  onCreate: (expiresInHours: number) => Promise<TeamInviteCreated>;
+  onCreate: (expiresInHours: number, role: TeamInviteRole) => Promise<TeamInviteCreated>;
   onClose: () => void;
 }
 
+/** 칸 나눔 하나(호스트 종류 고르기와 같은 모양) — 역할과 기한이 같은 모양이다(후보 I1). */
+function SegmentedChoice<T extends string | number>({
+  label,
+  choices,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  choices: ReadonlyArray<{ value: T; label: string }>;
+  value: T;
+  disabled: boolean;
+  onChange: (value: T) => void;
+}) {
+  return (
+    // 단추 여럿을 담으므로 <label>(FieldGroup) 대신 같은 모양의 머리를 쓴다 — label 은 누르면 첫 단추를 누른다.
+    <div className="grid gap-[0.55rem]">
+      <span className={FIELD_LABEL_CLASS}>{label}</span>
+      <div role="radiogroup" aria-label={label} className={SEGMENT_TRACK_CLASS}>
+        {choices.map((choice) => {
+          const selected = choice.value === value;
+          return (
+            <button
+              key={choice.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              disabled={disabled}
+              className={cn(
+                SEGMENT_CLASS,
+                selected
+                  ? 'border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]'
+                  : 'border-transparent text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_70%,transparent_30%)] hover:text-[var(--text)]',
+              )}
+              onClick={() => onChange(choice.value)}
+            >
+              {choice.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /**
- * 초대 링크 만들기 — 기한만 고르고, 만들면서 바로 복사한다.
+ * 초대 링크 만들기 — 역할(Member·Viewer)과 기한을 고르고, 만들면서 바로 복사한다.
  *
  * 만든 뒤에도 링크를 창에 두고 `다시 복사` 를 준다(첫 복사가 실패했을 때). 창을 닫은 뒤에는 링크 목록에서
  * 다시 복사한다.
@@ -42,6 +93,7 @@ export function InviteLinkDialog({ teamName, onCreate, onClose }: InviteLinkDial
   const { t: translate } = useTranslation();
   const { busy, error, run } = useDialogAction();
   const [hours, setHours] = useState<number>(DEFAULT_EXPIRY_HOURS);
+  const [role, setRole] = useState<TeamInviteRole>('member');
   const [created, setCreated] = useState<{ link: string; copied: boolean } | null>(null);
   const durationLabel = translate(
     EXPIRY_CHOICES.find((choice) => choice.hours === hours)?.labelKey ?? 'teamsPanel.invite.duration.day7',
@@ -49,7 +101,7 @@ export function InviteLinkDialog({ teamName, onCreate, onClose }: InviteLinkDial
 
   const create = () =>
     void run(async () => {
-      const invite = await onCreate(hours);
+      const invite = await onCreate(hours, role);
       setCreated({ link: invite.link, copied: await copyText(invite.link) });
     });
 
@@ -119,33 +171,22 @@ export function InviteLinkDialog({ teamName, onCreate, onClose }: InviteLinkDial
           </div>
         </>
       ) : (
-        // 단추 여럿을 담으므로 <label>(FieldGroup) 대신 같은 모양의 머리를 쓴다 — label 은 누르면 첫 단추를 누른다.
-        <div className="grid gap-[0.55rem]">
-          <span className={FIELD_LABEL_CLASS}>Expires</span>
-          <div role="radiogroup" aria-label="Expires" className={SEGMENT_TRACK_CLASS}>
-            {EXPIRY_CHOICES.map((choice) => {
-              const selected = choice.hours === hours;
-              return (
-                <button
-                  key={choice.hours}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  disabled={busy}
-                  className={cn(
-                    SEGMENT_CLASS,
-                    selected
-                      ? 'border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]'
-                      : 'border-transparent text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_70%,transparent_30%)] hover:text-[var(--text)]',
-                  )}
-                  onClick={() => setHours(choice.hours)}
-                >
-                  {translate(choice.labelKey)}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <>
+          <SegmentedChoice
+            label="Role"
+            choices={ROLE_CHOICES.map((choice) => ({ value: choice.role, label: choice.label }))}
+            value={role}
+            disabled={busy}
+            onChange={setRole}
+          />
+          <SegmentedChoice
+            label="Expires"
+            choices={EXPIRY_CHOICES.map((choice) => ({ value: choice.hours, label: translate(choice.labelKey) }))}
+            value={hours}
+            disabled={busy}
+            onChange={setHours}
+          />
+        </>
       )}
       <TeamDialogError message={error} />
     </TeamDialogFrame>

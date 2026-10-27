@@ -2279,7 +2279,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
         };
       });
     },
-    applyTmuxGroupReconnectGaveUp: (groupId, message) => {
+    applyTmuxGroupReconnectGaveUp: (groupId, message, retryable = true) => {
       set((state) => {
         const group = state.tmuxGroups.find((g) => g.id === groupId);
         if (!group) {
@@ -2287,7 +2287,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
         }
         const controlSessionId = group.controlSessionId;
         const progress = createConnectionProgress("reconnecting", message, {
-          retryable: true,
+          retryable,
         });
         return {
           tmuxGroups: state.tmuxGroups.map((g) =>

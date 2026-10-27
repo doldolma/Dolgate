@@ -184,6 +184,10 @@ export type RdpSessionEvent =
       sessionId: string;
       graceful?: boolean;
       reason?: string | null;
+      /**
+       * 앱이 닫았다면 그 까닭(팀에서 빠짐 등). 있으면 화면은 탭을 지우지 않고 다시 시도 없이 이 문구를 보인다.
+       */
+      notice?: string;
     }
   // 해상도가 실제로 바뀌었다. 캔버스와 누적 버퍼를 새 크기로 다시 만들어야 한다.
   | {

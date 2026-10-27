@@ -1145,6 +1145,11 @@ export class CoreManager {
     string,
     PortForwardRuntimeRecord
   >();
+  /**
+   * 앱이 닫는 연결의 까닭(팀에서 빠짐 등) — 세션·SFTP·컨테이너 끝점·포워딩 규칙 id 마다. 닫힘 이벤트에
+   * `closedNotice` 로 실어 화면이 그 자리에 보이게 하고, 기록의 끊긴 까닭으로도 쓴다.
+   */
+  private readonly closeNotices = new Map<string, string>();
   private readonly pendingResponses = new Map<
     string,
     PendingResponse<Record<string, unknown>>
@@ -2157,6 +2162,7 @@ export class CoreManager {
     this.containerEndpoints.delete(endpointId);
     this.containerNamesByEndpointId.delete(endpointId);
     if (!this.process) {
+      this.closeNotices.delete(endpointId);
       return;
     }
     await this.start();
@@ -3452,6 +3458,16 @@ export class CoreManager {
   }
 
   async stopPortForward(ruleId: string): Promise<void> {
+    // 앱이 멈추는 까닭은 이번 멈춤에만 쓴다 — 실패해도 남기지 않는다(같은 규칙의 다음 멈춤에 묻어나지 않게).
+    const notice = this.closeNotices.get(ruleId);
+    try {
+      await this.stopPortForwardWith(ruleId, notice);
+    } finally {
+      this.closeNotices.delete(ruleId);
+    }
+  }
+
+  private async stopPortForwardWith(ruleId: string, notice: string | undefined): Promise<void> {
     if (!this.process) {
       this.portForwardDefinitions.delete(ruleId);
       this.portForwardRuntimes.delete(ruleId);
@@ -3478,7 +3494,7 @@ export class CoreManager {
         ...runtime,
         status: "stopped",
         updatedAt: new Date().toISOString(),
-        message: undefined,
+        message: notice,
       });
       this.broadcastPortForwardEvent({
         runtime: this.portForwardRuntimes.get(ruleId)!,
@@ -3550,11 +3566,13 @@ export class CoreManager {
         ["sftpDisconnected"],
       );
       this.sftpEndpoints.delete(endpointId);
-      this.finalizeSftpLifecycle(endpointId, "closed", null);
+      this.finalizeSftpLifecycle(endpointId, "closed", this.closeNotices.get(endpointId) ?? null);
       this.sftpEndpointOwnerById.delete(endpointId);
     } catch (error) {
       this.finalizeSftpLifecycle(endpointId, "error", toErrorMessage(error));
       throw error;
+    } finally {
+      this.closeNotices.delete(endpointId);
     }
   }
 
@@ -4429,6 +4447,53 @@ export class CoreManager {
     }
   }
 
+  /**
+   * 이 호스트들의 연결을 모두 닫는다 — 터미널(탭)·SFTP·컨테이너·포워딩. 팀에서 빠지면 그 팀 호스트의 것을
+   * 닫는다(팀 볼트를 지우기 전에 부른다). notice 는 화면이 그 자리에 보일 까닭이자 기록의 끊긴 까닭이다.
+   * 닫기를 건 연결 수를 돌려준다.
+   */
+  closeHostConnections(hostIds: ReadonlySet<string>, notice: string): number {
+    let closed = 0;
+    for (const [sessionId, tab] of Array.from(this.tabs)) {
+      if (tab.hostId && hostIds.has(tab.hostId)) {
+        this.closeNotices.set(sessionId, notice);
+        this.disconnect(sessionId);
+        closed += 1;
+      }
+    }
+    for (const [endpointId, endpoint] of Array.from(this.sftpEndpoints)) {
+      if (hostIds.has(endpoint.hostId)) {
+        this.closeNotices.set(endpointId, notice);
+        void this.sftpDisconnect(endpointId).catch(() => undefined);
+        closed += 1;
+      }
+    }
+    for (const [endpointId, endpoint] of Array.from(this.containerEndpoints)) {
+      if (hostIds.has(endpoint.hostId)) {
+        this.closeNotices.set(endpointId, notice);
+        void this.containersDisconnect(endpointId).catch(() => undefined);
+        closed += 1;
+      }
+    }
+    for (const runtime of this.listPortForwardRuntimes()) {
+      if (hostIds.has(runtime.hostId) && (runtime.status === "starting" || runtime.status === "running")) {
+        this.closeNotices.set(runtime.ruleId, notice);
+        void this.stopPortForward(runtime.ruleId).catch(() => undefined);
+        closed += 1;
+      }
+    }
+    return closed;
+  }
+
+  /** 앱이 닫는 연결의 닫힘 이벤트에 그 까닭을 싣는다. 까닭이 없으면 그대로다. */
+  private withCloseNotice(
+    event: CoreEvent<Record<string, unknown>>,
+    id: string | undefined,
+  ): CoreEvent<Record<string, unknown>> {
+    const notice = id ? this.closeNotices.get(id) : undefined;
+    return notice ? { ...event, payload: { ...event.payload, message: notice, closedNotice: notice } } : event;
+  }
+
   /** 임시 컨테이너 터널의 주인을 기록한다. 시작한 IPC 가 부른다. */
   registerContainerTunnelOwner(
     ruleId: string,
@@ -4587,12 +4652,14 @@ export class CoreManager {
       this.sessionTransportById.delete(sessionId);
       this.tmuxControlSessionIds.delete(sessionId);
       this.tabs.delete(sessionId);
+      // 앱이 닫는 것이면(팀에서 빠짐 등) 그 까닭을 싣는다. 코어가 뒤에 보내는 닫힘에도 실어야 하므로 아직 지우지 않는다.
+      const notice = this.closeNotices.get(sessionId);
       this.broadcastTerminalEvent({
         type: "closed",
         sessionId,
-        payload: {
-          message: "client requested disconnect",
-        },
+        payload: notice
+          ? { message: notice, closedNotice: notice }
+          : { message: "client requested disconnect" },
       });
       this.sessionOwnerById.delete(sessionId);
       // **로컬 정리만 하면 붙는 중인 연결이 그대로 살아남는다.**
@@ -4978,7 +5045,9 @@ export class CoreManager {
           : event.type === "portForwardStopped"
             ? "stopped"
             : "error";
-      const runtime = this.buildForwardRuntime(ruleId, event.payload, status);
+      const built = this.buildForwardRuntime(ruleId, event.payload, status);
+      const notice = status === "stopped" ? this.closeNotices.get(ruleId) : undefined;
+      const runtime = notice ? { ...built, message: notice } : built;
       if (status === "stopped") {
         this.portForwardDefinitions.delete(ruleId);
       }
@@ -5024,17 +5093,21 @@ export class CoreManager {
                 ),
               );
             } else {
+              const notice = this.closeNotices.get(event.endpointId);
               this.finalizeContainerLifecycleForScope(
                 event.endpointId,
                 lifecycleId,
-                typeof event.payload.message === "string"
-                  ? event.payload.message
-                  : null,
+                notice ?? (typeof event.payload.message === "string" ? event.payload.message : null),
               );
             }
           }
         }
-        this.broadcastTerminalEvent(event);
+        this.broadcastTerminalEvent(
+          event.type === "containersDisconnected" ? this.withCloseNotice(event, event.endpointId) : event,
+        );
+        if (event.type !== "containersConnected") {
+          this.closeNotices.delete(event.endpointId);
+        }
         return;
       }
       if (
@@ -5044,7 +5117,9 @@ export class CoreManager {
       ) {
         return;
       }
-      this.broadcastTerminalEvent(event);
+      this.broadcastTerminalEvent(
+        event.type === "sftpDisconnected" ? this.withCloseNotice(event, event.endpointId) : event,
+      );
       return;
     }
 
@@ -5067,6 +5142,8 @@ export class CoreManager {
       }
       if (existing) {
         if (event.type === "closed") {
+          const closing = this.withCloseNotice(event, event.sessionId);
+          this.closeNotices.delete(event.sessionId);
           this.clearPendingStartupCommand(event.sessionId);
           this.sessionTransportById.delete(event.sessionId);
           this.tmuxControlSessionIds.delete(event.sessionId);
@@ -5086,20 +5163,20 @@ export class CoreManager {
                     : t("core.sshSessionClosed"),
               metadata: {
                 sessionId: event.sessionId,
-                message: event.payload.message ?? null,
+                message: closing.payload.message ?? null,
               },
             });
           } else if (!sessionLifecycle.disconnectedAt) {
             this.finalizeSessionLifecycle(
               event.sessionId,
               "closed",
-              typeof event.payload.message === "string"
-                ? event.payload.message
+              typeof closing.payload.message === "string"
+                ? closing.payload.message
                 : null,
             );
           }
           this.sessionLifecycleById.delete(event.sessionId);
-          this.broadcastTerminalEvent(event);
+          this.broadcastTerminalEvent(closing);
           this.forgetSessionOwner(event.sessionId);
           return;
         }
@@ -5212,9 +5289,12 @@ export class CoreManager {
           }
         }
       }
-      this.broadcastTerminalEvent(event);
       if (event.type === "closed") {
+        this.broadcastTerminalEvent(this.withCloseNotice(event, event.sessionId));
+        this.closeNotices.delete(event.sessionId);
         this.forgetSessionOwner(event.sessionId);
+      } else {
+        this.broadcastTerminalEvent(event);
       }
       return;
     }

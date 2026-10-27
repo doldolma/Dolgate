@@ -30,9 +30,16 @@ vi.mock('../components/HostDrawer', () => ({
   }),
 }));
 
+// 저장된 인증 정보 지우기 — 호스트를 지울 때 "함께 삭제"가 여기로 온다.
+const removeKeychainSecrets = vi.fn().mockResolvedValue(undefined);
 vi.mock('../view-models/settings', () => ({
   useSettingsViewModel: () =>
-    stub({ keychainEntries: [{ secretRef: 'secret:mine', label: 'My key' }], activityLogs: [], settings: {} }),
+    stub({
+      keychainEntries: [{ secretRef: 'secret:mine', label: 'My key' }],
+      activityLogs: [],
+      settings: {},
+      removeKeychainSecrets,
+    }),
 }));
 
 vi.mock('../services/desktop/tailnet', () => ({
@@ -709,6 +716,27 @@ describe('HomeShell vaults', () => {
     expect(option?.textContent).toContain('deploy@team-web.example.test');
   });
 
+  // 팀 호스트를 지울 때 그 호스트만 쓰던 팀 비밀번호도 "함께 삭제"에 나온다 — 홈이 팀 것을 읽는 길을 넘겨야 된다.
+  it("offers a team host's own team password when deleting it, and removes it with the host", async () => {
+    const hosts = [host('my-web', 'Prod'), { ...host('team-web', 'Prod'), secretRef: 'secret:team' } as HostRecord];
+    vi.mocked(desktopApi.hosts.list).mockResolvedValue(hosts);
+    appStore.setState({ hosts });
+    vi.mocked(desktopApi.keychain.list).mockImplementation(async (vaultId?: string | null) =>
+      vaultId === TEAM ? ([{ secretRef: 'secret:team', label: 'Team key' }] as never) : ([] as never),
+    );
+    render(<Home />);
+
+    fireEvent.contextMenu(document.querySelector<HTMLElement>('[data-home-asset-key="host:team-web"]')!);
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('button', { name: '삭제' }));
+    const alsoDelete = await screen.findByRole('checkbox', { name: '더 이상 사용되지 않는 저장된 인증 정보 1개도 함께 삭제' });
+    expect(alsoDelete).toBeChecked();
+    expect(desktopApi.keychain.list).toHaveBeenCalledWith(TEAM);
+
+    fireEvent.click(within(alsoDelete.closest<HTMLElement>('[role="dialog"]')!).getByRole('button', { name: '삭제' }));
+    await waitFor(() => expect(removeKeychainSecrets).toHaveBeenCalledWith(['secret:team']));
+    expect(desktopApi.hosts.remove).toHaveBeenCalledWith(['team-web']);
+  });
+
   it('opens the invite link window for the team from the vault menu', async () => {
     vi.mocked(desktopApi.teams.createInvite).mockResolvedValue({
       code: 'abc',
@@ -817,7 +845,7 @@ describe('HomeShell vault sections', () => {
       },
     ]);
     vi.mocked(desktopApi.teams.getReplayStatuses).mockResolvedValue([
-      { recordingId: 'rec-1', state: 'ended', authorEmail: 'b@acme.dev', segmentCount: 2 },
+      { recordingId: 'rec-1', state: 'ended', authorEmail: 'b@acme.dev', segmentCount: 2, viewable: true },
     ]);
     appStore.setState({ homeSection: 'logs' });
     render(<Home />);
@@ -827,5 +855,174 @@ describe('HomeShell vault sections', () => {
     expect(desktopApi.teams.listActivity).toHaveBeenCalledWith(TEAM, { limit: 100 });
     fireEvent.click(await screen.findByRole('button', { name: 'Replay' }));
     expect(desktopApi.sessionReplays.open).toHaveBeenCalledWith('rec-1', TEAM);
+  });
+
+  // 바뀐 것과 복원 — 볼트 표의 역할이 기록 화면까지 가야 관리자에게 Changes 탭이 생긴다(7-4).
+  it('lets an admin restore a change from the logs screen', async () => {
+    vi.mocked(desktopApi.teams.listChanges).mockResolvedValue({
+      sets: [
+        {
+          firstSeq: 3,
+          lastSeq: 4,
+          changedBy: 'user-b',
+          changedByEmail: 'b@acme.dev',
+          changedAt: '2026-10-26T08:24:20.000Z',
+          items: [
+            { kind: 'hosts', recordId: 'web-1', label: 'web-1', deleted: true, currentLabel: null },
+            { kind: 'hosts', recordId: 'web-2', label: 'web-2', deleted: true, currentLabel: null },
+          ],
+          changedLater: false,
+          restored: false,
+        },
+      ],
+      nextBefore: null,
+    });
+    appStore.setState({ homeSection: 'logs' });
+    render(<Home />);
+
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Vault' }), { target: { value: TEAM } });
+    fireEvent.click(await screen.findByRole('tab', { name: 'Changes' }));
+    const card = await screen.findByTestId('team-change-card');
+    expect(within(card).getByText('호스트 2개를 삭제했습니다.')).toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: '복원' }));
+    await waitFor(() =>
+      expect(desktopApi.teams.restoreChange).toHaveBeenCalledWith(
+        TEAM,
+        { firstSeq: 3, lastSeq: 4, changedBy: 'user-b', changedAt: '2026-10-26T08:24:20.000Z' },
+        undefined,
+      ),
+    );
+  });
+});
+
+/**
+ * 내가 읽기 전용(Viewer)인 팀 — 보고 접속하고 꺼내 복사하는 것만 남고, 만들고 고치고 옮기고 지우는 길은 닫힌다(7-3).
+ * 볼트 표의 역할이 사이드바 볼트(readOnly)를 거쳐 메뉴·상세·끌어다 놓기·서랍까지 가는지 진짜 홈에서 본다.
+ */
+describe('HomeShell vaults — read-only team', () => {
+  function viewerIndex(): VaultIndex {
+    return { ...vaultIndex(), teams: vaultIndex().teams.map((team) => ({ ...team, role: 'viewer' as const })) };
+  }
+
+  beforeEach(() => {
+    vi.mocked(desktopApi.teams.getVaultIndex).mockResolvedValue(viewerIndex());
+    appStore.setState({ vaultIndex: viewerIndex() });
+  });
+
+  const vaultRow = (vaultId: string) =>
+    screen.getByLabelText('Group tree').querySelector<HTMLElement>(`[data-vault-id="${vaultId}"]`)!;
+  const card = (hostId: string) => document.querySelector<HTMLElement>(`[data-home-asset-key="host:${hostId}"]`)!;
+  const menuItems = () => within(screen.getByRole('menu')).getAllByRole('button').map((item) => item.textContent);
+
+  it('gives a read-only member no Changes tab in the logs screen', async () => {
+    appStore.setState({ homeSection: 'logs' });
+    render(<Home />);
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Vault' }), { target: { value: TEAM } });
+    await waitFor(() => expect(desktopApi.teams.listActivity).toHaveBeenCalled());
+    expect(screen.queryByRole('tab', { name: 'Changes' })).toBeNull();
+    expect(desktopApi.teams.listChanges).not.toHaveBeenCalled();
+  });
+
+  it('marks only the read-only team with a dim eye that says what Viewer means', () => {
+    render(<Home />);
+
+    expect(within(vaultRow(TEAM)).getByRole('img', { name: 'Viewer — 보고 접속만 할 수 있습니다' })).toBeInTheDocument();
+    expect(within(vaultRow('personal')).queryByRole('img', { name: /Viewer/ })).toBeNull();
+  });
+
+  it('leaves only team management in its vault menu', () => {
+    render(<Home />);
+
+    fireEvent.contextMenu(vaultRow(TEAM));
+    expect(menuItems()).toEqual(['팀 관리']);
+  });
+
+  it('keeps connecting, copying out and exporting in the host menu, and drops editing', () => {
+    render(<Home />);
+
+    fireEvent.contextMenu(card('team-web'));
+    const items = menuItems();
+    expect(items).toEqual(expect.arrayContaining(['연결', '볼트로 복사…', '내보내기...']));
+    expect(items).not.toContain('수정');
+    expect(items).not.toContain('복제');
+    expect(items).not.toContain('삭제');
+
+    // 개인 호스트는 그대로다.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.contextMenu(card('my-web'));
+    expect(menuItems()).toEqual(expect.arrayContaining(['수정', '복제', '삭제']));
+  });
+
+  it('keeps copying out and exporting in the group menu, and drops creating, renaming and deleting', () => {
+    render(<Home />);
+
+    fireEvent.contextMenu(prodRows()[1]!);
+    const items = menuItems();
+    expect(items).toEqual(expect.arrayContaining(['볼트로 복사…', '내보내기... (항목 1개)']));
+    expect(items).not.toContain('하위 그룹 생성');
+    expect(items).not.toContain('이름 변경');
+    expect(items).not.toContain('삭제');
+  });
+
+  it("drops the host's edit buttons in its detail but keeps connecting", async () => {
+    render(<Home />);
+
+    fireEvent.click(card('team-web'));
+    expect(await screen.findByRole('button', { name: 'Connect' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit Host' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+  });
+
+  it("hides New Group while you look inside the team, and makes a new host in your own vault", async () => {
+    render(<Home />);
+    expect(screen.getByRole('button', { name: 'New Group' })).toBeInTheDocument();
+
+    fireEvent.click(prodRows()[1]!);
+    expect(appStore.getState()).toMatchObject({ currentVaultId: TEAM, currentGroupPath: 'Prod' });
+    expect(screen.queryByRole('button', { name: 'New Group' })).toBeNull();
+
+    // 그 팀에는 만들 수 없다 — 서랍은 개인 맨 위로 열리고, 맨 위 Vault 에도 그 팀이 없다.
+    act(() => appStore.getState().openCreateHostDrawer());
+    await waitFor(() => expect(screen.getByTestId('host-drawer')).toBeInTheDocument());
+    expect(appStore.getState().hostDrawer).toMatchObject({ mode: 'create', vaultId: 'personal', defaultGroupPath: null });
+    expect((drawerProps.vaultChoices as Array<{ id: string }>).map((choice) => choice.id)).toEqual(['personal']);
+  });
+
+  it('never opens the editor on a read-only team host, and leaves the editor when you pick one while editing', async () => {
+    render(<Home />);
+
+    act(() => appStore.getState().openEditHostDrawer('team-web'));
+    expect(appStore.getState().hostDrawer).toEqual({ mode: 'closed' });
+
+    // 개인 호스트를 고치는 중에 팀 호스트를 고르면 편집 창은 그 호스트로 옮겨 가지 않고 닫힌다 — 상세가 보인다.
+    act(() => appStore.getState().openEditHostDrawer('my-web'));
+    await waitFor(() => expect(screen.getByTestId('host-drawer')).toBeInTheDocument());
+    fireEvent.click(card('team-web'));
+    await waitFor(() => expect(appStore.getState().hostDrawer).toEqual({ mode: 'closed' }));
+    expect(await screen.findByRole('button', { name: 'Connect' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit Host' })).toBeNull();
+  });
+
+  it('copies out of the team by dragging, but never moves inside it or copies into it', () => {
+    render(<Home />);
+
+    // 팀 호스트를 팀 그룹에 — 그 안에서 옮기기는 놓이지 않는다(dragover 를 받지 않는다).
+    let dataTransfer = createDataTransfer();
+    fireEvent.dragStart(card('team-web'), { dataTransfer });
+    expect(fireEvent.dragOver(prodRows()[1]!, { dataTransfer })).toBe(true);
+    fireEvent.dragEnd(card('team-web'), { dataTransfer });
+
+    // 개인 호스트를 팀 줄에 — 넣는 복사도 놓이지 않는다.
+    dataTransfer = createDataTransfer();
+    fireEvent.dragStart(card('my-web'), { dataTransfer });
+    expect(fireEvent.dragOver(vaultRow(TEAM), { dataTransfer })).toBe(true);
+    fireEvent.drop(vaultRow(TEAM), { dataTransfer });
+    expect(desktopApi.teams.previewCopy).not.toHaveBeenCalled();
+    fireEvent.dragEnd(card('my-web'), { dataTransfer });
+
+    // 팀 호스트를 개인 줄에 — 꺼내는 복사는 된다.
+    dataTransfer = createDataTransfer();
+    fireEvent.dragStart(card('team-web'), { dataTransfer });
+    expect(fireEvent.dragOver(vaultRow('personal'), { dataTransfer })).toBe(false);
   });
 });

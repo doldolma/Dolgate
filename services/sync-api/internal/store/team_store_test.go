@@ -347,6 +347,10 @@ func TestTeamInviteSealedSecretLivesWithTheLink(t *testing.T) {
 			outsider := createTeamTestUser(t, store, "sealed-outsider@example.com", true)
 			teamID := createTestTeam(t, store, owner, "Acme")
 			inviteTestMember(t, store, teamID, owner, member)
+			// 링크를 다루는 것은 관리자 이상이다 — 만든 사람이 아닌 관리자로 본다.
+			if err := store.SetTeamMemberRole(ctx, teamID, owner.ID, member.ID, TeamRoleAdmin); err != nil {
+				t.Fatalf("SetTeamMemberRole() error = %v", err)
+			}
 
 			create := func(token string, sealed string, lifetime time.Duration) TeamInvite {
 				t.Helper()
@@ -386,7 +390,7 @@ func TestTeamInviteSealedSecretLivesWithTheLink(t *testing.T) {
 				}
 				return sealed
 			}
-			// 만든 사람이 아닌 멤버도 받는다. 기한이 지난 것은 정리 전이어도 내주지 않는다.
+			// 만든 사람이 아닌 관리자도 받는다. 기한이 지난 것은 정리 전이어도 내주지 않는다.
 			for _, actor := range []teamTestUser{owner, member} {
 				sealed := sealedByCode(actor)
 				if sealed[live.Code] != "sealed-live" || sealed[plain.Code] != "" || sealed[expired.Code] != "" || sealed[revoked.Code] != "" {
@@ -437,8 +441,8 @@ func TestTeamOwnerOnlyActionsAndMembership(t *testing.T) {
 			if _, err := store.DeleteTeam(ctx, teamID, member.ID); !errors.Is(err, ErrTeamOwnerOnly) {
 				t.Fatalf("member delete error = %v, want ErrTeamOwnerOnly", err)
 			}
-			if err := store.RemoveTeamMember(ctx, teamID, member.ID, owner.ID); !errors.Is(err, ErrTeamOwnerOnly) {
-				t.Fatalf("member remove error = %v, want ErrTeamOwnerOnly", err)
+			if err := store.RemoveTeamMember(ctx, teamID, member.ID, owner.ID); !errors.Is(err, ErrTeamAdminOnly) {
+				t.Fatalf("member remove error = %v, want ErrTeamAdminOnly", err)
 			}
 
 			// 멤버가 아니면 팀이 없는 것과 같다.
@@ -475,10 +479,11 @@ func TestTeamOwnerOnlyActionsAndMembership(t *testing.T) {
 			if err := store.TransferTeamOwnership(ctx, teamID, owner.ID, member.ID); err != nil {
 				t.Fatalf("transfer error = %v", err)
 			}
+			// 옛 소유자는 관리자가 된다.
 			requireTeamRole(t, store, teamID, member.ID, TeamRoleOwner)
-			requireTeamRole(t, store, teamID, owner.ID, TeamRoleMember)
+			requireTeamRole(t, store, teamID, owner.ID, TeamRoleAdmin)
 			teams, err := store.ListTeamsForUser(ctx, owner.ID)
-			if err != nil || len(teams) != 1 || teams[0].Name != "Acme Infra" || teams[0].Role != TeamRoleMember {
+			if err != nil || len(teams) != 1 || teams[0].Name != "Acme Infra" || teams[0].Role != TeamRoleAdmin {
 				t.Fatalf("teams after rename/transfer = %#v, %v", teams, err)
 			}
 			// 넘긴 뒤에는 옛 소유자가 그냥 나갈 수 있다.
@@ -502,6 +507,10 @@ func TestTeamRemovalIsAtomicAndRevokesEveryLink(t *testing.T) {
 				"hostPrefs": {teamTestRecord("pref-1", "mine", time.Now(), false)},
 			}, member.VaultEpoch); err != nil {
 				t.Fatalf("ApplyTeamPrivateRecords() error = %v", err)
+			}
+			// 링크는 관리자 이상이 만든다 — 빠질 사람이 관리자로서 만든 링크도 빼면 함께 죽는지 본다.
+			if err := store.SetTeamMemberRole(ctx, teamID, owner.ID, member.ID, TeamRoleAdmin); err != nil {
+				t.Fatalf("SetTeamMemberRole() error = %v", err)
 			}
 			knownToken := "member-knows-this"
 			known, err := store.CreateTeamInvite(ctx, CreateTeamInviteInput{
@@ -713,11 +722,19 @@ func TestTeamPushKeepsPreviousVersions(t *testing.T) {
 			if len(history) != 2 {
 				t.Fatalf("history rows = %d, want 2: %#v", len(history), history)
 			}
-			if history[0].EncryptedPayload != "v1" || history[0].UpdatedBy != owner.ID || history[0].ChangedBy != member.ID || history[0].RecordID != "h1" {
+			// 고쳐서 밀려난 판은 Deleted 가 아니고, 지워서 밀려난 판은 Deleted 다 — 지운 표시는 판으로 남지 않아
+			// 지웠는지는 여기에만 있다.
+			if history[0].EncryptedPayload != "v1" || history[0].UpdatedBy != owner.ID || history[0].ChangedBy != member.ID ||
+				history[0].RecordID != "h1" || history[0].Deleted {
 				t.Fatalf("first previous version = %#v", history[0])
 			}
-			if history[1].EncryptedPayload != "v2" || history[1].UpdatedBy != member.ID || history[1].ChangedBy != member.ID {
+			if history[1].EncryptedPayload != "v2" || history[1].UpdatedBy != member.ID || history[1].ChangedBy != member.ID ||
+				!history[1].Deleted {
 				t.Fatalf("second previous version = %#v", history[1])
+			}
+			listed, err := store.ListTeamRecordVersions(ctx, teamID, owner.ID, TeamRecordVersionQuery{})
+			if err != nil || len(listed) != 2 || !listed[0].Deleted || listed[1].Deleted {
+				t.Fatalf("listed versions = %#v, %v", listed, err)
 			}
 
 			revision, payload, err := store.GetTeamSyncSnapshot(ctx, teamID, owner.ID)

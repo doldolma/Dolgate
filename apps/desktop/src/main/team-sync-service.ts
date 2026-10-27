@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import {
+  canEditTeamVault,
   collectGroupPaths,
   deriveTeamInviteJoinToken,
   isKnownHostKind,
@@ -38,6 +39,8 @@ import {
   normalizeTeamHostPrefsRecord,
   normalizeTeamWorkspacePrefsRecord,
   TEAM_PRIVATE_SECRET_KINDS,
+  type DesktopVaultData,
+  type DesktopVaultSecure,
   type StoredEncryptedValue,
   type SyncDeletionRecord,
   type TeamHostPrefsRecord,
@@ -72,7 +75,7 @@ import {
   TEAM_MEMBER_CREDENTIAL_NORMALIZERS,
 } from "./team-member-prefs";
 import { createTeamVaultScope } from "./team-vault-scope";
-import type { TeamVaultScope, VaultSecretStore } from "./vault-catalog";
+import type { TeamVaultScope, VaultScope, VaultSecretStore } from "./vault-catalog";
 import { TeamVaultNotFoundError } from "./vault-root";
 
 /*
@@ -141,8 +144,11 @@ export interface TeamSyncServiceOptions {
   secretStore: Pick<VaultSecretStore, "load" | "save" | "remove">;
   /** 팀 목록이나 팀 데이터가 바뀌었다 — 화면을 다시 읽히고, 코어에 tailnet 설정을 다시 알린다. */
   onChanged?: () => void;
-  /** 이 기기에서 팀을 지웠다(빠짐·팀 삭제·로그아웃) — 팀 기록·녹화의 대기열과 캐시를 지운다. */
-  onTeamForgotten?: (teamId: string) => void;
+  /**
+   * 이 기기에서 팀을 지운다(빠짐·팀 삭제·로그아웃) — 팀 기록·녹화의 대기열과 캐시를 지우고, 그 팀 호스트의 열린 연결을
+   * 닫는다. 팀 볼트를 지우기 **직전에** 부르고 그 팀 호스트의 id 를 함께 준다(지운 뒤에는 모른다).
+   */
+  onTeamForgotten?: (teamId: string, hostIds: ReadonlySet<string>) => void;
   api?: TeamApi;
   storage?: DesktopStateStorage;
   /** 시험용. */
@@ -268,7 +274,7 @@ export class TeamSyncService {
   private readonly api: TeamApi;
   private readonly storage: DesktopStateStorage;
   private readonly onChanged: () => void;
-  private readonly onTeamForgotten: (teamId: string) => void;
+  private readonly onTeamForgotten: (teamId: string, hostIds: ReadonlySet<string>) => void;
   private readonly startWatchLoop: (options: SyncWatchLoopOptions) => SyncWatchLoop;
   private readonly runtimes = new Map<string, TeamRuntime>();
   private readonly statuses = new Map<string, TeamSyncStatus>();
@@ -398,9 +404,8 @@ export class TeamSyncService {
   async purgeAll(): Promise<void> {
     this.stop();
     for (const teamId of this.storage.listTeamIds()) {
-      this.storage.removeTeam(teamId);
+      this.removeTeamData(teamId);
       await this.secretStore.remove(pendingTeamJoinAccount(teamId)).catch(() => undefined);
-      this.onTeamForgotten(teamId);
     }
     this.onChanged();
   }
@@ -451,7 +456,8 @@ export class TeamSyncService {
       await this.secretStore.save(pendingTeamJoinAccount(info.teamId), link);
       this.storage.upsertTeamInfo(info.teamId, {
         name: info.teamName,
-        role: "member",
+        // 링크의 역할로 미리 둔다 — 읽기 전용 링크면 처음부터 편집 길이 닫힌다. 팀 목록 읽기가 맞춘다.
+        role: info.role,
         wrappedTeamDek: null,
         dataFloor: 0,
         updatedAt: nowIso(),
@@ -605,7 +611,7 @@ export class TeamSyncService {
       const current = this.storage.getTeamState(teamId)?.info;
       this.storage.upsertTeamInfo(teamId, {
         name: joined.teamName,
-        role: current?.role ?? "member",
+        role: joined.role ?? current?.role ?? "member",
         wrappedTeamDek,
         dataFloor: current?.dataFloor ?? 0,
         updatedAt: nowIso(),
@@ -678,7 +684,15 @@ export class TeamSyncService {
     }
     this.statuses.delete(teamId);
     await this.secretStore.remove(pendingTeamJoinAccount(teamId)).catch(() => undefined);
-    this.onTeamForgotten(teamId);
+    return this.removeTeamData(teamId);
+  }
+
+  /** 팀 볼트를 이 기기에서 지운다. 지우기 직전에 알린다 — 그때는 아직 그 팀의 호스트를 안다. */
+  private removeTeamData(teamId: string): boolean {
+    const hostIds = this.storage.getTeamState(teamId)
+      ? new Set(createTeamVaultScope(teamId).hosts.list().map((host) => host.id))
+      : new Set<string>();
+    this.onTeamForgotten(teamId, hostIds);
     return this.storage.removeTeam(teamId);
   }
 
@@ -832,14 +846,21 @@ export class TeamSyncService {
     const teamId = runtime.teamId;
     let remote = await this.api.getRecords(lease, teamId, runtime.records.baseline ? runtime.records.etag : null);
     const baseline = remote.payload ? buildBaseline(remote.payload) : (runtime.records.baseline ?? new Map());
-    this.materializeImplicitGroups(runtime);
+    // 읽기 전용은 레코드를 올리지 않는다(서버도 거절한다) — 받기만 한다.
+    const editable = this.canEditRecords(teamId);
+    if (editable) {
+      this.materializeImplicitGroups(runtime);
+    }
     const before = this.storage.teamVaultFingerprint(teamId);
     // 올릴 것을 모으기 전의 모습이다. 모으는 사이에 고친 것은 여기에 없어서, 다음 pushDirty 가 그것을 올린다.
     const signature = this.storage.teamSyncSignatures(teamId)?.records ?? null;
     const delta = await this.buildRecordDelta(runtime, baseline);
     if (delta.builder.count > 0) {
-      await this.api.pushRecords(lease, teamId, delta.builder.payload, TEAM_SYNC_DATA_FLOOR);
-      assertActive(lease);
+      if (editable) {
+        await this.api.pushRecords(lease, teamId, delta.builder.payload, TEAM_SYNC_DATA_FLOOR);
+        assertActive(lease);
+      }
+      // 읽기 전용이면 이 기기에 남은 다른 모습(역할이 바뀌기 전에 고친 것 등)을 서버 것으로 되돌린다.
       runtime.scope.syncOutbox.clearMany(delta.deletions);
       remote = await this.api.getRecords(lease, teamId, null);
     }
@@ -855,17 +876,24 @@ export class TeamSyncService {
       return { applied: false, pruned: false };
     }
     const rebased = this.applyRecords(runtime, remote.payload);
+    const reupload = rebased && editable;
     runtime.records = {
       etag: remote.etag,
       baseline: buildBaseline(remote.payload),
-      // 옮긴 워크스페이스는 아직 올리지 않았다 — 맞춰진 것으로 적지 않는다.
-      settled: rebased ? null : (this.storage.teamSyncSignatures(teamId)?.records ?? null),
+      // 옮긴 워크스페이스는 아직 올리지 않았다 — 맞춰진 것으로 적지 않는다(읽기 전용은 올리지 않으니 맞춰진 것이다).
+      settled: reupload ? null : (this.storage.teamSyncSignatures(teamId)?.records ?? null),
     };
-    if (rebased) {
+    if (reupload) {
       // 그룹 이름이 바뀐 것을 따라 워크스페이스 경로를 옮겼다 — 되올린다.
       this.pushDirty();
     }
     return { applied: true, pruned: this.storage.pruneTeamMemberPrefs(teamId) };
+  }
+
+  /** 이 팀의 레코드를 고치고 올릴 수 있는지(멤버 이상). */
+  private canEditRecords(teamId: string): boolean {
+    const role = this.storage.getTeamState(teamId)?.info.role;
+    return role ? canEditTeamVault(role) : false;
   }
 
   // 호스트만 있던 그룹 경로를 그룹 레코드로 만든다(개인 push 와 같다). 그래야 다른 기기가 그 그룹의
@@ -884,32 +912,7 @@ export class TeamSyncService {
   ): Promise<{ builder: DeltaBuilder; deletions: SyncDeletionRecord[] }> {
     const { scope } = runtime;
     const builder = new DeltaBuilder(baseline, runtime.dekBase64);
-    for (const record of scope.groups.list()) builder.add("groups", record.id, record.updatedAt, record);
-    // 사람마다 다른 값은 팀 레코드에 싣지 않는다(team-member-prefs.ts).
-    for (const record of scope.hosts.list().map(stripHostMemberPrefs)) {
-      builder.add("hosts", record.id, record.updatedAt, record);
-    }
-    for (const record of scope.knownHosts.list()) builder.add("knownHosts", record.id, record.updatedAt, record);
-    for (const record of scope.portForwards.list()) builder.add("portForwards", record.id, record.updatedAt, record);
-    for (const record of scope.dnsOverrides.list()) builder.add("dnsOverrides", record.id, record.updatedAt, record);
-    for (const record of scope.snippets.list()) builder.add("snippets", record.id, record.updatedAt, record);
-    for (const record of scope.savedWorkspaces.list().map(stripWorkspaceMemberPrefs)) {
-      builder.add("workspaces", record.id, record.updatedAt, record);
-    }
-    // 키(tailnet auth key·AWS 정적 키)는 올리지 않는다 — 넣은 기기에만 둔다(team-member-prefs.ts).
-    for (const record of scope.tailnets.listPayloads()) {
-      builder.add("tailnets", record.id, record.updatedAt, stripTailnetAuthKey(record));
-    }
-    for (const record of scope.awsProfiles.listPayloads()) {
-      builder.add("awsProfiles", record.id, record.updatedAt, stripAwsProfileKeys(record));
-    }
-    for (const entry of scope.secretMetadata.list()) {
-      const raw = await scope.secrets.load(entry.secretRef);
-      if (raw) {
-        const secret = JSON.parse(raw) as ManagedSecretPayload;
-        builder.add("secrets", entry.secretRef, secret.updatedAt, secret);
-      }
-    }
+    await forEachTeamRecord(scope, (kind, id, updatedAt, value) => builder.add(kind, id, updatedAt, value));
     // 앱 설정(preferences)은 팀에 없다.
     const deletions = scope.syncOutbox.list().filter((entry) => entry.kind !== "preferences");
     for (const entry of deletions) {
@@ -947,9 +950,6 @@ export class TeamSyncService {
       .map(stripWorkspaceMemberPrefs);
     const tailnets = decode<TailnetPayload>("tailnets").filter(free(taken.tailnets));
     const awsProfiles = decode<ManagedAwsProfilePayload>("awsProfiles").filter(free(taken.awsProfiles));
-    // 키는 팀에 올리지 않으니 받은 것에는 없다. 이 기기에 넣어 둔 것(내 것을 공유하며 채운 것 포함)은 갈아 끼울 때도
-    // 그대로 둔다. 섞여 온 키(옛 앱)는 남의 것이라 담지 않는다.
-    const here = this.storage.getTeamState(teamId)?.secure;
     const secrets = decode<ManagedSecretPayload>("secrets").filter(
       (secret) => !taken.secretMetadata.has(secret.secretRef),
     );
@@ -964,47 +964,28 @@ export class TeamSyncService {
         ? rebaseSavedWorkspaceGroups(workspaces, renamed, new Set(collectGroupPaths(groups, hosts)), nowIso())
         : workspaces;
 
-    this.storage.replaceTeamVault(
-      teamId,
-      {
-        groups,
-        hosts,
-        knownHosts,
-        portForwards,
-        dnsOverrides,
-        snippets,
-        savedWorkspaces,
-        // 로그인한 계정과 auth key 는 사람 것이다 — 섞여 와도 담지 않는다(이 기기 것은 이 기기 칸·이 볼트에 있다).
-        tailnets: tailnets.map(({ loginName: _theirs, authKey: _person, ...tailnet }) =>
-          normalizeTailnetPayloadForStorage(tailnet),
-        ),
-        awsProfiles: awsProfiles.map((profile) => ({
-          id: profile.id,
-          name: profile.name,
-          kind: profile.kind,
-          updatedAt: profile.updatedAt,
-        })),
-        secretMetadata: secrets.map(secretMetadataFromSyncedSecret),
-      },
-      {
-        managedSecretsByRef: Object.fromEntries(
-          secrets.map((secret) => [secret.secretRef, encodeSecretForStorage(JSON.stringify(secret))]),
-        ),
-        tailnetAuthKeysById: Object.fromEntries(
-          tailnets.flatMap((tailnet) => {
-            const key = here?.tailnetAuthKeysById[tailnet.id];
-            return key ? [[tailnet.id, key]] : [];
-          }),
-        ),
-        managedAwsProfilesById: Object.fromEntries(
-          awsProfiles.map((profile) => [
-            profile.id,
-            lockReceivedAwsProfile(stripAwsProfileKeys(profile), here?.managedAwsProfilesById[profile.id]),
-          ]),
-        ),
-      },
+    const stored = toStoredTeamRecords(
+      { groups, hosts, knownHosts, portForwards, dnsOverrides, snippets, savedWorkspaces, tailnets, awsProfiles, secrets },
+      this.storage.getTeamState(teamId)?.secure,
     );
+    this.storage.replaceTeamVault(teamId, stored.records, stored.secure);
     return savedWorkspaces.some((record, index) => record !== workspaces[index]);
+  }
+
+  /**
+   * 되살린 레코드에 붙일 시각 — 지금, 그러나 마지막으로 받은 서버 사본의 그 레코드보다는 늦게. 서버와 올리기는 시각이
+   * 더 늦은 쪽을 받으므로, 시계가 늦은 기기에서 되살리면 남이 지운 표시가 이겨 되살린 것이 조용히 사라진다.
+   */
+  writeTimeAfterServer(teamId: string, records: ReadonlyArray<{ kind: string; id: string }>): string {
+    const baseline = this.runtimes.get(teamId)?.records.baseline;
+    let latest = Date.now();
+    for (const { kind, id } of records) {
+      const known = baseline?.get(baselineKey(kind, id));
+      if (known !== undefined && known >= latest) {
+        latest = known + 1;
+      }
+    }
+    return new Date(latest).toISOString();
   }
 
   /** 내 개인 칸을 맞춘다. 내 개인 DEK 로 잠그고 받는다 — 팀 키로는 안 열린다. 받은 것이 있으면 true. */
@@ -1080,6 +1061,100 @@ export class TeamSyncService {
     };
     return true;
   }
+}
+
+/**
+ * 팀 볼트의 레코드를 서버에 올리는 모양으로 하나씩 넘긴다(종류·id·시각·값). 사람마다 다른 값과 키(tailnet auth key·
+ * AWS 정적 키)는 뺀다 — 키는 넣은 기기에만 둔다(team-member-prefs.ts). 올리기와 되살리기(지금 것과 견주기)가 함께 쓴다.
+ */
+export async function forEachTeamRecord(
+  scope: Omit<VaultScope, "id">,
+  visit: (kind: string, id: string, updatedAt: string, value: unknown) => void,
+): Promise<void> {
+  for (const record of scope.groups.list()) visit("groups", record.id, record.updatedAt, record);
+  for (const record of scope.hosts.list().map(stripHostMemberPrefs)) visit("hosts", record.id, record.updatedAt, record);
+  for (const record of scope.knownHosts.list()) visit("knownHosts", record.id, record.updatedAt, record);
+  for (const record of scope.portForwards.list()) visit("portForwards", record.id, record.updatedAt, record);
+  for (const record of scope.dnsOverrides.list()) visit("dnsOverrides", record.id, record.updatedAt, record);
+  for (const record of scope.snippets.list()) visit("snippets", record.id, record.updatedAt, record);
+  for (const record of scope.savedWorkspaces.list().map(stripWorkspaceMemberPrefs)) {
+    visit("workspaces", record.id, record.updatedAt, record);
+  }
+  for (const record of scope.tailnets.listPayloads()) {
+    visit("tailnets", record.id, record.updatedAt, stripTailnetAuthKey(record));
+  }
+  for (const record of scope.awsProfiles.listPayloads()) {
+    visit("awsProfiles", record.id, record.updatedAt, stripAwsProfileKeys(record));
+  }
+  for (const entry of scope.secretMetadata.list()) {
+    const raw = await scope.secrets.load(entry.secretRef);
+    if (raw) {
+      const secret = JSON.parse(raw) as ManagedSecretPayload;
+      visit("secrets", entry.secretRef, secret.updatedAt, secret);
+    }
+  }
+}
+
+/** 팀 레코드 묶음 — 서버에 올리는 모양 그대로(키 없음). 받은 것과 되살린 것을 이 기기 모양으로 바꿀 때 쓴다. */
+export interface TeamRecordSet {
+  groups: GroupRecord[];
+  hosts: HostRecord[];
+  knownHosts: KnownHostRecord[];
+  portForwards: PortForwardRuleRecord[];
+  dnsOverrides: DnsOverrideRecord[];
+  snippets: SnippetRecord[];
+  savedWorkspaces: SavedWorkspaceRecord[];
+  tailnets: TailnetPayload[];
+  awsProfiles: ManagedAwsProfilePayload[];
+  secrets: ManagedSecretPayload[];
+}
+
+/**
+ * 팀 레코드를 이 기기의 팀 볼트 모양(레코드와 잠근 비밀값)으로 바꾼다. 로그인한 계정과 키는 사람 것이라 섞여 와도
+ * 담지 않고(옛 앱), 이 기기에 넣어 둔 키(here — 내 것을 공유하며 채운 것 포함)만 얹는다.
+ */
+export function toStoredTeamRecords(
+  set: TeamRecordSet,
+  here: DesktopVaultSecure | undefined,
+): { records: Omit<DesktopVaultData, "syncOutbox">; secure: DesktopVaultSecure } {
+  return {
+    records: {
+      groups: set.groups,
+      hosts: set.hosts,
+      knownHosts: set.knownHosts,
+      portForwards: set.portForwards,
+      dnsOverrides: set.dnsOverrides,
+      snippets: set.snippets,
+      savedWorkspaces: set.savedWorkspaces,
+      tailnets: set.tailnets.map(({ loginName: _theirs, authKey: _person, ...tailnet }) =>
+        normalizeTailnetPayloadForStorage(tailnet),
+      ),
+      awsProfiles: set.awsProfiles.map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        kind: profile.kind,
+        updatedAt: profile.updatedAt,
+      })),
+      secretMetadata: set.secrets.map(secretMetadataFromSyncedSecret),
+    },
+    secure: {
+      managedSecretsByRef: Object.fromEntries(
+        set.secrets.map((secret) => [secret.secretRef, encodeSecretForStorage(JSON.stringify(secret))]),
+      ),
+      tailnetAuthKeysById: Object.fromEntries(
+        set.tailnets.flatMap((tailnet) => {
+          const key = here?.tailnetAuthKeysById[tailnet.id];
+          return key ? [[tailnet.id, key]] : [];
+        }),
+      ),
+      managedAwsProfilesById: Object.fromEntries(
+        set.awsProfiles.map((profile) => [
+          profile.id,
+          lockReceivedAwsProfile(stripAwsProfileKeys(profile), here?.managedAwsProfilesById[profile.id]),
+        ]),
+      ),
+    },
+  };
 }
 
 /**

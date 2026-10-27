@@ -532,6 +532,11 @@ export interface UseHostBrowserParams {
   savedWorkspaces?: readonly SavedWorkspaceRecord[];
   groups: GroupRecord[];
   keychainEntries: SecretMetadataRecord[];
+  /**
+   * 팀 볼트의 저장된 인증 정보(이름·종류만)를 읽는다. keychainEntries 는 개인 것뿐이라, 지우는 호스트 가운데 팀 것이
+   * 있으면 그 팀 것을 읽어 "안 쓰게 되는 인증 정보도 함께 삭제"에 넣는다.
+   */
+  loadTeamSavedCredentials?: (teamId: string) => Promise<SecretMetadataRecord[]>;
   currentGroupPath: string | null;
   /**
    * 볼트들(개인 + 이 기기의 팀, buildBrowserVaults). **팀이 없으면 비어 있다** — 그때는 볼트 줄 없이 지금
@@ -769,6 +774,8 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   const [isRemovingHost, setIsRemovingHost] = useState(false);
   const [removeUnusedSecretsOnHostDelete, setRemoveUnusedSecretsOnHostDelete] =
     useState(true);
+  // 지우려는 호스트의 팀 인증 정보 — 창을 열기 전에 읽어 둔다(HostBrowser.requestDeleteAssets).
+  const [hostDeleteTeamCredentials, setHostDeleteTeamCredentials] = useState<SecretMetadataRecord[]>([]);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const [contextMenuStyle, setContextMenuStyle] =
@@ -1279,11 +1286,11 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       hostDeleteTarget
         ? getUnusedSavedCredentialsAfterHostDeletion(
             hosts,
-            keychainEntries,
+            [...keychainEntries, ...hostDeleteTeamCredentials],
             hostDeleteTarget.hostIds,
           )
         : [],
-    [hostDeleteTarget, hosts, keychainEntries],
+    [hostDeleteTarget, hosts, keychainEntries, hostDeleteTeamCredentials],
   );
   /**
    * 메뉴가 뜨면 **실제로 렌더된 크기를 재서** 화면 안으로 접어 넣는다.
@@ -1639,14 +1646,39 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       .map((asset) => asset.key);
   }
 
+  /** teamCredentials 는 지우는 호스트의 팀 인증 정보(loadTeamCredentials) — 개인 목록에는 팀 것이 없다. */
   function getUnusedLocalSecretRefsAfterHostDeletion(
     hostIds: readonly string[],
+    teamCredentials: readonly SecretMetadataRecord[] = [],
   ): string[] {
     return getUnusedSavedCredentialsAfterHostDeletion(
       hosts,
-      keychainEntries,
+      [...keychainEntries, ...teamCredentials],
       [...hostIds],
     );
+  }
+
+  /** 이 호스트들이 든 팀 볼트(읽을 길이 없으면 빈 목록 — 그때는 지금처럼 개인 것만 센다). */
+  function teamIdsOfHosts(hostIds: readonly string[]): string[] {
+    if (!params.loadTeamSavedCredentials) {
+      return [];
+    }
+    const wanted = new Set(hostIds);
+    return vaults
+      .filter((vault) => vault.kind === "team" && vault.hosts.some((host) => wanted.has(host.id)))
+      .map((vault) => vault.id);
+  }
+
+  /** 그 팀들의 저장된 인증 정보. 읽지 못한 팀은 빼고 센다. */
+  async function loadTeamCredentials(teamIds: readonly string[]): Promise<SecretMetadataRecord[]> {
+    const load = params.loadTeamSavedCredentials;
+    if (!load || teamIds.length === 0) {
+      return [];
+    }
+    const lists = await Promise.all(
+      teamIds.map((teamId) => load(teamId).catch((): SecretMetadataRecord[] => [])),
+    );
+    return lists.flat();
   }
 
   function buildHostDeleteTarget(hostIds: string[]): HostDeleteTarget {
@@ -2249,15 +2281,34 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   }
 
   /**
+   * 내가 읽기 전용(Viewer)인 팀 볼트인가 — 그 볼트의 것은 만들고 고치고 옮기고 지우는 길을 닫는다(메인과 서버도
+   * 막는다). 꺼내 복사하기·접속·즐겨찾기는 그대로다. 팀이 없거나 개인이면 false.
+   */
+  function isReadOnlyVault(vaultId: string | null | undefined): boolean {
+    if (!hasVaults || !vaultId) {
+      return false;
+    }
+    return vaults.find((entry) => entry.id === vaultId)?.readOnly === true;
+  }
+
+  /** 그 항목이 든 볼트가 읽기 전용인가 — 줄 메뉴·상세가 편집 길을 닫을지. */
+  function isReadOnlyAsset(assetKey: HomeAssetKey): boolean {
+    return isReadOnlyVault(vaultIdByAssetKey.get(assetKey) ?? PERSONAL_VAULT_ID);
+  }
+
+  /**
    * 이 항목들을 그 볼트에 놓을 수 있는가 — 모두 그 볼트 것이어야 한다. 볼트 사이는 옮기기가 아니라
-   * 복사(공유)라 여기서 놓이지 않는다.
+   * 복사(공유)라 여기서 놓이지 않는다. 읽기 전용 볼트 안에서는 옮기지 않는다.
    */
   function canDropAssetsInVault(
     assetKeys: readonly HomeAssetKey[],
     vaultId: string,
   ): boolean {
-    return assetKeys.every(
-      (key) => (vaultIdByAssetKey.get(key) ?? PERSONAL_VAULT_ID) === vaultId,
+    return (
+      !isReadOnlyVault(vaultId) &&
+      assetKeys.every(
+        (key) => (vaultIdByAssetKey.get(key) ?? PERSONAL_VAULT_ID) === vaultId,
+      )
     );
   }
 
@@ -2267,13 +2318,18 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     ? "copyMove"
     : "move";
 
-  /** 그 볼트에 복사해 넣을 수 있는가 — 막힌 팀(다시 들어와야 함·업데이트 필요)은 안 된다. */
-  function canCopyWithVault(vaultId: string): boolean {
+  /** 그 볼트에서 꺼내 복사할 수 있는가 — 막힌 팀(다시 들어와야 함·업데이트 필요)은 안 된다. 읽기 전용은 된다. */
+  function canCopyFromVault(vaultId: string): boolean {
     if (!params.onRequestVaultCopy) {
       return false;
     }
     const vault = vaults.find((entry) => entry.id === vaultId);
     return Boolean(vault) && !vault?.blocked;
+  }
+
+  /** 그 볼트에 복사해 넣을 수 있는가 — 막힌 팀과 내가 읽기 전용인 팀은 안 된다. */
+  function canCopyIntoVault(vaultId: string): boolean {
+    return canCopyFromVault(vaultId) && !isReadOnlyVault(vaultId);
   }
 
   /**
@@ -2302,7 +2358,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       source = vaultId;
       ids.push(ref.id);
     }
-    if (!source || !canCopyWithVault(source)) {
+    if (!source || !canCopyFromVault(source)) {
       return null;
     }
     return {
@@ -2324,14 +2380,15 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   /** 그 볼트 말고 복사해 넣을 볼트가 있는가 — 줄 메뉴의 공유를 보일지. */
   function hasCopyTargetFrom(sourceVaultId: string): boolean {
     return (
-      canCopyWithVault(sourceVaultId) &&
-      vaults.some((vault) => vault.id !== sourceVaultId && !vault.blocked)
+      canCopyFromVault(sourceVaultId) &&
+      vaults.some((vault) => vault.id !== sourceVaultId && canCopyIntoVault(vault.id))
     );
   }
 
   /**
    * 끌고 있는 것을 이 볼트(의 그룹)에 놓으면 무슨 일인가. 같은 볼트는 지금 옮기기 그대로, 다른 볼트는 복사,
-   * 볼트가 섞였거나 호스트와 워크스페이스가 섞였거나 막힌 팀이면 놓을 수 없다(null).
+   * 볼트가 섞였거나 호스트와 워크스페이스가 섞였거나 막힌 팀이면 놓을 수 없다(null). 읽기 전용 볼트는 그 안에서
+   * 옮기지도, 복사해 넣지도 않는다 — 꺼내 다른 볼트로 복사하는 것만 된다.
    */
   function resolveDropIntent(
     dataTransfer: DataTransfer,
@@ -2343,7 +2400,8 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       if (canDropAssetsInVault(assetKeys, vaultId)) {
         return "move";
       }
-      return copySourceOfAssets(assetKeys) !== null && canCopyWithVault(vaultId)
+      const source = copySourceOfAssets(assetKeys);
+      return source !== null && source !== vaultId && canCopyIntoVault(vaultId)
         ? "copy"
         : null;
     }
@@ -2352,9 +2410,11 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       return null;
     }
     if (group.vaultId === vaultId) {
-      return canReparentGroup(group.path, groupPath) ? "move" : null;
+      return !isReadOnlyVault(vaultId) && canReparentGroup(group.path, groupPath)
+        ? "move"
+        : null;
     }
-    return hasVaults && canCopyWithVault(group.vaultId) && canCopyWithVault(vaultId)
+    return hasVaults && canCopyFromVault(group.vaultId) && canCopyIntoVault(vaultId)
       ? "copy"
       : null;
   }
@@ -2555,6 +2615,8 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     getActiveDraggedGroup,
     draggedGroupVaultId,
     canDropAssetsInVault,
+    isReadOnlyVault,
+    isReadOnlyAsset,
     vaultDragTargetId,
     setVaultDragTargetId,
     dropIntent,
@@ -2611,6 +2673,9 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     setHostDeleteTarget,
     buildHostDeleteTarget,
     getUnusedLocalSecretRefsAfterHostDeletion,
+    teamIdsOfHosts,
+    loadTeamCredentials,
+    setHostDeleteTeamCredentials,
     hostDeleteUnusedLocalSecretRefs,
     removeUnusedSecretsOnHostDelete,
     setRemoveUnusedSecretsOnHostDelete,

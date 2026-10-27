@@ -118,7 +118,9 @@ import type {
   WarpgateImportEvent,
   WarpgateTargetSummary,
 } from "@dolssh/shared-core";
-import type { SyncPayloadV2, SyncWatchResult } from "@dolssh/shared-core";
+import type { SyncKind, SyncPayloadV2, SyncWatchResult } from "@dolssh/shared-core";
+// 팀 역할은 shared-core 에 있다(모바일도 같은 규칙을 쓴다). 여기서는 받아 쓰기만 한다 — @shared 가 shared-core 를 함께 내보낸다.
+import type { TeamAssignableRole, TeamInviteRole, TeamRole } from "@dolssh/shared-core";
 import type {
   AiApiKeyStatus,
   AiApprovalResponse,
@@ -1300,9 +1302,6 @@ export type TabCommandPayload =
   | { kind: "last" }
   | { kind: "reopen" };
 
-/** 팀 볼트에서의 역할. 소유자만 이름 바꾸기·멤버 제거·소유권 넘기기·팀 삭제를 한다. */
-export type TeamRole = "owner" | "member";
-
 /**
  * 팀 볼트 동기화 상태.
  * - idle: 아직 돌지 않는다(막 생겼거나 볼트가 잠겼다)
@@ -1323,13 +1322,15 @@ export interface TeamActivityBody {
 
 /** 서버가 남긴 멤버 변화(평문). 이메일은 그때의 것이다. */
 export interface TeamMemberChange {
-  type: "member_joined" | "member_left" | "member_removed" | "owner_changed" | (string & {});
+  type: "member_joined" | "member_left" | "member_removed" | "owner_changed" | "role_changed" | (string & {});
   userId: string;
   email?: string;
   byUserId?: string;
   byEmail?: string;
   /** member_left 의 까닭(vault_reset·account_deleted)이나, 소유자가 저절로 바뀐 까닭(successor). */
   reason?: string;
+  /** 들어온 사람의 역할(member_joined)이나 바뀐 역할(role_changed). */
+  role?: string;
 }
 
 /** 화면에 주는 팀 기록 한 줄. 앱 활동이면 activity, 멤버 변화면 memberChange 가 있다. */
@@ -1366,7 +1367,80 @@ export interface TeamReplayStatus {
   authorEmail: string;
   /** 서버에 온 구간 수. 0 이면 아직 볼 것이 없다(녹화한 쪽 앱이 첫 구간을 보내는 중). */
   segmentCount: number;
+  /** 내가 받아 볼 수 있는지 — 관리자 이상이거나 내가 녹화한 것. 아니면 서버가 내주지 않는다. */
+  viewable: boolean;
 }
+
+/** 팀 볼트 레코드의 종류 — 팀 동기화의 종류와 같다(앱 설정은 팀에 없다). */
+export type TeamRecordKind = Exclude<SyncKind, "preferences">;
+
+/** 바뀐 것 묶음의 항목 하나 — 그 올리기가 고치거나 지운 레코드. */
+export interface TeamChangeItem {
+  kind: TeamRecordKind;
+  recordId: string;
+  /** 그 판의 이름(호스트 이름·그룹 경로·포워딩 이름 등). 풀지 못했으면 null. */
+  label: string | null;
+  /** 그 올리기가 지운 것인지(아니면 고쳤다). */
+  deleted: boolean;
+  /** 고친 것이고 그 뒤 이름이 바뀌었으면 지금 이름. */
+  currentLabel: string | null;
+}
+
+/** 한 번에 올라간 변경 — 같은 사람·같은 시각에 밀려난 이전 판들. 복원하면 그 판들이 지금 것으로 돌아온다. */
+export interface TeamChangeSet {
+  /** 묶음의 판 순번 범위(서버). 복원할 때 그대로 넘긴다. */
+  firstSeq: number;
+  lastSeq: number;
+  changedBy: string;
+  changedByEmail: string;
+  changedAt: string;
+  items: TeamChangeItem[];
+  /** 그 뒤에 다시 바뀐 레코드가 있다 — 복원하면 그 변경을 덮는다. */
+  changedLater: boolean;
+  /** 모두 지금 내용과 같다 — 이미 복원했거나 되돌려져 복원할 것이 없다. */
+  restored: boolean;
+}
+
+export interface TeamChangesPage {
+  sets: TeamChangeSet[];
+  /** 더 오래된 묶음을 받을 기준(listChanges 의 before). 끝이면 null. */
+  nextBefore: number | null;
+}
+
+/** 복원할 묶음을 가리키는 것. */
+export type TeamChangeRef = Pick<TeamChangeSet, "firstSeq" | "lastSeq" | "changedBy" | "changedAt">;
+
+/** 복원에 든 레코드 하나. */
+export interface TeamRestoredRecord {
+  kind: TeamRecordKind;
+  recordId: string;
+  label: string | null;
+}
+
+/** 복원에서 건너뛴 레코드. */
+export interface TeamRestoreSkipped extends TeamRestoredRecord {
+  /** other-vault: 다른 볼트에 같은 것이 있다. unreadable: 이 앱이 열 수 없다(다른 키로 잠김·모르는 종류). */
+  reason: "other-vault" | "unreadable";
+}
+
+/** 복원하면 덮게 되는, 그 뒤의 변경. */
+export interface TeamRestoreOverwrite extends TeamRestoredRecord {
+  /** 그 뒤에 바꾼 사람·시각. 지운 것을 그 뒤 다시 만든 것이면 알 수 없다(null). */
+  byEmail: string | null;
+  at: string | null;
+}
+
+export type TeamRestoreOutcome =
+  /** 남이 그 뒤에 바꾼 것을 덮게 된다 — 쓰지 않았다. 덮어도 되면 overwrite 로 다시 부른다. */
+  | { status: "needs-confirm"; overwrites: TeamRestoreOverwrite[] }
+  | {
+      status: "restored";
+      restored: TeamRestoredRecord[];
+      /** 복원한 것이 쓰는데 지워져 있어 함께 돌아온 것(비밀번호·점프 호스트 등). */
+      dependencies: TeamRestoredRecord[];
+      /** 다른 볼트에 같은 것이 있거나 이 앱이 열 수 없어 건너뛴 것. */
+      skipped: TeamRestoreSkipped[];
+    };
 
 /** 팀 녹화를 열 때 함께 받는 것. 이 기기의 녹화에는 없다. */
 export interface TeamReplayView {
@@ -1408,19 +1482,21 @@ export interface TeamInvite {
   code: string;
   createdBy: string;
   createdByEmail: string;
+  /** 이 링크로 들어오는 사람의 역할. */
+  role: TeamInviteRole;
   expiresAt: string;
   useCount: number;
   createdAt: string;
   active: boolean;
   revokedAt: string | null;
   /**
-   * 다시 복사할 링크. 링크의 비밀값은 팀 키로 잠가 링크 기록에 함께 두므로 멤버 누구나 링크가 살아 있는
+   * 다시 복사할 링크. 링크의 비밀값은 팀 키로 잠가 링크 기록에 함께 두므로 관리자 이상이 링크가 살아 있는
    * 동안 다시 복사한다. 쓸 수 없는 링크와 그 칸이 없는 링크(이 기능 전에 만든 것)는 null 이다.
    */
   link: string | null;
 }
 
-/** 만든 초대 링크. 같은 링크를 멤버 누구나 링크 목록(`TeamInvite.link`)에서 다시 복사할 수 있다. */
+/** 만든 초대 링크. 같은 링크를 관리자 이상이 링크 목록(`TeamInvite.link`)에서 다시 복사할 수 있다. */
 export interface TeamInviteCreated {
   link: string;
   invite: TeamInvite;
@@ -1432,6 +1508,8 @@ export interface TeamInviteInfo {
   teamName: string;
   inviterEmail: string;
   memberCount: number;
+  /** 들어가면 받을 역할. */
+  role: TeamInviteRole;
   expiresAt: string;
   /** 이 기기에 이미 그 팀이 있다. */
   alreadyJoined: boolean;
@@ -2165,13 +2243,22 @@ export interface DesktopApi {
     /** 소유자만. */
     transferOwnership: (teamId: string, userId: string) => Promise<void>;
     listMembers: (teamId: string) => Promise<TeamMember[]>;
-    /** 소유자만. 그 멤버의 접근이 끊기고 이 팀의 초대 링크가 모두 취소된다. */
+    /**
+     * 관리자 이상. 관리자는 멤버·읽기 전용만 뺀다. 그 멤버의 접근이 끊기고 이 팀의 초대 링크가 모두 취소된다.
+     */
     removeMember: (teamId: string, userId: string) => Promise<void>;
+    /** 관리자 이상. 관리자는 멤버 ↔ 읽기 전용만 바꾸고, 관리자로 올리거나 관리자를 바꾸는 것은 소유자만 한다. */
+    setMemberRole: (teamId: string, userId: string, role: TeamAssignableRole) => Promise<void>;
     /** 다른 멤버가 남은 소유자는 소유권을 넘긴 뒤에 나갈 수 있다. */
     leave: (teamId: string) => Promise<void>;
-    /** 기한은 1시간~30일(시간 단위), 없으면 7일. */
-    createInvite: (teamId: string, options?: { expiresInHours?: number }) => Promise<TeamInviteCreated>;
+    /** 관리자 이상. 기한은 1시간~30일(시간 단위), 없으면 7일. 역할은 없으면 멤버. */
+    createInvite: (
+      teamId: string,
+      options?: { expiresInHours?: number; role?: TeamInviteRole },
+    ) => Promise<TeamInviteCreated>;
+    /** 관리자 이상. */
     listInvites: (teamId: string) => Promise<TeamInvite[]>;
+    /** 관리자 이상. */
     revokeInvite: (teamId: string, code: string) => Promise<void>;
     getInviteInfo: (link: string) => Promise<TeamInviteInfo>;
     /** 참여 카드에 띄울 것 — 열 수 없는 링크면 그 까닭(던지지 않는다). 팀 키 상자는 받지 않는다. */
@@ -2194,6 +2281,17 @@ export interface DesktopApi {
     listActivity: (teamId: string, query?: TeamActivityQuery) => Promise<TeamActivityItem[]>;
     /** 그 녹화들이 팀 서버에 있는지와 상태. 서버에 없는 녹화는 결과에 없다. */
     getReplayStatuses: (teamId: string, recordingIds: string[]) => Promise<TeamReplayStatus[]>;
+    /** 관리자 이상. 팀 볼트에서 바뀐 것(이전 판)을 한 번에 올라간 묶음으로, 최신부터. before 를 주면 그 앞을 준다. */
+    listChanges: (teamId: string, query?: { before?: number }) => Promise<TeamChangesPage>;
+    /**
+     * 관리자 이상. 그 묶음의 판들을 지금 것으로 다시 쓰고 팀에 올린다. 그것이 쓰는데 지워진 것(비밀번호·점프 호스트 등)도
+     * 함께 돌아온다. 남이 그 뒤에 바꾼 것을 덮게 되면 overwrite 없이는 쓰지 않고 needs-confirm 을 돌려준다.
+     */
+    restoreChange: (
+      teamId: string,
+      change: TeamChangeRef,
+      options?: { overwrite?: boolean },
+    ) => Promise<TeamRestoreOutcome>;
     /** 팀 목록이 바뀌었다(참여·빠짐·이름·역할). */
     onChanged: (listener: () => void) => () => void;
   };

@@ -259,6 +259,22 @@ describe("TeamReplayViewer", () => {
     expect(sameEntries(played, await readLocal(replayDir, rec(5))).data).toBe(true);
   });
 
+  // 녹화한 사람이 팀에서 빠지면(또는 24시간 새 구간이 없으면) 서버가 끝 메타 없이 끊김으로 닫는다 — 끝은 서버가
+  // 마지막으로 받은 때이고, 받은 데까지 재생된다.
+  it("opens a recording the server cut without the recorder's end", async () => {
+    const server = createFakeTeamReplayServer();
+    const { replayDir } = await uploadSession(server, rec(6), TEST_SESSION, { ended: false });
+    server.replays.get(rec(6))!.state = "cut";
+    const { viewer } = createViewer(server);
+
+    const view = await viewer.load(TEAM, rec(6));
+    expect(view.team?.state).toBe("cut");
+    expect(view.disconnectedAt).toBe("2026-10-21T01:05:00.000Z");
+    expect(view.durationMs).toBe(600);
+    const played = await readAll(viewer, rec(6), view.segments.length);
+    expect(sameEntries(played, await readLocal(replayDir, rec(6))).data).toBe(true);
+  });
+
   it("plays a recording cut short by the per-recording limit only as long as what is in the team", async () => {
     const server = createFakeTeamReplayServer();
     server.setReject((call) => (call === "segment:2" ? new TeamApiError(413, "team_replay_too_large", "too large") : null));

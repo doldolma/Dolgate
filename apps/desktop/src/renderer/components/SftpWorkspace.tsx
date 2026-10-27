@@ -2294,8 +2294,9 @@ function HostPicker({
           host={awsFailureDiagnostic.host}
           diagnostic={awsFailureDiagnostic.diagnostic}
           onRetry={() => onConnectHost(awsFailureDiagnostic.host.id)}
+          // 읽기 전용 팀의 호스트는 고칠 수 없다 — 설정 고치기를 내밀지 않는다(다시 시도·복사는 그대로).
           onOpenHostSettings={
-            onOpenHostSettings
+            onOpenHostSettings && !vaultByHostId.get(awsFailureDiagnostic.host.id)?.readOnly
               ? () => onOpenHostSettings(awsFailureDiagnostic.host.id)
               : undefined
           }

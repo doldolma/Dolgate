@@ -59,7 +59,7 @@ export function createTeamsSlice(deps: SliceDeps): TeamsSlice {
         }
         await api.teams.leave(teamId);
       } finally {
-        // 넘긴 뒤 나가기만 실패해도 내 역할은 이미 멤버다. 표를 맞춰 두어야 다시 누를 때 또 넘기려 하지 않는다.
+        // 넘긴 뒤 나가기만 실패해도 내 역할은 이미 관리자다. 표를 맞춰 두어야 다시 누를 때 또 넘기려 하지 않는다.
         await afterTeamsChanged();
       }
     },
@@ -68,9 +68,11 @@ export function createTeamsSlice(deps: SliceDeps): TeamsSlice {
       await afterTeamsChanged();
     },
     removeTeamMember: (teamId, userId) => api.teams.removeMember(teamId, userId),
+    setTeamMemberRole: (teamId, userId, role) => api.teams.setMemberRole(teamId, userId, role),
     listTeamMembers: (teamId) => api.teams.listMembers(teamId),
     listTeamInvites: (teamId) => api.teams.listInvites(teamId),
-    createTeamInvite: (teamId, expiresInHours) => api.teams.createInvite(teamId, { expiresInHours }),
+    createTeamInvite: (teamId, expiresInHours, role = "member") =>
+      api.teams.createInvite(teamId, { expiresInHours, role }),
     revokeTeamInvite: (teamId, code) => api.teams.revokeInvite(teamId, code),
     countTeamSecrets: async (teamId) => (await api.keychain.list(teamId)).length,
     getMyHostCredentials: (hostId) => api.teams.getMyCredentials(hostId),

@@ -1,13 +1,18 @@
 import {
   isVaultEpochRejectionCode,
+  normalizeTeamInviteRole,
+  normalizeTeamRole,
   SYNC_DATA_FLOOR_HEADER,
   VAULT_EPOCH_HEADER,
   type ServerInfoResponse,
   type SyncRecord,
+  type TeamAssignableRole,
   type TeamInvite,
   type TeamInviteInfo,
+  type TeamInviteRole,
   type TeamMember,
   type TeamReplayState,
+  type TeamRole,
 } from "@shared";
 import { AUTH_INVALID_ERROR_MESSAGE } from "./auth-error-message";
 import { t } from "./i18n";
@@ -68,7 +73,7 @@ export function isTeamApiError(error: unknown, code?: string): error is TeamApiE
 export interface TeamSummary {
   id: string;
   name: string;
-  role: "owner" | "member";
+  role: TeamRole;
   /** 내 개인 DEK 로 감싼 팀 키. 링크로 들어와 아직 올리지 않았으면 null. */
   wrappedTeamDek: string | null;
   dataFloor: number;
@@ -93,6 +98,8 @@ export interface TeamJoinResult {
   inviteBox: string;
   /** 이미 멤버였다(사본을 올리기 전에 끊겨 다시 부른 것). */
   rejoined: boolean;
+  /** 들어온 역할. 이 칸을 모르는 서버면 null — 팀 목록을 다시 읽으면 맞춰진다. */
+  role: TeamRole | null;
 }
 
 /** 종류 → 레코드. 개인 /sync 와 같은 모양이다. */
@@ -131,6 +138,28 @@ export interface RawTeamReplay {
   createdAt: string;
   lastActivityAt: string;
   endedAt?: string;
+  /** 내가 받아 볼 수 있는지(관리자 이상이거나 내가 녹화한 것). */
+  viewable?: boolean;
+}
+
+/** 이전 판 하나(서버 모양). 같은 올리기에서 밀려난 판은 changedBy·changedAt 이 같다. */
+export interface RawTeamRecordVersion {
+  seq: number;
+  kind: string;
+  recordId: string;
+  /** 팀 키로 잠근 그 판 그대로. */
+  encryptedPayload: string;
+  updatedAt: string;
+  deletedAt?: string;
+  /** 그 판을 쓴 사람. */
+  updatedBy: string;
+  updatedByEmail: string;
+  /** 그 판을 밀어낸(덮어쓰거나 지운) 사람. */
+  changedBy: string;
+  changedByEmail: string;
+  changedAt: string;
+  /** 밀어낸 올리기가 지운 것인지(아니면 고쳤다). 옛 서버는 주지 않는다. deletedAt 은 그 판 자신의 지운 시각이다. */
+  deleted?: boolean;
 }
 
 export type TeamReplayExtraKind = "commands" | "snapshot";
@@ -198,6 +227,10 @@ export class TeamApi {
     await this.send(lease, "POST", `${teamPath(teamId)}/members/${encodeURIComponent(userId)}/remove`);
   }
 
+  async setMemberRole(lease: TeamRequestLease, teamId: string, userId: string, role: TeamAssignableRole): Promise<void> {
+    await this.send(lease, "PUT", `${teamPath(teamId)}/members/${encodeURIComponent(userId)}/role`, { body: { role } });
+  }
+
   async leaveTeam(lease: TeamRequestLease, teamId: string): Promise<{ teamDeleted: boolean }> {
     const body = await this.json<{ teamDeleted?: boolean }>(lease, "POST", `${teamPath(teamId)}/leave`);
     return { teamDeleted: body.teamDeleted === true };
@@ -211,7 +244,7 @@ export class TeamApi {
   async createInvite(
     lease: TeamRequestLease,
     teamId: string,
-    input: { inviteBox: string; sealedSecret: string; joinTokenHash: string; expiresAt: string },
+    input: { inviteBox: string; sealedSecret: string; joinTokenHash: string; expiresAt: string; role: TeamInviteRole },
   ): Promise<TeamInviteSummary> {
     return toInviteSummary(
       await this.json<RawInviteSummary>(lease, "POST", `${teamPath(teamId)}/invites`, { body: input }),
@@ -229,16 +262,17 @@ export class TeamApi {
 
   // 참여 토큰은 헤더로만 보낸다 — 주소에 실으면 서버 요청 로그에 남는다.
   async getInviteInfo(lease: TeamRequestLease, code: string, token: string): Promise<TeamInviteLookup> {
-    return this.json<TeamInviteLookup>(lease, "GET", `/invite/${encodeURIComponent(code)}/info`, {
+    const body = await this.json<TeamInviteLookup>(lease, "GET", `/invite/${encodeURIComponent(code)}/info`, {
       headers: { "X-Dolgate-Invite-Token": token },
     });
+    return { ...body, role: normalizeTeamInviteRole(body.role) };
   }
 
   async joinTeam(lease: TeamRequestLease, code: string, token: string): Promise<TeamJoinResult> {
     const body = await this.json<TeamJoinResult>(lease, "POST", `/invite/${encodeURIComponent(code)}/join`, {
       headers: { "X-Dolgate-Invite-Token": token },
     });
-    return { ...body, rejoined: body.rejoined === true };
+    return { ...body, rejoined: body.rejoined === true, role: body.role ? normalizeTeamRole(body.role) : null };
   }
 
   /** 팀 레코드. etag 가 지금과 같으면 payload 는 null 이다(304). */
@@ -372,6 +406,24 @@ export class TeamApi {
     const suffix = params.size > 0 ? `?${params.toString()}` : "";
     const body = await this.json<{ replays?: RawTeamReplay[] }>(lease, "GET", `${teamPath(teamId)}/replays${suffix}`);
     return body.replays ?? [];
+  }
+
+  /** 이전 판 목록(관리자 이상). 최신부터, before(순번) 앞부터. kind·recordId 를 주면 그 레코드의 판만. */
+  async listRecordVersions(
+    lease: TeamRequestLease,
+    teamId: string,
+    query: { before?: number; limit?: number; kind?: string; recordId?: string } = {},
+  ): Promise<RawTeamRecordVersion[]> {
+    const params = new URLSearchParams();
+    if (query.before) params.set("before", String(query.before));
+    if (query.limit) params.set("limit", String(query.limit));
+    if (query.kind && query.recordId) {
+      params.set("kind", query.kind);
+      params.set("recordId", query.recordId);
+    }
+    const suffix = params.size > 0 ? `?${params.toString()}` : "";
+    const body = await this.json<{ versions?: RawTeamRecordVersion[] }>(lease, "GET", `${teamPath(teamId)}/versions${suffix}`);
+    return body.versions ?? [];
   }
 
   async getTeamReplay(lease: TeamRequestLease, teamId: string, recordingId: string): Promise<RawTeamReplayDetail> {
@@ -604,7 +656,7 @@ function toTeamSummary(raw: RawTeamSummary): TeamSummary {
   return {
     id: raw.id,
     name: raw.name,
-    role: raw.role === "owner" ? "owner" : "member",
+    role: normalizeTeamRole(raw.role),
     // 사본을 아직 안 올린 멤버는 빈 문자열로 온다.
     wrappedTeamDek: raw.wrappedTeamDek ? raw.wrappedTeamDek : null,
     dataFloor: typeof raw.dataFloor === "number" ? raw.dataFloor : 0,
@@ -614,7 +666,12 @@ function toTeamSummary(raw: RawTeamSummary): TeamSummary {
 }
 
 function toInviteSummary(raw: RawInviteSummary): TeamInviteSummary {
-  return { ...raw, revokedAt: raw.revokedAt ?? null, sealedSecret: raw.sealedSecret || null };
+  return {
+    ...raw,
+    role: normalizeTeamInviteRole(raw.role),
+    revokedAt: raw.revokedAt ?? null,
+    sealedSecret: raw.sealedSecret || null,
+  };
 }
 
 function teamPath(teamId: string): string {
@@ -646,7 +703,7 @@ async function readErrorCode(response: Response): Promise<string | null> {
   }
 }
 
-// 개인 동기화는 401·403 을 인증 실패로 본다. 팀 API 는 403 을 "소유자만"(team_owner_only)에도 쓰고, 서버의
+// 개인 동기화는 401·403 을 인증 실패로 본다. 팀 API 는 403 을 역할 거절(team_owner_only 등)에도 쓰고, 서버의
 // 진짜 인증 실패는 code 없는 401 이다 — team_ code 가 붙은 실패는 인증 문제가 아니다.
 function isAuthFailure(response: Response, failure: { message: string; code: string | null }): boolean {
   return !failure.code?.startsWith("team_") && isLikelyAuthError(response, failure.message);
@@ -658,6 +715,10 @@ const TEAM_API_ERROR_KEYS = new Map<string, string>([
   ["team_invite_invalid", "teams.api.inviteInvalid"],
   ["team_not_found", "teams.api.notFound"],
   ["team_owner_only", "teams.api.ownerOnly"],
+  ["team_admin_only", "teams.api.adminOnly"],
+  ["team_read_only", "teams.api.readOnly"],
+  ["team_role_invalid", "teams.api.roleInvalid"],
+  ["team_replay_forbidden", "teams.api.replayForbidden"],
   ["team_owner_must_transfer", "teams.api.ownerMustTransfer"],
   ["team_vault_required", "teams.api.vaultRequired"],
   ["team_client_outdated", "teams.api.clientOutdated"],

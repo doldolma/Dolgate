@@ -332,6 +332,7 @@ export const ipcChannels = {
     transferOwnership: 'teams:transfer-ownership',
     listMembers: 'teams:list-members',
     removeMember: 'teams:remove-member',
+    setMemberRole: 'teams:set-member-role',
     leave: 'teams:leave',
     createInvite: 'teams:create-invite',
     listInvites: 'teams:list-invites',
@@ -347,6 +348,8 @@ export const ipcChannels = {
     clearMyCredentials: 'teams:clear-my-credentials',
     listActivity: 'teams:list-activity',
     getReplayStatuses: 'teams:get-replay-statuses',
+    listChanges: 'teams:list-changes',
+    restoreChange: 'teams:restore-change',
     // 팀 목록이 바뀌었을 때 메인이 렌더러로 보낸다.
     changed: 'teams:changed',
     // 브라우저의 링크 페이지가 초대 링크를 넘겼다 — 화면은 takePendingInviteLink 로 가져간다.

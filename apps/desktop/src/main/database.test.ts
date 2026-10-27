@@ -1838,6 +1838,37 @@ describe('ActivityLogRepository', () => {
     expect(logs.list()).toEqual([]);
   });
 
+  it('rewrites several rows at once and still tells the observer about each', async () => {
+    const { ActivityLogRepository } = await loadRepositories();
+    const logs = new ActivityLogRepository();
+    const lifecycle = (id: string, createdAt: string, status: string) => ({
+      id,
+      level: 'info' as const,
+      category: 'session' as const,
+      kind: 'session-lifecycle' as const,
+      message: 'ssh 세션',
+      metadata: { sessionId: id, status },
+      createdAt,
+      updatedAt: createdAt,
+    });
+    logs.upsert(lifecycle('a', '2026-01-01T00:00:00.000Z', 'connected'));
+    logs.upsert(lifecycle('b', '2026-01-02T00:00:00.000Z', 'connected'));
+    const observed: string[] = [];
+    logs.setObserver((record) => observed.push(`${record.id}:${(record.metadata as { status: string }).status}`));
+
+    logs.upsertMany([
+      lifecycle('a', '2026-01-01T00:00:00.000Z', 'closed'),
+      lifecycle('b', '2026-01-02T00:00:00.000Z', 'closed'),
+    ]);
+
+    expect(observed).toEqual(['a:closed', 'b:closed']);
+    // 자리(시작 시각 순서)는 그대로, 줄 수도 그대로다.
+    expect(logs.list().map((entry) => `${entry.id}:${(entry.metadata as { status: string }).status}`)).toEqual([
+      'b:closed',
+      'a:closed',
+    ]);
+  });
+
   it('clears hasReplay for session logs whose recording no longer exists', async () => {
     const { ActivityLogRepository } = await loadRepositories();
     const logs = new ActivityLogRepository();

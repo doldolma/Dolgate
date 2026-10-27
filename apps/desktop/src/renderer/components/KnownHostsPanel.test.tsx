@@ -151,3 +151,22 @@ describe('KnownHostsPanel with team vaults', () => {
     await waitFor(() => expect(onRemove).toHaveBeenCalledWith('known-team'));
   });
 });
+
+// 7-3: 내가 읽기 전용(Viewer)인 팀 — 팀이 신뢰한 키는 지우지 않는다(내가 신뢰한 것은 내 칸에 있다).
+describe('KnownHostsPanel with a read-only team', () => {
+  it("drops Remove on the team's host keys and keeps it on mine", async () => {
+    appStore.setState({
+      vaultIndex: {
+        ...createEmptyVaultIndex(),
+        teams: [{ id: 'team-a', name: 'Acme Infra', role: 'viewer', syncState: 'ready', syncError: null, groups: [] }],
+      },
+    });
+    vi.mocked(listTeamKnownHosts).mockResolvedValue([{ ...KNOWN_HOST, id: 'known-team', host: '10.20.0.11' }]);
+    renderPanel([]);
+
+    const teamKey = (await screen.findByText('10.20.0.11:22')).closest('section')!;
+    expect(within(teamKey).queryByRole('button', { name: 'Remove' })).toBeNull();
+    const personalKey = screen.getByText('gate.example.com:22').closest('section')!;
+    expect(within(personalKey).getByRole('button', { name: 'Remove' })).toBeInTheDocument();
+  });
+});

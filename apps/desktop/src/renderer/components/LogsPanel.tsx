@@ -6,6 +6,7 @@ import type {
   TeamActivityItem,
   TeamMemberChange,
   TeamReplayStatus,
+  TeamRole,
   ContainerActionLogMetadata,
   ContainerLifecycleLogMetadata,
   PortForwardLifecycleLogMetadata,
@@ -14,24 +15,33 @@ import type {
   SftpLifecycleLogMetadata,
   PortForwardTransport,
 } from '@shared';
+import { canManageTeam } from '@shared';
 import {
   Badge,
   Button,
   Card,
   CardMain,
   EmptyState,
+  InfoHint,
+  InfoHintPoints,
   Input,
   PanelSection,
   SelectField,
+  TabButton,
+  Tabs,
   Toolbar,
   Tooltip,
 } from '../ui';
-import { Play, User } from '../ui/icons';
+import { Play } from '../ui/icons';
 import { useTranslation } from 'react-i18next';
 import { getFormatLocale, t } from '../i18n';
 import { resolveLogMessage } from '../lib/activity-log-message';
 import { getKeyboardLayoutSearchQueries } from '../lib/keyboard-layout-search';
 import { useTeamActivity } from '../controllers/useTeamActivity';
+import { memberLeavesOf, withMemberLeftEnd } from './teams/team-member-left';
+import { AuthorLine } from './teams/AuthorLine';
+import { TeamChangesList } from './teams/TeamChangesList';
+import { TEAM_ROLE_LABELS } from './teams/team-format';
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
 
@@ -40,8 +50,8 @@ interface LogsPanelProps {
   onClear: () => Promise<void>;
   /** teamId 를 주면 그 팀의 녹화(서버)를 연다. */
   onOpenReplay: (recordingId: string, teamId?: string | null) => Promise<void>;
-  /** 이 기기의 팀. 있으면 Vault 를 골라 팀 기록(서버)을 본다. */
-  teams?: ReadonlyArray<{ id: string; name: string }>;
+  /** 이 기기의 팀. 있으면 Vault 를 골라 팀 기록(서버)을 본다. 관리자 이상이면 바뀐 것(Changes)도 본다. */
+  teams?: ReadonlyArray<{ id: string; name: string; role?: TeamRole }>;
 }
 
 const PERSONAL_VAULT = 'personal';
@@ -57,8 +67,16 @@ interface TeamLogRow {
 function describeMemberChange(change: TeamMemberChange, translate: Translate): string {
   const email = change.email ?? change.userId;
   const by = change.byEmail ?? change.byUserId ?? '';
+  // 역할 이름은 칩과 같은 영어 라벨. 모르는 값은 그대로 보인다.
+  const role = change.role ? (TEAM_ROLE_LABELS[change.role as TeamRole] ?? change.role) : null;
   if (change.type === 'member_joined') {
-    return translate('teamLogs.memberJoined', { email });
+    // Member 로 들어온 것은 지금처럼 — 다른 역할(읽기 전용 링크)만 역할을 붙인다.
+    return role && change.role !== 'member'
+      ? translate('teamLogs.memberJoinedAs', { email, role })
+      : translate('teamLogs.memberJoined', { email });
+  }
+  if (change.type === 'role_changed' && role) {
+    return translate('teamLogs.roleChanged', { email, by, role });
   }
   if (change.type === 'member_left') {
     if (change.reason === 'vault_reset') {
@@ -82,11 +100,14 @@ function describeMemberChange(change: TeamMemberChange, translate: Translate): s
 
 /**
  * 서버의 팀 기록(최신부터)을 화면 줄로 만든다. 수명 줄(접속·SFTP 등)의 시작과 끝은 같은 기록이라 한 줄로
- * 합친다 — 나중 것이 앞의 것을 대신한다. 줄은 그 기록의 시각(수명 줄은 시작 시각)으로 최신부터 놓는다.
+ * 합친다 — 나중 것이 앞의 것을 대신한다. 줄은 그 기록의 시각(수명 줄은 시작 시각)으로 최신부터 놓는다. 시작만 있는
+ * 줄은 남긴 사람이 그 뒤에 팀에서 빠졌으면 그때 끝난 것으로 보인다(withMemberLeftEnd).
  */
 function buildTeamRows(items: readonly TeamActivityItem[], translate: Translate): TeamLogRow[] {
   const rows: TeamLogRow[] = [];
   const seen = new Set<string>();
+  const leaves = memberLeavesOf(items);
+  const leftReason = translate('teamLogs.memberLeftEnd');
   for (const item of items) {
     if (item.activity) {
       const record = item.activity.record;
@@ -95,7 +116,7 @@ function buildTeamRows(items: readonly TeamActivityItem[], translate: Translate)
         continue;
       }
       seen.add(id);
-      rows.push({ log: { ...record, id }, author: item.authorEmail, seq: item.seq });
+      rows.push({ log: { ...withMemberLeftEnd(record, item, leaves, leftReason), id }, author: item.authorEmail, seq: item.seq });
       continue;
     }
     const message = item.memberChange
@@ -139,6 +160,10 @@ function teamReplayAction(
   if (status?.state === 'deleted') {
     return { kind: 'unavailable', reason: translate('teamLogs.replayDeleted') };
   }
+  // 녹화는 관리자 이상과 녹화한 사람만 받는다 — 서버가 내주지 않으니 열지 말고 까닭을 말한다.
+  if (status && !status.viewable) {
+    return { kind: 'unavailable', reason: translate('teamLogs.replayForbidden') };
+  }
   if (status && status.segmentCount > 0) {
     return { kind: 'open', recordingId, teamId };
   }
@@ -146,15 +171,6 @@ function teamReplayAction(
 }
 
 /** 팀 기록 줄을 남긴 멤버. */
-function AuthorLine({ email }: { email: string }) {
-  return (
-    <div className="mt-[0.15rem] flex min-w-0 items-center gap-[0.3rem] text-[0.82rem] text-[var(--text-soft)]">
-      <User className="h-[0.8rem] w-[0.8rem] shrink-0" aria-hidden />
-      <span className="truncate">{email}</span>
-    </div>
-  );
-}
-
 function isSessionLifecycleMetadata(value: Record<string, unknown> | null): value is SessionLifecycleLogMetadata & Record<string, unknown> {
   return Boolean(
     value &&
@@ -342,6 +358,14 @@ function getPortForwardStatusTone(status: PortForwardLifecycleLogMetadata['statu
   return 'stopped';
 }
 
+function isOpenSftpStatus(status: SftpLifecycleLogMetadata['status']): boolean {
+  return status === 'connecting' || status === 'connected';
+}
+
+function isOpenContainerStatus(status: ContainerLifecycleLogMetadata['status']): boolean {
+  return status === 'connecting' || status === 'connected';
+}
+
 function getSftpStatusLabel(status: SftpLifecycleLogMetadata['status']): string {
   if (status === 'connecting') {
     return 'Connecting';
@@ -417,6 +441,22 @@ function formatBytes(value?: number | null): string | null {
     ? Math.round(nextValue).toString()
     : nextValue.toFixed(1);
   return `${formatted}${units[unitIndex]}`;
+}
+
+/**
+ * 수명 줄의 끝 시각 칸. 끝났는데 시각을 모르면(앱이 꺼져 끊긴 줄) 비워 둔다 — 모르는 시각을 지어내지 않는다.
+ * 아직 이어지는 줄이면 ongoingLabel 이다.
+ */
+function formatLifecycleEnd(endedAt: string | null | undefined, ongoing: boolean, ongoingLabel: string): string {
+  if (endedAt) {
+    return formatLogTimestamp(endedAt);
+  }
+  return ongoing ? ongoingLabel : '—';
+}
+
+/** 수명 줄의 길이 칸. 끝 시각을 모르는 끝난 줄은 길이도 모른다. */
+function formatLifecycleDuration(durationMs: number | null | undefined, endedAt: string | null | undefined, ongoing: boolean): string {
+  return !ongoing && !endedAt ? '—' : formatSessionLifecycleDuration(durationMs);
 }
 
 export function formatSessionLifecycleDuration(durationMs?: number | null): string {
@@ -556,6 +596,11 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
   const [vault, setVault] = useState<string>(PERSONAL_VAULT);
   // 고른 팀이 이 기기에서 없어지면(나감·지움) 개인 기록으로 돌아간다.
   const teamId = vault !== PERSONAL_VAULT && teams.some((team) => team.id === vault) ? vault : null;
+  // 바뀐 것과 복원은 관리자 이상만(서버도 막는다). 멤버·읽기 전용과 개인 볼트에는 탭 줄이 없다.
+  const teamRole = teams.find((team) => team.id === teamId)?.role;
+  const canRestore = Boolean(teamId && teamRole && canManageTeam(teamRole));
+  const [view, setView] = useState<'activity' | 'changes'>('activity');
+  const showChanges = canRestore && view === 'changes';
   const teamActivity = useTeamActivity(teamId);
   const teamRows = useMemo(
     () => (teamId ? buildTeamRows(teamActivity.items, translate) : null),
@@ -642,34 +687,61 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
           </label>
         ) : null}
 
-        <label className="flex w-full max-w-[220px] flex-col gap-[0.4rem]">
-          <span className="text-[0.9rem] text-[var(--text-soft)]">Category</span>
-          <SelectField
-            value={category}
-            onChange={(event) =>
-              setCategory(event.target.value as 'all' | ActivityLogCategory)
-            }
-          >
-            <option value="all">All</option>
-            <option value="session">Session</option>
-            <option value="audit">Audit</option>
-          </SelectField>
-        </label>
+        {canRestore ? (
+          <div className="flex items-center gap-2">
+            <Tabs role="tablist" aria-label={translate('teamChanges.tabsLabel')}>
+              <TabButton role="tab" aria-selected={!showChanges} active={!showChanges} onClick={() => setView('activity')}>
+                Activity
+              </TabButton>
+              <TabButton role="tab" aria-selected={showChanges} active={showChanges} onClick={() => setView('changes')}>
+                Changes
+              </TabButton>
+            </Tabs>
+            <InfoHint label={translate('teamChanges.about.label')}>
+              <InfoHintPoints
+                items={[
+                  translate('teamChanges.about.body'),
+                  translate('teamChanges.about.together'),
+                  translate('teamChanges.about.admins'),
+                ]}
+              />
+            </InfoHint>
+          </div>
+        ) : null}
 
-        <label className="flex w-full max-w-[220px] flex-col gap-[0.4rem]">
-          <span className="text-[0.9rem] text-[var(--text-soft)]">Level</span>
-          <SelectField
-            value={level}
-            onChange={(event) =>
-              setLevel(event.target.value as 'all' | ActivityLogLevel)
-            }
-          >
-            <option value="all">All</option>
-            <option value="info">Info</option>
-            <option value="warn">Warn</option>
-            <option value="error">Error</option>
-          </SelectField>
-        </label>
+        {/* 바뀐 것에는 분류·수준이 없다 — 찾기만 남는다. */}
+        {showChanges ? null : (
+          <>
+            <label className="flex w-full max-w-[220px] flex-col gap-[0.4rem]">
+              <span className="text-[0.9rem] text-[var(--text-soft)]">Category</span>
+              <SelectField
+                value={category}
+                onChange={(event) =>
+                  setCategory(event.target.value as 'all' | ActivityLogCategory)
+                }
+              >
+                <option value="all">All</option>
+                <option value="session">Session</option>
+                <option value="audit">Audit</option>
+              </SelectField>
+            </label>
+
+            <label className="flex w-full max-w-[220px] flex-col gap-[0.4rem]">
+              <span className="text-[0.9rem] text-[var(--text-soft)]">Level</span>
+              <SelectField
+                value={level}
+                onChange={(event) =>
+                  setLevel(event.target.value as 'all' | ActivityLogLevel)
+                }
+              >
+                <option value="all">All</option>
+                <option value="info">Info</option>
+                <option value="warn">Warn</option>
+                <option value="error">Error</option>
+              </SelectField>
+            </label>
+          </>
+        )}
 
         <label className="flex w-full max-w-[320px] flex-col gap-[0.4rem]">
           <span className="text-[0.9rem] text-[var(--text-soft)]">Search</span>
@@ -677,7 +749,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Host, container, port, error"
+            placeholder={showChanges ? translate('teamChanges.searchPlaceholder') : 'Host, container, port, error'}
           />
         </label>
 
@@ -690,7 +762,9 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
       </Toolbar>
 
       <PanelSection>
-        {teamId && teamActivity.error && visibleLogs.length === 0 ? (
+        {showChanges && teamId ? (
+          <TeamChangesList teamId={teamId} search={search} />
+        ) : teamId && teamActivity.error && visibleLogs.length === 0 ? (
           <EmptyState title={translate('teamLogs.loadFailed')} description={teamActivity.error} />
         ) : teamId && teamActivity.loading && visibleLogs.length === 0 ? (
           <EmptyState title={translate('teamLogs.loading')} />
@@ -771,11 +845,11 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>{translate('logs.field.browseEnded')}</span>
-                      <strong>{containerLifecycleMetadata.endedAt ? formatLogTimestamp(containerLifecycleMetadata.endedAt) : translate('logs.field.connecting')}</strong>
+                      <strong>{formatLifecycleEnd(containerLifecycleMetadata.endedAt, isOpenContainerStatus(containerLifecycleMetadata.status), translate('logs.field.connecting'))}</strong>
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>{translate('logs.field.heldFor')}</span>
-                      <strong>{formatSessionLifecycleDuration(containerLifecycleMetadata.durationMs)}</strong>
+                      <strong>{formatLifecycleDuration(containerLifecycleMetadata.durationMs, containerLifecycleMetadata.endedAt, isOpenContainerStatus(containerLifecycleMetadata.status))}</strong>
                     </div>
                   </div>
                   <div className="mt-[0.7rem] flex flex-wrap gap-[0.4rem]">
@@ -900,11 +974,11 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>{translate('logs.field.connectEnded')}</span>
-                      <strong>{sessionLifecycleMetadata.disconnectedAt ? formatLogTimestamp(sessionLifecycleMetadata.disconnectedAt) : translate('logs.field.connecting')}</strong>
+                      <strong>{formatLifecycleEnd(sessionLifecycleMetadata.disconnectedAt, sessionLifecycleMetadata.status === 'connected', translate('logs.field.connecting'))}</strong>
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>{translate('logs.field.connectDuration')}</span>
-                      <strong>{formatSessionLifecycleDuration(sessionLifecycleMetadata.durationMs)}</strong>
+                      <strong>{formatLifecycleDuration(sessionLifecycleMetadata.durationMs, sessionLifecycleMetadata.disconnectedAt, sessionLifecycleMetadata.status === 'connected')}</strong>
                     </div>
                   </div>
                   {sessionLifecycleMetadata.disconnectReason ? (
@@ -937,11 +1011,11 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>{translate('logs.field.connectEnded')}</span>
-                      <strong>{sftpLifecycleMetadata.endedAt ? formatLogTimestamp(sftpLifecycleMetadata.endedAt) : translate('logs.field.connecting')}</strong>
+                      <strong>{formatLifecycleEnd(sftpLifecycleMetadata.endedAt, isOpenSftpStatus(sftpLifecycleMetadata.status), translate('logs.field.connecting'))}</strong>
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>{translate('logs.field.connectDuration')}</span>
-                      <strong>{formatSessionLifecycleDuration(sftpLifecycleMetadata.durationMs)}</strong>
+                      <strong>{formatLifecycleDuration(sftpLifecycleMetadata.durationMs, sftpLifecycleMetadata.endedAt, isOpenSftpStatus(sftpLifecycleMetadata.status))}</strong>
                     </div>
                   </div>
                   {getSftpSummaryItems(sftpLifecycleMetadata).length > 0 ? (
@@ -995,11 +1069,11 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>{translate('logs.field.forwardEnded')}</span>
-                      <strong>{portForwardLifecycleMetadata.stoppedAt ? formatLogTimestamp(portForwardLifecycleMetadata.stoppedAt) : translate('logs.field.forwarding')}</strong>
+                      <strong>{formatLifecycleEnd(portForwardLifecycleMetadata.stoppedAt, portForwardLifecycleMetadata.status === 'running', translate('logs.field.forwarding'))}</strong>
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>{translate('logs.field.heldFor')}</span>
-                      <strong>{formatSessionLifecycleDuration(portForwardLifecycleMetadata.durationMs)}</strong>
+                      <strong>{formatLifecycleDuration(portForwardLifecycleMetadata.durationMs, portForwardLifecycleMetadata.stoppedAt, portForwardLifecycleMetadata.status === 'running')}</strong>
                     </div>
                   </div>
                   {portForwardLifecycleMetadata.endReason ? (
@@ -1032,7 +1106,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
             );
           })
         )}
-        {teamId && teamActivity.hasMore && visibleLogs.length > 0 ? (
+        {teamId && !showChanges && teamActivity.hasMore && visibleLogs.length > 0 ? (
           <div ref={loadMoreRef} className="py-3 text-center text-[0.85rem] text-[var(--text-soft)]">
             {teamActivity.loading ? translate('teamLogs.loading') : null}
           </div>

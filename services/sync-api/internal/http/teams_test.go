@@ -96,6 +96,33 @@ func addMemberOverHTTP(t *testing.T, router *gin.Engine, teamID string, inviter 
 	expectStatus(t, teamCall(router, member, http.MethodPut, "/teams/"+teamID+"/key", `{"wrappedTeamDek":"member-copy"}`, epochHeader(member)), http.StatusNoContent, "put key")
 }
 
+// teamMemberIDByEmail 은 멤버 목록에서 그 이메일의 사용자 ID 를 찾는다.
+func teamMemberIDByEmail(t *testing.T, router *gin.Engine, viewer *watchTestAccount, teamID string, email string) string {
+	t.Helper()
+	listed := teamCall(router, viewer, http.MethodGet, "/teams/"+teamID+"/members", "", nil)
+	expectStatus(t, listed, http.StatusOK, "members")
+	var body struct {
+		Members []struct {
+			UserID string `json:"userId"`
+			Email  string `json:"email"`
+		} `json:"members"`
+	}
+	decodeJSON(t, listed, &body)
+	for _, member := range body.Members {
+		if member.Email == email {
+			return member.UserID
+		}
+	}
+	t.Fatalf("%s is not in the team: %#v", email, body.Members)
+	return ""
+}
+
+func setTeamRoleOverHTTP(t *testing.T, router *gin.Engine, actor *watchTestAccount, teamID string, userID string, role string) {
+	t.Helper()
+	expectStatus(t, teamCall(router, actor, http.MethodPut, "/teams/"+teamID+"/members/"+userID+"/role", fmt.Sprintf(`{"role":%q}`, role), nil),
+		http.StatusNoContent, "set role "+role)
+}
+
 func TestTeamCreateValidatesIDAndVaultEpoch(t *testing.T) {
 	env := newWatchTestEnv(t)
 	router := env.router(t, httpserver.RouterConfig{SyncWatch: env.hub(t, time.Hour)})
@@ -182,7 +209,7 @@ func TestTeamInviteJoinAndPermissions(t *testing.T) {
 		expectTeamCode(t, teamCall(router, outsider, http.MethodGet, path, "", nil), http.StatusNotFound, "team_not_found", "outsider GET "+path)
 	}
 
-	// 소유자만: 이름 바꾸기·팀 삭제·소유권 넘기기·제거.
+	// 소유자만: 이름 바꾸기·팀 삭제·소유권 넘기기. 빼기는 관리자 이상이다.
 	expectTeamCode(t, teamCall(router, member, http.MethodPatch, "/teams/"+teamID, `{"name":"Mine"}`, nil), http.StatusForbidden, "team_owner_only", "member rename")
 	expectTeamCode(t, teamCall(router, member, http.MethodDelete, "/teams/"+teamID, "", nil), http.StatusForbidden, "team_owner_only", "member delete")
 	expectTeamCode(t, teamCall(router, member, http.MethodPost, "/teams/"+teamID+"/owner", `{"userId":"x"}`, nil), http.StatusForbidden, "team_owner_only", "member transfer")
@@ -203,7 +230,7 @@ func TestTeamInviteJoinAndPermissions(t *testing.T) {
 	}
 	ownerID := members.Members[0].UserID
 	memberID := members.Members[1].UserID
-	expectTeamCode(t, teamCall(router, member, http.MethodPost, "/teams/"+teamID+"/members/"+ownerID+"/remove", "", nil), http.StatusForbidden, "team_owner_only", "member removes owner")
+	expectTeamCode(t, teamCall(router, member, http.MethodPost, "/teams/"+teamID+"/members/"+ownerID+"/remove", "", nil), http.StatusForbidden, "team_admin_only", "member removes owner")
 	expectTeamCode(t, teamCall(router, owner, http.MethodPost, "/teams/"+teamID+"/leave", "", nil), http.StatusConflict, "team_owner_must_transfer", "owner leave with members")
 
 	// 제거하면 그 사람은 팀을 못 보고, 알던 링크로 되돌아오지도 못한다.
@@ -246,7 +273,7 @@ func TestTeamInviteValidatesLifetimeAndRevocation(t *testing.T) {
 }
 
 // 잠근 비밀값은 멤버의 링크 목록에만 실린다 — 링크 정보·참여 응답에는 없고, 취소하면 목록에서도 빠진다.
-func TestTeamInviteSealedSecretGoesOnlyToMembers(t *testing.T) {
+func TestTeamInviteSealedSecretGoesOnlyToAdmins(t *testing.T) {
 	env := newWatchTestEnv(t)
 	router := env.router(t, httpserver.RouterConfig{SyncWatch: env.hub(t, time.Hour)})
 	owner := newWatchTestAccount(t, router, "sealed-http-owner@example.com")
@@ -290,8 +317,11 @@ func TestTeamInviteSealedSecretGoesOnlyToMembers(t *testing.T) {
 		t.Fatalf("invite %s missing from the list: %#v", invite.Code, body.Invites)
 		return "", false
 	}
+	// 링크(다시 복사할 비밀값까지)는 관리자 이상만 본다 — 멤버는 목록부터 못 받는다.
+	expectTeamCode(t, teamCall(router, member, http.MethodGet, "/teams/"+teamID+"/invites", "", nil), http.StatusForbidden, "team_admin_only", "member lists invites")
+	setTeamRoleOverHTTP(t, router, owner, teamID, teamMemberIDByEmail(t, router, owner, teamID, "sealed-http-member@example.com"), "admin")
 	if sealed, ok := sealedInList(member); !ok || sealed != "sealed-secret" {
-		t.Fatalf("member sees sealed secret %q (%v)", sealed, ok)
+		t.Fatalf("admin sees sealed secret %q (%v)", sealed, ok)
 	}
 
 	tokenHeader := map[string]string{"X-Dolgate-Invite-Token": token}

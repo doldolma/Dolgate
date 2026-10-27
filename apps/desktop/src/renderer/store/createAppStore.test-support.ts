@@ -1021,6 +1021,7 @@ export function createMockApi(): DesktopApi {
       transferOwnership: vi.fn().mockResolvedValue(undefined),
       listMembers: vi.fn().mockResolvedValue([]),
       removeMember: vi.fn().mockResolvedValue(undefined),
+      setMemberRole: vi.fn().mockResolvedValue(undefined),
       leave: vi.fn().mockResolvedValue(undefined),
       createInvite: vi.fn(),
       listInvites: vi.fn().mockResolvedValue([]),
@@ -1047,6 +1048,8 @@ export function createMockApi(): DesktopApi {
       clearMyCredentials: vi.fn().mockResolvedValue(undefined),
       listActivity: vi.fn().mockResolvedValue([]),
       getReplayStatuses: vi.fn().mockResolvedValue([]),
+      listChanges: vi.fn().mockResolvedValue({ sets: [], nextBefore: null }),
+      restoreChange: vi.fn().mockResolvedValue({ status: 'restored', restored: [], dependencies: [], skipped: [] }),
     },
     savedWorkspaces: {
       list: vi.fn().mockResolvedValue([]),

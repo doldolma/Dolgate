@@ -5,7 +5,7 @@ import { useAppStore } from '../../store/appStore';
 import { normalizeErrorMessage } from '../../store/utils/errors-and-prompts';
 import { DialogBackdrop } from '../DialogBackdrop';
 import { Button, ModalBody, ModalFooter, ModalShell } from '../../ui';
-import { History, Link, Lock, Users } from '../../ui/icons';
+import { Eye, History, Link, Lock, Users } from '../../ui/icons';
 import { TeamDialogError } from './TeamDialogFrame';
 import { MarkSquare } from './MarkSquare';
 
@@ -264,11 +264,18 @@ export function JoinTeamDialogHost({ onRequestLogin }: JoinTeamDialogHostProps) 
           {translate('teamsPanel.joinCard.invitedBy', { email: preview.inviterEmail, count: preview.memberCount })}
         </SoftLine>
         <div className="grid gap-2 rounded-[10px] border border-[var(--selection-border)] bg-[var(--selection-tint)] px-3 py-2.5 text-left text-[0.84rem] leading-[1.55] text-[var(--text-soft)]">
+          {/* 읽기 전용 링크면 들어가기 전에 그것부터 말한다(후보 J1). Member 링크는 지금과 같다. */}
+          {preview.role === 'viewer' ? (
+            <p className="m-0 flex items-start gap-2">
+              <Eye className="mt-[0.2rem] h-4 w-4 shrink-0 text-[var(--accent-strong)]" aria-hidden="true" />
+              <span>{translate('teamsPanel.joinCard.viewer')}</span>
+            </p>
+          ) : null}
           <p className="m-0 flex items-start gap-2">
             <Lock className="mt-[0.2rem] h-4 w-4 shrink-0 text-[var(--accent-strong)]" aria-hidden="true" />
             <span>{translate('teamsPanel.joinCard.what')}</span>
           </p>
-          {/* 들어가기 전에 알아야 한다 — 팀 호스트에서 한 일은 멤버 모두가 본다. */}
+          {/* 들어가기 전에 알아야 한다 — 팀 호스트에서 한 일은 멤버 모두가, 녹화는 관리자와 녹화한 사람이 본다. */}
           <p className="m-0 flex items-start gap-2">
             <History className="mt-[0.2rem] h-4 w-4 shrink-0 text-[var(--accent-strong)]" aria-hidden="true" />
             <span>{translate('teamsPanel.joinCard.history')}</span>

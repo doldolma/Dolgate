@@ -882,3 +882,76 @@ describe('AwsProfilesPanel with team vaults', () => {
     await waitFor(() => expect(api.aws.deleteProfile).toHaveBeenCalledWith('acme-sso', TEAM))
   })
 })
+
+// 7-3: 내가 읽기 전용(Viewer)인 팀 — 쓰기(SSO 로그인·내 키)만 남고, 만들기·이름·리전·지우기는 닫힌다.
+describe('AwsProfilesPanel with a read-only team', () => {
+  const TEAM = 'team-a'
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    resetAwsProfilesPanelCacheForTests()
+    appStore.setState({
+      vaultIndex: {
+        ...createEmptyVaultIndex(),
+        teams: [{ id: TEAM, name: 'Acme Infra', role: 'viewer', syncState: 'ready', syncError: null, groups: [] }],
+      },
+    })
+  })
+
+  afterEach(() => {
+    appStore.setState(appStore.getInitialState(), true)
+  })
+
+  const section = (vaultId: string) =>
+    within(document.querySelector(`[data-vault-section="${vaultId}"]`)!.closest('section')!)
+
+  it('lets you add only your own key to a team static profile, and log in to a team SSO one', async () => {
+    const mocked = installMockApi()
+    const api = mocked.api
+    const personalList = api.aws.listProfiles.getMockImplementation()!
+    api.aws.listProfiles.mockImplementation(async (vaultId?: string) =>
+      vaultId === TEAM
+        ? [
+            { id: 'team-prod', name: 'acme-prod' },
+            { id: 'team-sso', name: 'acme-sso' },
+          ]
+        : personalList(),
+    )
+    const personalDetails = api.aws.getProfileDetails.getMockImplementation()!
+    api.aws.getProfileDetails.mockImplementation(async (profileName: string, vaultId?: string) =>
+      vaultId === TEAM
+        ? profileName === 'acme-prod'
+          ? createProfileDetails({ id: 'team-prod', profileName: 'acme-prod', configuredRegion: 'us-east-1' })
+          : createProfileDetails({ id: 'team-sso', profileName: 'acme-sso', kind: 'sso', isSsoProfile: true, isAuthenticated: false })
+        : personalDetails(profileName),
+    )
+    render(<AwsProfilesPanel hosts={[]} />)
+    await waitFor(() => expect(section(TEAM).getByText('acme-prod')).toBeInTheDocument())
+    expect(section(TEAM).queryByRole('button', { name: 'Acme Infra에 새 프로필' })).toBeNull()
+    expect(section('personal').getByRole('button', { name: /에 새 프로필$/ })).toBeInTheDocument()
+
+    fireEvent.click(section(TEAM).getByRole('button', { name: /acme-prod/ }))
+    await screen.findByRole('heading', { name: 'acme-prod' })
+    for (const name of ['수정', '이름 변경', '기본 Region 변경', '삭제']) {
+      expect(screen.queryByRole('button', { name })).toBeNull()
+    }
+    fireEvent.click(screen.getByRole('button', { name: '키 넣기' }))
+    const dialog = within(screen.getByRole('dialog', { name: /acme-prod/ }))
+    fireEvent.change(dialog.getByLabelText('Access Key'), { target: { value: 'AKIAMINE' } })
+    fireEvent.change(dialog.getByLabelText('Secret'), { target: { value: 'mine' } })
+    fireEvent.click(dialog.getByRole('button', { name: '저장' }))
+    await waitFor(() =>
+      expect(api.aws.updateProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ profileName: 'acme-prod', accessKeyId: 'AKIAMINE', secretAccessKey: 'mine', vaultId: TEAM }),
+      ),
+    )
+    // 리전은 보내지 않는다 — 팀 설정이라 그대로다.
+    expect(vi.mocked(api.aws.updateProfile).mock.lastCall?.[0]).not.toHaveProperty('region')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /acme-prod/ })).toBeNull())
+
+    fireEvent.click(section(TEAM).getByRole('button', { name: /acme-sso/ }))
+    await screen.findByRole('heading', { name: 'acme-sso' })
+    expect(screen.getByRole('button', { name: 'AWS SSO 로그인' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '삭제' })).toBeNull()
+  })
+})

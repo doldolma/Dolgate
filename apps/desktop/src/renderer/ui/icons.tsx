@@ -92,6 +92,10 @@ export {
   User,
   Users,
   TriangleAlert,
+  RotateCcw,
+  Server,
+  Globe,
+  ShieldCheck,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';

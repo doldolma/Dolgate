@@ -258,6 +258,14 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
     uploads.activate(history.stateDirectoryPath!);
     const viewer = new TeamReplayViewer({ api: teamApi, openTeamAccess, cache: new TeamReplayCache() });
     viewer.activate(history.stateDirectoryPath!);
+    // 바뀐 것과 복원 — ipc.ts 의 연결 그대로(올리기는 시험이 직접 건다).
+    const { TeamRestoreService } = await import("./team-restore-service");
+    const restore = new TeamRestoreService({
+      api: teamApi,
+      openTeamAccess,
+      writeTime: (forTeam, records) => service.writeTimeAfterServer(forTeam, records),
+      onRestored: () => undefined,
+    });
     forgetTeamHistory = (forgotten) => {
       history.forgetTeam(forgotten);
       uploads.forgetTeam(forgotten);
@@ -290,6 +298,8 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
       viewer,
       recording,
       replayCacheDir: path.join(history.stateDirectoryPath!, "replay-cache"),
+      api: teamApi,
+      restore,
     };
   }
 
@@ -510,12 +520,14 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
       teamName: "Acme",
       inviterEmail: accountA.email,
       memberCount: 1,
+      role: "member",
       alreadyJoined: false,
     });
     await expect(deviceB.teams.join(link)).resolves.toMatchObject({ id: teamId, role: "member", syncState: "ready" });
     await deviceB.tick();
-    // B 도 A 가 만든 링크를 목록에서 다시 복사한다 — 서버의 잠근 비밀값을 B 의 팀 키로 연다.
-    const invites = await deviceB.teams.listInvites(teamId);
+    // 링크 목록(다시 복사)은 관리자 이상의 일이다 — 멤버인 B 는 받지 못하고, A 는 서버의 잠근 비밀값을 팀 키로 연다.
+    await expect(deviceB.teams.listInvites(teamId)).rejects.toMatchObject({ code: "team_admin_only" });
+    const invites = await deviceA1.teams.listInvites(teamId);
     expect(invites.find((invite) => link.includes(`/invite/${invite.code}#`))?.link).toBe(link);
 
     expect(deviceB.catalog.getHost("team-host")).toMatchObject({ label: "prod", agentForwarding: null, terminalThemeId: null });
@@ -833,6 +845,14 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
     const [end] = await deviceB.history.listActivity(teamId, { limit: 1 });
     expect(end).toMatchObject({ authorEmail: accountA.email, activity: { phase: "end" } });
     expect(end!.activity!.record.metadata).toMatchObject({ status: "closed", recordingId: recordingIds[0] });
+    // 멤버는 남의 녹화를 받지 못한다(관리자 이상과 녹화한 사람만). 기록과 녹화가 있다는 것은 본다.
+    expect((await deviceB.history.getReplayStatuses(teamId, [recordingIds[0]!]))[0]).toMatchObject({ state: "ended", viewable: false });
+    await expect(deviceB.viewer.load(teamId, recordingIds[0]!)).rejects.toMatchObject({ code: "team_replay_forbidden" });
+    // A 가 B 를 관리자로 올리면 B 도 모두의 녹화를 본다.
+    await deviceA1.teams.setMemberRole(teamId, accountB.userId, "admin");
+    await deviceB.tick();
+    expect(deviceB.storage.getTeamState(teamId)?.info.role).toBe("admin");
+    expect((await deviceB.history.getReplayStatuses(teamId, [recordingIds[0]!]))[0]).toMatchObject({ viewable: true });
     const { view, played } = await playTeamRecording(deviceB, recordingIds[0]!);
     expect(view.team).toMatchObject({ teamId, authorEmail: accountA.email, state: "ended" });
     expect(view.team!.commands!.blocks.map((block) => block.command)).toEqual(["ls -la", "uptime"]);
@@ -873,7 +893,9 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
     expect(deviceC.catalog.scopeOfHost("team-host").id).toBe(teamId);
 
     const { replayDir } = await recordTeamSession(deviceC, recordingIds[3]!);
-    await playTeamRecording(deviceC, recordingIds[2]!);
+    // 멤버라 A 의 녹화는 못 받고, 자기 녹화는 받는다.
+    await expect(deviceC.viewer.load(teamId, recordingIds[2]!)).rejects.toMatchObject({ code: "team_replay_forbidden" });
+    await playTeamRecording(deviceC, recordingIds[3]!);
     expect(existsSync(path.join(deviceC.replayCacheDir, teamId))).toBe(true);
     await deviceC.teams.leave(teamId);
     // C 의 기기에서 팀이 지워지며 팀 녹화 캐시도 지워진다.
@@ -890,6 +912,164 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
     expect(view.team).toMatchObject({ authorEmail: accountC.email, state: "ended" });
     expect(sameEntries(played, await readLocalRecording(replayDir, recordingIds[3]!))).toBe(true);
     expect((await deviceA1.teams.listMembers(teamId)).map((member) => member.email).sort()).toEqual([accountA.email, accountB.email]);
+  }, 60_000);
+
+  it("a viewer reads and trusts but never writes the team, until A makes them a member", async () => {
+    const accountD = await createAccount("d@team-e2e.test");
+    const deviceD = await createDevice("d", accountD);
+    const invite = await deviceA1.teams.createInvite(teamId, { role: "viewer" });
+    await expect(deviceD.teams.previewInvite(invite.link)).resolves.toMatchObject({ status: "ok", role: "viewer" });
+    await expect(deviceD.teams.join(invite.link)).resolves.toMatchObject({ id: teamId, role: "viewer" });
+    await deviceD.tick();
+    expect(deviceD.catalog.getHost("team-host")).toMatchObject({ label: "from-b" });
+
+    // 읽기 전용은 팀 것을 고치지 못한다 — 메인이 먼저 막고, 서버도 거절한다.
+    expect(() => deviceD.catalog.createHost(teamId, "d-host", { kind: "ssh", label: "d", hostname: "d.internal", port: 22, username: "u", authType: "password" } as never, null)).toThrow(
+      deviceD.vaultRoot.TeamVaultReadOnlyError,
+    );
+    const forced = await api(accountD.accessToken, "POST", `/teams/${teamId}/sync`, {
+      hosts: [{ id: "forced", encrypted_payload: "x", updated_at: new Date().toISOString() }],
+    });
+    expect(forced).toMatchObject({ status: 403, body: { code: "team_read_only" } });
+    await expect(deviceD.teams.createInvite(teamId)).rejects.toMatchObject({ code: "team_admin_only" });
+
+    // 접속하며 신뢰한 호스트 키는 D 의 내 칸에 간다. 팀의 호스트 키에는 없다.
+    const before = deviceA1.storage.getState().teams[teamId]!.data.knownHosts.length;
+    deviceD.catalog.scopeOfHost("team-host").knownHosts.trust({
+      hostId: "team-host",
+      hostLabel: "from-b",
+      host: "prod.internal",
+      port: 22,
+      algorithm: "ssh-ed25519",
+      publicKeyBase64: "AAAAC3NzaC1lZDI1NTE5AAAAID",
+      fingerprintSha256: "SHA256:viewer-trusted",
+    });
+    await deviceD.service.pushDirty();
+    expect(deviceD.catalog.scopeOfHost("team-host").knownHosts.getByHostPortAlgorithm("prod.internal", 22, "ssh-ed25519")).toMatchObject({
+      fingerprintSha256: "SHA256:viewer-trusted",
+    });
+    const privateSlot = await api(accountD.accessToken, "GET", `/teams/${teamId}/me`);
+    expect((privateSlot.body.hostPrefs as unknown[]).length).toBeGreaterThan(0);
+    await deviceA1.tick();
+    expect(deviceA1.storage.getState().teams[teamId]!.data.knownHosts.length).toBe(before);
+
+    // A 가 멤버로 올리면 D 의 기기는 팀 감시로 알고, 그때부터 고친 것이 팀에 간다.
+    await deviceA1.teams.setMemberRole(teamId, accountD.userId, "member");
+    await deviceD.tick();
+    expect(deviceD.storage.getTeamState(teamId)?.info.role).toBe("member");
+    deviceD.catalog.createHost(teamId, "d-host", { kind: "ssh", label: "from-d", hostname: "d.internal", port: 22, username: "u", authType: "password" } as never, null);
+    await deviceD.service.pushDirty();
+    await deviceA1.tick();
+    expect(deviceA1.catalog.getHost("d-host")).toMatchObject({ label: "from-d" });
+
+    // 멤버가 지운 것은 이전 판에 남는다 — 관리자 이상만 본다.
+    deviceD.catalog.removeHosts(["d-host"]);
+    await deviceD.service.pushDirty();
+    await expect(deviceD.api.listRecordVersions(deviceD.service.openTeamAccess(teamId)!.lease, teamId)).rejects.toMatchObject({
+      code: "team_admin_only",
+    });
+    const access = deviceA1.service.openTeamAccess(teamId)!;
+    const versions = await deviceA1.api.listRecordVersions(access.lease, teamId, { kind: "hosts", recordId: "d-host" });
+    expect(versions).toHaveLength(1);
+    expect(versions[0]).toMatchObject({ changedByEmail: accountD.email, updatedByEmail: accountD.email });
+    expect(decrypt<{ label: string }>(versions[0]!.encryptedPayload, access.teamKeyBase64)).toMatchObject({ label: "from-d" });
+    await deviceD.teams.leave(teamId);
+  }, 60_000);
+
+  it("A restores a host B deleted with its password and jump host, though B removed those in a later push", async () => {
+    // 녹화 보기 때 관리자로 올린 B 를 멤버로 — 지우는 것은 멤버도 하지만, 바뀐 것과 복원은 관리자 이상이다.
+    await deviceA1.teams.setMemberRole(teamId, accountB.userId, "member");
+    await deviceB.tick();
+    expect(deviceB.storage.getTeamState(teamId)?.info.role).toBe("member");
+    const scope = deviceA1.catalog.getScope(teamId)!;
+    const dbSecret = "secret:e2e-restore-db";
+    await scope.secrets.save(
+      dbSecret,
+      JSON.stringify({ secretRef: dbSecret, label: "restore-db", password: "s3cret", updatedAt: new Date().toISOString() }),
+    );
+    scope.secretMetadata.upsert({ secretRef: dbSecret, label: "restore-db", hasPassword: true, hasPassphrase: false });
+    const ssh = (label: string, hostname: string, extra: Record<string, unknown> = {}) =>
+      ({ kind: "ssh", label, hostname, port: 22, username: "ops", authType: "password", ...extra }) as never;
+    deviceA1.catalog.createHost(teamId, "restore-jump", ssh("restore-jump", "jump.internal"), null);
+    deviceA1.catalog.createHost(teamId, "restore-db", ssh("restore-db", "db.internal", { jumpHostIds: ["restore-jump"] }), dbSecret);
+    await deviceA1.service.pushDirty();
+    await deviceB.tick();
+    expect(deviceB.catalog.getHost("restore-db")).toMatchObject({ label: "restore-db" });
+
+    // B 가 앱의 지우기처럼 지운다 — 호스트를 먼저 올리고, 안 쓰게 된 비밀번호와 점프 호스트는 다음 올리기에.
+    deviceB.catalog.removeHosts(["restore-db"]);
+    await deviceB.service.pushDirty();
+    const scopeB = deviceB.catalog.getScope(teamId)!;
+    scopeB.syncOutbox.upsertDeletions("secrets", [dbSecret]);
+    await scopeB.secrets.remove(dbSecret);
+    scopeB.secretMetadata.removeMany([dbSecret]);
+    deviceB.catalog.removeHosts(["restore-jump"]);
+    await deviceB.service.pushDirty();
+    await deviceA1.tick();
+    expect(deviceA1.catalog.getHost("restore-db")).toBeNull();
+
+    // 멤버는 바뀐 것을 보지 못한다(관리자 이상).
+    await expect(deviceB.restore.listChanges(teamId)).rejects.toThrow();
+    const [cleanup, removal] = (await deviceA1.restore.listChanges(teamId)).sets;
+    expect(cleanup.items.map((item) => [item.kind, item.recordId, item.deleted]).sort()).toEqual([
+      ["hosts", "restore-jump", true],
+      ["secrets", dbSecret, true],
+    ]);
+    expect(removal).toMatchObject({
+      changedByEmail: accountB.email,
+      items: [{ kind: "hosts", recordId: "restore-db", label: "restore-db", deleted: true, currentLabel: null }],
+      changedLater: false,
+      restored: false,
+    });
+
+    const outcome = await deviceA1.restore.restoreChange(teamId, removal);
+    expect(outcome).toMatchObject({ status: "restored", restored: [{ recordId: "restore-db" }], skipped: [] });
+    expect(outcome.status === "restored" ? outcome.dependencies.map((record) => record.recordId).sort() : null).toEqual(
+      ["restore-jump", dbSecret].sort(),
+    );
+    await deviceA1.service.pushDirty();
+    await deviceB.tick();
+    expect(deviceB.catalog.getHost("restore-db")).toMatchObject({ label: "restore-db", jumpHostIds: ["restore-jump"] });
+    expect(deviceB.catalog.getHost("restore-jump")).toMatchObject({ label: "restore-jump" });
+    await expect(deviceB.catalog.loadSecret(dbSecret)).resolves.toContain("s3cret");
+    const after = (await deviceA1.restore.listChanges(teamId)).sets;
+    expect(after.find((set) => set.lastSeq === removal.lastSeq)).toMatchObject({ restored: true });
+  }, 60_000);
+
+  it("A reverts B's rename, and overwrites B's later edit of that host only when told to", async () => {
+    const draft = (label: string, hostname: string) =>
+      ({ kind: "ssh", label, hostname, port: 22, username: "ops", authType: "password", jumpHostIds: ["restore-jump"] }) as never;
+    deviceB.catalog.updateHost("restore-db", draft("restore-db-2", "db.internal"), "secret:e2e-restore-db");
+    await deviceB.service.pushDirty();
+    deviceB.catalog.updateHost("restore-db", draft("restore-db-2", "db2.internal"), "secret:e2e-restore-db");
+    await deviceB.service.pushDirty();
+    await deviceA1.tick();
+
+    const [hostnameEdit, rename] = (await deviceA1.restore.listChanges(teamId)).sets;
+    expect(hostnameEdit).toMatchObject({ changedLater: false, items: [{ recordId: "restore-db", deleted: false }] });
+    expect(rename).toMatchObject({
+      changedLater: true,
+      items: [{ recordId: "restore-db", label: "restore-db", deleted: false, currentLabel: "restore-db-2" }],
+    });
+    const asked = await deviceA1.restore.restoreChange(teamId, rename);
+    expect(asked).toMatchObject({
+      status: "needs-confirm",
+      overwrites: [{ recordId: "restore-db", byEmail: accountB.email }],
+    });
+    expect(deviceA1.catalog.getHost("restore-db")).toMatchObject({ hostname: "db2.internal" });
+
+    await expect(deviceA1.restore.restoreChange(teamId, rename, { overwrite: true })).resolves.toMatchObject({
+      status: "restored",
+    });
+    await deviceA1.service.pushDirty();
+    await deviceB.tick();
+    expect(deviceB.catalog.getHost("restore-db")).toMatchObject({ label: "restore-db", hostname: "db.internal" });
+    // 덮인 판은 A 의 새 변경으로 남아 다시 되돌릴 수 있다.
+    const [newest] = (await deviceA1.restore.listChanges(teamId)).sets;
+    expect(newest).toMatchObject({
+      changedByEmail: accountA.email,
+      items: [{ recordId: "restore-db", label: "restore-db-2", deleted: false, currentLabel: "restore-db" }],
+    });
   }, 60_000);
 
   it("removing B wipes B's copy and the old link stops working", async () => {

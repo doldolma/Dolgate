@@ -98,3 +98,29 @@ describe('SnippetsPanel vaults', () => {
     expect(screen.getByRole('dialog').querySelector('[data-vault-chip]')).toBeNull();
   });
 });
+
+// 7-3: 내가 읽기 전용(Viewer)인 팀 — 넣기만 하고, 만들고 고치지 않는다(+ 와 편집이 없다).
+describe('SnippetsPanel vaults — read-only team', () => {
+  it('drops the + and Edit for a team you only view, and keeps Insert', () => {
+    const index = vaultIndex();
+    index.teams = index.teams.map((team) => (team.id === TEAM ? { ...team, role: 'viewer' as const } : team));
+    render(
+      <SnippetsPanel
+        snippets={snippets}
+        hosts={[]}
+        vaultIndex={index}
+        onSave={vi.fn()}
+        onRemove={vi.fn()}
+        onInsert={vi.fn()}
+      />,
+    );
+
+    expect(within(section(TEAM)).getByText('Restart app')).toBeInTheDocument();
+    expect(within(section(TEAM)).queryByRole('button', { name: /스니펫 추가/ })).toBeNull();
+    expect(within(section(TEAM)).queryByRole('button', { name: '편집' })).toBeNull();
+    expect(within(section(TEAM)).getByRole('button', { name: '삽입' })).toBeInTheDocument();
+    // 개인 것은 그대로다.
+    expect(within(section('personal')).getByRole('button', { name: '편집' })).toBeInTheDocument();
+    expect(within(section('personal')).getByRole('button', { name: /스니펫 추가/ })).toBeInTheDocument();
+  });
+});

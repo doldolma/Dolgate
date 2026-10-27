@@ -1,6 +1,14 @@
 import { Fragment, useEffect, useEffectEvent, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { TeamInvite, TeamMember, TeamRole } from '@shared';
+import {
+  canChangeTeamRole,
+  canManageTeam,
+  canRemoveTeamMember,
+  type TeamAssignableRole,
+  type TeamInvite,
+  type TeamMember,
+  type TeamRole,
+} from '@shared';
 import { useAppStore } from '../../store/appStore';
 import { normalizeErrorMessage } from '../../store/utils/errors-and-prompts';
 import { cn } from '../../lib/cn';
@@ -17,12 +25,12 @@ import {
   SplitButtonMenuItem,
   Tooltip,
 } from '../../ui';
-import { Check, Copy, Crown, Link, LogIn, LogOut, MoreVertical, Pencil, Plus, Trash2, UserMinus } from '../../ui/icons';
+import { Check, Copy, Crown, Eye, Link, LogIn, LogOut, MoreVertical, Pencil, Plus, Trash2, UserMinus } from '../../ui/icons';
 import { copyText } from './copy-text';
 import { InviteLinkDialog } from './InviteLinkDialog';
 import { DeleteTeamDialog, LeaveTeamDialog } from './TeamExitDialogs';
 import { JoinWithLinkDialog, MakeOwnerDialog, RemoveMemberDialog, TeamNameDialog } from './TeamFormDialogs';
-import { formatExactTime, formatRelativeTime, isCurrentMember, shortNameOf } from './team-format';
+import { TEAM_ROLE_LABELS, formatExactTime, formatRelativeTime, isCurrentMember, shortNameOf } from './team-format';
 
 // AWS Profiles 탭과 같은 두 칸 — 왼쪽 목록 판·오른쪽 상세 판.
 const PANEL_CLASS =
@@ -41,6 +49,9 @@ const ROW_CLASS = 'flex min-w-0 items-center gap-3 px-3.5 py-2.5';
 const ROWS_LABEL_CLASS = 'text-[0.8rem] font-medium text-[var(--text-soft)]';
 // 이름 옆에 붙는 작은 칩. 기본 Badge(상태 표시용)는 글줄보다 높아 이름 옆에서 튀었다.
 const ROLE_BADGE_CLASS = 'min-h-0 px-[0.45rem] py-0 text-[0.7rem] font-medium leading-[1.15rem]';
+// 역할 바꾸기로 줄 수 있는 역할(소유자는 넘기기로만 바뀐다), 메뉴 순서대로.
+const ASSIGNABLE_ROLES: readonly TeamAssignableRole[] = ['admin', 'member', 'viewer'];
+const ROLE_ORDER: readonly TeamRole[] = ['owner', 'admin', 'member', 'viewer'];
 
 /** 열린 창. 팀에 대한 창은 연 순간의 팀을 붙잡는다 — 그 사이 팀이 사라져 다른 팀을 건드리지 않게. */
 type TeamsDialog =
@@ -93,10 +104,14 @@ interface MenuAction {
   danger?: boolean;
   /** 앞 항목들과 줄로 나눈다(지우기처럼 되돌릴 수 없는 것). */
   separatorBefore?: boolean;
+  /** 이 항목 앞에 다는 작은 머리(멤버 메뉴의 Role). */
+  captionBefore?: string;
+  /** 고르기 항목(역할)이면 지금 골라진 것인지. 있으면 menuitemradio 다. */
+  checked?: boolean;
   onSelect: () => void;
 }
 
-/** ⋯ 단추와 그 메뉴. 팀 메뉴(이름 변경·나가기·삭제)와 멤버 줄 메뉴(소유자로 지정·제거)가 같이 쓴다. */
+/** ⋯ 단추와 그 메뉴. 팀 메뉴(이름 변경·나가기·삭제)와 멤버 줄 메뉴(역할·소유자로 지정·제거)가 같이 쓴다. */
 function ActionsMenu({ label, size, actions }: { label: string; size: 'sm' | 'md'; actions: MenuAction[] }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -118,8 +133,14 @@ function ActionsMenu({ label, size, actions }: { label: string; size: 'sm' | 'md
           {actions.map((action) => (
             <Fragment key={action.key}>
               {action.separatorBefore ? <div role="separator" className="my-1 h-px bg-[var(--border)]" /> : null}
+              {action.captionBefore ? (
+                <div className="px-3 pb-1 pt-1.5 text-[0.72rem] font-semibold text-[var(--text-soft)]">
+                  {action.captionBefore}
+                </div>
+              ) : null}
               <SplitButtonMenuItem
-                role="menuitem"
+                role={action.checked === undefined ? 'menuitem' : 'menuitemradio'}
+                aria-checked={action.checked}
                 className={action.danger ? 'text-[var(--danger-text)]' : undefined}
                 onClick={() => {
                   setOpen(false);
@@ -199,13 +220,39 @@ function CopyLinkButton({ link, onResult }: { link: string; onResult: (copied: b
   );
 }
 
-function RoleBadge({ role, className }: { role: TeamRole; className?: string }) {
-  return role === 'owner' ? (
-    <Badge tone="starting" className={cn(ROLE_BADGE_CLASS, className)}>
-      Owner
+/** 역할 칩 넷 — 관리하는 역할(Owner·Admin)은 강조, Member 는 무채, Viewer 는 무채에 눈(보고 접속만). */
+export function RoleBadge({ role, className }: { role: TeamRole; className?: string }) {
+  if (role === 'owner' || role === 'admin') {
+    return (
+      <Badge tone="starting" className={cn(ROLE_BADGE_CLASS, className)}>
+        {TEAM_ROLE_LABELS[role]}
+      </Badge>
+    );
+  }
+  return (
+    <Badge className={cn(ROLE_BADGE_CLASS, role === 'viewer' && 'gap-1', className)}>
+      {role === 'viewer' ? <Eye className="h-3 w-3" aria-hidden="true" /> : null}
+      {TEAM_ROLE_LABELS[role]}
     </Badge>
-  ) : (
-    <Badge className={cn(ROLE_BADGE_CLASS, className)}>Member</Badge>
+  );
+}
+
+/** '멤버' 머리의 ⓘ — 역할마다 할 수 있는 것(늘 보이는 설명 줄 대신 말풍선 하나). */
+function RolesHint() {
+  const { t: translate } = useTranslation();
+  return (
+    <InfoHint label={translate('teamsPanel.roles.label')}>
+      <span className="grid gap-1.5">
+        {ROLE_ORDER.map((role) => (
+          <span key={role} className="flex items-start gap-2">
+            <strong className="shrink-0 text-[var(--text)]" style={{ width: '3.6rem' }}>
+              {TEAM_ROLE_LABELS[role]}
+            </strong>
+            <span>{translate(`teamsPanel.roles.${role}`)}</span>
+          </span>
+        ))}
+      </span>
+    </InfoHint>
   );
 }
 
@@ -290,6 +337,7 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
   const leaveTeam = useAppStore((state) => state.leaveTeam);
   const transferTeamOwnership = useAppStore((state) => state.transferTeamOwnership);
   const removeTeamMember = useAppStore((state) => state.removeTeamMember);
+  const setTeamMemberRole = useAppStore((state) => state.setTeamMemberRole);
   const listTeamMembers = useAppStore((state) => state.listTeamMembers);
   const listTeamInvites = useAppStore((state) => state.listTeamInvites);
   const createTeamInvite = useAppStore((state) => state.createTeamInvite);
@@ -316,7 +364,11 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
     }
     let cancelled = false;
     setRosterError(null);
-    Promise.all([listTeamMembers(teamId), listTeamInvites(teamId)]).then(
+    Promise.all([
+      listTeamMembers(teamId),
+      // 링크 목록은 관리자 이상만 받는다(서버가 거절한다) — 그 아래 역할에게는 빈 목록이다.
+      teamRole && canManageTeam(teamRole) ? listTeamInvites(teamId) : Promise.resolve<TeamInvite[]>([]),
+    ]).then(
       ([members, invites]) => {
         if (!cancelled) {
           setRoster({ teamId, members, invites });
@@ -429,8 +481,8 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
     dialogView = (
       <InviteLinkDialog
         teamName={dialog.teamName}
-        onCreate={async (hours) => {
-          const created = await createTeamInvite(dialog.teamId, hours);
+        onCreate={async (hours, role) => {
+          const created = await createTeamInvite(dialog.teamId, hours, role);
           reloadRoster();
           return created;
         }}
@@ -504,6 +556,8 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
   }
 
   const isOwner = team.role === 'owner';
+  // 초대 링크·멤버 빼기·역할 바꾸기는 관리자 이상(서버가 막는다 — 화면은 길만 닫는다).
+  const canManage = canManageTeam(team.role);
   const shownRoster = rosterFor(team.id);
   const activeInvites = shownRoster?.invites.filter((invite) => invite.active) ?? [];
   const summary = [
@@ -543,6 +597,61 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
         ]
       : []),
   ];
+
+  /**
+   * 멤버 줄의 ⋯ 메뉴(R1) — 맨 위에 Role 셋(지금 역할에 체크), 그 아래 소유자로 지정·제거. 내 역할로 할 수 있는 것만
+   * 둔다(서버와 같은 규칙: 소유자는 누구든 Admin 까지, 관리자는 Member ↔ Viewer 만 바꾸고 그 둘만 뺀다).
+   */
+  const memberActionsOf = (member: TeamMember): MenuAction[] => {
+    const choices = ASSIGNABLE_ROLES.filter(
+      (role) => role === member.role || canChangeTeamRole(team.role, member.role, role),
+    );
+    // 바꿀 곳이 지금 역할 하나뿐이면(관리자가 관리자를 볼 때) 역할 칸을 두지 않는다.
+    const roleActions: MenuAction[] = choices.some((role) => role !== member.role)
+      ? choices.map((role, index) => ({
+          key: `role-${role}`,
+          label: TEAM_ROLE_LABELS[role],
+          icon: (
+            <Check
+              className={cn('h-4 w-4 text-[var(--accent-strong)]', role !== member.role && 'invisible')}
+              aria-hidden="true"
+            />
+          ),
+          captionBefore: index === 0 ? 'Role' : undefined,
+          checked: role === member.role,
+          onSelect: () => {
+            if (role === member.role) {
+              return;
+            }
+            void runAction(async () => {
+              await setTeamMemberRole(team.id, member.userId, role);
+              reloadRoster();
+            });
+          },
+        }))
+      : [];
+    const actions = [...roleActions];
+    if (isOwner) {
+      actions.push({
+        key: 'make-owner',
+        label: translate('teamsPanel.members.makeOwner'),
+        icon: <Crown className="h-4 w-4 text-[var(--text-soft)]" aria-hidden="true" />,
+        separatorBefore: actions.length > 0,
+        onSelect: () => setDialog({ kind: 'make-owner', teamId: team.id, member }),
+      });
+    }
+    if (canRemoveTeamMember(team.role, member.role)) {
+      actions.push({
+        key: 'remove',
+        label: translate('teamsPanel.members.remove'),
+        icon: <UserMinus className="h-4 w-4" aria-hidden="true" />,
+        danger: true,
+        separatorBefore: actions.length > 0,
+        onSelect: () => setDialog({ kind: 'remove-member', teamId: team.id, teamName: team.name, member }),
+      });
+    }
+    return actions;
+  };
 
   return (
     <div className="grid gap-5">
@@ -591,13 +700,15 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
               </div>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Button
-                variant="primary"
-                onClick={() => setDialog({ kind: 'invite', teamId: team.id, teamName: team.name })}
-              >
-                <Link className="h-4 w-4" aria-hidden="true" />
-                {translate('teamsPanel.inviteLink')}
-              </Button>
+              {canManage ? (
+                <Button
+                  variant="primary"
+                  onClick={() => setDialog({ kind: 'invite', teamId: team.id, teamName: team.name })}
+                >
+                  <Link className="h-4 w-4" aria-hidden="true" />
+                  {translate('teamsPanel.inviteLink')}
+                </Button>
+              ) : null}
               <ActionsMenu label={translate('teamsPanel.teamActions')} size="md" actions={teamActions} />
             </div>
           </div>
@@ -624,10 +735,14 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
                   <li key={invite.code} className={ROW_CLASS}>
                     <Link className="h-4 w-4 shrink-0 text-[var(--text-soft)]" aria-hidden="true" />
                     <div className="grid min-w-0 flex-1 gap-0.5">
-                      <span className="text-[0.9rem] text-[var(--text)]">
-                        {translate('teamsPanel.invites.title', {
-                          name: invite.createdByEmail ? shortNameOf(invite.createdByEmail) : '—',
-                        })}
+                      {/* 이 링크로 들어오는 사람의 역할(IL) — 어느 링크가 Viewer 로 들이는지 목록에서 바로 보인다. */}
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="text-[0.9rem] text-[var(--text)]">
+                          {translate('teamsPanel.invites.title', {
+                            name: invite.createdByEmail ? shortNameOf(invite.createdByEmail) : '—',
+                          })}
+                        </span>
+                        <RoleBadge role={invite.role} className="shrink-0" />
                       </span>
                       <span className="flex flex-wrap gap-x-1.5 text-[0.8rem] text-[var(--text-soft)]">
                         <Tooltip label={formatExactTime(invite.expiresAt)}>
@@ -673,10 +788,14 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
 
           {shownRoster ? (
             <div className="grid gap-2">
-              <span className={ROWS_LABEL_CLASS}>{translate('teamsPanel.members.label')}</span>
+              <span className={cn(ROWS_LABEL_CLASS, 'flex items-center gap-1.5')}>
+                {translate('teamsPanel.members.label')}
+                <RolesHint />
+              </span>
               <ul aria-label={translate('teamsPanel.members.label')} className={ROWS_CLASS}>
                 {shownRoster.members.map((member) => {
                   const me = isMe(member);
+                  const memberActions = me ? [] : memberActionsOf(member);
                   return (
                     <li key={member.userId} className={ROW_CLASS}>
                       <div className="grid min-w-0 flex-1 gap-0.5">
@@ -709,32 +828,11 @@ export function TeamsPanel({ currentUserId, currentUserEmail }: TeamsPanelProps)
                         )}
                       </div>
                       <RoleBadge role={member.role} className="shrink-0" />
-                      {isOwner ? (
-                        me ? (
-                          // 다른 줄의 ⋯ 자리를 비워 역할 칩이 한 줄로 선다.
-                          <span className="w-8 shrink-0" aria-hidden="true" />
-                        ) : (
-                          <ActionsMenu
-                            label={translate('teamsPanel.members.actions')}
-                            size="sm"
-                            actions={[
-                              {
-                                key: 'make-owner',
-                                label: translate('teamsPanel.members.makeOwner'),
-                                icon: <Crown className="h-4 w-4 text-[var(--text-soft)]" aria-hidden="true" />,
-                                onSelect: () => setDialog({ kind: 'make-owner', teamId: team.id, member }),
-                              },
-                              {
-                                key: 'remove',
-                                label: translate('teamsPanel.members.remove'),
-                                icon: <UserMinus className="h-4 w-4" aria-hidden="true" />,
-                                danger: true,
-                                onSelect: () =>
-                                  setDialog({ kind: 'remove-member', teamId: team.id, teamName: team.name, member }),
-                              },
-                            ]}
-                          />
-                        )
+                      {memberActions.length > 0 ? (
+                        <ActionsMenu label={translate('teamsPanel.members.actions')} size="sm" actions={memberActions} />
+                      ) : canManage ? (
+                        // 다른 줄의 ⋯ 자리를 비워 역할 칩이 한 줄로 선다.
+                        <span className="w-8 shrink-0" aria-hidden="true" />
                       ) : null}
                     </li>
                   );

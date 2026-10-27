@@ -4,13 +4,14 @@ import type { TeamMember } from '@shared';
 import { Button, FieldGroup, NoticeCard, SelectField } from '../../ui';
 import { LogOut, Trash2 } from '../../ui/icons';
 import { TeamContentCountTiles, type TeamContentCounts } from './TeamContentCounts';
+import { TEAM_ROLE_LABELS, orderBySuccession } from './team-format';
 import { TeamDialogError, TeamDialogFrame } from './TeamDialogFrame';
 import { useDialogAction } from './useDialogAction';
 
 interface LeaveTeamDialogProps {
   teamName: string;
   isOwner: boolean;
-  /** 나 말고 남은 멤버(들어온 순서). 못 읽었으면 null — 그때는 멤버가 나가는 창을 보인다. */
+  /** 나 말고 남은 멤버. 못 읽었으면 null — 그때는 멤버가 나가는 창을 보인다. */
   otherMembers: TeamMember[] | null;
   counts: TeamContentCounts;
   /** 소유자는 넘길 사람을 준다. 마지막 한 명이 나가면 서버가 팀을 지운다. */
@@ -21,7 +22,8 @@ interface LeaveTeamDialogProps {
 /**
  * 팀 나가기. 셋 중 하나다.
  * - 멤버: 확인 한 번
- * - 다른 멤버가 남은 소유자: 막지 않고, 넘길 사람(가장 먼저 들어온 사람이 골라져 있음)을 골라 넘기고 나간다
+ * - 다른 멤버가 남은 소유자: 막지 않고, 넘길 사람을 골라 넘기고 나간다. 처음에는 서버가 소유자를 잇는 순서(관리자 →
+ *   멤버 → 읽기 전용, 같으면 먼저 들어온 사람)의 첫 사람이 골라져 있고, 이름 옆에 역할이 보인다
  * - 마지막 한 명: 나가면 팀이 지워진다 — 지워질 개수를 보인다
  */
 export function LeaveTeamDialog({ teamName, isOwner, otherMembers, counts, onLeave, onClose }: LeaveTeamDialogProps) {
@@ -29,10 +31,11 @@ export function LeaveTeamDialog({ teamName, isOwner, otherMembers, counts, onLea
   const { busy, error, run } = useDialogAction();
   const isLast = otherMembers !== null && otherMembers.length === 0;
   const mustHandOver = isOwner && otherMembers !== null && otherMembers.length > 0;
-  // 고르지 않았으면 가장 먼저 들어온 사람이다. 멤버 목록이 창을 연 뒤에 와도 그 사람이 골라져 있게 그때그때 정한다.
+  const successors = otherMembers ? orderBySuccession(otherMembers) : null;
+  // 고르지 않았으면 잇는 순서의 첫 사람이다. 멤버 목록이 창을 연 뒤에 와도 그 사람이 골라져 있게 그때그때 정한다.
   const [chosenOwnerId, setChosenOwnerId] = useState<string | null>(null);
   const newOwnerId =
-    otherMembers?.find((member) => member.userId === chosenOwnerId)?.userId ?? otherMembers?.[0]?.userId ?? '';
+    successors?.find((member) => member.userId === chosenOwnerId)?.userId ?? successors?.[0]?.userId ?? '';
 
   const leave = () =>
     void run(() => onLeave(mustHandOver ? newOwnerId : null)).then((done) => done && onClose());
@@ -81,9 +84,9 @@ export function LeaveTeamDialog({ teamName, isOwner, otherMembers, counts, onLea
               disabled={busy}
               onChange={(event) => setChosenOwnerId(event.target.value)}
             >
-              {otherMembers!.map((member, index) => (
+              {successors!.map((member) => (
                 <option key={member.userId} value={member.userId}>
-                  {index === 0 ? `${member.email} · ${translate('teamsPanel.leave.earliest')}` : member.email}
+                  {`${member.email} · ${TEAM_ROLE_LABELS[member.role]}`}
                 </option>
               ))}
             </SelectField>

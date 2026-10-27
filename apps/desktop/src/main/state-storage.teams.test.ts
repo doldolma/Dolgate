@@ -62,7 +62,14 @@ describe("team vault local state", () => {
       } as never);
       team.secure.managedSecretsByRef["secret:team-1"] = SECRET;
       team.secure.tailnetAuthKeysById["tailnet-1"] = SECRET;
-      team.private.hostPrefs.push({ id: "team-host", favorite: true, agentForwarding: null, updatedAt: "2026-10-19T00:00:00.000Z" });
+      team.private.hostPrefs.push({
+        id: "team-host",
+        favorite: true,
+        agentForwarding: null,
+        rdpCertificateFingerprint: null,
+        knownHosts: [],
+        updatedAt: "2026-10-19T00:00:00.000Z",
+      });
       team.private.workspacePrefs.push({ id: "ws-1", favorite: false, lastOpenedAt: "2026-10-19T01:00:00.000Z", updatedAt: "2026-10-19T00:00:00.000Z" });
       team.local.terminalThemeByHostId["team-host"] = "dolssh-dark";
       team.sync.pendingPush = true;
@@ -77,7 +84,16 @@ describe("team vault local state", () => {
     expect(team?.data.hosts.map((host) => host.id)).toEqual(["team-host"]);
     expect(team?.secure.managedSecretsByRef["secret:team-1"]).toEqual(SECRET);
     expect(team?.secure.tailnetAuthKeysById["tailnet-1"]).toEqual(SECRET);
-    expect(team?.private.hostPrefs).toEqual([{ id: "team-host", favorite: true, agentForwarding: null, updatedAt: "2026-10-19T00:00:00.000Z" }]);
+    expect(team?.private.hostPrefs).toEqual([
+      {
+        id: "team-host",
+        favorite: true,
+        agentForwarding: null,
+        rdpCertificateFingerprint: null,
+        knownHosts: [],
+        updatedAt: "2026-10-19T00:00:00.000Z",
+      },
+    ]);
     expect(team?.private.workspacePrefs[0]?.lastOpenedAt).toBe("2026-10-19T01:00:00.000Z");
     expect(team?.local.terminalThemeByHostId).toEqual({ "team-host": "dolssh-dark" });
     expect(team?.sync.pendingPush).toBe(true);
@@ -97,7 +113,7 @@ describe("team vault local state", () => {
           "": { info: { name: "no id" } },
           broken: { info: {} },
           "team-1": {
-            info: { name: "Acme", role: "admin", dataFloor: -2 },
+            info: { name: "Acme", role: "superuser", dataFloor: -2 },
             secure: { managedSecretsByRef: { "secret:a": SECRET, "auth:refresh-token": SECRET, "secret:b": { value: 1 } } },
             private: {
               hostPrefs: [{ id: "h1", favorite: "yes", updatedAt: "2026-10-19T00:00:00.000Z" }, { favorite: true }],
@@ -112,9 +128,12 @@ describe("team vault local state", () => {
     const storage = module.getDesktopStateStorage();
     expect(storage.listTeamIds()).toEqual(["team-1"]);
     const team = storage.getTeamState("team-1");
-    expect(team?.info).toMatchObject({ name: "Acme", role: "member", wrappedTeamDek: null, dataFloor: 0 });
+    // 모르는 역할은 가장 좁은 읽기 전용으로 읽는다 — 서버가 거절할 편집 길을 열지 않게.
+    expect(team?.info).toMatchObject({ name: "Acme", role: "viewer", wrappedTeamDek: null, dataFloor: 0 });
     expect(Object.keys(team?.secure.managedSecretsByRef ?? {})).toEqual(["secret:a"]);
-    expect(team?.private.hostPrefs).toEqual([{ id: "h1", favorite: null, agentForwarding: null, updatedAt: "2026-10-19T00:00:00.000Z" }]);
+    expect(team?.private.hostPrefs).toEqual([
+      { id: "h1", favorite: null, agentForwarding: null, rdpCertificateFingerprint: null, knownHosts: [], updatedAt: "2026-10-19T00:00:00.000Z" },
+    ]);
     expect(team?.private.syncOutbox).toEqual([{ kind: "hostPrefs", recordId: "h2", deletedAt: "2026-10-19T00:00:00.000Z" }]);
     expect(team?.local.terminalThemeByHostId).toEqual({});
     expect(team?.data.hosts).toEqual([]);
@@ -125,5 +144,54 @@ describe("team vault local state", () => {
     writeFileSync(path.join(tempDir, "storage", "state.json"), JSON.stringify({ data: { hosts: [] } }));
     const module = await loadStorage();
     expect(module.getDesktopStateStorage().getState().teams).toEqual({});
+  });
+
+  it("puts restored records back by id, clears their pending deletions and refuses read-only teams", async () => {
+    const module = await loadStorage();
+    const storage = module.getDesktopStateStorage();
+    const T = "2026-10-19T00:00:00.000Z";
+    const record = (id: string, label: string) =>
+      ({ id, kind: "ssh", label, hostname: `${id}.example.com`, port: 22, username: "u", authType: "password", createdAt: T, updatedAt: T }) as never;
+    storage.updateState((state) => {
+      const team = module.createTeamState({ name: "Acme", role: "admin", wrappedTeamDek: "w", dataFloor: 1, updatedAt: T });
+      team.data.hosts.push(record("keep", "keep"), record("renamed", "renamed-later"));
+      team.data.syncOutbox.push(
+        { kind: "hosts", recordId: "gone", deletedAt: T },
+        { kind: "hosts", recordId: "other", deletedAt: T },
+      );
+      state.teams["team-1"] = team;
+      state.teams["team-ro"] = module.createTeamState({ name: "RO", role: "viewer", wrappedTeamDek: "w", dataFloor: 1, updatedAt: T });
+    });
+    const empty = { groups: [], hosts: [], knownHosts: [], portForwards: [], dnsOverrides: [], snippets: [], savedWorkspaces: [], tailnets: [], awsProfiles: [], secretMetadata: [] };
+    storage.restoreTeamRecords(
+      "team-1",
+      {
+        records: { ...empty, hosts: [record("renamed", "renamed"), record("gone", "gone")], secretMetadata: [{ secretRef: "secret:gone", label: "gone" } as never] },
+        secure: { managedSecretsByRef: { "secret:gone": SECRET }, managedAwsProfilesById: {}, tailnetAuthKeysById: {} },
+      },
+      [
+        { kind: "hosts", recordId: "renamed" },
+        { kind: "hosts", recordId: "gone" },
+        { kind: "secrets", recordId: "secret:gone" },
+      ],
+    );
+    const team = storage.getTeamState("team-1")!;
+    expect(team.data.hosts.map((host) => [host.id, host.label])).toEqual([
+      ["keep", "keep"],
+      ["renamed", "renamed"],
+      ["gone", "gone"],
+    ]);
+    // 아직 올리지 못한 지움이 남아 있으면 다음 올리기가 되살린 것을 다시 지운다 — 그것만 치운다.
+    expect(team.data.syncOutbox.map((entry) => entry.recordId)).toEqual(["other"]);
+    expect(team.data.secretMetadata.map((entry) => entry.secretRef)).toEqual(["secret:gone"]);
+    expect(team.secure.managedSecretsByRef["secret:gone"]).toEqual(SECRET);
+    expect(() =>
+      storage.restoreTeamRecords(
+        "team-ro",
+        { records: { ...empty, hosts: [record("x", "x")] }, secure: { managedSecretsByRef: {}, managedAwsProfilesById: {}, tailnetAuthKeysById: {} } },
+        [{ kind: "hosts", recordId: "x" }],
+      ),
+    ).toThrow();
+    expect(storage.getTeamState("team-ro")!.data.hosts).toEqual([]);
   });
 });

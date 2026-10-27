@@ -53,9 +53,11 @@ import type {
   SftpPrincipal,
   SecretMetadataRecord,
   SshKeyGenerateInput,
+  TeamAssignableRole,
   TeamAvailability,
   TeamInvite,
   TeamInviteCreated,
+  TeamInviteRole,
   VaultCopyCounts,
   VaultCopyRequest,
   VaultCopyResult,
@@ -1216,8 +1218,11 @@ interface AppStateParts {
     summary: TerminalReconnectState,
     message: string,
   ) => void;
-  /** 자동 재연결 포기/끊김 확정: 그룹 reconnect 해제 + 패인 탭을 'error'(수동 재시도)로. */
-  applyTmuxGroupReconnectGaveUp: (groupId: string, message: string) => void;
+  /**
+   * 자동 재연결 포기/끊김 확정: 그룹 reconnect 해제 + 패인 탭을 'error'(수동 재시도)로. retryable 이 false 면 다시 시도
+   * 단추를 두지 않는다(메인이 까닭과 함께 닫은 세션 — 팀에서 빠짐).
+   */
+  applyTmuxGroupReconnectGaveUp: (groupId: string, message: string, retryable?: boolean) => void;
   /** 셸 통합(OSC 133) 마커로 탭의 명령 상태(실행 중/성공/실패)를 갱신한다. 탭 점 하이브리드용. */
   applyTabCommandState: (
     sessionId: string,
@@ -1935,9 +1940,16 @@ export interface TeamsSlice {
   leaveTeam: (teamId: string, newOwnerId?: string | null) => Promise<void>;
   transferTeamOwnership: (teamId: string, userId: string) => Promise<void>;
   removeTeamMember: (teamId: string, userId: string) => Promise<void>;
+  /** 멤버의 역할을 바꾼다(관리자 이상 — 소유자는 Admin 까지, 관리자는 Member ↔ Viewer 만. 서버가 막는다). */
+  setTeamMemberRole: (teamId: string, userId: string, role: TeamAssignableRole) => Promise<void>;
   listTeamMembers: (teamId: string) => Promise<TeamMember[]>;
   listTeamInvites: (teamId: string) => Promise<TeamInvite[]>;
-  createTeamInvite: (teamId: string, expiresInHours: number) => Promise<TeamInviteCreated>;
+  /** role 은 들어올 사람의 역할(Member·Viewer). 없으면 Member. */
+  createTeamInvite: (
+    teamId: string,
+    expiresInHours: number,
+    role?: TeamInviteRole,
+  ) => Promise<TeamInviteCreated>;
   revokeTeamInvite: (teamId: string, code: string) => Promise<void>;
   /** 팀이 함께 쓰는 비밀번호·키 수(팀 삭제 창). */
   countTeamSecrets: (teamId: string) => Promise<number>;

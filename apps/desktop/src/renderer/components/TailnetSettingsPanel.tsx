@@ -61,7 +61,7 @@ import {
   testTailnet,
 } from '../services/desktop/tailnet';
 import { useTeamVaultLists } from '../controllers/useTeamVaultLists';
-import { sectionsByVault } from '../lib/vault-groups';
+import { isReadOnlyVault, sectionsByVault } from '../lib/vault-groups';
 import { PERSONAL_VAULT_ID } from '../store/utils/vaults';
 import { VaultEmptyLine, VaultSectionHeader } from './teams/VaultMark';
 
@@ -406,10 +406,12 @@ export function TailnetSettingsPanel() {
   const addDraft = draft && !draft.saved ? draft : null;
   const draftVaultId = addDraft?.vaultId ?? PERSONAL_VAULT_ID;
 
-  const renderDraftForm = (draft: TailnetDraft) => (
+  // vaultId — 고치는 tailnet 이 든 팀 볼트. 읽기 전용 팀이면 내 auth key 만 바꾼다.
+  const renderDraftForm = (draft: TailnetDraft, vaultId: string | null = null) => (
     <TailnetForm
       key={draft.id}
       draft={draft}
+      keyOnly={vaultId !== null && isReadOnlyVault(vaultIndex, vaultId)}
       status={statusById[draft.id]}
       testing={testingId === draft.id}
       testDisabled={testingId !== null}
@@ -518,13 +520,16 @@ export function TailnetSettingsPanel() {
           >
             {translate('tailnetSettings.edit')}
           </Button>
-          <Button
-            variant="danger"
-            onClick={() => setPendingRemoval(record)}
-            disabled={testingId !== null}
-          >
-            {translate('common.delete')}
-          </Button>
+          {/* 읽기 전용 팀의 것은 지우지 않는다 — 고치기는 내 auth key 만 연다. */}
+          {vaultId !== null && isReadOnlyVault(vaultIndex, vaultId) ? null : (
+            <Button
+              variant="danger"
+              onClick={() => setPendingRemoval(record)}
+              disabled={testingId !== null}
+            >
+              {translate('common.delete')}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -548,7 +553,7 @@ export function TailnetSettingsPanel() {
 
   // 고치는 중인 카드는 그 자리에 폼이 열린다.
   const renderItem = (row: TailnetRow, vaultId: string | null) =>
-    draft?.saved && draft.id === row.record.id ? renderDraftForm(draft) : renderRow(row, vaultId);
+    draft?.saved && draft.id === row.record.id ? renderDraftForm(draft, vaultId) : renderRow(row, vaultId);
 
   return (
     <div className="grid gap-5">
@@ -616,7 +621,7 @@ export function TailnetSettingsPanel() {
                 count={section.items.length}
                 // 막힌 팀과 초안을 쓰는 중에는 + 를 내지 않는다(초안 하나가 시험 노드 하나다).
                 addLabel={
-                  section.blocked || draft !== null
+                  section.blocked || section.readOnly || draft !== null
                     ? null
                     : translate('teams.vault.addTo', {
                         vault: section.team?.name ?? translate('sidebar.personalVault'),

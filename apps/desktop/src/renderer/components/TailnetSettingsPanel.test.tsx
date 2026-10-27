@@ -561,3 +561,56 @@ describe('TailnetSettingsPanel with team vaults', () => {
     expect(section('personal').getByText('auth key')).toBeInTheDocument();
   });
 });
+
+// 7-3: 내가 읽기 전용(Viewer)인 팀 — 붙기와 내 auth key 넣기만 남고, 만들기·지우기와 이름·서버 고치기는 닫힌다.
+describe('TailnetSettingsPanel with a read-only team', () => {
+  beforeEach(() => {
+    for (const mock of Object.values(mocks)) {
+      mock.mockReset();
+    }
+    mocks.listTailnets.mockResolvedValue([createRecord()]);
+    mocks.listTeamTailnets.mockResolvedValue([createRecord({ id: 'net-team', label: 'acme-tailnet', hasAuthKey: false })]);
+    mocks.snapshotTailnets.mockResolvedValue({ statuses: [], localNodeName: 'dev' });
+    mocks.onTailnetStatus.mockReturnValue(() => {});
+    mocks.saveTailnet.mockResolvedValue(createRecord({ id: 'net-team' }));
+    // 새 키를 넣으면 지금 등록을 먼저 푼다.
+    mocks.forgetTailnet.mockResolvedValue(undefined);
+    storeState.tailnetStatuses = {};
+    storeState.hosts = [];
+    storeState.vaultIndex = {
+      teams: [{ id: 'team-a', name: 'Acme Infra', role: 'viewer', syncState: 'ready', syncError: null, groups: [] }],
+    };
+  });
+
+  const section = (vaultId: string) =>
+    within(document.querySelector(`[data-vault-section="${vaultId}"]`)!.closest('section')!);
+
+  it('opens only my auth key for a team tailnet, with no + and no delete', async () => {
+    render(<TailnetSettingsPanel />);
+    await waitFor(() => expect(section('team-a').getByText('acme-tailnet')).toBeInTheDocument());
+
+    expect(section('team-a').queryByRole('button', { name: 'Acme Infra에 네트워크 추가' })).toBeNull();
+    expect(section('team-a').queryByRole('button', { name: '삭제' })).toBeNull();
+    expect(section('team-a').getByRole('button', { name: '연결' })).toBeInTheDocument();
+    // 개인 것은 그대로다.
+    expect(section('personal').getByRole('button', { name: '삭제' })).toBeInTheDocument();
+
+    fireEvent.click(section('team-a').getByRole('button', { name: '편집' }));
+    // 이름·서버는 팀 설정이라 잠기고, 키 칸만 쓴다.
+    expect(section('team-a').getByDisplayValue('acme-tailnet')).toBeDisabled();
+    const key = section('team-a').getByPlaceholderText('비우면 브라우저 로그인');
+    expect(key).toBeEnabled();
+    fireEvent.change(key, { target: { value: 'tskey-mine' } });
+    fireEvent.click(section('team-a').getByRole('button', { name: '저장' }));
+
+    await waitFor(() =>
+      expect(mocks.saveTailnet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          vaultId: 'team-a',
+          authKey: 'tskey-mine',
+          record: expect.objectContaining({ id: 'net-team', label: 'acme-tailnet' }),
+        }),
+      ),
+    );
+  });
+});

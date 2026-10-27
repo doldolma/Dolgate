@@ -229,3 +229,40 @@ describe('PortForwardingPanel vaults', () => {
     expect(dialog.querySelector(`[data-vault-chip="${TEAM}"]`)).not.toBeNull();
   });
 });
+
+// 7-3: 내가 읽기 전용(Viewer)인 팀 — 켜고 끄기만(이 기기의 일), 만들고 고치고 지우지 않는다.
+describe('PortForwardingPanel vaults — read-only team', () => {
+  beforeEach(() => {
+    const index = vaultIndex();
+    index.teams = index.teams.map((team) => (team.id === TEAM ? { ...team, role: 'viewer' as const } : team));
+    appStore.setState({ vaultIndex: index });
+  });
+
+  it('keeps Start on a team rule but drops its + , Edit and Delete', () => {
+    renderPanel();
+
+    expect(within(section(TEAM)).getByText('acme-web-1 app')).toBeInTheDocument();
+    expect(within(section(TEAM)).queryByRole('button', { name: /SSH 포워딩 추가/ })).toBeNull();
+    expect(within(section(TEAM)).getByRole('button', { name: '시작' })).toBeInTheDocument();
+    expect(within(section(TEAM)).queryByRole('button', { name: '편집' })).toBeNull();
+    expect(within(section(TEAM)).queryByRole('button', { name: '삭제' })).toBeNull();
+    // 개인 것은 그대로다.
+    expect(within(section('personal')).getByRole('button', { name: '편집' })).toBeInTheDocument();
+    expect(within(section('personal')).getByRole('button', { name: '삭제' })).toBeInTheDocument();
+  });
+
+  it('keeps On/Off on a team DNS override but drops its + , Edit and Delete', () => {
+    const props = renderPanel({
+      dnsOverrides: [
+        { id: 'team-static', type: 'static', hostname: 'grafana.lab.test', address: '10.20.0.50', status: 'inactive', createdAt: at, updatedAt: at },
+      ],
+    });
+    fireEvent.click(screen.getByRole('tab', { name: 'DNS Override' }));
+
+    expect(within(section(TEAM)).queryByRole('button', { name: /DNS Override 추가/ })).toBeNull();
+    expect(within(section(TEAM)).queryByRole('button', { name: '편집' })).toBeNull();
+    expect(within(section(TEAM)).queryByRole('button', { name: '삭제' })).toBeNull();
+    fireEvent.click(within(section(TEAM)).getByRole('button', { name: 'On' }));
+    expect(props.onSetStaticDnsOverrideActive).toHaveBeenCalledWith('team-static', true);
+  });
+});

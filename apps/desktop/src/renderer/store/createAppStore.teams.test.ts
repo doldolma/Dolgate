@@ -104,14 +104,26 @@ describe("createAppStore teams", () => {
     expect(api.teams.getVaultIndex).toHaveBeenCalledTimes(1);
   });
 
+  it("changes a member's role through the API", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().setTeamMemberRole("team-1", "user-2", "viewer");
+
+    expect(api.teams.setMemberRole).toHaveBeenCalledWith("team-1", "user-2", "viewer");
+  });
+
   it("creates an invite for the chosen hours and counts the team's own secrets", async () => {
     const api = createMockApi();
     const store = createAppStore(api);
     vi.mocked(api.teams.createInvite).mockResolvedValue({ link: LINK, invite: {} as never });
     vi.mocked(api.keychain.list).mockResolvedValue([{ secretRef: "a" }, { secretRef: "b" }] as never);
 
+    // 역할을 주지 않으면 Member 링크다.
     await store.getState().createTeamInvite("team-1", 24);
-    expect(api.teams.createInvite).toHaveBeenCalledWith("team-1", { expiresInHours: 24 });
+    expect(api.teams.createInvite).toHaveBeenCalledWith("team-1", { expiresInHours: 24, role: "member" });
+    await store.getState().createTeamInvite("team-1", 1, "viewer");
+    expect(api.teams.createInvite).toHaveBeenLastCalledWith("team-1", { expiresInHours: 1, role: "viewer" });
 
     await expect(store.getState().countTeamSecrets("team-1")).resolves.toBe(2);
     expect(api.keychain.list).toHaveBeenCalledWith("team-1");

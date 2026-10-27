@@ -47,7 +47,7 @@ describe("team member prefs", () => {
 
   it("lays only my own values over a team host, whatever the record carried", () => {
     const prefs: TeamMemberPrefs = {
-      hosts: new Map([["ssh", { id: "ssh", favorite: null, agentForwarding: true, updatedAt: "t" }]]),
+      hosts: new Map([["ssh", { id: "ssh", favorite: null, agentForwarding: true, rdpCertificateFingerprint: null, knownHosts: [], updatedAt: "t" }]]),
       workspaces: new Map(),
       terminalThemeByHostId: { ec2: "kanagawa-wave" },
     };

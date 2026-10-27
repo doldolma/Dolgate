@@ -1,9 +1,10 @@
-import type {
-  GroupRecord,
-  HostRecord,
-  SavedWorkspaceRecord,
-  TeamRole,
-  VaultIndex,
+import {
+  canEditTeamVault,
+  type GroupRecord,
+  type HostRecord,
+  type SavedWorkspaceRecord,
+  type TeamRole,
+  type VaultIndex,
 } from "@shared";
 import { PERSONAL_VAULT_ID } from "../../store/utils";
 
@@ -22,6 +23,8 @@ export interface BrowserVault {
   role: TeamRole | null;
   /** 동기화가 막혀 손봐야 할 때만(다시 들어와야 함·업데이트 필요). 평소엔 null 이라 줄에 아무것도 안 보인다. */
   blocked: "needs-rejoin" | "outdated" | null;
+  /** 내가 읽기 전용(Viewer)인 팀 — 보고 접속만 한다. 만들기·고치기·옮기기·지우기 길을 닫는다. 개인은 false. */
+  readOnly: boolean;
   groups: GroupRecord[];
   hosts: HostRecord[];
   workspaces: SavedWorkspaceRecord[];
@@ -49,6 +52,7 @@ export function buildBrowserVaults(input: {
     name: input.personalName,
     role: null,
     blocked: null,
+    readOnly: false,
     groups: [...input.groups],
     hosts: [],
     workspaces: [],
@@ -65,6 +69,7 @@ export function buildBrowserVaults(input: {
           team.syncState === "needs-rejoin" || team.syncState === "outdated"
             ? team.syncState
             : null,
+        readOnly: !canEditTeamVault(team.role),
         groups: [...team.groups],
         hosts: [],
         workspaces: [],

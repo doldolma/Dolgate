@@ -72,7 +72,8 @@ export function KnownHostsPanel({
   );
   const rdpSections = groupByVault(trustedRdpHosts, vaultIndex?.teamIdByHostId, vaultIndex);
 
-  const renderKnownHost = (record: KnownHostRecord, team: boolean) => (
+  // readOnly — 내가 읽기 전용인 팀의 것. 팀의 신뢰를 지우지 않는다(내가 신뢰한 것은 내 칸에 있어 이 목록에 없다).
+  const renderKnownHost = (record: KnownHostRecord, team: boolean, readOnly = false) => (
     <Card key={record.id}>
       <CardMain>
         <CardTitleRow>
@@ -90,11 +91,13 @@ export function KnownHostsPanel({
           </span>
         </CardMeta>
       </CardMain>
-      <CardActions>
-        <Button variant="danger" onClick={() => void onRemove(record.id)}>
-          Remove
-        </Button>
-      </CardActions>
+      {readOnly ? null : (
+        <CardActions>
+          <Button variant="danger" onClick={() => void onRemove(record.id)}>
+            Remove
+          </Button>
+        </CardActions>
+      )}
     </Card>
   );
 
@@ -140,7 +143,7 @@ export function KnownHostsPanel({
       <PanelSection>
         {sections ? (
           renderVaultSections(sections, translate('knownHosts.emptyTitle'), (record, section) =>
-            renderKnownHost(record, section.team !== null),
+            renderKnownHost(record, section.team !== null, section.readOnly),
           )
         ) : records.length === 0 ? (
           <EmptyState

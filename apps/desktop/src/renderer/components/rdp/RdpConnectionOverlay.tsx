@@ -114,8 +114,9 @@ export function RdpConnectionOverlay({ sessionId }: RdpConnectionOverlayProps) {
           : translate('rdp.overlay.connectingTitle')
       }
       message={message}
-      // 재시도는 같은 탭에 다시 붙는다(stableId 유지) — 자동 재연결과 같은 경로다.
-      showRetry={failed}
+      // 재시도는 같은 탭에 다시 붙는다(stableId 유지) — 자동 재연결과 같은 경로다. 메인이 까닭과 함께 닫은 세션(팀에서
+      // 빠짐)은 다시 붙을 호스트가 없어 두지 않는다(터미널 창과 같은 규칙).
+      showRetry={failed && tab.connectionProgress?.retryable !== false}
       onClose={() => {
         void disconnectTab(sessionId);
       }}

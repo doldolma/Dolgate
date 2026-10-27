@@ -307,7 +307,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.hosts.setDetectedOs,
     async (event, id: string, detectedOs: HostDetectedOs | null) => {
-      const record = ctx.vaults.writeHost(id, (hosts) => hosts.setDetectedOs(id, detectedOs));
+      const record = ctx.vaults.setHostDetectedOs(id, detectedOs);
       ctx.queueSync();
       ctx.emitWorkspaceChanged?.(event?.sender);
       return record;

@@ -72,6 +72,20 @@ describe("registerHostsGroupsIpcHandlers", () => {
     expect(ctx.hosts.update).not.toHaveBeenCalled();
   });
 
+  // 접속하며 알아낸 OS 는 카탈로그로 쓴다 — 읽기 전용 팀 호스트면 카탈로그가 쓰지 않는다.
+  it("records a detected OS through the catalog, which knows read-only teams", async () => {
+    const ctx = createContext();
+    ctx.vaults = { ...ctx.vaults, setHostDetectedOs: vi.fn(() => ({ id: "host-1" })), writeHost: vi.fn() };
+    ctx.emitWorkspaceChanged = vi.fn();
+    registerHostsGroupsIpcHandlers(ctx);
+
+    const os = { family: "linux", distro: "ubuntu" };
+    await getRegisteredHandler(ipcChannels.hosts.setDetectedOs)({ sender: "window" }, "host-1", os);
+
+    expect(ctx.vaults.setHostDetectedOs).toHaveBeenCalledWith("host-1", os);
+    expect(ctx.vaults.writeHost).not.toHaveBeenCalled();
+  });
+
   it("creates a host in a team vault and keeps its password in that team", async () => {
     const ctx = createContext();
     const teamScope = {

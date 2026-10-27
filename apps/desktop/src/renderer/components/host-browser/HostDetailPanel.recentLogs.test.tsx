@@ -72,6 +72,9 @@ function renderEmptyDetail(scope: Partial<HostBrowserModel>) {
     openCreateGroupModal: vi.fn(),
     onSelectSection: vi.fn(),
     ...scope,
+    // 읽기 전용 팀(Viewer)이 아닌 볼트 — 편집 길이 열려 있다.
+    isReadOnlyVault: () => false,
+    isReadOnlyAsset: () => false,
   } as unknown as HostBrowserModel;
   return render(<HostDetailPanel hb={hb} />);
 }

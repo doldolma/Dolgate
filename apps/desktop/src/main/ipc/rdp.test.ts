@@ -203,15 +203,17 @@ function createHarness(
 }
 
 describe("registerRdpIpcHandlers certificate trust", () => {
-  // 팀 호스트의 핀은 그 팀 레코드에 둔다 — 카탈로그가 그 호스트의 볼트로 보낸다.
+  // 팀 호스트의 핀은 그 팀 레코드에 둔다(읽기 전용이면 내 칸에) — 카탈로그가 그 호스트의 볼트로 보낸다.
   it("pins the certificate through the vault that holds the host", async () => {
     const harness = createHarness(null);
-    const vaults = (harness.ctx as unknown as { vaults: { writeHost: (...args: unknown[]) => unknown } }).vaults;
-    const writeHost = vi.spyOn(vaults, "writeHost");
+    const vaults = (harness.ctx as unknown as {
+      vaults: { setHostRdpCertificateFingerprint: (...args: unknown[]) => unknown };
+    }).vaults;
+    const pin = vi.spyOn(vaults, "setHostRdpCertificateFingerprint");
 
     await harness.connectAndVerify();
 
-    expect(writeHost).toHaveBeenCalledWith("rdp-1", expect.any(Function));
+    expect(pin).toHaveBeenCalledWith("rdp-1", "AA:BB:CC");
   });
 
   it("queues a sync after pinning so the next pull cannot wipe it", async () => {

@@ -28,6 +28,9 @@ import type { SyncService } from "./sync-service";
 import { TeamService } from "./team-service";
 import type { TeamSyncService } from "./team-sync-service";
 import { resolveLogTeamId, type TeamHistoryService } from "./team-history-service";
+import { TeamRestoreService } from "./team-restore-service";
+import { logMessage } from "./activity-log-message";
+import { TeamApi } from "./team-api";
 import { PERSONAL_VAULT_ID } from "./vault-root";
 import { createStoredTeamVaults } from "./team-vault-scope";
 import type { TermiusImportService } from "./termius-import-service";
@@ -126,8 +129,29 @@ export function registerIpcHandlers(
     sessionShareService,
     sessionReplayService,
   });
+  // 팀 볼트 복원 — 이전 판을 팀 키로 풀어 묶어 보이고, 되살린 것은 보통 올리기로 올린다. 기록은 팀 기록에도 간다.
+  const teamRestore = new TeamRestoreService({
+    api: new TeamApi(authService),
+    openTeamAccess: (teamId) => teamSync.openTeamAccess(teamId),
+    writeTime: (teamId, records) => teamSync.writeTimeAfterServer(teamId, records),
+    onRestored: async (teamId, outcome) => {
+      baseCtx.activityLogs.append(
+        "info",
+        "audit",
+        logMessage("teams.restored", { count: outcome.restored.length + outcome.dependencies.length }),
+        {
+          vaultId: teamId,
+          restored: outcome.restored.length,
+          dependencies: outcome.dependencies.length,
+          skipped: outcome.skipped.length,
+        },
+      );
+      // 팀 볼트만 바뀌었다 — 그 팀에 올리고 기다린다(실패해도 던지지 않는다. 남은 것은 다음 올리기가 가져간다).
+      await teamSync.pushDirty();
+    },
+  });
   // 팀 기록은 기록의 볼트를 여기서 만든 카탈로그로 찾는다.
-  const ctx = { ...baseCtx, teamHistory };
+  const ctx = { ...baseCtx, teamHistory, teamRestore };
   teamHistory?.setTeamResolver((metadata) => resolveLogTeamId(ctx.vaults, metadata));
   // 팀 호스트 세션의 녹화는 그 팀으로도 간다(team-replay-uploads).
   sessionReplayService.setTeamOfHost((hostId) => {

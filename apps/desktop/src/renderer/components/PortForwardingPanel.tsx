@@ -40,7 +40,7 @@ import type {
 } from '../store/createAppStore';
 import { formatInteractiveHop, normalizeErrorMessage, PERSONAL_VAULT_ID } from '../store/utils';
 import { cn } from '../lib/cn';
-import { groupByVault, hasTeamVaults, teamOfVault, vaultIdOf, type VaultSection } from '../lib/vault-groups';
+import { groupByVault, hasTeamVaults, isReadOnlyVault, teamOfVault, vaultIdOf, type VaultSection } from '../lib/vault-groups';
 import {
   portForwardFailureMessage,
   portForwardStatusLabel,
@@ -1131,6 +1131,8 @@ export function PortForwardingPanel({
 
   function renderRuleCard(rule: PortForwardRuleRecord) {
     const runtime = runtimeMap.get(rule.id);
+    // 읽기 전용 팀의 규칙은 켜고 끄기만 한다(그 기기의 일이다) — 고치기·지우기는 닫는다.
+    const readOnly = isReadOnlyVault(vaultIndex, ruleVaultOf(rule.id));
     const isRunning =
       runtime?.status === 'running' || runtime?.status === 'starting';
 
@@ -1167,12 +1169,16 @@ export function PortForwardingPanel({
             <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
               {isRunning ? translate('portForward.action.stop') : translate('portForward.action.start')}
             </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit', ruleId: rule.id })}>
-              {translate('portForward.action.edit')}
-            </Button>
-            <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
-              {translate('portForward.action.delete')}
-            </Button>
+            {readOnly ? null : (
+              <>
+                <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit', ruleId: rule.id })}>
+                  {translate('portForward.action.edit')}
+                </Button>
+                <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
+                  {translate('portForward.action.delete')}
+                </Button>
+              </>
+            )}
           </CardActions>
         </Card>
       );
@@ -1214,12 +1220,16 @@ export function PortForwardingPanel({
             <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
               {isRunning ? translate('portForward.action.stop') : translate('portForward.action.start')}
             </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit', ruleId: rule.id })}>
-              {translate('portForward.action.edit')}
-            </Button>
-            <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
-              {translate('portForward.action.delete')}
-            </Button>
+            {readOnly ? null : (
+              <>
+                <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit', ruleId: rule.id })}>
+                  {translate('portForward.action.edit')}
+                </Button>
+                <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
+                  {translate('portForward.action.delete')}
+                </Button>
+              </>
+            )}
           </CardActions>
         </Card>
       );
@@ -1257,12 +1267,16 @@ export function PortForwardingPanel({
             <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
               {isRunning ? translate('portForward.action.stop') : translate('portForward.action.start')}
             </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit', ruleId: rule.id })}>
-              {translate('portForward.action.edit')}
-            </Button>
-            <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
-              {translate('portForward.action.delete')}
-            </Button>
+            {readOnly ? null : (
+              <>
+                <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit', ruleId: rule.id })}>
+                  {translate('portForward.action.edit')}
+                </Button>
+                <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
+                  {translate('portForward.action.delete')}
+                </Button>
+              </>
+            )}
           </CardActions>
         </Card>
       );
@@ -1298,12 +1312,16 @@ export function PortForwardingPanel({
           <Button type="button" variant="secondary" size="sm" onClick={() => void (isRunning ? onStop(rule.id) : onStart(rule.id))}>
             {isRunning ? translate('portForward.action.stop') : translate('portForward.action.start')}
           </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit', ruleId: rule.id })}>
-            {translate('portForward.action.edit')}
-          </Button>
-          <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
-            {translate('portForward.action.delete')}
-          </Button>
+          {readOnly ? null : (
+            <>
+              <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit', ruleId: rule.id })}>
+                {translate('portForward.action.edit')}
+              </Button>
+              <Button type="button" variant="danger" size="sm" onClick={() => void onRemove(rule.id)}>
+                {translate('portForward.action.delete')}
+              </Button>
+            </>
+          )}
         </CardActions>
       </Card>
     );
@@ -1316,6 +1334,8 @@ export function PortForwardingPanel({
     const runtime = rule ? runtimeMap.get(rule.id) : undefined;
     const isRunning = runtime?.status === 'running' || runtime?.status === 'starting';
     const isStatic = isStaticDnsOverrideRecord(override);
+    // 읽기 전용 팀의 것은 켜고 끄기만(이 기기의 hosts 파일이다) — 고치기·지우기는 닫는다.
+    const readOnly = isReadOnlyVault(vaultIndex, vaultIdOf(vaultIndex?.teamIdByDnsOverrideId, override.id));
     // 같은 이름을 앞 볼트(개인 → 먼저 있는 팀)가 적용 중이면 이 줄은 쓰이지 않는다(X1). 켜 둔 상태는 그대로다.
     const appliedBy = override.appliedByVaultId
       ? (teamOfVault(vaultIndex, override.appliedByVaultId)?.name ?? translate('sidebar.personalVault'))
@@ -1377,12 +1397,16 @@ export function PortForwardingPanel({
               {override.status === 'active' ? 'Off' : 'On'}
             </Button>
           ) : null}
-          <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit-dns', dnsOverrideId: override.id })}>
-            {translate('portForward.action.edit')}
-          </Button>
-          <Button type="button" variant="danger" size="sm" onClick={() => void onRemoveDnsOverride(override.id)}>
-            {translate('portForward.action.delete')}
-          </Button>
+          {readOnly ? null : (
+            <>
+              <Button type="button" variant="secondary" size="sm" onClick={() => openPortForwardEditor({ kind: 'edit-dns', dnsOverrideId: override.id })}>
+                {translate('portForward.action.edit')}
+              </Button>
+              <Button type="button" variant="danger" size="sm" onClick={() => void onRemoveDnsOverride(override.id)}>
+                {translate('portForward.action.delete')}
+              </Button>
+            </>
+          )}
         </CardActions>
       </Card>
     );
@@ -1400,7 +1424,7 @@ export function PortForwardingPanel({
               team={section.team}
               count={section.items.length}
               addLabel={
-                section.blocked
+                section.blocked || section.readOnly
                   ? null
                   : translate('teams.vault.addTo', {
                       vault: section.team?.name ?? translate('sidebar.personalVault'),
