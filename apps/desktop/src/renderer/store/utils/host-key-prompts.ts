@@ -156,6 +156,29 @@ export function dropHostKeyPromptsForSession(
 }
 
 /**
+ * 끝난 끝점(SFTP·컨테이너)의 물음을 버린다. 보여 주던 것을 버렸으면 다음을 올린다.
+ *
+ * 탭이 없는 연결이라 세션으로는 못 고른다. 그 연결이 끝났는데(팀에서 빠져 앱이 끊은 것 포함) 물음을 남기면, 답은 이미
+ * 없는 대기표로 가고 — 신뢰를 누르면 키만 저장된다.
+ */
+export function dropHostKeyPromptsForEndpoint(
+  state: HostKeyPromptQueueState,
+  endpointId: string,
+): HostKeyPromptQueueState {
+  const queued = state.queuedHostKeyPrompts.filter(
+    (prompt) => prompt.endpointId !== endpointId,
+  );
+  if (state.pendingHostKeyPrompt?.endpointId !== endpointId) {
+    return {
+      pendingHostKeyPrompt: state.pendingHostKeyPrompt,
+      queuedHostKeyPrompts: queued,
+    };
+  }
+  const [next, ...rest] = queued;
+  return { pendingHostKeyPrompt: next ?? null, queuedHostKeyPrompts: rest };
+}
+
+/**
  * 세션 ID 가 바뀌면(재연결로 탭이 새 세션을 받으면) 줄에 선 것까지 함께 옮긴다.
  *
  * 보여 주는 것만 옮기면, 줄에 있던 물음은 사라진 세션을 가리킨 채 올라와서 답이 엉뚱한 곳으로 간다.

@@ -114,6 +114,8 @@ export interface RemoteDesktopSurfaceProps {
    * 없는 화면도 이 컴포넌트를 쓴다).
    */
   onReconnect?: () => void;
+  /** 이 기기에 키가 없는 팀 AWS 프로필로 SSM 을 타다 실패했을 때 '키 넣기'. 넘길 때만 버튼이 나온다. */
+  onAddAwsKey?: () => void;
   title?: string;
   hostAddress?: string;
   connectionStatusMessage?: string | null;
@@ -139,6 +141,7 @@ export function RemoteDesktopSurface({
   isActiveTab = true,
   errorMessage,
   onReconnect,
+  onAddAwsKey,
   title,
   hostAddress,
   connectionStatusMessage,
@@ -957,6 +960,19 @@ export function RemoteDesktopSurface({
                   <Text style={styles.reconnectLabel}>
                     {t('session.reconnect')}
                   </Text>
+                </Pressable>
+              ) : null}
+              {onAddAwsKey && status === 'error' ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('awsKey.addAria', {
+                    title: title ?? protocol.toUpperCase(),
+                  })}
+                  onPress={onAddAwsKey}
+                  style={styles.reconnectButton}
+                >
+                  <Ionicons name="key-outline" size={15} color="#c8c8e0" />
+                  <Text style={styles.reconnectLabel}>{t('awsKey.add')}</Text>
                 </Pressable>
               ) : null}
               {connectionStages.length > 0 ? (

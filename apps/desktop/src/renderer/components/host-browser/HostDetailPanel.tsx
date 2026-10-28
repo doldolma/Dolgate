@@ -72,6 +72,7 @@ import { getFormatLocale, t } from '../../i18n';
 import { resolveLogMessage } from '../../lib/activity-log-message';
 import { HostBadge } from './HostBadge';
 import { VaultMark } from '../teams/VaultMark';
+import { MobileMark } from '../teams/AuthorLine';
 import type { AssetTeam } from './AssetLocation';
 import { PerPersonHint } from '../teams/PerPersonHint';
 import { memberLeavesOf, withMemberLeftEnd } from '../teams/team-member-left';
@@ -192,6 +193,8 @@ interface HostActivityEntry {
   log: ActivityLogRecord;
   /** 팀 기록에서 온 줄을 남긴 멤버. 이 기기의 기록이면 null. */
   author: string | null;
+  /** 폰이 남긴 팀 기록 줄(녹화 없음) — 부제 끝에 'Mobile'. */
+  mobile: boolean;
   /** Replay 로 열 녹화. 팀 줄이면 teamId 가 있다(서버의 녹화). */
   replay: { recordingId: string; teamId: string | null } | null;
   /** 팀 녹화가 있지만 나는 볼 수 없다(관리자도, 녹화한 사람도 아니다) — Replay 를 끄고 까닭을 툴팁으로. */
@@ -243,6 +246,7 @@ export function buildActivityEntries(input: {
       key: log.id,
       log,
       author: null,
+      mobile: false,
       replay: recordingId ? { recordingId, teamId: null } : null,
       replayForbidden: false,
     };
@@ -271,6 +275,7 @@ export function buildActivityEntries(input: {
         key,
         log: withMemberLeftEnd(record, item, leaves, leftReason),
         author: item.authorEmail,
+        mobile: item.activity?.client === 'mobile',
         replay: teamReplay?.viewable ? { recordingId: teamReplay.recordingId, teamId } : null,
         replayForbidden: teamReplay?.viewable === false,
       });
@@ -337,11 +342,14 @@ function ActivityRow({
   onOpenReplay,
   replayForbiddenReason = null,
   team = null,
+  mobile = false,
 }: {
   primary: string;
   /** 볼트가 섞인 목록에서 이 호스트가 든 팀 — 이름 뒤에 팀 표시(팀 이름은 툴팁). */
   team?: AssetTeam | null;
   secondary?: string | null;
+  /** 폰이 남긴 팀 기록 줄 — 부제 끝에 'Mobile'(녹화 없음은 툴팁). 부제가 길어 잘려도 이것은 남는다. */
+  mobile?: boolean;
   level?: string;
   when: string;
   /** 연결이 이어진 시간. 아직 살아 있거나 옛 기록이면 null 이라 그 줄을 그리지 않는다. */
@@ -369,7 +377,13 @@ function ActivityRow({
             </>
           ) : null}
         </span>
-        {secondary ? (
+        {secondary && mobile ? (
+          // 띄움은 글자 사이 빈칸만큼 — 부제 안의 ' · ' 와 같은 폭으로 보이게.
+          <span className="flex min-w-0 items-center gap-[0.2rem] text-[0.72rem] text-[var(--text-soft)]">
+            <span className="min-w-0 truncate">{secondary}</span>
+            <MobileMark icon={false} />
+          </span>
+        ) : secondary ? (
           <span className="min-w-0 truncate text-[0.72rem] text-[var(--text-soft)]">
             {secondary}
           </span>
@@ -1225,7 +1239,7 @@ function EmptyDetail({
         replayStatuses: teamActivity.replayStatuses,
       })
         .slice(0, 6)
-        .map(({ key, log, author, replay, replayForbidden }) => {
+        .map(({ key, log, author, mobile, replay, replayForbidden }) => {
           const hostId = getLogHostId(log) ?? '';
           const metadata = log.metadata as {
             hostLabel?: string;
@@ -1264,6 +1278,7 @@ function EmptyDetail({
             name,
             // 팀 기록 줄은 누가 남겼는지를 뒤에 붙인다.
             detail: author ? `${detailWithCount} · ${author}` : detailWithCount,
+            mobile,
             when: log.createdAt,
             duration: formatSessionDuration(metadata?.durationMs),
             level: log.level,
@@ -1375,6 +1390,7 @@ function EmptyDetail({
                   hb.showsTeamMarks ? hb.teamOfAsset(`host:${item.hostId}`) : null
                 }
                 secondary={item.detail}
+                mobile={item.mobile}
                 level={item.level}
                 when={item.when}
                 duration={item.duration}
@@ -1746,7 +1762,7 @@ function ActivityList({
   const { t: translate } = useTranslation();
   return (
     <div className="flex flex-col">
-      {entries.map(({ key, log, author, replay, replayForbidden }) => {
+      {entries.map(({ key, log, author, mobile, replay, replayForbidden }) => {
         const metadata = log.metadata as {
           connectionKind?: string;
           awsTransport?: string;
@@ -1782,6 +1798,7 @@ function ActivityList({
             key={key}
             primary={primaryWithCount}
             secondary={secondary}
+            mobile={mobile}
             level={log.level}
             when={log.createdAt}
             duration={isSession ? formatSessionDuration(metadata?.durationMs) : null}

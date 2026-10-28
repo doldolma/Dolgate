@@ -26,6 +26,7 @@ import type {
   SyncRecord,
   SyncStatus,
   TailnetPayload,
+  TeamHostCredentials,
   ServerInfoResponse,
   VaultKdfDescriptor,
   VaultCacheRecord,
@@ -64,6 +65,7 @@ export const PRIVACY_POLICY_URL =
 
 const AUTH_SESSION_SERVICE = 'dolgate.mobile.auth-session';
 const MANAGED_SECRETS_SERVICE = 'dolgate.mobile.managed-secrets';
+const TEAM_SECRETS_SERVICE = 'dolgate.mobile.team-secrets';
 const MANAGED_AWS_PROFILES_SERVICE = 'dolgate.mobile.managed-aws-profiles';
 const MANAGED_TAILNETS_SERVICE = 'dolgate.mobile.managed-tailnets';
 const AWS_SSO_TOKENS_SERVICE = 'dolgate.mobile.aws-sso-tokens';
@@ -295,6 +297,11 @@ export function createLocalId(prefix: string): string {
 }
 
 function createInstallationId(): string {
+  return createRandomUuid();
+}
+
+/** 표준형 UUID(v4). 서버가 id 로 표준형만 받는 곳(팀 기록 등)에 쓴다. */
+export function createRandomUuid(): string {
   const bytes = randomBytes(16);
   bytes[6] = (bytes[6] & 0x0f) | 0x40;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
@@ -407,6 +414,56 @@ export async function saveStoredSecrets(
 export async function clearStoredSecrets(): Promise<void> {
   await Keychain.resetGenericPassword({
     service: MANAGED_SECRETS_SERVICE,
+  });
+}
+
+/** 팀 정적 AWS 프로필에 이 기기에서 넣은 키. */
+export interface TeamAwsKey {
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
+/**
+ * 팀마다 받은 비밀값과 내 자격 증명, 이 기기에서 넣은 팀 AWS 키(팀 ID → 그 팀 것). 개인 비밀값과 따로 둔다 — 개인
+ * 것은 개인 동기화가 통째로 다시 쓰고, 팀 것은 팀에서 빠질 때 그 팀 몫만 지운다.
+ */
+export type StoredTeamSecrets = Record<
+  string,
+  {
+    secretsByRef: ManagedSecretsMap;
+    hostCredentials: Record<string, TeamHostCredentials>;
+    /** 프로필 ID → 이 기기의 키. 어디로도 올리지 않는다 — 키는 기기마다 넣는다(데스크톱과 같다). */
+    awsKeys?: Record<string, TeamAwsKey>;
+  }
+>;
+
+export async function loadStoredTeamSecrets(): Promise<StoredTeamSecrets> {
+  const credentials = await Keychain.getGenericPassword({
+    service: TEAM_SECRETS_SERVICE,
+  });
+  if (!credentials) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(credentials.password) as StoredTeamSecrets;
+  } catch {
+    return {};
+  }
+}
+
+export async function saveStoredTeamSecrets(
+  teamSecrets: StoredTeamSecrets,
+): Promise<void> {
+  await Keychain.setGenericPassword('dolgate', JSON.stringify(teamSecrets), {
+    service: TEAM_SECRETS_SERVICE,
+    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+}
+
+export async function clearStoredTeamSecrets(): Promise<void> {
+  await Keychain.resetGenericPassword({
+    service: TEAM_SECRETS_SERVICE,
   });
 }
 
@@ -561,7 +618,7 @@ export async function getOrCreateClientInstallationId(): Promise<string> {
 
 // 클라이언트 식별 헤더 — 세션 발급뿐 아니라 /sync 에도 실어, 서버의 v2 push 버전
 // 게이트(426)가 최신 클라이언트를 구버전으로 오인하지 않게 한다.
-async function buildClientIdentificationHeaders(): Promise<
+export async function buildClientIdentificationHeaders(): Promise<
   Record<string, string>
 > {
   return {
@@ -926,7 +983,7 @@ export type SyncSnapshotResult =
 // 경계에서 한 번만 메꾼다 — 데스크톱 normalizeSyncPayload 와 같은 규칙이다.
 //
 // 모르는 kind 는 그대로 둔다. 우리가 안 읽을 뿐이고, 떨어뜨릴 이유가 없다.
-function normalizeSyncPayload(
+export function normalizeSyncPayload(
   payload: Partial<SyncPayloadV2> | null | undefined,
 ): SyncPayloadV2 {
   const empty = buildEmptySyncPayload();
@@ -1378,7 +1435,8 @@ export function sanitizeTerminalSnapshot(input: string): string {
   return input.replace(/\u0000/g, '').replace(/\r/g, '');
 }
 
-function encodeEncryptedPayload<T>(value: T, keyBase64: string): string {
+/** 레코드 하나를 동기화 봉투(AES-GCM)로 잠근다 — 개인 동기화와 팀 개인 칸 올리기가 같은 모양을 쓴다. */
+export function encodeEncryptedPayload<T>(value: T, keyBase64: string): string {
   const key = toByteArray(keyBase64);
   const iv = randomBytes(12);
   const plaintext = Buffer.from(JSON.stringify(value), 'utf8');
@@ -1457,7 +1515,7 @@ async function fetchEmpty(
   }
 }
 
-async function fetchWithOptions(
+export async function fetchWithOptions(
   url: string,
   init?: RequestInit,
   options?: FetchRequestOptions,
@@ -1498,7 +1556,7 @@ async function fetchWithOptions(
   }
 }
 
-async function toApiError(response: Response): Promise<ApiError> {
+export async function toApiError(response: Response): Promise<ApiError> {
   const raw = await response.text();
   const trimmed = raw.trim();
   let code: string | undefined;

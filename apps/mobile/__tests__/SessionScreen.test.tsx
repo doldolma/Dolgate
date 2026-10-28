@@ -18,8 +18,11 @@ import {
   TERMINAL_PRIMARY_SHORTCUTS,
   TERMINAL_SECONDARY_SHORTCUTS,
 } from '../src/lib/terminal-input';
+import { AwsKeyModal } from '../src/components/AwsKeyModal';
 import { SessionScreen } from '../src/screens/SessionScreen';
 import { useMobileAppStore } from '../src/store/useMobileAppStore';
+import type { MobileTeamVault } from '../src/store/team-sync';
+import * as vaultCatalog from '../src/store/vault-catalog';
 import { getPalette } from '../src/theme';
 
 const mockNavigationGoBack = jest.fn();
@@ -767,6 +770,93 @@ describe('SessionScreen', () => {
     await act(async () => {
       tree!.unmount();
     });
+  });
+
+  // 재연결 목록은 볼트가 섞인 목록이다 — 팀 호스트에는 홈의 검색·즐겨찾기처럼 어느 팀인지 단다.
+  it('marks a team host in the recent list with its team', async () => {
+    const acme: MobileTeamVault = {
+      id: 'team-acme',
+      name: 'Acme Infra',
+      role: 'member',
+      wrappedTeamDek: 'wrapped',
+      state: 'ready',
+      errorMessage: null,
+      hosts: [{ ...hosts[1], id: 'team-web', label: 'prod-web-1' }],
+      groups: [],
+      knownHosts: [],
+      awsProfiles: [],
+      tailnets: [],
+      snippets: [],
+      hostPrefs: [],
+    };
+    act(() => {
+      useMobileAppStore.setState({
+        sessions: [
+          { ...session, status: 'closed', isRestorable: true },
+          {
+            ...secondSession,
+            id: 'session-team',
+            sessionId: 'session-team',
+            hostId: 'team-web',
+            title: 'prod-web-1',
+            status: 'closed',
+            isRestorable: true,
+          },
+        ],
+        teamVaults: [acme],
+      });
+    });
+    const textIn = (node: renderer.ReactTestInstance) =>
+      node
+        .findAllByType(Text)
+        .map(text => ([] as unknown[]).concat(text.props.children).join(''));
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+    try {
+      expect(
+        textIn(
+          tree!.root.findByProps({
+            accessibilityLabel: 'prod-web-1 세션 재연결',
+          }),
+        ),
+      ).toContain('Acme Infra');
+      expect(
+        textIn(
+          tree!.root.findByProps({
+            accessibilityLabel: 'Synology 세션 재연결',
+          }),
+        ),
+      ).not.toContain('Acme Infra');
+    } finally {
+      await act(async () => {
+        tree!.unmount();
+        useMobileAppStore.setState({ teamVaults: [] });
+      });
+    }
+  });
+
+  // 자동 완성 스니펫은 지금 보이는 세션 호스트의 볼트 것이 먼저다(작업 8-4) — 화면이 그 호스트로 고르는지.
+  it('asks the catalog for snippets of the shown session host', async () => {
+    const spy = jest.spyOn(vaultCatalog, 'snippetsForSession');
+    act(() => {
+      useMobileAppStore.setState({ sessions: [session] });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+    try {
+      expect(spy).toHaveBeenCalledWith(expect.anything(), 'host-1');
+    } finally {
+      spy.mockRestore();
+      await act(async () => {
+        tree!.unmount();
+      });
+    }
   });
 
   it('renders the native terminal input overlay on iOS', async () => {
@@ -2324,6 +2414,223 @@ describe('SessionScreen', () => {
       expect(mockSetOrientationUnlocked).toHaveBeenLastCalledWith(false);
     },
   );
+
+  // ── 실패 화면의 '키 넣기'(작업 8-4b) ──────────────────────────────────────────────
+  // 이 기기에 키가 없는 팀 정적 AWS 프로필로 붙다 실패했을 때만 단다. 넣으면 그 세션을 알아서 다시 붙인다.
+  const AWS_KEY = { accessKeyId: 'AKIAMINE', secretAccessKey: 'mine-secret' };
+
+  function awsTeam(hosts: MobileTeamVault['hosts']): MobileTeamVault {
+    return {
+      id: 'team-acme',
+      name: 'Acme Infra',
+      role: 'member',
+      wrappedTeamDek: 'wrapped',
+      state: 'ready',
+      errorMessage: null,
+      hosts,
+      groups: [],
+      knownHosts: [],
+      awsProfiles: [
+        {
+          id: 'acme-aws',
+          name: 'acme-static',
+          kind: 'static',
+          region: 'ap-northeast-2',
+          accessKeyId: '',
+          secretAccessKey: '',
+          updatedAt: '2026-10-27T00:00:00.000Z',
+        },
+      ],
+      tailnets: [],
+      snippets: [],
+      hostPrefs: [],
+    };
+  }
+
+  /** 저장하면 키가 생겨 '키 없음'이 풀린다 — 스토어가 하는 대로. */
+  const savingKey = () =>
+    jest.fn(async () => {
+      useMobileAppStore.setState({
+        teamSecrets: {
+          'team-acme': {
+            secretsByRef: {},
+            hostCredentials: {},
+            awsKeys: { 'acme-aws': AWS_KEY },
+          },
+        },
+      });
+    });
+
+  it('offers to add a team AWS key on the terminal failure banner and reconnects after saving', async () => {
+    const ec2: AwsEc2HostRecord = {
+      id: 'team-ec2',
+      kind: 'aws-ec2',
+      label: 'Team EC2',
+      awsProfileId: 'acme-aws',
+      awsProfileName: 'acme-static',
+      awsRegion: 'ap-northeast-2',
+      awsInstanceId: 'i-team',
+      createdAt: '2026-10-27T00:00:00.000Z',
+      updatedAt: '2026-10-27T00:00:00.000Z',
+    };
+    const saveTeamAwsKey = savingKey();
+    const resumeSession = jest.fn(async () => 'session-ec2');
+    act(() => {
+      useMobileAppStore.setState({
+        sessions: [
+          session,
+          {
+            ...session,
+            id: 'session-ec2',
+            sessionId: 'session-ec2',
+            hostId: 'team-ec2',
+            title: 'Team EC2',
+            status: 'error',
+            errorMessage: 'no key on this device',
+          },
+        ],
+        activeSessionTabId: 'session-ec2',
+        activeConnectionTab: { kind: 'terminal', id: 'session-ec2' },
+        teamVaults: [awsTeam([ec2])],
+        teamSecrets: {
+          'team-acme': { secretsByRef: {}, hostCredentials: {} },
+        },
+        saveTeamAwsKey,
+        resumeSession,
+      });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+    const addKey = () =>
+      tree!.root.findAllByProps({
+        accessibilityLabel: 'Team EC2 에 AWS 키 넣기',
+      });
+    const modal = () => tree!.root.findByType(AwsKeyModal);
+    try {
+      expect(modal().props.request).toBeNull();
+      await act(async () => {
+        addKey()[0].props.onPress();
+      });
+      expect(modal().props.request).toEqual({
+        profileName: 'acme-static',
+        teamName: 'Acme Infra',
+      });
+
+      await act(async () => {
+        await modal().props.onSave(AWS_KEY);
+      });
+      expect(saveTeamAwsKey).toHaveBeenCalledWith('team-ec2', AWS_KEY);
+      expect(resumeSession).toHaveBeenCalledWith('session-ec2');
+      expect(modal().props.request).toBeNull();
+      // 키가 생겼으니 더는 달지 않는다.
+      expect(addKey()).toHaveLength(0);
+    } finally {
+      await act(async () => {
+        tree!.unmount();
+        useMobileAppStore.setState({ teamVaults: [], teamSecrets: {} });
+      });
+    }
+  });
+
+  it('offers to add a team AWS key on the remote desktop failure view, and only for a missing team key', async () => {
+    const rdp = {
+      id: 'team-rdp',
+      kind: 'rdp',
+      label: 'Team RDP',
+      hostname: '10.0.0.5',
+      port: 3389,
+      awsSsm: {
+        profileId: 'acme-aws',
+        profileName: 'acme-static',
+        region: 'ap-northeast-2',
+        instanceId: 'i-win',
+      },
+      createdAt: '2026-10-27T00:00:00.000Z',
+      updatedAt: '2026-10-27T00:00:00.000Z',
+    } as MobileTeamVault['hosts'][number];
+    const rdSession: MobileRemoteDesktopSessionRecord = {
+      id: 'rd-team',
+      hostId: 'team-rdp',
+      protocol: 'rdp',
+      title: 'Team RDP',
+      status: 'error',
+      inputMode: 'trackpad',
+      scaleMode: 'fit',
+      errorMessage: 'no key on this device',
+      openedAt: '2024-01-01T00:00:02.000Z',
+      lastEventAt: '2024-01-01T00:00:02.000Z',
+      lastConnectedAt: null,
+      lastDisconnectedAt: null,
+    };
+    const saveTeamAwsKey = savingKey();
+    const reconnectRemoteDesktopSession = jest.fn(async () => undefined);
+    act(() => {
+      useMobileAppStore.setState({
+        remoteDesktopSessions: [
+          rdSession,
+          { ...rdSession, id: 'rd-mine', hostId: 'host-1', title: 'My RDP' },
+        ],
+        activeConnectionTab: { kind: 'rdp', id: 'rd-mine' },
+        teamVaults: [awsTeam([rdp])],
+        teamSecrets: {
+          'team-acme': { secretsByRef: {}, hostCredentials: {} },
+        },
+        saveTeamAwsKey,
+        reconnectRemoteDesktopSession,
+      });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+    const surface = () =>
+      tree!.root.find(
+        node =>
+          typeof node.props.sessionId === 'string' &&
+          node.props.onDisconnect !== undefined &&
+          node.props.protocol === 'rdp',
+      );
+    try {
+      // 개인 호스트의 실패에는 달지 않는다.
+      expect(surface().props.onAddAwsKey).toBeUndefined();
+
+      act(() => {
+        useMobileAppStore.setState({
+          activeConnectionTab: { kind: 'rdp', id: 'rd-team' },
+        });
+      });
+      const addKey = tree!.root.findByProps({
+        accessibilityLabel: 'Team RDP 에 AWS 키 넣기',
+      });
+      await act(async () => {
+        addKey.props.onPress();
+      });
+      const modal = tree!.root.findByType(AwsKeyModal);
+      expect(modal.props.request).toEqual({
+        profileName: 'acme-static',
+        teamName: 'Acme Infra',
+      });
+      await act(async () => {
+        await modal.props.onSave(AWS_KEY);
+      });
+      expect(saveTeamAwsKey).toHaveBeenCalledWith('team-rdp', AWS_KEY);
+      expect(reconnectRemoteDesktopSession).toHaveBeenCalledWith('rd-team');
+      expect(surface().props.onAddAwsKey).toBeUndefined();
+    } finally {
+      await act(async () => {
+        tree!.unmount();
+        useMobileAppStore.setState({
+          remoteDesktopSessions: [],
+          teamVaults: [],
+          teamSecrets: {},
+        });
+      });
+    }
+  });
 
   it('renders RDP session tab and handles close', async () => {
     const rdSession: MobileRemoteDesktopSessionRecord = {

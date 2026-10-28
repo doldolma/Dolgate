@@ -517,6 +517,11 @@ export interface PendingHostKeyPrompt {
    * 인증을 두 번 요구하던 문제를 없앴다. OTP 는 30초마다 바뀌어 두 번 넣을 수 없다.
    */
   liveChallengeId?: string | null;
+  /**
+   * 물은 연결이 탭 없는 끝점(SFTP·컨테이너)이면 그 끝점 id. 그 연결이 끝나면(끊김·오류 — 팀에서 빠져 앱이 끊은 것 포함)
+   * 이 물음도 거둔다 — 남겨 두면 답할 대상이 없는 창이 남는다.
+   */
+  endpointId?: string | null;
   action:
     | {
         kind: "ssh";

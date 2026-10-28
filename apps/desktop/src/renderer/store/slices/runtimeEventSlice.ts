@@ -162,6 +162,8 @@ import {
   updatePaneState,
   toTrustInput,
   enqueueHostKeyPrompt,
+  dropHostKeyPromptsForSession,
+  dropHostKeyPromptsForEndpoint,
   findHostByAddress,
   hostMatchesHopAddress,
   updateConnectionView,
@@ -496,7 +498,22 @@ function keepTabClosedWithNotice(
   sessionId: string,
   notice: string,
 ): Partial<AppState> {
+  // 탭은 까닭을 보이려고 남기지만, 그 연결의 물음(호스트 키·OTP·인증 실패 뒤 다시 묻는 창)은 답할 대상이 없다 — 탭을 지울 때
+  // (removeSessionFromState)와 같이 거둔다. 남기면 거기서 신뢰를 눌러 빠진 팀 호스트의 키를 저장할 수 있었다.
   return {
+    ...dropHostKeyPromptsForSession(state, sessionId),
+    pendingInteractiveAuths: clearSessionPendingInteractiveAuth(
+      state.pendingInteractiveAuths,
+      sessionId,
+    ),
+    pendingCredentialRetry:
+      state.pendingCredentialRetry?.sessionId === sessionId
+        ? null
+        : state.pendingCredentialRetry,
+    activeCredentialRetryAttempt:
+      state.activeCredentialRetryAttempt?.sessionId === sessionId
+        ? null
+        : state.activeCredentialRetryAttempt,
     tabs: state.tabs.map(
       (tab): TerminalTab =>
         tab.sessionId === sessionId
@@ -965,6 +982,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
               ? null
               : (sessionId ?? null),
             liveChallengeId: String(payload.challengeId ?? ""),
+            endpointId: endpointId ?? null,
             probe: {
               hostId: hostRecord?.id ?? "",
               hostLabel: hostRecord?.label ?? host,
@@ -1470,10 +1488,16 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
           ) {
             // 메인이 까닭과 함께 닫았다(팀에서 빠짐) — 컨테이너 화면에 까닭을 보인다.
             const containersClosedNotice =
-              event.type === "containersDisconnected" ? closedNoticeOf(event.payload) : "";
+              event.type === "containersDisconnected" || event.type === "containersError"
+                ? closedNoticeOf(event.payload)
+                : "";
             set((state) => {
               const currentTab = findContainersTab(state, containerHostId);
               return {
+                // 끝난 연결의 호스트 키 물음은 답할 대상이 없다 — OTP 와 같이 거둔다.
+                ...(event.type === "containersConnected"
+                  ? {}
+                  : dropHostKeyPromptsForEndpoint(state, endpointId)),
                 pendingInteractiveAuths: clearEndpointPendingInteractiveAuth(
                   state.pendingInteractiveAuths,
                   endpointId,
@@ -1880,7 +1904,9 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
           // 메인이 까닭과 함께 닫았다(팀에서 빠짐). 그 호스트는 곧 사라지므로 되살리지 않고, 창을 호스트 고르기로
           // 돌려 까닭을 보인다 — 그대로 두면 끊긴 목록이 살아 있는 것처럼 남는다.
           const sftpClosedNotice =
-            event.type === "sftpDisconnected" ? closedNoticeOf(event.payload) : "";
+            event.type === "sftpDisconnected" || event.type === "sftpError"
+              ? closedNoticeOf(event.payload)
+              : "";
           if (sftpClosedNotice) {
             if (sftpPaneId) {
               cancelReconnect(sftpPaneId, "closed-notice");
@@ -1888,6 +1914,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
             set((state) => {
               const paneId = resolveSftpPaneIdByEndpoint(state, endpointId);
               return {
+                ...dropHostKeyPromptsForEndpoint(state, endpointId),
                 pendingInteractiveAuths: clearEndpointPendingInteractiveAuth(
                   state.pendingInteractiveAuths,
                   endpointId,
@@ -1928,10 +1955,17 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
             !sftpPermanent &&
             (sftpPaneBefore?.endpoint != null || sftpActiveReconnect);
 
+          // 끝난 연결(끊김·오류)의 호스트 키 물음은 답할 대상이 없다 — OTP 와 같이 거둔다.
+          const sftpEnded =
+            event.type === "sftpDisconnected" || event.type === "sftpError";
           set((state) => {
             const paneId = resolveSftpPaneIdByEndpoint(state, endpointId);
+            const prompts = sftpEnded
+              ? dropHostKeyPromptsForEndpoint(state, endpointId)
+              : {};
             if (!paneId) {
               return {
+                ...prompts,
                 pendingInteractiveAuths: clearEndpointPendingInteractiveAuth(
                   state.pendingInteractiveAuths,
                   endpointId,
@@ -1949,6 +1983,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 ? event.payload.status
                 : "unknown";
             return {
+              ...prompts,
               pendingInteractiveAuths: clearEndpointPendingInteractiveAuth(
                 state.pendingInteractiveAuths,
                 endpointId,
@@ -2796,6 +2831,12 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
           nextState.pendingInteractiveAuths = clearEndpointPendingInteractiveAuth(
             state.pendingInteractiveAuths,
             event.runtime.ruleId,
+          );
+          // 호스트 키 물음도 같다 — 끝난 포워딩(팀에서 빠져 앱이 멈춘 VNC 터널 포함)에는 답할 대상이 없다. 남기면 답할 데 없는
+          // 창이 남는다. 실시간 물음의 끝점 id 가 곧 규칙 id 다.
+          Object.assign(
+            nextState,
+            dropHostKeyPromptsForEndpoint(state, event.runtime.ruleId),
           );
         }
 

@@ -3,6 +3,7 @@ import { randomBytes, utf8ToBytes } from "@noble/ciphers/utils.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { base64ToBytes, bytesToBase64 } from "./base64";
+import type { ActivityLogRecord } from "./models";
 import { TEAM_DEK_BYTE_LENGTH, TeamCryptoError } from "./team-crypto";
 
 // 팀 기록·녹화의 암호. 서버는 크기와 순서만 보고 내용은 모른다.
@@ -20,6 +21,19 @@ import { TEAM_DEK_BYTE_LENGTH, TeamCryptoError } from "./team-crypto";
 
 /** 이 빌드가 쓰고 읽는 기록·녹화 형식. */
 export const TEAM_HISTORY_FORMAT_VERSION = 1;
+
+/** 팀 기록 한 줄의 본문(앱 활동). 팀 키로 잠가 올린다. 로컬 기록과 같은 모양이라 화면이 같은 방식으로 그린다. */
+export interface TeamActivityBody {
+  v: number;
+  /** 수명 줄(접속·SFTP·포트 포워딩·컨테이너)의 시작·끝. 같은 record.id 의 줄을 화면이 한 줄로 합친다. */
+  phase?: "start" | "end";
+  /**
+   * 남긴 앱. 모바일은 "mobile" 을 단다 — 녹화 없이 기록만 남는다. 없으면 데스크톱이다. 형식 버전은 그대로라 이 칸을
+   * 모르는 옛 앱은 표시만 없이 그대로 읽는다.
+   */
+  client?: "mobile";
+  record: ActivityLogRecord;
+}
 
 const IV_BYTE_LENGTH = 12;
 const TAG_BYTE_LENGTH = 16;

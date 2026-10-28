@@ -18,6 +18,7 @@ import {
   encodeStreamFrame,
 } from "./core-framing";
 import { resolveDesktopRepoRoot } from "./repo-root";
+import { HostGoneError } from "./host-gone-error";
 import { t } from "./i18n";
 import { logMessage } from "./activity-log-message";
 
@@ -1150,6 +1151,22 @@ export class CoreManager {
    * `closedNotice` 로 실어 화면이 그 자리에 보이게 하고, 기록의 끊긴 까닭으로도 쓴다.
    */
   private readonly closeNotices = new Map<string, string>();
+  /**
+   * 붙는 중인 SFTP·컨테이너 끝점 — 코어가 '붙었다'고 답하기 전이라 위의 끝점 표에 아직 없다. 팀에서 빠지면 이것도 끊어야
+   * 한다(`closeHostConnections`). 끊었으면 notice 에 까닭을 둔다 — 붙는 요청은 그 까닭으로 끝나고, 늦게 '붙었다'가 와도
+   * 적지 않고 끊는다.
+   */
+  private readonly connectingEndpoints = new Map<
+    string,
+    { kind: "sftp" | "containers"; hostId: string; notice: string | null }
+  >();
+  /**
+   * 그 호스트가 아직 볼트에 있는지(메인이 단다). 다이얼 직전에 묻는다 — IPC 는 처음에 호스트를 찾고 시작하지만, AWS·키체인을
+   * 기다리는 사이 팀에서 빠지면 그 연결은 아직 어디에도 적히지 않아 닫기가 닿지 않는다. 모든 연결이 지나는 마지막 자리다.
+   */
+  private hostPresent: ((hostId: string) => boolean) | null = null;
+  /** 팀에서 빠져 닫은 호스트의 까닭 — 그 뒤 다이얼을 막을 때 같은 문구로 말한다. */
+  private readonly goneHostNotices = new Map<string, string>();
   private readonly pendingResponses = new Map<
     string,
     PendingResponse<Record<string, unknown>>
@@ -1837,6 +1854,7 @@ export class CoreManager {
       suppressReadyFailureEvent?: boolean;
     } = {},
   ): Promise<{ sessionId: string; ready?: Promise<void> }> {
+    this.assertHostStillPresent(payload.hostId);
     await this.start();
     // 세션 ID는 Electron 쪽에서 먼저 발급해서 탭과 SSH 세션을 동일한 식별자로 묶는다.
     const sessionId = randomUUID();
@@ -2119,18 +2137,36 @@ export class CoreManager {
     runtimeCommand: string | null;
     unsupportedReason: string | null;
   }> {
+    this.assertHostStillPresent(payload.hostId);
     await this.start();
     const { endpointId, hostId, ...connectPayload } = payload;
-    const response = await this.requestResponse<Record<string, unknown>>(
-      {
-        id: randomUUID(),
-        type: "containersConnect",
-        endpointId,
-        payload: connectPayload,
-      },
-      ["containersConnected"],
-      { timeoutMs: 120000 },
-    );
+    const connecting = { kind: "containers" as const, hostId, notice: null as string | null };
+    this.connectingEndpoints.set(endpointId, connecting);
+    let response: Record<string, unknown>;
+    try {
+      response = await this.requestResponse<Record<string, unknown>>(
+        {
+          id: randomUUID(),
+          type: "containersConnect",
+          endpointId,
+          payload: connectPayload,
+        },
+        ["containersConnected"],
+        { timeoutMs: 120000 },
+      );
+    } catch (error) {
+      // 팀에서 빠져 끊었다 — 코어가 낸 취소 문구 대신 그 까닭으로 끝낸다.
+      throw connecting.notice ? new HostGoneError(connecting.notice) : error;
+    } finally {
+      if (this.connectingEndpoints.get(endpointId) === connecting) {
+        this.connectingEndpoints.delete(endpointId);
+      }
+    }
+    if (connecting.notice) {
+      // 끊기보다 코어가 먼저 붙었다 — 적지 않고 끊는다(끊김을 기다리지 않는다 — 까닭은 이미 정해졌다).
+      void this.containersDisconnect(endpointId).catch(() => undefined);
+      throw new HostGoneError(connecting.notice);
+    }
     const runtime =
       response.runtime === "docker" || response.runtime === "podman"
         ? (response.runtime as HostContainerRuntime)
@@ -2543,6 +2579,7 @@ export class CoreManager {
     /** 원격 셸 종류. Windows 인스턴스는 "powershell" — 코어가 셸 통합 시도 여부를 여기서 정한다. */
     shellKind?: string;
   }): Promise<{ sessionId: string }> {
+    this.assertHostStillPresent(payload.hostId);
     await this.start();
     const sessionId = randomUUID();
     this.assignCurrentSessionOwner(sessionId);
@@ -2627,6 +2664,7 @@ export class CoreManager {
     /** 원격 셸 종류. Windows 인스턴스는 "powershell" — 서버의 ssh-core 가 셸 통합 판단에 쓴다. */
     shellKind?: string;
   }): Promise<{ sessionId: string }> {
+    this.assertHostStillPresent(payload.hostId);
     const sessionId = randomUUID();
     const ownerWebContentsId = this.sessionOwnerStorage.getStore();
     const startupCommand = this.normalizeStartupCommand(payload.startupCommand);
@@ -3299,6 +3337,7 @@ export class CoreManager {
       transport?: PortForwardTransport;
     },
   ): Promise<PortForwardRuntimeRecord> {
+    this.assertHostStillPresent(payload.hostId);
     await this.start();
     const baseRuntime: PortForwardRuntimeRecord = {
       ruleId: payload.ruleId,
@@ -3356,6 +3395,7 @@ export class CoreManager {
       transport?: PortForwardTransport;
     },
   ): Promise<PortForwardRuntimeRecord> {
+    this.assertHostStillPresent(payload.hostId);
     await this.start();
     const baseRuntime: PortForwardRuntimeRecord = {
       ruleId: payload.ruleId,
@@ -3509,10 +3549,13 @@ export class CoreManager {
       hostId: string;
     },
   ): Promise<SftpEndpointSummary> {
+    this.assertHostStillPresent(payload.hostId);
     this.assignCurrentSftpEndpointOwner(payload.endpointId);
     await this.start();
     const { endpointId, ...connectPayload } = payload;
     this.startSftpLifecycle(payload);
+    const connecting = { kind: "sftp" as const, hostId: payload.hostId, notice: null as string | null };
+    this.connectingEndpoints.set(endpointId, connecting);
     try {
       const requestId = randomUUID();
       const response = await this.requestResponse<{
@@ -3527,6 +3570,11 @@ export class CoreManager {
         },
         ["sftpConnected"],
       );
+      if (connecting.notice) {
+        // 붙는 사이 팀에서 빠졌다. 끊기보다 코어가 먼저 붙었다 — 적지 않고 끊는다.
+        void this.cancelConnectingEndpoint("sftp", endpointId);
+        throw new HostGoneError(connecting.notice);
+      }
 
       const summary: SftpEndpointSummary = {
         id: endpointId,
@@ -3545,8 +3593,46 @@ export class CoreManager {
       void this.cleanupSftpPartialRecordsForHost(payload.hostId, endpointId);
       return summary;
     } catch (error) {
+      if (connecting.notice) {
+        // 팀에서 빠져 앱이 끊었다 — 실패가 아니라 닫힘이고, 코어의 취소 문구 대신 그 까닭으로 끝낸다.
+        this.finalizeSftpLifecycle(endpointId, "closed", connecting.notice);
+        throw new HostGoneError(connecting.notice);
+      }
       this.finalizeSftpLifecycle(endpointId, "error", toErrorMessage(error));
       throw error;
+    } finally {
+      if (this.connectingEndpoints.get(endpointId) === connecting) {
+        this.connectingEndpoints.delete(endpointId);
+      }
+    }
+  }
+
+  /**
+   * 붙는 중인 끝점을 코어에서 끊는다 — 코어는 붙는 중 작업과 그 물음을 함께 접는다(`starting.Cancel`). 아직 적히지 않은
+   * 끝점이라 `sftpDisconnect` 를 쓰지 않는다(그것은 적힌 끝점만 끊는다).
+   */
+  private async cancelConnectingEndpoint(
+    kind: "sftp" | "containers",
+    endpointId: string,
+  ): Promise<void> {
+    if (kind === "containers") {
+      await this.containersDisconnect(endpointId).catch(() => undefined);
+      return;
+    }
+    try {
+      await this.requestResponse(
+        {
+          id: randomUUID(),
+          type: "sftpDisconnect",
+          endpointId,
+          payload: {},
+        },
+        ["sftpDisconnected"],
+      );
+    } catch {
+      // 코어가 이미 내려갔으면 붙는 요청도 함께 끝났다.
+    } finally {
+      this.closeNotices.delete(endpointId);
     }
   }
 
@@ -4453,6 +4539,9 @@ export class CoreManager {
    * 닫기를 건 연결 수를 돌려준다.
    */
   closeHostConnections(hostIds: ReadonlySet<string>, notice: string): number {
+    for (const hostId of hostIds) {
+      this.goneHostNotices.set(hostId, notice);
+    }
     let closed = 0;
     for (const [sessionId, tab] of Array.from(this.tabs)) {
       if (tab.hostId && hostIds.has(tab.hostId)) {
@@ -4475,6 +4564,16 @@ export class CoreManager {
         closed += 1;
       }
     }
+    // 붙는 중인 SFTP·컨테이너 — 위의 표에는 '붙었다' 뒤에야 오른다. 그대로 두면 호스트 키 물음에 답하거나 느린 서버가 답한
+    // 뒤 빠진 팀 호스트에 붙는다. 코어에 끊기를 보내면 붙는 중 작업과 물음까지 접힌다.
+    for (const [endpointId, connecting] of Array.from(this.connectingEndpoints)) {
+      if (hostIds.has(connecting.hostId) && !connecting.notice) {
+        connecting.notice = notice;
+        this.closeNotices.set(endpointId, notice);
+        void this.cancelConnectingEndpoint(connecting.kind, endpointId);
+        closed += 1;
+      }
+    }
     for (const runtime of this.listPortForwardRuntimes()) {
       if (hostIds.has(runtime.hostId) && (runtime.status === "starting" || runtime.status === "running")) {
         this.closeNotices.set(runtime.ruleId, notice);
@@ -4485,12 +4584,33 @@ export class CoreManager {
     return closed;
   }
 
-  /** 앱이 닫는 연결의 닫힘 이벤트에 그 까닭을 싣는다. 까닭이 없으면 그대로다. */
+  /** 다이얼 직전 확인에 쓸 '호스트가 볼트에 있는가'를 단다(메인이 볼트 목록으로). */
+  setHostPresence(isPresent: (hostId: string) => boolean): void {
+    this.hostPresent = isPresent;
+  }
+
+  /**
+   * 다이얼 직전 — 그 호스트가 볼트에서 사라졌으면 붙지 않는다. 팀에서 빠져 닫은 호스트면 그 까닭으로, 아니면(지움)
+   * IPC 와 같은 'Host not found' 로 멈춘다. 호스트가 없는 연결(로컬 셸·시리얼)은 보지 않는다.
+   */
+  private assertHostStillPresent(hostId: string | null | undefined): void {
+    if (!hostId || !this.hostPresent || this.hostPresent(hostId)) {
+      return;
+    }
+    throw new HostGoneError(this.goneHostNotices.get(hostId) ?? "Host not found");
+  }
+
+  /**
+   * 앱이 닫는 연결의 닫힘 이벤트에 그 까닭을 싣는다. 까닭이 없으면 그대로다. 붙는 중에 끊은 끝점은 끊김과 붙는 요청의 오류가
+   * 순서 없이 오므로, 그 요청이 끝날 때까지 끝점에 남긴 까닭도 본다.
+   */
   private withCloseNotice(
     event: CoreEvent<Record<string, unknown>>,
     id: string | undefined,
   ): CoreEvent<Record<string, unknown>> {
-    const notice = id ? this.closeNotices.get(id) : undefined;
+    const notice = id
+      ? (this.closeNotices.get(id) ?? this.connectingEndpoints.get(id)?.notice ?? undefined)
+      : undefined;
     return notice ? { ...event, payload: { ...event.payload, message: notice, closedNotice: notice } } : event;
   }
 
@@ -5084,8 +5204,12 @@ export class CoreManager {
           this.containerEndpoints.delete(event.endpointId);
           this.containerNamesByEndpointId.delete(event.endpointId);
           const lifecycleId = this.getContainerLifecycleId(event.endpointId);
+          // 붙는 중에 팀에서 빠져 끊은 것 — 붙는 요청의 오류도 실패가 아니라 그 까닭의 닫힘이다.
+          const abortNotice = this.connectingEndpoints.get(event.endpointId)?.notice ?? null;
           if (lifecycleId) {
-            if (event.type === "containersError") {
+            if (event.type === "containersError" && abortNotice) {
+              this.finalizeContainerLifecycleForScope(event.endpointId, lifecycleId, abortNotice);
+            } else if (event.type === "containersError") {
               this.failContainerLifecycleForScope(
                 event.endpointId,
                 String(
@@ -5103,7 +5227,7 @@ export class CoreManager {
           }
         }
         this.broadcastTerminalEvent(
-          event.type === "containersDisconnected" ? this.withCloseNotice(event, event.endpointId) : event,
+          event.type === "containersConnected" ? event : this.withCloseNotice(event, event.endpointId),
         );
         if (event.type !== "containersConnected") {
           this.closeNotices.delete(event.endpointId);
@@ -5118,13 +5242,22 @@ export class CoreManager {
         return;
       }
       this.broadcastTerminalEvent(
-        event.type === "sftpDisconnected" ? this.withCloseNotice(event, event.endpointId) : event,
+        event.type === "sftpDisconnected" || event.type === "sftpError"
+          ? this.withCloseNotice(event, event.endpointId)
+          : event,
       );
       return;
     }
 
     if (event.sessionId) {
       const existing = this.tabs.get(event.sessionId);
+      // 앱이 까닭과 함께 이미 닫은 붙는 중 세션이다(팀에서 빠짐 — `disconnect` 가 그 까닭으로 '닫힘'을 먼저 보냈다). 코어는 붙는 중
+      // 연결을 접으며 취소 오류를 뒤늦게 보내고 '닫힘'은 보내지 않는다 — 그 오류를 넘기면 화면의 까닭이 '연결을 그만뒀습니다'로
+      // 덮인다. 넘기지 않고, 남겨 둔 까닭도 여기서 지운다.
+      if (!existing && event.type === "error" && this.closeNotices.has(event.sessionId)) {
+        this.closeNotices.delete(event.sessionId);
+        return;
+      }
       const transport = this.sessionTransportById.get(event.sessionId) ?? "ssh";
       const isAwsSession =
         transport === "aws-ssm" || transport === "aws-ssm-server-proxy";

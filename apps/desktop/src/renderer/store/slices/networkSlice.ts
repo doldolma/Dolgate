@@ -435,6 +435,23 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
             if (!pending) {
               return;
             }
+            // 물음의 호스트가 목록에서 사라졌다(붙는 사이 팀에서 빠짐·지움). 키를 두지 않고, 기다리는 연결에는 '아니오'로
+            // 답한다 — 신뢰로 풀면 빠진 팀 호스트에 붙거나 그 키가 개인 볼트로 간다. 볼트에 없는 홉(호스트 id 없음)은 그대로다.
+            if (
+              pending.probe.hostId &&
+              !get().hosts.some((host) => host.id === pending.probe.hostId)
+            ) {
+              set((state) => removeHostKeyPrompt(state, pending));
+              if (pending.liveChallengeId) {
+                await api.ssh
+                  .respondHostKeyTrust({
+                    challengeId: pending.liveChallengeId,
+                    trust: false,
+                  })
+                  .catch(() => undefined);
+              }
+              return;
+            }
             if (mode === "replace") {
               await api.knownHosts.replace(toTrustInput(pending.probe));
             } else {

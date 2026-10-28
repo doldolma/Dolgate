@@ -3648,7 +3648,8 @@
     "closeTab": "{{title}} 닫기",
     "emptyInline": "열린 컨테이너 화면이 없습니다.",
     "emptyTitle": "열린 컨테이너 화면이 없습니다.",
-    "emptyDescription": "Host 카드에서 우클릭한 뒤 컨테이너를 열어 주세요."
+    "emptyDescription": "Host 카드에서 우클릭한 뒤 컨테이너를 열어 주세요.",
+    "hostGone": "이 호스트를 더 이상 찾을 수 없습니다."
   },
   "tmuxPrompt": {
     "raw": "tmux 명령",
@@ -4400,7 +4401,8 @@
     "memberJoinedAs": "{{email}} 님이 {{role}} 로 팀에 들어왔습니다",
     "roleChanged": "{{by}} 님이 {{email}} 님의 역할을 {{role}} 로 바꿨습니다",
     "replayForbidden": "녹화는 관리자와 녹화한 사람만 볼 수 있습니다",
-    "memberLeftEnd": "팀에서 빠져 연결이 끝났습니다."
+    "memberLeftEnd": "팀에서 빠져 연결이 끝났습니다.",
+    "mobileNotRecorded": "모바일 접속은 녹화하지 않습니다"
   },
   "teamChanges": {
     "tabsLabel": "기록 보기",

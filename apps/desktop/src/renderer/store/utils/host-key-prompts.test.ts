@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PendingHostKeyPrompt } from "../types";
 import {
+  dropHostKeyPromptsForEndpoint,
   dropHostKeyPromptsForSession,
   findHostKeyPromptForSession,
   findUnownedHostKeyPrompt,
@@ -143,6 +144,34 @@ describe("호스트 키 신뢰 물음 큐", () => {
 
     expect(after.pendingHostKeyPrompt?.liveChallengeId).toBe("b");
     expect(after.queuedHostKeyPrompts).toEqual([]);
+  });
+
+  // SFTP·컨테이너는 탭이 없어 끝점 id 로 고른다. 끝난 연결의 물음은 보여 주던 것이든 줄에 선 것이든 걷어낸다.
+  it("끝난 끝점의 물음은 보여 주던 것을 걷고 다음을 올린다", () => {
+    const state = enqueueHostKeyPrompt(
+      enqueueHostKeyPrompt(empty, createPrompt("a", { endpointId: "sftp-1" })),
+      createPrompt("b", { endpointId: "sftp-2" }),
+    );
+
+    const after = dropHostKeyPromptsForEndpoint(state, "sftp-1");
+
+    expect(after.pendingHostKeyPrompt?.liveChallengeId).toBe("b");
+    expect(after.queuedHostKeyPrompts).toEqual([]);
+  });
+
+  it("끝난 끝점의 물음은 줄에서도 걷어내고, 보여 주던 다른 것은 그대로 둔다", () => {
+    const state = enqueueHostKeyPrompt(
+      enqueueHostKeyPrompt(
+        enqueueHostKeyPrompt(empty, createPrompt("a", { endpointId: "sftp-1" })),
+        createPrompt("b", { endpointId: "sftp-2" }),
+      ),
+      createPrompt("c", { endpointId: "sftp-1" }),
+    );
+
+    const after = dropHostKeyPromptsForEndpoint(state, "sftp-2");
+
+    expect(after.pendingHostKeyPrompt?.liveChallengeId).toBe("a");
+    expect(after.queuedHostKeyPrompts.map((p) => p.liveChallengeId)).toEqual(["c"]);
   });
 
   it("보여 주는 것이 남을 세션이면 그것은 그대로 둔다", () => {

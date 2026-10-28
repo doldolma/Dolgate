@@ -21,6 +21,8 @@ import { probeLocalAgent, resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { connectAwsEc2OverSsm } from "./aws-ec2-ssh-over-ssm";
 import { runWithIpcSessionOwner } from "./session-owner";
 import { collectHopSecretsToPersist, findHostNeedingPassword } from "./connect-credentials";
+import { HostGoneError } from "../host-gone-error";
+import { hostPresenceGuard } from "./host-presence";
 import { COMPLETION_EXIT_UNKNOWN } from "../core-manager";
 import type { AwsSessionFallback, AwsSessionTransport } from "@dolssh/shared-core";
 import { t } from '../i18n';
@@ -117,6 +119,8 @@ async function connectAwsServerProxySessionWithAuthRetry(
     shellKind?: string;
   },
 ): Promise<{ sessionId: string }> {
+  // AWS·서버를 기다리는 사이 팀에서 빠지면 탭이 아직 없어 닫기가 닿지 않는다 — 붙기 직전에 본다.
+  const ensureHostPresent = hostPresenceGuard(ctx, input.hostId);
   const envSpec = await ctx.awsService.buildServerProxySessionEnvSpec(
     input.profileName,
     input.region,
@@ -124,6 +128,7 @@ async function connectAwsServerProxySessionWithAuthRetry(
 
   const connectOnce = async (accessToken: string) => {
     await assertAwsSsmServerProxySupported(ctx, accessToken);
+    ensureHostPresent();
     return ctx.coreManager.connectAwsServerProxySession({
       ...input,
       serverUrl: ctx.authService.getServerUrl(),
@@ -137,6 +142,10 @@ async function connectAwsServerProxySessionWithAuthRetry(
   try {
     return await connectOnce(initialAccessToken);
   } catch (error) {
+    // 기다리는 사이 호스트가 사라졌다(팀에서 빠짐) — 인증 문제가 아니니 새로 고쳐 다시 붙지 않는다.
+    if (error instanceof HostGoneError) {
+      throw error;
+    }
     const refreshed = await ctx.authService.refreshSession().catch(() => null);
     if (refreshed?.status !== "authenticated") {
       throw error;
@@ -219,10 +228,13 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           // 직결은 로컬 코어, 서버 프록시는 sync-api 안의 코어.
           shellKind: isWindowsInstance ? "powershell" : undefined,
         };
+        // SSH 를 해 보고 물러나는 사이·SSM 세션을 여는 사이 팀에서 빠질 수 있다 — 탭이 아직 없어 닫기가 닿지 않는다.
+        const ensureHostPresent = hostPresenceGuard(ctx, host.id);
         const connectSsmShell = async () =>
           host.awsSsmServerProxyEnabled === true
             ? connectAwsServerProxySessionWithAuthRetry(ctx, connectionInput)
             : (async () => {
+                ensureHostPresent();
                 const awsSessionEnv = ctx.awsService.buildManagedSessionEnvSpec();
                 const ssmSession = ctx.awsService.shouldUseInProcessSsm()
                   ? await ctx.awsService.startSsmShellSession(
@@ -231,6 +243,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
                       host.awsInstanceId,
                     )
                   : undefined;
+                ensureHostPresent();
                 return ctx.coreManager.connectAwsSession({
                   ...connectionInput,
                   env: awsSessionEnv.env,
@@ -297,7 +310,8 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
               });
               awsTransport = "ssh-over-ssm";
             } catch (error) {
-              if (isHostKeySecurityError(error)) {
+              // 호스트가 사라진 것(팀에서 빠짐)은 SSM 셸로 물러날 일이 아니다.
+              if (isHostKeySecurityError(error) || error instanceof HostGoneError) {
                 throw error;
               }
               const latestHost = ctx.vaults.getHost(host.id);
@@ -315,7 +329,8 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
               connection = await connectSsmShell();
               awsTransport = "ssm-shell";
             } catch (fallbackError) {
-              if (failedSshOverSsm) {
+              // 물러나는 사이 호스트가 사라졌다 — 그 까닭만 말한다(SSH 실패와 합치지 않는다).
+              if (failedSshOverSsm && !(fallbackError instanceof HostGoneError)) {
                 throw combineAwsSshFallbackFailure(
                   failedSshOverSsm.error,
                   fallbackError,

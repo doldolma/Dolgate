@@ -12,6 +12,7 @@ import type {
 } from "./context";
 import { resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { retryAwsSsmSshOperation } from "./coordinators/aws-ssm-ssh-retry";
+import { hostPresenceGuard } from "./host-presence";
 import { t } from '../i18n';
 
 const AWS_EC2_SSH_PROGRESS_ENDPOINT_PREFIX = "aws-ec2-ssh:";
@@ -46,6 +47,8 @@ export async function connectAwsEc2OverSsm(
   options: AwsEc2OverSsmConnectOptions,
 ): Promise<{ sessionId: string }> {
   const progressEndpointId = `${AWS_EC2_SSH_PROGRESS_ENDPOINT_PREFIX}${host.id}`;
+  // AWS 를 기다리는 동안 팀에서 빠지면 탭이 아직 없어 닫기가 닿지 않는다 — 기다림 뒤 손대기 전마다 본다.
+  const ensureHostPresent = hostPresenceGuard(ctx, host.id);
   const emitProgress = (
     stage: AwsConnectionProgressStage,
     message: string,
@@ -134,6 +137,7 @@ export async function connectAwsEc2OverSsm(
     agentForwardingEndpointKind: agentForwardingEndpoint?.kind,
     agentForwardingEndpoint: agentForwardingEndpoint?.endpoint,
   };
+  ensureHostPresent();
 
   if (hydratedHost.awsSsmServerProxyEnabled === true) {
     // Server-proxy: sync-api owns every AWS call. Send the resolved credentials +
@@ -153,6 +157,7 @@ export async function connectAwsEc2OverSsm(
       publicKey,
     });
     return runWithAwsServerProxyAuthRetry(ctx.authService, (accessToken) => {
+      ensureHostPresent();
       emitProgress(
         "connecting-sftp",
         t('ssmSsh.startingSession', { label: hydratedHost.label }),
@@ -194,6 +199,7 @@ export async function connectAwsEc2OverSsm(
     hydratedHost.id,
   );
   const bindPort = await ctx.reserveLoopbackPort();
+  ensureHostPresent();
   const tunnel = await ctx.awsSsmTunnelService.start({
     runtimeId: `aws-ec2-ssh:${hydratedHost.id}:${randomUUID()}`,
     profileName,
@@ -209,7 +215,9 @@ export async function connectAwsEc2OverSsm(
       t('ssmSsh.startingSession', { label: hydratedHost.label }),
       hydratedHost.id,
     );
-    const connection = await retryAwsSsmSshOperation(() => {
+    const connection = await retryAwsSsmSshOperation(async () => {
+      // 터널이 열리는 사이 빠졌을 수 있다 — 붙지 않고, 아래에서 터널을 닫는다.
+      ensureHostPresent();
       const payload = {
         ...baseConnect,
         host: tunnel.bindAddress,

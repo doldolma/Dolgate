@@ -441,6 +441,50 @@ describe('known host trust scope', () => {
     expect(ctx.knownHosts.trust).not.toHaveBeenCalled();
   });
 
+  // 붙는 사이 팀에서 빠진 팀 호스트의 남은 물음에서 신뢰하면 — 그 호스트는 이제 어느 볼트에도 없다. 모르는 호스트를 개인으로 보는
+  // scopeOfHost 로 두면 팀 호스트의 키가 개인 볼트로 새므로 받지 않는다(8-6 결함 ②의 데스크톱 쪽).
+  it.each([
+    ['trusting', ipcChannels.knownHosts.trust],
+    ['replacing', ipcChannels.knownHosts.replace],
+  ])('refuses %s a key for a host that is in no vault', async (_label, channel) => {
+    ipcHandlers.clear();
+    const ctx = createContext();
+    ctx.hosts.getById = vi.fn(() => null) as never;
+    registerKnownHostsLogsKeychainIpcHandlers(ctx as never);
+
+    await expect(
+      ipcHandlers.get(channel)!({}, {
+        hostId: 'gone-team-host',
+        hostLabel: 'Team SSH',
+        host: 'team.example.com',
+        port: 22,
+        algorithm: 'ssh-ed25519',
+        publicKeyBase64: 'AAA',
+        fingerprintSha256: 'SHA256:team',
+      }),
+    ).rejects.toThrow('Host not found');
+    expect(ctx.knownHosts.trust).not.toHaveBeenCalled();
+    expect(ctx.queueSync).not.toHaveBeenCalled();
+  });
+
+  it('still keeps a key for a hop that is not a saved host (no host id)', async () => {
+    ipcHandlers.clear();
+    const ctx = createContext();
+    registerKnownHostsLogsKeychainIpcHandlers(ctx as never);
+
+    await ipcHandlers.get(ipcChannels.knownHosts.trust)!({}, {
+      hostId: '',
+      hostLabel: 'bastion.example.com',
+      host: 'bastion.example.com',
+      port: 22,
+      algorithm: 'ssh-ed25519',
+      publicKeyBase64: 'AAA',
+      fingerprintSha256: 'SHA256:hop',
+    });
+
+    expect(ctx.knownHosts.trust).toHaveBeenCalledWith(expect.objectContaining({ host: 'bastion.example.com' }));
+  });
+
   it('applies the same scope rule when replacing a key', async () => {
     ipcHandlers.clear();
     const ctx = createContext();

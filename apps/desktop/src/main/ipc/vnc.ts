@@ -11,6 +11,7 @@ import { t } from "../i18n";
 import { resolveLocalAgentEndpoint } from "./agent-endpoint";
 import type { VncManager } from "../vnc-manager";
 import type { MainIpcContext } from "./context";
+import { hostPresenceGuard } from "./host-presence";
 
 // 렌더러는 hostId 만 넘긴다. 호스트 조회와 비밀번호 해석은 여기서 한다 — 자격증명은 메인 프로세스
 // 밖으로 나가지 않는다(SSH·RDP 와 같은 규칙).
@@ -154,7 +155,11 @@ export function registerVncIpcHandlers(
         throw new Error("Not a VNC host");
       }
 
+      // 비밀값·통로를 기다리는 사이 팀에서 빠지면(지우면) 이 세션은 아직 VNC 관리자에 적히지 않아 닫기가 닿지 않는다 —
+      // 기다림 뒤 손대기 전마다 본다.
+      const ensureHostPresent = hostPresenceGuard(ctx, host.id);
       const secrets = await ctx.loadHostSecrets(host);
+      ensureHostPresent();
       // 프레임을 보낼 창을 먼저 등록한다. 접속이 끝난 뒤에 등록하면 첫 화면을 놓친다 — 서버는
       // 우리가 요청한 전체 갱신을 곧바로 보낸다.
       vncManager.watchSession(sessionId, event.sender.id);
@@ -162,6 +167,8 @@ export function registerVncIpcHandlers(
       let forwarded: { host: string; port: number } | null = null;
       try {
         forwarded = await openForward(sessionId, host);
+        // 통로가 열리는 사이 빠졌을 수 있다 — 붙지 않는다(아래에서 연 통로를 닫는다).
+        ensureHostPresent();
         // 통로가 정해졌으니 이제 RFB 협상이다. 경유가 없으면 이것이 유일한 진행 보고다.
         vncManager.reportProgress(
           sessionId,
@@ -200,6 +207,9 @@ export function registerVncIpcHandlers(
         // 접속이 실패하면 열어 둔 통로를 닫는다. 안 닫으면 실패한 시도마다 리스너가 남는다.
         closeForward(sessionId);
         vncManager.unwatchSession(sessionId, event.sender.id);
+        // 붙는 사이 호스트가 사라졌으면(팀에서 빠짐 — 팀 게이트웨이의 터널이 먼저 멈춘다) 터널이 남긴 취소 오류 대신 그 까닭으로
+        // 끝낸다. 그대로 넘기면 탭에 '연결을 그만뒀습니다'가 보였다.
+        ensureHostPresent();
         throw error;
       }
     },

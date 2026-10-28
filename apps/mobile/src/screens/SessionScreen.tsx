@@ -43,6 +43,7 @@ import {
   XtermJsWebView,
   type XtermWebViewHandle,
 } from '@fressh/react-native-xtermjs-webview';
+import { AwsKeyModal } from '../components/AwsKeyModal';
 import { ConnectionStagesPanel } from '../components/ConnectionStagesPanel';
 import { openInAppBrowser } from '../lib/in-app-browser';
 import { resolveMobileConnectionStages } from '../lib/connection-stages';
@@ -91,6 +92,12 @@ import {
   useMobileAppStore,
 } from '../store/useMobileAppStore';
 import { getLiveRemoteDesktopSessions } from '../store/remoteDesktopSlice';
+import {
+  listHosts,
+  snippetsForSession,
+  teamAwsKeyMissing,
+  teamNamesByHostId,
+} from '../store/vault-catalog';
 import { buildRecentConnections } from '../lib/recent-connections';
 import type { MobilePalette } from '../theme';
 import { useMobilePalette } from '../theme';
@@ -250,8 +257,8 @@ export function SessionScreen(): React.JSX.Element {
     status: null,
   });
   const sessions = useMobileAppStore(state => state.sessions);
-  const hosts = useMobileAppStore(state => state.hosts);
-  const snippets = useMobileAppStore(state => state.snippets);
+  const hosts = useMobileAppStore(state => listHosts(state));
+  const teamNameByHostId = useMobileAppStore(state => teamNamesByHostId(state));
   const terminalAutocompleteEnabled = useMobileAppStore(
     state => state.settings.terminalAutocompleteEnabled !== false,
   );
@@ -285,6 +292,7 @@ export function SessionScreen(): React.JSX.Element {
     state => state.setActiveSessionTab,
   );
   const resumeSession = useMobileAppStore(state => state.resumeSession);
+  const saveTeamAwsKey = useMobileAppStore(state => state.saveTeamAwsKey);
   const connectToHost = useMobileAppStore(state => state.connectToHost);
   const disconnectSession = useMobileAppStore(state => state.disconnectSession);
   const duplicateSession = useMobileAppStore(state => state.duplicateSession);
@@ -459,6 +467,33 @@ export function SessionScreen(): React.JSX.Element {
     activeTab?.kind === 'rdp' || activeTab?.kind === 'vnc'
       ? (liveRdSessions.find(session => session.id === activeTab.id) ?? null)
       : null;
+  // 실패 화면의 '키 넣기' — 이 기기에 키가 없는 팀 정적 AWS 프로필로 붙다 실패했을 때(데스크톱 M3 와 같다). 넣으면
+  // 그 세션을 다시 붙인다.
+  const activeSessionNeedsAwsKey = useMobileAppStore(
+    state =>
+      activeSession?.status === 'error' &&
+      teamAwsKeyMissing(state, activeSession.hostId) !== null,
+  );
+  const activeRdNeedsAwsKey = useMobileAppStore(
+    state =>
+      activeRdSession?.status === 'error' &&
+      teamAwsKeyMissing(state, activeRdSession.hostId) !== null,
+  );
+  const [awsKeyTarget, setAwsKeyTarget] = useState<{
+    kind: 'terminal' | 'rd';
+    sessionId: string;
+    hostId: string;
+  } | null>(null);
+  const awsKeyProfileName = useMobileAppStore(state =>
+    awsKeyTarget
+      ? (teamAwsKeyMissing(state, awsKeyTarget.hostId)?.profileName ?? null)
+      : null,
+  );
+  const awsKeyTeamName = useMobileAppStore(state =>
+    awsKeyTarget
+      ? (teamAwsKeyMissing(state, awsKeyTarget.hostId)?.teamName ?? null)
+      : null,
+  );
   const remoteDesktopOrientationUnlocked =
     isFocused && activeRdSession !== null;
 
@@ -1239,6 +1274,11 @@ export function SessionScreen(): React.JSX.Element {
     void writeToSession(inputState.sessionId, value);
   };
 
+  // 자동 완성 스니펫 — 이 세션 호스트의 볼트 것이 먼저, 그다음 개인·다른 팀 것(데스크톱과 같은 순서).
+  const renderedTerminalHostId = renderedTerminalSession?.hostId ?? null;
+  const snippets = useMobileAppStore(state =>
+    snippetsForSession(state, renderedTerminalHostId),
+  );
   const terminalAutocomplete = useTerminalAutocomplete({
     sessionId: renderedTerminalSessionId,
     enabled: terminalAutocompleteEnabled,
@@ -1350,12 +1390,36 @@ export function SessionScreen(): React.JSX.Element {
                       },
                     ]}
                   >
-                    <Text
-                      numberOfLines={1}
-                      style={[styles.reconnectTitle, { color: palette.text }]}
-                    >
-                      {entry.title}
-                    </Text>
+                    <View style={styles.reconnectTitleRow}>
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.reconnectTitle,
+                          { color: palette.text },
+                        ]}
+                      >
+                        {entry.title}
+                      </Text>
+                      {/* 볼트가 섞인 목록이라 팀 호스트에는 어느 팀인지 단다 — 홈의 검색·즐겨찾기와 같은 표시. */}
+                      {teamNameByHostId.has(entry.hostId) ? (
+                        <View style={styles.reconnectTeam}>
+                          <Ionicons
+                            name="people-outline"
+                            size={11}
+                            color={palette.mutedText}
+                          />
+                          <Text
+                            numberOfLines={1}
+                            style={[
+                              styles.reconnectTeamText,
+                              { color: palette.mutedText },
+                            ]}
+                          >
+                            {teamNameByHostId.get(entry.hostId)}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
                     {entry.kind === 'terminal' ? null : (
                       <Text
                         style={[
@@ -1649,29 +1713,65 @@ export function SessionScreen(): React.JSX.Element {
                 {activeSession.errorMessage}
               </Text>
             </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={translate('session.reconnectAria', {
-                title: activeSession.title,
-              })}
-              onPress={async () => {
-                await resumeSession(activeSession.id);
-                focusRequestedTerminalInput(true);
-              }}
-              style={[
-                styles.inlineBannerButton,
-                {
-                  backgroundColor: palette.surfaceAlt,
-                  borderColor: palette.sessionSurfaceBorder,
-                },
-              ]}
-            >
-              <Text
-                style={[styles.inlineBannerButtonText, { color: palette.text }]}
+            <View style={styles.inlineBannerActions}>
+              {activeSessionNeedsAwsKey ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={translate('awsKey.addAria', {
+                    title: activeSession.title,
+                  })}
+                  onPress={() =>
+                    setAwsKeyTarget({
+                      kind: 'terminal',
+                      sessionId: activeSession.id,
+                      hostId: activeSession.hostId,
+                    })
+                  }
+                  style={[
+                    styles.inlineBannerButton,
+                    {
+                      backgroundColor: palette.surfaceAlt,
+                      borderColor: palette.sessionSurfaceBorder,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.inlineBannerButtonText,
+                      { color: palette.text },
+                    ]}
+                  >
+                    {translate('awsKey.add')}
+                  </Text>
+                </Pressable>
+              ) : null}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={translate('session.reconnectAria', {
+                  title: activeSession.title,
+                })}
+                onPress={async () => {
+                  await resumeSession(activeSession.id);
+                  focusRequestedTerminalInput(true);
+                }}
+                style={[
+                  styles.inlineBannerButton,
+                  {
+                    backgroundColor: palette.surfaceAlt,
+                    borderColor: palette.sessionSurfaceBorder,
+                  },
+                ]}
               >
-                {translate('session.reconnect')}
-              </Text>
-            </Pressable>
+                <Text
+                  style={[
+                    styles.inlineBannerButtonText,
+                    { color: palette.text },
+                  ]}
+                >
+                  {translate('session.reconnect')}
+                </Text>
+              </Pressable>
+            </View>
           </View>
         ) : null}
 
@@ -1919,6 +2019,16 @@ export function SessionScreen(): React.JSX.Element {
                   onReconnect={() => {
                     void reconnectRemoteDesktopSession(activeRdSession.id);
                   }}
+                  onAddAwsKey={
+                    activeRdNeedsAwsKey
+                      ? () =>
+                          setAwsKeyTarget({
+                            kind: 'rd',
+                            sessionId: activeRdSession.id,
+                            hostId: activeRdSession.hostId,
+                          })
+                      : undefined
+                  }
                   title={activeRdSession.title}
                   hostAddress={
                     activeRdHost &&
@@ -2146,6 +2256,28 @@ export function SessionScreen(): React.JSX.Element {
       </View>
       {/* 편집기는 전체화면 모달이라 SFTP 브라우저 위에 얹는다 — 열려 있을 때만 렌더된다. */}
       <RemoteFileEditorModal />
+      <AwsKeyModal
+        request={
+          awsKeyProfileName && awsKeyTeamName
+            ? { profileName: awsKeyProfileName, teamName: awsKeyTeamName }
+            : null
+        }
+        onCancel={() => setAwsKeyTarget(null)}
+        onSave={async key => {
+          if (!awsKeyTarget) {
+            return;
+          }
+          await saveTeamAwsKey(awsKeyTarget.hostId, key);
+          setAwsKeyTarget(null);
+          // 넣었으면 알아서 다시 붙는다(데스크톱 M3 와 같다).
+          if (awsKeyTarget.kind === 'terminal') {
+            await resumeSession(awsKeyTarget.sessionId);
+            focusRequestedTerminalInput(true);
+          } else {
+            await reconnectRemoteDesktopSession(awsKeyTarget.sessionId);
+          }
+        }}
+      />
     </IosEdgeSwipeBack>
   );
 }
@@ -2190,10 +2322,27 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
   },
-  reconnectTitle: {
+  reconnectTitleRow: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  reconnectTitle: {
+    flexShrink: 1,
     fontSize: 15,
     fontWeight: '600',
+  },
+  // 팀 호스트의 팀 이름. 제목보다 먼저 줄어든다.
+  reconnectTeam: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    flexShrink: 2,
+  },
+  reconnectTeamText: {
+    flexShrink: 1,
+    fontSize: 11,
   },
   // 프로토콜 꼬리표. 터미널 항목에는 붙지 않으므로 제목과 재연결 사이의 폭만 차지한다.
   reconnectProtocol: {
@@ -2293,6 +2442,9 @@ const styles = StyleSheet.create({
   inlineBannerText: {
     fontSize: 12,
     lineHeight: 16,
+  },
+  inlineBannerActions: {
+    gap: 6,
   },
   inlineBannerButton: {
     borderWidth: 1,

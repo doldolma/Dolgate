@@ -3648,7 +3648,8 @@
     "closeTab": "Close {{title}}",
     "emptyInline": "No container screen is open.",
     "emptyTitle": "No container screen is open.",
-    "emptyDescription": "Right-click a host card and open its containers."
+    "emptyDescription": "Right-click a host card and open its containers.",
+    "hostGone": "This host is no longer available."
   },
   "tmuxPrompt": {
     "raw": "tmux command",
@@ -4400,7 +4401,8 @@
     "memberJoinedAs": "{{email}} joined the team as {{role}}",
     "roleChanged": "{{by}} changed {{email}}'s role to {{role}}",
     "replayForbidden": "Only team admins and the person who recorded it can view this recording",
-    "memberLeftEnd": "Ended when this member left the team."
+    "memberLeftEnd": "Ended when this member left the team.",
+    "mobileNotRecorded": "Mobile connections are not recorded"
   },
   "teamChanges": {
     "tabsLabel": "Log view",

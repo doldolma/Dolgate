@@ -51,6 +51,12 @@ function activityItem(seq: number, record: ActivityLogRecord, phase?: 'start' | 
   };
 }
 
+/** 폰이 남긴 줄 — 본문에 client: "mobile"(녹화 없음). */
+function mobileItem(seq: number, record: ActivityLogRecord, phase: 'start' | 'end', author = 'b@example.com'): TeamActivityItem {
+  const item = activityItem(seq, record, phase, author);
+  return { ...item, activity: { ...item.activity!, client: 'mobile' } };
+}
+
 function serverItem(seq: number, createdAt: string, overrides: Partial<TeamActivityItem>): TeamActivityItem {
   return {
     seq,
@@ -167,6 +173,40 @@ describe('LogsPanel — team history', () => {
   });
 
   // 녹화는 관리자 이상과 녹화한 사람만 받는다(7-1) — 서버가 내주지 않으니 열지 말고 까닭을 말한다.
+  // 작업 8-5b — 폰이 남긴 줄은 작성자 뒤에 'Mobile'. 폰은 녹화하지 않아 Replay 가 없고, 까닭은 Mobile 의 툴팁이다.
+  it('marks a row a phone left with Mobile after the author, says on hover why it has no Replay, and finds it by "mobile"', async () => {
+    const phone = sessionLog('p1', {
+      hostLabel: 'web-phone',
+      status: 'closed',
+      disconnectedAt: '2026-10-21T01:05:00.000Z',
+      durationMs: 300_000,
+      recordingId: null,
+      hasReplay: false,
+    });
+    const desk = sessionLog('d1', { hostLabel: 'web-desk', status: 'closed', disconnectedAt: '2026-10-21T01:10:00.000Z' });
+    mocks.listTeamActivity.mockResolvedValue([mobileItem(2, phone, 'end'), activityItem(1, desk, 'end', 'c@example.com')]);
+    mocks.getTeamReplayStatuses.mockResolvedValue([status('rec-d1', 'ended')]);
+    renderPanel();
+    chooseTeam();
+
+    const phoneCard = (await screen.findByText('web-phone')).closest('[data-testid="logs-lifecycle-card"]') as HTMLElement;
+    const deskCard = screen.getByText('web-desk').closest('[data-testid="logs-lifecycle-card"]') as HTMLElement;
+    expect(within(phoneCard).getByText('b@example.com')).toBeInTheDocument();
+    expect(within(phoneCard).getByText('Mobile')).toBeInTheDocument();
+    // 카드의 작성자 줄에는 폰 아이콘이 함께 선다.
+    expect(phoneCard.querySelector('svg.lucide-smartphone')).not.toBeNull();
+    expect(within(deskCard).queryByText('Mobile')).toBeNull();
+    // 폰의 줄에는 Replay 가 없다. 데스크톱의 줄은 그대로 연다.
+    expect(within(phoneCard).queryByRole('button', { name: /Replay/ })).toBeNull();
+    expect(await within(deskCard).findByRole('button', { name: 'Replay' })).toBeEnabled();
+    fireEvent.mouseEnter(within(phoneCard).getByText('Mobile').parentElement!);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('모바일 접속은 녹화하지 않습니다');
+
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'mobile' } });
+    expect(screen.getByText('web-phone')).toBeInTheDocument();
+    expect(screen.queryByText('web-desk')).toBeNull();
+  });
+
   it("doesn't open a team recording you may not view, and says why", async () => {
     mocks.listTeamActivity.mockResolvedValue([activityItem(1, sessionLog('theirs', { status: 'closed' }), 'end')]);
     mocks.getTeamReplayStatuses.mockResolvedValue([{ ...status('rec-theirs', 'ended'), viewable: false }]);

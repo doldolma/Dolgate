@@ -121,6 +121,8 @@ import type {
 import type { SyncKind, SyncPayloadV2, SyncWatchResult } from "@dolssh/shared-core";
 // 팀 역할은 shared-core 에 있다(모바일도 같은 규칙을 쓴다). 여기서는 받아 쓰기만 한다 — @shared 가 shared-core 를 함께 내보낸다.
 import type { TeamAssignableRole, TeamInviteRole, TeamRole } from "@dolssh/shared-core";
+// 팀 기록 본문도 모바일이 같은 모양으로 올리므로 shared-core 에 있다(team-history-crypto.ts).
+import type { TeamActivityBody } from "@dolssh/shared-core";
 import type {
   AiApiKeyStatus,
   AiApprovalResponse,
@@ -1311,14 +1313,6 @@ export type TabCommandPayload =
  * - error: 마지막 동기화가 실패했다(다음 변경 때 다시 시도한다)
  */
 export type TeamSyncStateName = "idle" | "ready" | "needs-rejoin" | "outdated" | "error";
-
-/** 팀 기록 한 줄의 본문(앱 활동). 팀 키로 잠가 올린다. 로컬 기록과 같은 모양이라 화면이 같은 방식으로 그린다. */
-export interface TeamActivityBody {
-  v: number;
-  /** 수명 줄(접속·SFTP·포트 포워딩·컨테이너)의 시작·끝. 같은 record.id 의 줄을 화면이 한 줄로 합친다. */
-  phase?: "start" | "end";
-  record: ActivityLogRecord;
-}
 
 /** 서버가 남긴 멤버 변화(평문). 이메일은 그때의 것이다. */
 export interface TeamMemberChange {

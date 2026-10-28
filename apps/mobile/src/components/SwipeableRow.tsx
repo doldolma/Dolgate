@@ -40,7 +40,12 @@ export interface SwipeableRowAction {
 }
 
 interface SwipeableRowProps {
-  /** 오른쪽 끝에서부터 놓인다. 마지막 항목이 가장 바깥이다. */
+  /**
+   * 오른쪽 끝에서부터 놓인다. 마지막 항목이 가장 바깥이다.
+   *
+   * 비어 있으면 오른쪽 판을 그리지 않는다 — 줄은 움직이지 않고 미는 손짓만 삼킨다. 밀기 줄이 없는 카드는
+   * 손가락이 카드 안에서 떨어질 때 누르기로 읽혀서, 고칠 것이 없는 줄(팀 호스트)을 밀면 접속이 시작됐다.
+   */
   actions: SwipeableRowAction[];
   /** 액션 한 칸의 폭. 글자와 아이콘이 들어갈 만큼. */
   actionWidth?: number;
@@ -107,7 +112,8 @@ export function SwipeableRow({
       ref={row => {
         rowRef.current = row;
       }}
-      renderRightActions={renderActions}
+      // 판이 없으면 Swipeable 이 열 폭을 0 으로 잡아 줄이 그 자리에 있다(열리지 않는다).
+      renderRightActions={actions.length > 0 ? renderActions : undefined}
       // **열리는 문턱은 기본값을 그대로 쓴다** — `rightThreshold` 를 주지 않는다.
       //
       // gesture-handler 의 기본값은 액션 패널 폭의 절반이고(2.31.1 의 Swipeable), 그것이 iOS 의

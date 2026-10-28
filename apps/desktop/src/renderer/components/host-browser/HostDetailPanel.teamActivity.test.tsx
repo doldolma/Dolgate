@@ -50,7 +50,13 @@ function sessionRecord(id: string, hostId: string, createdAt: string, metadata: 
   } as unknown as ActivityLogRecord;
 }
 
-function teamItem(seq: number, author: { id: string; email: string }, record: ActivityLogRecord, phase: 'start' | 'end'): TeamActivityItem {
+function teamItem(
+  seq: number,
+  author: { id: string; email: string },
+  record: ActivityLogRecord,
+  phase: 'start' | 'end',
+  client?: 'mobile',
+): TeamActivityItem {
   return {
     seq,
     id: `event-${seq}`,
@@ -59,7 +65,7 @@ function teamItem(seq: number, author: { id: string; email: string }, record: Ac
     authorEmail: author.email,
     createdAt: record.createdAt,
     receivedAt: record.createdAt,
-    activity: { v: 1, phase, record },
+    activity: { v: 1, phase, ...(client ? { client } : {}), record },
     memberChange: null,
     unreadable: null,
   };
@@ -158,6 +164,28 @@ describe('HostDetailPanel — 팀 호스트의 Recent Activity', () => {
     expect(screen.queryByRole('button', { name: '세션 Replay 보기' })).toBeNull();
   });
 
+  // 작업 8-5b — 폰이 남긴 줄은 부제(작성자) 끝에 'Mobile', 녹화 없음은 그 툴팁. 기록 화면과 같은 규칙이다.
+  it("marks another member's phone session with Mobile after who it was, and says on hover why it has no Replay", async () => {
+    const phone = sessionRecord('rec-phone', 'h-team', '2026-10-24T09:00:00.000Z', { recordingId: null, hasReplay: false });
+    const desk = sessionRecord('rec-desk', 'h-team', '2026-10-24T08:00:00.000Z', {});
+    vi.mocked(listTeamActivity).mockResolvedValue([
+      teamItem(2, ALICE, phone, 'end', 'mobile'),
+      teamItem(1, { id: 'u-bob', email: 'bob@acme.dev' }, desk, 'end'),
+    ]);
+    vi.mocked(getTeamReplayStatuses).mockResolvedValue([]);
+    renderHost('h-team', []);
+
+    const author = await screen.findByText(ALICE.email);
+    const row = author.closest('div.flex.items-center') as HTMLElement;
+    expect(within(row).getByText('Mobile')).toBeInTheDocument();
+    // 좁은 줄에는 글자만 — 아이콘은 기록 화면 카드에만.
+    expect(row.querySelector('svg.lucide-smartphone')).toBeNull();
+    expect(screen.getByText('bob@acme.dev').parentElement).not.toHaveTextContent('Mobile');
+    expect(screen.getAllByText('Mobile')).toHaveLength(1);
+    fireEvent.mouseEnter(within(row).getByText('Mobile').parentElement!);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('모바일 접속은 녹화하지 않습니다');
+  });
+
   it('reads nothing from the team for a personal host', async () => {
     renderHost('h-mine', [sessionRecord('rec-local', 'h-mine', '2026-10-24T08:00:00.000Z', {})]);
 
@@ -231,6 +259,19 @@ describe('HostDetailPanel — 최근 로그의 팀 기록', () => {
     expect(onOpenReplay).toHaveBeenLastCalledWith('r-theirs', TEAM);
     fireEvent.click(replays[1]!);
     expect(onOpenReplay).toHaveBeenLastCalledWith('r-mine');
+  });
+
+  it("marks another member's phone session among the recent logs with Mobile", async () => {
+    const phone = sessionRecord('rec-phone', 'h-team', '2026-10-24T09:00:00.000Z', { recordingId: null, hasReplay: false });
+    vi.mocked(listTeamActivity).mockResolvedValue([teamItem(2, ALICE, phone, 'end', 'mobile')]);
+    vi.mocked(getTeamReplayStatuses).mockResolvedValue([]);
+    renderRecent({}, [sessionRecord('rec-mine', 'h-mine', '2026-10-24T08:00:00.000Z', {})]);
+
+    const recent = await screen.findByTestId('recent-logs');
+    await waitFor(() => expect(recent).toHaveTextContent(`SSH · ${ALICE.email}`));
+    expect(within(recent).getAllByText('Mobile')).toHaveLength(1);
+    fireEvent.mouseEnter(within(recent).getByText('Mobile').parentElement!);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('모바일 접속은 녹화하지 않습니다');
   });
 
   it('reads no team in the personal vault', async () => {

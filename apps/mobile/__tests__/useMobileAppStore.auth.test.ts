@@ -18,9 +18,12 @@ import type {
   ManagedAwsProfilePayload,
   RdpHostRecord,
   SshHostRecord,
+  SnippetRecord,
   SyncPayloadV2,
   SyncRecord,
   TailnetPayload,
+  TeamHostCredentials,
+  TeamHostPrefsRecord,
   VncHostRecord,
 } from "@dolssh/shared-core";
 import { fromByteArray, toByteArray } from "base64-js";
@@ -42,6 +45,8 @@ import {
   resetMobileStoreRuntimeForTests,
   useMobileAppStore,
 } from "../src/store/useMobileAppStore";
+import { listHosts } from "../src/store/vault-catalog";
+import { STSClient } from "@aws-sdk/client-sts";
 
 const REPORTED_TEST_GRID = { cols: 57, rows: 46 };
 
@@ -344,6 +349,8 @@ function resetStore(
     sftpCopyBuffer: null,
     activeConnectionTab: null,
     secretsByRef: {},
+    teamVaults: [],
+    teamSecrets: {},
     pendingBrowserLoginState: null,
     pendingServerKeyPrompt: null,
     pendingCredentialPrompt: null,
@@ -3340,6 +3347,615 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(useMobileAppStore.getState().pendingServerKeyPrompt).toBeNull();
   });
 
+  // 팀 호스트(작업 8-2): 찾기 입구로 팀 볼트에서 찾고 그 팀의 비밀번호로 붙는다. 새 호스트 키를 받아들여도 개인
+  // 볼트에는 남기지 않는다 — 남기면 개인 동기화로 팀 것이 샌다(내 개인 칸에 남기는 것은 8-4).
+  it("connects a team host with its team password and keeps an accepted key out of the personal vault", async () => {
+    const host: SshHostRecord = {
+      id: "team-host-1",
+      kind: "ssh",
+      label: "Team SSH",
+      hostname: "team.example.com",
+      port: 22,
+      username: "ops",
+      authType: "password",
+      secretRef: "team-secret-1",
+      privateKeyPath: null,
+      certificatePath: null,
+      createdAt: "2026-10-27T00:00:00.000Z",
+      updatedAt: "2026-10-27T00:00:00.000Z",
+    };
+
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState(), hosts: [], knownHosts: [] });
+      useMobileAppStore.setState({
+        // 앞 시험이 남긴 개인 대기열과 섞이지 않게 비운다.
+        syncOutbox: [],
+        teamVaults: [
+          {
+            id: "team-1",
+            name: "Acme",
+            role: "member",
+            wrappedTeamDek: "wrapped",
+            state: "ready",
+            errorMessage: null,
+            hosts: [host],
+            groups: [],
+            knownHosts: [],
+            awsProfiles: [],
+            tailnets: [],
+            snippets: [],
+            hostPrefs: [],
+          },
+        ],
+        teamSecrets: {
+          "team-1": {
+            secretsByRef: {
+              "team-secret-1": {
+                secretRef: "team-secret-1",
+                label: "Team SSH credentials",
+                password: "team-pw",
+                updatedAt: "2026-10-27T00:00:00.000Z",
+              },
+            },
+            hostCredentials: {},
+          },
+        },
+      });
+    });
+
+    engineNative.connect.mockImplementationOnce(async (connectionId: string) => {
+      const decided = new Promise<boolean>(resolve => {
+        engineNative.respondHostKeyTrust.mockImplementationOnce(
+          async (_challengeId: string, trust: boolean) => {
+            resolve(trust);
+          },
+        );
+      });
+      DeviceEventEmitter.emit("GoSshEngine:connection", {
+        eventJson: JSON.stringify({
+          type: "hostKeyTrustChallenge",
+          sessionId: connectionId,
+          payload: {
+            challengeId: "hostkey-trust-team",
+            algorithm: "ssh-ed25519",
+            fingerprintSha256: "SHA256:team",
+            publicKeyBase64: "AAAAC3NzaC1lZDI1NTE5team",
+            mismatch: false,
+          },
+        }),
+      });
+      if (!(await decided)) {
+        throw new Error("connect: trusted host key is required");
+      }
+      return JSON.stringify({ id: connectionId });
+    });
+
+    await act(async () => {
+      void useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+    expect(useMobileAppStore.getState().pendingServerKeyPrompt).not.toBeNull();
+
+    await act(async () => {
+      await useMobileAppStore.getState().acceptServerKeyPrompt();
+      await flushAsyncWork();
+    });
+
+    expect(engineNative.respondHostKeyTrust).toHaveBeenCalledWith(
+      "hostkey-trust-team",
+      true,
+    );
+    expect(lastConnectRequest()).toEqual(
+      expect.objectContaining({
+        host: "team.example.com",
+        username: "ops",
+        authType: "password",
+        password: "team-pw",
+      }),
+    );
+    expect(useMobileAppStore.getState().knownHosts).toEqual([]);
+    expect(
+      useMobileAppStore
+        .getState()
+        .syncOutbox.some(entry => entry.kind === "knownHosts"),
+    ).toBe(false);
+  });
+
+  // ── 팀 호스트 — 내 개인 칸(작업 8-4) ─────────────────────────────────────────
+  // 자격 증명은 내 것 → 팀 것 → 묻기. 폰에서 생긴 내 것(호스트 키·물어서 넣은 비밀값·사용자 이름·별표)은 내 개인
+  // 칸에 남고 개인 볼트로 새지 않는다.
+
+  it("uses my credentials for a team host before its team password", async () => {
+    const host = teamSshHost();
+    const known = await trustedHostKey(host.hostname, host.port);
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState(), hosts: [], knownHosts: [] });
+      setTeamVault({
+        hosts: [host],
+        knownHosts: [known],
+        secretsByRef: { "team-secret-1": teamSecret("team-pw") },
+        hostCredentials: { [host.id]: { username: "me", password: "my-pw" } },
+      });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWorkDeep();
+    });
+
+    expect(lastConnectRequest()).toEqual(
+      expect.objectContaining({ username: "me", password: "my-pw" }),
+    );
+  });
+
+  it("falls back to the team password when I only set my username", async () => {
+    const host = teamSshHost();
+    const known = await trustedHostKey(host.hostname, host.port);
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState(), hosts: [], knownHosts: [] });
+      setTeamVault({
+        hosts: [host],
+        knownHosts: [known],
+        secretsByRef: { "team-secret-1": teamSecret("team-pw") },
+        hostCredentials: { [host.id]: { username: "me" } },
+      });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWorkDeep();
+    });
+
+    expect(lastConnectRequest()).toEqual(
+      expect.objectContaining({ username: "me", password: "team-pw" }),
+    );
+  });
+
+  it("asks for a team host password, uses the typed username this time, and keeps both as my credentials", async () => {
+    const host = teamSshHost({ secretRef: null });
+    const known = await trustedHostKey(host.hostname, host.port);
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState(), hosts: [], knownHosts: [] });
+      setTeamVault({ hosts: [host], knownHosts: [known] });
+    });
+
+    await act(async () => {
+      void useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWorkDeep();
+    });
+    expect(useMobileAppStore.getState().pendingCredentialPrompt).toEqual(
+      expect.objectContaining({ hostId: host.id, initialUsername: "ops" }),
+    );
+
+    await act(async () => {
+      await useMobileAppStore
+        .getState()
+        .submitCredentialPrompt({ username: "other", password: "typed" });
+      await flushAsyncWorkDeep();
+    });
+
+    // 이번 시도부터 고친 이름으로 나간다.
+    expect(lastConnectRequest()).toEqual(
+      expect.objectContaining({ username: "other", password: "typed" }),
+    );
+    const state = useMobileAppStore.getState();
+    expect(state.teamSecrets["team-1"].hostCredentials[host.id]).toEqual({
+      username: "other",
+      password: "typed",
+    });
+    expect(state.teamVaults[0].privateOutbox).toEqual([
+      expect.objectContaining({ kind: "hostCredentials", id: host.id }),
+    ]);
+    // 개인 볼트에는 아무것도 안 남는다.
+    expect(state.hosts).toEqual([]);
+    expect(state.secretsByRef).toEqual({});
+    expect(state.syncOutbox).toEqual([]);
+  });
+
+  it("keeps only what I typed as my credentials, not the team values the prompt was filled with", async () => {
+    const host = teamSshHost();
+    const known = await trustedHostKey(host.hostname, host.port);
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState(), hosts: [], knownHosts: [] });
+      // 팀 비밀값에 비밀번호가 없어 묻는다 — 창은 팀의 패스프레이즈를 미리 채워 함께 돌려준다.
+      setTeamVault({
+        hosts: [host],
+        knownHosts: [known],
+        secretsByRef: { "team-secret-1": teamSecretWithoutPassword() },
+      });
+    });
+
+    await act(async () => {
+      void useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWorkDeep();
+    });
+    expect(useMobileAppStore.getState().pendingCredentialPrompt).toEqual(
+      expect.objectContaining({
+        initialValue: expect.objectContaining({ passphrase: "team-pass" }),
+      }),
+    );
+    await act(async () => {
+      await useMobileAppStore.getState().submitCredentialPrompt({
+        username: "ops",
+        password: "typed",
+        passphrase: "team-pass",
+      });
+      await flushAsyncWorkDeep();
+    });
+
+    // 팀 것과 같은 칸은 옮기지 않는다 — 옮기면 팀이 바꿔도 내 낡은 사본이 먼저 쓰인다(데스크톱과 같다).
+    expect(
+      useMobileAppStore.getState().teamSecrets["team-1"].hostCredentials[host.id],
+    ).toEqual({ password: "typed" });
+  });
+
+  it("keeps my other credentials when the prompt leaves a field empty", async () => {
+    const host = teamSshHost();
+    const known = await trustedHostKey(host.hostname, host.port);
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState(), hosts: [], knownHosts: [] });
+      setTeamVault({
+        hosts: [host],
+        knownHosts: [known],
+        secretsByRef: { "team-secret-1": teamSecretWithoutPassword() },
+        hostCredentials: { [host.id]: { passphrase: "my-pass" } },
+      });
+    });
+
+    await act(async () => {
+      void useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWorkDeep();
+    });
+    // 패스프레이즈 칸을 비우고 비밀번호만 넣었다.
+    await act(async () => {
+      await useMobileAppStore
+        .getState()
+        .submitCredentialPrompt({ username: "ops", password: "typed" });
+      await flushAsyncWorkDeep();
+    });
+
+    expect(
+      useMobileAppStore.getState().teamSecrets["team-1"].hostCredentials[host.id],
+    ).toEqual({ passphrase: "my-pass", password: "typed" });
+  });
+
+  it("remembers a team host key I trusted in my private slot, so the next connection does not ask", async () => {
+    const host = teamSshHost();
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState(), hosts: [], knownHosts: [] });
+      setTeamVault({
+        hosts: [host],
+        secretsByRef: { "team-secret-1": teamSecret("team-pw") },
+      });
+    });
+
+    // 엔진이 붙는 중에 호스트 키를 묻는다 — 저장된 키와 견주어 답한다.
+    const decisions: boolean[] = [];
+    const challengeOnConnect = () =>
+      engineNative.connect.mockImplementationOnce(
+        async (connectionId: string) => {
+          const decided = new Promise<boolean>(resolve => {
+            engineNative.respondHostKeyTrust.mockImplementationOnce(
+              async (_challengeId: string, trust: boolean) => {
+                decisions.push(trust);
+                resolve(trust);
+              },
+            );
+          });
+          DeviceEventEmitter.emit("GoSshEngine:connection", {
+            eventJson: JSON.stringify({
+              type: "hostKeyTrustChallenge",
+              sessionId: connectionId,
+              payload: {
+                challengeId: `hostkey-${decisions.length}`,
+                algorithm: "ssh-ed25519",
+                fingerprintSha256: "SHA256:mine",
+                publicKeyBase64: "AAAAC3NzaC1lZDI1NTE5mine",
+                mismatch: false,
+              },
+            }),
+          });
+          if (!(await decided)) {
+            throw new Error("connect: trusted host key is required");
+          }
+          return JSON.stringify({ id: connectionId });
+        },
+      );
+
+    challengeOnConnect();
+    await act(async () => {
+      void useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+    expect(useMobileAppStore.getState().pendingServerKeyPrompt).not.toBeNull();
+    await act(async () => {
+      await useMobileAppStore.getState().acceptServerKeyPrompt();
+      await flushAsyncWorkDeep();
+    });
+
+    const state = useMobileAppStore.getState();
+    expect(state.teamVaults[0].hostPrefs).toEqual([
+      expect.objectContaining({
+        id: host.id,
+        knownHosts: [
+          expect.objectContaining({
+            host: host.hostname,
+            port: host.port,
+            publicKeyBase64: "AAAAC3NzaC1lZDI1NTE5mine",
+          }),
+        ],
+      }),
+    ]);
+    expect(state.knownHosts).toEqual([]);
+    expect(state.syncOutbox).toEqual([]);
+
+    // 새로 붙으면(열린 세션을 다시 쓰지 않게 비운다) 내 개인 칸의 키로 바로 답한다 — 묻지 않는다.
+    act(() => {
+      useMobileAppStore.setState({ sessions: [] });
+    });
+    challengeOnConnect();
+    await act(async () => {
+      void useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWorkDeep();
+    });
+    expect(useMobileAppStore.getState().pendingServerKeyPrompt).toBeNull();
+    expect(decisions).toEqual([true, true]);
+  });
+
+  it("keeps a team host favorite in my private slot", async () => {
+    const host = teamSshHost();
+    act(() => {
+      resetStore({ auth: createAuthenticatedState(), hosts: [], knownHosts: [] });
+      setTeamVault({ hosts: [host] });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().toggleHostFavorite(host.id);
+    });
+    let state = useMobileAppStore.getState();
+    expect(state.teamVaults[0].hostPrefs).toEqual([
+      expect.objectContaining({ id: host.id, favorite: true }),
+    ]);
+    expect(listHosts(state).find(item => item.id === host.id)?.favorite).toBe(true);
+    expect(state.hosts).toEqual([]);
+    expect(state.syncOutbox).toEqual([]);
+
+    await act(async () => {
+      await useMobileAppStore.getState().toggleHostFavorite(host.id);
+    });
+    state = useMobileAppStore.getState();
+    expect(state.teamVaults[0].hostPrefs[0].favorite).toBeNull();
+  });
+
+  // ── 팀 AWS 정적 키 — 이 기기에서 넣기(작업 8-4b) ─────────────────────────────────
+  // 팀 정적 프로필의 키는 기기마다 넣는다. 없으면 AWS 를 불러 보기 전에 무엇을 넣어야 하는지 말하고, 넣은 키는 STS 로
+  // 확인해 맞을 때만 이 기기의 키체인에 둔다(데스크톱 M3 와 같다).
+
+  /** 팀 정적 프로필(acme-static, 레코드에는 키가 없다)로 직접 붙는 팀 EC2 호스트. */
+  function setTeamAwsHost(): AwsEc2HostRecord {
+    const host: AwsEc2HostRecord = {
+      id: "team-ec2",
+      kind: "aws-ec2",
+      label: "Team EC2",
+      awsProfileId: "team-aws-static",
+      awsProfileName: "acme-static",
+      awsRegion: "ap-northeast-2",
+      awsInstanceId: "i-team",
+      createdAt: "2026-10-27T00:00:00.000Z",
+      updatedAt: "2026-10-27T00:00:00.000Z",
+    };
+    resetStore({
+      auth: createAuthenticatedState(),
+      hosts: [],
+      syncStatus: {
+        ...createDefaultSyncStatus(),
+        awsProfilesServerSupport: "supported",
+        awsSsmServerSupport: "unsupported",
+      },
+    });
+    setTeamVault({
+      hosts: [host],
+      awsProfiles: [
+        {
+          id: "team-aws-static",
+          name: "acme-static",
+          kind: "static",
+          region: "ap-northeast-2",
+          accessKeyId: "",
+          secretAccessKey: "",
+          updatedAt: "2026-10-27T00:00:00.000Z",
+        },
+      ],
+    });
+    return host;
+  }
+
+  /** 키체인의 팀 비밀값 칸에 마지막으로 쓴 것. */
+  function lastStoredTeamSecrets(): Record<string, { awsKeys?: unknown }> {
+    const calls = keychainMock.setGenericPassword.mock.calls.filter(
+      call =>
+        (call[2] as { service?: string } | undefined)?.service ===
+        "dolgate.mobile.team-secrets",
+    );
+    const last = calls[calls.length - 1];
+    return last ? JSON.parse(String(last[1])) : {};
+  }
+
+  it("says which team profile needs a key on this device before calling AWS", async () => {
+    let host!: AwsEc2HostRecord;
+    act(() => {
+      host = setTeamAwsHost();
+    });
+    const stsClients = (STSClient as unknown as jest.Mock).mock.calls.length;
+    mockSsmDirect.startSsmShellSession.mockClear();
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+
+    const session = useMobileAppStore
+      .getState()
+      .sessions.find(item => item.id === sessionId);
+    expect(session?.status).toBe("error");
+    expect(session?.errorMessage).toBe(
+      '팀 프로필 "acme-static" 에 이 기기의 AWS 키가 없습니다. 키는 동기화되지 않아 기기마다 넣습니다.',
+    );
+    expect((STSClient as unknown as jest.Mock).mock.calls.length).toBe(
+      stsClients,
+    );
+    expect(mockSsmDirect.startSsmShellSession).not.toHaveBeenCalled();
+  });
+
+  it("says the same on SFTP for a team EC2 host without this device's key", async () => {
+    let host!: AwsEc2HostRecord;
+    act(() => {
+      host = setTeamAwsHost();
+    });
+    const stsClients = (STSClient as unknown as jest.Mock).mock.calls.length;
+
+    let sftpId: string | null = null;
+    await act(async () => {
+      sftpId = await useMobileAppStore.getState().openSftpForHost(host.id);
+      await flushAsyncWork();
+    });
+
+    expect(
+      useMobileAppStore
+        .getState()
+        .sftpSessions.find(item => item.id === sftpId),
+    ).toEqual(
+      expect.objectContaining({
+        status: "error",
+        errorMessage:
+          '팀 프로필 "acme-static" 에 이 기기의 AWS 키가 없습니다. 키는 동기화되지 않아 기기마다 넣습니다.',
+      }),
+    );
+    expect((STSClient as unknown as jest.Mock).mock.calls.length).toBe(
+      stsClients,
+    );
+  });
+
+  it("does not keep a team AWS key that STS rejects", async () => {
+    let host!: AwsEc2HostRecord;
+    act(() => {
+      host = setTeamAwsHost();
+    });
+    keychainMock.setGenericPassword.mockClear();
+    (STSClient as unknown as jest.Mock).mockImplementationOnce(() => ({
+      send: jest.fn(async () => {
+        throw Object.assign(
+          new Error("The security token included in the request is invalid."),
+          { name: "InvalidClientTokenId" },
+        );
+      }),
+      destroy: jest.fn(),
+    }));
+
+    await expect(
+      useMobileAppStore.getState().saveTeamAwsKey(host.id, {
+        accessKeyId: "AKIAWRONG",
+        secretAccessKey: "wrong",
+      }),
+    ).rejects.toThrow();
+
+    expect(
+      useMobileAppStore.getState().teamSecrets["team-1"].awsKeys,
+    ).toBeUndefined();
+    expect(lastStoredTeamSecrets()).toEqual({});
+  });
+
+  it("keeps a verified team AWS key only on this device and connects with it", async () => {
+    let host!: AwsEc2HostRecord;
+    act(() => {
+      host = setTeamAwsHost();
+    });
+    keychainMock.setGenericPassword.mockClear();
+
+    await act(async () => {
+      await useMobileAppStore.getState().saveTeamAwsKey(host.id, {
+        accessKeyId: " AKIAMINE ",
+        secretAccessKey: "mine-secret",
+      });
+    });
+
+    const key = { accessKeyId: "AKIAMINE", secretAccessKey: "mine-secret" };
+    let state = useMobileAppStore.getState();
+    expect(state.teamSecrets["team-1"].awsKeys).toEqual({
+      "team-aws-static": key,
+    });
+    expect(lastStoredTeamSecrets()["team-1"]?.awsKeys).toEqual({
+      "team-aws-static": key,
+    });
+    // 팀 레코드·개인 볼트·내 개인 칸 어디에도 안 들어간다.
+    expect(state.teamVaults[0].awsProfiles[0]).toMatchObject({
+      accessKeyId: "",
+      secretAccessKey: "",
+    });
+    expect(state.awsProfiles).toEqual([]);
+    expect(state.syncOutbox).toEqual([]);
+    expect(state.teamVaults[0].privateOutbox ?? []).toEqual([]);
+
+    // 다시 붙으면 넣은 키로 AWS 를 부른다(관리 대상 확인에서 멈추게 둔다).
+    mockSsmDirect.assertSsmManagedInstance.mockRejectedValueOnce(
+      new Error("stop after the key is used"),
+    );
+    await act(async () => {
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+    expect(mockSsmDirect.assertSsmManagedInstance).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        credentials: expect.objectContaining(key),
+        instanceId: "i-team",
+      }),
+    );
+    state = useMobileAppStore.getState();
+    expect(
+      state.sessions.find(item => item.hostId === host.id)?.errorMessage,
+    ).toContain("stop after the key is used");
+  });
+
+  it("runs a team host's startup snippet from its own team", async () => {
+    const host = teamSshHost({
+      startupCommand: { type: "snippet", snippetId: "team-snippet" },
+    });
+    const known = await trustedHostKey(host.hostname, host.port);
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState(), hosts: [], knownHosts: [] });
+      setTeamVault({
+        hosts: [host],
+        knownHosts: [known],
+        secretsByRef: { "team-secret-1": teamSecret("team-pw") },
+        snippets: [
+          {
+            id: "team-snippet",
+            label: "boot",
+            command: "echo team-boot",
+            createdAt: "2026-10-27T00:00:00.000Z",
+            updatedAt: "2026-10-27T00:00:00.000Z",
+          } as SnippetRecord,
+        ],
+      });
+    });
+
+    jest.useFakeTimers();
+    try {
+      engineNative.sendData.mockClear();
+      await act(async () => {
+        await useMobileAppStore.getState().connectToHost(host.id);
+        await jest.advanceTimersByTimeAsync(3_000);
+      });
+      const sent = engineNative.sendData.mock.calls.map(call =>
+        Buffer.from(String(call[1]), "base64").toString("utf8"),
+      );
+      expect(sent).toContain("echo team-boot\r");
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("connects certificate SSH hosts with synced private key and certificate", async () => {
     const host: SshHostRecord = {
       id: "host-cert",
@@ -3994,3 +4610,79 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(useMobileAppStore.getState().sessions[0]?.status).toBe("connected");
   });
 });
+
+/** 팀 SSH 호스트 하나(팀 비밀값 team-secret-1 을 쓴다). */
+function teamSshHost(overrides: Partial<SshHostRecord> = {}): SshHostRecord {
+  return {
+    id: "team-host-1",
+    kind: "ssh",
+    label: "Team SSH",
+    hostname: "team.example.com",
+    port: 22,
+    username: "ops",
+    authType: "password",
+    secretRef: "team-secret-1",
+    privateKeyPath: null,
+    certificatePath: null,
+    createdAt: "2026-10-27T00:00:00.000Z",
+    updatedAt: "2026-10-27T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function teamSecret(password: string): LoadedManagedSecretPayload {
+  return {
+    secretRef: "team-secret-1",
+    label: "Team SSH credentials",
+    password,
+    updatedAt: "2026-10-27T00:00:00.000Z",
+  } as LoadedManagedSecretPayload;
+}
+
+/** 비밀번호가 없는 팀 비밀값 — 패스프레이즈(team-pass)만 든다. */
+function teamSecretWithoutPassword(): LoadedManagedSecretPayload {
+  return {
+    secretRef: "team-secret-1",
+    label: "Team SSH credentials",
+    passphrase: "team-pass",
+    updatedAt: "2026-10-27T00:00:00.000Z",
+  } as LoadedManagedSecretPayload;
+}
+
+/** 팀 하나(team-1)를 받아 둔 상태로 둔다. 개인 대기열은 비운다 — 앞 시험의 것과 섞이지 않게. */
+function setTeamVault(options: {
+  hosts: Array<SshHostRecord | AwsEc2HostRecord>;
+  knownHosts?: KnownHostRecord[];
+  awsProfiles?: ManagedAwsProfilePayload[];
+  snippets?: SnippetRecord[];
+  hostPrefs?: TeamHostPrefsRecord[];
+  secretsByRef?: Record<string, LoadedManagedSecretPayload>;
+  hostCredentials?: Record<string, TeamHostCredentials>;
+}): void {
+  useMobileAppStore.setState({
+    syncOutbox: [],
+    teamVaults: [
+      {
+        id: "team-1",
+        name: "Acme",
+        role: "member",
+        wrappedTeamDek: "wrapped",
+        state: "ready",
+        errorMessage: null,
+        hosts: options.hosts,
+        groups: [],
+        knownHosts: options.knownHosts ?? [],
+        awsProfiles: options.awsProfiles ?? [],
+        tailnets: [],
+        snippets: options.snippets ?? [],
+        hostPrefs: options.hostPrefs ?? [],
+      },
+    ],
+    teamSecrets: {
+      "team-1": {
+        secretsByRef: options.secretsByRef ?? {},
+        hostCredentials: options.hostCredentials ?? {},
+      },
+    },
+  });
+}

@@ -13,6 +13,11 @@ import { getAwsEc2SftpDisabledMessage, hostSubtitleLabels } from '../i18n/shared
 
 interface HostActionSheetProps {
   host: HostRecord | null;
+  /**
+   * 내 개인 볼트의 호스트인가(기본). 팀 호스트는 폰에서 고치지 않으므로 수정·삭제를 뺀다 — 닫는 길은 흐리게 두지
+   * 않고 숨긴다(데스크톱 7-3 과 같다). 별표는 둔다: 팀 호스트의 별표는 내 개인 칸에 남는다(작업 8-4).
+   */
+  editable?: boolean;
   onClose: () => void;
   onConnect: (host: HostRecord) => void;
   onConnectSftp: (host: HostRecord) => void;
@@ -29,6 +34,7 @@ interface HostActionSheetProps {
 // 없다(그 화면이 무엇을 보여주는지는 HostFormScreen 의 AwsEc2HostForm 참고).
 export function HostActionSheet({
   host,
+  editable = true,
   onClose,
   onConnect,
   onConnectSftp,
@@ -71,7 +77,10 @@ export function HostActionSheet({
       onPress: () => onToggleFavorite(host),
     });
     // RDP·VNC 도 고칠 수 있다. 예전에는 접속만 되고 주소 하나 못 고쳤다.
-    if (isSshHostRecord(host) || isAwsEc2HostRecord(host) || isRdHost) {
+    if (
+      editable &&
+      (isSshHostRecord(host) || isAwsEc2HostRecord(host) || isRdHost)
+    ) {
       actions.push({
         key: "edit",
         icon: "create-outline",
@@ -79,7 +88,7 @@ export function HostActionSheet({
         onPress: () => onEdit(host),
       });
     }
-    if (isSshHostRecord(host) || isRdHost) {
+    if (editable && (isSshHostRecord(host) || isRdHost)) {
       actions.push({
         key: "delete",
         icon: "trash-outline",

@@ -158,6 +158,8 @@ export function registerIpcHandlers(
     const vaultId = ctx.vaults.scopeOfHost(hostId).id;
     return vaultId === PERSONAL_VAULT_ID ? null : vaultId;
   });
+  // 다이얼 직전 마지막 확인 — 기다리는 사이 팀에서 빠진(지운) 호스트에는 붙지 않는다(core-manager 의 assertHostStillPresent).
+  coreManager.setHostPresence((hostId) => Boolean(ctx.vaults.getHost(hostId)));
 
   registerAiIpcHandlers(ctx);
   registerAuthIpcHandlers(ctx);

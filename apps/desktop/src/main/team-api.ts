@@ -3,9 +3,14 @@ import {
   normalizeTeamInviteRole,
   normalizeTeamRole,
   SYNC_DATA_FLOOR_HEADER,
+  toTeamSummary,
   VAULT_EPOCH_HEADER,
+  type RawTeamSummary,
   type ServerInfoResponse,
-  type SyncRecord,
+  type TeamSummary,
+  type TeamSyncPayload,
+  type TeamWatchResult,
+  type TeamWatchRevisions,
   type TeamAssignableRole,
   type TeamInvite,
   type TeamInviteInfo,
@@ -70,17 +75,6 @@ export function isTeamApiError(error: unknown, code?: string): error is TeamApiE
   return error instanceof TeamApiError && (code === undefined || error.code === code);
 }
 
-export interface TeamSummary {
-  id: string;
-  name: string;
-  role: TeamRole;
-  /** 내 개인 DEK 로 감싼 팀 키. 링크로 들어와 아직 올리지 않았으면 null. */
-  wrappedTeamDek: string | null;
-  dataFloor: number;
-  memberCount: number;
-  createdAt: string;
-}
-
 /** 링크 정보(GET /invite/:code/info). 참여 카드의 "이미 들어가 있음"은 앱이 얹는다. */
 export type TeamInviteLookup = Omit<TeamInviteInfo, "alreadyJoined">;
 
@@ -102,18 +96,8 @@ export interface TeamJoinResult {
   role: TeamRole | null;
 }
 
-/** 종류 → 레코드. 개인 /sync 와 같은 모양이다. */
-export type TeamSyncPayload = Record<string, SyncRecord[]>;
-
-export interface TeamWatchRevisions {
-  revision: number;
-  infoRevision: number;
-  privateRevision: number;
-}
-
-export type TeamWatchResult =
-  | { changed: false }
-  | { changed: true; etag: string | null; revisions: TeamWatchRevisions };
+// 팀 목록·레코드·감시의 응답 모양은 모바일도 같은 것으로 읽으므로 shared-core 에 있다(team-api-types.ts).
+export type { TeamSummary, TeamSyncPayload, TeamWatchResult, TeamWatchRevisions } from "@shared";
 
 /** 팀 기록 한 줄(서버 모양). payload 는 앱 기록이면 팀 키로 잠근 것, 서버 기록(멤버 변화)이면 평문 JSON 이다. */
 export interface RawTeamEvent {
@@ -637,32 +621,9 @@ interface RequestOptions {
   fallback?: string;
 }
 
-interface RawTeamSummary {
-  id: string;
-  name: string;
-  role: string;
-  wrappedTeamDek?: string | null;
-  dataFloor?: number;
-  memberCount?: number;
-  createdAt?: string;
-}
-
 interface RawInviteSummary extends Omit<TeamInvite, "revokedAt" | "link"> {
   revokedAt?: string;
   sealedSecret?: string;
-}
-
-function toTeamSummary(raw: RawTeamSummary): TeamSummary {
-  return {
-    id: raw.id,
-    name: raw.name,
-    role: normalizeTeamRole(raw.role),
-    // 사본을 아직 안 올린 멤버는 빈 문자열로 온다.
-    wrappedTeamDek: raw.wrappedTeamDek ? raw.wrappedTeamDek : null,
-    dataFloor: typeof raw.dataFloor === "number" ? raw.dataFloor : 0,
-    memberCount: typeof raw.memberCount === "number" ? raw.memberCount : 0,
-    createdAt: raw.createdAt ?? "",
-  };
 }
 
 function toInviteSummary(raw: RawInviteSummary): TeamInviteSummary {

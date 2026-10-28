@@ -527,6 +527,20 @@
     "groupHostCount": "{{count}}개 호스트",
     "groupHostCountOne": "{{count}}개 호스트",
     "groupMeta": "그룹 {{meta}}",
+    "personalVault": "Personal",
+    "openVault": "{{name}} 볼트 열기",
+    "vaultCount": "{{count}}개 볼트",
+    "vaultCountOne": "{{count}}개 볼트",
+    "teamState": {
+      "needsRejoin": "Rejoin needed",
+      "outdated": "Update required"
+    },
+    "teamBlocked": {
+      "needsRejoinTitle": "이 팀의 키가 없습니다.",
+      "needsRejoinBody": "데스크톱에서 초대 링크로 다시 들어오면 폰도 이 팀을 다시 받습니다.",
+      "outdatedTitle": "이 팀에는 새 앱이 필요합니다.",
+      "outdatedBody": "새 버전에서 추가한 항목이 있습니다. 앱을 업데이트하면 마저 받습니다."
+    },
     "connectHost": "{{name}} 접속",
     "action": {
       "quickConnect": "{{target}} 에 접속",
@@ -609,7 +623,8 @@
     "roleSourceNotFound": "AWS role source profile을 찾을 수 없습니다.",
     "roleCredentialFailed": "AWS role credential을 가져오지 못했습니다.",
     "ssoRoleCredentialFailed": "AWS SSO role credential을 가져오지 못했습니다.",
-    "credentialVerifyFailed": "AWS 자격 증명을 검증하지 못했습니다."
+    "credentialVerifyFailed": "AWS 자격 증명을 검증하지 못했습니다.",
+    "teamKeyMissing": "팀 프로필 \"{{profile}}\" 에 이 기기의 AWS 키가 없습니다. 키는 동기화되지 않아 기기마다 넣습니다."
   },
   "credentialPrompt": {
     "fileReadFailed": "파일을 읽지 못했습니다.",
@@ -821,5 +836,18 @@
     "closeAria": "그룹 메뉴 닫기",
     "failedTitle": "그룹을 바꾸지 못했습니다",
     "failed": "잠시 후 다시 시도해 주세요."
+  },
+  "awsKey": {
+    "add": "키 넣기",
+    "addAria": "{{title}} 에 AWS 키 넣기",
+    "dialogTitle": "{{profile}} · 키",
+    "save": "저장 후 연결",
+    "saveFailed": "키를 저장하지 못했습니다."
+  },
+  "teamHistory": {
+    "sessionLog": "{{kind}} 세션",
+    "sftpSession": "SFTP 세션",
+    "interruptedByAppExit": "앱이 꺼져 끊겼습니다.",
+    "connectionsClosed": "팀에서 빠져 이 연결을 닫았습니다."
   }
 }

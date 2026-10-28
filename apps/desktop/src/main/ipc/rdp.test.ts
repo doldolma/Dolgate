@@ -1040,3 +1040,89 @@ describe("registerRdpIpcHandlers share folder picker", () => {
     });
   });
 });
+
+// 비밀값·터널을 기다리는 사이 팀에서 빠지면(지우면) 그 세션은 아직 RDP 관리자에 적히지 않아 '팀 연결 닫기'가 닿지 않는다.
+// 기다린 뒤 붙기 전에 호스트가 아직 있는지 본다 — 없으면 붙지 않고, 연 통로는 닫는다.
+describe("registerRdpIpcHandlers when the host leaves its vault while connecting", () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  }
+
+  function connect() {
+    return handlers.get("rdp:connect")!({ sender: { id: 1 } }, "sess-1", "rdp-1") as Promise<unknown>;
+  }
+
+  it("does not open the forward when the host left while the credential was read", async () => {
+    const harness = createHarness("AA:BB:CC", null, { tailnetId: "net-a" });
+    const secrets = deferred<{ password: string }>();
+    harness.ctx.loadSecrets.mockReturnValue(secrets.promise);
+
+    const pending = connect();
+    await vi.waitFor(() => expect(harness.ctx.loadSecrets).toHaveBeenCalled());
+    harness.ctx.hosts.getById.mockReturnValue(null as never);
+    secrets.resolve({ password: "secret" });
+
+    await expect(pending).rejects.toThrow("Host not found");
+    expect(harness.ctx.coreManager.openTailnetForward).not.toHaveBeenCalled();
+    expect(harness.rdpManager.connect).not.toHaveBeenCalled();
+  });
+
+  it("does not dial, and closes the SSM tunnel, when the host left while the tunnel opened", async () => {
+    const harness = createHarness("AA:BB:CC", null, {
+      awsSsm: {
+        profileId: "profile-1",
+        profileName: "gw-prod",
+        region: "ap-northeast-2",
+        instanceId: "i-00c8d7296782e6ad5",
+      },
+    });
+    const tunnel = deferred<{ bindAddress: string; bindPort: number }>();
+    harness.ctx.coreManager.startSsmTunnel.mockReturnValue(tunnel.promise);
+
+    const pending = connect();
+    await vi.waitFor(() => expect(harness.ctx.coreManager.startSsmTunnel).toHaveBeenCalled());
+    harness.ctx.hosts.getById.mockReturnValue(null as never);
+    tunnel.resolve({ bindAddress: "127.0.0.1", bindPort: 61022 });
+
+    await expect(pending).rejects.toThrow("Host not found");
+    expect(harness.rdpManager.connect).not.toHaveBeenCalled();
+    expect(harness.ctx.coreManager.stopSsmTunnel).toHaveBeenCalledWith("rdp:sess-1");
+  });
+
+  // 붙는 중(RDP 협상)에 팀에서 빠지면 관리자가 세션을 끊어 접속이 끊김 오류로 끝난다 — 그 오류 대신 까닭으로.
+  it("ends with the reason, not the cut connect's error, when the host left while connecting", async () => {
+    const harness = createHarness("AA:BB:CC");
+    harness.rdpManager.connect.mockImplementation(async () => {
+      harness.ctx.hosts.getById.mockReturnValue(null as never);
+      throw new Error("RDP session closed");
+    });
+
+    await expect(connect()).rejects.toThrow("Host not found");
+  });
+
+  it("keeps the connect's own failure when the host is still there", async () => {
+    const harness = createHarness("AA:BB:CC");
+    harness.rdpManager.connect.mockRejectedValue(new Error("TLS handshake failed"));
+
+    await expect(connect()).rejects.toThrow("TLS handshake failed");
+  });
+
+  it("does not dial, and closes the tailnet forward, when the host left while the forward opened", async () => {
+    const harness = createHarness("AA:BB:CC", null, { tailnetId: "net-a" });
+    const forward = deferred<string>();
+    harness.ctx.coreManager.openTailnetForward.mockReturnValue(forward.promise);
+
+    const pending = connect();
+    await vi.waitFor(() => expect(harness.ctx.coreManager.openTailnetForward).toHaveBeenCalled());
+    harness.ctx.hosts.getById.mockReturnValue(null as never);
+    forward.resolve("127.0.0.1:52341");
+
+    await expect(pending).rejects.toThrow("Host not found");
+    expect(harness.rdpManager.connect).not.toHaveBeenCalled();
+    expect(harness.ctx.coreManager.closeTailnetForward).toHaveBeenCalledWith("sess-1");
+  });
+});

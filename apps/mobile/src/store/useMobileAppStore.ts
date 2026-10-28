@@ -112,6 +112,7 @@ import {
   buildLocalStateSyncPayload,
   clearStoredAuthSession,
   clearStoredSecrets,
+  clearStoredTeamSecrets,
   changeRemoteAccountPassword,
   createDefaultMobileSettings,
   createDefaultSyncStatus,
@@ -184,6 +185,7 @@ import {
   type AwsSsoBrowserLoginPrompt,
   resolveAwsSessionForHost,
   type ResolvedAwsSessionResult,
+  verifyAwsStaticKey,
 } from '../lib/aws-session';
 import {
   assertSsmManagedInstance,
@@ -276,6 +278,34 @@ import {
   type RemoteDesktopSlice,
   type RemoteDesktopSliceState,
 } from './remoteDesktopSlice';
+import {
+  awsProfilesForHost,
+  connectSecretForHost,
+  findHost,
+  findPersonalHost,
+  findPersonalSecret,
+  hostsInVaultOf,
+  knownHostsForHost,
+  listHosts,
+  personalKnownHosts,
+  secretForHost,
+  snippetsForHost,
+  tailnetsForHost,
+  teamAwsKeyMissing,
+  teamIdOfHost,
+  withTrustedKnownHost,
+} from './vault-catalog';
+import {
+  createTeamSync,
+  teamVaultsForPersist,
+  type TeamSync,
+  type TeamSyncSlice,
+} from './team-sync';
+import {
+  createTeamHistory,
+  type SftpCounts,
+  type TeamHistory,
+} from './team-history';
 
 // shared-core 는 코드만 돌려주므로, 사용자에게 보일 문구는 이 앱에서 만들어 던진다.
 function assertVaultPassphrase(passphrase: string): void {
@@ -906,6 +936,13 @@ interface MobileAppState {
   snippets: SnippetRecord[];
   knownHosts: KnownHostRecord[];
   secretMetadata: SecretMetadataRecord[];
+  /**
+   * 내 팀들 — 팀마다 받은 것을 따로 담는다(store/team-sync.ts). 위의 개인 칸과 섞지 않는다: 개인 동기화는 목록을
+   * 통째로 올리므로 섞으면 팀 것이 개인 볼트로 샌다. 둘을 함께 찾는 것은 vault-catalog.ts 다.
+   */
+  teamVaults: TeamSyncSlice['teamVaults'];
+  /** 팀마다 받은 비밀값과 내 자격 증명. 저장은 키체인이다(앱 저장소에 남기지 않는다). */
+  teamSecrets: TeamSyncSlice['teamSecrets'];
   sessions: MobileSessionRecord[];
   sftpSessions: MobileSftpSessionRecord[];
   /** 열려 있는 원격 파일 편집기. 한 번에 하나만 띄운다. */
@@ -993,6 +1030,14 @@ interface MobileAppState {
     enabled: boolean,
   ) => Promise<void>;
   toggleHostFavorite: (hostId: string) => Promise<void>;
+  /**
+   * 그 팀 호스트가 쓰는 팀 정적 AWS 프로필에 이 기기의 키를 넣는다(실패 화면의 '키 넣기'). STS 로 확인해 맞을 때만
+   * 저장한다 — 틀리면 던지고 아무것도 남기지 않는다. 다시 붙는 것은 부르는 쪽이 한다.
+   */
+  saveTeamAwsKey: (
+    hostId: string,
+    key: { accessKeyId: string; secretAccessKey: string },
+  ) => Promise<void>;
   deleteHost: (hostId: string) => Promise<void>;
   /**
    * 그룹을 새로 만든다. 호스트가 없는 빈 그룹으로 시작한다 — 홈 목록은 호스트가 0개인
@@ -1202,6 +1247,34 @@ const runtimeSftpSessions = new Map<string, SftpRuntimeSession>();
 const terminalSubscriptionGenerations = new Map<string, number>();
 const pendingSessionConnections = new Set<string>();
 const pendingSftpConnections = new Set<string>();
+/**
+ * 붙는 중인 터미널·SFTP 흐름을 밖에서 멈추는 길(세션 id 별) — 팀에서 빠질 때 쓴다. 아직 런타임이 없는 연결(호스트 키·자격
+ * 증명 창이나 느린 서버를 기다리는 중)에는 런타임을 닫는 길이 닿지 않아, 창이 풀리면 셸을 열고 '연결됨'으로 덮었다. 흐름이
+ * 시작할 때 걸고 끝날 때 뗀다.
+ */
+const connectAborts = new Map<string, () => void>();
+
+/**
+ * 붙는 흐름 하나에 멈춤을 건다. 멈추면 흐름의 표시를 켜고, 엔진이 아직 붙는 중이면(다이얼·인증·창 기다림) 그 자리에서
+ * 거둔다 — 느린 서버가 뒤늦게 답해도 로그인하지 않는다. 돌려준 함수로 뗀다(같은 id 로 뒤에 건 것은 건드리지 않는다).
+ */
+function registerConnectAbort(
+  recordId: string,
+  markAborted: () => void,
+): () => void {
+  const abort = () => {
+    markAborted();
+    void getEngine()
+      .cancelConnect(recordId)
+      .catch(() => undefined);
+  };
+  connectAborts.set(recordId, abort);
+  return () => {
+    if (connectAborts.get(recordId) === abort) {
+      connectAborts.delete(recordId);
+    }
+  };
+}
 type PendingTailnetConnection = {
   requestId: string;
   tailnetId: string;
@@ -1249,6 +1322,12 @@ let syncWatchLoop: SyncWatchLoop | null = null;
 // 서버가 변경 대기(GET /sync/watch)를 지원하는가 — 서버 URL 별로 기억한다. 동기화 때 읽는
 // /api/info 로 알게 되고, 대기 요청이 404 등을 받으면 지원하지 않는 것으로 바꾼다.
 let syncWatchSupport: { serverUrl: string; supported: boolean } | null = null;
+// 팀 받기(store/team-sync.ts). 스토어를 만들 때 하나 생긴다 — 토큰 갱신 등 스토어 안의 것을 쓴다.
+let teamSync: TeamSync | null = null;
+// 팀 기록(store/team-history.ts) — 팀 호스트 접속의 시작·끝을 팀에 남긴다. 앱을 켤 때(initializeApp) 지켜보기 시작한다.
+let teamHistory: TeamHistory | null = null;
+/** 로그아웃 직전 팀 기록의 끝 줄을 올려 보는 시간. 못 올린 것은 버린다(팀 데이터와 함께). */
+const TEAM_HISTORY_LOGOUT_FLUSH_MS = 2000;
 let appStateSubscription: { remove: () => void } | null = null;
 let pendingServerKeyResolver: ((accepted: boolean) => void) | null = null;
 let pendingCredentialResolver:
@@ -1534,6 +1613,8 @@ function ensureSyncPollingLifecycle(): void {
         }
       } else {
         stopSyncPolling();
+        // 팀 감시도 멈춘다. 받은 것은 그대로 두고, 앞으로 오면 개인 당기기가 다시 연다.
+        teamSync?.stop();
         // Pause all live remote desktop sessions on background
         const state = useMobileAppStore.getState();
         for (const rdSession of getLiveRemoteDesktopSessions(
@@ -2531,6 +2612,8 @@ function createEmptyProtectedState(): Pick<
   | 'knownHosts'
   | 'secretMetadata'
   | 'secretsByRef'
+  | 'teamVaults'
+  | 'teamSecrets'
   | 'sessions'
   | 'sftpSessions'
   | 'sftpTransfers'
@@ -2551,6 +2634,8 @@ function createEmptyProtectedState(): Pick<
     knownHosts: [],
     secretMetadata: [],
     secretsByRef: {},
+    teamVaults: [],
+    teamSecrets: {},
     sessions: [],
     sftpSessions: [],
     sftpTransfers: [],
@@ -2612,6 +2697,30 @@ function getKnownHostStatus(
   }
 
   return { status: 'untrusted', existing: null };
+}
+
+/**
+ * 요청 창에서 내가 넣은 비밀값 칸만 — 비운 칸으로 내 자격 증명의 다른 값을 지우지 않고, 팀 비밀값과 같은 칸(창이
+ * 미리 채워 돌려준 것)은 옮기지 않는다. 옮기면 팀이 바꿔도 내 낡은 사본이 먼저 쓰인다 — 데스크톱
+ * persistMyHostCredentials 와 같다.
+ */
+function typedSecretFields(
+  input: HostSecretInput,
+  team: LoadedManagedSecretPayload | undefined,
+): HostSecretInput {
+  const fields: HostSecretInput = {};
+  for (const field of [
+    'password',
+    'passphrase',
+    'privateKeyPem',
+    'certificateText',
+  ] as const) {
+    const value = input[field];
+    if (value && value !== team?.[field]) {
+      fields[field] = value;
+    }
+  }
+  return fields;
 }
 
 function disconnectRuntimeSession(sessionId: string): void {
@@ -2754,8 +2863,12 @@ export const useMobileAppStore = create<MobileAppState>()(
         // runtime teardown here so a new caller cannot clear credentials while
         // old-account sockets or Tailnet authorization attempts remain alive.
         await disconnectAllRuntimeSessions();
+        teamSync?.resetRuntime();
         const tasks: Array<Promise<unknown>> = [
           clearStoredSecrets(),
+          clearStoredTeamSecrets(),
+          // 팀 기록의 대기열도 그 계정·서버의 것이다 — 다른 계정이나 서버로 보내지 않는다.
+          teamHistory?.purge() ?? Promise.resolve(),
           clearStoredAwsProfiles(),
           clearStoredAwsSsoTokens(),
           clearStoredTailnets(),
@@ -2784,6 +2897,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         lastSyncRevision = null;
         vaultSyncGeneration += 1;
         stopSyncPolling();
+        teamSync?.resetRuntime();
       };
 
       const clearPromptState = () => {
@@ -2883,6 +2997,57 @@ export const useMobileAppStore = create<MobileAppState>()(
             throw error;
           }
         };
+
+      // 팀은 E2EE(v2) 볼트가 풀려 있을 때만 받는다 — 팀 키가 내 개인 DEK 로 감싸여 있다. 옛 v1 볼트는 팀이 없다.
+      teamSync = createTeamSync({
+        readAccess: () => {
+          const state = get();
+          const session =
+            state.auth.status === 'authenticated' ? state.auth.session : null;
+          if (!session || state.vault.status !== 'unlocked') {
+            return null;
+          }
+          return {
+            serverUrl: state.settings.serverUrl,
+            accessToken: session.tokens.accessToken,
+            personalDekBase64: state.vault.dekBase64,
+            vaultEpoch: state.vault.epoch,
+            generation: vaultSyncGeneration,
+          };
+        },
+        refreshAccessToken: async () =>
+          (await refreshAuthForConnection())?.tokens.accessToken ?? null,
+        getState: () => get(),
+        setState: patch => set(patch),
+        isForeground: () => AppState.currentState === 'active',
+        onTeamForgotten: (teamId, hostIds) => {
+          // 그 팀에는 더 올릴 수 없다 — 끝 줄도 남기지 않는다(데스크톱 기록 화면이 빠진 때를 끝으로 그린다).
+          teamHistory?.forgetTeam(teamId);
+          void closeTeamHostConnections(hostIds).catch(error => {
+            console.warn('Failed to close team host connections.', error);
+          });
+        },
+      });
+
+      teamHistory = createTeamHistory({
+        subscribe: listener => useMobileAppStore.subscribe(listener),
+        send: (teamId, events) =>
+          teamSync?.sendTeamEvents(teamId, events) ??
+          Promise.resolve('not-open'),
+        storage: AsyncStorage,
+      });
+
+      // 개인 당기기가 끝날 때마다 팀 목록도 다시 읽는다(풀림·앞으로 옴·당기기 — 데스크톱과 같은 때). 팀마다의
+      // 실패는 그 팀의 상태에 남는다.
+      const refreshTeams = (serverInfo: ServerInfoResponse | null) => {
+        void teamSync
+          ?.refresh(serverInfo)
+          .catch(error => {
+            console.warn('Failed to refresh teams.', error);
+          })
+          // 팀이 열렸으면 기다리던 팀 기록을 올린다.
+          .finally(() => teamHistory?.kick());
+      };
 
       const resolveAuthGate = (
         nextState: Partial<
@@ -3068,6 +3233,11 @@ export const useMobileAppStore = create<MobileAppState>()(
             secretMetadata: deriveSecretMetadata(state.hosts, secretsByRef),
             secureStateReady: true,
           }));
+          // 팀 비밀값도 키체인에서 읽어 온다 — 오프라인에서도 팀 호스트에 붙게. 실패해도 개인 복원은 끝났고,
+          // 다음 팀 받기가 다시 채운다.
+          await teamSync?.restoreSecrets().catch(error => {
+            console.warn('Failed to restore team secrets.', error);
+          });
 
           // 여기서 콜드스타트 자동 재연결을 시도했다가 되돌렸다. 교착이 생긴다:
           // 접속은 resolvePtyTerminalGridSize() 로 터미널 그리드를 기다리는데, 화면은 세션이
@@ -3659,13 +3829,14 @@ export const useMobileAppStore = create<MobileAppState>()(
       // the algorithm, and a host with both Ed25519 and ECDSA on file would
       // otherwise fail whenever it picks the one that was left out.
       const trustedHostKeysFor = (
+        hostId: string,
         hostname: string,
         port: number,
         tailnetId?: string | null,
       ): string[] => {
         const normalizedTailnetId = tailnetId?.trim() || undefined;
-        return get()
-          .knownHosts.filter(
+        return knownHostsForHost(get(), hostId)
+          .filter(
             record =>
               (record.tailnetId?.trim() || undefined) === normalizedTailnetId &&
               record.host === hostname &&
@@ -3705,7 +3876,7 @@ export const useMobileAppStore = create<MobileAppState>()(
 
         let resolved: EngineJumpTarget | undefined;
         for (const jumpHostId of chain) {
-          const jumpHostRecord = get().hosts.find(
+          const jumpHostRecord = hostsInVaultOf(get(), host.id).find(
             record => record.id === jumpHostId,
           );
           if (!jumpHostRecord) {
@@ -3734,6 +3905,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             username: jumpHost.username,
             credential,
             trustedHostKeysBase64: trustedHostKeysFor(
+              jumpHost.id,
               jumpHost.hostname,
               jumpHost.port,
               jumpHost.tailnetId,
@@ -3755,7 +3927,10 @@ export const useMobileAppStore = create<MobileAppState>()(
         challenge: EngineInteractiveChallenge,
         recordId?: string,
       ): Promise<EngineInteractiveAnswer | null> => {
-        const hopLabel = formatInteractiveHop(challenge.hop, get().hosts);
+        const hopLabel = formatInteractiveHop(
+          challenge.hop,
+          hostsInVaultOf(get(), host.id),
+        );
         if (recordId) {
           patchConnectionView(recordId, { interactiveAuthPending: true });
         }
@@ -3813,6 +3988,8 @@ export const useMobileAppStore = create<MobileAppState>()(
         resolved: ResolvedAwsSessionResult;
         terminalSize: { cols: number; rows: number };
         accessToken: string;
+        /** 팀에서 빠져 밖에서 멈췄는지. 멈췄으면 연 것을 닫고 false 를 돌려준다(호출부가 물러나지 않는다). */
+        isAborted: () => boolean;
         markClosed: () => void;
         markDropped: () => void;
       }): Promise<boolean> => {
@@ -3839,7 +4016,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         }
         const attempt = async (
           accessToken: string,
-        ): Promise<'connected' | 'auth-rejected' | 'failed'> => {
+        ): Promise<'connected' | 'auth-rejected' | 'failed' | 'aborted'> => {
           // 셸까지 열려야 런타임으로 등록한다. 그 전에 실패하면 dispose 가 책임질 것이 없으므로,
           // 여기서 직접 닫아야 한다.
           let connection: EngineConnection | null = null;
@@ -3878,7 +4055,11 @@ export const useMobileAppStore = create<MobileAppState>()(
               credential: { type: 'key', privateKey: key.privateKeyPem },
               size: terminalSize,
               wsProxy,
-              trustedHostKeysBase64: trustedHostKeysFor(identity, sshPort),
+              trustedHostKeysBase64: trustedHostKeysFor(
+                host.id,
+                identity,
+                sshPort,
+              ),
               onServerKey: async info =>
                 resolveKnownHostTrust(
                   host,
@@ -3893,6 +4074,10 @@ export const useMobileAppStore = create<MobileAppState>()(
               shellIntegration: shellIntegrationEnabled(get),
               onClosed: input.markClosed,
             });
+            if (input.isAborted()) {
+              await closeSshRuntimeResources(connection, shell, null);
+              return 'aborted';
+            }
             runtimeSessions.set(sessionRecordId, {
               kind: 'ssh',
               recordId: sessionRecordId,
@@ -3927,6 +4112,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             // 여기서는 전송이 서버의 웹소켓이라 그냥 두면 서버 쪽 SSM 세션이 살아 있는 채로 남는다.
             if (connection) {
               await connection.disconnect().catch(() => undefined);
+            }
+            // 멈춰서 실패한 것(거둔 연결·거부한 키)은 인스턴스 탓이 아니다 — 기억하지 않는다.
+            if (input.isAborted()) {
+              return 'aborted';
             }
             // 호스트 키 문제는 폴백하지 않는다 — 폴백해 버리면 사용자가 신뢰한 뒤 SSH 로 붙을
             // 기회가 사라진다(직접 경로와 같은 판단).
@@ -3980,6 +4169,8 @@ export const useMobileAppStore = create<MobileAppState>()(
         sessionRecordId: string;
         resolved: ResolvedAwsSessionResult;
         terminalSize: { cols: number; rows: number };
+        /** 팀에서 빠져 밖에서 멈췄는지. 멈췄으면 연 것을 닫고 조용히 끝낸다(SSM 셸로 물러나지 않는다). */
+        isAborted: () => boolean;
         markClosed: () => void;
         markDropped: () => void;
       }): Promise<void> => {
@@ -4055,6 +4246,11 @@ export const useMobileAppStore = create<MobileAppState>()(
                 region: resolved.region,
                 instanceId: host.awsInstanceId,
               });
+              // 키를 올리고 포워드를 여는 사이 멈췄으면 붙지 않는다 — 인스턴스에 로그인이 남지 않게.
+              if (input.isAborted()) {
+                await forward.stop().catch(() => undefined);
+                return;
+              }
               const connection = await engine.connect({
                 connectionId: sessionRecordId,
                 host: '127.0.0.1',
@@ -4062,7 +4258,11 @@ export const useMobileAppStore = create<MobileAppState>()(
                 username: sshUsername,
                 credential: { type: 'key', privateKey: key.privateKeyPem },
                 size: terminalSize,
-                trustedHostKeysBase64: trustedHostKeysFor(identity, sshPort),
+                trustedHostKeysBase64: trustedHostKeysFor(
+                  host.id,
+                  identity,
+                  sshPort,
+                ),
                 onServerKey: async info =>
                   resolveKnownHostTrust(
                     host,
@@ -4077,6 +4277,15 @@ export const useMobileAppStore = create<MobileAppState>()(
                 shellIntegration: shellIntegrationEnabled(get),
                 onClosed: input.markClosed,
               });
+              if (input.isAborted()) {
+                await closeSshRuntimeResources(
+                  connection,
+                  shell,
+                  null,
+                  forward,
+                );
+                return;
+              }
 
               runtimeSessions.set(sessionRecordId, {
                 kind: 'ssh',
@@ -4112,6 +4321,13 @@ export const useMobileAppStore = create<MobileAppState>()(
             } catch (error) {
               const message =
                 error instanceof Error ? error.message : String(error);
+              // 멈춰서 실패한 것은 물러날 일도, 기억할 일도 아니다(인스턴스 탓이 아니다).
+              if (input.isAborted()) {
+                if (forward) {
+                  await forward.stop().catch(() => undefined);
+                }
+                return;
+              }
               // 호스트 키 문제는 폴백하지 않는다 — 폴백해 버리면 사용자가 신뢰한 뒤 SSH 로
               // 붙을 기회가 사라진다.
               if (isAwsHostKeySecurityError(message)) {
@@ -4134,6 +4350,9 @@ export const useMobileAppStore = create<MobileAppState>()(
         }
 
         // SSM 셸로 폴백. 윈도우 인스턴스는 애초에 여기로 온다.
+        if (input.isAborted()) {
+          return;
+        }
         try {
           const token = await startSsmShellSession({
             credentials: resolved.credentials,
@@ -4157,6 +4376,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             },
             onClosed: input.markClosed,
           });
+          if (input.isAborted()) {
+            await shell.close().catch(() => undefined);
+            return;
+          }
 
           console.info(
             `[mobile-aws] direct connected=ssm-shell fellBack=${sshFailure !== null}`,
@@ -4217,8 +4440,13 @@ export const useMobileAppStore = create<MobileAppState>()(
         info: MobileServerPublicKeyInfo,
         recordId?: string,
       ): Promise<boolean> => {
+        // 어느 볼트에도 없는 호스트 — 붙는 사이 팀에서 빠졌거나 지워졌다 — 의 키는 받지 않는다. 그 연결은 이제 누구의
+        // 것도 아니다(묻지도 않는다).
+        if (!findHost(get(), host.id)) {
+          return false;
+        }
         const { status, existing } = getKnownHostStatus(
-          get().knownHosts,
+          knownHostsForHost(get(), host.id),
           info,
           host.tailnetId,
         );
@@ -4260,6 +4488,23 @@ export const useMobileAppStore = create<MobileAppState>()(
         if (!accepted) {
           return false;
         }
+        // 팀 호스트의 키는 개인 볼트에 남기지 않는다 — 남기면 개인 동기화로 팀 것이 샌다. 내 개인 칸에 둔다(같은 자리는
+        // 갈아 끼운다). 찾을 때 내 것이 먼저라 다음에는 묻지 않는다 — 데스크톱 TeamKnownHostRepository 와 같다.
+        const teamId = teamIdOfHost(get(), host.id);
+        if (teamId) {
+          teamSync?.updateHostPrefs(teamId, host.id, prefs => ({
+            ...prefs,
+            knownHosts: withTrustedKnownHost(
+              prefs.knownHosts,
+              buildKnownHostRecord(info, null, host.tailnetId),
+            ),
+          }));
+          return true;
+        }
+        // 창이 떠 있는 사이 볼트에서 사라졌다(팀에서 빠짐·지움) — 마지막 안전장치로 거부한다.
+        if (!findPersonalHost(get(), host.id)) {
+          return false;
+        }
 
         const trustedRecord = buildKnownHostRecord(
           info,
@@ -4267,7 +4512,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           host.tailnetId,
         );
         const nextKnownHosts = sortKnownHosts(
-          get().knownHosts.filter(record => record.id !== trustedRecord.id),
+          personalKnownHosts(get()).filter(
+            record => record.id !== trustedRecord.id,
+          ),
         );
         const mergedKnownHosts = sortKnownHosts([
           ...nextKnownHosts,
@@ -4338,14 +4585,35 @@ export const useMobileAppStore = create<MobileAppState>()(
         }
         promptedSecretsByHostId.delete(hostId);
 
-        const host = get().hosts.find(item => item.id === hostId);
+        // 팀 호스트에서 물어서 넣은 것은 내 자격 증명으로 둔다(내 개인 칸) — 팀 비밀값은 고치지 않는다. 다음에는
+        // 내 것이 먼저라 묻지 않는다.
+        const teamId = teamIdOfHost(get(), hostId);
+        if (teamId) {
+          const teamHost = findHost(get(), hostId);
+          const typed = typedSecretFields(
+            prompted,
+            teamHost && isSshHostRecord(teamHost) && teamHost.secretRef
+              ? secretForHost(get(), hostId, teamHost.secretRef)
+              : undefined,
+          );
+          if (Object.keys(typed).length > 0) {
+            await teamSync?.updateHostCredentials(teamId, hostId, current => ({
+              ...current,
+              ...typed,
+            }));
+          }
+          return;
+        }
+
+        // 개인 호스트만 여기서 저장한다 — 팀 호스트를 이 길로 쓰면 팀 것이 개인 볼트로 샌다.
+        const host = findPersonalHost(get(), hostId);
         if (!host || !isSshHostRecord(host)) {
           return;
         }
 
         const secretRef = host.secretRef ?? createLocalId('secret');
         const merged = mergePromptedSecrets(
-          get().secretsByRef[secretRef],
+          findPersonalSecret(get(), secretRef),
           { ...host, secretRef },
           prompted,
         );
@@ -4407,6 +4675,20 @@ export const useMobileAppStore = create<MobileAppState>()(
         if (username === host.username.trim()) {
           return;
         }
+        // 팀 호스트는 내 자격 증명의 사용자 이름으로 둔다(내 개인 칸). 키체인 칸은 곧바로 바뀌므로 이번 시도도
+        // refreshSshHost 가 그 이름을 얹어 읽는다.
+        const teamId = teamIdOfHost(get(), host.id);
+        if (teamId) {
+          void teamSync?.updateHostCredentials(teamId, host.id, current => ({
+            ...current,
+            username,
+          }));
+          return;
+        }
+        // 개인 호스트만 고친다 — 팀 호스트를 이 길로 쓰면 팀 것이 개인 볼트로 샌다.
+        if (!findPersonalHost(get(), host.id)) {
+          return;
+        }
         const record: HostRecord = {
           ...host,
           username,
@@ -4431,7 +4713,7 @@ export const useMobileAppStore = create<MobileAppState>()(
        * 알 수 없다.
        */
       const refreshSshHost = <T extends SshHostRecord>(host: T): T => {
-        const next = get().hosts.find(item => item.id === host.id);
+        const next = findHost(get(), host.id);
         return next && isSshHostRecord(next) ? (next as T) : host;
       };
 
@@ -4464,9 +4746,8 @@ export const useMobileAppStore = create<MobileAppState>()(
         host: SshHostRecord,
         override?: HostSecretInput | null,
       ): Promise<HostSecretInput | null> => {
-        const existing = host.secretRef
-          ? get().secretsByRef[host.secretRef]
-          : undefined;
+        // 팀 호스트면 내 자격 증명이 먼저, 비운 칸은 팀 비밀값이다. 둘 다 없으면 묻는다.
+        const existing = connectSecretForHost(get(), host);
         const promptBase: HostSecretInput = {
           password: existing?.password,
           passphrase: existing?.passphrase,
@@ -4641,6 +4922,17 @@ export const useMobileAppStore = create<MobileAppState>()(
           flushSessionSnapshot(sessionId, { periodic: true });
         }, SESSION_SNAPSHOT_FLUSH_MS);
         runtimeSnapshotFlushTimers.set(sessionId, timer);
+      };
+
+      /**
+       * 이 기기에 키가 없는 팀 정적 AWS 프로필이면 무엇을 넣어야 하는지 — 붙어 보기 전에 SDK 오류 대신 말한다(데스크톱과
+       * 같다). 실패 화면은 이때 '키 넣기'를 단다.
+       */
+      const teamAwsKeyMissingMessage = (hostId: string): string | null => {
+        const missing = teamAwsKeyMissing(get(), hostId);
+        return missing
+          ? t('aws.teamKeyMissing', { profile: missing.profileName })
+          : null;
       };
 
       const markSessionState = (
@@ -4825,7 +5117,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           await startSyncedTailnet({
             requestId,
             tailnetId: input.resolution.tailnetId,
-            tailnets: get().tailnets,
+            tailnets: tailnetsForHost(get(), input.hostId),
             timeoutMs: MOBILE_TAILNET_START_TIMEOUT_MS,
             onStatus: status => {
               setConnectionProgress(
@@ -4886,9 +5178,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             }
             throw new Error(t('store.tailnetBrowserOpenFailed'));
           }
-          const currentHost = get().hosts.find(
-            host => host.id === input.hostId,
-          );
+          const currentHost = findHost(get(), input.hostId);
           // **처음 정할 때와 같은 규칙으로 다시 정해야 한다.** 여기서 대상의 tailnetId 를 직접
           // 읽으면, 첫 홉의 tailnet 으로 노드를 올려놓고 대상 기준으로 검사하게 된다 — 대상에
           // 설정이 없는 경유 구성에서는 그 둘이 언제나 달라서 붙을 때마다 "설정이 변경되었습니다"
@@ -4896,9 +5186,12 @@ export const useMobileAppStore = create<MobileAppState>()(
           const currentResolution = currentHost
             ? resolveSyncedTailnetRoute(
                 {
-                  tailnetId: resolveSshHostTailnetId(currentHost, get().hosts),
+                  tailnetId: resolveSshHostTailnetId(
+                    currentHost,
+                    hostsInVaultOf(get(), currentHost.id),
+                  ),
                 },
-                get().tailnets,
+                tailnetsForHost(get(), currentHost.id),
               )
             : {
                 kind: 'missing' as const,
@@ -5004,7 +5297,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         hostId: string,
         sourceSessionId?: string,
       ): Promise<string | null> => {
-        const host = get().hosts.find(item => item.id === hostId);
+        const host = findHost(get(), hostId);
         if (!host || (!isSshHostRecord(host) && !isAwsEc2HostRecord(host))) {
           return null;
         }
@@ -5062,10 +5355,21 @@ export const useMobileAppStore = create<MobileAppState>()(
         pendingSftpConnections.add(sftpSessionRecord.id);
         let pendingConnection: MobileSftpConnection | null = null;
         let closedDuringConnect = false;
+        // 팀에서 빠져 밖에서 멈춘 것(closeTeamHostConnections). 이때는 아무 상태도 쓰지 않는다 — 닫은 쪽이 남긴 까닭이
+        // 남아야 한다. 끊김(closedDuringConnect)과 따로 두는 것은, 끊긴 뒤의 오류는 지금처럼 보여야 해서다.
+        let aborted = false;
+        const releaseAbort = registerConnectAbort(sftpSessionRecord.id, () => {
+          aborted = true;
+          closedDuringConnect = true;
+        });
 
         try {
           if (isAwsEc2HostRecord(host)) {
-            await connectAwsSftpSessionRecord(sftpSessionRecord, host);
+            await connectAwsSftpSessionRecord(
+              sftpSessionRecord,
+              host,
+              () => aborted,
+            );
             return;
           }
 
@@ -5086,6 +5390,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             host,
             options?.credentialOverride,
           );
+          if (aborted) {
+            return;
+          }
           if (!credentials) {
             markSftpSessionState(
               sftpSessionRecord.id,
@@ -5110,6 +5417,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
 
           const validationMessage = await validateEngineCredential(security);
+          if (aborted) {
+            return;
+          }
           if (validationMessage) {
             markSftpSessionState(
               sftpSessionRecord.id,
@@ -5123,8 +5433,13 @@ export const useMobileAppStore = create<MobileAppState>()(
           // "tailnet 안의 베스천을 거쳐 사내 LAN 호스트로" 가 안 된다 — 판정은 shared-core 가
           // 데스크톱과 같은 규칙으로 한다.
           const tailnetResolution = resolveSyncedTailnetRoute(
-            { tailnetId: resolveSshHostTailnetId(host, get().hosts) },
-            get().tailnets,
+            {
+              tailnetId: resolveSshHostTailnetId(
+                host,
+                hostsInVaultOf(get(), host.id),
+              ),
+            },
+            tailnetsForHost(get(), host.id),
           );
           if (tailnetResolution.kind === 'missing') {
             markSftpSessionState(
@@ -5188,6 +5503,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             ...(tailnet ? { tailnet } : {}),
             ...(jumpChain ? { jump: jumpChain } : {}),
             trustedHostKeysBase64: trustedHostKeysFor(
+              host.id,
               host.hostname,
               host.port,
               host.tailnetId,
@@ -5257,7 +5573,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           }));
         } catch (error) {
           await disposeRuntimeSftpSession(sftpSessionRecord.id);
-          if (error instanceof TailnetPreparationCancelledError) {
+          if (aborted || error instanceof TailnetPreparationCancelledError) {
             return;
           }
           if (isAuthExpiredError(error)) {
@@ -5291,6 +5607,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             interactiveAuthPending: false,
           });
         } finally {
+          releaseAbort();
           if (pendingConnection) {
             try {
               await pendingConnection.close();
@@ -5303,6 +5620,8 @@ export const useMobileAppStore = create<MobileAppState>()(
       const connectAwsSftpSessionRecord = async (
         sftpSessionRecord: MobileSftpSessionRecord,
         host: AwsEc2HostRecord,
+        /** 팀에서 빠져 밖에서 멈췄는지(connectSftpSessionRecord 가 건 것). 멈췄으면 상태를 쓰지 않고 연 것을 닫는다. */
+        isAborted: () => boolean,
       ) => {
         let accessToken = get().auth.session?.tokens.accessToken;
         if (!accessToken) {
@@ -5313,6 +5632,11 @@ export const useMobileAppStore = create<MobileAppState>()(
         const disabledReason = getAwsEc2SftpDisabledMessage(host);
         if (disabledReason) {
           markSftpSessionState(sftpSessionRecord.id, 'error', disabledReason);
+          return;
+        }
+        const keyMissing = teamAwsKeyMissingMessage(host.id);
+        if (keyMissing) {
+          markSftpSessionState(sftpSessionRecord.id, 'error', keyMissing);
           return;
         }
 
@@ -5339,6 +5663,9 @@ export const useMobileAppStore = create<MobileAppState>()(
               },
             }));
           } catch {}
+        }
+        if (isAborted()) {
+          return;
         }
 
         if (awsSftpServerSupport === 'unsupported') {
@@ -5389,7 +5716,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           try {
             resolvedSession = await resolveAwsSessionForHost({
               host,
-              profiles: get().awsProfiles,
+              profiles: awsProfilesForHost(get(), host.id),
               serverUrl: get().settings.serverUrl,
               authAccessToken: accessToken,
               presentLoginPrompt: prompt => {
@@ -5425,8 +5752,8 @@ export const useMobileAppStore = create<MobileAppState>()(
           region: resolvedSession.region,
           instanceId: host.awsInstanceId,
         });
-        let trustedHostKeysBase64 = get()
-          .knownHosts.filter(
+        let trustedHostKeysBase64 = knownHostsForHost(get(), host.id)
+          .filter(
             record => record.host === knownHostName && record.port === sshPort,
           )
           .map(record => record.publicKeyBase64);
@@ -5434,6 +5761,9 @@ export const useMobileAppStore = create<MobileAppState>()(
 
         let hostKeyAttempts = 0;
         while (hostKeyAttempts < 2) {
+          if (isAborted()) {
+            return;
+          }
           const payload: AwsSftpCreateSessionRequest = {
             hostId: host.id,
             label: host.label,
@@ -5455,6 +5785,12 @@ export const useMobileAppStore = create<MobileAppState>()(
               accessToken,
               payload,
             });
+            if (isAborted()) {
+              try {
+                await connection.close();
+              } catch {}
+              return;
+            }
             runtimeSftpSessions.set(sftpSessionRecord.id, {
               recordId: sftpSessionRecord.id,
               hostId: host.id,
@@ -5464,6 +5800,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             const listing = await connection.listDirectory(
               sftpSessionRecord.currentPath || '.',
             );
+            // 그 사이 멈췄으면 런타임은 닫는 쪽이 이미 닫았다.
+            if (isAborted()) {
+              return;
+            }
             const now = new Date().toISOString();
             set(state => ({
               sftpSessions: patchSftpSessionRecord(
@@ -5484,6 +5824,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           } catch (error) {
             if (error instanceof AwsSftpHostKeyChallengeError) {
               const accepted = await resolveKnownHostTrust(host, error.info);
+              if (isAborted()) {
+                return;
+              }
               if (!accepted) {
                 markSftpSessionState(
                   sftpSessionRecord.id,
@@ -5492,8 +5835,8 @@ export const useMobileAppStore = create<MobileAppState>()(
                 );
                 return;
               }
-              trustedHostKeysBase64 = get()
-                .knownHosts.filter(
+              trustedHostKeysBase64 = knownHostsForHost(get(), host.id)
+                .filter(
                   record =>
                     record.host === knownHostName && record.port === sshPort,
                 )
@@ -5592,7 +5935,17 @@ export const useMobileAppStore = create<MobileAppState>()(
         hostId: string,
         fingerprint: string,
       ) => {
-        const current = get().hosts.find(item => item.id === hostId);
+        // 팀 호스트는 내 개인 칸에 고정한다 — 팀 레코드는 고치지 않는다(데스크톱과 같다). 견줄 때도 내 것이 먼저다.
+        const teamId = teamIdOfHost(get(), hostId);
+        if (teamId) {
+          teamSync?.updateHostPrefs(teamId, hostId, prefs => ({
+            ...prefs,
+            rdpCertificateFingerprint: fingerprint,
+          }));
+          return;
+        }
+        // 개인 호스트만 고정한다 — 팀 호스트를 이 길로 쓰면 팀 것이 개인 볼트로 샌다.
+        const current = findPersonalHost(get(), hostId);
         if (!current || !isRdpHostRecord(current)) return;
 
         const record: RdpHostRecord = {
@@ -5625,7 +5978,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           throw new Error(t('session.rdpCertificateMissing'));
         }
 
-        const current = get().hosts.find(item => item.id === hostId);
+        const current = findHost(get(), hostId);
         if (!current || !isRdpHostRecord(current)) {
           await nativeTrustCertificate(rdId, false).catch(() => undefined);
           return;
@@ -5703,9 +6056,8 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
           assertRuntimeCurrent();
 
-          const secret = host.secretRef
-            ? get().secretsByRef[host.secretRef]
-            : undefined;
+          // 팀 호스트면 내 자격 증명(사용자 이름·도메인·비밀번호)이 먼저다.
+          const secret = connectSecretForHost(get(), host);
           if (host.secretRef && !secret) {
             throw new Error(t('session.remoteDesktopCredentialsUnavailable'));
           }
@@ -5726,7 +6078,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             protocol === 'vnc' ? host.sshTunnelHostId?.trim() : undefined;
 
           if (protocol === 'vnc' && sshTunnelHostId) {
-            const tunnelHostRecord = get().hosts.find(
+            const tunnelHostRecord = hostsInVaultOf(get(), host.id).find(
               item => item.id === sshTunnelHostId,
             );
             if (!tunnelHostRecord || !isSshHostRecord(tunnelHostRecord)) {
@@ -5764,8 +6116,13 @@ export const useMobileAppStore = create<MobileAppState>()(
             if (validationMessage) throw new Error(validationMessage);
 
             const route = resolveSyncedTailnetRoute(
-              { tailnetId: resolveSshHostTailnetId(tunnelHost, get().hosts) },
-              get().tailnets,
+              {
+                tailnetId: resolveSshHostTailnetId(
+                  tunnelHost,
+                  hostsInVaultOf(get(), tunnelHost.id),
+                ),
+              },
+              tailnetsForHost(get(), tunnelHost.id),
             );
             if (route.kind === 'missing') {
               throw new Error(t('store.tailnetMissing'));
@@ -5824,6 +6181,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 onBanner: banner => patchConnectionView(rdId, { banner }),
                 onHopProgress: hop => patchConnectionView(rdId, { hop }),
                 trustedHostKeysBase64: trustedHostKeysFor(
+                  tunnelHost.id,
                   tunnelHost.hostname,
                   tunnelHost.port,
                   tunnelHost.tailnetId,
@@ -5850,7 +6208,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           } else {
             const route = resolveSyncedTailnetRoute(
               { tailnetId: host.tailnetId?.trim() || undefined },
-              get().tailnets,
+              tailnetsForHost(get(), host.id),
             );
             if (route.kind === 'missing') {
               throw new Error(t('store.tailnetMissing'));
@@ -5912,12 +6270,13 @@ export const useMobileAppStore = create<MobileAppState>()(
               });
               const awsSsm = host.awsSsm;
               const explicitProfileId = awsSsm.profileId?.trim() || null;
+              const profiles = awsProfilesForHost(get(), host.id);
               const profile = explicitProfileId
-                ? get().awsProfiles.find(item => item.id === explicitProfileId)
-                : get().awsProfiles.find(
-                    item => item.name === awsSsm.profileName,
-                  );
+                ? profiles.find(item => item.id === explicitProfileId)
+                : profiles.find(item => item.name === awsSsm.profileName);
               if (!profile) throw new Error(t('aws.profileNotFound'));
+              const keyMissing = teamAwsKeyMissingMessage(host.id);
+              if (keyMissing) throw new Error(keyMissing);
 
               const awsHost: AwsEc2HostRecord = {
                 id: `rdp-ssm:${host.id}`,
@@ -5939,7 +6298,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 try {
                   resolvedSession = await resolveAwsSessionForHost({
                     host: awsHost,
-                    profiles: get().awsProfiles,
+                    profiles: awsProfilesForHost(get(), host.id),
                     serverUrl: get().settings.serverUrl,
                     authAccessToken: accessToken,
                     presentLoginPrompt: prompt => {
@@ -6253,7 +6612,11 @@ export const useMobileAppStore = create<MobileAppState>()(
         }
       };
 
-      const closeRemoteDesktopSession = async (rdId: string) => {
+      /** 원격 데스크톱을 닫는다. notice 를 주면 탭을 남겨 그 까닭을 보인다(팀에서 빠짐). */
+      const closeRemoteDesktopSession = async (
+        rdId: string,
+        notice?: string,
+      ) => {
         get().updateRemoteDesktopSession(rdId, {
           status: 'disconnecting',
           connectionStatusMessage: t('session.remoteDesktopDisconnecting'),
@@ -6268,11 +6631,104 @@ export const useMobileAppStore = create<MobileAppState>()(
           await rejectPendingRdpCertificateForSession(rdId);
         }
         get().updateRemoteDesktopSession(rdId, {
-          status: 'closed',
+          ...(notice
+            ? { status: 'error', errorMessage: notice }
+            : { status: 'closed' }),
           connectionStatusMessage: null,
           lastDisconnectedAt: new Date().toISOString(),
         });
         clearConnectionView(rdId);
+      };
+
+      /**
+       * 그 호스트들에 떠 있는 창을 거둔다 — 팀에서 빠질 때. 남겨 두면 그 창으로 연결이 이어진다. 호스트 키는 거부로,
+       * 자격 증명·대화형 인증은 취소로 푼다(답을 기다리던 흐름이 그 자리에서 접는다). 인증이 깨진 뒤 다시 묻는 창도 닫는다.
+       */
+      const dismissConnectPromptsFor = (hostIds: ReadonlySet<string>) => {
+        const state = get();
+        if (
+          state.pendingServerKeyPrompt &&
+          hostIds.has(state.pendingServerKeyPrompt.hostId)
+        ) {
+          void state.rejectServerKeyPrompt();
+        }
+        if (
+          state.pendingCredentialPrompt &&
+          hostIds.has(state.pendingCredentialPrompt.hostId)
+        ) {
+          state.cancelCredentialPrompt();
+        }
+        if (
+          state.pendingInteractiveAuthPrompt &&
+          hostIds.has(state.pendingInteractiveAuthPrompt.hostId)
+        ) {
+          state.cancelInteractiveAuthPrompt();
+        }
+        if (
+          state.pendingCredentialRetry &&
+          hostIds.has(state.pendingCredentialRetry.hostId)
+        ) {
+          state.cancelCredentialRetry();
+        }
+      };
+
+      /**
+       * 팀을 이 기기에서 잊기 직전 — 그 팀 호스트의 연결(터미널·SFTP·원격 데스크톱, 붙는 중·끊겨 다시 붙기를 기다리는
+       * 것까지)을 닫고 탭에 까닭을 남긴다. 팀에서 빠진 사람의 접근을 바로 끊는다(데스크톱 team-connections.ts 와 같다).
+       * '오류'로 남기므로 앞으로 와도 다시 붙지 않는다.
+       */
+      const closeTeamHostConnections = async (hostIds: ReadonlySet<string>) => {
+        const notice = t('teamHistory.connectionsClosed');
+        const state = get();
+        // 붙는 중인 흐름부터 멈추고 그 호스트에 떠 있는 창을 거둔다. 아직 런타임이 없는 연결에는 아래 닫기가 닿지 않아,
+        // 창이 풀리면 셸을 열고 '연결됨'으로 덮었다. 멈춘 흐름은 상태를 쓰지 않으므로 아래에 남기는 까닭이 그대로 남는다.
+        for (const session of [...state.sessions, ...state.sftpSessions]) {
+          if (hostIds.has(session.hostId)) {
+            connectAborts.get(session.id)?.();
+          }
+        }
+        dismissConnectPromptsFor(hostIds);
+        await Promise.all([
+          ...state.sessions
+            .filter(
+              session =>
+                hostIds.has(session.hostId) && session.status !== 'closed',
+            )
+            .map(async session => {
+              await cancelPendingTailnetConnection(session.id);
+              await disposeRuntimeSession(session.id);
+              markSessionState(session.id, 'error', notice);
+            }),
+          ...state.sftpSessions
+            .filter(
+              session =>
+                hostIds.has(session.hostId) && session.status !== 'closed',
+            )
+            .map(async session => {
+              await cancelPendingTailnetConnection(session.id);
+              await disposeRuntimeSftpSession(session.id);
+              markSftpSessionState(session.id, 'error', notice);
+            }),
+          ...getLiveRemoteDesktopSessions(state.remoteDesktopSessions)
+            .filter(session => hostIds.has(session.hostId))
+            .map(session => closeRemoteDesktopSession(session.id, notice)),
+        ]);
+      };
+
+      /** 팀 호스트 SFTP 줄의 숫자를 센다 — 실패도 센다(데스크톱과 같은 칸). 팀 호스트가 아니면 세지 않는다. */
+      const countedSftp = async <T>(
+        sftpSessionId: string,
+        counts: SftpCounts,
+        run: () => Promise<T>,
+      ): Promise<T> => {
+        try {
+          const result = await run();
+          teamHistory?.countSftp(sftpSessionId, counts);
+          return result;
+        } catch (error) {
+          teamHistory?.countSftp(sftpSessionId, { errorCount: 1 });
+          throw error;
+        }
       };
 
       const connectSessionRecord = async (
@@ -6357,6 +6813,11 @@ export const useMobileAppStore = create<MobileAppState>()(
         let pendingBackgroundListenerId: number | null = null;
         let pendingStartupFlusher: StartupCommandFlusher | null = null;
         let closedDuringConnect = false;
+        // 팀에서 빠지면 밖에서 멈춘다(closeTeamHostConnections). 멈춘 흐름은 상태를 쓰지 않는다 — 닫은 쪽이 남긴 까닭이
+        // 남아야 한다. 그래서 기다린 뒤 상태를 쓰는 자리마다 먼저 본다.
+        const releaseAbort = registerConnectAbort(sessionRecord.id, () => {
+          closedDuringConnect = true;
+        });
         try {
           if (
             host.authType !== 'password' &&
@@ -6375,6 +6836,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             host,
             credentialOverride,
           );
+          if (closedDuringConnect) {
+            return;
+          }
           if (!credentials) {
             markSessionState(
               sessionRecord.id,
@@ -6400,6 +6864,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
 
           const validationMessage = await validateEngineCredential(security);
+          if (closedDuringConnect) {
+            return;
+          }
           if (validationMessage) {
             markSessionState(sessionRecord.id, 'error', validationMessage);
             return;
@@ -6409,8 +6876,13 @@ export const useMobileAppStore = create<MobileAppState>()(
           // "tailnet 안의 베스천을 거쳐 사내 LAN 호스트로" 가 안 된다 — 판정은 shared-core 가
           // 데스크톱과 같은 규칙으로 한다.
           const tailnetResolution = resolveSyncedTailnetRoute(
-            { tailnetId: resolveSshHostTailnetId(host, get().hosts) },
-            get().tailnets,
+            {
+              tailnetId: resolveSshHostTailnetId(
+                host,
+                hostsInVaultOf(get(), host.id),
+              ),
+            },
+            tailnetsForHost(get(), host.id),
           );
           if (tailnetResolution.kind === 'missing') {
             markSessionState(
@@ -6513,6 +6985,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           const terminalSize = await resolvePtyTerminalGridSize();
           // 홉의 자격증명이 없으면 여기서 물어본다 — 아직 붙기 전이라 물어볼 자리가 있다.
           const jumpChain = await resolveJumpChain(host);
+          if (closedDuringConnect) {
+            return;
+          }
           const connection = await engine.connect({
             connectionId: sessionRecord.id,
             host: host.hostname,
@@ -6523,6 +6998,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             ...(jumpChain ? { jump: jumpChain } : {}),
             size: terminalSize,
             trustedHostKeysBase64: trustedHostKeysFor(
+              host.id,
               host.hostname,
               host.port,
               host.tailnetId,
@@ -6593,7 +7069,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             pendingStartupFlusher = startupFlusher;
           };
 
-          const startupPlan = resolveStartupCommand(host, get().snippets);
+          const startupPlan = resolveStartupCommand(
+            host,
+            snippetsForHost(get(), host.id),
+          );
           if (startupPlan.kind === 'command') {
             beginStartupCommand(startupPlan.command);
           } else if (startupPlan.kind === 'variables') {
@@ -6722,6 +7201,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             });
           }
         } finally {
+          releaseAbort();
           if (pendingConnection) {
             await closeSshRuntimeResources(
               pendingConnection,
@@ -6740,10 +7220,21 @@ export const useMobileAppStore = create<MobileAppState>()(
           retriedAuth?: boolean;
         },
       ) => {
+        // 팀에서 빠지면 밖에서 멈춘다(SSH 흐름과 같다). 멈춘 흐름은 상태를 쓰지 않고, 그 사이 연 것은 닫는다.
+        let aborted = false;
+        const releaseAbort = registerConnectAbort(sessionRecord.id, () => {
+          aborted = true;
+        });
+        const isAborted = () => aborted;
         try {
           let accessToken = get().auth.session?.tokens.accessToken;
           if (!accessToken) {
             await expireAuthSession();
+            return;
+          }
+          const keyMissing = teamAwsKeyMissingMessage(host.id);
+          if (keyMissing) {
+            markSessionState(sessionRecord.id, 'error', keyMissing);
             return;
           }
 
@@ -6773,6 +7264,9 @@ export const useMobileAppStore = create<MobileAppState>()(
               }));
             } catch {}
           }
+          if (aborted) {
+            return;
+          }
 
           // **서버 프록시를 켠 호스트만 서버 능력에 묶인다.** 직접 붙는 호스트는 서버가
           // SSM 을 못 해도 상관없다 — 기기가 직접 AWS 를 부른다.
@@ -6796,7 +7290,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             try {
               resolvedSession = await resolveAwsSessionForHost({
                 host,
-                profiles: get().awsProfiles,
+                profiles: awsProfilesForHost(get(), host.id),
                 serverUrl: get().settings.serverUrl,
                 authAccessToken: accessToken,
                 presentLoginPrompt: prompt => {
@@ -6826,6 +7320,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             }
           }
           const terminalSize = await resolvePtyTerminalGridSize();
+          if (aborted) {
+            return;
+          }
 
           // **서버 프록시를 끈 호스트는 기기에서 직접 붙는다.**
           //
@@ -6844,6 +7341,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 sessionRecordId: sessionRecord.id,
                 resolved: resolvedSession,
                 terminalSize,
+                isAborted,
                 markClosed: () => {
                   void disposeRuntimeSession(sessionRecord.id);
                   markSessionState(sessionRecord.id, 'closed');
@@ -6860,6 +7358,9 @@ export const useMobileAppStore = create<MobileAppState>()(
               });
             } catch (error) {
               await disposeRuntimeSession(sessionRecord.id);
+              if (aborted) {
+                return;
+              }
               // 데스크톱과 같은 분류를 지난다 — 코어·SDK 원문("undefined is not a function",
               // Go 의 "context deadline exceeded" 등)을 그대로 띄우면 사용자가 할 수 있는 것이
               // 없다. 분류되지 않은 것은 원문을 남긴다(유일한 단서다).
@@ -6891,6 +7392,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               resolved: resolvedSession,
               terminalSize,
               accessToken,
+              isAborted,
               markClosed: () => {
                 void disposeRuntimeSession(sessionRecord.id);
                 markSessionState(sessionRecord.id, 'closed');
@@ -6907,6 +7409,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             })
           ) {
             pendingSessionConnections.delete(sessionRecord.id);
+            return;
+          }
+          // 멈춘 흐름은 서버의 SSM 셸 릴레이로 물러나지 않는다.
+          if (aborted) {
             return;
           }
 
@@ -7161,6 +7667,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           };
         } catch (error) {
           disconnectRuntimeSession(sessionRecord.id);
+          if (aborted) {
+            return;
+          }
           if (isAuthExpiredError(error)) {
             await expireAuthSession();
             return;
@@ -7176,6 +7685,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               : t('store.ssmConnectFailed'),
           );
         } finally {
+          releaseAbort();
           pendingSessionConnections.delete(sessionRecord.id);
         }
       };
@@ -7343,6 +7853,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 syncStatus: readySyncStatus,
               });
               ensureSyncPollingLifecycle();
+              refreshTeams(serverInfo);
               return;
             }
             // 주의: lastSyncRevision 은 여기서 설정하지 않는다. 아직 볼트가 잠겨 있어
@@ -7552,6 +8063,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               ) {
                 ensureSyncPollingLifecycle();
               }
+              refreshTeams(serverInfo);
               return;
             }
 
@@ -7684,6 +8196,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             ) {
               ensureSyncPollingLifecycle();
             }
+            refreshTeams(serverInfo);
           } catch (error) {
             if (isStaleSync()) {
               // 세대가 바뀐 sync 의 실패는 무의미하다 — 상태를 건드리지 않는다.
@@ -7894,9 +8407,12 @@ export const useMobileAppStore = create<MobileAppState>()(
 
       // 로그아웃·회원 탈퇴가 공유하는 로컬 정리 — keychain 자격증명과 메모리 상태를 모두 비운다.
       const resetToSignedOutState = async () => {
+        teamSync?.resetRuntime();
         await Promise.allSettled([
           clearStoredAuthSession(),
           clearStoredSecrets(),
+          clearStoredTeamSecrets(),
+          teamHistory?.purge() ?? Promise.resolve(),
           clearStoredAwsProfiles(),
           clearStoredAwsSsoTokens(),
           clearStoredTailnets(),
@@ -7915,6 +8431,8 @@ export const useMobileAppStore = create<MobileAppState>()(
           knownHosts: [],
           secretMetadata: [],
           secretsByRef: {},
+          teamVaults: [],
+          teamSecrets: {},
           sessions: [],
           sftpSessions: [],
           sftpEditor: null,
@@ -7982,6 +8500,8 @@ export const useMobileAppStore = create<MobileAppState>()(
         snippets: [],
         knownHosts: [],
         secretMetadata: [],
+        teamVaults: [],
+        teamSecrets: {},
         sessions: [],
         sftpSessions: [],
         sftpEditor: null,
@@ -8024,6 +8544,8 @@ export const useMobileAppStore = create<MobileAppState>()(
               authGateResolved: false,
               secureStateReady: false,
             });
+            // 팀 호스트 접속을 팀 기록에 남기기 시작한다. 앞선 실행이 끝을 못 적은 줄은 여기서 닫힌다.
+            teamHistory?.start();
 
             try {
               const finishStoredAuthLoadTiming =
@@ -8226,6 +8748,9 @@ export const useMobileAppStore = create<MobileAppState>()(
         },
         logout: async () => {
           clearOfflineRecoveryLoop();
+          // 팀 호스트 연결의 끝 줄을 팀 기록에 올려 본다(최대 2초) — 팀 받기를 내려놓기 전에. 못 올린 것은 아래
+          // 정리(resetToSignedOutState)가 팀 데이터와 함께 버린다.
+          await teamHistory?.finishBeforeLogout(TEAM_HISTORY_LOGOUT_FLUSH_MS);
           invalidateSyncRuntime();
           secureStateRestoreVersion += 1;
           clearPrompts();
@@ -8753,6 +9278,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             resetSession
               ? saveStoredAuthSession(resetSession)
               : Promise.resolve(),
+            // 서버는 볼트를 초기화한 사람을 모든 팀에서 뺐다 — 팀 키도 옛 DEK 로 감싼 것이라 못 연다. 폰의 팀
+            // 것도 지운다(다시 들어오려면 링크로). 팀마다 빠진 팀과 같이 닫으므로 그 팀 기록 대기열도 버려진다.
+            teamSync?.purge() ?? Promise.resolve(),
           ]);
           assertVaultOperationContext(operationContext);
         },
@@ -8989,7 +9517,7 @@ export const useMobileAppStore = create<MobileAppState>()(
 
           const now = new Date().toISOString();
           const existing = input.hostId
-            ? get().hosts.find(host => host.id === input.hostId)
+            ? findPersonalHost(get(), input.hostId)
             : undefined;
           if (input.hostId && (!existing || !isSshHostRecord(existing))) {
             throw new Error(t('store.hostToEditNotFound'));
@@ -9088,7 +9616,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               ? {
                   secretRef,
                   label:
-                    get().secretsByRef[secretRef]?.label ??
+                    findPersonalSecret(get(), secretRef)?.label ??
                     `${record.label} credentials`,
                   ...(input.authType === 'password'
                     ? { password }
@@ -9106,7 +9634,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             throw new Error(getSecureStateLoadingMessage());
           }
           const existing = input.hostId
-            ? get().hosts.find(item => item.id === input.hostId)
+            ? findPersonalHost(get(), input.hostId)
             : undefined;
           if (input.hostId && !existing) {
             throw new Error(t('store.hostToEditNotFound'));
@@ -9147,7 +9675,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             input.credentialMode ??
             (previous?.secretRef ? 'preserve' : 'replace');
           const previousSecret = previous?.secretRef
-            ? get().secretsByRef[previous.secretRef]
+            ? findPersonalSecret(get(), previous.secretRef)
             : undefined;
           // RDP 는 계정이 자격증명에 딸린다 — 저장된 것이 없으면 비밀번호 없이는 만들 것이
           // 없다. 반대로 이미 있으면 계정만 바꾸는 것도 교체다(비밀번호는 아래에서 잇는다).
@@ -9265,7 +9793,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               ? {
                   secretRef,
                   label:
-                    get().secretsByRef[secretRef]?.label ??
+                    findPersonalSecret(get(), secretRef)?.label ??
                     `${record.label} credentials`,
                   kind: input.kind,
                   ...(mergedUsername ? { username: mergedUsername } : {}),
@@ -9279,8 +9807,30 @@ export const useMobileAppStore = create<MobileAppState>()(
         },
         // 즐겨찾기 토글 — 데스크톱과 같은 host.favorite 필드를 뒤집는다. saveHost 와 같은
         // 경로(로컬 먼저 → 아웃박스)를 쓴다. 시크릿은 건드리지 않으므로 호스트만 큐에 넣는다.
+        saveTeamAwsKey: async (hostId, key) => {
+          const missing = teamAwsKeyMissing(get(), hostId);
+          if (!missing) {
+            return;
+          }
+          const trimmed = {
+            accessKeyId: key.accessKeyId.trim(),
+            secretAccessKey: key.secretAccessKey.trim(),
+          };
+          // 맞는 키만 남긴다 — 틀린 키를 두면 다음 접속이 또 뜻 없는 확인 실패로 끝난다.
+          await verifyAwsStaticKey(trimmed, missing.region);
+          await teamSync?.setAwsKey(missing.teamId, missing.profileId, trimmed);
+        },
         toggleHostFavorite: async (hostId: string) => {
-          const host = get().hosts.find(item => item.id === hostId);
+          // 팀 호스트의 별표는 내 개인 칸에 둔다 — 팀 레코드는 고치지 않는다(데스크톱과 같다).
+          const teamId = teamIdOfHost(get(), hostId);
+          if (teamId) {
+            teamSync?.updateHostPrefs(teamId, hostId, prefs => ({
+              ...prefs,
+              favorite: prefs.favorite === true ? null : true,
+            }));
+            return;
+          }
+          const host = findPersonalHost(get(), hostId);
           if (!host) {
             throw new Error(t('store.hostToEditNotFound'));
           }
@@ -9305,7 +9855,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           hostId: string,
           enabled: boolean,
         ) => {
-          const host = get().hosts.find(item => item.id === hostId);
+          const host = findPersonalHost(get(), hostId);
           if (!host || host.kind !== 'aws-ec2') {
             throw new Error(t('store.hostToEditNotFound'));
           }
@@ -9326,7 +9876,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           enqueueAndDrain([{ kind: 'hosts', id: hostId, op: 'upsert' }]);
         },
         deleteHost: async (hostId: string) => {
-          const host = get().hosts.find(item => item.id === hostId);
+          const host = findPersonalHost(get(), hostId);
           if (!host) {
             return;
           }
@@ -9351,20 +9901,22 @@ export const useMobileAppStore = create<MobileAppState>()(
         // 그룹 이름을 바꾸면 그 아래 호스트의 groupName(경로 문자열)이 전부 다시 쓰이므로
         // 바뀐 것만 골라 큐에 넣는다(updatedAt 대조).
         quickConnectSsh: async (input: ParsedQuickSshCommand) => {
-          const existing = findExistingQuickSshHost(input, get().hosts);
+          // 같은 주소의 호스트는 어느 볼트에 있든 그것으로 붙는다(데스크톱과 같다).
+          // 새로 만드는 것은 개인 볼트에 만든다.
+          const existing = findExistingQuickSshHost(input, listHosts(get()));
           if (existing) {
             return get().connectToHost(existing.id);
           }
 
           await get().saveHost({
-            label: buildQuickSshHostLabel(input, get().hosts, null),
+            label: buildQuickSshHostLabel(input, listHosts(get()), null),
             hostname: input.hostname,
             port: input.port,
             username: input.username,
             authType: 'password',
           });
           // saveHost 는 id 를 돌려주지 않는다. 같은 주소가 둘일 수 없으므로 다시 찾는다.
-          const created = findExistingQuickSshHost(input, get().hosts);
+          const created = findExistingQuickSshHost(input, listHosts(get()));
           return created ? get().connectToHost(created.id) : null;
         },
         createGroup: async (name: string, parentPath: string | null) => {
@@ -9498,7 +10050,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           if (getRemoteDesktopHandle(sessionId)) {
             return;
           }
-          const host = get().hosts.find(item => item.id === session.hostId);
+          const host = findHost(get(), session.hostId);
           if (!host || !(isRdpHostRecord(host) || isVncHostRecord(host))) {
             // 호스트를 지웠거나 종류가 바뀐 경우. 붙을 곳이 없으니 이유를 남긴다.
             get().updateRemoteDesktopSession(sessionId, {
@@ -9537,7 +10089,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             return null;
           }
 
-          const host = get().hosts.find(item => item.id === hostId);
+          const host = findHost(get(), hostId);
           if (!host) {
             return null;
           }
@@ -9649,9 +10201,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             return null;
           }
 
-          const host = get().hosts.find(
-            item => item.id === sourceSession.hostId,
-          );
+          const host = findHost(get(), sourceSession.hostId);
           if (!host) {
             return null;
           }
@@ -9734,7 +10284,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             return session.id;
           }
 
-          const host = get().hosts.find(item => item.id === session.hostId);
+          const host = findHost(get(), session.hostId);
           if (!host) {
             markSessionState(
               session.id,
@@ -10592,7 +11142,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
           const path = joinRemotePath(sftpSession.currentPath, name);
-          await runtime.connection.mkdir(path);
+          await countedSftp(sftpSessionId, { mkdirCount: 1 }, () =>
+            runtime.connection.mkdir(path),
+          );
           await refreshSftpDirectory(sftpSessionId, sftpSession.currentPath);
         },
         renameSftpEntry: async (
@@ -10611,7 +11163,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             parentRemotePath(sourcePath),
             nextName,
           );
-          await runtime.connection.rename(sourcePath, targetPath);
+          await countedSftp(sftpSessionId, { renameCount: 1 }, () =>
+            runtime.connection.rename(sourcePath, targetPath),
+          );
           await refreshSftpDirectory(sftpSessionId, sftpSession.currentPath);
         },
         chmodSftpEntry: async (
@@ -10626,7 +11180,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           if (!runtime || !sftpSession) {
             return;
           }
-          await runtime.connection.chmod(remotePath, parseUnixMode(mode));
+          await countedSftp(sftpSessionId, { chmodCount: 1 }, () =>
+            runtime.connection.chmod(remotePath, parseUnixMode(mode)),
+          );
           await refreshSftpDirectory(sftpSessionId, sftpSession.currentPath);
         },
         deleteSftpEntries: async (sftpSessionId: string, paths: string[]) => {
@@ -10644,7 +11200,9 @@ export const useMobileAppStore = create<MobileAppState>()(
                 path,
                 sftpSession.listing,
               );
-              await deleteRemoteEntryRecursive(runtime.connection, entry);
+              await countedSftp(sftpSessionId, { deleteCount: 1 }, () =>
+                deleteRemoteEntryRecursive(runtime.connection, entry),
+              );
             }
             await refreshSftpDirectory(sftpSessionId, sftpSession.currentPath);
           } catch (error) {
@@ -10809,7 +11367,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             );
             return;
           }
-          const current = get().hosts.find(item => item.id === prompt.hostId);
+          const current = findHost(get(), prompt.hostId);
           if (!current || !isRdpHostRecord(current)) {
             await nativeTrustCertificate(prompt.sessionId, false).catch(
               () => undefined,
@@ -10858,9 +11416,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           input: HostSecretInput & { username?: string },
         ) => {
           const prompt = get().pendingCredentialPrompt;
-          const host = prompt
-            ? get().hosts.find(item => item.id === prompt.hostId)
-            : undefined;
+          const host = prompt ? findHost(get(), prompt.hostId) : undefined;
           const username = input.username?.trim();
           if (!username) {
             throw new Error(t('credentialRetry.usernameRequired'));
@@ -10882,7 +11438,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           if (!pending) {
             return;
           }
-          const host = get().hosts.find(item => item.id === pending.hostId);
+          const host = findHost(get(), pending.hostId);
           if (!host || !isSshHostRecord(host)) {
             set({ pendingCredentialRetry: null });
             return;
@@ -10920,7 +11476,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           const sftpSession = get().sftpSessions.find(
             item => item.id === pending.target.recordId,
           );
-          const sftpHost = get().hosts.find(item => item.id === pending.hostId);
+          const sftpHost = findHost(get(), pending.hostId);
           if (
             !sftpSession ||
             !sftpHost ||
@@ -10976,6 +11532,8 @@ export const useMobileAppStore = create<MobileAppState>()(
         // 호스트의 startupCommand 와 같고, secrets 는 여전히 persist 하지 않는다.
         snippets: state.snippets,
         knownHosts: state.knownHosts,
+        // 받은 팀 것도 남긴다 — 오프라인에서도 팀 호스트에 붙게. 비밀값은 여기 없다(키체인).
+        ...teamVaultsForPersist(state),
         sessions: compactPersistedSessions(state.sessions),
         // 닫힌 RD 기록만 남는다 — 최근 세션에서 재연결할 근거다.
         remoteDesktopSessions: compactPersistedRemoteDesktopSessions(
@@ -11050,6 +11608,8 @@ export function resetMobileStoreRuntimeForTests(): void {
   vaultSyncGeneration = 0;
   stopSyncPolling();
   syncWatchSupport = null;
+  teamSync?.resetRuntime();
+  teamHistory?.resetRuntime();
   if (appStateSubscription) {
     appStateSubscription.remove();
     appStateSubscription = null;
@@ -11109,6 +11669,7 @@ export function resetMobileStoreRuntimeForTests(): void {
   }
   pendingSessionConnections.clear();
   pendingSftpConnections.clear();
+  connectAborts.clear();
   pendingTailnetConnections.clear();
   activeTailnetAuthorization = null;
   tailnetRequestCounter = 0;

@@ -527,6 +527,20 @@
     "groupHostCount": "{{count}} hosts",
     "groupHostCountOne": "{{count}} host",
     "groupMeta": "Groups {{meta}}",
+    "personalVault": "Personal",
+    "openVault": "Open the {{name}} vault",
+    "vaultCount": "{{count}} vaults",
+    "vaultCountOne": "{{count}} vault",
+    "teamState": {
+      "needsRejoin": "Rejoin needed",
+      "outdated": "Update required"
+    },
+    "teamBlocked": {
+      "needsRejoinTitle": "This team's key is missing.",
+      "needsRejoinBody": "Join again with an invite link on the desktop, and this phone receives the team again.",
+      "outdatedTitle": "This team needs a newer app.",
+      "outdatedBody": "It has items added in a newer version. Update the app to catch up."
+    },
     "connectHost": "Connect to {{name}}",
     "action": {
       "quickConnect": "Connect to {{target}}",
@@ -609,7 +623,8 @@
     "roleSourceNotFound": "The AWS role source profile was not found.",
     "roleCredentialFailed": "Could not obtain the AWS role credential.",
     "ssoRoleCredentialFailed": "Could not obtain the AWS SSO role credential.",
-    "credentialVerifyFailed": "Could not verify the AWS credentials."
+    "credentialVerifyFailed": "Could not verify the AWS credentials.",
+    "teamKeyMissing": "This device has no AWS key for the team profile \"{{profile}}\". Keys aren't synced, so add one on each device."
   },
   "credentialPrompt": {
     "fileReadFailed": "Could not read the file.",
@@ -821,5 +836,18 @@
     "closeAria": "Close group menu",
     "failedTitle": "Could not change the group",
     "failed": "Please try again in a moment."
+  },
+  "awsKey": {
+    "add": "Add key",
+    "addAria": "Add an AWS key for {{title}}",
+    "dialogTitle": "{{profile}} · Key",
+    "save": "Save and connect",
+    "saveFailed": "Couldn't save the key."
+  },
+  "teamHistory": {
+    "sessionLog": "{{kind}} session",
+    "sftpSession": "SFTP session",
+    "interruptedByAppExit": "Cut off because the app stopped unexpectedly.",
+    "connectionsClosed": "Closed because you are no longer in the team."
   }
 }

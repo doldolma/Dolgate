@@ -14,6 +14,7 @@ vi.mock("electron", () => ({
 
 import { registerSftpIpcHandlers } from "./sftp";
 import { withVaults } from "../vault-catalog.test-support";
+import { HostGoneError } from "../host-gone-error";
 
 function createAwsHost(overrides = {}) {
   return {
@@ -429,6 +430,99 @@ describe("registerSftpIpcHandlers", () => {
         reasonCode: "ssh-auth-failed",
       }),
     );
+  });
+
+  // 붙는 사이 호스트가 볼트에서 사라지면(팀에서 빠짐·지움) — 끝점이 아직 없어 닫기가 닿지 않는다. 기다림마다 뒤에서 보고,
+  // 없으면 AWS 에 더 손대지 않고 붙지도 않는다. 그 까닭은 단계 문구를 붙이지 않고 그대로 낸다(8-6 결함 ②의 데스크톱 쪽).
+  describe("when the host leaves its vault while connecting", () => {
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((done) => {
+        resolve = done;
+      });
+      return { promise, resolve };
+    }
+
+    function connect(ctx: any) {
+      registerSftpIpcHandlers(ctx);
+      return ipcHandlers.get(ipcChannels.sftp.connect)?.(null, { hostId: "aws-host-1", endpointId: "endpoint-aws" });
+    }
+
+    it("does not push the EIC key when the host left during the preflight", async () => {
+      const ctx = createContext();
+      ctx.consumeAwsSftpPreflight.mockReturnValue(null);
+      const preflight = deferred<unknown>();
+      ctx.resolveAwsSftpPreflight.mockReturnValue(preflight.promise);
+
+      const result = connect(ctx);
+      await vi.waitFor(() => expect(ctx.resolveAwsSftpPreflight).toHaveBeenCalled());
+      ctx.hosts.getById.mockReturnValue(null);
+      preflight.resolve(createAwsHost());
+
+      await expect(result).rejects.toThrow(new HostGoneError("Host not found"));
+      expect(ctx.awsService.sendSshPublicKey).not.toHaveBeenCalled();
+      expect(ctx.coreManager.sftpConnect).not.toHaveBeenCalled();
+    });
+
+    it("does not open the tunnel when the host left during the key push", async () => {
+      const ctx = createContext();
+      const keyPush = deferred<void>();
+      ctx.awsService.sendSshPublicKey.mockReturnValue(keyPush.promise);
+
+      const result = connect(ctx);
+      await vi.waitFor(() => expect(ctx.awsService.sendSshPublicKey).toHaveBeenCalled());
+      ctx.hosts.getById.mockReturnValue(null);
+      keyPush.resolve();
+
+      await expect(result).rejects.toThrow(new HostGoneError("Host not found"));
+      expect(ctx.awsSsmTunnelService.start).not.toHaveBeenCalled();
+      expect(ctx.coreManager.sftpConnect).not.toHaveBeenCalled();
+    });
+
+    it("closes the tunnel without connecting when the host left while it opened", async () => {
+      const ctx = createContext();
+      const opening = deferred<{ runtimeId: string; bindAddress: string; bindPort: number }>();
+      ctx.awsSsmTunnelService.start.mockReturnValue(opening.promise);
+
+      const result = connect(ctx);
+      await vi.waitFor(() => expect(ctx.awsSsmTunnelService.start).toHaveBeenCalled());
+      ctx.hosts.getById.mockReturnValue(null);
+      opening.resolve({ runtimeId: "aws-sftp-runtime", bindAddress: "127.0.0.1", bindPort: 2222 });
+
+      await expect(result).rejects.toThrow(new HostGoneError("Host not found"));
+      expect(ctx.coreManager.sftpConnect).not.toHaveBeenCalled();
+      expect(ctx.awsSsmTunnelService.stop).toHaveBeenCalledWith("aws-sftp-runtime");
+    });
+
+    it("does not connect through the server proxy, nor refresh the login, when the host left meanwhile", async () => {
+      const ctx = createContext(createAwsHost({ awsSsmServerProxyEnabled: true }));
+      const envSpec = deferred<{ env: Record<string, string>; unsetEnv: string[] }>();
+      ctx.awsService.buildServerProxySessionEnvSpec = vi.fn(() => envSpec.promise);
+      ctx.authService = {
+        getServerUrl: vi.fn(() => "https://sync.example.test"),
+        getAccessToken: vi.fn(() => "token"),
+        refreshSession: vi.fn().mockResolvedValue({ status: "authenticated" }),
+      };
+
+      const result = connect(ctx);
+      await vi.waitFor(() => expect(ctx.awsService.buildServerProxySessionEnvSpec).toHaveBeenCalled());
+      ctx.hosts.getById.mockReturnValue(null);
+      envSpec.resolve({ env: {}, unsetEnv: [] });
+
+      await expect(result).rejects.toThrow(new HostGoneError("Host not found"));
+      expect(ctx.coreManager.sftpConnect).not.toHaveBeenCalled();
+      expect(ctx.authService.refreshSession).not.toHaveBeenCalled();
+    });
+
+    // 붙는 중에 팀에서 빠져 코어 매니저가 끊은 것 — 그 까닭을 단계 문구 없이 그대로 낸다.
+    it("passes the reason of a connect cut by leaving the team through as is", async () => {
+      const ctx = createContext();
+      ctx.coreManager.sftpConnect.mockRejectedValue(new HostGoneError("팀에서 빠져 이 연결을 닫았습니다."));
+
+      await expect(connect(ctx)).rejects.toThrow(new HostGoneError("팀에서 빠져 이 연결을 닫았습니다."));
+      expect(ctx.coreManager.sftpConnect).toHaveBeenCalledTimes(1);
+      expect(ctx.awsSsmTunnelService.stop).toHaveBeenCalledWith("aws-sftp-runtime");
+    });
   });
 
   it("classifies local SSM listener connection refused as a tunnel failure", async () => {

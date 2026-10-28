@@ -61,6 +61,8 @@ interface TeamLogRow {
   log: ActivityLogRecord;
   /** 그 줄을 남긴 멤버. 멤버 변화(서버가 남김)는 없다. */
   author: string | null;
+  /** 폰이 남긴 줄(녹화 없음) — 작성자 뒤에 'Mobile'. */
+  mobile: boolean;
   seq: number;
 }
 
@@ -116,7 +118,12 @@ function buildTeamRows(items: readonly TeamActivityItem[], translate: Translate)
         continue;
       }
       seen.add(id);
-      rows.push({ log: { ...withMemberLeftEnd(record, item, leaves, leftReason), id }, author: item.authorEmail, seq: item.seq });
+      rows.push({
+        log: { ...withMemberLeftEnd(record, item, leaves, leftReason), id },
+        author: item.authorEmail,
+        mobile: item.activity.client === 'mobile',
+        seq: item.seq,
+      });
       continue;
     }
     const message = item.memberChange
@@ -134,6 +141,7 @@ function buildTeamRows(items: readonly TeamActivityItem[], translate: Translate)
         createdAt: item.createdAt,
       } as ActivityLogRecord,
       author: item.memberChange ? null : item.authorEmail,
+      mobile: false,
       seq: item.seq,
     });
   }
@@ -611,6 +619,10 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
     () => new Map((teamRows ?? []).map((row) => [row.log.id, row.author])),
     [teamRows]
   );
+  const mobileIds = useMemo(
+    () => new Set((teamRows ?? []).filter((row) => row.mobile).map((row) => row.log.id)),
+    [teamRows]
+  );
 
   // 한 번만 뽑아 둔다. 최대 1만 건이라 글자마다 다시 만들면 입력이 끊긴다.
   // translate 가 바뀌는 때는 언어가 바뀌는 때이고, 그때는 다시 만드는 것이 맞다.
@@ -620,10 +632,12 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
         shownLogs.map((log) => {
           const author = authorById.get(log.id);
           const text = getLogSearchText(log, translate);
-          return [log.id, author ? `${text} ${author.toLocaleLowerCase()}` : text];
+          // 폰이 남긴 줄은 'mobile' 로도 찾는다 — 작성자 뒤에 보이는 그 글자다.
+          const mobile = mobileIds.has(log.id) ? ' mobile' : '';
+          return [log.id, author ? `${text} ${author.toLocaleLowerCase()}${mobile}` : text];
         })
       ),
-    [authorById, shownLogs, translate]
+    [authorById, mobileIds, shownLogs, translate]
   );
   // 호스트 검색과 같은 규칙: `tjqj` 로도 `서버` 가 걸린다. 같은 앱에서 검색이 갈리면 안 된다.
   const searchQueries = useMemo(
@@ -814,6 +828,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
                   ? { kind: 'open', recordingId: sessionLifecycleMetadata.recordingId, teamId: null }
                   : null;
             const author = authorById.get(log.id) ?? null;
+            const mobile = mobileIds.has(log.id);
 
             return containerLifecycleMetadata ? (
               <Card key={log.id} data-testid="logs-container-lifecycle-card">
@@ -824,7 +839,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
                       <div className="text-[0.9rem] text-[var(--text-soft)]">
                         {containerLifecycleMetadata.workspaceKind === 'ecs-cluster' ? 'ECS cluster' : 'Host containers'}
                       </div>
-                      {author ? <AuthorLine email={author} /> : null}
+                      {author ? <AuthorLine email={author} mobile={mobile} /> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-[0.55rem]">
                       <Badge tone={containerLifecycleMetadata.transport === 'aws-ecs' ? 'starting' : 'running'}>
@@ -893,7 +908,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
                       {containerActionMetadata.containerName ? (
                         <div className="text-[0.82rem] text-[var(--text-soft)]">{containerActionMetadata.containerId}</div>
                       ) : null}
-                      {author ? <AuthorLine email={author} /> : null}
+                      {author ? <AuthorLine email={author} mobile={mobile} /> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-[0.55rem]">
                       {containerActionMetadata.runtime ? (
@@ -931,7 +946,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
                       {getSessionLifecycleSubtitle(sessionLifecycleMetadata) ? (
                         <div className="text-[0.9rem] text-[var(--text-soft)]">{getSessionLifecycleSubtitle(sessionLifecycleMetadata)}</div>
                       ) : null}
-                      {author ? <AuthorLine email={author} /> : null}
+                      {author ? <AuthorLine email={author} mobile={mobile} /> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-[0.55rem]">
                       <Badge tone={getConnectionKindTone(sessionLifecycleMetadata.connectionKind)}>
@@ -995,7 +1010,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
                       {sftpLifecycleMetadata.title.trim() && sftpLifecycleMetadata.title.trim() !== sftpLifecycleMetadata.hostLabel.trim() ? (
                         <div className="text-[0.9rem] text-[var(--text-soft)]">{sftpLifecycleMetadata.title}</div>
                       ) : null}
-                      {author ? <AuthorLine email={author} /> : null}
+                      {author ? <AuthorLine email={author} mobile={mobile} /> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-[0.55rem]">
                       <Badge tone="running">SFTP</Badge>
@@ -1051,7 +1066,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
                       <div className="text-[0.9rem] text-[var(--text-soft)]">
                         {`${portForwardLifecycleMetadata.bindAddress}:${portForwardLifecycleMetadata.bindPort} -> ${portForwardLifecycleMetadata.targetSummary}`}
                       </div>
-                      {author ? <AuthorLine email={author} /> : null}
+                      {author ? <AuthorLine email={author} mobile={mobile} /> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-[0.55rem]">
                       <Badge tone={getPortForwardTransportTone(portForwardLifecycleMetadata.transport)}>
@@ -1094,7 +1109,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
                     <span>{log.category}</span>
                     <span>{formatLogTimestamp(log.createdAt)}</span>
                   </div>
-                  {author ? <AuthorLine email={author} /> : null}
+                  {author ? <AuthorLine email={author} mobile={mobile} /> : null}
                   {log.metadata ? (
                     <details className="mt-[0.7rem] rounded-[10px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <summary>Metadata</summary>

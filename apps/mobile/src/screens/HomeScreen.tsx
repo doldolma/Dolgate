@@ -45,6 +45,12 @@ import type {
 } from "../navigation/RootNavigator";
 import { useScreenPadding } from "../lib/screen-layout";
 import { useMobileAppStore } from "../store/useMobileAppStore";
+import {
+  listHosts,
+  listVaults,
+  teamNamesByHostId,
+  type VaultView,
+} from "../store/vault-catalog";
 import { useMobilePalette } from "../theme";
 import { hostSubtitleLabels } from '../i18n/shared-messages';
 import { useTranslation } from "react-i18next";
@@ -54,10 +60,46 @@ import { useTranslation } from "react-i18next";
 // (사용자가 만드는 그룹 이름에는 들어갈 수 없는 문자다).
 const FAVORITES_GROUP_PATH = "\u0000favorites";
 
+// 팀이 있으면 맨 윗단은 볼트 목록이다(데스크톱 사이드바의 볼트 줄 — 8-3 후보 C1). 볼트 카드를 누르면 그 볼트의
+// 그룹·호스트로 들어간다. 볼트 안의 자리도 그룹 경로처럼 문자열 하나로 두어 뒤로 가기 기록과 아래 정리 로직이
+// 그대로 쓴다. 개인 볼트의 그룹은 지금 경로 그대로라 팀이 없을 때의 길은 바뀌지 않는다 — 개인 볼트의 뿌리와 팀
+// 안의 자리에만 즐겨찾기처럼 NUL 로 시작하는 표식을 붙인다.
+const PERSONAL_VAULT_PATH = "\u0000personal";
+const TEAM_VAULT_PREFIX = "\u0000team:";
+
+function teamVaultPath(teamId: string, groupPath: string | null): string {
+  return `${TEAM_VAULT_PREFIX}${teamId}${groupPath === null ? "" : `\u0000${groupPath}`}`;
+}
+
+/** 자리 → 볼트(개인 null·팀 id)와 그 안의 그룹 경로. 맨 윗단(null)·즐겨찾기는 볼트 밖이라 없다. */
+function readVaultPlace(
+  path: string | null,
+): { vaultId: string | null; groupPath: string | null } | undefined {
+  if (path === null || path === FAVORITES_GROUP_PATH) {
+    return undefined;
+  }
+  if (path === PERSONAL_VAULT_PATH) {
+    return { vaultId: null, groupPath: null };
+  }
+  if (!path.startsWith(TEAM_VAULT_PREFIX)) {
+    return { vaultId: null, groupPath: path };
+  }
+  const rest = path.slice(TEAM_VAULT_PREFIX.length);
+  const split = rest.indexOf("\u0000");
+  return split < 0
+    ? { vaultId: rest, groupPath: null }
+    : { vaultId: rest.slice(0, split), groupPath: rest.slice(split + 1) };
+}
+
 type HomeListItem =
   | {
       kind: "favorites";
       hostCount: number;
+    }
+  | {
+      /** 맨 윗단의 볼트 카드 — 팀이 있을 때만. 누르면 그 볼트의 뿌리로 들어간다. */
+      kind: "vault";
+      vault: VaultView;
     }
   | {
       kind: "group";
@@ -66,7 +108,8 @@ type HomeListItem =
   | {
       kind: "host";
       host: HostRecord;
-      showGroupMeta: boolean;
+      /** 볼트를 가리지 않는 목록(검색·즐겨찾기)이라 어디에 있는지 단다 — 그룹 줄과, 팀 호스트면 팀 이름. */
+      showLocation: boolean;
     }
   | {
       /** 그룹 목록을 닫는 "새 그룹" 줄. 지금 보고 있는 경로의 하위로 만든다. */
@@ -118,6 +161,23 @@ function actionKey(action: HomeAction): string {
   return "action:quick-connect";
 }
 
+function homeListItemKey(item: HomeListItem): string {
+  switch (item.kind) {
+    case "favorites":
+      return "favorites";
+    case "vault":
+      return `vault:${item.vault.id ?? ""}`;
+    case "group":
+      return `group:${item.group.path}`;
+    case "new-group":
+      return "new-group";
+    case "action":
+      return actionKey(item.action);
+    default:
+      return `host:${item.host.id}`;
+  }
+}
+
 /**
  * 스와이프 액션의 삭제 배경.
  *
@@ -141,8 +201,10 @@ export function HomeScreen(): React.JSX.Element {
   const [currentGroupPath, setCurrentGroupPath] = useState<string | null>(null);
   const [groupHistory, setGroupHistory] = useState<Array<string | null>>([]);
   const auth = useMobileAppStore((state) => state.auth);
-  const groups = useMobileAppStore((state) => state.groups);
-  const hosts = useMobileAppStore((state) => state.hosts);
+  const vaults = useMobileAppStore((state) => listVaults(state));
+  // 볼트를 가리지 않는 목록(검색·즐겨찾기)은 모든 볼트의 호스트를 본다. 볼트 안의 목록은 그 볼트 것만.
+  const hosts = useMobileAppStore((state) => listHosts(state));
+  const teamNameByHostId = useMobileAppStore((state) => teamNamesByHostId(state));
   const sessions = useMobileAppStore((state) => state.sessions);
   const syncStatus = useMobileAppStore((state) => state.syncStatus);
   const connectToHost = useMobileAppStore((state) => state.connectToHost);
@@ -188,9 +250,37 @@ export function HomeScreen(): React.JSX.Element {
     return map;
   }, [sessions]);
 
+  // 팀이 있을 때만 맨 윗단에 볼트 목록을 둔다. 없으면 맨 윗단이 곧 개인 볼트의 뿌리다 — 지금 홈 그대로.
+  const showVaultList = vaults.length > 1;
+  const isFavoritesView = currentGroupPath === FAVORITES_GROUP_PATH;
+  const isVaultList = showVaultList && currentGroupPath === null;
+  const vaultPlace = readVaultPlace(currentGroupPath);
+  // 지금 그 안을 보고 있는 볼트와 그 안의 경로. 볼트 목록과 즐겨찾기는 볼트 밖이다. 사라진 팀의 자리면 없다 —
+  // 아래 정리 로직이 곧 되돌려 보낸다.
+  const currentVault =
+    isFavoritesView || isVaultList
+      ? null
+      : (vaults.find((vault) => vault.id === (vaultPlace?.vaultId ?? null)) ??
+        null);
+  const vaultGroupPath = vaultPlace?.groupPath ?? null;
+  // 팀 것은 폰에서 고치지 않는다(작업 8 정할 것 1) — 개인 볼트 안에서만 만들기·고치기 길을 둔다.
+  const inPersonalVault = currentVault !== null && currentVault.id === null;
+  const inTeamVault = currentVault !== null && currentVault.id !== null;
+
+  /** 그 볼트 안의 자리. 개인 볼트의 뿌리는 볼트 목록이 있을 때만 맨 윗단과 갈린다. */
+  const pathInVault = useCallback(
+    (vaultId: string | null, groupPath: string | null): string | null => {
+      if (vaultId !== null) {
+        return teamVaultPath(vaultId, groupPath);
+      }
+      return groupPath ?? (showVaultList ? PERSONAL_VAULT_PATH : null);
+    },
+    [showVaultList],
+  );
+
   const groupNameByPath = useMemo(() => {
     const map = new Map<string, string>();
-    for (const group of groups) {
+    for (const group of currentVault?.groups ?? []) {
       const normalizedPath = normalizeGroupPath(group.path);
       if (!normalizedPath) {
         continue;
@@ -198,28 +288,37 @@ export function HomeScreen(): React.JSX.Element {
       map.set(normalizedPath, group.name?.trim() || getGroupLabel(normalizedPath));
     }
     return map;
-  }, [groups]);
+  }, [currentVault]);
 
-  // 이 두 값은 정렬(sortHosts)에 의존하지 않으므로 앞에서 구한다 — 아래 경로 정리 로직이
+  // 이 값은 정렬(sortHosts)에 의존하지 않으므로 앞에서 구한다 — 아래 경로 정리 로직이
   // 즐겨찾기 목적지를 모르면 화면을 되돌려 보낸다.
-  const isFavoritesView = currentGroupPath === FAVORITES_GROUP_PATH;
   const hasFavorites = useMemo(
     () => hosts.some((host) => host.favorite === true),
     [hosts],
   );
 
-  const availableGroupPaths = useMemo(
-    () => collectGroupPaths(groups, hosts),
-    [groups, hosts],
-  );
-  // 즐겨찾기 경로도 유효한 목적지로 넣는다 — 아래 정리 로직이 모르는 경로를 되돌려 보낸다.
+  // 갈 수 있는 자리 — 볼트마다의 그룹 경로, 볼트의 뿌리, 즐겨찾기. 아래 정리 로직이 모르는 자리를 되돌려 보낸다
+  // (지운 그룹, 빠진 팀).
   const availableGroupPathSet = useMemo(() => {
-    const paths = new Set(availableGroupPaths);
+    const paths = new Set<string>();
+    for (const vault of vaults) {
+      const groupPaths = collectGroupPaths(vault.groups, vault.hosts);
+      const teamId = vault.id;
+      if (teamId === null) {
+        groupPaths.forEach((path) => paths.add(path));
+        if (showVaultList) {
+          paths.add(PERSONAL_VAULT_PATH);
+        }
+        continue;
+      }
+      paths.add(teamVaultPath(teamId, null));
+      groupPaths.forEach((path) => paths.add(teamVaultPath(teamId, path)));
+    }
     if (hasFavorites) {
       paths.add(FAVORITES_GROUP_PATH);
     }
     return paths;
-  }, [availableGroupPaths, hasFavorites]);
+  }, [hasFavorites, showVaultList, vaults]);
 
   useEffect(() => {
     const sanitizedHistory = groupHistory.filter(
@@ -307,18 +406,20 @@ export function HomeScreen(): React.JSX.Element {
   const sortHosts = (nextHosts: HostRecord[]) =>
     [...nextHosts].sort((left, right) => left.label.localeCompare(right.label));
 
+  // 그룹 트리는 볼트마다 따로 돈다 — 같은 경로(`Prod`)가 개인과 팀에 다 있어도 섞이지 않는다.
   const visibleGroups = useMemo(() => {
-    if (isSearching) {
+    if (isSearching || !currentVault) {
       return [];
     }
-    if (isFavoritesView) {
-      return [];
-    }
-    return buildVisibleGroups(groups, hosts, currentGroupPath);
-  }, [currentGroupPath, groups, hosts, isFavoritesView, isSearching]);
+    return buildVisibleGroups(
+      currentVault.groups,
+      currentVault.hosts,
+      vaultGroupPath,
+    );
+  }, [currentVault, isSearching, vaultGroupPath]);
 
   // 즐겨찾기는 호스트 레코드의 favorite 필드에서 파생된다 — 데스크톱과 같은 출처이고
-  // 동기화로 넘어온다.
+  // 동기화로 넘어온다. 팀 호스트의 별표는 내 개인 칸의 것이다(찾기 입구가 얹어 준다).
   const favoriteHosts = useMemo(
     () => sortHosts(hosts.filter((host) => host.favorite === true)),
     [hosts],
@@ -336,18 +437,19 @@ export function HomeScreen(): React.JSX.Element {
             .toLowerCase()
             .includes(normalizedQuery),
         )
-      : hosts.filter((host) =>
-          isDirectHostChild(host.groupName ?? null, currentGroupPath),
+      : (currentVault?.hosts ?? []).filter((host) =>
+          isDirectHostChild(host.groupName ?? null, vaultGroupPath),
         );
 
     return sortHosts(nextHosts);
   }, [
-    currentGroupPath,
+    currentVault,
     favoriteHosts,
     hosts,
     isFavoritesView,
     isSearching,
     query,
+    vaultGroupPath,
   ]);
 
   const listData = useMemo<HomeListItem[]>(() => {
@@ -372,18 +474,28 @@ export function HomeScreen(): React.JSX.Element {
       // 길이 사라졌다. 카드는 이미 탭이 접속이라 "바로 접속" 도 원래 되고 있었다.
       // 그래서 동작 줄은 **카드가 못 하는 것**(즉석 SSH·설정 섹션)만 맡는다.
       for (const host of filteredHosts) {
-        items.push({ kind: "host", host, showGroupMeta: true });
+        items.push({ kind: "host", host, showLocation: true });
       }
 
       return items;
     }
 
-    return [
-      // 루트에서만 고정한다 — 그룹 안(즐겨찾기 화면 포함)에 또 띄우면 자기 자신으로 들어가는
-      // 카드가 남는다.
-      ...(currentGroupPath === null && favoriteHosts.length > 0
+    // 즐겨찾기 카드는 맨 윗단에서만 고정한다 — 그룹 안(즐겨찾기 화면 포함)에 또 띄우면 자기 자신으로
+    // 들어가는 카드가 남는다. 볼트를 가리지 않으므로 볼트 목록 위에 둔다.
+    const favoritesCard =
+      currentGroupPath === null && favoriteHosts.length > 0
         ? [{ kind: "favorites" as const, hostCount: favoriteHosts.length }]
-        : []),
+        : [];
+
+    if (isVaultList) {
+      return [
+        ...favoritesCard,
+        ...vaults.map((vault) => ({ kind: "vault" as const, vault })),
+      ];
+    }
+
+    return [
+      ...favoritesCard,
       ...visibleGroups.map((group) => ({
         kind: "group" as const,
         group,
@@ -393,13 +505,13 @@ export function HomeScreen(): React.JSX.Element {
       // 카드가 아니라 조용한 한 줄이다. 처음에는 그룹 카드와 같은 크기의 점선 상자로
       // 만들었는데, 진짜 그룹처럼 보이면서 그룹·호스트 이음새에 끼어 어색했다.
       //
-      // 넣지 않는 경우가 둘이다:
-      //  - 검색 중·즐겨찾기 화면 — 경로가 없는 가상 목록이라 "어디에 만들지" 가 안 정해진다
+      // 개인 볼트 안에만 둔다(팀 것은 폰에서 고치지 않는다). 거기서도 넣지 않는 경우가 있다:
+      //  - 즐겨찾기 화면 — 경로가 없는 가상 목록이라 "어디에 만들지" 가 안 정해진다(볼트 밖이다)
       //  - 뿌리에 아무것도 없을 때 — 이 줄이 있으면 목록이 비지 않아 **빈 화면 안내가 영영
       //    안 뜬다.** 처음 쓰는 사람에게 필요한 것은 호스트를 추가하라는 안내다.
       //    (그룹 안에서는 비어 있어도 남긴다 — 방금 만든 그룹에 하위 그룹을 만들 수 있어야 한다.)
-      ...(isFavoritesView ||
-      (currentGroupPath === null &&
+      ...(!inPersonalVault ||
+      (vaultGroupPath === null &&
         visibleGroups.length === 0 &&
         filteredHosts.length === 0)
         ? []
@@ -407,37 +519,58 @@ export function HomeScreen(): React.JSX.Element {
       ...filteredHosts.map((host) => ({
         kind: "host" as const,
         host,
-        showGroupMeta: isFavoritesView,
+        showLocation: isFavoritesView,
       })),
     ];
   }, [
     currentGroupPath,
     favoriteHosts,
     filteredHosts,
+    inPersonalVault,
     isFavoritesView,
     isSearching,
+    isVaultList,
     query,
+    vaultGroupPath,
+    vaults,
     visibleGroups,
   ]);
 
   // 영어는 1개일 때 문구가 달라진다("1 host"). i18next 복수형 규칙은 Intl.PluralRules
   // 가 없는 런타임이 있어 쓰지 않으므로, 데스크톱처럼 경우별 키를 골라 쓴다.
   const countLabel = useCallback(
-    (key: "home.groupHostCount" | "home.folderCount", count: number): string =>
-      translate(count === 1 ? `${key}One` : key, { count }),
+    (
+      key: "home.groupHostCount" | "home.folderCount" | "home.vaultCount",
+      count: number,
+    ): string => translate(count === 1 ? `${key}One` : key, { count }),
     [translate],
   );
 
+  const vaultTitle = useCallback(
+    (vault: VaultView): string =>
+      vault.name ?? translate("home.personalVault"),
+    [translate],
+  );
+
+  // 볼트의 뿌리는 볼트 목록에서 들어왔을 때만 따로 있다(팀이 없으면 맨 윗단이 곧 개인 볼트의 뿌리다).
+  const atVaultRoot =
+    currentVault !== null && currentGroupPath !== null && vaultGroupPath === null;
   const currentGroupTitle = isFavoritesView
     ? translate("home.favorites")
-    : currentGroupPath
-      ? groupNameByPath.get(currentGroupPath) ?? getGroupLabel(currentGroupPath)
-      : "All Hosts";
+    : vaultGroupPath
+      ? groupNameByPath.get(vaultGroupPath) ?? getGroupLabel(vaultGroupPath)
+      : atVaultRoot
+        ? vaultTitle(currentVault)
+        : "All Hosts";
   const currentGroupSubtitle = isFavoritesView
     ? countLabel("home.groupHostCount", filteredHosts.length)
-    : currentGroupPath
-      ? currentGroupPath
-      : countLabel("home.folderCount", visibleGroups.length);
+    : vaultGroupPath
+      ? vaultGroupPath
+      : isVaultList
+        ? countLabel("home.vaultCount", vaults.length)
+        : atVaultRoot
+          ? countLabel("home.groupHostCount", currentVault.hosts.length)
+          : countLabel("home.folderCount", visibleGroups.length);
 
   const emptyState = useMemo(() => {
     if (isSearching) {
@@ -446,7 +579,7 @@ export function HomeScreen(): React.JSX.Element {
         body: translate("home.emptySearchBody"),
       };
     }
-    if (currentGroupPath) {
+    if (vaultGroupPath || isFavoritesView) {
       return {
         title: translate("home.emptyGroupTitle"),
         body: translate("home.emptyGroupBody"),
@@ -456,7 +589,7 @@ export function HomeScreen(): React.JSX.Element {
       title: translate("home.emptyTitle"),
       body: translate("home.emptyBody"),
     };
-  }, [currentGroupPath, isSearching]);
+  }, [isFavoritesView, isSearching, translate, vaultGroupPath]);
 
   const handleConnect = useCallback(
     async (host: HostRecord) => {
@@ -511,13 +644,20 @@ export function HomeScreen(): React.JSX.Element {
    *
    * 지운 그룹 안에 들어와 있으면 그 자리에 남을 수 없다. 이름이 바뀐 경우도 마찬가지다 —
    * 옛 경로는 더 이상 없다. 뒤로 가기 기록에도 그 경로가 남아 있으므로 같이 정리한다.
+   * 고치는 그룹은 늘 개인 볼트의 것이라 개인 볼트의 뿌리로 나온다.
    */
-  const leaveGroupPath = useCallback((removedPath: string) => {
-    const isGone = (path: string | null) =>
-      path !== null && (path === removedPath || path.startsWith(`${removedPath}/`));
-    setCurrentGroupPath((current) => (isGone(current) ? null : current));
-    setGroupHistory((history) => history.filter((path) => !isGone(path)));
-  }, []);
+  const leaveGroupPath = useCallback(
+    (removedPath: string) => {
+      const isGone = (path: string | null) =>
+        path !== null &&
+        (path === removedPath || path.startsWith(`${removedPath}/`));
+      setCurrentGroupPath((current) =>
+        isGone(current) ? pathInVault(null, null) : current,
+      );
+      setGroupHistory((history) => history.filter((path) => !isGone(path)));
+    },
+    [pathInVault],
+  );
 
   const runGroupMutation = useCallback(
     async (run: () => Promise<void>) => {
@@ -641,6 +781,17 @@ export function HomeScreen(): React.JSX.Element {
   );
 
   const statusBanner = useMemo(() => {
+    // 막힌 팀 안에서는 무엇을 하면 되는지를 그 자리에서 말한다. 카드에는 상태 칩 하나만 단다.
+    if (currentVault?.blocked) {
+      const reason =
+        currentVault.blocked === "needs-rejoin" ? "needsRejoin" : "outdated";
+      return {
+        title: translate(`home.teamBlocked.${reason}Title`),
+        body: translate(`home.teamBlocked.${reason}Body`),
+        borderColor: palette.warning,
+      };
+    }
+
     if (auth.status === "offline-authenticated") {
       return {
         title: translate("home.offlineTitle"),
@@ -662,6 +813,7 @@ export function HomeScreen(): React.JSX.Element {
     return null;
   }, [
     auth.status,
+    currentVault?.blocked,
     palette.danger,
     palette.warning,
     syncStatus,
@@ -737,31 +889,34 @@ export function HomeScreen(): React.JSX.Element {
               },
             ]}
           />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={translate("home.addHost")}
-            // 한 탭으로 폼까지 간다. 종류(SSH·RDP·VNC)는 폼 맨 위에서 고르고 SSH 가 기본이라,
-            // 흔한 길에는 손이 더 들지 않으면서 나머지도 눈에 보인다.
-            onPress={() =>
-              // 그룹을 열어 둔 채 추가하면 그 그룹에 넣으려는 것이다. 즐겨찾기는 진짜
-              // 그룹이 아니라 호스트의 플래그라 넘기지 않는다.
-              navigation.navigate(
-                "HostForm",
-                !isFavoritesView && currentGroupPath
-                  ? { defaultGroupPath: currentGroupPath }
-                  : undefined,
-              )
-            }
-            style={[
-              styles.addHostButton,
-              {
-                backgroundColor: palette.accentSoft,
-                borderColor: palette.accent,
-              },
-            ]}
-          >
-            <Ionicons name="add" size={24} color={palette.accent} />
-          </Pressable>
+          {/* 팀 볼트 안에서는 숨긴다 — 폰은 팀에 만들지 않는다. 닫는 길은 흐리게 두지 않고 숨긴다. */}
+          {inTeamVault ? null : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={translate("home.addHost")}
+              // 한 탭으로 폼까지 간다. 종류(SSH·RDP·VNC)는 폼 맨 위에서 고르고 SSH 가 기본이라,
+              // 흔한 길에는 손이 더 들지 않으면서 나머지도 눈에 보인다.
+              onPress={() =>
+                // 그룹을 열어 둔 채 추가하면 그 그룹에 넣으려는 것이다. 즐겨찾기는 진짜
+                // 그룹이 아니라 호스트의 플래그라 넘기지 않는다. 새 호스트는 늘 개인 볼트에 든다.
+                navigation.navigate(
+                  "HostForm",
+                  inPersonalVault && vaultGroupPath
+                    ? { defaultGroupPath: vaultGroupPath }
+                    : undefined,
+                )
+              }
+              style={[
+                styles.addHostButton,
+                {
+                  backgroundColor: palette.accentSoft,
+                  borderColor: palette.accent,
+                },
+              ]}
+            >
+              <Ionicons name="add" size={24} color={palette.accent} />
+            </Pressable>
+          )}
         </View>
 
         {statusBanner ? (
@@ -818,17 +973,7 @@ export function HomeScreen(): React.JSX.Element {
           ref={listRef}
           style={styles.list}
           data={listData}
-          keyExtractor={(item) =>
-            item.kind === "favorites"
-              ? "favorites"
-              : item.kind === "group"
-                ? `group:${item.group.path}`
-                : item.kind === "new-group"
-                  ? "new-group"
-                  : item.kind === "action"
-                    ? actionKey(item.action)
-                    : `host:${item.host.id}`
-          }
+          keyExtractor={homeListItemKey}
           // 목록을 넘기기 시작하면 열린 줄을 닫는다. 스크롤 중에 열린 줄이 따라다니면 다른
           // 호스트의 삭제를 누르게 된다.
           onScrollBeginDrag={closeOpenSwipeableRow}
@@ -905,6 +1050,86 @@ export function HomeScreen(): React.JSX.Element {
                 </Pressable>
               );
             }
+            if (item.kind === "vault") {
+              const vault = item.vault;
+              const name = vaultTitle(vault);
+              return (
+                // 그룹 카드와 같은 모양이다 — 누르면 그 볼트 안으로 들어간다. 역할은 달지 않는다: 폰은 역할과
+                // 상관없이 팀 것을 보고 접속만 한다(8-3 후보 R3). 막힌 팀만 상태 칩을 단다(데스크톱의 경고와 같다).
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={translate("home.openVault", { name })}
+                  onPress={() => {
+                    openGroup(pathInVault(vault.id, null) ?? PERSONAL_VAULT_PATH);
+                  }}
+                  style={[
+                    styles.groupCard,
+                    {
+                      backgroundColor: palette.surface,
+                      borderColor: palette.border,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.groupIcon,
+                      { backgroundColor: palette.accentSoft },
+                    ]}
+                  >
+                    <Ionicons
+                      name={vault.id === null ? "person-outline" : "people-outline"}
+                      size={18}
+                      color={vault.blocked ? palette.mutedText : palette.accent}
+                    />
+                  </View>
+                  <View style={styles.groupCardCopy}>
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.groupCardTitle, { color: palette.text }]}
+                    >
+                      {name}
+                    </Text>
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.groupCardMeta, { color: palette.mutedText }]}
+                    >
+                      {countLabel("home.groupHostCount", vault.hosts.length)}
+                    </Text>
+                  </View>
+                  {vault.blocked ? (
+                    <View
+                      style={[
+                        styles.stateChip,
+                        {
+                          borderColor: palette.border,
+                          backgroundColor: palette.surface,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name="warning-outline"
+                        size={12}
+                        color={palette.warning}
+                      />
+                      <Text
+                        style={[styles.stateChipText, { color: palette.mutedText }]}
+                      >
+                        {translate(
+                          vault.blocked === "needs-rejoin"
+                            ? "home.teamState.needsRejoin"
+                            : "home.teamState.outdated",
+                        )}
+                      </Text>
+                    </View>
+                  ) : null}
+                  <Ionicons
+                    name="chevron-forward"
+                    size={18}
+                    color={palette.mutedText}
+                  />
+                </Pressable>
+              );
+            }
             if (item.kind === "new-group") {
               return (
                 <Pressable
@@ -939,9 +1164,17 @@ export function HomeScreen(): React.JSX.Element {
                   accessibilityRole="button"
                   accessibilityLabel={translate("home.openGroup", { name: item.group.name })}
                   onPress={() => {
-                    openGroup(item.group.path);
+                    openGroup(
+                      pathInVault(currentVault?.id ?? null, item.group.path) ??
+                        item.group.path,
+                    );
                   }}
-                  onLongPress={() => setActionSheetGroup(item.group)}
+                  // 그룹 편집(이름 바꾸기·지우기)은 개인 볼트의 그룹만. 팀 그룹은 폰에서 고치지 않는다.
+                  onLongPress={
+                    inPersonalVault
+                      ? () => setActionSheetGroup(item.group)
+                      : undefined
+                  }
                   style={[
                     styles.groupCard,
                     {
@@ -1053,34 +1286,13 @@ export function HomeScreen(): React.JSX.Element {
             }
 
 
-            const searchGroupMeta = item.showGroupMeta
+            const searchGroupMeta = item.showLocation
               ? getSearchGroupMeta(item.host)
               : null;
             const compactMeta = getCompactHostMeta(item.host);
+            const teamName = teamNameByHostId.get(item.host.id);
 
-            return (
-              // 밀어서 수정·삭제. 길게 누르기(액션 시트)는 그대로 둔다 — 거기에는 연결·SFTP·
-              // 즐겨찾기까지 들어 있어서 스와이프가 대신할 수 없다.
-              <SwipeableRow
-                actions={[
-                  {
-                    key: "edit",
-                    label: translate("common.edit"),
-                    icon: "pencil-outline",
-                    background: palette.tabInactive,
-                    onPress: () => handleEditHost(item.host),
-                  },
-                  {
-                    key: "delete",
-                    label: translate("common.delete"),
-                    icon: "trash-outline",
-                    // 화면에 빨강은 이것 하나뿐이다. 수정까지 색을 주면 둘 다 "눌러 주세요" 로
-                    // 보여서, 지우려던 게 아닌데 빨강을 누를 확률이 올라간다.
-                    background: DESTRUCTIVE_ACTION_BG,
-                    onPress: () => handleDeleteHost(item.host),
-                  },
-                ]}
-              >
+            const card = (
               <Pressable
                 accessibilityRole="button"
                 // 그룹 카드에는 라벨이 있는데 호스트 카드에는 없었다. 스크린리더가 카드 안의
@@ -1126,13 +1338,68 @@ export function HomeScreen(): React.JSX.Element {
                     {translate("home.groupMeta", { meta: searchGroupMeta })}
                   </Text>
                 ) : null}
-                <Text
-                  numberOfLines={1}
-                  style={[styles.hostMeta, { color: palette.mutedText }]}
-                >
-                  {compactMeta}
-                </Text>
+                {/* 볼트가 섞인 목록에서는 팀 호스트의 주소 줄 앞에 팀을 단다 — 데스크톱 명령 팔레트와 같은 표시이고
+                    카드 높이가 개인 호스트와 같다(8-3 후보 M1b). 팀 볼트 안에서는 어디인지 아니까 달지 않는다. */}
+                {item.showLocation && teamName ? (
+                  <View style={styles.teamMetaLine}>
+                    <Ionicons
+                      name="people-outline"
+                      size={11}
+                      color={palette.mutedText}
+                    />
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.hostMeta,
+                        styles.teamMetaText,
+                        { color: palette.mutedText },
+                      ]}
+                    >
+                      {`${teamName} · ${compactMeta}`}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.hostMeta, { color: palette.mutedText }]}
+                  >
+                    {compactMeta}
+                  </Text>
+                )}
               </Pressable>
+            );
+
+            return (
+              // 밀어서 수정·삭제. 길게 누르기(액션 시트)는 그대로 둔다 — 거기에는 연결·SFTP·
+              // 즐겨찾기까지 들어 있어서 스와이프가 대신할 수 없다.
+              //
+              // 팀 호스트는 폰에서 고치지 않으므로 액션이 없다. 그래도 밀기 줄로 감싼다 — 감싸지 않으면
+              // 카드를 밀다 손을 뗀 것이 누르기로 읽혀 접속이 시작된다(8-3c 에서 찾음).
+              <SwipeableRow
+                actions={
+                  teamName
+                    ? []
+                    : [
+                        {
+                          key: "edit",
+                          label: translate("common.edit"),
+                          icon: "pencil-outline",
+                          background: palette.tabInactive,
+                          onPress: () => handleEditHost(item.host),
+                        },
+                        {
+                          key: "delete",
+                          label: translate("common.delete"),
+                          icon: "trash-outline",
+                          // 화면에 빨강은 이것 하나뿐이다. 수정까지 색을 주면 둘 다 "눌러 주세요" 로
+                          // 보여서, 지우려던 게 아닌데 빨강을 누를 확률이 올라간다.
+                          background: DESTRUCTIVE_ACTION_BG,
+                          onPress: () => handleDeleteHost(item.host),
+                        },
+                      ]
+                }
+              >
+                {card}
               </SwipeableRow>
             );
           }}
@@ -1174,8 +1441,8 @@ export function HomeScreen(): React.JSX.Element {
             groupPrompt?.mode === "rename" ? groupPrompt.group.name : ""
           }
           hint={
-            groupPrompt?.mode === "create" && currentGroupPath
-              ? translate("groupActions.createHint", { path: currentGroupPath })
+            groupPrompt?.mode === "create" && vaultGroupPath
+              ? translate("groupActions.createHint", { path: vaultGroupPath })
               : null
           }
           submitLabel={
@@ -1195,13 +1462,18 @@ export function HomeScreen(): React.JSX.Element {
                 leaveGroupPath(groupPrompt.group.path);
                 return;
               }
-              await createGroup(name, currentGroupPath);
+              // 새 그룹 줄은 개인 볼트 안에만 있다 — 그 볼트 안의 경로에 만든다.
+              await createGroup(name, vaultGroupPath);
             });
           }}
         />
 
         <HostActionSheet
           host={actionSheetHost}
+          editable={
+            actionSheetHost === null ||
+            !teamNameByHostId.has(actionSheetHost.id)
+          }
           onClose={() => setActionSheetHost(null)}
           onConnect={(host) => void handleConnect(host)}
           onConnectSftp={(host) => void handleConnectSftp(host)}
@@ -1388,6 +1660,29 @@ const styles = StyleSheet.create({
   hostMeta: {
     fontSize: 11,
     lineHeight: 15,
+  },
+  // 섞인 목록의 팀 호스트 — 주소 줄 앞에 팀 아이콘과 이름.
+  teamMetaLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  teamMetaText: {
+    flex: 1,
+  },
+  // 막힌 팀의 상태(다시 들어와야 함·업데이트 필요). 누르는 것이 아니라 표식이다.
+  stateChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  stateChipText: {
+    fontSize: 10,
+    fontWeight: "700",
   },
   badge: {
     borderRadius: 999,

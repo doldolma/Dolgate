@@ -23,6 +23,7 @@ import {
 import { GroupNamePromptModal } from "../src/components/GroupNamePromptModal";
 import { HomeScreen } from "../src/screens/HomeScreen";
 import { useMobileAppStore } from "../src/store/useMobileAppStore";
+import type { MobileTeamVault } from "../src/store/team-sync";
 
 const mockNavigate = jest.fn();
 const mockFlatListScrollToOffset = jest.fn();
@@ -1213,5 +1214,392 @@ describe("HomeScreen group browsing", () => {
       jest.runOnlyPendingTimers();
       tree!.unmount();
     });
+  });
+});
+
+// ── 볼트(작업 8-3 — 후보 C1·R3·M1b) ─────────────────────────────────────────
+// 팀이 있으면 맨 윗단은 볼트 목록이고, 팀 것은 보고 접속만 한다. 팀이 없으면 위 시험들 그대로다.
+
+describe("HomeScreen vaults", () => {
+  const now = new Date().toISOString();
+
+  function ssh(
+    id: string,
+    label: string,
+    hostname: string,
+    extra: Partial<SshHostRecord> = {},
+  ): SshHostRecord {
+    return {
+      id,
+      kind: "ssh",
+      label,
+      hostname,
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      secretRef: null,
+      groupName: null,
+      createdAt: now,
+      updatedAt: now,
+      ...extra,
+    };
+  }
+
+  function team(overrides: Partial<MobileTeamVault>): MobileTeamVault {
+    return {
+      id: "team-acme",
+      name: "Acme Infra",
+      role: "member",
+      wrappedTeamDek: "wrapped",
+      state: "ready",
+      errorMessage: null,
+      hosts: [],
+      groups: [],
+      knownHosts: [],
+      awsProfiles: [],
+      tailnets: [],
+      snippets: [],
+      hostPrefs: [],
+      ...overrides,
+    };
+  }
+
+  const personalGroups: GroupRecord[] = [
+    { id: "group-servers", path: "Servers", name: "Servers", createdAt: now, updatedAt: now },
+  ];
+  const personalHosts: SshHostRecord[] = [
+    ssh("host-root", "Root Host", "root.example.com", { username: "root", favorite: true }),
+    ssh("host-servers", "Server Jump", "jump.example.com", { username: "ops", groupName: "Servers" }),
+    ssh("host-lab", "Lab Node", "lab.example.com"),
+  ];
+  const acme = team({
+    groups: [{ id: "team-group-prod", path: "Prod", name: "Prod", createdAt: now, updatedAt: now }],
+    hosts: [
+      ssh("team-web-1", "prod-web-1", "10.0.1.11", { groupName: "Prod" }),
+      ssh("team-web-2", "prod-web-2", "10.0.1.12", { groupName: "Prod" }),
+      ssh("team-bastion", "bastion", "bastion.acme.internal", { username: "jump" }),
+    ],
+    // 내 개인 칸의 별표 — 팀 레코드에는 별표가 없다.
+    hostPrefs: [
+      {
+        id: "team-bastion",
+        favorite: true,
+        agentForwarding: null,
+        rdpCertificateFingerprint: null,
+        knownHosts: [],
+        updatedAt: now,
+      },
+    ],
+  });
+  const data = team({
+    id: "team-data",
+    name: "Data Platform",
+    role: "viewer",
+    hosts: [ssh("team-airflow", "data-airflow", "10.20.0.5")],
+  });
+  const legacy = team({ id: "team-legacy", name: "Legacy Ops", state: "outdated" });
+
+  /** 누를 수 있는 것 중 그 이름의 첫째. 없으면 undefined. */
+  function findPressable(
+    tree: renderer.ReactTestRenderer,
+    label: string,
+  ): renderer.ReactTestInstance | undefined {
+    return tree.root.findAll(
+      (node) =>
+        node.props.accessibilityLabel === label &&
+        typeof node.props.onPress === "function",
+    )[0];
+  }
+
+  function textIn(node: renderer.ReactTestInstance): string[] {
+    return node
+      .findAllByType(Text)
+      .map((text) => ([] as unknown[]).concat(text.props.children).join(""));
+  }
+
+  function texts(tree: renderer.ReactTestRenderer): string[] {
+    return collectText(tree.toJSON());
+  }
+
+  async function press(node: renderer.ReactTestInstance | undefined) {
+    expect(node).toBeTruthy();
+    await act(async () => {
+      node!.props.onPress();
+    });
+  }
+
+  /** 지금 떠 있는 호스트 시트의 항목 이름. */
+  function sheetLabels(tree: renderer.ReactTestRenderer): string[] {
+    const sheet = tree.root
+      .findAllByType(ActionSheet)
+      .find((candidate) => candidate.props.visible);
+    return (sheet?.props.items ?? []).map((item: { label: string }) => item.label);
+  }
+
+  async function mount(): Promise<renderer.ReactTestRenderer> {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderHome();
+    });
+    return tree!;
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    mockNavigate.mockReset();
+    jest
+      .spyOn(BackHandler, "addEventListener")
+      .mockImplementation(() => ({ remove: jest.fn() }));
+    if (!FlatList.prototype.scrollToOffset) {
+      Object.defineProperty(FlatList.prototype, "scrollToOffset", {
+        configurable: true,
+        value: () => undefined,
+      });
+    }
+    jest
+      .spyOn(FlatList.prototype, "scrollToOffset")
+      .mockImplementation(() => undefined);
+    useMobileAppStore.setState({
+      hydrated: true,
+      bootstrapping: false,
+      authGateResolved: true,
+      secureStateReady: true,
+      auth: createAuthenticatedState(),
+      settings: {
+        ...createDefaultMobileSettings(),
+        theme: "dark",
+      },
+      syncStatus: createDefaultSyncStatus(),
+      groups: personalGroups,
+      hosts: personalHosts,
+      teamVaults: [acme, data, legacy],
+      teamSecrets: {},
+      knownHosts: [],
+      secretMetadata: [],
+      sessions: [],
+      activeSessionTabId: null,
+      secretsByRef: {},
+      pendingBrowserLoginState: null,
+      pendingServerKeyPrompt: null,
+      pendingCredentialPrompt: null,
+      connectToHost: jest.fn(async (hostId: string) => `session:${hostId}`),
+    });
+  });
+
+  afterEach(() => {
+    act(() => {
+      jest.runOnlyPendingTimers();
+    });
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+    // 트리는 바깥 afterEach 가 걷어내므로 아직 붙어 있다 — 다시 그리는 것도 act() 안에서.
+    act(() => {
+      useMobileAppStore.setState({ teamVaults: [], teamSecrets: {} });
+    });
+  });
+
+  it("puts favorites, Personal and each team at the top, with no roles", async () => {
+    const tree = await mount();
+    const text = texts(tree).join(" | ");
+
+    expect(text).toContain("All Hosts");
+    expect(text).toContain("4개 볼트");
+    expect(textIn(findPressable(tree, "Personal 볼트 열기")!)).toContain("3개 호스트");
+    expect(textIn(findPressable(tree, "Acme Infra 볼트 열기")!)).toContain("3개 호스트");
+    expect(textIn(findPressable(tree, "Data Platform 볼트 열기")!)).toContain("1개 호스트");
+    // 볼트 안의 것은 맨 윗단에 섞지 않는다. 만들 자리도 아니다.
+    expect(text).not.toContain("Root Host");
+    expect(text).not.toContain("bastion");
+    expect(findPressable(tree, "Servers 그룹 열기")).toBeUndefined();
+    expect(findPressable(tree, "새 그룹")).toBeUndefined();
+    // 즐겨찾기는 볼트를 가리지 않는다 — 개인 별표 하나와 팀 호스트에 내가 단 별표 하나.
+    expect(textIn(findPressable(tree, "즐겨찾기 열기")!)).toContain("2개 호스트");
+    expect(text.indexOf("즐겨찾기")).toBeLessThan(text.indexOf("Personal"));
+    // 역할은 달지 않는다(R3). 막힌 팀만 상태 칩.
+    expect(text).not.toMatch(/member|viewer/i);
+    expect(textIn(findPressable(tree, "Legacy Ops 볼트 열기")!)).toContain("Update required");
+    expect(textIn(findPressable(tree, "Acme Infra 볼트 열기")!).join(" ")).not.toContain(
+      "Update required",
+    );
+  });
+
+  it("opens a team with only its own groups and hosts, and no way to change them", async () => {
+    const tree = await mount();
+    await press(findPressable(tree, "Acme Infra 볼트 열기"));
+
+    const text = texts(tree).join(" | ");
+    expect(text).toContain("Acme Infra");
+    expect(text).toContain("3개 호스트");
+    expect(findPressable(tree, "Prod 그룹 열기")).toBeTruthy();
+    expect(text).toContain("bastion");
+    expect(text).not.toContain("prod-web-1");
+    expect(text).not.toContain("Root Host");
+    // 만들기·고치기 길이 없다 — +, 새 그룹, 밀어서 수정·삭제, 그룹 길게 누르기.
+    expect(findPressable(tree, "호스트 추가")).toBeUndefined();
+    expect(findPressable(tree, "새 그룹")).toBeUndefined();
+    expect(findPressable(tree, "Prod 그룹 열기")!.props.onLongPress).toBeUndefined();
+    // 팀 호스트 카드도 밀기 줄 안에 있되 액션이 없다 — 밀기 줄이 없으면 카드를 밀다 손을 뗀 것이
+    // 누르기로 읽혀 접속이 시작된다(8-3c 에서 실제 앱으로 찾음).
+    const rows = tree.root.findAllByType(SwipeableRow);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].props.actions).toEqual([]);
+    expect(
+      rows[0].findAll(
+        (node) =>
+          node.props.accessibilityLabel === "bastion 접속" &&
+          typeof node.props.onPress === "function",
+      ),
+    ).not.toHaveLength(0);
+
+    // 길게 누르면 접속·SFTP 와 별표뿐이다 — 별표는 내 개인 칸에 남는다(작업 8-4). 수정·삭제는 없다.
+    const toggleHostFavorite = jest.fn(async () => undefined);
+    useMobileAppStore.setState({ toggleHostFavorite });
+    await act(async () => {
+      findPressable(tree, "bastion 접속")!.props.onLongPress();
+    });
+    expect(sheetLabels(tree)).toEqual(["연결", "SFTP 연결", "즐겨찾기에서 제거"]);
+    const sheet = tree.root
+      .findAllByType(ActionSheet)
+      .find((candidate) => candidate.props.visible)!;
+    await act(async () => {
+      sheet.props.items
+        .find((item: { key: string }) => item.key === "favorite")
+        .onPress();
+    });
+    expect(toggleHostFavorite).toHaveBeenCalledWith("team-bastion");
+
+    // 팀 그룹으로 들어가고, 뒤로 가기로 팀의 뿌리 → 볼트 목록.
+    await press(findPressable(tree, "Prod 그룹 열기"));
+    expect(texts(tree).join(" | ")).toContain("prod-web-2");
+    await press(findPressable(tree, "이전 그룹으로 이동"));
+    expect(findPressable(tree, "Prod 그룹 열기")).toBeTruthy();
+    await press(findPressable(tree, "이전 그룹으로 이동"));
+    expect(texts(tree).join(" | ")).toContain("4개 볼트");
+  });
+
+  it("keeps the personal vault as it was, behind its card", async () => {
+    const createGroup = jest.fn(async () => undefined);
+    useMobileAppStore.setState({ createGroup });
+    const tree = await mount();
+
+    // 볼트 목록의 + 는 개인 볼트에 만든다.
+    await press(findPressable(tree, "호스트 추가"));
+    expect(mockNavigate).toHaveBeenLastCalledWith("HostForm", undefined);
+
+    await press(findPressable(tree, "Personal 볼트 열기"));
+    const text = texts(tree).join(" | ");
+    expect(text).toContain("Personal");
+    expect(text).toContain("Root Host");
+    expect(text).not.toContain("bastion");
+    expect(tree.root.findAllByType(SwipeableRow).length).toBeGreaterThan(0);
+    expect(findPressable(tree, "Servers 그룹 열기")!.props.onLongPress).toEqual(
+      expect.any(Function),
+    );
+    await act(async () => {
+      findPressable(tree, "Root Host 접속")!.props.onLongPress();
+    });
+    expect(sheetLabels(tree)).toEqual(
+      expect.arrayContaining(["즐겨찾기에서 제거", "수정", "삭제"]),
+    );
+
+    // 새 그룹은 개인 볼트의 뿌리에 만든다 — 자리 표식이 그룹 경로로 새지 않는다.
+    await press(findPressable(tree, "새 그룹"));
+    await act(async () => {
+      tree.root.findByType(GroupNamePromptModal).props.onSubmit("Lab");
+    });
+    expect(createGroup).toHaveBeenCalledWith("Lab", null);
+
+    // 그룹 안의 + 는 그 그룹을 미리 채운다.
+    await press(findPressable(tree, "Servers 그룹 열기"));
+    await press(findPressable(tree, "호스트 추가"));
+    expect(mockNavigate).toHaveBeenLastCalledWith("HostForm", {
+      defaultGroupPath: "Servers",
+    });
+  });
+
+  it("marks team hosts with their team in search and favorites, but not inside the team", async () => {
+    const tree = await mount();
+
+    await act(async () => {
+      tree.root.findByType(TextInput).props.onChangeText("ubuntu");
+    });
+    let lines = texts(tree);
+    expect(lines).toContainEqual(expect.stringMatching(/^Acme Infra · ubuntu@10\.0\.1\.11:22 /));
+    expect(lines).toContainEqual(expect.stringMatching(/^Data Platform · ubuntu@10\.20\.0\.5:22 /));
+    // 개인 호스트에는 팀이 없다.
+    expect(lines).toContainEqual(expect.stringMatching(/^ubuntu@lab\.example\.com:22 /));
+    // 팀 호스트도 밀어서 고치는 길이 없다 — 줄은 다 밀기 줄이지만 액션은 개인 호스트에만 있다.
+    const rows = tree.root.findAllByType(SwipeableRow);
+    expect(rows).toHaveLength(4);
+    expect(rows.filter((row) => row.props.actions.length > 0)).toHaveLength(1);
+
+    await act(async () => {
+      tree.root.findByType(TextInput).props.onChangeText("");
+    });
+    await press(findPressable(tree, "즐겨찾기 열기"));
+    lines = texts(tree);
+    expect(lines).toContainEqual(
+      expect.stringMatching(/^Acme Infra · jump@bastion\.acme\.internal:22 /),
+    );
+    expect(lines).toContainEqual(expect.stringMatching(/^root@root\.example\.com:22 /));
+
+    await press(findPressable(tree, "이전 그룹으로 이동"));
+    await press(findPressable(tree, "Acme Infra 볼트 열기"));
+    lines = texts(tree);
+    expect(lines).toContainEqual(expect.stringMatching(/^jump@bastion\.acme\.internal:22 /));
+    expect(lines.join(" | ")).not.toContain("Acme Infra ·");
+  });
+
+  it("says what to do inside a blocked team, and says nothing for a passing error", async () => {
+    const tree = await mount();
+    await press(findPressable(tree, "Legacy Ops 볼트 열기"));
+    expect(texts(tree)).toContain("이 팀에는 새 앱이 필요합니다.");
+
+    act(() => {
+      useMobileAppStore.setState({
+        teamVaults: [acme, data, { ...legacy, state: "needs-rejoin" }],
+      });
+    });
+    expect(texts(tree)).toContain("이 팀의 키가 없습니다.");
+
+    act(() => {
+      useMobileAppStore.setState({
+        teamVaults: [acme, data, { ...legacy, state: "error", errorMessage: "network down" }],
+      });
+    });
+    const text = texts(tree).join(" | ");
+    expect(text).not.toContain("이 팀의 키가 없습니다.");
+    expect(text).not.toContain("새 앱");
+    expect(text).not.toContain("network down");
+  });
+
+  it("leaves a team that goes away, and draws the plain home once no team is left", async () => {
+    const tree = await mount();
+    await press(findPressable(tree, "Acme Infra 볼트 열기"));
+
+    act(() => {
+      useMobileAppStore.setState({ teamVaults: [data, legacy] });
+    });
+    expect(texts(tree).join(" | ")).toContain("3개 볼트");
+    expect(findPressable(tree, "Acme Infra 볼트 열기")).toBeUndefined();
+
+    act(() => {
+      useMobileAppStore.setState({ teamVaults: [] });
+    });
+    // 팀이 없으면 지금 홈 그대로 — 볼트 카드 없이 개인 볼트의 뿌리.
+    expect(findPressable(tree, "Personal 볼트 열기")).toBeUndefined();
+    expect(findPressable(tree, "Servers 그룹 열기")).toBeTruthy();
+    expect(texts(tree)).toContain("Root Host");
+  });
+
+  it("connects to a team host from its card", async () => {
+    const connectToHost = jest.fn(async (hostId: string) => `session:${hostId}`);
+    useMobileAppStore.setState({ connectToHost });
+    const tree = await mount();
+    await press(findPressable(tree, "Data Platform 볼트 열기"));
+
+    await press(findPressable(tree, "data-airflow 접속"));
+    expect(connectToHost).toHaveBeenCalledWith("team-airflow");
+    expect(mockNavigate).toHaveBeenCalledWith("Sessions");
   });
 });

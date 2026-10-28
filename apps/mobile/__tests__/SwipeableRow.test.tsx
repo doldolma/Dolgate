@@ -80,6 +80,22 @@ describe("SwipeableRow", () => {
     expect(findSwipeable(tree).props.renderRightActions).toBeInstanceOf(Function);
   });
 
+  // 고칠 것이 없는 줄(팀 호스트)도 밀기 줄로 감싼다 — 밀기 줄이 없으면 카드를 밀다 손을 뗀 것이 누르기로
+  // 읽혀 접속이 시작됐다. 판이 없으면 Swipeable 이 열 폭을 0 으로 잡아 줄은 그 자리에 있다.
+  it("액션이 없으면 오른쪽 판 없이 미는 손짓만 받는다", async () => {
+    const tree = await mount(
+      <SwipeableRow actions={[]}>
+        <Text>team-bastion</Text>
+      </SwipeableRow>,
+    );
+
+    const swipeable = findSwipeable(tree);
+    expect(swipeable.props.renderRightActions).toBeUndefined();
+    expect(
+      swipeable.findAllByType(Text).some(n => n.props.children === "team-bastion"),
+    ).toBe(true);
+  });
+
   // 열리는 문턱은 라이브러리 기본값(액션 패널 폭의 절반)에 맡긴다 — 그것이 iOS 스와이프
   // 액션과 같은 감각이다. 우리가 숫자를 주면 액션 수와 무관해져서, 액션 두 개인 목록에서는
   // 기본값보다 두 배 쉽게 열렸다(세로로 넘기다 실수로 열린다).

@@ -393,9 +393,6 @@ export function ContainersShell({
         {containersViewModel.containerTabs.length > 0 ? (
           containersViewModel.containerTabs.map((tab) => {
             const host = findHost(homeViewModel.hosts, tab.hostId);
-            if (!host) {
-              return null;
-            }
             const isActiveTab = activeContainersHostId === tab.hostId;
             return (
               <div
@@ -408,7 +405,15 @@ export function ContainersShell({
                 tabIndex={isActiveTab ? 0 : -1}
                 className="h-full min-h-0"
               >
-                {tab.kind === 'ecs-cluster' ? (
+                {!host ? (
+                  // 호스트가 목록에서 사라졌다(팀에서 빠짐·지움). 빈 화면 대신 까닭을 보인다 — 팀에서 빠져 앱이 닫았으면 그 까닭이
+                  // 탭에 담겨 있다.
+                  <EmptyState
+                    className="max-w-[620px]"
+                    title={tab.title.replace(/ · (Containers|ECS)$/, '')}
+                    description={tab.errorMessage || translate('containersShell.hostGone')}
+                  />
+                ) : tab.kind === 'ecs-cluster' ? (
                   <AwsEcsWorkspace
                     host={host}
                     tab={tab}

@@ -147,6 +147,12 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
    */
   const resolveTrustScope = (input: KnownHostTrustInput): KnownHostTrustInput => {
     const host = ctx.vaults.getHost(input.hostId);
+    // 어느 볼트에도 없는 호스트의 키는 받지 않는다(마지막 안전장치). 붙는 사이 팀에서 빠진 팀 호스트의 남은 물음에서
+    // 신뢰하면, scopeOfHost 가 모르는 호스트를 개인으로 봐서 팀 호스트의 키가 개인 볼트(개인 동기화)로 갔다.
+    // 호스트 id 가 빈 것(볼트에 없는 홉)은 그대로 둔다.
+    if (input.hostId && !host) {
+      throw new Error("Host not found");
+    }
     const tailnetId =
       host && isSshHostRecord(host) ? (host.tailnetId ?? undefined) : undefined;
     return { ...input, tailnetId };

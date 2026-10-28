@@ -27,6 +27,7 @@ import {
 } from "../rdp-monitor-layout";
 import { RdpMonitorWindows } from "../rdp-monitor-windows";
 import type { MainIpcContext } from "./context";
+import { hostPresenceGuard } from "./host-presence";
 import { PERSONAL_VAULT_ID } from "../vault-catalog";
 
 // 렌더러는 hostId 만 넘긴다. 호스트 레코드 조회와 비밀번호 해석은 여기서 한다 —
@@ -524,7 +525,11 @@ export function registerRdpIpcHandlers(
       // 시크릿을 읽기 전에 등록한다. await 뒤로 미루면 그 사이에 인증서 판정이 도착했을 때
       // 세션이 어느 호스트인지 몰라 저장된 핀을 못 찾고, 신뢰한 서버를 다시 묻게 된다.
       hostBySession.set(sessionId, hostId);
+      // 비밀값·통로를 기다리는 사이 팀에서 빠지면(지우면) 이 세션은 아직 RDP 관리자에 적히지 않아 닫기가 닿지 않는다 —
+      // 기다림 뒤 손대기 전마다 본다.
+      const ensureHostPresent = hostPresenceGuard(ctx, host.id);
       const secrets = await ctx.loadHostSecrets(host);
+      ensureHostPresent();
 
       // 어느 화면을 빌려줄지 정하는 순서:
       //   1. 이 기기에서 골라 둔 선택이 있으면 그것 (호스트가 아니라 기기 로컬 설정이다 —
@@ -592,6 +597,14 @@ export function registerRdpIpcHandlers(
       // dialAddress 는 `호스트:포트` 다. 포워드는 OS 가 고른 임의 포트에 열리므로 포트까지 실어야
       // 한다 — 코어는 주소에 실린 포트를 쓴다(rdp-core 의 resolve_dial_address).
       const dialAddress = await openSessionForward(sessionId, host);
+      // 통로가 열리는 사이 빠졌을 수 있다 — 붙지 않고, 연 통로를 닫는다.
+      try {
+        ensureHostPresent();
+      } catch (error) {
+        closeSessionForward(sessionId);
+        hostBySession.delete(sessionId);
+        throw error;
+      }
 
       // 이 창이 이 세션의 주인이다. 창이 닫히면 세션도 끊는다(아래 destroyed 훅).
       rdpManager.setSessionOwner(sessionId, event.sender.id);
@@ -671,6 +684,8 @@ export function registerRdpIpcHandlers(
       } catch (error) {
         // 접속이 실패했으면 포워드를 남기지 않는다. 남으면 원격으로 가는 리스너가 계속 산다.
         closeSessionForward(sessionId);
+        // 붙는 사이 호스트가 사라졌으면(팀에서 빠짐) 끊긴 접속이 남긴 오류 대신 그 까닭으로 끝낸다(VNC 와 같다).
+        ensureHostPresent();
         throw error;
       } finally {
         hostBySession.delete(sessionId);

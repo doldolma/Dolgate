@@ -1,4 +1,5 @@
 import type { AwsSshTunnelStartMessage } from "@shared";
+import { HostGoneError } from "./host-gone-error";
 
 // URL 조립과 타깃 조립은 모바일도 같은 것을 써야 한다 — shared-core 에 두고 다시 내보낸다.
 export {
@@ -49,6 +50,10 @@ export async function runWithAwsServerProxyAuthRetry<T>(
   try {
     return await connect(authService.getAccessToken());
   } catch (error) {
+    // 기다리는 사이 호스트가 사라졌다(팀에서 빠짐) — 인증 문제가 아니니 새로 고쳐 다시 붙지 않는다.
+    if (error instanceof HostGoneError) {
+      throw error;
+    }
     const refreshed = await authService.refreshSession().catch(() => null);
     if (refreshed?.status !== "authenticated") {
       throw error;

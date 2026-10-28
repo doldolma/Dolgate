@@ -28,6 +28,7 @@ import {
 } from "./ssh";
 import { connectAwsEc2OverSsm } from "./aws-ec2-ssh-over-ssm";
 import { withVaults } from "../vault-catalog.test-support";
+import { HostGoneError } from "../host-gone-error";
 
 const connectAwsEc2OverSsmMock = vi.mocked(connectAwsEc2OverSsm);
 
@@ -1091,6 +1092,93 @@ describe("registerSshIpcHandlers", () => {
       expect(ctx.activityLogs.append).not.toHaveBeenCalled();
     },
   );
+
+  // 붙는 사이 호스트가 볼트에서 사라지면(팀에서 빠짐·지움) — 아직 탭이 없어 닫기가 닿지 않는다. SSM 셸로 물러나지 않고,
+  // 물러나는 중이었으면 붙지 않는다(8-6 결함 ②의 데스크톱 쪽).
+  it("does not fall back to the SSM shell when the host left during the SSH attempt", async () => {
+    const ctx = createAwsEc2Context();
+    connectAwsEc2OverSsmMock.mockRejectedValue(new HostGoneError("팀에서 빠져 이 연결을 닫았습니다."));
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await expect(
+      connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
+    ).rejects.toThrow(new HostGoneError("팀에서 빠져 이 연결을 닫았습니다."));
+    expect(ctx.coreManager.connectAwsSession).not.toHaveBeenCalled();
+    expect(ctx.activityLogs.append).not.toHaveBeenCalled();
+  });
+
+  it("does not open the SSM shell when the host left after the SSH attempt failed", async () => {
+    const ctx = createAwsEc2Context();
+    // 앱 안에서 SSM 세션을 여는 길 — 열면 AWS 쪽에 세션이 생긴다. 빠진 호스트에는 열지도 않는다.
+    ctx.awsService.shouldUseInProcessSsm.mockReturnValue(true);
+    connectAwsEc2OverSsmMock.mockImplementation(async () => {
+      ctx.hosts.getById.mockReturnValue(null);
+      throw new Error("EIC not supported");
+    });
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await expect(
+      connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
+    ).rejects.toThrow(new HostGoneError("Host not found"));
+    expect(ctx.awsService.startSsmShellSession).not.toHaveBeenCalled();
+    expect(ctx.coreManager.connectAwsSession).not.toHaveBeenCalled();
+  });
+
+  it("does not dial the SSM shell when the host left while its session was opening", async () => {
+    const ctx = createAwsEc2Context({ awsPlatform: "Windows" });
+    ctx.awsService.shouldUseInProcessSsm.mockReturnValue(true);
+    let opened!: (token: unknown) => void;
+    ctx.awsService.startSsmShellSession.mockReturnValue(
+      new Promise((resolve) => {
+        opened = resolve;
+      }),
+    );
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+    const result = connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 });
+    await vi.waitFor(() => expect(ctx.awsService.startSsmShellSession).toHaveBeenCalled());
+    ctx.hosts.getById.mockReturnValue(null);
+    opened({ sessionId: "ssm-1", streamUrl: "wss://ssm", tokenValue: "t" });
+
+    await expect(result).rejects.toThrow(new HostGoneError("Host not found"));
+    expect(ctx.coreManager.connectAwsSession).not.toHaveBeenCalled();
+  });
+
+  it("does not dial the server-proxy SSM session, nor refresh the login, when the host left meanwhile", async () => {
+    const ctx = createAwsEc2Context({ awsPlatform: "Windows", awsSsmServerProxyEnabled: true });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ serverVersion: "test", capabilities: { sync: { awsProfiles: true }, sessions: { awsSsm: true } } }),
+          { status: 200 },
+        ),
+      ),
+    );
+    let envReady!: (spec: unknown) => void;
+    ctx.awsService.buildServerProxySessionEnvSpec.mockReturnValue(
+      new Promise((resolve) => {
+        envReady = resolve;
+      }),
+    );
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+    const result = connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 });
+    await vi.waitFor(() => expect(ctx.awsService.buildServerProxySessionEnvSpec).toHaveBeenCalled());
+    ctx.hosts.getById.mockReturnValue(null);
+    envReady({ env: {}, unsetEnv: [] });
+
+    await expect(result).rejects.toThrow(new HostGoneError("Host not found"));
+    expect(ctx.coreManager.connectAwsServerProxySession).not.toHaveBeenCalled();
+    expect(ctx.authService.refreshSession).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
 
   it("skips the SSH-over-SSM attempt on the next connect after a fallback", async () => {
     const ctx = createAwsEc2Context();

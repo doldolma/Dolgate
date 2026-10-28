@@ -69,7 +69,8 @@ import {
   normalizeSftpBrowserColumnWidths,
   normalizeTeamRole
 } from '@shared';
-import type { HostDetectedOs, SyncKind, TeamRole } from '@shared';
+import type { HostDetectedOs, SyncKind, TeamHostPrefsRecord, TeamRole, TeamWorkspacePrefsRecord } from '@shared';
+import { normalizeTeamHostPrefsRecord, normalizeTeamWorkspacePrefsRecord } from '@shared';
 import { normalizeAppLanguage } from '../common/i18n/locale';
 import {
   resolveLocalHistoryScope,
@@ -121,33 +122,10 @@ export interface TeamPrivateSecretRecord {
   updatedAt: string;
 }
 
-/**
- * 팀 호스트에 대한 내 설정(멤버 개인 칸). 사람마다 다른 값이라 팀 레코드에는 넣지 않고, 내 개인
- * DEK 로 잠가 내 기기끼리만 맞춘다. 테마는 여기도 아니고 이 기기에만 둔다(DesktopTeamState.local).
- */
-export interface TeamHostPrefsRecord {
-  /** 호스트 ID. */
-  id: string;
-  favorite: boolean | null;
-  agentForwarding: boolean | null;
-  /**
-   * 읽기 전용 멤버가 이 RDP 호스트에서 신뢰한 서버 인증서 지문. 팀 레코드에 쓰지 못해 내 칸에 두고, 화면과 접속에는
-   * 팀 것 대신 이것을 쓴다(overlayHostMemberPrefs).
-   */
-  rdpCertificateFingerprint: string | null;
-  /** 읽기 전용 멤버가 이 호스트로 접속하며 신뢰한 호스트 키 — 위와 같은 까닭으로 내 칸에 둔다. */
-  knownHosts: KnownHostRecord[];
-  updatedAt: string;
-}
-
-/** 팀 워크스페이스에 대한 내 설정(멤버 개인 칸). */
-export interface TeamWorkspacePrefsRecord {
-  /** 워크스페이스 ID. */
-  id: string;
-  favorite: boolean;
-  lastOpenedAt: string | null;
-  updatedAt: string;
-}
+// 멤버 개인 칸의 모양은 모바일도 같은 것을 읽으므로 shared-core 에 있다(team-member-prefs.ts). 테마는 거기도 아니고
+// 이 기기에만 둔다(DesktopTeamState.local).
+export type { TeamHostPrefsRecord, TeamWorkspacePrefsRecord } from '@shared';
+export { normalizeTeamHostPrefsRecord, normalizeTeamWorkspacePrefsRecord } from '@shared';
 
 export interface TeamPrivateDeletionRecord {
   kind: TeamPrivateKind;
@@ -1801,67 +1779,6 @@ function normalizeTeamPrivateSecretRecords(value: unknown): TeamPrivateSecretRec
     const stored = normalizeStoredEncryptedValue(entry.value);
     return stored ? [{ id: entry.id, value: stored, updatedAt: entry.updatedAt }] : [];
   });
-}
-
-export function normalizeTeamHostPrefsRecord(value: unknown): TeamHostPrefsRecord | null {
-  if (!isObject(value) || typeof value.id !== 'string' || !value.id || typeof value.updatedAt !== 'string') {
-    return null;
-  }
-  return {
-    id: value.id,
-    favorite: value.favorite === true ? true : null,
-    agentForwarding: value.agentForwarding === true ? true : null,
-    rdpCertificateFingerprint:
-      typeof value.rdpCertificateFingerprint === 'string' && value.rdpCertificateFingerprint
-        ? value.rdpCertificateFingerprint
-        : null,
-    knownHosts: Array.isArray(value.knownHosts)
-      ? value.knownHosts.map(normalizeKnownHostRecord).filter((entry): entry is KnownHostRecord => entry !== null)
-      : [],
-    updatedAt: value.updatedAt
-  };
-}
-
-/** 호스트 키 기록 하나(내 칸에서 읽을 때). 빠진 칸이 있으면 버린다 — 접속 판단에 쓰는 값이다. */
-function normalizeKnownHostRecord(value: unknown): KnownHostRecord | null {
-  if (
-    !isObject(value) ||
-    typeof value.id !== 'string' ||
-    !value.id ||
-    typeof value.host !== 'string' ||
-    typeof value.port !== 'number' ||
-    typeof value.algorithm !== 'string' ||
-    typeof value.publicKeyBase64 !== 'string' ||
-    typeof value.fingerprintSha256 !== 'string' ||
-    typeof value.createdAt !== 'string' ||
-    typeof value.updatedAt !== 'string'
-  ) {
-    return null;
-  }
-  return {
-    id: value.id,
-    ...(typeof value.tailnetId === 'string' && value.tailnetId ? { tailnetId: value.tailnetId } : {}),
-    host: value.host,
-    port: value.port,
-    algorithm: value.algorithm,
-    publicKeyBase64: value.publicKeyBase64,
-    fingerprintSha256: value.fingerprintSha256,
-    createdAt: value.createdAt,
-    lastSeenAt: typeof value.lastSeenAt === 'string' ? value.lastSeenAt : value.updatedAt,
-    updatedAt: value.updatedAt
-  };
-}
-
-export function normalizeTeamWorkspacePrefsRecord(value: unknown): TeamWorkspacePrefsRecord | null {
-  if (!isObject(value) || typeof value.id !== 'string' || !value.id || typeof value.updatedAt !== 'string') {
-    return null;
-  }
-  return {
-    id: value.id,
-    favorite: value.favorite === true,
-    lastOpenedAt: typeof value.lastOpenedAt === 'string' ? value.lastOpenedAt : null,
-    updatedAt: value.updatedAt
-  };
 }
 
 function compareIsoDesc(left: { createdAt?: string; deletedAt?: string }, right: { createdAt?: string; deletedAt?: string }): number {

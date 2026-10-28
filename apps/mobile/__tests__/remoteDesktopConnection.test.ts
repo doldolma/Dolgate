@@ -1,4 +1,4 @@
-import { NativeModules } from 'react-native';
+import { DeviceEventEmitter, NativeModules } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { act } from 'react-test-renderer';
 import type {
@@ -58,6 +58,20 @@ jest.mock('../src/lib/aws-ssm-direct', () => ({
   ...jest.requireActual('../src/lib/aws-ssm-direct'),
   startSsmPortForwardSession: jest.fn(),
 }));
+
+// 진짜 팀 받기를 쓰되, 스토어가 넘긴 deps 를 잡아 둔다 — 팀에서 빠짐을 일으키는 입구다.
+jest.mock('../src/store/team-sync', () => {
+  const actual = jest.requireActual('../src/store/team-sync');
+  const captured: { deps: unknown } = { deps: null };
+  return {
+    ...actual,
+    createTeamSync: (deps: unknown) => {
+      captured.deps = deps;
+      return actual.createTeamSync(deps);
+    },
+    mockCaptured: captured,
+  };
+});
 
 const engineNative = NativeModules.GoSshEngineModule as Record<
   string,
@@ -248,6 +262,63 @@ function emitSessionEvent(event: RemoteDesktopSessionEvent): void {
   }
   sessionEventListener(event);
 }
+
+/** 팀 team-1 을 받아 둔다(이 기기 사람은 멤버). */
+function joinTeam(
+  hosts: Array<VncHostRecord | SshHostRecord>,
+  secretsByRef: Record<string, LoadedManagedSecretPayload>,
+): void {
+  useMobileAppStore.setState({
+    teamVaults: [
+      {
+        id: 'team-1',
+        name: 'Acme',
+        role: 'member',
+        wrappedTeamDek: 'wrapped',
+        state: 'ready',
+        errorMessage: null,
+        hosts,
+        groups: [],
+        knownHosts: [],
+        awsProfiles: [],
+        tailnets: [],
+        snippets: [],
+        hostPrefs: [],
+      },
+    ],
+    teamSecrets: { 'team-1': { secretsByRef, hostCredentials: {} } },
+  });
+}
+
+/** team-1 에서 빠진다 — 팀 받기의 forgetTeam 과 같은 순서다(그 팀 호스트의 연결을 닫게 하고 → 팀을 지운다). */
+async function removeFromTeam(): Promise<void> {
+  const { mockCaptured } = jest.requireMock('../src/store/team-sync') as {
+    mockCaptured: {
+      deps: {
+        onTeamForgotten?: (teamId: string, hostIds: ReadonlySet<string>) => void;
+      } | null;
+    };
+  };
+  await act(async () => {
+    const state = useMobileAppStore.getState();
+    const vault = state.teamVaults.find(item => item.id === 'team-1');
+    if (!vault || !mockCaptured.deps) {
+      throw new Error('team-1 or team sync is missing');
+    }
+    mockCaptured.deps.onTeamForgotten?.(
+      'team-1',
+      new Set(vault.hosts.map(host => host.id)),
+    );
+    const { 'team-1': _gone, ...teamSecrets } = state.teamSecrets;
+    useMobileAppStore.setState({
+      teamVaults: state.teamVaults.filter(item => item.id !== 'team-1'),
+      teamSecrets,
+    });
+    await flushAsyncWork(24);
+  });
+}
+
+const TEAM_REMOVAL_NOTICE = '팀에서 빠져 이 연결을 닫았습니다.';
 
 function lastTunnelPayload(): Record<string, unknown> {
   const call = openTunnelNative.mock.calls.at(-1);
@@ -956,6 +1027,196 @@ describe('mobile remote desktop connection paths', () => {
     expect(useMobileAppStore.getState().pendingRdpCertificatePrompt).toBeNull();
   });
 
+  // 팀 RDP 호스트(작업 8-4) — 내 자격 증명(사용자 이름·도메인·비밀번호)이 먼저고, 신뢰한 인증서는 내 개인 칸에
+  // 둔다. 팀 레코드와 개인 볼트는 그대로다.
+  it('connects a team RDP host with my credentials and keeps the trusted certificate in my private slot', async () => {
+    const host = createRdpHost({ certificateFingerprint: null });
+    resetStore({ hosts: [], secretsByRef: {} });
+    useMobileAppStore.setState({
+      syncOutbox: [],
+      teamVaults: [
+        {
+          id: 'team-1',
+          name: 'Acme',
+          role: 'member',
+          wrappedTeamDek: 'wrapped',
+          state: 'ready',
+          errorMessage: null,
+          hosts: [host],
+          groups: [],
+          knownHosts: [],
+          awsProfiles: [],
+          tailnets: [],
+          snippets: [],
+          hostPrefs: [],
+        },
+      ],
+      teamSecrets: {
+        'team-1': {
+          secretsByRef: {},
+          hostCredentials: {
+            [host.id]: { username: 'me', domain: 'HOME', password: 'my-pw' },
+          },
+        },
+      },
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+    expect(nativeConnectMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        username: 'me',
+        domain: 'HOME',
+        password: 'my-pw',
+      }),
+    );
+
+    await act(async () => {
+      emitSessionEvent({
+        sessionId: requireSessionId(sessionId),
+        type: 'certificate',
+        fingerprint: 'cc-dd',
+      });
+      await flushAsyncWork();
+    });
+    expect(useMobileAppStore.getState().pendingRdpCertificatePrompt).toEqual(
+      expect.objectContaining({ fingerprint: 'CC-DD', previousFingerprint: null }),
+    );
+    await act(async () => {
+      await useMobileAppStore.getState().acceptRdpCertificatePrompt();
+    });
+
+    const state = useMobileAppStore.getState();
+    expect(state.teamVaults[0].hostPrefs).toEqual([
+      expect.objectContaining({
+        id: host.id,
+        rdpCertificateFingerprint: 'CC-DD',
+      }),
+    ]);
+    expect((state.teamVaults[0].hosts[0] as RdpHostRecord).certificateFingerprint).toBeNull();
+    expect(state.hosts).toEqual([]);
+    expect(state.syncOutbox).toEqual([]);
+
+    // 같은 인증서면 내 개인 칸의 지문으로 바로 믿는다.
+    nativeTrustMock.mockClear();
+    await act(async () => {
+      emitSessionEvent({
+        sessionId: requireSessionId(sessionId),
+        type: 'certificate',
+        fingerprint: 'cc-dd',
+      });
+      await flushAsyncWork();
+    });
+    expect(nativeTrustMock).toHaveBeenCalledWith(sessionId, true);
+    expect(useMobileAppStore.getState().pendingRdpCertificatePrompt).toBeNull();
+  });
+
+  // 팀 정적 AWS 프로필로 SSM 을 타는 팀 RDP 호스트(작업 8-4b) — 이 기기에 키가 없으면 AWS 를 불러 보기 전에 무엇을
+  // 넣어야 하는지 말하고, 넣은 키는 그 프로필에 얹어 쓴다.
+  it("says a team RDP host over SSM needs this device's AWS key, then uses the key once it is added", async () => {
+    const host = createRdpHost({
+      awsSsm: {
+        profileId: 'team-aws',
+        profileName: 'acme-static',
+        region: 'ap-northeast-2',
+        instanceId: 'i-rdp',
+      },
+    });
+    const team = (
+      awsKeys?: Record<string, { accessKeyId: string; secretAccessKey: string }>,
+    ) => ({
+      teamVaults: [
+        {
+          id: 'team-1',
+          name: 'Acme',
+          role: 'member' as const,
+          wrappedTeamDek: 'wrapped',
+          state: 'ready' as const,
+          errorMessage: null,
+          hosts: [host],
+          groups: [],
+          knownHosts: [],
+          awsProfiles: [
+            {
+              id: 'team-aws',
+              name: 'acme-static',
+              kind: 'static' as const,
+              region: 'ap-northeast-2',
+              accessKeyId: '',
+              secretAccessKey: '',
+              updatedAt: '2026-10-27T00:00:00.000Z',
+            },
+          ],
+          tailnets: [],
+          snippets: [],
+          hostPrefs: [],
+        },
+      ],
+      teamSecrets: {
+        'team-1': {
+          secretsByRef: {},
+          hostCredentials: { [host.id]: { username: 'me', password: 'my-pw' } },
+          ...(awsKeys ? { awsKeys } : {}),
+        },
+      },
+    });
+    resetStore({
+      auth: {
+        status: 'authenticated',
+        session: { tokens: { accessToken: 'access-token' } },
+        offline: null,
+        errorMessage: null,
+      },
+      hosts: [],
+      secretsByRef: {},
+    });
+    useMobileAppStore.setState({ syncOutbox: [], ...team() });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork(24);
+    });
+    expect(resolveAwsSessionMock).not.toHaveBeenCalled();
+    expect(
+      useMobileAppStore
+        .getState()
+        .remoteDesktopSessions.find(record => record.id === sessionId),
+    ).toEqual(
+      expect.objectContaining({
+        status: 'error',
+        errorMessage: expect.stringContaining('"acme-static"'),
+      }),
+    );
+
+    // 키를 넣은 뒤(스토어가 이 기기 키체인에 둔 것) 다시 붙으면 그 키를 얹은 프로필로 SSM 을 탄다.
+    useMobileAppStore.setState(
+      team({
+        'team-aws': { accessKeyId: 'AKIAMINE', secretAccessKey: 'mine-secret' },
+      }),
+    );
+    await act(async () => {
+      await useMobileAppStore
+        .getState()
+        .reconnectRemoteDesktopSession(requireSessionId(sessionId));
+      await flushAsyncWork(24);
+    });
+    expect(resolveAwsSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profiles: [
+          expect.objectContaining({
+            id: 'team-aws',
+            accessKeyId: 'AKIAMINE',
+            secretAccessKey: 'mine-secret',
+          }),
+        ],
+      }),
+    );
+  });
+
   it('rejects an RDP certificate event with no fingerprint', async () => {
     const host = createRdpHost();
     const secret = createRdpSecret();
@@ -1294,6 +1555,109 @@ describe('mobile remote desktop connection paths', () => {
         .getState()
         .remoteDesktopSessions.find(record => record.id === sessionId)?.status,
     ).toBe('closed');
+  });
+
+  // 8-6 결함 ②: 붙는 중에 팀에서 빠져도 뒤늦게 붙지 않는다. 원격 데스크톱은 런타임이 붙기 전부터 있어 이미 막혀
+  // 있었다 — 그 사실을 시험으로 남기고, 까닭 문구가 남는지 본다.
+  it('disconnects a team VNC that finishes connecting after the team was removed and keeps the notice', async () => {
+    const host = createVncHost();
+    const secret = createVncSecret();
+    joinTeam([host], { [secret.secretRef]: secret });
+    const pendingConnect = deferred<void>();
+    nativeConnectMock.mockReturnValueOnce(pendingConnect.promise);
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork(24);
+    });
+    expect(nativeConnectMock).toHaveBeenCalledTimes(1);
+
+    await removeFromTeam();
+    expect(nativeDisconnectMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pendingConnect.resolve(undefined);
+      await flushAsyncWork(24);
+    });
+
+    expect(nativeDisconnectMock).toHaveBeenCalledTimes(2);
+    expect(getRemoteDesktopHandle(requireSessionId(sessionId))).toBeUndefined();
+    expect(
+      useMobileAppStore
+        .getState()
+        .remoteDesktopSessions.find(record => record.id === sessionId),
+    ).toMatchObject({ status: 'error', errorMessage: TEAM_REMOVAL_NOTICE });
+  });
+
+  // SSH 를 거치는 VNC — 게이트웨이의 호스트 키 창이 떠 있는 동안 빠지면 창을 거두고(전에는 남았다) 터널도 열지 않는다.
+  it('closes the gateway host key prompt of a team VNC when the team is removed', async () => {
+    const tunnelHost = createSshTunnelHost();
+    const host = createVncHost({ sshTunnelHostId: tunnelHost.id });
+    const vncSecret = createVncSecret();
+    const sshSecret = createSshSecret();
+    joinTeam([host, tunnelHost], {
+      [vncSecret.secretRef]: vncSecret,
+      [sshSecret.secretRef]: sshSecret,
+    });
+    openTunnelNative.mockImplementationOnce(async requestJson => {
+      const request = JSON.parse(requestJson) as { id: string };
+      const decided = new Promise<boolean>((resolve, reject) => {
+        engineNative.respondHostKeyTrust.mockImplementationOnce(
+          async (_challengeId: string, trust: boolean) => {
+            resolve(trust);
+          },
+        );
+        engineNative.cancelConnect.mockImplementationOnce(async () => {
+          reject(new Error('connect: cancelled'));
+        });
+      });
+      DeviceEventEmitter.emit('GoSshEngine:connection', {
+        eventJson: JSON.stringify({
+          type: 'hostKeyTrustChallenge',
+          sessionId: request.id,
+          payload: {
+            challengeId: 'gateway-key',
+            algorithm: 'ssh-ed25519',
+            fingerprintSha256: 'SHA256:gateway',
+            publicKeyBase64: 'AAAAC3NzaC1lZDI1NTE5gateway',
+            mismatch: false,
+          },
+        }),
+      });
+      if (!(await decided)) {
+        throw new Error('connect: trusted host key is required');
+      }
+      return JSON.stringify({
+        tunnelId: request.id,
+        host: '127.0.0.1',
+        port: 45900,
+        transport: 'ssh',
+        authToken: 'ab'.repeat(32),
+      });
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork(24);
+    });
+    expect(useMobileAppStore.getState().pendingServerKeyPrompt?.hostId).toBe(
+      tunnelHost.id,
+    );
+
+    await removeFromTeam();
+
+    expect(useMobileAppStore.getState().pendingServerKeyPrompt).toBeNull();
+    expect(engineNative.cancelConnect).toHaveBeenCalledWith(
+      `rd-tunnel:${sessionId}`,
+    );
+    expect(nativeConnectMock).not.toHaveBeenCalled();
+    expect(
+      useMobileAppStore
+        .getState()
+        .remoteDesktopSessions.find(record => record.id === sessionId),
+    ).toMatchObject({ status: 'error', errorMessage: TEAM_REMOVAL_NOTICE });
   });
 
   it('logout owns and closes a tunnel that finishes opening late', async () => {

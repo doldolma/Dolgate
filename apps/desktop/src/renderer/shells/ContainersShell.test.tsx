@@ -25,6 +25,7 @@ type HostTabRecord = {
   title: string;
   kind: 'host-containers' | 'ecs-cluster';
   runtime: 'docker' | 'podman' | null;
+  errorMessage?: string;
 };
 
 function createHost(hostId: string, label: string): HostRecord {
@@ -59,28 +60,36 @@ interface ContainersShellHarnessProps {
   initialActiveHostId?: string;
   onCloseHostContainersTab?: ReturnType<typeof vi.fn>;
   onFocusHostContainersTab?: ReturnType<typeof vi.fn>;
+  /** 호스트 목록에서 뺄 것 — 탭은 그대로 남는다(팀에서 빠지면 그 팀 호스트가 목록에서 사라진다). */
+  goneHostIds?: string[];
+  /** 탭에 담긴 까닭(앱이 닫으며 남긴 것). */
+  tabErrors?: Record<string, string>;
 }
 
 function ContainersShellHarness({
   initialActiveHostId = 'host-1',
   onCloseHostContainersTab = vi.fn().mockResolvedValue(undefined),
   onFocusHostContainersTab = vi.fn(),
+  goneHostIds = [],
+  tabErrors = {},
 }: ContainersShellHarnessProps) {
   const hosts = useMemo(
-    () => [
-      createHost('host-1', 'Alpha'),
-      createHost('host-2', 'Bravo'),
-      createHost('host-3', 'Charlie'),
-    ],
-    [],
+    () =>
+      [
+        createHost('host-1', 'Alpha'),
+        createHost('host-2', 'Bravo'),
+        createHost('host-3', 'Charlie'),
+      ].filter((host) => !goneHostIds.includes(host.id)),
+    [goneHostIds],
   );
   const tabs = useMemo(
-    () => [
-      createHostTab('host-1', 'Alpha · Containers'),
-      createHostTab('host-2', 'Bravo · Containers'),
-      createHostTab('host-3', 'Charlie · Containers'),
-    ],
-    [],
+    () =>
+      [
+        createHostTab('host-1', 'Alpha · Containers'),
+        createHostTab('host-2', 'Bravo · Containers'),
+        createHostTab('host-3', 'Charlie · Containers'),
+      ].map((tab) => (tabErrors[tab.hostId] ? { ...tab, errorMessage: tabErrors[tab.hostId] } : tab)),
+    [tabErrors],
   );
   const [activeContainerHostId, setActiveContainerHostId] = useState(initialActiveHostId);
 
@@ -171,6 +180,31 @@ afterEach(() => {
 });
 
 describe('ContainersShell', () => {
+  // 팀에서 빠지면 그 팀 호스트가 목록에서 사라진다. 탭은 까닭과 함께 남는데, 호스트를 못 찾아 빈 화면이었다.
+  it('shows the reason on a tab whose host left the list, and the usual screen for the others', () => {
+    const goneHostIds = ['host-2'];
+    const tabErrors = { 'host-2': '팀에서 빠져 이 연결을 닫았습니다.' };
+    render(
+      <ContainersShellHarness initialActiveHostId="host-2" goneHostIds={goneHostIds} tabErrors={tabErrors} />,
+    );
+
+    const panel = document.getElementById('containers-host-panel-host-2');
+    expect(panel).toHaveTextContent('Bravo');
+    expect(panel).toHaveTextContent('팀에서 빠져 이 연결을 닫았습니다.');
+    expect(panel).toBeVisible();
+    expect(screen.getByTestId('containers-workspace-host-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('containers-workspace-host-2')).not.toBeInTheDocument();
+  });
+
+  it('says the host is gone when the tab kept no reason', () => {
+    const goneHostIds = ['host-2'];
+    render(<ContainersShellHarness initialActiveHostId="host-2" goneHostIds={goneHostIds} />);
+
+    expect(document.getElementById('containers-host-panel-host-2')).toHaveTextContent(
+      '이 호스트를 더 이상 찾을 수 없습니다.',
+    );
+  });
+
   it('scrolls the active host tab into view when selection changes', async () => {
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {

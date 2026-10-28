@@ -91,6 +91,7 @@ export {
   Lock,
   User,
   Users,
+  Smartphone,
   TriangleAlert,
   RotateCcw,
   Server,

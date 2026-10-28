@@ -17,6 +17,7 @@ import {
   sortSessionsByRecency,
   useMobileAppStore,
 } from "../store/useMobileAppStore";
+import { listHosts } from "../store/vault-catalog";
 import { type MobilePalette, useMobilePalette } from "../theme";
 
 function getStatusTone(status: string, palette: MobilePalette) {
@@ -48,7 +49,7 @@ export function ConnectionsScreen(): React.JSX.Element {
   const screenPadding = useScreenPadding();
   const navigation = useNavigation<NavigationProp<MainTabParamList>>();
   const storedSessions = useMobileAppStore((state) => state.sessions);
-  const hosts = useMobileAppStore((state) => state.hosts);
+  const hosts = useMobileAppStore((state) => listHosts(state));
   const resumeSession = useMobileAppStore((state) => state.resumeSession);
   const removeSession = useMobileAppStore((state) => state.removeSession);
 

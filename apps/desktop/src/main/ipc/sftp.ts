@@ -25,6 +25,8 @@ import type {
 } from "./context";
 import { resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { retryAwsSsmSshOperation } from "./coordinators/aws-ssm-ssh-retry";
+import { HostGoneError } from "../host-gone-error";
+import { hostPresenceGuard } from "./host-presence";
 import {
   buildAwsServerProxyStartMessage,
   buildAwsWsProxyTarget,
@@ -114,6 +116,8 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
 
       if (isAwsEc2HostRecord(typedHost)) {
         const endpointId = input.endpointId;
+        // AWS 를 기다리는 사이 팀에서 빠지면 끝점이 아직 없어 닫기가 닿지 않는다 — 기다림 뒤 손대기 전마다 본다.
+        const ensureHostPresent = hostPresenceGuard(ctx, typedHost.id);
         const hydratedHost =
           ctx.consumeAwsSftpPreflight(endpointId, typedHost.id) ??
           (await ctx.resolveAwsSftpPreflight({
@@ -177,6 +181,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
           message: t('sftpIpc.generatingTempKey'),
         });
         const { privateKeyPem, publicKey } = ctx.createEphemeralAwsSftpKeyPair();
+        ensureHostPresent();
 
         if (hydratedHost.awsSsmServerProxyEnabled === true) {
           // Server-proxy (bastion): sync-api opens the SSM tunnel and pushes the EIC
@@ -204,8 +209,9 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
           try {
             return await runWithAwsServerProxyAuthRetry(
               ctx.authService,
-              (accessToken) =>
-                ctx.coreManager.sftpConnect({
+              (accessToken) => {
+                ensureHostPresent();
+                return ctx.coreManager.sftpConnect({
                   endpointId,
                   host: hydratedHost.awsInstanceId,
                   port: sshPort,
@@ -221,10 +227,14 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
                     accessToken,
                     startMessage,
                   }),
-                }),
+                });
+              },
             );
           } catch (error) {
-            if (error instanceof Error && /^\[/.test(error.message)) {
+            if (
+              error instanceof HostGoneError ||
+              (error instanceof Error && /^\[/.test(error.message))
+            ) {
               throw error;
             }
             throw ctx.emitSftpConnectionFailureProgress({
@@ -269,6 +279,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
         const bindPort = await ctx.reserveLoopbackPort();
         let tunnelRuntimeId = "";
         try {
+          ensureHostPresent();
           const tunnel = await ctx.awsSsmTunnelService.start({
             runtimeId: `aws-sftp:${endpointId}`,
             profileName,
@@ -286,8 +297,10 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
             stage: "connecting-sftp",
             message: t('sftpIpc.startingSession'),
           });
-          const endpoint = await retryAwsSsmSshOperation(() =>
-            ctx.coreManager.sftpConnect({
+          const endpoint = await retryAwsSsmSshOperation(async () => {
+            // 터널이 열리는 사이 빠졌을 수 있다 — 붙지 않고, 아래에서 터널을 닫는다.
+            ensureHostPresent();
+            return ctx.coreManager.sftpConnect({
               endpointId,
               host: tunnel.bindAddress,
               port: tunnel.bindPort,
@@ -298,8 +311,8 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
               trustedHostKeysBase64,
               hostId: hydratedHost.id,
               title: hydratedHost.label,
-            }),
-          );
+            });
+          });
           ctx.trackAwsSftpTunnelRuntime(endpoint.id, tunnel.runtimeId);
           return endpoint;
         } catch (error) {
@@ -307,7 +320,10 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
           if (tunnelRuntimeId) {
             await ctx.awsSsmTunnelService.stop(tunnelRuntimeId).catch(() => undefined);
           }
-          if (error instanceof Error && /^\[/.test(error.message)) {
+          if (
+            error instanceof HostGoneError ||
+            (error instanceof Error && /^\[/.test(error.message))
+          ) {
             throw error;
           }
           throw ctx.emitSftpConnectionFailureProgress({

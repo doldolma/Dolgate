@@ -136,6 +136,21 @@ export async function resolveAwsSessionForHost(input: {
   };
 }
 
+/**
+ * 정적 키가 맞는지 STS 로 확인한다 — 팀 정적 프로필에 이 기기의 키를 넣을 때 틀린 키는 저장하지 않으려고(데스크톱
+ * 키 넣기와 같다).
+ */
+export async function verifyAwsStaticKey(
+  key: { accessKeyId: string; secretAccessKey: string },
+  region?: string | null,
+): Promise<void> {
+  assertAwsRuntimeReady();
+  await validateIdentity(
+    { accessKeyId: key.accessKeyId, secretAccessKey: key.secretAccessKey },
+    resolveAwsRegion(region),
+  );
+}
+
 function resolveManagedProfileForHost(
   profiles: ManagedAwsProfilePayload[],
   host: AwsEc2HostRecord,

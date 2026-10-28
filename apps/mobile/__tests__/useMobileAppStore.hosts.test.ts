@@ -151,6 +151,8 @@ function resetStore(overrides?: {
     activeSessionTabId: null,
     activeConnectionTab: null,
     secretsByRef: overrides?.secretsByRef ?? {},
+    teamVaults: [],
+    teamSecrets: {},
     pendingBrowserLoginState: null,
     pendingServerKeyPrompt: null,
     pendingCredentialPrompt: null,
@@ -1042,6 +1044,56 @@ describe("useMobileAppStore host mutations", () => {
     expect(useMobileAppStore.getState().syncOutbox).toContainEqual(
       expect.objectContaining({ kind: "hosts", id: "host-1", op: "upsert" }),
     );
+    expect(useMobileAppStore.getState().pendingCredentialPrompt).toBeNull();
+  });
+
+  // 팀 호스트(작업 8-2)는 개인 편집 길로 고치지 않는다 — 그 길은 개인 볼트에 쓰고 개인 동기화로 올라가므로,
+  // 고친 사용자명을 남기면 팀 호스트가 통째로 개인 볼트로 샌다(내 개인 칸에 남기는 것은 8-4).
+  it("does not copy a team host into the personal vault when its username is corrected", async () => {
+    const teamHost = { ...createExistingHost(), id: "team-host-1", label: "Team host" };
+    resetStore({ auth: createAuthenticatedState(), hosts: [] });
+    useMobileAppStore.setState({
+      syncOutbox: [],
+      teamVaults: [
+        {
+          id: "team-1",
+          name: "Acme",
+          role: "member",
+          wrappedTeamDek: "wrapped",
+          state: "ready",
+          errorMessage: null,
+          hosts: [teamHost],
+          groups: [],
+          knownHosts: [],
+          awsProfiles: [],
+          tailnets: [],
+          snippets: [],
+          hostPrefs: [],
+        },
+      ],
+      pendingCredentialPrompt: {
+        hostId: "team-host-1",
+        hostLabel: "Team host",
+        authType: "password",
+        message: null,
+        initialValue: {},
+        initialUsername: "ubuntu",
+      },
+    });
+
+    await act(async () => {
+      await useMobileAppStore
+        .getState()
+        .submitCredentialPrompt({ username: "admin", password: "fresh" });
+    });
+
+    expect(useMobileAppStore.getState().hosts).toEqual([]);
+    expect(
+      useMobileAppStore
+        .getState()
+        .syncOutbox.some((entry) => entry.kind === "hosts"),
+    ).toBe(false);
+    expect(useMobileAppStore.getState().teamVaults[0]?.hosts).toEqual([teamHost]);
     expect(useMobileAppStore.getState().pendingCredentialPrompt).toBeNull();
   });
 

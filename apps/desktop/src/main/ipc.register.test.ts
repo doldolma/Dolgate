@@ -116,10 +116,11 @@ function createDependencySet() {
     installAuthorizedKey: vi.fn(),
     setTailnetConfigProvider: vi.fn(),
     pushTailnetConfigs: vi.fn(),
+    setHostPresence: vi.fn(),
   };
 
   return {
-    hosts: {} as any,
+    hosts: { getById: vi.fn((id: string) => (id === "present-host" ? { id } : null)) } as any,
     groups: {} as any,
     settings: {} as any,
     portForwards: {} as any,
@@ -205,6 +206,11 @@ describe("registerIpcHandlers", () => {
       1,
     );
     expect(deps.coreManager.setTerminalStreamHandler).toHaveBeenCalledTimes(1);
+    // 다이얼 직전 확인은 볼트 목록으로 답한다 — 어느 볼트에도 없는 호스트는 '없다'.
+    expect(deps.coreManager.setHostPresence).toHaveBeenCalledTimes(1);
+    const isHostPresent = deps.coreManager.setHostPresence.mock.calls[0][0] as (hostId: string) => boolean;
+    expect(isHostPresent("gone-host")).toBe(false);
+    expect(isHostPresent("present-host")).toBe(true);
 
     expect(moduleSpies.auth).toHaveBeenCalledTimes(1);
     expect(moduleSpies.sync).toHaveBeenCalledTimes(1);
