@@ -2416,7 +2416,8 @@ describe('SessionScreen', () => {
   );
 
   // ── 실패 화면의 '키 넣기'(작업 8-4b) ──────────────────────────────────────────────
-  // 이 기기에 키가 없는 팀 정적 AWS 프로필로 붙다 실패했을 때만 단다. 넣으면 그 세션을 알아서 다시 붙인다.
+  // 이 기기에 키가 없거나 AWS 가 이 기기의 키를 거절한 팀 정적 AWS 프로필로 붙다 실패했을 때만 단다. 넣으면 그 세션을
+  // 알아서 다시 붙인다.
   const AWS_KEY = { accessKeyId: 'AKIAMINE', secretAccessKey: 'mine-secret' };
 
   function awsTeam(hosts: MobileTeamVault['hosts']): MobileTeamVault {
@@ -2535,6 +2536,107 @@ describe('SessionScreen', () => {
     }
   });
 
+  it("offers a new team AWS key on the terminal failure banner when AWS rejected this device's key", async () => {
+    const ec2: AwsEc2HostRecord = {
+      id: 'team-ec2',
+      kind: 'aws-ec2',
+      label: 'Team EC2',
+      awsProfileId: 'acme-aws',
+      awsProfileName: 'acme-static',
+      awsRegion: 'ap-northeast-2',
+      awsInstanceId: 'i-team',
+      createdAt: '2026-10-27T00:00:00.000Z',
+      updatedAt: '2026-10-27T00:00:00.000Z',
+    };
+    const oldKey = { accessKeyId: 'AKIAOLD', secretAccessKey: 'old-secret' };
+    // 저장하면 키를 갈아 끼우고 거절 표시를 지운다 — 스토어가 하는 대로.
+    const saveTeamAwsKey = jest.fn(async () => {
+      useMobileAppStore.setState({
+        teamSecrets: {
+          'team-acme': {
+            secretsByRef: {},
+            hostCredentials: {},
+            awsKeys: { 'acme-aws': AWS_KEY },
+          },
+        },
+        teamAwsKeyRejections: {},
+      });
+    });
+    const resumeSession = jest.fn(async () => 'session-ec2');
+    act(() => {
+      useMobileAppStore.setState({
+        sessions: [
+          session,
+          {
+            ...session,
+            id: 'session-ec2',
+            sessionId: 'session-ec2',
+            hostId: 'team-ec2',
+            title: 'Team EC2',
+            status: 'error',
+            errorMessage: 'rejected key',
+          },
+        ],
+        activeSessionTabId: 'session-ec2',
+        activeConnectionTab: { kind: 'terminal', id: 'session-ec2' },
+        teamVaults: [awsTeam([ec2])],
+        teamSecrets: {
+          'team-acme': {
+            secretsByRef: {},
+            hostCredentials: {},
+            awsKeys: { 'acme-aws': oldKey },
+          },
+        },
+        teamAwsKeyRejections: {},
+        saveTeamAwsKey,
+        resumeSession,
+      });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+    const addKey = () =>
+      tree!.root.findAllByProps({
+        accessibilityLabel: 'Team EC2 에 AWS 키 넣기',
+      });
+    const modal = () => tree!.root.findByType(AwsKeyModal);
+    try {
+      // 키가 있고 거절되지 않은 실패(다른 까닭)에는 달지 않는다.
+      expect(addKey()).toHaveLength(0);
+
+      act(() => {
+        useMobileAppStore.setState({ teamAwsKeyRejections: { 'acme-aws': true } });
+      });
+      expect(addKey().length).toBeGreaterThan(0);
+      await act(async () => {
+        addKey()[0].props.onPress();
+      });
+      expect(modal().props.request).toEqual({
+        profileName: 'acme-static',
+        teamName: 'Acme Infra',
+      });
+
+      await act(async () => {
+        await modal().props.onSave(AWS_KEY);
+      });
+      expect(saveTeamAwsKey).toHaveBeenCalledWith('team-ec2', AWS_KEY);
+      expect(resumeSession).toHaveBeenCalledWith('session-ec2');
+      expect(modal().props.request).toBeNull();
+      expect(addKey()).toHaveLength(0);
+    } finally {
+      await act(async () => {
+        tree!.unmount();
+        useMobileAppStore.setState({
+          teamVaults: [],
+          teamSecrets: {},
+          teamAwsKeyRejections: {},
+        });
+      });
+    }
+  });
+
   it('offers to add a team AWS key on the remote desktop failure view, and only for a missing team key', async () => {
     const rdp = {
       id: 'team-rdp',
@@ -2620,6 +2722,12 @@ describe('SessionScreen', () => {
       expect(saveTeamAwsKey).toHaveBeenCalledWith('team-rdp', AWS_KEY);
       expect(reconnectRemoteDesktopSession).toHaveBeenCalledWith('rd-team');
       expect(surface().props.onAddAwsKey).toBeUndefined();
+
+      // AWS 가 넣은 키를 거절하면 다시 단다.
+      act(() => {
+        useMobileAppStore.setState({ teamAwsKeyRejections: { 'acme-aws': true } });
+      });
+      expect(surface().props.onAddAwsKey).toEqual(expect.any(Function));
     } finally {
       await act(async () => {
         tree!.unmount();
@@ -2627,6 +2735,7 @@ describe('SessionScreen', () => {
           remoteDesktopSessions: [],
           teamVaults: [],
           teamSecrets: {},
+          teamAwsKeyRejections: {},
         });
       });
     }

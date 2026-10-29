@@ -95,7 +95,7 @@ import { getLiveRemoteDesktopSessions } from '../store/remoteDesktopSlice';
 import {
   listHosts,
   snippetsForSession,
-  teamAwsKeyMissing,
+  teamAwsKeyToEnter,
   teamNamesByHostId,
 } from '../store/vault-catalog';
 import { buildRecentConnections } from '../lib/recent-connections';
@@ -467,17 +467,17 @@ export function SessionScreen(): React.JSX.Element {
     activeTab?.kind === 'rdp' || activeTab?.kind === 'vnc'
       ? (liveRdSessions.find(session => session.id === activeTab.id) ?? null)
       : null;
-  // 실패 화면의 '키 넣기' — 이 기기에 키가 없는 팀 정적 AWS 프로필로 붙다 실패했을 때(데스크톱 M3 와 같다). 넣으면
-  // 그 세션을 다시 붙인다.
+  // 실패 화면의 '키 넣기' — 이 기기에 키가 없거나 AWS 가 이 기기의 키를 거절한 팀 정적 AWS 프로필로 붙다 실패했을
+  // 때(데스크톱 M3 와 같다). 넣으면 그 세션을 다시 붙인다.
   const activeSessionNeedsAwsKey = useMobileAppStore(
     state =>
       activeSession?.status === 'error' &&
-      teamAwsKeyMissing(state, activeSession.hostId) !== null,
+      teamAwsKeyToEnter(state, activeSession.hostId) !== null,
   );
   const activeRdNeedsAwsKey = useMobileAppStore(
     state =>
       activeRdSession?.status === 'error' &&
-      teamAwsKeyMissing(state, activeRdSession.hostId) !== null,
+      teamAwsKeyToEnter(state, activeRdSession.hostId) !== null,
   );
   const [awsKeyTarget, setAwsKeyTarget] = useState<{
     kind: 'terminal' | 'rd';
@@ -486,12 +486,12 @@ export function SessionScreen(): React.JSX.Element {
   } | null>(null);
   const awsKeyProfileName = useMobileAppStore(state =>
     awsKeyTarget
-      ? (teamAwsKeyMissing(state, awsKeyTarget.hostId)?.profileName ?? null)
+      ? (teamAwsKeyToEnter(state, awsKeyTarget.hostId)?.profileName ?? null)
       : null,
   );
   const awsKeyTeamName = useMobileAppStore(state =>
     awsKeyTarget
-      ? (teamAwsKeyMissing(state, awsKeyTarget.hostId)?.teamName ?? null)
+      ? (teamAwsKeyToEnter(state, awsKeyTarget.hostId)?.teamName ?? null)
       : null,
   );
   const remoteDesktopOrientationUnlocked =

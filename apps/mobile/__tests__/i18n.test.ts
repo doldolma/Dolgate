@@ -179,6 +179,20 @@ describe('연결 실패 문구', () => {
     ).toBe(t('connectFailure.awsAuth'));
   });
 
+  // 팀 키 거절 문구는 AWS 원문 문장을 싣지 않는다 — 실으면 위 규칙이 '다시 로그인'으로 바꾼다. 할 일은 키를 다시
+  // 넣는 것이라 두 언어 모두 그대로 남아야 한다.
+  it('팀 AWS 키 거절 문구는 그대로 남는다', () => {
+    for (const language of ['ko', 'en'] as const) {
+      const message = i18next.t('aws.teamKeyRejected', {
+        lng: language,
+        profile: 'acme-static',
+        code: 'InvalidClientTokenId',
+      });
+      expect(message).toContain('InvalidClientTokenId');
+      expect(getConnectFailureMessage(message, 'i-0abc')).toBe(message);
+    }
+  });
+
   // 분류되지 않은 실패를 뭉뚱그린 문구로 덮으면 유일한 단서가 사라진다.
   it('분류되지 않은 오류는 원문을 그대로 남긴다', () => {
     expect(getConnectFailureMessage('some brand new failure', 'host')).toBe(

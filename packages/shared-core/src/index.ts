@@ -5,6 +5,7 @@ export * from "./client-api";
 export * from "./command-exit";
 export * from "./connection-failure";
 export * from "./credential-retry";
+export * from "./aws-key-rejection";
 export * from "./aws-ssm-attempt";
 export * from "./aws-ws-proxy";
 export * from "./connection-stages";

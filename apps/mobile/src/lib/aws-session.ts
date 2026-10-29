@@ -15,6 +15,7 @@ import type {
   ManagedAwsSsoProfilePayload,
   ManagedAwsStaticProfilePayload,
 } from "@dolssh/shared-core";
+import { isAwsKeyRejectedError } from "@dolssh/shared-core";
 import {
   cancelAwsSsoBrowserLogin,
   completeAwsSsoLoginHandoff,
@@ -40,6 +41,22 @@ type AwsProfileResolutionContext = {
   depth: number;
   resolvedSsoProfileId?: string | null;
 };
+
+/**
+ * AWS 가 이 정적 프로필의 키를 받지 않았다(`isAwsKeyRejectedError`). 어느 프로필의 키인지 함께 알린다 — 팀 정적
+ * 프로필에 이 기기에서 넣은 키면 실패 화면이 '키 넣기'를 다시 낸다. 문구는 AWS 원문 그대로다.
+ */
+export class AwsKeyRejectedError extends Error {
+  constructor(
+    readonly profileId: string,
+    /** AWS 오류 코드(`InvalidClientTokenId` 등). */
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "AwsKeyRejectedError";
+  }
+}
 
 export interface AwsSsoBrowserLoginPrompt {
   loginId: string;
@@ -237,10 +254,22 @@ function resolveStaticProfileCredentials(
     accessKeyId: profile.accessKeyId,
     secretAccessKey: profile.secretAccessKey,
   };
-  return validateIdentity(credentials, region).then(() => ({
-    credentials,
-    region,
-  }));
+  return validateIdentity(credentials, region).then(
+    () => ({
+      credentials,
+      region,
+    }),
+    (error: unknown) => {
+      // 키 자체가 거절됐으면 어느 프로필의 키인지 붙여 올린다(role 의 원본일 때도 여기다).
+      throw isAwsKeyRejectedError(error)
+        ? new AwsKeyRejectedError(
+            profile.id,
+            (error as Error).name,
+            (error as Error).message,
+          )
+        : error;
+    },
+  );
 }
 
 async function resolveSsoProfileCredentials(input: {

@@ -8,7 +8,7 @@ import {
   privateDecrypt,
   randomUUID,
 } from "node:crypto";
-import { AWS_PROFILE_REGION_OPTIONS } from "@shared";
+import { AWS_PROFILE_REGION_OPTIONS, isAwsKeyRejectedError } from "@shared";
 import type {
   AwsEc2InstanceSummary,
   AwsWindowsPasswordFailure,
@@ -1853,11 +1853,12 @@ export class AwsService {
   }
 
   /**
-   * 이 기기에 키가 없어 붙을 수 없는 팀 정적 프로필(키는 동기화하지 않아 기기마다 넣는다 — 팀에는 설정만 간다).
-   * assume role 이면 같은 팀의
-   * 원본을 본다. 펼친 이름으로 찾는다 — 개인 것이거나 키가 있으면 null.
+   * 이 기기의 키를 넣는 팀 정적 프로필(키는 동기화하지 않아 기기마다 넣는다 — 팀에는 설정만 간다). assume role 이면
+   * 같은 팀의 원본을 본다. 펼친 이름으로 찾는다 — 개인 것이거나 정적이 아니면 null.
    */
-  private findTeamProfileMissingKey(profileName: string): AwsProfileMissingKey | null {
+  private findTeamProfileKeyHolder(
+    profileName: string,
+  ): { missingKey: AwsProfileMissingKey; hasKey: boolean } | null {
     for (const team of this.teamProfileSource()) {
       const payload = team.payloads.find(
         (item) => teamAwsProfileName(team.teamId, item.name) === profileName,
@@ -1869,15 +1870,21 @@ export class AwsService {
         payload.kind === "role"
           ? team.payloads.find((item) => item.id === payload.sourceProfileId)
           : payload;
-      if (
-        keyHolder?.kind === "static" &&
-        !(keyHolder.accessKeyId.trim() && keyHolder.secretAccessKey.trim())
-      ) {
-        return { teamId: team.teamId, profileId: keyHolder.id, profileName: keyHolder.name };
+      if (keyHolder?.kind !== "static") {
+        return null;
       }
-      return null;
+      return {
+        missingKey: { teamId: team.teamId, profileId: keyHolder.id, profileName: keyHolder.name },
+        hasKey: Boolean(keyHolder.accessKeyId.trim() && keyHolder.secretAccessKey.trim()),
+      };
     }
     return null;
+  }
+
+  /** 이 기기에 키가 없어 붙을 수 없는 팀 정적 프로필. 개인 것이거나 키가 있으면 null. */
+  private findTeamProfileMissingKey(profileName: string): AwsProfileMissingKey | null {
+    const holder = this.findTeamProfileKeyHolder(profileName);
+    return holder && !holder.hasKey ? holder.missingKey : null;
   }
 
   resolveManagedProfileName(profileId: string | null | undefined): string | null {
@@ -3359,7 +3366,28 @@ export class AwsService {
         accountId: identity.account,
         arn: identity.arn,
       };
-    } catch {
+    } catch (error) {
+      // AWS 가 이 기기에서 넣은 팀 키를 거절했으면 키가 없을 때와 같이 다시 넣을 곳을 준다 — 연결 실패 화면이 "키 넣기"를
+      // 낸다. 새 키는 저장할 때 STS 로 확인하고 갈아 끼운다.
+      const rejectedKey =
+        awsRootDir === this.awsProfileRootDir && isAwsKeyRejectedError(error)
+          ? this.findTeamProfileKeyHolder(profileName)
+          : null;
+      if (rejectedKey?.hasKey) {
+        return {
+          id: profileId,
+          profileName,
+          available: true,
+          isSsoProfile,
+          isAuthenticated: false,
+          configuredRegion: configuredRegion || null,
+          errorMessage: t('aws.profile.teamKeyRejected', {
+            profile: rejectedKey.missingKey.profileName,
+            code: (error as Error).name,
+          }),
+          missingKey: rejectedKey.missingKey,
+        };
+      }
       return {
         id: profileId,
         profileName,

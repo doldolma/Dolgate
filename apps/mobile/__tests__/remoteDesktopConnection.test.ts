@@ -30,8 +30,12 @@ import {
   _resetHandlesForTests,
   getRemoteDesktopHandle,
 } from '../src/store/remoteDesktopSlice';
-import { resolveAwsSessionForHost } from '../src/lib/aws-session';
+import {
+  AwsKeyRejectedError,
+  resolveAwsSessionForHost,
+} from '../src/lib/aws-session';
 import { startSsmPortForwardSession } from '../src/lib/aws-ssm-direct';
+import { teamAwsKeyToEnter } from '../src/store/vault-catalog';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: jest.fn(async () => null),
@@ -1114,9 +1118,8 @@ describe('mobile remote desktop connection paths', () => {
     expect(useMobileAppStore.getState().pendingRdpCertificatePrompt).toBeNull();
   });
 
-  // 팀 정적 AWS 프로필로 SSM 을 타는 팀 RDP 호스트(작업 8-4b) — 이 기기에 키가 없으면 AWS 를 불러 보기 전에 무엇을
-  // 넣어야 하는지 말하고, 넣은 키는 그 프로필에 얹어 쓴다.
-  it("says a team RDP host over SSM needs this device's AWS key, then uses the key once it is added", async () => {
+  /** 팀 정적 AWS 프로필(acme-static, 팀 레코드에는 키가 없다)로 SSM 을 타는 팀 RDP 호스트. */
+  function teamRdpOverSsm() {
     const host = createRdpHost({
       awsSsm: {
         profileId: 'team-aws',
@@ -1163,6 +1166,13 @@ describe('mobile remote desktop connection paths', () => {
         },
       },
     });
+    return { host, team };
+  }
+
+  // 팀 정적 AWS 프로필로 SSM 을 타는 팀 RDP 호스트(작업 8-4b) — 이 기기에 키가 없으면 AWS 를 불러 보기 전에 무엇을
+  // 넣어야 하는지 말하고, 넣은 키는 그 프로필에 얹어 쓴다.
+  it("says a team RDP host over SSM needs this device's AWS key, then uses the key once it is added", async () => {
+    const { host, team } = teamRdpOverSsm();
     resetStore({
       auth: {
         status: 'authenticated',
@@ -1215,6 +1225,63 @@ describe('mobile remote desktop connection paths', () => {
         ],
       }),
     );
+  });
+
+  // 넣은 키를 AWS 가 거절하면(폐기·교체) 키가 없을 때와 같이 다시 넣을 자리를 낸다. 실패 화면은 연결 실패 분류를
+  // 지나는데, AWS 원문('security token … invalid')이면 'AWS 인증 만료'로 바뀐다 — 우리 문구로 끝나는지 본다.
+  it("says AWS rejected this device's key for a team RDP host over SSM, keeping the key until a new one", async () => {
+    const { host, team } = teamRdpOverSsm();
+    const oldKey = { accessKeyId: 'AKIAOLD', secretAccessKey: 'old-secret' };
+    resetStore({
+      auth: {
+        status: 'authenticated',
+        session: { tokens: { accessToken: 'access-token' } },
+        offline: null,
+        errorMessage: null,
+      },
+      hosts: [],
+      secretsByRef: {},
+    });
+    useMobileAppStore.setState({ syncOutbox: [], ...team({ 'team-aws': oldKey }) });
+    resolveAwsSessionMock.mockRejectedValueOnce(
+      new AwsKeyRejectedError(
+        'team-aws',
+        'InvalidClientTokenId',
+        'The security token included in the request is invalid.',
+      ),
+    );
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork(24);
+    });
+
+    const rejected =
+      '팀 프로필 "acme-static" 에 넣은 이 기기의 AWS 키를 AWS 가 받지 않았습니다(InvalidClientTokenId).';
+    const state = useMobileAppStore.getState();
+    expect(
+      state.remoteDesktopSessions.find(record => record.id === sessionId),
+    ).toEqual(expect.objectContaining({ status: 'error', errorMessage: rejected }));
+    expect(
+      state.connectionViews[requireSessionId(sessionId)]?.failureMessage,
+    ).toBe(rejected);
+    expect(state.teamAwsKeyRejections).toEqual({ 'team-aws': true });
+    expect(teamAwsKeyToEnter(state, host.id)).toEqual(
+      expect.objectContaining({ teamId: 'team-1', profileId: 'team-aws' }),
+    );
+    expect(state.teamSecrets['team-1'].awsKeys).toEqual({ 'team-aws': oldKey });
+    expect(startSsmPortForwardSessionMock).not.toHaveBeenCalled();
+
+    // 다시 붙을 때는 AWS 에 다시 묻고, 받아들여지면 표시를 지운다.
+    await act(async () => {
+      await useMobileAppStore
+        .getState()
+        .reconnectRemoteDesktopSession(requireSessionId(sessionId));
+      await flushAsyncWork(24);
+    });
+    expect(resolveAwsSessionMock).toHaveBeenCalledTimes(2);
+    expect(useMobileAppStore.getState().teamAwsKeyRejections).toEqual({});
   });
 
   it('rejects an RDP certificate event with no fingerprint', async () => {

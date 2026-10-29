@@ -2871,6 +2871,51 @@ describe('AwsService team profile management', () => {
     expect(status.missingKey).toBeUndefined();
   });
 
+  it('gives the key slot again when AWS rejects the key this device put in a team static profile, for the profile and for a role on it', async () => {
+    const { service, scope, vault } = await createTeamService([managedStaticProfile('mine')]);
+    scope.awsProfiles.upsert(
+      managedStaticProfile('keyed', { id: 'team:keyed', accessKeyId: 'AKIAOLD', secretAccessKey: 'old', region: 'us-east-1' }),
+    );
+    scope.awsProfiles.upsert(managedRoleProfile('ops', 'team:keyed', { id: 'team:ops' }));
+    await service.materializeManagedProfiles();
+    const sts = service as unknown as { stsGetCallerIdentityFromRoot: ReturnType<typeof vi.fn> };
+    const awsError = (name: string, message: string) => Object.assign(new Error(message), { name });
+    sts.stsGetCallerIdentityFromRoot = vi
+      .fn()
+      .mockRejectedValue(awsError('InvalidClientTokenId', 'The security token included in the request is invalid.'));
+    const missingKey = { teamId: TEAM_ID, profileId: 'team:keyed', profileName: 'keyed' };
+
+    await expect(service.getProfileStatus('keyed', vault)).resolves.toMatchObject({
+      isAuthenticated: false,
+      errorMessage: '팀 프로필 "keyed" 에 넣은 이 기기의 AWS 키를 AWS 가 받지 않았습니다(InvalidClientTokenId).',
+      missingKey,
+    });
+    // 접속 경로는 펼친 이름으로 묻는다. role 은 원본의 키를 가리킨다.
+    await expect(service.getProfileStatus(teamAwsProfileName(TEAM_ID, 'ops'))).resolves.toMatchObject({ missingKey });
+    sts.stsGetCallerIdentityFromRoot.mockRejectedValue(
+      awsError('SignatureDoesNotMatch', 'The request signature we calculated does not match the signature you provided.'),
+    );
+    await expect(service.getProfileStatus('keyed', vault)).resolves.toMatchObject({
+      errorMessage: expect.stringContaining('(SignatureDoesNotMatch)'),
+      missingKey,
+    });
+
+    // 다른 실패(시간 초과 등)는 그대로다 — 키를 다시 넣어도 풀리지 않는다.
+    sts.stsGetCallerIdentityFromRoot.mockRejectedValue(awsError('TimeoutError', 'The operation was aborted due to timeout'));
+    const offline = await service.getProfileStatus('keyed', vault);
+    expect(offline.missingKey).toBeUndefined();
+    expect(offline.errorMessage).toBe('이 프로필은 저장된 AWS 자격 증명으로 인증하지 못했습니다.');
+
+    // 개인 프로필의 키는 개인 볼트 것이라 여기서 다시 넣게 하지 않는다(설정에서 고친다).
+    sts.stsGetCallerIdentityFromRoot.mockRejectedValue(
+      awsError('InvalidClientTokenId', 'The security token included in the request is invalid.'),
+    );
+    const personal = await service.getProfileStatus('mine');
+    expect(personal.missingKey).toBeUndefined();
+    expect(personal.errorMessage).toBe('이 프로필은 저장된 AWS 자격 증명으로 인증하지 못했습니다.');
+    expect(sts.stsGetCallerIdentityFromRoot).toHaveBeenCalledTimes(5);
+  });
+
   it('shows a team profile under its own name in the details, and logs in to a team SSO profile by that name', async () => {
     const { service, scope, vault } = await createTeamService();
     scope.awsProfiles.upsert(managedStaticProfile('prod', { id: 'team:prod', accessKeyId: 'AKIAMINE', secretAccessKey: 'mine' }));

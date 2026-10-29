@@ -973,7 +973,8 @@
       "sameName": "The new profile name is the same as the current one.",
       "linkedNotFoundNamed": "The linked AWS profile \"{{label}}\" could not be found. Choose the profile again in the host settings.",
       "linkedNotFound": "The linked AWS profile could not be found. Choose the profile again in the host settings.",
-      "teamKeyMissing": "This device has no AWS key for the team profile \"{{profile}}\". Keys aren't synced, so add one on each device."
+      "teamKeyMissing": "This device has no AWS key for the team profile \"{{profile}}\". Keys aren't synced, so add one on each device.",
+      "teamKeyRejected": "AWS rejected this device's key for the team profile \"{{profile}}\" ({{code}})."
     },
     "role": {
       "assumeDenied": "This role cannot be assumed with the selected source profile. Check the IAM permissions and the target role's trust policy.",

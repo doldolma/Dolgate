@@ -182,6 +182,7 @@ import {
   resumeDroppedActiveSession,
 } from '../lib/session-resume';
 import {
+  AwsKeyRejectedError,
   type AwsSsoBrowserLoginPrompt,
   resolveAwsSessionForHost,
   type ResolvedAwsSessionResult,
@@ -291,7 +292,9 @@ import {
   secretForHost,
   snippetsForHost,
   tailnetsForHost,
+  teamAwsDeviceKeySlot,
   teamAwsKeyMissing,
+  teamAwsKeyToEnter,
   teamIdOfHost,
   withTrustedKnownHost,
 } from './vault-catalog';
@@ -943,6 +946,11 @@ interface MobileAppState {
   teamVaults: TeamSyncSlice['teamVaults'];
   /** 팀마다 받은 비밀값과 내 자격 증명. 저장은 키체인이다(앱 저장소에 남기지 않는다). */
   teamSecrets: TeamSyncSlice['teamSecrets'];
+  /**
+   * AWS 가 거절한, 이 기기에서 넣은 팀 정적 AWS 키(프로필 id). 실패 화면이 '키 넣기'를 다시 낸다. 옛 키는 지우지
+   * 않고 새 키가 확인될 때 갈아 끼운다. 메모리에만 둔다 — 다시 붙는 데 성공하거나 새 키를 넣으면 지운다.
+   */
+  teamAwsKeyRejections: Record<string, true>;
   sessions: MobileSessionRecord[];
   sftpSessions: MobileSftpSessionRecord[];
   /** 열려 있는 원격 파일 편집기. 한 번에 하나만 띄운다. */
@@ -1032,7 +1040,8 @@ interface MobileAppState {
   toggleHostFavorite: (hostId: string) => Promise<void>;
   /**
    * 그 팀 호스트가 쓰는 팀 정적 AWS 프로필에 이 기기의 키를 넣는다(실패 화면의 '키 넣기'). STS 로 확인해 맞을 때만
-   * 저장한다 — 틀리면 던지고 아무것도 남기지 않는다. 다시 붙는 것은 부르는 쪽이 한다.
+   * 저장한다 — 틀리면 던지고 아무것도 남기지 않는다. AWS 가 거절한 옛 키는 이때 갈아 끼운다. 다시 붙는 것은 부르는
+   * 쪽이 한다.
    */
   saveTeamAwsKey: (
     hostId: string,
@@ -2614,6 +2623,7 @@ function createEmptyProtectedState(): Pick<
   | 'secretsByRef'
   | 'teamVaults'
   | 'teamSecrets'
+  | 'teamAwsKeyRejections'
   | 'sessions'
   | 'sftpSessions'
   | 'sftpTransfers'
@@ -2636,6 +2646,7 @@ function createEmptyProtectedState(): Pick<
     secretsByRef: {},
     teamVaults: [],
     teamSecrets: {},
+    teamAwsKeyRejections: {},
     sessions: [],
     sftpSessions: [],
     sftpTransfers: [],
@@ -4935,6 +4946,56 @@ export const useMobileAppStore = create<MobileAppState>()(
           : null;
       };
 
+      const clearTeamAwsKeyRejection = (profileId: string) => {
+        if (!get().teamAwsKeyRejections[profileId]) {
+          return;
+        }
+        set(state => {
+          const { [profileId]: _cleared, ...rest } = state.teamAwsKeyRejections;
+          return { teamAwsKeyRejections: rest };
+        });
+      };
+
+      /**
+       * 세 접속 길(터미널·SFTP·원격 데스크톱)의 AWS 자격 증명 풀기. AWS 가 이 기기에서 넣은 팀 키를 거절하면 그 사실을
+       * 남기고(실패 화면이 '키 넣기'를 다시 낸다) 무엇이 거절됐는지 말하는 오류로 바꾼다 — AWS 원문 문장은 연결 실패
+       * 분류가 'AWS 인증 만료'로 바꿔 버려 코드만 붙인다. 키가 받아들여지면 남긴 표시를 지운다. 옛 키는 지우지 않는다.
+       */
+      const resolveAwsSessionOfHost = async (
+        hostId: string,
+        input: Parameters<typeof resolveAwsSessionForHost>[0],
+      ): Promise<ResolvedAwsSessionResult> => {
+        const deviceKey = () => teamAwsDeviceKeySlot(get(), hostId);
+        try {
+          const resolved = await resolveAwsSessionForHost(input);
+          const accepted = deviceKey();
+          if (accepted) {
+            clearTeamAwsKeyRejection(accepted.profileId);
+          }
+          return resolved;
+        } catch (error) {
+          const rejected = deviceKey();
+          if (
+            !(error instanceof AwsKeyRejectedError) ||
+            rejected?.profileId !== error.profileId
+          ) {
+            throw error;
+          }
+          set(state => ({
+            teamAwsKeyRejections: {
+              ...state.teamAwsKeyRejections,
+              [rejected.profileId]: true,
+            },
+          }));
+          throw new Error(
+            t('aws.teamKeyRejected', {
+              profile: rejected.profileName,
+              code: error.code,
+            }),
+          );
+        }
+      };
+
       const markSessionState = (
         sessionId: string,
         status: MobileSessionRecord['status'],
@@ -5714,7 +5775,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         let retriedAuth = false;
         while (!resolvedSession) {
           try {
-            resolvedSession = await resolveAwsSessionForHost({
+            resolvedSession = await resolveAwsSessionOfHost(host.id, {
               host,
               profiles: awsProfilesForHost(get(), host.id),
               serverUrl: get().settings.serverUrl,
@@ -6296,7 +6357,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               let retriedAuth = false;
               while (!resolvedSession) {
                 try {
-                  resolvedSession = await resolveAwsSessionForHost({
+                  resolvedSession = await resolveAwsSessionOfHost(host.id, {
                     host: awsHost,
                     profiles: awsProfilesForHost(get(), host.id),
                     serverUrl: get().settings.serverUrl,
@@ -7288,7 +7349,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           let retriedAuth = options?.retriedAuth === true;
           while (!resolvedSession) {
             try {
-              resolvedSession = await resolveAwsSessionForHost({
+              resolvedSession = await resolveAwsSessionOfHost(host.id, {
                 host,
                 profiles: awsProfilesForHost(get(), host.id),
                 serverUrl: get().settings.serverUrl,
@@ -8433,6 +8494,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           secretsByRef: {},
           teamVaults: [],
           teamSecrets: {},
+          teamAwsKeyRejections: {},
           sessions: [],
           sftpSessions: [],
           sftpEditor: null,
@@ -8502,6 +8564,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         secretMetadata: [],
         teamVaults: [],
         teamSecrets: {},
+        teamAwsKeyRejections: {},
         sessions: [],
         sftpSessions: [],
         sftpEditor: null,
@@ -9808,17 +9871,19 @@ export const useMobileAppStore = create<MobileAppState>()(
         // 즐겨찾기 토글 — 데스크톱과 같은 host.favorite 필드를 뒤집는다. saveHost 와 같은
         // 경로(로컬 먼저 → 아웃박스)를 쓴다. 시크릿은 건드리지 않으므로 호스트만 큐에 넣는다.
         saveTeamAwsKey: async (hostId, key) => {
-          const missing = teamAwsKeyMissing(get(), hostId);
-          if (!missing) {
+          const slot = teamAwsKeyToEnter(get(), hostId);
+          if (!slot) {
             return;
           }
           const trimmed = {
             accessKeyId: key.accessKeyId.trim(),
             secretAccessKey: key.secretAccessKey.trim(),
           };
-          // 맞는 키만 남긴다 — 틀린 키를 두면 다음 접속이 또 뜻 없는 확인 실패로 끝난다.
-          await verifyAwsStaticKey(trimmed, missing.region);
-          await teamSync?.setAwsKey(missing.teamId, missing.profileId, trimmed);
+          // 맞는 키만 남긴다 — 틀린 키를 두면 다음 접속이 또 뜻 없는 확인 실패로 끝난다. 거절된 옛 키도 새 키가
+          // 확인될 때에만 갈아 끼운다.
+          await verifyAwsStaticKey(trimmed, slot.region);
+          await teamSync?.setAwsKey(slot.teamId, slot.profileId, trimmed);
+          clearTeamAwsKeyRejection(slot.profileId);
         },
         toggleHostFavorite: async (hostId: string) => {
           // 팀 호스트의 별표는 내 개인 칸에 둔다 — 팀 레코드는 고치지 않는다(데스크톱과 같다).

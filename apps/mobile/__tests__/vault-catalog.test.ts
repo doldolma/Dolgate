@@ -25,7 +25,9 @@ import {
   snippetsForSession,
   tailnetsForHost,
   teamIdOfHost,
+  teamAwsDeviceKeySlot,
   teamAwsKeyMissing,
+  teamAwsKeyToEnter,
   teamNamesByHostId,
   withTrustedKnownHost,
   type VaultCatalogSource,
@@ -660,6 +662,58 @@ describe('vault-catalog — 팀 AWS 키', () => {
     expect(teamAwsKeyMissing(source, 'team-ec2')).toBeNull();
     expect(teamAwsKeyMissing(source, 'team-ec2-role')).toBeNull();
     expect(teamAwsKeyMissing(source, 'team-rdp')).toBeNull();
+  });
+
+  it('AWS 가 거절한 이 기기의 키도 다시 넣을 자리로 본다 — 붙기 전 확인은 키가 없을 때만 막는다', () => {
+    const source = {
+      ...awsSource(),
+      teamAwsKeyRejections: {} as Record<string, true>,
+    };
+    const slot = {
+      teamId: 'team-1',
+      teamName: 'Acme Infra',
+      profileId: 'aws-static',
+      profileName: 'acme-static',
+      region: 'ap-northeast-2',
+    };
+    // 키가 없으면 거절 표시와 상관없이 넣을 자리다.
+    expect(teamAwsKeyToEnter(source, 'team-ec2')).toEqual(slot);
+    expect(teamAwsDeviceKeySlot(source, 'team-ec2')).toBeNull();
+
+    source.teamSecrets['team-1'].awsKeys = { 'aws-static': MINE };
+    expect(teamAwsDeviceKeySlot(source, 'team-ec2')).toEqual(slot);
+    expect(teamAwsDeviceKeySlot(source, 'team-ec2-role')).toEqual(slot);
+    expect(teamAwsDeviceKeySlot(source, 'team-rdp')).toEqual(slot);
+    expect(teamAwsKeyToEnter(source, 'team-ec2')).toBeNull();
+
+    source.teamAwsKeyRejections = { 'aws-static': true };
+    expect(teamAwsKeyToEnter(source, 'team-ec2')).toEqual(slot);
+    expect(teamAwsKeyToEnter(source, 'team-ec2-role')).toEqual(slot);
+    expect(teamAwsKeyToEnter(source, 'team-rdp')).toEqual(slot);
+    // 붙기 전 확인은 막지 않는다 — 다시 붙을 때 AWS 에 다시 묻는다.
+    expect(teamAwsKeyMissing(source, 'team-ec2')).toBeNull();
+    // SSO·개인 호스트·AWS 를 안 쓰는 팀 호스트는 해당이 없다.
+    expect(teamAwsKeyToEnter(source, 'team-ec2-sso')).toBeNull();
+    expect(teamAwsKeyToEnter(source, 'host-ec2')).toBeNull();
+    expect(teamAwsKeyToEnter(source, 'team-app')).toBeNull();
+    expect(teamAwsDeviceKeySlot(source, 'host-ec2')).toBeNull();
+    expect(teamAwsDeviceKeySlot(source, 'team-ec2-sso')).toBeNull();
+
+    // 팀 레코드에 든 키(옛 레코드)로만 붙는 호스트는 이 기기에서 갈아 끼울 키가 없다.
+    source.teamSecrets['team-1'].awsKeys = {};
+    const team = source.teamVaults[0];
+    team.awsProfiles[0] = {
+      ...team.awsProfiles[0],
+      accessKeyId: 'AKIATEAM',
+      secretAccessKey: 'team-secret',
+    } as ManagedAwsProfilePayload;
+    expect(teamAwsDeviceKeySlot(source, 'team-ec2')).toBeNull();
+    expect(teamAwsKeyToEnter(source, 'team-ec2')).toBeNull();
+    // 이 기기의 키가 있으면 그것이 팀 레코드의 키보다 먼저 쓰인다 — 거절된 것도 그 키다.
+    source.teamSecrets['team-1'].awsKeys = { 'aws-static': MINE };
+    expect(awsProfilesForHost(source, 'team-ec2')[0]).toMatchObject(MINE);
+    expect(teamAwsDeviceKeySlot(source, 'team-ec2')).toEqual(slot);
+    expect(teamAwsKeyToEnter(source, 'team-ec2')).toEqual(slot);
   });
 
   it('팀 정적 프로필에는 이 기기의 키를 얹어 준다 — 팀 레코드와 다른 종류, 개인 것은 그대로', () => {

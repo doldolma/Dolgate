@@ -340,6 +340,17 @@ describe("resolveConnectionFailurePresentation", () => {
     });
   });
 
+  // 팀 키 거절 문구는 AWS 원문 문장을 싣지 않는다 — 실으면 위 규칙이 'AWS 인증 만료(다시 로그인)'로 바꾼다. 키를 다시
+  // 넣는 것이 할 일이라 우리 문구 그대로 남아야 한다.
+  it("keeps the team AWS key rejection wording as it is", () => {
+    for (const message of [
+      '팀 프로필 "acme-static" 에 넣은 이 기기의 AWS 키를 AWS 가 받지 않았습니다(InvalidClientTokenId).',
+      'AWS rejected this device\'s key for the team profile "acme-static" (SignatureDoesNotMatch).',
+    ]) {
+      expect(resolveConnectionFailurePresentation(message).message).toBe(message);
+    }
+  });
+
   it("presents AWS CLI SSO token failures as authentication guidance", () => {
     expect(
       resolveConnectionFailurePresentation(

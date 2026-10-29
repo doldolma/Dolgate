@@ -973,7 +973,8 @@
       "sameName": "새 프로필명이 기존 프로필명과 같습니다.",
       "linkedNotFoundNamed": "연결된 AWS 프로필 \"{{label}}\"을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.",
       "linkedNotFound": "연결된 AWS 프로필을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.",
-      "teamKeyMissing": "팀 프로필 \"{{profile}}\" 에 이 기기의 AWS 키가 없습니다. 키는 동기화되지 않아 기기마다 넣습니다."
+      "teamKeyMissing": "팀 프로필 \"{{profile}}\" 에 이 기기의 AWS 키가 없습니다. 키는 동기화되지 않아 기기마다 넣습니다.",
+      "teamKeyRejected": "팀 프로필 \"{{profile}}\" 에 넣은 이 기기의 AWS 키를 AWS 가 받지 않았습니다({{code}})."
     },
     "role": {
       "assumeDenied": "선택한 source profile로 이 Role을 Assume할 수 없습니다. IAM 권한과 대상 role trust policy를 확인해 주세요.",

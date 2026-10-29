@@ -5,6 +5,7 @@ import type {
 } from "@dolssh/shared-core";
 import { ensureAwsRuntimeGlobals } from "../src/lib/aws-runtime";
 import {
+  AwsKeyRejectedError,
   type AwsSsoBrowserLoginPrompt,
   recordAwsSsoCallbackUrl,
   resolveAwsSessionForHost,
@@ -240,6 +241,114 @@ describe("resolveAwsSessionForHost", () => {
       AWS_REGION: "ap-northeast-2",
     });
     expect(mockStsSend).toHaveBeenCalledTimes(3);
+  });
+
+  // ── AWS 가 정적 키를 거절했을 때 — 어느 프로필의 키인지 알린다(팀 키를 다시 넣는 자리) ─────────────────
+  function awsError(name: string, message: string): Error {
+    return Object.assign(new Error(message), { name });
+  }
+
+  function staticAndRoleProfiles(): ManagedAwsProfilePayload[] {
+    return [
+      {
+        id: "profile-static",
+        name: "prod-static",
+        kind: "static",
+        region: "ap-southeast-1",
+        accessKeyId: "AKIASTATIC",
+        secretAccessKey: "secret",
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: "profile-role",
+        name: "prod-role",
+        kind: "role",
+        region: "us-east-1",
+        sourceProfileId: "profile-static",
+        roleArn: "arn:aws:iam::123456789012:role/demo",
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+  }
+
+  it.each([
+    ["InvalidClientTokenId", "The security token included in the request is invalid."],
+    ["SignatureDoesNotMatch", "The request signature we calculated does not match the signature you provided."],
+  ])(
+    "names the static profile whose key AWS rejected (%s) — on its own and as a role's source",
+    async (code, message) => {
+      const host = createAwsHost();
+      host.awsProfileId = "profile-static";
+      mockStsSend.mockRejectedValue(awsError(code, message));
+
+      const direct = resolveAwsSessionForHost({
+        host,
+        profiles: staticAndRoleProfiles(),
+        serverUrl: "https://ssh.doldolma.com",
+        authAccessToken: "access-token",
+      });
+      await expect(direct).rejects.toBeInstanceOf(AwsKeyRejectedError);
+      await expect(direct).rejects.toMatchObject({
+        profileId: "profile-static",
+        code,
+        message,
+      });
+
+      host.awsProfileId = "profile-role";
+      await expect(
+        resolveAwsSessionForHost({
+          host,
+          profiles: staticAndRoleProfiles(),
+          serverUrl: "https://ssh.doldolma.com",
+          authAccessToken: "access-token",
+        }),
+      ).rejects.toMatchObject({ profileId: "profile-static", code });
+      // 원본 키에서 멈췄다 — role 전환은 부르지 않았다.
+      expect(mockStsSend).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("leaves other AWS failures as they were — role refused, the role's own credentials, network", async () => {
+    const host = createAwsHost();
+    host.awsProfileId = "profile-role";
+    const resolve = () =>
+      resolveAwsSessionForHost({
+        host,
+        profiles: staticAndRoleProfiles(),
+        serverUrl: "https://ssh.doldolma.com",
+        authAccessToken: "access-token",
+      });
+
+    // 원본 키는 맞고 role 전환이 거부됐다 — 키를 다시 넣어도 풀리지 않는다.
+    mockStsSend
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(awsError("AccessDenied", "not authorized to perform: sts:AssumeRole"));
+    const refused = await resolve().catch((error: unknown) => error);
+    expect(refused).not.toBeInstanceOf(AwsKeyRejectedError);
+    expect(refused).toMatchObject({ name: "AccessDenied" });
+
+    // role 이 받은 임시 자격 증명이 거절된 것은 넣은 키의 탓이 아니다.
+    mockStsSend
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({
+        Credentials: {
+          AccessKeyId: "ASIAROLE",
+          SecretAccessKey: "role-secret",
+          SessionToken: "role-token",
+        },
+      })
+      .mockRejectedValueOnce(
+        awsError("InvalidClientTokenId", "The security token included in the request is invalid."),
+      );
+    const roleCredentials = await resolve().catch((error: unknown) => error);
+    expect(roleCredentials).not.toBeInstanceOf(AwsKeyRejectedError);
+    expect(roleCredentials).toMatchObject({ name: "InvalidClientTokenId" });
+
+    host.awsProfileId = "profile-static";
+    mockStsSend.mockRejectedValueOnce(new TypeError("Network request failed"));
+    const offline = await resolve().catch((error: unknown) => error);
+    expect(offline).not.toBeInstanceOf(AwsKeyRejectedError);
+    expect(offline).toMatchObject({ message: "Network request failed" });
   });
 
   it("uses server-provided SSO credentials immediately when ready", async () => {

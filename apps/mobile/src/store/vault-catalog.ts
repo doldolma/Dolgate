@@ -465,8 +465,8 @@ function awsProfileOfHost(
     : profiles.find(profile => profile.name === awsSsm.profileName);
 }
 
-/** 이 기기에서 키를 넣어야 붙는 팀 정적 AWS 프로필. */
-export interface TeamAwsKeyMissing {
+/** 이 기기의 키를 넣는 팀 정적 AWS 프로필. */
+export interface TeamAwsKeySlot {
   teamId: string;
   teamName: string;
   profileId: string;
@@ -475,14 +475,11 @@ export interface TeamAwsKeyMissing {
   region: string | null;
 }
 
-/**
- * 이 기기에 키가 없어 붙을 수 없는 팀 정적 AWS 프로필 — 키는 동기화하지 않아 기기마다 넣는다(데스크톱
- * findTeamProfileMissingKey 와 같다). role 이면 그 원본을 본다. 개인 호스트거나 AWS 를 안 쓰거나 키가 있으면 없다.
- */
-export function teamAwsKeyMissing(
-  source: Pick<VaultCatalogSource, 'hosts' | 'teamVaults' | 'teamSecrets'>,
+/** 그 호스트가 쓰는 팀 정적 AWS 프로필(role 이면 그 원본)과 그 팀. 개인 호스트거나 AWS 를 안 쓰거나 정적이 아니면 없다. */
+function teamAwsKeyHolder(
+  source: Pick<VaultCatalogSource, 'hosts' | 'teamVaults'>,
   hostId: string,
-): TeamAwsKeyMissing | null {
+): { team: MobileTeamVault; slot: TeamAwsKeySlot; teamKey: boolean } | null {
   const team = teamOfHost(source, hostId);
   const host = team?.hosts.find(item => item.id === hostId);
   if (!team || !host) {
@@ -493,20 +490,79 @@ export function teamAwsKeyMissing(
     profile?.kind === 'role'
       ? team.awsProfiles.find(item => item.id === profile.sourceProfileId)
       : profile;
-  if (
-    keyHolder?.kind !== 'static' ||
-    source.teamSecrets[team.id]?.awsKeys?.[keyHolder.id] ||
-    (keyHolder.accessKeyId.trim() && keyHolder.secretAccessKey.trim())
-  ) {
+  if (keyHolder?.kind !== 'static') {
     return null;
   }
   return {
-    teamId: team.id,
-    teamName: team.name,
-    profileId: keyHolder.id,
-    profileName: keyHolder.name,
-    region: keyHolder.region?.trim() || null,
+    team,
+    slot: {
+      teamId: team.id,
+      teamName: team.name,
+      profileId: keyHolder.id,
+      profileName: keyHolder.name,
+      region: keyHolder.region?.trim() || null,
+    },
+    // 팀 레코드에 키가 들었다(옛 레코드) — 이 기기에 키가 없어도 붙는다.
+    teamKey: Boolean(
+      keyHolder.accessKeyId.trim() && keyHolder.secretAccessKey.trim(),
+    ),
   };
+}
+
+/**
+ * 이 기기에 키가 없어 붙을 수 없는 팀 정적 AWS 프로필 — 키는 동기화하지 않아 기기마다 넣는다(데스크톱
+ * findTeamProfileMissingKey 와 같다). role 이면 그 원본을 본다. 개인 호스트거나 AWS 를 안 쓰거나 키가 있으면 없다.
+ */
+export function teamAwsKeyMissing(
+  source: Pick<VaultCatalogSource, 'hosts' | 'teamVaults' | 'teamSecrets'>,
+  hostId: string,
+): TeamAwsKeySlot | null {
+  const found = teamAwsKeyHolder(source, hostId);
+  if (
+    !found ||
+    found.teamKey ||
+    source.teamSecrets[found.team.id]?.awsKeys?.[found.slot.profileId]
+  ) {
+    return null;
+  }
+  return found.slot;
+}
+
+/**
+ * 그 호스트가 쓰는, 이 기기에서 넣은 키가 있는 팀 정적 AWS 프로필(role 이면 그 원본). AWS 가 그 키를 거절했다는
+ * 표시(`teamAwsKeyRejections`)를 남기고 지우는 자리다. 이 기기의 키는 팀 레코드의 키보다 먼저 얹히므로(awsProfilesForHost)
+ * 붙을 때 쓴 것도 이 키다.
+ */
+export function teamAwsDeviceKeySlot(
+  source: Pick<VaultCatalogSource, 'hosts' | 'teamVaults' | 'teamSecrets'>,
+  hostId: string,
+): TeamAwsKeySlot | null {
+  const found = teamAwsKeyHolder(source, hostId);
+  return found &&
+    source.teamSecrets[found.team.id]?.awsKeys?.[found.slot.profileId]
+    ? found.slot
+    : null;
+}
+
+/**
+ * 이 기기에서 키를 (다시) 넣어야 붙는 팀 정적 AWS 프로필 — 키가 없거나, 이 기기에서 넣은 키를 AWS 가 거절했다
+ * (`teamAwsKeyRejections`, 프로필 id). 실패 화면의 '키 넣기'와 저장이 이것을 본다. 붙기 전 확인은 키가 없을 때만
+ * 막는다(teamAwsKeyMissing) — 거절된 키라도 다시 붙을 때는 AWS 에 다시 묻는다.
+ */
+export function teamAwsKeyToEnter(
+  source: Pick<VaultCatalogSource, 'hosts' | 'teamVaults' | 'teamSecrets'> & {
+    teamAwsKeyRejections: Record<string, true>;
+  },
+  hostId: string,
+): TeamAwsKeySlot | null {
+  const missing = teamAwsKeyMissing(source, hostId);
+  if (missing) {
+    return missing;
+  }
+  const deviceKey = teamAwsDeviceKeySlot(source, hostId);
+  return deviceKey && source.teamAwsKeyRejections[deviceKey.profileId]
+    ? deviceKey
+    : null;
 }
 
 /** 그 호스트가 지날 수 있는 tailnet — 그 호스트의 볼트 것. */

@@ -45,7 +45,7 @@ import {
   resetMobileStoreRuntimeForTests,
   useMobileAppStore,
 } from "../src/store/useMobileAppStore";
-import { listHosts } from "../src/store/vault-catalog";
+import { listHosts, teamAwsKeyToEnter } from "../src/store/vault-catalog";
 import { STSClient } from "@aws-sdk/client-sts";
 
 const REPORTED_TEST_GRID = { cols: 57, rows: 46 };
@@ -3915,6 +3915,272 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(
       state.sessions.find(item => item.hostId === host.id)?.errorMessage,
     ).toContain("stop after the key is used");
+  });
+
+  // ── AWS 가 이 기기의 팀 키를 거절했을 때 — 같은 자리에서 다시 넣는다 ─────────────────────────────────────
+  // 폐기·교체된 키는 STS 가 거절한다(오류 코드로만 가린다). 키가 없을 때와 같이 '키 넣기'를 내고, 옛 키는 새 키가
+  // 확인될 때 갈아 끼운다. 거절 표시가 있어도 다시 붙을 때는 AWS 에 다시 묻는다.
+
+  const OLD_KEY = { accessKeyId: "AKIAOLD", secretAccessKey: "old-secret" };
+  const REJECTED =
+    '팀 프로필 "acme-static" 에 넣은 이 기기의 AWS 키를 AWS 가 받지 않았습니다(InvalidClientTokenId).';
+
+  /** 이 기기에서 넣어 둔 팀 키. */
+  function setDeviceAwsKey(key: {
+    accessKeyId: string;
+    secretAccessKey: string;
+  }): void {
+    useMobileAppStore.setState(state => ({
+      teamSecrets: {
+        ...state.teamSecrets,
+        "team-1": {
+          ...state.teamSecrets["team-1"],
+          awsKeys: { "team-aws-static": key },
+        },
+      },
+    }));
+  }
+
+  /** 다음 STS 확인 한 번을 그 오류로 끝낸다. */
+  function failNextSts(error: Error): void {
+    (STSClient as unknown as jest.Mock).mockImplementationOnce(() => ({
+      send: jest.fn(async () => {
+        throw error;
+      }),
+      destroy: jest.fn(),
+    }));
+  }
+
+  function awsError(name: string, message: string): Error {
+    return Object.assign(new Error(message), { name });
+  }
+
+  const INVALID_TOKEN = () =>
+    awsError(
+      "InvalidClientTokenId",
+      "The security token included in the request is invalid.",
+    );
+
+  it("says AWS rejected this device's team key and offers a new one, asking AWS again on the next try", async () => {
+    let host!: AwsEc2HostRecord;
+    act(() => {
+      host = setTeamAwsHost();
+      setDeviceAwsKey(OLD_KEY);
+    });
+    mockSsmDirect.assertSsmManagedInstance.mockClear();
+    failNextSts(INVALID_TOKEN());
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+
+    let state = useMobileAppStore.getState();
+    expect(state.sessions.find(item => item.id === sessionId)).toEqual(
+      expect.objectContaining({ status: "error", errorMessage: REJECTED }),
+    );
+    expect(state.teamAwsKeyRejections).toEqual({ "team-aws-static": true });
+    expect(teamAwsKeyToEnter(state, host.id)).toEqual(
+      expect.objectContaining({ teamId: "team-1", profileId: "team-aws-static" }),
+    );
+    // 옛 키는 그대로 둔다 — 새 키가 확인될 때 갈아 끼운다.
+    expect(state.teamSecrets["team-1"].awsKeys).toEqual({
+      "team-aws-static": OLD_KEY,
+    });
+    expect(mockSsmDirect.assertSsmManagedInstance).not.toHaveBeenCalled();
+
+    // 관리자가 키를 다시 켰을 수 있다 — 다시 붙을 때는 AWS 에 다시 묻고, 받아들여지면 표시를 지운다.
+    const stsClients = (STSClient as unknown as jest.Mock).mock.calls.length;
+    mockSsmDirect.assertSsmManagedInstance.mockRejectedValueOnce(
+      new Error("stop after the key is used"),
+    );
+    await act(async () => {
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+    state = useMobileAppStore.getState();
+    expect((STSClient as unknown as jest.Mock).mock.calls.length).toBe(
+      stsClients + 1,
+    );
+    expect(mockSsmDirect.assertSsmManagedInstance).toHaveBeenLastCalledWith(
+      expect.objectContaining({ credentials: expect.objectContaining(OLD_KEY) }),
+    );
+    expect(state.teamAwsKeyRejections).toEqual({});
+    expect(teamAwsKeyToEnter(state, host.id)).toBeNull();
+  });
+
+  it("says the same on SFTP when AWS rejects this device's team key", async () => {
+    let host!: AwsEc2HostRecord;
+    act(() => {
+      host = {
+        ...setTeamAwsHost(),
+        awsSshUsername: "ec2-user",
+        awsAvailabilityZone: "ap-northeast-2a",
+      };
+      useMobileAppStore.setState(state => ({
+        syncStatus: { ...state.syncStatus, awsSftpServerSupport: "supported" },
+        teamVaults: [{ ...state.teamVaults[0], hosts: [host] }],
+      }));
+      setDeviceAwsKey(OLD_KEY);
+    });
+    failNextSts(
+      awsError(
+        "SignatureDoesNotMatch",
+        "The request signature we calculated does not match the signature you provided.",
+      ),
+    );
+
+    let sftpId: string | null = null;
+    await act(async () => {
+      sftpId = await useMobileAppStore.getState().openSftpForHost(host.id);
+      await flushAsyncWork();
+    });
+
+    const state = useMobileAppStore.getState();
+    expect(state.sftpSessions.find(item => item.id === sftpId)).toEqual(
+      expect.objectContaining({
+        status: "error",
+        errorMessage:
+          '팀 프로필 "acme-static" 에 넣은 이 기기의 AWS 키를 AWS 가 받지 않았습니다(SignatureDoesNotMatch).',
+      }),
+    );
+    expect(state.teamAwsKeyRejections).toEqual({ "team-aws-static": true });
+  });
+
+  it("replaces a rejected team key only with one STS accepts, on this device only", async () => {
+    let host!: AwsEc2HostRecord;
+    act(() => {
+      host = setTeamAwsHost();
+      setDeviceAwsKey(OLD_KEY);
+    });
+    failNextSts(INVALID_TOKEN());
+    await act(async () => {
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+    expect(useMobileAppStore.getState().teamAwsKeyRejections).toEqual({
+      "team-aws-static": true,
+    });
+    keychainMock.setGenericPassword.mockClear();
+
+    // 틀린 새 키는 저장하지 않는다 — 옛 키와 거절 표시가 그대로다.
+    failNextSts(INVALID_TOKEN());
+    await expect(
+      useMobileAppStore.getState().saveTeamAwsKey(host.id, {
+        accessKeyId: "AKIAWRONG",
+        secretAccessKey: "wrong",
+      }),
+    ).rejects.toThrow();
+    let state = useMobileAppStore.getState();
+    expect(state.teamSecrets["team-1"].awsKeys).toEqual({
+      "team-aws-static": OLD_KEY,
+    });
+    expect(state.teamAwsKeyRejections).toEqual({ "team-aws-static": true });
+    expect(lastStoredTeamSecrets()).toEqual({});
+
+    // 맞는 새 키는 옛 키와 갈아 끼우고 표시를 지운다. 이 기기 키체인에만 둔다.
+    const newKey = { accessKeyId: "AKIANEW", secretAccessKey: "new-secret" };
+    await act(async () => {
+      await useMobileAppStore.getState().saveTeamAwsKey(host.id, newKey);
+    });
+    state = useMobileAppStore.getState();
+    expect(state.teamSecrets["team-1"].awsKeys).toEqual({
+      "team-aws-static": newKey,
+    });
+    expect(lastStoredTeamSecrets()["team-1"]?.awsKeys).toEqual({
+      "team-aws-static": newKey,
+    });
+    expect(state.teamAwsKeyRejections).toEqual({});
+    expect(teamAwsKeyToEnter(state, host.id)).toBeNull();
+    expect(state.teamVaults[0].awsProfiles[0]).toMatchObject({
+      accessKeyId: "",
+      secretAccessKey: "",
+    });
+    expect(state.syncOutbox).toEqual([]);
+    expect(state.teamVaults[0].privateOutbox ?? []).toEqual([]);
+
+    // 넣을 자리가 없으면(키가 있고 거절되지 않았다) 아무것도 하지 않는다 — AWS 도 부르지 않는다.
+    const stsClients = (STSClient as unknown as jest.Mock).mock.calls.length;
+    await act(async () => {
+      await useMobileAppStore.getState().saveTeamAwsKey(host.id, {
+        accessKeyId: "AKIAOTHER",
+        secretAccessKey: "other",
+      });
+    });
+    expect((STSClient as unknown as jest.Mock).mock.calls.length).toBe(
+      stsClients,
+    );
+    expect(useMobileAppStore.getState().teamSecrets["team-1"].awsKeys).toEqual({
+      "team-aws-static": newKey,
+    });
+  });
+
+  it("does not ask for a new key on other AWS failures or for a personal profile's rejected key", async () => {
+    let host!: AwsEc2HostRecord;
+    act(() => {
+      host = setTeamAwsHost();
+      setDeviceAwsKey(OLD_KEY);
+    });
+    failNextSts(new TypeError("Network request failed"));
+    const stsClients = () =>
+      (STSClient as unknown as jest.Mock).mock.calls.length;
+    let before = stsClients();
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+    expect(stsClients()).toBe(before + 1);
+    let state = useMobileAppStore.getState();
+    const offline = state.sessions.find(item => item.id === sessionId);
+    expect(offline?.status).toBe("error");
+    expect(offline?.errorMessage).not.toContain("받지 않았습니다");
+    expect(state.teamAwsKeyRejections).toEqual({});
+    expect(teamAwsKeyToEnter(state, host.id)).toBeNull();
+
+    // 개인 정적 프로필의 키는 개인 볼트 것이다(데스크톱에서 고친다) — 다시 넣을 자리로 내밀지 않는다.
+    const personal: AwsEc2HostRecord = {
+      ...host,
+      id: "host-aws-mine",
+      awsProfileId: "profile-mine",
+      awsProfileName: "mine",
+    };
+    act(() => {
+      useMobileAppStore.setState({
+        hosts: [personal],
+        awsProfiles: [
+          {
+            id: "profile-mine",
+            name: "mine",
+            kind: "static",
+            region: "ap-northeast-2",
+            accessKeyId: "AKIAMINE",
+            secretAccessKey: "mine-secret",
+            updatedAt: "2026-10-28T00:00:00.000Z",
+          },
+        ],
+      });
+    });
+    failNextSts(INVALID_TOKEN());
+    before = stsClients();
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(personal.id);
+      await flushAsyncWork();
+    });
+    expect(stsClients()).toBe(before + 1);
+    state = useMobileAppStore.getState();
+    const mine = state.sessions.find(item => item.id === sessionId);
+    // 지금 그대로다 — AWS 원문을 연결 실패 분류가 인증 만료로 읽는다.
+    expect(mine).toEqual(
+      expect.objectContaining({
+        status: "error",
+        errorMessage:
+          "AWS 인증이 만료되었습니다. 데스크톱에서 다시 로그인한 뒤 시도해 주세요.",
+      }),
+    );
+    expect(state.teamAwsKeyRejections).toEqual({});
   });
 
   it("runs a team host's startup snippet from its own team", async () => {
