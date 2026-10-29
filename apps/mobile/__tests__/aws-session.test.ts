@@ -290,6 +290,7 @@ describe("resolveAwsSessionForHost", () => {
       await expect(direct).rejects.toBeInstanceOf(AwsKeyRejectedError);
       await expect(direct).rejects.toMatchObject({
         profileId: "profile-static",
+        profileName: "prod-static",
         code,
         message,
       });
@@ -302,7 +303,11 @@ describe("resolveAwsSessionForHost", () => {
           serverUrl: "https://ssh.doldolma.com",
           authAccessToken: "access-token",
         }),
-      ).rejects.toMatchObject({ profileId: "profile-static", code });
+      ).rejects.toMatchObject({
+        profileId: "profile-static",
+        profileName: "prod-static",
+        code,
+      });
       // 원본 키에서 멈췄다 — role 전환은 부르지 않았다.
       expect(mockStsSend).toHaveBeenCalledTimes(2);
     },

@@ -1246,6 +1246,7 @@ describe('mobile remote desktop connection paths', () => {
     resolveAwsSessionMock.mockRejectedValueOnce(
       new AwsKeyRejectedError(
         'team-aws',
+        'acme-static',
         'InvalidClientTokenId',
         'The security token included in the request is invalid.',
       ),

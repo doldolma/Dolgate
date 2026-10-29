@@ -625,7 +625,8 @@
     "ssoRoleCredentialFailed": "AWS SSO role credential을 가져오지 못했습니다.",
     "credentialVerifyFailed": "AWS 자격 증명을 검증하지 못했습니다.",
     "teamKeyMissing": "팀 프로필 \"{{profile}}\" 에 이 기기의 AWS 키가 없습니다. 키는 동기화되지 않아 기기마다 넣습니다.",
-    "teamKeyRejected": "팀 프로필 \"{{profile}}\" 에 넣은 이 기기의 AWS 키를 AWS 가 받지 않았습니다({{code}})."
+    "teamKeyRejected": "팀 프로필 \"{{profile}}\" 에 넣은 이 기기의 AWS 키를 AWS 가 받지 않았습니다({{code}}).",
+    "personalKeyRejected": "AWS 가 프로필 \"{{profile}}\" 의 키를 받지 않았습니다({{code}}). 데스크톱에서 이 프로필의 키를 바꿔 주세요."
   },
   "credentialPrompt": {
     "fileReadFailed": "파일을 읽지 못했습니다.",

@@ -625,7 +625,8 @@
     "ssoRoleCredentialFailed": "Could not obtain the AWS SSO role credential.",
     "credentialVerifyFailed": "Could not verify the AWS credentials.",
     "teamKeyMissing": "This device has no AWS key for the team profile \"{{profile}}\". Keys aren't synced, so add one on each device.",
-    "teamKeyRejected": "AWS rejected this device's key for the team profile \"{{profile}}\" ({{code}})."
+    "teamKeyRejected": "AWS rejected this device's key for the team profile \"{{profile}}\" ({{code}}).",
+    "personalKeyRejected": "AWS rejected the key of the profile \"{{profile}}\" ({{code}}). Change this profile's key in the desktop app."
   },
   "credentialPrompt": {
     "fileReadFailed": "Could not read the file.",

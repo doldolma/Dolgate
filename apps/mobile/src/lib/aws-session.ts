@@ -44,11 +44,14 @@ type AwsProfileResolutionContext = {
 
 /**
  * AWS 가 이 정적 프로필의 키를 받지 않았다(`isAwsKeyRejectedError`). 어느 프로필의 키인지 함께 알린다 — 팀 정적
- * 프로필에 이 기기에서 넣은 키면 실패 화면이 '키 넣기'를 다시 낸다. 문구는 AWS 원문 그대로다.
+ * 프로필에 이 기기에서 넣은 키면 실패 화면이 '키 넣기'를 다시 내고, 개인 프로필이면 데스크톱에서 그 키를 바꾸라고
+ * 말한다. 문구는 AWS 원문 그대로다.
  */
 export class AwsKeyRejectedError extends Error {
   constructor(
     readonly profileId: string,
+    /** 키를 가진 정적 프로필의 이름(role 이면 그 원본). */
+    readonly profileName: string,
     /** AWS 오류 코드(`InvalidClientTokenId` 등). */
     readonly code: string,
     message: string,
@@ -264,6 +267,7 @@ function resolveStaticProfileCredentials(
       throw isAwsKeyRejectedError(error)
         ? new AwsKeyRejectedError(
             profile.id,
+            profile.name,
             (error as Error).name,
             (error as Error).message,
           )

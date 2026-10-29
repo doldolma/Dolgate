@@ -4960,6 +4960,7 @@ export const useMobileAppStore = create<MobileAppState>()(
        * 세 접속 길(터미널·SFTP·원격 데스크톱)의 AWS 자격 증명 풀기. AWS 가 이 기기에서 넣은 팀 키를 거절하면 그 사실을
        * 남기고(실패 화면이 '키 넣기'를 다시 낸다) 무엇이 거절됐는지 말하는 오류로 바꾼다 — AWS 원문 문장은 연결 실패
        * 분류가 'AWS 인증 만료'로 바꿔 버려 코드만 붙인다. 키가 받아들여지면 남긴 표시를 지운다. 옛 키는 지우지 않는다.
+       * 개인 프로필의 키는 데스크톱에서 넣고 개인 동기화로 오므로(폰에는 고칠 자리가 없다) 데스크톱에서 바꾸라고 한다.
        */
       const resolveAwsSessionOfHost = async (
         hostId: string,
@@ -4974,11 +4975,19 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
           return resolved;
         } catch (error) {
+          if (!(error instanceof AwsKeyRejectedError)) {
+            throw error;
+          }
+          if (findPersonalHost(get(), hostId)) {
+            throw new Error(
+              t('aws.personalKeyRejected', {
+                profile: error.profileName,
+                code: error.code,
+              }),
+            );
+          }
           const rejected = deviceKey();
-          if (
-            !(error instanceof AwsKeyRejectedError) ||
-            rejected?.profileId !== error.profileId
-          ) {
+          if (rejected?.profileId !== error.profileId) {
             throw error;
           }
           set(state => ({

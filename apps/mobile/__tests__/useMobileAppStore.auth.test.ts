@@ -4172,8 +4172,142 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(stsClients()).toBe(before + 1);
     state = useMobileAppStore.getState();
     const mine = state.sessions.find(item => item.id === sessionId);
-    // 지금 그대로다 — AWS 원문을 연결 실패 분류가 인증 만료로 읽는다.
+    // 다시 로그인할 것이 없다 — 키를 바꿀 곳(데스크톱)을 말한다.
     expect(mine).toEqual(
+      expect.objectContaining({
+        status: "error",
+        errorMessage:
+          'AWS 가 프로필 "mine" 의 키를 받지 않았습니다(InvalidClientTokenId). 데스크톱에서 이 프로필의 키를 바꿔 주세요.',
+      }),
+    );
+    expect(state.teamAwsKeyRejections).toEqual({});
+    expect(teamAwsKeyToEnter(state, personal.id)).toBeNull();
+  });
+
+  // ── AWS 가 개인 정적 프로필의 키를 거절했을 때 — 키는 데스크톱에서 넣고 개인 동기화로 온다 ─────────────────
+  const PERSONAL_STATIC = {
+    id: "profile-mine",
+    name: "mine",
+    kind: "static" as const,
+    region: "ap-northeast-2",
+    accessKeyId: "AKIAMINE",
+    secretAccessKey: "mine-secret",
+    updatedAt: "2026-10-28T00:00:00.000Z",
+  };
+
+  it("points to the desktop when AWS rejects a personal profile's key — on SFTP, for a wrong secret, and as a role's source", async () => {
+    let host!: AwsEc2HostRecord;
+    act(() => {
+      host = {
+        ...setTeamAwsHost(),
+        id: "host-aws-mine",
+        awsProfileId: "profile-mine",
+        awsProfileName: "mine",
+        awsSshUsername: "ec2-user",
+        awsAvailabilityZone: "ap-northeast-2a",
+      };
+      useMobileAppStore.setState(state => ({
+        syncStatus: { ...state.syncStatus, awsSftpServerSupport: "supported" },
+        hosts: [host],
+        awsProfiles: [
+          PERSONAL_STATIC,
+          {
+            id: "profile-mine-role",
+            name: "mine-role",
+            kind: "role",
+            region: "ap-northeast-2",
+            sourceProfileId: "profile-mine",
+            roleArn: "arn:aws:iam::123456789012:role/mine",
+            updatedAt: "2026-10-28T00:00:00.000Z",
+          },
+        ],
+      }));
+    });
+    failNextSts(
+      awsError(
+        "SignatureDoesNotMatch",
+        "The request signature we calculated does not match the signature you provided.",
+      ),
+    );
+
+    let sftpId: string | null = null;
+    await act(async () => {
+      sftpId = await useMobileAppStore.getState().openSftpForHost(host.id);
+      await flushAsyncWork();
+    });
+    let state = useMobileAppStore.getState();
+    expect(state.sftpSessions.find(item => item.id === sftpId)).toEqual(
+      expect.objectContaining({
+        status: "error",
+        errorMessage:
+          'AWS 가 프로필 "mine" 의 키를 받지 않았습니다(SignatureDoesNotMatch). 데스크톱에서 이 프로필의 키를 바꿔 주세요.',
+      }),
+    );
+
+    // role 은 원본 정적 프로필의 키로 붙는다 — 바꿀 것은 그 원본의 키다.
+    const role: AwsEc2HostRecord = {
+      ...host,
+      id: "host-aws-mine-role",
+      awsProfileId: "profile-mine-role",
+      awsProfileName: "mine-role",
+    };
+    act(() => {
+      useMobileAppStore.setState(current => ({
+        hosts: [...current.hosts, role],
+      }));
+    });
+    failNextSts(INVALID_TOKEN());
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(role.id);
+      await flushAsyncWork();
+    });
+    state = useMobileAppStore.getState();
+    expect(state.sessions.find(item => item.id === sessionId)).toEqual(
+      expect.objectContaining({
+        status: "error",
+        errorMessage:
+          'AWS 가 프로필 "mine" 의 키를 받지 않았습니다(InvalidClientTokenId). 데스크톱에서 이 프로필의 키를 바꿔 주세요.',
+      }),
+    );
+    expect(state.teamAwsKeyRejections).toEqual({});
+    expect(teamAwsKeyToEnter(state, host.id)).toBeNull();
+    expect(teamAwsKeyToEnter(state, role.id)).toBeNull();
+  });
+
+  // 키를 기기마다 두기 전의 팀 레코드에 든 키 — 이 기기의 것도, 데스크톱 개인 볼트의 것도 아니라 지금 문구 그대로다.
+  it("leaves the message as it was when AWS rejects a key kept in an old team record", async () => {
+    let host!: AwsEc2HostRecord;
+    act(() => {
+      host = setTeamAwsHost();
+      useMobileAppStore.setState(state => ({
+        teamVaults: [
+          {
+            ...state.teamVaults[0],
+            awsProfiles: [
+              {
+                id: "team-aws-static",
+                name: "acme-static",
+                kind: "static",
+                region: "ap-northeast-2",
+                accessKeyId: "AKIARECORD",
+                secretAccessKey: "record-secret",
+                updatedAt: "2026-10-27T00:00:00.000Z",
+              },
+            ],
+          },
+        ],
+      }));
+    });
+    failNextSts(INVALID_TOKEN());
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+    const state = useMobileAppStore.getState();
+    expect(state.sessions.find(item => item.id === sessionId)).toEqual(
       expect.objectContaining({
         status: "error",
         errorMessage:
