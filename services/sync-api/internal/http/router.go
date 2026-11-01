@@ -409,6 +409,13 @@ func syncRevisionETag(revision int64) string {
 	return fmt.Sprintf("\"%d\"", revision)
 }
 
+// matchesSyncETag compares a single revision validator using weak comparison.
+// A compression proxy may turn "42" into W/"42" without changing the sync
+// revision. Treating that as a change makes watch/pull loop indefinitely.
+func matchesSyncETag(known, current string) bool {
+	return strings.TrimPrefix(strings.TrimSpace(known), "W/") == current
+}
+
 // respondSyncWatchChanged 는 GET /sync/watch 의 "바뀌었다" 응답이다. 리비전을 ETag 와 본문에
 // 같이 실어, 클라이언트가 이미 그 리비전을 적용했다면(자기 push 의 메아리) 당기지 않게 한다.
 func respondSyncWatchChanged(ctx *gin.Context, revision int64) {
@@ -1695,7 +1702,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		// 이미 읽어 왔다(GetSyncGate 주석 참고).
 		// (구버전 클라는 If-None-Match 를 안 보내므로 항상 200 전체를 받는다.)
 		gateETag := syncRevisionETag(ctx.GetInt64(syncGateRevisionContextKey))
-		if match := strings.TrimSpace(ctx.GetHeader("If-None-Match")); match != "" && match == gateETag {
+		if matchesSyncETag(ctx.GetHeader("If-None-Match"), gateETag) {
 			ctx.Header("ETag", gateETag)
 			ctx.Status(http.StatusNotModified)
 			return
@@ -1727,8 +1734,8 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	syncGroup.GET("/watch", func(ctx *gin.Context) {
 		userID := ctx.GetString("userId")
 		since := ctx.GetInt64(syncGateRevisionContextKey)
-		known := strings.TrimSpace(ctx.GetHeader("If-None-Match"))
-		if known != syncRevisionETag(since) {
+		known := syncRevisionETag(since)
+		if !matchesSyncETag(ctx.GetHeader("If-None-Match"), known) {
 			respondSyncWatchChanged(ctx, since)
 			return
 		}
