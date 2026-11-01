@@ -336,3 +336,72 @@ func TestSyncWatchTellsADeletedAccountToSignIn(t *testing.T) {
 		t.Fatalf("expected 401 after deletion, got %d %s", recorder.Code, recorder.Body.String())
 	}
 }
+
+// Compression proxies can weaken a strong ETag without changing its revision.
+func TestSyncWeakETag(t *testing.T) {
+	env := newWatchTestEnv(t)
+	hub := env.hub(t, time.Hour)
+	router := env.router(t, httpserver.RouterConfig{SyncWatch: hub, SyncWatchHold: 100 * time.Millisecond})
+	account := newWatchTestAccount(t, router, "weak-etag@example.com")
+	etag := account.currentETag(t, router)
+	weak := "W/" + etag
+
+	t.Run("pull avoids retransmitting unchanged data", func(t *testing.T) {
+		request := vaultTestRequest(http.MethodGet, "/sync", "", account.token, vaultE2EECapableVersion)
+		request.Header.Set("If-None-Match", weak)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusNotModified || recorder.Body.Len() != 0 {
+			t.Fatalf("expected empty 304 for weak current ETag, got %d (%d bytes)", recorder.Code, recorder.Body.Len())
+		}
+		if got := recorder.Header().Get("ETag"); got != etag {
+			t.Fatalf("expected canonical ETag %q, got %q", etag, got)
+		}
+	})
+
+	for _, test := range []struct {
+		name   string
+		header string
+		want   int
+	}{
+		{"strong", etag, http.StatusNotModified},
+		{"weak with whitespace", " \tW/" + etag + " \t", http.StatusNotModified},
+		{"missing", "", http.StatusOK},
+		{"stale weak", `W/"0"`, http.StatusOK},
+		{"unquoted", etag[1 : len(etag)-1], http.StatusOK},
+		{"invalid weak prefix", "w/" + etag, http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := vaultTestRequest(http.MethodGet, "/sync", "", account.token, vaultE2EECapableVersion)
+			request.Header.Set("If-None-Match", test.header)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			if recorder.Code != test.want {
+				t.Fatalf("expected %d for %q, got %d", test.want, test.header, recorder.Code)
+			}
+		})
+	}
+
+	t.Run("watch waits instead of reporting a false change", func(t *testing.T) {
+		result := account.watchAsync(t, router, hub, weak)
+		recorder := awaitWatch(t, result, 5*time.Second, "with a weak current ETag")
+		if recorder.Code != http.StatusNotModified || recorder.Body.Len() != 0 {
+			t.Fatalf("expected empty 304 after waiting, got %d", recorder.Code)
+		}
+		if got := recorder.Header().Get("ETag"); got != etag {
+			t.Fatalf("expected canonical ETag %q, got %q", etag, got)
+		}
+	})
+
+	t.Run("weak stale ETag still reports changes", func(t *testing.T) {
+		revision := account.push(t, router)
+		assertWatchChanged(t, account.watch(router, weak), revision)
+		request := vaultTestRequest(http.MethodGet, "/sync", "", account.token, vaultE2EECapableVersion)
+		request.Header.Set("If-None-Match", weak)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK || recorder.Body.Len() == 0 {
+			t.Fatalf("expected full 200 for stale weak ETag, got %d", recorder.Code)
+		}
+	})
+}
