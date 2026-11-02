@@ -5,7 +5,9 @@ import {
   isWarpgateSshHostRecord,
 } from "@shared";
 import type {
+  ConnectAttemptSecrets,
   HostContainerRuntime,
+  HostSecretInput,
   ResolvedJumpHost,
   SshHostRecord,
 } from "@shared";
@@ -25,9 +27,16 @@ import { retryAwsSsmSshOperation } from "./aws-ssm-ssh-retry";
 import type { HostCoordinator } from "./host-coordinator";
 import type { SecretCoordinator } from "./secret-coordinator";
 import type { TunnelRegistry } from "./tunnel-registry";
+import {
+  collectHopSecretsToPersist,
+  credentialsNeededAfterFailure,
+  CredentialsNeededError,
+  persistAttemptSecrets,
+} from "../connect-credentials";
 import type {
   AwsConnectionProgressEmitter,
   AwsEc2HostRecord,
+  MainIpcContext,
   SftpCompatibleHostRecord,
 } from "../context";
 import { t } from '../../i18n';
@@ -47,9 +56,11 @@ export interface ContainerRuntimeCoordinator {
     hostId: string,
     ruleId: string,
   ) => string;
+  /** attempt 는 요청 창에 넣은 값. 넣은 값을 거절하면 CredentialsNeededError 를 던진다. */
   ensureContainersEndpoint: (
     host: SftpCompatibleHostRecord,
     endpointId?: string,
+    attempt?: ConnectAttemptSecrets,
   ) => Promise<ResolvedContainersEndpoint>;
   startContainerTunnelRuntime: (input: {
     ruleId: string;
@@ -63,6 +74,8 @@ export interface ContainerRuntimeCoordinator {
     bindPort: number;
     /** 패널이 이미 아는 네트워크. 있으면 코어의 검사를 건너뛴다. */
     networks?: readonly { name: string; ipAddress: string }[];
+    /** 요청 창에 넣은 값(컨테이너 연결에 쓴다). */
+    attempt?: ConnectAttemptSecrets;
   }) => Promise<unknown>;
   buildContainerShellCommand: (
     runtimeCommand: string,
@@ -79,8 +92,11 @@ export function createContainerRuntimeCoordinator(deps: {
   tunnelRegistry: TunnelRegistry;
   secretCoordinator: SecretCoordinator;
   hostCoordinator: HostCoordinator;
+  /** 점프 홉을 찾는 데 쓴다(요청 창에 넣은 값을 홉 자리에 저장·거절한 홉 찾기). */
+  vaults: MainIpcContext["vaults"];
   resolveJumpHostTarget: (
     host: SshHostRecord,
+    jumpSecrets?: Record<string, HostSecretInput>,
   ) => Promise<ResolvedJumpHost | undefined>;
   emitContainersConnectionProgress: AwsConnectionProgressEmitter;
 }): ContainerRuntimeCoordinator {
@@ -93,9 +109,15 @@ export function createContainerRuntimeCoordinator(deps: {
     tunnelRegistry,
     secretCoordinator,
     hostCoordinator,
+    vaults,
     resolveJumpHostTarget,
     emitContainersConnectionProgress,
   } = deps;
+  const credentials = {
+    vaults,
+    resolveSshAuth: secretCoordinator.resolveSshAuth,
+    persistHostSpecificSecret: secretCoordinator.persistHostSpecificSecret,
+  };
 
   const quotePosix = (value: string): string =>
     `'${value.replace(/'/g, `'\"'\"'`)}'`;
@@ -121,6 +143,7 @@ export function createContainerRuntimeCoordinator(deps: {
   const connectContainersEndpoint = async (
     host: SftpCompatibleHostRecord,
     endpointId = buildContainersEndpointId(host.id),
+    attempt?: ConnectAttemptSecrets,
   ): Promise<ResolvedContainersEndpoint> => {
     const existingRuntime =
       coreManager.getContainersEndpointRuntime(endpointId);
@@ -339,9 +362,10 @@ export function createContainerRuntimeCoordinator(deps: {
     }
 
     const trustedHostKeysBase64 = hostCoordinator.resolveTrustedHostKeys(host);
-    const { username, authType, secrets, shouldPersistHostSecret } =
-      await secretCoordinator.resolveSshAuth(host);
-    const jump = await resolveJumpHostTarget(host);
+    const auth = await secretCoordinator.resolveSshAuth(host, attempt?.secrets);
+    const { username, authType, secrets } = auth;
+    const jump = await resolveJumpHostTarget(host, attempt?.jumpSecrets);
+    const hopSecretsToPersist = await collectHopSecretsToPersist(credentials, host, attempt?.jumpSecrets);
     const authAgentEndpoint =
       authType === "agent" ? await resolveLocalAgentEndpoint() : null;
     const result = await coreManager.containersConnect({
@@ -362,10 +386,14 @@ export function createContainerRuntimeCoordinator(deps: {
       authAgentEndpointKind: authAgentEndpoint?.kind,
       authAgentEndpoint: authAgentEndpoint?.endpoint,
       hostId: host.id,
+    }).catch((error: unknown) => {
+      // 점프 홉이나 대상이 넣은 값을 거절했으면 요청 창이 그 홉을 다시 묻게 한다 — 요청 창을 띄울 수 있는 IPC 가
+      // 결과로 바꾼다.
+      const needed = credentialsNeededAfterFailure(credentials, host, error);
+      throw needed ? new CredentialsNeededError(needed) : error;
     });
-    if (shouldPersistHostSecret) {
-      await secretCoordinator.persistHostSpecificSecret(host.id, host.label, secrets);
-    }
+    // 넣은 값은 붙은 뒤 제자리에(대상·점프 홉, 팀 호스트는 내 자격 증명).
+    await persistAttemptSecrets(credentials, host, auth, hopSecretsToPersist);
     return {
       endpointId,
       runtime: result.runtime,
@@ -378,6 +406,7 @@ export function createContainerRuntimeCoordinator(deps: {
   const ensureContainersEndpoint = async (
     host: SftpCompatibleHostRecord,
     endpointId = buildContainersEndpointId(host.id),
+    attempt?: ConnectAttemptSecrets,
   ): Promise<ResolvedContainersEndpoint> => {
     const existingRuntime = coreManager.getContainersEndpointRuntime(endpointId);
     if (existingRuntime) {
@@ -387,7 +416,7 @@ export function createContainerRuntimeCoordinator(deps: {
     if (pendingConnection) {
       return pendingConnection;
     }
-    const connection = connectContainersEndpoint(host, endpointId);
+    const connection = connectContainersEndpoint(host, endpointId, attempt);
     pendingEndpointConnections.set(endpointId, connection);
     try {
       return await connection;
@@ -408,6 +437,7 @@ export function createContainerRuntimeCoordinator(deps: {
     bindAddress: string;
     bindPort: number;
     networks?: readonly { name: string; ipAddress: string }[];
+    attempt?: ConnectAttemptSecrets;
   }) => {
     const {
       ruleId,
@@ -419,6 +449,7 @@ export function createContainerRuntimeCoordinator(deps: {
       bindAddress,
       bindPort,
       networks,
+      attempt,
     } = input;
     const endpointId = buildContainerPortForwardEndpointId(host.id, ruleId);
     // 감사 로그(Recent Activity)에 ruleId(UUID) 대신 보여 줄 라벨.
@@ -459,7 +490,7 @@ export function createContainerRuntimeCoordinator(deps: {
 
     try {
       publishRuntime("starting", "Checking container runtime");
-      const runtimeInfo = await ensureContainersEndpoint(host, endpointId);
+      const runtimeInfo = await ensureContainersEndpoint(host, endpointId, attempt);
       if (!runtimeInfo.runtime) {
         throw new Error(
           runtimeInfo.unsupportedReason ||

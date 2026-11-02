@@ -6,6 +6,7 @@ import type {
   ActivityLogRecord,
   AuthType,
   AppSettings,
+  ConnectAttemptSecrets,
   AwsProfileMissingKey,
   AwsEcsClusterSnapshot,
   AwsEcsServiceLogsSnapshot,
@@ -14,6 +15,7 @@ import type {
   CoreEvent,
   RdpCertificatePrompt,
   RdpSessionEvent,
+  VncCredentialFailure,
   VncSessionEvent,
   DesktopApi,
   DnsOverrideDraft,
@@ -577,18 +579,28 @@ export interface PendingCredentialRetry {
    */
   requestId?: string;
   sessionId?: string | null;
-  /** 붙으려는 호스트(세션·SFTP 의 대상). */
+  /** 붙으려는 SSH 호스트(세션·SFTP·포워딩·컨테이너의 대상, VNC 는 그 SSH 터널 호스트). */
   hostId: string;
   /**
    * 요청 창이 묻는 호스트가 대상이 아니라 그 점프 호스트일 때 그 id. 창의 제목·사용자 이름·인증 방식은 이
    * 호스트 것이고, 넣은 값은 그 홉 자리(jumpSecrets)로 간다.
    */
   promptHostId?: string;
-  source: "ssh" | "sftp";
+  /** 다시 할 일 — 제출하면 그 일을 넣은 값으로 다시 한다(submitCredentialRetry). */
+  source: "ssh" | "sftp" | "portForward" | "containers" | "containerShell" | "vnc";
   authType: Extract<AuthType, "password" | "privateKey" | "certificate">;
   message: string;
   initialUsername: string;
   paneId?: SftpPaneId;
+  /** source 가 portForward 일 때 그 규칙. */
+  ruleId?: string;
+  /** source 가 containerShell 일 때 그 컨테이너(sessionId 는 기다리는 셸 탭). */
+  containerId?: string;
+  /**
+   * VNC 호스트 자신의 계정·비밀번호를 묻는다(hostId 가 그 VNC 호스트) — 서버가 알린 까닭 코드다. 계정까지 묻는지와 문구가
+   * 여기서 갈리고, 넣은 값은 SSH 터널 자리가 아니라 VNC 자리(vncSecrets)로 간다. 없으면 SSH 호스트의 값을 묻는다.
+   */
+  vncFailure?: VncCredentialFailure;
   /**
    * 이번 시도에서 앞서 요청 창에 넣은 값. 아직 붙지 않아 저장되지 않았으므로, 다음 시도에 이것을 함께 보낸다
    * — 점프 호스트를 묻는 동안 대상에 넣은 값을(또는 그 반대를) 잃지 않는다.
@@ -596,11 +608,8 @@ export interface PendingCredentialRetry {
   carried?: ConnectAttemptSecrets;
 }
 
-/** 한 접속 시도에서 요청 창에 넣은 값 — 대상의 것과 점프 호스트마다의 것. */
-export interface ConnectAttemptSecrets {
-  secrets?: HostSecretInput;
-  jumpSecrets?: Record<string, HostSecretInput>;
-}
+/** 한 접속 시도에서 요청 창에 넣은 값 — 대상의 것과 점프 호스트마다의 것(IPC 로도 간다). */
+export type { ConnectAttemptSecrets };
 
 export interface PendingCredentialRetryAttempt {
   sessionId?: string | null;
@@ -1067,8 +1076,8 @@ interface AppStateParts {
   ) => Promise<void>;
   /** RDP 세션을 같은 탭에 다시 붙인다. 재연결 오케스트레이터와 오버레이의 재시도가 쓴다. */
   retryRdpConnection: (sessionId: string) => Promise<void>;
-  /** VNC 세션을 같은 탭에 다시 붙인다(재연결 시도 횟수를 유지한다). */
-  retryVncConnection: (sessionId: string) => Promise<void>;
+  /** VNC 세션을 같은 탭에 다시 붙인다(재연결 시도 횟수를 유지한다). attempt 는 요청 창에 넣은 SSH 터널의 값. */
+  retryVncConnection: (sessionId: string, attempt?: ConnectAttemptSecrets) => Promise<void>;
   startSessionShare: (input: SessionShareStartInput) => Promise<void>;
   updateSessionShareSnapshot: (
     input: SessionShareSnapshotInput,
@@ -1117,7 +1126,8 @@ interface AppStateParts {
     targetHostId: string,
     placement: "before" | "after",
   ) => void;
-  refreshHostContainers: (hostId: string) => Promise<void>;
+  /** attempt 는 요청 창에 넣은 값(그 호스트와 점프 홉). */
+  refreshHostContainers: (hostId: string, attempt?: ConnectAttemptSecrets) => Promise<void>;
   refreshEcsClusterUtilization: (hostId: string) => Promise<void>;
   loginAwsProfileForEcsHost: (hostId: string) => Promise<void>;
   selectHostContainer: (
@@ -1165,6 +1175,13 @@ interface AppStateParts {
   openHostContainerShell: (
     hostId: string,
     containerId: string,
+  ) => Promise<void>;
+  /** 비밀번호를 기다리던 컨테이너 셸 탭을 요청 창에 넣은 값으로 다시 붙인다. */
+  retryHostContainerShell: (
+    sessionId: string,
+    hostId: string,
+    containerId: string,
+    attempt: ConnectAttemptSecrets,
   ) => Promise<void>;
   openEcsExecShell: (
     hostId: string,
@@ -1297,7 +1314,8 @@ interface AppStateParts {
   ) => Promise<SnippetRecord>;
   removeSnippet: (snippetId: string) => Promise<void>;
   removePortForward: (ruleId: string) => Promise<void>;
-  startPortForward: (ruleId: string) => Promise<void>;
+  /** attempt 는 요청 창에 넣은 값(그 호스트와 점프 홉). */
+  startPortForward: (ruleId: string, attempt?: ConnectAttemptSecrets) => Promise<void>;
   stopPortForward: (ruleId: string) => Promise<void>;
   removeKnownHost: (id: string) => Promise<void>;
   /**
@@ -1710,6 +1728,7 @@ export type ContainersSlice = Pick<
   | "refreshHostContainerStats"
   | "runHostContainerAction"
   | "openHostContainerShell"
+  | "retryHostContainerShell"
   | "openEcsExecShell"
 >;
 

@@ -1,7 +1,10 @@
 import {
   isSshHostRecord,
+  isVncCredentialFailure,
   isVncHostRecord,
+  type ConnectAttemptSecrets,
   type SshHostRecord,
+  type VncConnectedPayload,
   type VncInputEvent,
 } from "@shared";
 import { clipboard, ipcMain } from "electron";
@@ -9,7 +12,14 @@ import { clipboard, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import { t } from "../i18n";
 import { resolveLocalAgentEndpoint } from "./agent-endpoint";
-import type { VncManager } from "../vnc-manager";
+import {
+  collectHopSecretsToPersist,
+  credentialsNeededAfterFailure,
+  CredentialsNeededError,
+  findHostNeedingPassword,
+  persistAttemptSecrets,
+} from "./connect-credentials";
+import { VncConnectError, type VncManager } from "../vnc-manager";
 import type { MainIpcContext } from "./context";
 import { hostPresenceGuard } from "./host-presence";
 
@@ -40,6 +50,8 @@ export function registerVncIpcHandlers(
   const openForward = async (
     sessionId: string,
     host: ReturnType<typeof ctx.vaults.getHost> & { kind: "vnc" },
+    /** 요청 창에 넣은 SSH 터널 호스트(대상)와 그 점프의 값. */
+    attempt?: ConnectAttemptSecrets,
   ): Promise<{ host: string; port: number } | null> => {
     const tailnetId = host.tailnetId?.trim();
     if (tailnetId) {
@@ -77,10 +89,11 @@ export function registerVncIpcHandlers(
       }),
     );
     const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys(sshHost);
-    const { username, authType, secrets } =
-      await ctx.resolveSshAuth(sshHost);
+    const auth = await ctx.resolveSshAuth(sshHost, attempt?.secrets);
+    const { username, authType, secrets } = auth;
     await ctx.ensureCertificateAuthReady(sshHost, secrets, authType);
-    const jump = await ctx.resolveJumpHostTarget(sshHost);
+    const jump = await ctx.resolveJumpHostTarget(sshHost, attempt?.jumpSecrets);
+    const hopSecretsToPersist = await collectHopSecretsToPersist(ctx, sshHost, attempt?.jumpSecrets);
     const authAgentEndpoint =
       authType === "agent" ? await resolveLocalAgentEndpoint() : null;
 
@@ -117,8 +130,15 @@ export function registerVncIpcHandlers(
       // 경유 서버에서 다른 기기의 5900 으로 이어 주는 구성도 있다.
       targetHost: host.hostname,
       targetPort: host.port,
+    }).catch((error: unknown) => {
+      // 터널 호스트나 그 점프가 넣은 값을 거절했으면 요청 창이 그 홉을 다시 묻게 한다(connect 가 결과로 바꾼다).
+      const needed = credentialsNeededAfterFailure(ctx, sshHost, error);
+      throw needed ? new CredentialsNeededError(needed) : error;
     });
     forwardBySession.set(sessionId, { kind: "ssh", ruleId });
+    // 코어는 SSH 인증을 마친 뒤에 '시작됨'을 알린다 — 이제 넣은 값을 제자리에(팀 호스트는 내 자격 증명). 통로를 먼저
+    // 적어 둔다 — 저장이 실패해도 그 통로는 닫을 수 있어야 한다.
+    await persistAttemptSecrets(ctx, sshHost, auth, hopSecretsToPersist);
     // 통로가 열렸다. 이 다음의 실패는 원격 VNC 쪽이라는 뜻이고, 그 구분이 이 줄의 값이다.
     vncManager.reportProgress(
       sessionId,
@@ -146,7 +166,7 @@ export function registerVncIpcHandlers(
 
   ipcMain.handle(
     ipcChannels.vnc.connect,
-    async (event, sessionId: string, hostId: string) => {
+    async (event, sessionId: string, hostId: string, attempt?: ConnectAttemptSecrets) => {
       const host = ctx.vaults.getHost(hostId);
       if (!host) {
         throw new Error("Host not found");
@@ -155,18 +175,35 @@ export function registerVncIpcHandlers(
         throw new Error("Not a VNC host");
       }
 
+      // SSH 터널 호스트(또는 그 점프)에 쓸 비밀번호가 없으면 아무것도 열지 않고 그 홉을 알린다 — 화면이 요청 창을
+      // 그 홉으로 띄운다. 코어에 맡기면 붙기 전에 영어 원문으로 멈추고, 그 문구는 VNC 비밀번호로 읽힌다.
+      // openForward 와 같은 순서로 고른다 — tailnet 이 있으면 SSH 터널을 쓰지 않는다.
+      const tunnelHostId = host.tailnetId?.trim() ? null : host.sshTunnelHostId?.trim();
+      const tunnelHost = tunnelHostId ? ctx.vaults.getHost(tunnelHostId) : null;
+      if (tunnelHost && isSshHostRecord(tunnelHost)) {
+        const needsPasswordFor = await findHostNeedingPassword(ctx, tunnelHost, attempt?.secrets, attempt?.jumpSecrets);
+        if (needsPasswordFor) {
+          return { credentialsNeeded: { hostId: needsPasswordFor, reason: "missing" as const } };
+        }
+      }
+
       // 비밀값·통로를 기다리는 사이 팀에서 빠지면(지우면) 이 세션은 아직 VNC 관리자에 적히지 않아 닫기가 닿지 않는다 —
       // 기다림 뒤 손대기 전마다 본다.
       const ensureHostPresent = hostPresenceGuard(ctx, host.id);
       const secrets = await ctx.loadHostSecrets(host);
       ensureHostPresent();
+      // 요청 창에 넣은 VNC 값이 저장된 것보다 먼저다. 계정이 실려 있으면 빈 값이라도 그것을 쓴다(계정을 비워 VNC 암호로 붙기).
+      const typed = attempt?.vncSecrets;
+      const password = typed?.password ?? secrets.password;
+      const username = typed && typed.username !== undefined ? typed.username : secrets.username;
       // 프레임을 보낼 창을 먼저 등록한다. 접속이 끝난 뒤에 등록하면 첫 화면을 놓친다 — 서버는
       // 우리가 요청한 전체 갱신을 곧바로 보낸다.
       vncManager.watchSession(sessionId, event.sender.id);
 
       let forwarded: { host: string; port: number } | null = null;
+      let connected: VncConnectedPayload;
       try {
-        forwarded = await openForward(sessionId, host);
+        forwarded = await openForward(sessionId, host, attempt);
         // 통로가 열리는 사이 빠졌을 수 있다 — 붙지 않는다(아래에서 연 통로를 닫는다).
         ensureHostPresent();
         // 통로가 정해졌으니 이제 RFB 협상이다. 경유가 없으면 이것이 유일한 진행 보고다.
@@ -179,15 +216,15 @@ export function registerVncIpcHandlers(
         );
         // 이 창이 이 세션의 주인이다. 창이 닫히면 세션도 끊는다(아래 watch 의 destroyed 훅).
         vncManager.setSessionOwner(sessionId, event.sender.id);
-        return await vncManager.connect(
+        connected = await vncManager.connect(
           {
             sessionId,
             host: forwarded?.host ?? host.hostname,
             port: forwarded?.port ?? host.port,
-            password: secrets.password,
+            password,
             // 자격증명에 계정이 있으면 넘긴다. 쓸지 말지는 코어가 협상 결과로 판단한다 —
             // VncAuth 는 계정을 쓰지 않고, Plain 계열만 쓴다.
-            username: secrets.username,
+            username,
             // 화질. 없으면 무손실이다 — 코어가 모르는 값도 무손실로 떨어뜨린다.
             imageQuality: host.imageQuality ?? undefined,
             shared: host.shared !== false,
@@ -199,7 +236,7 @@ export function registerVncIpcHandlers(
             hostLabel: host.label,
             title: host.label,
             connectionDetails: `${host.hostname} · ${host.port}${
-              secrets.username?.trim() ? ` · ${secrets.username.trim()}` : ""
+              username?.trim() ? ` · ${username.trim()}` : ""
             }`,
           },
         );
@@ -210,8 +247,45 @@ export function registerVncIpcHandlers(
         // 붙는 사이 호스트가 사라졌으면(팀에서 빠짐 — 팀 게이트웨이의 터널이 먼저 멈춘다) 터널이 남긴 취소 오류 대신 그 까닭으로
         // 끝낸다. 그대로 넘기면 탭에 '연결을 그만뒀습니다'가 보였다.
         ensureHostPresent();
+        // 터널 호스트나 그 점프가 넣은 값을 거절했다 — 화면이 그 홉을 다시 묻는다.
+        if (error instanceof CredentialsNeededError) {
+          return { credentialsNeeded: error.needed };
+        }
+        // VNC 서버가 계정·비밀번호를 요구하거나 거절했다 — 화면이 이 호스트의 값을 요청 창으로 묻는다. 계정은 무엇을 썼는지
+        // 함께 알린다(계정까지 묻는 창에 미리 채운다).
+        if (error instanceof VncConnectError && isVncCredentialFailure(error.failure)) {
+          const missing = error.failure === "password-required" || error.failure === "account-required";
+          return {
+            credentialsNeeded: {
+              hostId: host.id,
+              reason: missing ? ("missing" as const) : ("rejected" as const),
+              message: error.message,
+              failure: error.failure,
+              ...(username?.trim() ? { username: username.trim() } : {}),
+            },
+          };
+        }
+        // 코어가 이 실패를 이미 화면에 알렸다(까닭 코드와 함께) — 탭은 그 알림이 그렸다. 오류로 던지면 화면 흐름이 그 표시
+        // (Retry·재연결 예약)를 덮는다.
+        if (error instanceof VncConnectError && error.reported) {
+          return { failureReported: true as const };
+        }
         throw error;
       }
+      // 넣은 값으로 붙었다 — 쓴 계정·비밀번호를 제자리에 둔다(개인 호스트는 호스트 비밀값, 팀 호스트는 내 자격 증명). 다음부터는
+      // 묻지 않는다. 저장이 실패해도 붙은 연결은 그대로 둔다 — 다음에 다시 물을 뿐이다.
+      if (typed) {
+        await ctx
+          .persistHostSpecificSecret(host.id, host.label, {
+            kind: "vnc",
+            username: username?.trim() || undefined,
+            password,
+          })
+          .catch((error: unknown) => {
+            console.warn("[vnc] failed to save the entered credentials", error);
+          });
+      }
+      return connected;
     },
   );
 

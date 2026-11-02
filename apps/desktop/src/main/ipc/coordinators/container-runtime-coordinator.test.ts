@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CredentialsNeededError } from "../connect-credentials";
 import { createContainerRuntimeCoordinator } from "./container-runtime-coordinator";
 
 function createAwsHost() {
@@ -538,5 +539,102 @@ describe("세션 패널이 여는 컨테이너 터널", () => {
 
     expect(started).toBe(true);
     expect(disconnectedBeforeStart).toBe(false);
+  });
+});
+
+// 다듬기 2단계 — 컨테이너 연결은 요청 창에 넣은 값으로 붙고, 붙은 뒤 그 값을 제자리에 저장하고, 넣은 값을 거절하면
+// 그 홉을 알린다(요청 창을 띄울 수 있는 IPC 가 결과로 바꾼다).
+describe("container connection with values typed into the request dialog", () => {
+  const bastion = { id: "bastion", kind: "ssh", label: "Bastion", hostname: "b", port: 22, username: "tester", authType: "password" };
+  const target = {
+    id: "target",
+    kind: "ssh",
+    label: "Target",
+    hostname: "t",
+    port: 22,
+    username: "tester",
+    authType: "password",
+    jumpHostIds: ["bastion"],
+  } as any;
+
+  function createSshCoordinator(
+    containersConnect = vi.fn().mockResolvedValue({ runtime: "docker", runtimeCommand: "docker", unsupportedReason: null }),
+  ) {
+    const persistHostSpecificSecret = vi.fn(async () => "ref");
+    // 저장된 비밀번호는 없다 — 이번에 넣은 값만 쓴다.
+    const resolveSshAuth = vi.fn(async (host: { username: string; authType: string }, provided?: { password?: string }) => ({
+      username: host.username,
+      authType: host.authType,
+      secrets: provided?.password ? { password: provided.password } : {},
+      shouldPersistHostSecret: Boolean(provided?.password),
+      typedUsername: null,
+    }));
+    const { coordinator, deps } = createCoordinator({
+      secretCoordinator: { resolveSshAuth, persistHostSpecificSecret },
+      hostCoordinator: {
+        requireTrustedHostKeys: vi.fn(() => ["trusted"]),
+        resolveTrustedHostKeys: vi.fn(() => ["trusted"]),
+        resolveTailnetRoute: vi.fn(() => ({})),
+      },
+      vaults: { getHostInSameVault: vi.fn((_hostId: string, id: string) => (id === "bastion" ? bastion : null)) },
+      resolveJumpHostTarget: vi.fn(async (_host: unknown, jumpSecrets?: Record<string, { password?: string }>) => ({
+        host: "b",
+        password: jumpSecrets?.bastion?.password,
+      })),
+    });
+    deps.coreManager.containersConnect = containersConnect;
+    return { coordinator, deps, persistHostSpecificSecret };
+  }
+
+  it("connects with the typed values and saves them once connected", async () => {
+    const { coordinator, deps, persistHostSpecificSecret } = createSshCoordinator();
+    const attempt = { secrets: { password: "app-pw" }, jumpSecrets: { bastion: { password: "jump-pw" } } };
+    await expect(coordinator.ensureContainersEndpoint(target, "containers:target", attempt)).resolves.toMatchObject({
+      runtime: "docker",
+    });
+    expect(deps.coreManager.containersConnect).toHaveBeenCalledWith(
+      expect.objectContaining({ password: "app-pw", jump: expect.objectContaining({ password: "jump-pw" }) }),
+    );
+    expect(persistHostSpecificSecret.mock.calls).toEqual([
+      ["target", "Target", { password: "app-pw" }, null],
+      ["bastion", "Bastion", { password: "jump-pw" }, null],
+    ]);
+  });
+
+  it("names the jump host that rejected the typed value, saving nothing", async () => {
+    const rejected = Object.assign(new Error("jump host: ssh: unable to authenticate, attempted methods [none password]"), {
+      jumpDepth: 1,
+    });
+    const { coordinator, persistHostSpecificSecret } = createSshCoordinator(vi.fn().mockRejectedValue(rejected));
+    const error = await coordinator
+      .ensureContainersEndpoint(target, "containers:target", {
+        secrets: { password: "app-pw" },
+        jumpSecrets: { bastion: { password: "wrong" } },
+      })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(CredentialsNeededError);
+    expect((error as CredentialsNeededError).needed).toEqual({ hostId: "bastion", reason: "rejected", message: rejected.message });
+    expect(persistHostSpecificSecret).not.toHaveBeenCalled();
+  });
+
+  it("hands the typed values to the connection a container port forward opens", async () => {
+    const { coordinator, deps } = createSshCoordinator(
+      vi.fn().mockResolvedValue({ runtime: null, runtimeCommand: null, unsupportedReason: "no docker" }),
+    );
+    await expect(
+      coordinator.startContainerTunnelRuntime({
+        ruleId: "rule-1",
+        host: target,
+        containerId: "container-1",
+        networkName: "bridge",
+        targetPort: 80,
+        bindAddress: "127.0.0.1",
+        bindPort: 18080,
+        attempt: { secrets: { password: "app-pw" }, jumpSecrets: { bastion: { password: "jump-pw" } } },
+      }),
+    ).rejects.toThrow("no docker");
+    expect(deps.coreManager.containersConnect).toHaveBeenCalledWith(
+      expect.objectContaining({ password: "app-pw", jump: expect.objectContaining({ password: "jump-pw" }) }),
+    );
   });
 });

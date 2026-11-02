@@ -102,8 +102,8 @@ export function buildPortForwardsBridge(
       ipcRenderer.invoke(ipcChannels.portForwards.update, id, draft),
     remove: (id: string) =>
       ipcRenderer.invoke(ipcChannels.portForwards.remove, id),
-    start: (ruleId: string) =>
-      ipcRenderer.invoke(ipcChannels.portForwards.start, ruleId),
+    start: (ruleId, attempt) =>
+      ipcRenderer.invoke(ipcChannels.portForwards.start, ruleId, attempt),
     stop: (ruleId: string) =>
       ipcRenderer.invoke(ipcChannels.portForwards.stop, ruleId),
     onEvent: (listener) => subscribePortForwardEvent(listener),
@@ -211,6 +211,7 @@ export function buildLogsBridge(
   return {
     list: () => ipcRenderer.invoke(ipcChannels.logs.list),
     clear: () => ipcRenderer.invoke(ipcChannels.logs.clear),
+    exportCsv: (input) => ipcRenderer.invoke(ipcChannels.logs.exportCsv, input),
     onChanged: (listener) => subscribeActivityLogsChanged(listener),
   };
 }

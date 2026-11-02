@@ -1,5 +1,5 @@
-import { isSshHostRecord } from "@shared";
-import type { AuthType, ConnectCredentialsNeeded, HostRecord, VaultIndex } from "@shared";
+import { isSshHostRecord, isVncCredentialFailure } from "@shared";
+import type { AuthType, ConnectCredentialsNeeded, HostRecord, VaultIndex, VncCredentialFailure } from "@shared";
 import { t } from "../../i18n";
 import type { ConnectAttemptSecrets, PendingCredentialRetry } from "../types";
 import { myUsernameOf } from "./vaults";
@@ -16,6 +16,9 @@ export function credentialRetryAuthType(
  *
  * 묻는 호스트가 대상의 점프 호스트면 창은 그 호스트(제목·사용자 이름·인증 방식)로 뜨고, 넣은 값은 그 홉
  * 자리로 간다(promptHostId). 앞서 넣은 값(carried)은 다음 시도에 함께 보낸다.
+ *
+ * tunnelFor 는 SSH 터널로 가는 VNC 호스트의 이름이다 — 그때 hostId 는 SSH 터널 호스트이고, 문구는 VNC 비밀번호가
+ * 아님을 말한다.
  */
 export function buildHopCredentialRetry(input: {
   hosts: readonly HostRecord[];
@@ -25,6 +28,9 @@ export function buildHopCredentialRetry(input: {
   source: PendingCredentialRetry["source"];
   sessionId?: string | null;
   paneId?: PendingCredentialRetry["paneId"];
+  ruleId?: string;
+  containerId?: string;
+  tunnelFor?: string;
   carried?: ConnectAttemptSecrets;
 }): PendingCredentialRetry | null {
   const promptHost = input.hosts.find((host) => host.id === input.needed.hostId);
@@ -36,8 +42,13 @@ export function buildHopCredentialRetry(input: {
   const message =
     input.needed.reason === "missing"
       ? isJumpHop
-        ? t("credentialRetry.jumpPasswordNeeded", { label: promptHost.label, target: target?.label ?? "" })
-        : t("credentialRetry.passwordNeeded", { label: promptHost.label })
+        ? t("credentialRetry.jumpPasswordNeeded", {
+            label: promptHost.label,
+            target: input.tunnelFor ?? target?.label ?? "",
+          })
+        : input.tunnelFor
+          ? t("credentialRetry.tunnelPasswordNeeded", { label: promptHost.label, target: input.tunnelFor })
+          : t("credentialRetry.passwordNeeded", { label: promptHost.label })
       : (input.needed.message ?? "");
   return {
     requestId: globalThis.crypto.randomUUID(),
@@ -50,6 +61,51 @@ export function buildHopCredentialRetry(input: {
     message,
     initialUsername: myUsernameOf(input.vaultIndex, promptHost.id) ?? promptHost.username,
     ...(input.paneId ? { paneId: input.paneId } : {}),
+    ...(input.ruleId ? { ruleId: input.ruleId } : {}),
+    ...(input.containerId ? { containerId: input.containerId } : {}),
     ...(input.carried ? { carried: input.carried } : {}),
+  };
+}
+
+/** 계정까지 묻는 VNC 실패(macOS 화면 공유처럼 계정으로 로그인하는 서버). */
+export function vncFailureAsksAccount(failure: VncCredentialFailure): boolean {
+  return failure === "account-required" || failure === "account-auth-rejected";
+}
+
+/**
+ * VNC 서버가 계정·비밀번호를 요구하거나 거절했다(메인의 credentialsNeeded 가 VNC 호스트 자신을 가리킨다)를 요청 창 요청으로 바꾼다.
+ *
+ * 넣은 값은 SSH 터널 자리가 아니라 VNC 자리로 가고(vncFailure), 문구는 까닭마다 다르다. 앞선 시도의 값은 싣지 않는다 — 여기까지
+ * 왔으면 터널은 이미 열렸고 넣은 터널 값은 그때 저장됐다. 계정은 그 시도에서 쓴 것을 미리 채운다.
+ */
+export function buildVncCredentialRetry(input: {
+  host: HostRecord;
+  needed: ConnectCredentialsNeeded;
+  sessionId: string;
+}): PendingCredentialRetry | null {
+  const failure = input.needed.failure;
+  if (input.host.kind !== "vnc" || input.needed.hostId !== input.host.id || !isVncCredentialFailure(failure)) {
+    return null;
+  }
+  const label = input.host.label;
+  const message =
+    failure === "password-required"
+      ? t("credentialRetry.vncPasswordNeeded", { label })
+      : failure === "password-truncated"
+        ? t("credentialRetry.vncPasswordTruncated")
+        : failure === "account-required"
+          ? t("credentialRetry.vncAccountNeeded", { label })
+          : failure === "account-auth-rejected"
+            ? t("credentialRetry.vncAccountRejected")
+            : t("credentialRetry.vncPasswordRejected");
+  return {
+    requestId: globalThis.crypto.randomUUID(),
+    sessionId: input.sessionId,
+    hostId: input.host.id,
+    source: "vnc",
+    authType: "password",
+    message,
+    initialUsername: input.needed.username ?? "",
+    vncFailure: failure,
   };
 }

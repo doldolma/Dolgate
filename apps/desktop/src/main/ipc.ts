@@ -45,6 +45,7 @@ import { registerContainersIpcHandlers } from "./ipc/containers";
 import { registerHostsGroupsIpcHandlers } from "./ipc/hosts-groups";
 import { registerImportIpcHandlers } from "./ipc/imports";
 import { registerKnownHostsLogsKeychainIpcHandlers } from "./ipc/known-hosts-logs-keychain";
+import { registerLogsExportIpcHandlers } from "./ipc/logs-export";
 import { registerTailnetIpcHandlers } from "./ipc/tailnet";
 import { registerPortForwardAndDnsIpcHandlers } from "./ipc/port-forwards-dns";
 import { registerSessionShareIpcHandlers } from "./ipc/session-shares";
@@ -186,6 +187,7 @@ export function registerIpcHandlers(
   registerSnippetsIpcHandlers(ctx);
   registerSavedWorkspacesIpcHandlers(ctx);
   registerKnownHostsLogsKeychainIpcHandlers(ctx);
+  registerLogsExportIpcHandlers(ctx);
   registerTailnetIpcHandlers(ctx);
   registerSshKeyIpcHandlers(ctx);
   registerWindowUpdaterSettingsFilesIpcHandlers(ctx, windowRuntime);

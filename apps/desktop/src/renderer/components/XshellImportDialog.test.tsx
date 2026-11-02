@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopApi, XshellProbeResult } from '@shared';
 import {
@@ -6,7 +6,8 @@ import {
   buildXshellImportTree,
   collectEffectiveSelectedXshellGroupPaths,
   collectVisibleXshellSelectionTargets,
-  countEffectiveSelectedXshellHosts
+  countEffectiveSelectedXshellHosts,
+  countXshellImportSecrets
 } from './XshellImportDialog';
 
 const initialProbeResult: XshellProbeResult = {
@@ -347,5 +348,77 @@ describe('Xshell import dialog', () => {
     expect(body).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');
     expect(tree).not.toHaveClass('overflow-y-auto');
     expect(tree).toBeInTheDocument();
+  });
+});
+
+describe('Xshell import dialog — 어느 볼트로', () => {
+  const TEAM = 'team-1';
+  const choices = [
+    { id: 'personal', team: null },
+    { id: TEAM, team: { id: TEAM, name: 'Acme Infra' } }
+  ];
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('counts a key with its file and a saved password, one per host', () => {
+    const hosts = initialProbeResult.hosts;
+    // Servers 아래: web(키 파일 있음)·db(저장된 비밀번호). 루트 호스트는 비밀번호가 저장돼 있지 않다.
+    expect(countXshellImportSecrets(hosts, ['Servers'], [])).toBe(2);
+    expect(countXshellImportSecrets(hosts, [], ['host-root'])).toBe(0);
+    expect(countXshellImportSecrets(hosts, [], ['host-1'])).toBe(1);
+    expect(countXshellImportSecrets(hosts, [], ['host-2'])).toBe(1);
+    // 키 인증인데 키 파일을 못 찾은 호스트는 넣을 키가 없다.
+    expect(
+      countXshellImportSecrets([{ ...hosts[1]!, privateKeyPath: null }], [], [hosts[1]!.key])
+    ).toBe(0);
+  });
+
+  it('imports into the vault it was opened from with the sharing choice', async () => {
+    const api = installMockApi();
+    const onClose = vi.fn();
+    render(
+      <XshellImportDialog open vaultChoices={choices} defaultVaultId={TEAM} onClose={onClose} onImported={vi.fn()} />
+    );
+
+    expect(screen.getByRole('button', { name: 'Vault' })).toHaveTextContent('Acme Infra');
+    fireEvent.click(await screen.findByLabelText('Servers 그룹 선택'));
+    const share = screen.getByRole('switch');
+    expect(share).toHaveAccessibleName('비밀번호·SSH 키 2개도 함께 공유');
+    expect(share).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(share);
+    fireEvent.click(screen.getByRole('button', { name: '가져오기' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(api.xshell.importSelection).toHaveBeenCalledWith({
+      snapshotId: initialProbeResult.snapshotId,
+      selectedGroupPaths: ['Servers'],
+      selectedHostKeys: [],
+      vaultId: TEAM,
+      shareSecrets: false
+    });
+  });
+
+  it('sends nothing about vaults when you pick your own', async () => {
+    const api = installMockApi();
+    render(
+      <XshellImportDialog open vaultChoices={choices} defaultVaultId={TEAM} onClose={vi.fn()} onImported={vi.fn()} />
+    );
+    fireEvent.click(await screen.findByLabelText('Servers 그룹 선택'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Vault' }));
+    fireEvent.click(within(screen.getByRole('listbox', { name: /Vault/ })).getByRole('option', { name: 'Personal' }));
+    expect(screen.queryByRole('switch')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '가져오기' }));
+
+    await waitFor(() =>
+      expect(api.xshell.importSelection).toHaveBeenCalledWith({
+        snapshotId: initialProbeResult.snapshotId,
+        selectedGroupPaths: ['Servers'],
+        selectedHostKeys: []
+      })
+    );
   });
 });

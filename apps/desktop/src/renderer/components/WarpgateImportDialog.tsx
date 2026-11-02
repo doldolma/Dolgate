@@ -8,6 +8,7 @@ import type {
 } from "@shared";
 import { useWarpgateImportController } from "../controllers/useImportControllers";
 import { DialogBackdrop } from "./DialogBackdrop";
+import { ImportVaultFields, useImportVault, type ImportVaultProps } from "./ImportVaultFields";
 import {
   Button,
   Card,
@@ -31,11 +32,13 @@ import {
 import { Trans, useTranslation } from "react-i18next";
 import { t } from "../i18n";
 
-interface WarpgateImportDialogProps {
+interface WarpgateImportDialogProps extends ImportVaultProps {
   open: boolean;
+  /** 처음 고른 볼트(defaultVaultId) 안에서 지금 보고 있는 그룹. 다른 볼트를 고르면 그 볼트 맨 위로 간다. */
   currentGroupPath: string | null;
   onClose: () => void;
-  onImport: (draft: HostDraft) => Promise<void>;
+  /** 고른 볼트에 만든다(새 호스트 서랍의 Vault 와 같은 길). */
+  onImport: (draft: HostDraft, vaultId: string) => Promise<void>;
 }
 
 function normalizeBaseUrl(value: string): URL | null {
@@ -103,6 +106,8 @@ function getStatusDetail(
 export function WarpgateImportDialog({
   open,
   currentGroupPath,
+  vaultChoices = [],
+  defaultVaultId,
   onClose,
   onImport,
 }: WarpgateImportDialogProps) {
@@ -124,6 +129,12 @@ export function WarpgateImportDialog({
   const [activeAttemptId, setActiveAttemptId] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const activeAttemptIdRef = useRef<string | null>(null);
+  // Warpgate 호스트에는 비밀값이 없다 — 공유 줄 없이 Vault 만 고른다.
+  const { vaultId, setVaultId, shareSecrets, setShareSecrets, isDefaultVault } = useImportVault(
+    open,
+    defaultVaultId,
+  );
+  const groupPath = isDefaultVault ? currentGroupPath : null;
 
   useEffect(() => {
     activeAttemptIdRef.current = activeAttemptId;
@@ -276,6 +287,15 @@ export function WarpgateImportDialog({
         </ModalHeader>
 
         <ModalBody className="grid gap-4">
+          <ImportVaultFields
+            choices={vaultChoices}
+            vaultId={vaultId}
+            onVaultChange={setVaultId}
+            secretCount={0}
+            shareSecrets={shareSecrets}
+            onShareSecretsChange={setShareSecrets}
+            disabled={Boolean(savingTargetId)}
+          />
           <FieldGroup label="Warpgate URL">
             <Input
               value={baseUrl}
@@ -425,7 +445,7 @@ export function WarpgateImportDialog({
                             await onImport({
                               kind: "warpgate-ssh",
                               label: target.name,
-                              groupName: currentGroupPath ?? "",
+                              groupName: groupPath ?? "",
                               tags: [],
                               terminalThemeId: null,
                               warpgateBaseUrl: connectionInfo.baseUrl,
@@ -434,7 +454,7 @@ export function WarpgateImportDialog({
                               warpgateTargetId: target.id,
                               warpgateTargetName: target.name,
                               warpgateUsername: resolvedUsername,
-                            });
+                            }, vaultId);
                             onClose();
                           } catch (importError) {
                             setError(

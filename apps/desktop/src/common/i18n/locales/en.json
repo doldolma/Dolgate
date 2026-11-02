@@ -1535,6 +1535,21 @@
       "forwardStarted": "Forwarding started",
       "forwardEnded": "Forwarding ended",
       "forwarding": "Forwarding"
+    },
+    "count": "{{count}} entries",
+    "loadingOlder": " · Loading older entries… back to {{date}}",
+    "period": {
+      "all": "All time",
+      "aria": "Period: {{range}}",
+      "relativeHint": "Counts back from now — new entries keep showing up.",
+      "absoluteHint": "Dates use this device's time zone."
+    },
+    "export": {
+      "exporting": "Exporting… {{count}} entries",
+      "stop": "Stop",
+      "saved": "Saved to {{file}}",
+      "failed": "Couldn't export — {{message}}",
+      "nothing": "No entries to export"
     }
   },
   "hostForm": {
@@ -2836,6 +2851,12 @@
     "secretCreateFailed": "Could not create the new secret.",
     "hostSecretCreated": "Created a new host-only secret."
   },
+  "logsExport": {
+    "title": "Export logs",
+    "plaintext": "Saved as decrypted plain text.",
+    "exported": "Exported {{count}} log entries to CSV.",
+    "invalid": "The log export request is invalid."
+  },
   "connectStage": {
     "sshConfig": "Checking SSH settings",
     "awsProfile": "Checking the AWS profile",
@@ -3283,7 +3304,13 @@
     "retryFailed": "The retry failed.",
     "retry": "Try again",
     "passwordNeeded": "Enter the password for {{label}}.",
-    "jumpPasswordNeeded": "Enter the password for the jump host {{label}} — the connection to {{target}} goes through it."
+    "jumpPasswordNeeded": "Enter the password for the jump host {{label}} — the connection to {{target}} goes through it.",
+    "tunnelPasswordNeeded": "Enter the password for the SSH tunnel host {{label}} — the connection to {{target}} goes through it.",
+    "vncPasswordNeeded": "Enter the VNC password for {{label}}.",
+    "vncPasswordRejected": "The password was not accepted. Enter it again.",
+    "vncPasswordTruncated": "VNC only uses the first 8 characters of a password. Enter one that is 8 characters or shorter.",
+    "vncAccountNeeded": "Enter the account and password for {{label}}.",
+    "vncAccountRejected": "The account or password was not accepted. To connect with the VNC password instead, leave the account empty."
   },
   "opensshSvc": {
     "circularInclude": "Skipped a circular Include in {{path}}.",

@@ -11,7 +11,7 @@ import {
   type XshellSnapshotFolderInput,
 } from "@shared";
 import { randomUUID } from "node:crypto";
-import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { app, dialog, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
@@ -33,26 +33,12 @@ import {
   resolveCurrentXshellPasswordSecurityContext,
 } from "../xshell-password-decryptor";
 import type { MainIpcContext } from "./context";
+import { resolveImportTarget, type ImportedSecret } from "./import-target";
+import { ensureExtension, writeFileAtomically } from "./save-file";
 import { t } from "../i18n";
 import { logMessage } from "../activity-log-message";
 
 const hostTransferService = new HostTransferService();
-
-function ensureExtension(filePath: string, extension: string): string {
-  return filePath.toLocaleLowerCase().endsWith(extension)
-    ? filePath
-    : `${filePath}${extension}`;
-}
-
-async function writeFileAtomically(filePath: string, content: Buffer | string): Promise<void> {
-  const tempPath = `${filePath}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(tempPath, content, { mode: 0o600, flag: "wx" });
-    await rename(tempPath, filePath);
-  } finally {
-    await rm(tempPath, { force: true }).catch(() => undefined);
-  }
-}
 
 export function registerImportIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
@@ -313,12 +299,9 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
       }
 
       const result = await importTermiusSelection(snapshot, input, {
-        groups: ctx.groups,
-        hosts: ctx.hosts,
+        // 고른 볼트에 쓴다(없으면 개인). 팀이면 그 팀 볼트에 바로 — 개인에는 아무것도 안 남는다.
+        target: resolveImportTarget(ctx, input),
         activityLogs: ctx.activityLogs,
-        secretMetadata: ctx.secretMetadata,
-        persistSecret: async (label, secrets) =>
-          ctx.persistImportedSecret(label, secrets),
         queueSync: ctx.queueSync,
       });
 
@@ -348,16 +331,17 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
         );
       }
 
+      // 고른 볼트에 쓴다(없으면 개인). 팀이면 그 팀 볼트에 바로 — 개인에는 아무것도 안 남는다. 쓰기 전에 고를 수 있는
+      // 볼트인지부터 본다. 거절은 읽어 둔 config 를 버리지 않는다 — 다른 볼트를 골라 다시 누르면 된다.
+      const target = resolveImportTarget(ctx, input);
       try {
         const selectedHostKeys = new Set(input.selectedHostKeys);
         const selectedHosts = [...snapshot.hostsByKey.values()].filter((host) =>
           selectedHostKeys.has(host.key),
         );
         const targetGroupPath = normalizeGroupPath(input.groupPath);
-        const existingGroupPaths = new Set(
-          ctx.groups.list().map((group) => group.path),
-        );
-        const secretRefsByIdentityPath = new Map<string, string>();
+        const existingGroupPaths = new Set(target.listGroupPaths());
+        const secretsByIdentityPath = new Map<string, ImportedSecret>();
         const warnings: OpenSshImportWarning[] = [...snapshot.warnings];
 
         let createdGroupCount = 0;
@@ -369,8 +353,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
           if (existingGroupPaths.has(candidatePath)) {
             continue;
           }
-          const group = ctx.groups.create(
-            randomUUID(),
+          const group = target.createGroup(
             getGroupLabel(candidatePath),
             getParentGroupPath(candidatePath),
           );
@@ -379,22 +362,22 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
         }
 
         for (const host of selectedHosts) {
-          let secretRef: string | null = null;
+          let secret: ImportedSecret | null = null;
 
           if (host.authType === "privateKey" && host.identityFilePath) {
-            const cachedSecretRef = secretRefsByIdentityPath.get(host.identityFilePath);
-            if (cachedSecretRef) {
-              secretRef = cachedSecretRef;
+            const cachedSecret = secretsByIdentityPath.get(host.identityFilePath);
+            if (cachedSecret) {
+              secret = cachedSecret;
             } else {
               const identityImport = await resolveOpenSshIdentityImport(
                 host.identityFilePath,
               );
               if (identityImport.kind === "managed-key") {
-                secretRef = await ctx.persistImportedSecret(`OpenSSH ${host.alias}`, {
+                secret = await target.persistSecret(`OpenSSH ${host.alias}`, {
                   privateKeyPem: identityImport.privateKeyPem,
                 });
-                if (secretRef) {
-                  secretRefsByIdentityPath.set(host.identityFilePath, secretRef);
+                if (secret) {
+                  secretsByIdentityPath.set(host.identityFilePath, secret);
                   createdSecretCount += 1;
                 }
               } else {
@@ -405,7 +388,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
             }
           }
 
-          ctx.hosts.create(
+          target.createHost(
             randomUUID(),
             {
               kind: "ssh",
@@ -418,7 +401,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
               username: host.username,
               authType: host.authType,
             },
-            secretRef,
+            secret,
           );
           createdHostCount += 1;
         }
@@ -434,6 +417,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
             logMessage("imports.opensshImported"),
             {
               sourceCount: snapshot.sources.length,
+              vaultId: target.vaultId,
               targetGroupPath,
               createdGroupCount,
               createdHostCount,
@@ -478,15 +462,15 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
         );
       }
 
+      // 고른 볼트에 쓴다(없으면 개인) — OpenSSH 와 같다.
+      const target = resolveImportTarget(ctx, input);
       try {
         const selectedHosts = collectSelectedXshellHosts(snapshot, input);
         const selectedGroupPaths = collectSelectedXshellGroupPaths(
           snapshot,
           input,
         );
-        const existingGroupPaths = new Set(
-          ctx.groups.list().map((group) => group.path),
-        );
+        const existingGroupPaths = new Set(target.listGroupPaths());
         const passwordSecurityContext =
           await resolveCurrentXshellPasswordSecurityContext();
         const warnings: XshellImportWarning[] = [...snapshot.warnings];
@@ -500,8 +484,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
             if (existingGroupPaths.has(candidatePath)) {
               continue;
             }
-            const group = ctx.groups.create(
-              randomUUID(),
+            const group = target.createGroup(
               getGroupLabel(candidatePath),
               getParentGroupPath(candidatePath),
             );
@@ -516,8 +499,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
             if (existingGroupPaths.has(candidatePath)) {
               continue;
             }
-            ctx.groups.create(
-              randomUUID(),
+            target.createGroup(
               getGroupLabel(candidatePath),
               getParentGroupPath(candidatePath),
             );
@@ -525,7 +507,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
             createdGroupCount += 1;
           }
 
-          let secretRef: string | null = null;
+          let secret: ImportedSecret | null = null;
           if (host.authType === "privateKey") {
             if (!host.privateKeyPath) {
               warnings.push({
@@ -548,10 +530,10 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
               skippedHostCount += 1;
               continue;
             }
-            secretRef = await ctx.persistImportedSecret(`Xshell • ${host.label}`, {
+            secret = await target.persistSecret(`Xshell • ${host.label}`, {
               privateKeyPem: identityImport.privateKeyPem,
             });
-            if (secretRef) {
+            if (secret) {
               createdSecretCount += 1;
             } else {
               warnings.push({
@@ -577,10 +559,10 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
             });
 
             if (decryptedPassword.ok) {
-              secretRef = await ctx.persistImportedSecret(`Xshell • ${host.label}`, {
+              secret = await target.persistSecret(`Xshell • ${host.label}`, {
                 password: decryptedPassword.password,
               });
-              if (secretRef) {
+              if (secret) {
                 createdSecretCount += 1;
               }
             } else {
@@ -600,7 +582,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
             }
           }
 
-          ctx.hosts.create(
+          target.createHost(
             randomUUID(),
             {
               kind: "ssh",
@@ -613,7 +595,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
               username: host.username,
               authType: host.authType,
             },
-            secretRef,
+            secret,
           );
           createdHostCount += 1;
         }
@@ -629,6 +611,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
             logMessage("imports.xshellImported"),
             {
               sourceCount: snapshot.sources.length,
+              vaultId: target.vaultId,
               createdGroupCount,
               createdHostCount,
               createdSecretCount,

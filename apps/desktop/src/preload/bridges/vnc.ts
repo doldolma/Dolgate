@@ -1,5 +1,8 @@
 import type { IpcRenderer } from "electron";
 import type {
+  ConnectAttemptSecrets,
+  ConnectFailureReportedResult,
+  CredentialsNeededResult,
   VncConnectedPayload,
   VncCursorPayload,
   VncFramePayload,
@@ -18,7 +21,15 @@ import {
 // 인증서 프롬프트가 없다(인증서는 VeNCrypt X509 를 쓸 때만 생기고, 그때 붙인다).
 
 export interface VncBridge {
-  connect: (sessionId: string, hostId: string) => Promise<VncConnectedPayload>;
+  /**
+   * 자격 증명을 넣어야 붙으면(SSH 터널 호스트·그 점프, 또는 VNC 호스트 자신) 오류 대신 그 호스트를 알린다. 코어가 실패를 이미
+   * 화면에 알렸으면 그렇다고만 돌려준다.
+   */
+  connect: (
+    sessionId: string,
+    hostId: string,
+    attempt?: ConnectAttemptSecrets,
+  ) => Promise<VncConnectedPayload | CredentialsNeededResult | ConnectFailureReportedResult>;
   disconnect: (sessionId: string) => Promise<void>;
   sendInput: (sessionId: string, events: VncInputEvent[]) => void;
   /** 지금 로컬 클립보드를 원격에 올려 달라. 값은 메인이 읽는다(클립보드 소유자는 하나여야 한다). */
@@ -49,8 +60,8 @@ export interface VncBridge {
 
 export function buildVncBridge(ipcRenderer: IpcRenderer): VncBridge {
   return {
-    connect: (sessionId, hostId) =>
-      ipcRenderer.invoke(ipcChannels.vnc.connect, sessionId, hostId),
+    connect: (sessionId, hostId, attempt) =>
+      ipcRenderer.invoke(ipcChannels.vnc.connect, sessionId, hostId, attempt),
     disconnect: (sessionId) =>
       ipcRenderer.invoke(ipcChannels.vnc.disconnect, sessionId),
     sendInput: (sessionId, events) =>

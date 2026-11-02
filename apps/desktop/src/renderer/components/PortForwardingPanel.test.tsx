@@ -1298,6 +1298,18 @@ describe('PortForwardingPanel dialog', () => {
     });
   });
 
+  // 다듬기 2단계 — 편집 창에서는 묻지 않고 무엇이 필요한지만 말한다(규칙을 시작하거나 그 호스트의 Containers 를 열면
+  // 요청 창이 묻고, 넣은 값은 저장돼 여기서도 쓰인다).
+  it('says which password the container list needs instead of breaking on the reply', async () => {
+    containersApi.list.mockResolvedValueOnce({ credentialsNeeded: { hostId: 'ssh-host-1', reason: 'missing' } });
+    renderPanel();
+
+    openContainerDialog();
+    await chooseContainerHost(/SSH Host/);
+
+    expect(await screen.findByText('SSH Host 비밀번호를 넣어 주세요.')).toBeInTheDocument();
+  });
+
   it('allows saving a stopped container tunnel when the network name is known', async () => {
     containersApi.list.mockResolvedValueOnce({
       runtime: 'docker',

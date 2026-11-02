@@ -3,7 +3,9 @@ import {
   getAwsEc2HostSshPort,
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
+  isSshHostRecord,
   isWarpgateSshHostRecord,
+  type ConnectAttemptSecrets,
   type HostContainersEphemeralTunnelInput,
   type HostContainersLogsInput,
   type HostContainersSearchLogsInput,
@@ -19,6 +21,7 @@ import type {
   SshHostRecord,
 } from "./context";
 import { resolveLocalAgentEndpoint } from "./agent-endpoint";
+import { CredentialsNeededError, findHostNeedingPassword } from "./connect-credentials";
 import { retryAwsSsmSshOperation } from "./coordinators/aws-ssm-ssh-retry";
 import {
   buildAwsServerProxyStartMessage,
@@ -115,16 +118,24 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.list,
-    async (event, hostId: string) => {
+    async (event, hostId: string, attempt?: ConnectAttemptSecrets) => {
       const host = ctx.vaults.getHost(hostId);
       ctx.assertSftpCompatibleHost(host);
       registerContainerSubscriber(ctx, event, hostId);
       const typedHost = host as SftpCompatibleHostRecord;
+      // 쓸 비밀번호가 없는 홉이 있으면 코어를 부르지 않고 그 홉을 알린다 — 연결 기록(lifecycle)을 열기 전에 본다
+      // (SFTP 와 같다). 코어에 맡기면 붙기 전에 영어 원문으로 멈춘다.
+      if (isSshHostRecord(typedHost)) {
+        const needsPasswordFor = await findHostNeedingPassword(ctx, typedHost, attempt?.secrets, attempt?.jumpSecrets);
+        if (needsPasswordFor) {
+          return { credentialsNeeded: { hostId: needsPasswordFor, reason: "missing" as const } };
+        }
+      }
       const scopeId = ctx.buildContainersEndpointId(hostId);
       const { lifecycleId } = beginContainersLifecycle(ctx, typedHost);
       ctx.coreManager.noteContainerLifecycleLoadStarted(scopeId, lifecycleId);
       try {
-        const runtimeInfo = await ctx.ensureContainersEndpoint(typedHost);
+        const runtimeInfo = await ctx.ensureContainersEndpoint(typedHost, undefined, attempt);
         if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
           ctx.coreManager.markContainerLifecycleUnsupported({
             scopeId,
@@ -159,6 +170,10 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
               ? error.message
               : t('containersIpc.listFailed'),
         });
+        // 넣은 값을 거절했다 — 기록은 실패로 남기고(실제로 실패했다), 화면이 그 홉을 다시 묻게 한다.
+        if (error instanceof CredentialsNeededError) {
+          return { credentialsNeeded: error.needed };
+        }
         throw error;
       }
     },
@@ -411,13 +426,29 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.openShell,
-    async (event, hostId: string, containerId: string) =>
+    async (event, hostId: string, containerId: string, attempt?: ConnectAttemptSecrets) =>
       runWithIpcSessionOwner(ctx, event, async () => {
       assertContainerSubscriber(ctx, event, hostId);
       const host = ctx.vaults.getHost(hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
-      const runtimeInfo = await ctx.ensureContainersEndpoint(typedHost);
+      // 셸은 컨테이너 연결부터 붙는다 — 쓸 비밀번호가 없는 홉이 있으면 그 홉을 알리고, 넣은 값은 그 연결이 쓰고
+      // 붙은 뒤 저장한다. 그래서 아래의 셸 연결은 저장된 값으로 붙는다.
+      if (isSshHostRecord(typedHost)) {
+        const needsPasswordFor = await findHostNeedingPassword(ctx, typedHost, attempt?.secrets, attempt?.jumpSecrets);
+        if (needsPasswordFor) {
+          return { credentialsNeeded: { hostId: needsPasswordFor, reason: "missing" as const } };
+        }
+      }
+      let runtimeInfo: Awaited<ReturnType<typeof ctx.ensureContainersEndpoint>>;
+      try {
+        runtimeInfo = await ctx.ensureContainersEndpoint(typedHost, undefined, attempt);
+      } catch (error) {
+        if (error instanceof CredentialsNeededError) {
+          return { credentialsNeeded: error.needed };
+        }
+        throw error;
+      }
       if (!runtimeInfo.runtime || !runtimeInfo.runtimeCommand) {
         throw new Error(t('containersIpc.checkRuntimeFirst'));
       }

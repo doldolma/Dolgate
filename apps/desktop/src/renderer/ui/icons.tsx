@@ -71,6 +71,7 @@ export {
   PanelRight,
   Sparkles,
   Activity,
+  Calendar,
   Clock,
   Cpu,
   MemoryStick,

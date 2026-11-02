@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipcChannels } from "../../common/ipc-channels";
+import { CredentialsNeededError } from "./connect-credentials";
 import { registerContainersIpcHandlers } from "./containers";
 import { withVaults } from "../vault-catalog.test-support";
 
@@ -45,6 +46,103 @@ describe("registerContainersIpcHandlers", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  // 다듬기 2단계 — 컨테이너 목록·셸도 SSH 터미널처럼 비밀번호가 빠진 홉을 묻는다. 전에는 코어가 붙기 전에
+  // "jump host: password auth requires a password" 원문으로 멈췄다.
+  describe("asks for a missing password like the SSH terminal", () => {
+    const bastion = { id: "bastion", kind: "ssh", label: "Bastion", hostname: "b", port: 22, username: "tester", authType: "password" };
+    const target = { id: "target", kind: "ssh", label: "Target", hostname: "t", port: 22, username: "tester", authType: "password", jumpHostIds: ["bastion"] };
+
+    function setup(ensureContainersEndpoint: ReturnType<typeof vi.fn>) {
+      const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+      electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+        handlers.set(channel, handler);
+      });
+      const hosts = [bastion, target];
+      const coreManager = {
+        registerContainerSubscriber: vi.fn(),
+        assertContainerSubscriber: vi.fn(),
+        beginContainerLifecycle: vi.fn(() => ({ lifecycleId: "lifecycle-1" })),
+        noteContainerLifecycleLoadStarted: vi.fn(),
+        reportContainerLifecycleError: vi.fn(),
+        markContainerLifecycleConnected: vi.fn(),
+        containersList: vi.fn(async () => ({ runtime: "docker", containers: [] })),
+        runWithSessionOwner: vi.fn((_owner: number, action: () => Promise<unknown>) => action()),
+      };
+      registerContainersIpcHandlers(withVaults({
+        hosts: { getById: vi.fn((id: string) => hosts.find((host) => host.id === id) ?? null), list: vi.fn(() => hosts) },
+        assertSftpCompatibleHost: vi.fn(),
+        buildContainersEndpointId: vi.fn((id: string) => `containers:${id}`),
+        // 저장된 비밀번호는 없다. 이번에 넣은 값이 있으면 그것을 쓴다.
+        resolveSshAuth: vi.fn(async (host: { username: string; authType: string }, provided?: { password?: string }) => ({
+          username: host.username,
+          authType: host.authType,
+          secrets: provided?.password ? { password: provided.password } : {},
+          shouldPersistHostSecret: Boolean(provided?.password),
+          typedUsername: null,
+        })),
+        ensureContainersEndpoint,
+        coreManager,
+      }) as any);
+      const list = handlers.get(ipcChannels.containers.list);
+      const openShell = handlers.get(ipcChannels.containers.openShell);
+      if (!list || !openShell) {
+        throw new Error("expected containers handlers to be registered");
+      }
+      return { list, openShell, coreManager };
+    }
+
+    it("names the jump host before opening a connection record, without connecting", async () => {
+      const ensureContainersEndpoint = vi.fn();
+      const { list, coreManager } = setup(ensureContainersEndpoint);
+      await expect(list({ sender: { id: 91 } }, "target")).resolves.toEqual({
+        credentialsNeeded: { hostId: "bastion", reason: "missing" },
+      });
+      expect(coreManager.beginContainerLifecycle).not.toHaveBeenCalled();
+      expect(ensureContainersEndpoint).not.toHaveBeenCalled();
+    });
+
+    it("hands the typed values to the container connection", async () => {
+      const ensureContainersEndpoint = vi.fn(async () => ({
+        endpointId: "containers:target",
+        runtime: "docker",
+        runtimeCommand: "docker",
+        unsupportedReason: null,
+      }));
+      const { list } = setup(ensureContainersEndpoint);
+      const attempt = { secrets: { password: "app-pw" }, jumpSecrets: { bastion: { password: "jump-pw" } } };
+      await expect(list({ sender: { id: 91 } }, "target", attempt)).resolves.toMatchObject({ runtime: "docker" });
+      expect(ensureContainersEndpoint).toHaveBeenCalledWith(expect.objectContaining({ id: "target" }), undefined, attempt);
+    });
+
+    it("asks the hop again when the connection rejects the typed value, recording the failure", async () => {
+      const needed = { hostId: "bastion", reason: "rejected" as const, message: "jump host: ssh: unable to authenticate" };
+      const ensureContainersEndpoint = vi.fn().mockRejectedValue(new CredentialsNeededError(needed));
+      const { list, coreManager } = setup(ensureContainersEndpoint);
+      const attempt = { secrets: { password: "app-pw" }, jumpSecrets: { bastion: { password: "wrong" } } };
+      await expect(list({ sender: { id: 91 } }, "target", attempt)).resolves.toEqual({ credentialsNeeded: needed });
+      expect(coreManager.reportContainerLifecycleError).toHaveBeenCalledWith(
+        expect.objectContaining({ lifecycleId: "lifecycle-1", message: needed.message }),
+      );
+    });
+
+    it("asks before opening a container shell too", async () => {
+      const ensureContainersEndpoint = vi.fn();
+      const { openShell } = setup(ensureContainersEndpoint);
+      await expect(openShell({ sender: { id: 91 } }, "target", "container-1")).resolves.toEqual({
+        credentialsNeeded: { hostId: "bastion", reason: "missing" },
+      });
+      expect(ensureContainersEndpoint).not.toHaveBeenCalled();
+
+      const needed = { hostId: "target", reason: "rejected" as const, message: "ssh: unable to authenticate" };
+      ensureContainersEndpoint.mockRejectedValueOnce(new CredentialsNeededError(needed));
+      const attempt = { secrets: { password: "wrong" }, jumpSecrets: { bastion: { password: "jump-pw" } } };
+      await expect(openShell({ sender: { id: 91 } }, "target", "container-1", attempt)).resolves.toEqual({
+        credentialsNeeded: needed,
+      });
+      expect(ensureContainersEndpoint).toHaveBeenLastCalledWith(expect.objectContaining({ id: "target" }), undefined, attempt);
+    });
   });
 
   it("registers each window as a subscriber when opening a Container tab", async () => {
@@ -206,7 +304,8 @@ describe("registerContainersIpcHandlers", () => {
     ).resolves.toEqual({ sessionId: "session-1" });
 
     expect(runWithSessionOwner).toHaveBeenCalledWith(91, expect.any(Function));
-    expect(ensureContainersEndpoint).toHaveBeenCalledWith(host);
+    // 셋째 인자는 요청 창에 넣은 값이다(없음).
+    expect(ensureContainersEndpoint).toHaveBeenCalledWith(host, undefined, undefined);
     expect(consumeAwsSftpPreflight).not.toHaveBeenCalled();
     expect(resolveAwsSftpPreflight).not.toHaveBeenCalled();
     expect(sendSshPublicKey).toHaveBeenCalledWith(

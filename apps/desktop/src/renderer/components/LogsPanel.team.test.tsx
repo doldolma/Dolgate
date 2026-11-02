@@ -165,6 +165,9 @@ describe('LogsPanel — team history', () => {
 
     const deleted = screen.getByRole('button', { name: 'Replay — 팀 녹화 한도로 지워졌습니다' });
     expect(deleted).toBeDisabled();
+    // 하우스 단추의 꺼짐(0.7)은 켜진 Replay 와 거의 같아 보인다 — 호스트 상세와 같은 0.5 로 흐리다.
+    expect(deleted).toHaveClass('disabled:opacity-50');
+    expect(deleted).not.toHaveClass('disabled:opacity-70');
     fireEvent.mouseEnter(deleted.parentElement!);
     expect(screen.getByRole('tooltip')).toHaveTextContent('팀 녹화 한도로 지워졌습니다');
     fireEvent.mouseLeave(deleted.parentElement!);
@@ -215,6 +218,7 @@ describe('LogsPanel — team history', () => {
 
     const forbidden = await screen.findByRole('button', { name: 'Replay — 녹화는 관리자와 녹화한 사람만 볼 수 있습니다' });
     expect(forbidden).toBeDisabled();
+    expect(forbidden).toHaveClass('disabled:opacity-50');
     fireEvent.click(forbidden);
     expect(onOpenReplay).not.toHaveBeenCalled();
     fireEvent.mouseEnter(forbidden.parentElement!);

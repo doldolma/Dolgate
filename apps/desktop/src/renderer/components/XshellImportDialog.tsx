@@ -12,6 +12,12 @@ import {
 import { useXshellImportController } from '../controllers/useImportControllers';
 import { DialogBackdrop } from './DialogBackdrop';
 import {
+  ImportVaultFields,
+  importVaultRequest,
+  useImportVault,
+  type ImportVaultProps,
+} from './ImportVaultFields';
+import {
   Button,
   CloseIcon,
   EmptyState,
@@ -31,7 +37,7 @@ import { cn } from '../lib/cn';
 import { useTranslation } from 'react-i18next';
 import { t } from "../i18n";
 
-interface XshellImportDialogProps {
+interface XshellImportDialogProps extends ImportVaultProps {
   open: boolean;
   onClose: () => void;
   onImported: (result: XshellImportResult) => Promise<void> | void;
@@ -359,11 +365,11 @@ function normalizeXshellSelectionState(
   };
 }
 
-export function countEffectiveSelectedXshellHosts(
+function collectEffectiveSelectedXshellHosts(
   hosts: XshellImportHostPreview[],
   selectedGroupPaths: string[],
   selectedHostKeys: string[]
-): number {
+): XshellImportHostPreview[] {
   const selectedGroups = new Set(selectedGroupPaths.map((value) => value.trim()).filter(Boolean));
   const selectedHosts = new Set(selectedHostKeys);
 
@@ -372,7 +378,26 @@ export function countEffectiveSelectedXshellHosts(
       return true;
     }
     return [...selectedGroups].some((groupPath) => isGroupWithinPath(host.groupPath ?? null, groupPath));
-  }).length;
+  });
+}
+
+export function countEffectiveSelectedXshellHosts(
+  hosts: XshellImportHostPreview[],
+  selectedGroupPaths: string[],
+  selectedHostKeys: string[]
+): number {
+  return collectEffectiveSelectedXshellHosts(hosts, selectedGroupPaths, selectedHostKeys).length;
+}
+
+/** 가져오면 만들 비밀번호·SSH 키 수 — 키 파일이 있는 키 호스트와 저장된 비밀번호가 있는 호스트, 호스트마다 하나(메인과 같다). */
+export function countXshellImportSecrets(
+  hosts: XshellImportHostPreview[],
+  selectedGroupPaths: string[],
+  selectedHostKeys: string[]
+): number {
+  return collectEffectiveSelectedXshellHosts(hosts, selectedGroupPaths, selectedHostKeys).filter((host) =>
+    host.authType === 'privateKey' ? Boolean(host.privateKeyPath) : host.hasPasswordHint
+  ).length;
 }
 
 export function collectEffectiveSelectedXshellGroupPaths(
@@ -649,7 +674,13 @@ function XshellTreeRenderer({
   return <>{nodes.map((node) => renderNode(node, 0, false))}</>;
 }
 
-export function XshellImportDialog({ open, onClose, onImported }: XshellImportDialogProps) {
+export function XshellImportDialog({
+  open,
+  vaultChoices = [],
+  defaultVaultId,
+  onClose,
+  onImported
+}: XshellImportDialogProps) {
   const { t: translate } = useTranslation();
   const {
     addXshellFolderToSnapshot,
@@ -669,6 +700,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
     selectedHostKeys: []
   });
   const [error, setError] = useState<string | null>(null);
+  const { vaultId, setVaultId, shareSecrets, setShareSecrets } = useImportVault(open, defaultVaultId);
 
   useEffect(() => {
     if (!open) {
@@ -740,6 +772,10 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
     [probe?.groups, probe?.hosts, selection.selectedGroupPaths, selection.selectedHostKeys]
   );
   const hasSavedPasswordHosts = useMemo(() => (probe?.hosts ?? []).some((host) => host.hasPasswordHint), [probe?.hosts]);
+  const secretCount = useMemo(
+    () => countXshellImportSecrets(probe?.hosts ?? [], selection.selectedGroupPaths, selection.selectedHostKeys),
+    [probe?.hosts, selection.selectedGroupPaths, selection.selectedHostKeys]
+  );
   const selectedItemCount = selection.selectedGroupPaths.length + selection.selectedHostKeys.length;
   const canImport = Boolean(probe?.snapshotId) && selectedItemCount > 0 && !isImporting;
 
@@ -774,6 +810,16 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
               {error}
             </NoticeCard>
           ) : null}
+
+          <ImportVaultFields
+            choices={vaultChoices}
+            vaultId={vaultId}
+            onVaultChange={setVaultId}
+            secretCount={secretCount}
+            shareSecrets={shareSecrets}
+            onShareSecretsChange={setShareSecrets}
+            disabled={isImporting}
+          />
 
           {probe ? renderProbeSummary(probe.sources, probe.warnings, hasSavedPasswordHosts) : null}
 
@@ -974,7 +1020,8 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                 const result = await importXshellSelection({
                   snapshotId: probe.snapshotId,
                   selectedGroupPaths: selection.selectedGroupPaths,
-                  selectedHostKeys: selection.selectedHostKeys
+                  selectedHostKeys: selection.selectedHostKeys,
+                  ...importVaultRequest(vaultId, shareSecrets)
                 });
                 await onImported(result);
                 onClose();

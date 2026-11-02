@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DesktopApi, OpenSshProbeResult } from "@shared";
+import type { DesktopApi, OpenSshHostPreview, OpenSshProbeResult } from "@shared";
 import {
   OpenSshImportDialog,
+  countOpenSshImportSecrets,
   filterOpenSshImportHosts,
 } from "./OpenSshImportDialog";
 
@@ -256,5 +257,189 @@ describe("OpenSSH import dialog", () => {
 
     pendingAdd.resolve(appendedProbeResult);
     await waitFor(() => expect(screen.getByText("db")).toBeInTheDocument());
+  });
+});
+
+describe("OpenSSH import dialog — 어느 볼트로", () => {
+  const TEAM = "team-1";
+  const choices = [
+    { id: "personal", team: null },
+    { id: TEAM, team: { id: TEAM, name: "Acme Infra" } },
+  ];
+
+  function previewHost(key: string, identityFilePath: string | null): OpenSshHostPreview {
+    return {
+      key,
+      alias: key,
+      hostname: `${key}.example.test`,
+      port: 22,
+      username: "deploy",
+      authType: identityFilePath ? "privateKey" : "password",
+      identityFilePath,
+      sourceFilePath: "/conf/config",
+      sourceLine: 1,
+    };
+  }
+
+  // web-1·web-2 는 같은 키 파일, api 는 다른 키, db 는 비밀번호(config 에는 비밀번호가 없다).
+  const hosts = [
+    previewHost("web-1", "/keys/id_deploy"),
+    previewHost("web-2", "/keys/id_deploy"),
+    previewHost("api", "/keys/id_api"),
+    previewHost("db", null),
+  ];
+
+  function renderDialog(props: Partial<Parameters<typeof OpenSshImportDialog>[0]> = {}) {
+    const api = installMockApi();
+    api.openssh.probeDefault.mockResolvedValue({ ...emptyProbeResult, snapshotId: "snapshot-v", hosts });
+    const onClose = vi.fn();
+    const view = render(
+      <OpenSshImportDialog
+        open
+        currentGroupPath="Prod"
+        vaultChoices={choices}
+        defaultVaultId={TEAM}
+        onClose={onClose}
+        onImported={vi.fn()}
+        {...props}
+      />,
+    );
+    return { api, onClose, view };
+  }
+
+  const shareSwitch = () => screen.queryByRole("switch");
+  const targetLine = () => screen.getByText("대상 그룹").parentElement!;
+  const pickVault = (name: string) => {
+    fireEvent.click(screen.getByRole("button", { name: "Vault" }));
+    fireEvent.click(within(screen.getByRole("listbox", { name: /Vault/ })).getByRole("option", { name }));
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("counts each key file once among the selected hosts", () => {
+    expect(countOpenSshImportSecrets(hosts, ["web-1", "web-2", "db"])).toBe(1);
+    expect(countOpenSshImportSecrets(hosts, ["web-1", "web-2", "api", "db"])).toBe(2);
+    expect(countOpenSshImportSecrets(hosts, ["db"])).toBe(0);
+    expect(countOpenSshImportSecrets(hosts, [])).toBe(0);
+    // 키 인증인데 키 파일을 못 찾은 호스트는 넣을 키가 없다.
+    expect(countOpenSshImportSecrets([{ ...hosts[0]!, identityFilePath: null }], ["web-1"])).toBe(0);
+  });
+
+  it("starts on the vault it was opened from, into the group there, and shares the keys with the team", async () => {
+    const { api, onClose } = renderDialog();
+
+    expect(screen.getByRole("button", { name: "Vault" })).toHaveTextContent("Acme Infra");
+    expect(targetLine()).toHaveTextContent("Prod");
+    fireEvent.click(await screen.findByRole("button", { name: "보이는 항목 모두 선택" }));
+
+    expect(shareSwitch()).toHaveAccessibleName("비밀번호·SSH 키 2개도 함께 공유");
+    expect(shareSwitch()).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("button", { name: "가져오기" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(api.openssh.importSelection).toHaveBeenCalledWith({
+      snapshotId: "snapshot-v",
+      selectedHostKeys: ["web-1", "web-2", "api", "db"],
+      groupPath: "Prod",
+      vaultId: TEAM,
+      shareSecrets: true,
+    });
+  });
+
+  it("keeps the keys out of the team when sharing is turned off", async () => {
+    const { api, onClose } = renderDialog();
+    fireEvent.click(await screen.findByRole("button", { name: "보이는 항목 모두 선택" }));
+
+    fireEvent.click(shareSwitch()!);
+    expect(shareSwitch()).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(screen.getByRole("button", { name: "가져오기" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(api.openssh.importSelection).toHaveBeenCalledWith(
+      expect.objectContaining({ vaultId: TEAM, shareSecrets: false }),
+    );
+  });
+
+  it("leaves the group behind and drops the sharing line when you pick your own vault", async () => {
+    const { api, onClose } = renderDialog();
+    fireEvent.click(await screen.findByRole("button", { name: "보이는 항목 모두 선택" }));
+    expect(shareSwitch()).not.toBeNull();
+
+    pickVault("Personal");
+
+    expect(screen.getByRole("button", { name: "Vault" })).toHaveTextContent("Personal");
+    expect(shareSwitch()).toBeNull();
+    expect(targetLine()).toHaveTextContent("미분류");
+    fireEvent.click(screen.getByRole("button", { name: "가져오기" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    // 개인이면 요청은 지금까지와 같다 — 볼트를 싣지 않는다.
+    expect(api.openssh.importSelection).toHaveBeenCalledWith({
+      snapshotId: "snapshot-v",
+      selectedHostKeys: ["web-1", "web-2", "api", "db"],
+      groupPath: null,
+    });
+  });
+
+  it("goes to the top of a team picked from your own vault", async () => {
+    const { api, onClose } = renderDialog({ defaultVaultId: "personal", currentGroupPath: "Servers" });
+    expect(targetLine()).toHaveTextContent("Servers");
+    fireEvent.click(await screen.findByRole("button", { name: "보이는 항목 모두 선택" }));
+    expect(shareSwitch()).toBeNull();
+
+    pickVault("Acme Infra");
+
+    expect(targetLine()).toHaveTextContent("미분류");
+    expect(shareSwitch()).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("button", { name: "가져오기" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(api.openssh.importSelection).toHaveBeenCalledWith(
+      expect.objectContaining({ groupPath: null, vaultId: TEAM, shareSecrets: true }),
+    );
+  });
+
+  it("shows the sharing line only once a selected host brings a key", async () => {
+    renderDialog();
+    fireEvent.click(await screen.findByRole("checkbox", { name: /^db/ }));
+    expect(shareSwitch()).toBeNull();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /^web-1/ }));
+    expect(shareSwitch()).toHaveAccessibleName("비밀번호·SSH 키 1개도 함께 공유");
+  });
+
+  it("has no Vault field with only your own vault", async () => {
+    renderDialog({ vaultChoices: [choices[0]!], defaultVaultId: "personal" });
+    fireEvent.click(await screen.findByRole("button", { name: "보이는 항목 모두 선택" }));
+
+    expect(screen.queryByRole("button", { name: "Vault" })).toBeNull();
+    expect(shareSwitch()).toBeNull();
+  });
+
+  it("opens again on the vault it was opened from, with sharing on", async () => {
+    const { view } = renderDialog();
+    fireEvent.click(await screen.findByRole("button", { name: "보이는 항목 모두 선택" }));
+    fireEvent.click(shareSwitch()!);
+    pickVault("Personal");
+
+    const props = { currentGroupPath: "Prod", vaultChoices: choices, defaultVaultId: TEAM, onClose: vi.fn(), onImported: vi.fn() };
+    view.rerender(<OpenSshImportDialog open={false} {...props} />);
+    view.rerender(<OpenSshImportDialog open {...props} />);
+
+    expect(screen.getByRole("button", { name: "Vault" })).toHaveTextContent("Acme Infra");
+    fireEvent.click(await screen.findByRole("button", { name: "보이는 항목 모두 선택" }));
+    expect(shareSwitch()).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("holds the vault and the sharing switch still while importing", async () => {
+    const { api } = renderDialog();
+    api.openssh.importSelection.mockReturnValueOnce(new Promise(() => undefined));
+    fireEvent.click(await screen.findByRole("button", { name: "보이는 항목 모두 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "가져오기" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Vault" })).toBeDisabled());
+    expect(shareSwitch()).toBeDisabled();
   });
 });

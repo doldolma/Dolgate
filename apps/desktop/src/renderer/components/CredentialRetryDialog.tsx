@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import type { SshCertificateInfo } from "@shared";
+import type { SshCertificateInfo, VncCredentialFailure } from "@shared";
 import type { CredentialRetryInput } from "../store/types";
+import { vncFailureAsksAccount } from "../store/utils";
 import { useHostFormController } from "../controllers/useHostFormController";
 import { describeCertificateInfo } from "../lib/certificate-info";
 import { loadSavedCredential } from "../services/desktop/settings";
@@ -41,12 +42,15 @@ function shouldHideRetryMessageForCertificate(
 export interface CredentialRetryDialogRequest {
   hostId: string;
   hostLabel: string;
-  source: "ssh" | "sftp";
+  /** 머리말만 가른다 — SFTP 가 아니면 모두 SSH 접속이다(포트 포워딩·컨테이너·VNC 터널도). */
+  source: "ssh" | "sftp" | "portForward" | "containers" | "containerShell" | "vnc";
   authType: "password" | "privateKey" | "certificate";
   message: string;
   initialUsername: string;
   hasStoredSecret: boolean;
   secretRef?: string | null;
+  /** VNC 호스트 자신의 값을 묻는다 — 비밀번호만, 계정을 요구하는 서버면 계정도. */
+  vncFailure?: VncCredentialFailure;
 }
 
 interface ImportedRetryFile {
@@ -141,6 +145,9 @@ export function CredentialRetryDialog({
   )
     ? null
     : normalizedMessage;
+  // VNC 호스트 자신의 값이면 비밀번호만 묻는다 — 계정은 계정으로 로그인하는 서버(macOS 화면 공유)일 때만.
+  const vncFailure = request.vncFailure;
+  const showUsername = !vncFailure || vncFailureAsksAccount(vncFailure);
 
   return (
     <DialogBackdrop dismissOnBackdrop={false}>
@@ -152,7 +159,7 @@ export function CredentialRetryDialog({
         <ModalHeader>
           <div>
             <SectionLabel>
-              {request.source === "sftp" ? "SFTP Retry" : "SSH Retry"}
+              {vncFailure ? "VNC Retry" : request.source === "sftp" ? "SFTP Retry" : "SSH Retry"}
             </SectionLabel>
             <h3 id="credential-retry-title">
               {translate('credentialRetry.prompt', { label: request.hostLabel })}
@@ -181,21 +188,24 @@ export function CredentialRetryDialog({
               ) : null}
             </div>
           ) : null}
-          <FieldGroup label="Username">
-            <Input
-              autoFocus
-              value={username}
-              onChange={(event) => {
-                setUsername(event.target.value);
-                setError(null);
-              }}
-              placeholder="ubuntu"
-            />
-          </FieldGroup>
+          {showUsername ? (
+            <FieldGroup label="Username">
+              <Input
+                autoFocus
+                value={username}
+                onChange={(event) => {
+                  setUsername(event.target.value);
+                  setError(null);
+                }}
+                placeholder={vncFailure ? "macOS account" : "ubuntu"}
+              />
+            </FieldGroup>
+          ) : null}
 
           {request.authType === "password" ? (
             <FieldGroup label="Password">
               <Input
+                autoFocus={!showUsername}
                 type="password"
                 value={password}
                 onChange={(event) => {
@@ -290,11 +300,23 @@ export function CredentialRetryDialog({
             variant="primary"
             disabled={submitting}
             onClick={async () => {
-              if (!username.trim()) {
+              if (vncFailure) {
+                // 계정을 요구하는 서버면 계정이 있어야 한다. 계정이 거절된 서버는 비워서 VNC 암호로 붙을 수 있다. 비밀번호는 늘
+                // 새로 넣는다 — 저장된 것이 없거나 방금 거절됐다.
+                if (vncFailure === "account-required" && !username.trim()) {
+                  setError(translate('credentialRetry.usernameRequired'));
+                  return;
+                }
+                if (!password) {
+                  setError(translate('credentialRetry.passwordRequired'));
+                  return;
+                }
+              } else if (!username.trim()) {
                 setError(translate('credentialRetry.usernameRequired'));
                 return;
               }
               if (
+                !vncFailure &&
                 request.authType === "password" &&
                 !request.hasStoredSecret &&
                 !password

@@ -159,8 +159,8 @@ export function buildContainersBridge(
       ipcRenderer.invoke(ipcChannels.containers.beginLifecycle, hostId),
     reportLifecycleError: (input) =>
       ipcRenderer.invoke(ipcChannels.containers.reportLifecycleError, input),
-    list: (hostId: string) =>
-      ipcRenderer.invoke(ipcChannels.containers.list, hostId),
+    list: (hostId, attempt) =>
+      ipcRenderer.invoke(ipcChannels.containers.list, hostId, attempt),
     inspect: (hostId: string, containerId: string) =>
       ipcRenderer.invoke(ipcChannels.containers.inspect, hostId, containerId),
     logs: (input) => ipcRenderer.invoke(ipcChannels.containers.logs, input),
@@ -179,8 +179,8 @@ export function buildContainersBridge(
     stats: (input) => ipcRenderer.invoke(ipcChannels.containers.stats, input),
     searchLogs: (input) =>
       ipcRenderer.invoke(ipcChannels.containers.searchLogs, input),
-    openShell: (hostId: string, containerId: string) =>
-      ipcRenderer.invoke(ipcChannels.containers.openShell, hostId, containerId),
+    openShell: (hostId, containerId, attempt) =>
+      ipcRenderer.invoke(ipcChannels.containers.openShell, hostId, containerId, attempt),
     release: (hostId: string, lifecycleId?: string) =>
       ipcRenderer.invoke(ipcChannels.containers.release, hostId, lifecycleId),
     onConnectionProgress: (listener) =>

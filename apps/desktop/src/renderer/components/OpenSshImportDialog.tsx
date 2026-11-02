@@ -9,6 +9,12 @@ import type {
 import { useOpenSshImportController } from '../controllers/useImportControllers';
 import { DialogBackdrop } from './DialogBackdrop';
 import {
+  ImportVaultFields,
+  importVaultRequest,
+  useImportVault,
+  type ImportVaultProps,
+} from './ImportVaultFields';
+import {
   Button,
   CloseIcon,
   EmptyState,
@@ -27,8 +33,9 @@ import {
 import { Trans, useTranslation } from 'react-i18next';
 import { t } from "../i18n";
 
-interface OpenSshImportDialogProps {
+interface OpenSshImportDialogProps extends ImportVaultProps {
   open: boolean;
+  /** 처음 고른 볼트(defaultVaultId) 안에서 지금 보고 있는 그룹. 다른 볼트를 고르면 그 볼트 맨 위로 간다. */
   currentGroupPath: string | null;
   onClose: () => void;
   onImported: (result: OpenSshImportResult) => Promise<void> | void;
@@ -36,6 +43,19 @@ interface OpenSshImportDialogProps {
 
 function normalizeQuery(value: string): string {
   return value.trim().toLocaleLowerCase();
+}
+
+/** 고른 호스트가 가져올 SSH 키 수 — 같은 키 파일은 한 번만 넣는다(메인과 같다). 비밀번호는 config 에 없다. */
+export function countOpenSshImportSecrets(
+  hosts: OpenSshHostPreview[],
+  selectedHostKeys: string[],
+): number {
+  const selected = new Set(selectedHostKeys);
+  return new Set(
+    hosts
+      .filter((host) => selected.has(host.key) && host.authType === 'privateKey' && host.identityFilePath)
+      .map((host) => host.identityFilePath),
+  ).size;
 }
 
 export function filterOpenSshImportHosts(
@@ -100,6 +120,8 @@ function renderSourceList(sources: OpenSshSourceSummary[]) {
 export function OpenSshImportDialog({
   open,
   currentGroupPath,
+  vaultChoices = [],
+  defaultVaultId,
   onClose,
   onImported,
 }: OpenSshImportDialogProps) {
@@ -118,6 +140,12 @@ export function OpenSshImportDialog({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedHostKeys, setSelectedHostKeys] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const { vaultId, setVaultId, shareSecrets, setShareSecrets, isDefaultVault } = useImportVault(
+    open,
+    defaultVaultId,
+  );
+  // 보고 있는 그룹은 그 볼트로 가져올 때만 따라간다. 다른 볼트면 그 볼트 맨 위다.
+  const groupPath = isDefaultVault ? currentGroupPath : null;
 
   useEffect(() => {
     if (!open) {
@@ -172,6 +200,10 @@ export function OpenSshImportDialog({
     () => filterOpenSshImportHosts(probe?.hosts ?? [], searchQuery),
     [probe?.hosts, searchQuery],
   );
+  const secretCount = useMemo(
+    () => countOpenSshImportSecrets(probe?.hosts ?? [], selectedHostKeys),
+    [probe?.hosts, selectedHostKeys],
+  );
   const canImport =
     Boolean(probe?.snapshotId) && selectedHostKeys.length > 0 && !isImporting;
 
@@ -212,9 +244,19 @@ export function OpenSshImportDialog({
             </NoticeCard>
           ) : null}
 
+          <ImportVaultFields
+            choices={vaultChoices}
+            vaultId={vaultId}
+            onVaultChange={setVaultId}
+            secretCount={secretCount}
+            shareSecrets={shareSecrets}
+            onShareSecretsChange={setShareSecrets}
+            disabled={isImporting}
+          />
+
           <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
             <strong>{translate('opensshImport.dialog.targetGroup')}</strong>{' '}
-            <span>{currentGroupPath ?? translate('opensshImport.dialog.ungrouped')}</span>
+            <span>{groupPath ?? translate('opensshImport.dialog.ungrouped')}</span>
           </div>
 
           {probe ? renderSourceList(probe.sources) : null}
@@ -390,7 +432,8 @@ export function OpenSshImportDialog({
                 const result = await importOpenSshSelection({
                   snapshotId: probe.snapshotId,
                   selectedHostKeys,
-                  groupPath: currentGroupPath,
+                  groupPath,
+                  ...importVaultRequest(vaultId, shareSecrets),
                 });
                 await onImported(result);
                 onClose();

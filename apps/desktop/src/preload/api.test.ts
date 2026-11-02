@@ -228,6 +228,8 @@ describe("createDesktopApi", () => {
       ipcChannels.containers.openShell,
       "host-1",
       "container-1",
+      // 요청 창에 넣은 값(없음) — 비밀번호가 빠진 홉을 물은 뒤 다시 열 때 실린다.
+      undefined,
     );
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       5,

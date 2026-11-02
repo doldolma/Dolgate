@@ -1,4 +1,7 @@
 import type {
+  ConnectAttemptSecrets,
+  ConnectFailureReportedResult,
+  CredentialsNeededResult,
   VncConnectedPayload,
   VncCursorPayload,
   VncFramePayload,
@@ -14,8 +17,9 @@ import { desktopApi } from '../desktopApi';
 export function connectVnc(
   sessionId: string,
   hostId: string,
-): Promise<VncConnectedPayload> {
-  return desktopApi.vnc.connect(sessionId, hostId);
+  attempt?: ConnectAttemptSecrets,
+): Promise<VncConnectedPayload | CredentialsNeededResult | ConnectFailureReportedResult> {
+  return desktopApi.vnc.connect(sessionId, hostId, attempt);
 }
 
 export function disconnectVnc(sessionId: string): Promise<void> {

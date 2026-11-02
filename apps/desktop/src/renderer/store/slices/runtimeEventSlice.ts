@@ -713,8 +713,13 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
 
         if (event.type === "progress") {
           // 결과가 난 탭에는 얹지 않는다. 통로를 여는 보고는 접속 요청 안에서 나오므로, 실패한
-          // 뒤에 도착하는 순서가 실제로 생긴다 — 그러면 방금 띄운 이유가 진행 문구로 덮인다.
-          if (tab.status === "connected" || tab.status === "error") {
+          // 뒤에 도착하는 순서가 실제로 생긴다 — 그러면 방금 띄운 이유가 진행 문구로 덮인다. 요청 창을 띄운 탭도 같다 — 그
+          // 탭은 답을 기다리는 문구를 둔다(진행 알림과 접속 응답은 도착 순서가 정해져 있지 않다).
+          if (
+            tab.status === "connected" ||
+            tab.status === "error" ||
+            state.pendingCredentialRetry?.sessionId === event.sessionId
+          ) {
             return state;
           }
           return {

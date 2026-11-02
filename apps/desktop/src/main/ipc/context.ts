@@ -2,6 +2,7 @@ import type {
   AppSettings,
   AwsSftpDiagnosticDetails,
   AwsSftpDiagnosticReasonCode,
+  ConnectAttemptSecrets,
   DesktopBootstrapSnapshot,
   DesktopConnectInput,
   DesktopLocalConnectInput,
@@ -242,9 +243,14 @@ export interface MainIpcContext {
     allowBrowserLogin: boolean;
     emitProgress?: AwsConnectionProgressEmitter;
   }) => Promise<AwsEc2HostRecord>;
+  /**
+   * attempt 는 요청 창에 넣은 값 — 붙을 때 쓰고, 붙으면 제자리에 저장한다. 넣은 값을 거절하면
+   * CredentialsNeededError(connect-credentials.ts)를 던진다.
+   */
   ensureContainersEndpoint: (
     host: SftpCompatibleHostRecord,
     endpointId?: string,
+    attempt?: ConnectAttemptSecrets,
   ) => Promise<{
     endpointId: string;
     runtime: HostContainerRuntime | null;
@@ -264,6 +270,8 @@ export interface MainIpcContext {
     bindPort: number;
     /** 패널이 이미 알고 있는 네트워크. 있으면 코어에 다시 묻지 않는다. */
     networks?: readonly { name: string; ipAddress: string }[];
+    /** 요청 창에 넣은 값(컨테이너 연결에 쓴다 — ensureContainersEndpoint 의 attempt). */
+    attempt?: ConnectAttemptSecrets;
   }) => Promise<unknown>;
   resolveWindowFromSender: (sender: WebContents) => BrowserWindow;
   buildWindowState: (window: BrowserWindow) => DesktopWindowState;

@@ -69,6 +69,24 @@ export interface VncCapabilities {
  * 화면의 단계 목록이 그 이름으로 판정하므로, 여기서 문자열을 따로 만들면 두 곳이 어긋난다.
  * (컴파일러가 소속을 검사하게 두는 것이 목적이다.)
  */
+/**
+ * 계정·비밀번호를 넣으면 풀리는 VNC 실패(vnc-core 의 `crate::failure`). 붙는 중에 이것으로 끝나면 메인은 실패 대신 "넣어야
+ * 붙는다"(credentialsNeeded)로 돌려주고, 화면이 요청 창을 띄운다 — `account-` 로 시작하면 계정도 묻는다.
+ */
+export const VNC_CREDENTIAL_FAILURES = [
+  'password-required',
+  'auth-rejected',
+  'password-truncated',
+  'account-required',
+  'account-auth-rejected',
+] as const;
+
+export type VncCredentialFailure = (typeof VNC_CREDENTIAL_FAILURES)[number];
+
+export function isVncCredentialFailure(code: string | null | undefined): code is VncCredentialFailure {
+  return (VNC_CREDENTIAL_FAILURES as readonly string[]).includes(code ?? '');
+}
+
 export type VncConnectStage = Extract<
   TerminalConnectionStage,
   'ssh-tunnel-gateway' | 'ssh-tunnel-open' | 'connecting'

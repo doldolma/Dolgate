@@ -869,7 +869,8 @@ describe("createAppStore runtime, workspaces, and sharing", () => {
     await store.getState().acceptPendingHostKeyPrompt("replace");
 
     expect(api.knownHosts.replace).toHaveBeenCalled();
-    expect(api.portForwards.start).toHaveBeenCalledWith("pf-1");
+    // 둘째 인자는 요청 창에 넣은 값이다(없음).
+    expect(api.portForwards.start).toHaveBeenCalledWith("pf-1", undefined);
     expect(store.getState().pendingHostKeyPrompt).toBeNull();
   });
 

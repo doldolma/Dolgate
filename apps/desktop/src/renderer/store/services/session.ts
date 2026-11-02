@@ -7,8 +7,9 @@ import type {
   TerminalConnectionProgress,
   TerminalTab,
 } from "@shared";
-import type { AppState, PendingMissingUsernamePrompt } from "../types";
+import type { AppState, ConnectAttemptSecrets, PendingMissingUsernamePrompt } from "../types";
 import type { SliceDeps } from "./context";
+import { createBootstrapSyncServices } from "./bootstrap-sync";
 import { rdpViewportSize } from "./rdp-viewport";
 import { createTrustAuthServices } from "./trust-auth";
 import {
@@ -42,9 +43,11 @@ import {
   resolveLocalStartingProgress,
   myUsernameOf,
   buildHopCredentialRetry,
+  buildVncCredentialRetry,
   resolveCredentialRetryProgress,
 } from "../utils";
 import { rememberConnectAttemptSecrets } from "../utils/connect-attempt-secrets";
+import { cancelReconnect } from "./reconnect-orchestrator";
 import { t } from '../../i18n';
 
 type StoreSetter = SliceDeps["set"];
@@ -988,6 +991,8 @@ export function createSessionServices(deps: SliceDeps) {
     get: StoreGetter,
     host: HostRecord,
     reuseSessionId?: string,
+    /** 요청 창에 넣은 값 — SSH 터널 호스트(대상)와 그 점프의 것, VNC 호스트 자신의 것(vncSecrets). */
+    attempt?: ConnectAttemptSecrets,
   ) => {
     const sessionId = reuseSessionId ?? createPendingSessionId();
     if (!reuseSessionId) {
@@ -1050,8 +1055,58 @@ export function createSessionServices(deps: SliceDeps) {
     }
 
     try {
-      const connected = await api.vnc.connect(sessionId, host.id);
+      const connected = await api.vnc.connect(sessionId, host.id, attempt);
+      // 코어가 실패를 이미 알렸다 — 탭은 그 알림이 그렸다(까닭 문구·Retry, 또는 재연결 예약). 오류로 다시 그리면 Retry 가
+      // 숨고 재연결 표시를 덮는다.
+      if ("failureReported" in connected) {
+        return;
+      }
+      if ("credentialsNeeded" in connected) {
+        // VNC 서버가 계정·비밀번호를 요구하거나 거절했으면 이 호스트의 값을, 아니면 SSH 터널 호스트(또는 그 점프)의
+        // 비밀번호를 묻는다 — 요청 창을 띄우고 탭은 기다리는 모양으로 둔다. 터널 문구는 VNC 비밀번호가 아님을 말한다
+        // (tunnelFor). 다시 시도가 이 탭을 이어 쓴다.
+        const needed = connected.credentialsNeeded;
+        const retry =
+          needed.hostId === host.id
+            ? buildVncCredentialRetry({ host, needed, sessionId })
+            : tunnelHostId
+              ? buildHopCredentialRetry({
+                  hosts: get().hosts,
+                  vaultIndex: get().vaultIndex,
+                  hostId: tunnelHostId,
+                  needed,
+                  source: "vnc",
+                  sessionId,
+                  tunnelFor: host.label,
+                  carried: attempt,
+                })
+              : null;
+        if (!retry) {
+          markSessionError(set, sessionId, t("sessionSvc.connectFailed"), { retryable: false });
+          return;
+        }
+        // 사람의 답을 기다린다 — 자동 재연결이 돌던 탭이면 멈춘다. 두면 감시 시간이 지나 같은 탭을 다시 붙이며 세션을 바꿔
+        // 이 요청이 가리킬 탭이 사라진다.
+        const stableId = get().tabs.find((tab) => tab.sessionId === sessionId)?.stableId;
+        if (stableId) {
+          cancelReconnect(stableId, "credentials-needed");
+        }
+        const promptHost = get().hosts.find((item) => item.id === needed.hostId) ?? host;
+        set({ pendingCredentialRetry: retry });
+        updateSessionProgress(set, sessionId, resolveCredentialRetryProgress(promptHost, "auth"));
+        return;
+      }
+      if (attempt) {
+        // 넣은 사용자 이름은 붙은 뒤 개인 호스트 레코드에 들어간다 — 목록을 다시 읽는다(SFTP 와 같다).
+        await createBootstrapSyncServices(deps).refreshHostAndKeychainState(set);
+      }
       markSessionConnected(sessionId);
+      // 붙었다 — 자동 재연결이 돌던 탭이면 그 재연결을 끝낸다(SSH 가 붙었다는 알림에서 끝내는 것과 같다). 두면 시도마다 거는
+      // 감시 시간이 지나 끝나지 않은 재연결로 보고, 붙어 있는 세션을 끊고 다시 붙는다.
+      const connectedStableId = get().tabs.find((tab) => tab.sessionId === sessionId)?.stableId;
+      if (connectedStableId) {
+        cancelReconnect(connectedStableId, "reconnected");
+      }
       set((state) => ({
         tabs: state.tabs.map((tab) =>
           tab.sessionId === sessionId
@@ -1142,6 +1197,8 @@ export function createSessionServices(deps: SliceDeps) {
     set: StoreSetter,
     get: StoreGetter,
     sessionId: string,
+    /** 요청 창에 넣은 값(SSH 터널의 것·VNC 자신의 것). */
+    attempt?: ConnectAttemptSecrets,
   ) => {
     const tab = get().tabs.find((item) => item.sessionId === sessionId);
     if (!tab || tab.paneKind !== "vnc" || !tab.hostId) {
@@ -1177,7 +1234,7 @@ export function createSessionServices(deps: SliceDeps) {
       await api.vnc.disconnect(sessionId).catch(() => undefined);
     }
 
-    await startVncConnectionFlow(set, get, host, pendingSessionId);
+    await startVncConnectionFlow(set, get, host, pendingSessionId, attempt);
   };
 
   const startSessionConnectionFlow = async (

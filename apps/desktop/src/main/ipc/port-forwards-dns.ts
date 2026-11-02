@@ -3,7 +3,9 @@ import {
   getAwsEc2HostSshPort,
   isLinkedDnsOverrideDraft,
   isLinkedDnsOverrideRecord,
+  isSshHostRecord,
   isStaticDnsOverrideRecord,
+  type ConnectAttemptSecrets,
   type DnsOverrideDraft,
   type PortForwardDraft,
 } from "@shared";
@@ -23,6 +25,13 @@ import type {
   SshHostRecord,
 } from "./context";
 import { resolveLocalAgentEndpoint } from "./agent-endpoint";
+import {
+  collectHopSecretsToPersist,
+  credentialsNeededAfterFailure,
+  CredentialsNeededError,
+  findHostNeedingPassword,
+  persistAttemptSecrets,
+} from "./connect-credentials";
 import { t } from "../i18n";
 import { logMessage } from "../activity-log-message";
 import { PERSONAL_VAULT_ID, type VaultScope } from "../vault-catalog";
@@ -364,7 +373,7 @@ export function registerPortForwardAndDnsIpcHandlers(
 
   ipcMain.handle(
     ipcChannels.portForwards.start,
-    async (_event, ruleId: string) => {
+    async (_event, ruleId: string, attempt?: ConnectAttemptSecrets) => {
       // 팀 볼트의 규칙도 켠다 — 규칙 id 는 볼트를 넘어 겹치지 않는다.
       const rule = ctx.vaults.getPortForward(ruleId);
       if (!rule) {
@@ -373,15 +382,30 @@ export function registerPortForwardAndDnsIpcHandlers(
       const host = ctx.vaults.getHost(rule.hostId);
       if (rule.transport === "container") {
         ctx.assertSftpCompatibleHost(host);
-        return ctx.startContainerTunnelRuntime({
-          ruleId: rule.id,
-          host: host as SftpCompatibleHostRecord,
-          containerId: rule.containerId,
-          networkName: rule.networkName,
-          targetPort: rule.targetPort,
-          bindAddress: "127.0.0.1",
-          bindPort: rule.bindPort,
-        });
+        // 쓸 비밀번호가 없는 홉이 있으면 코어를 부르지 않고 그 홉을 알린다(SSH 터미널·SFTP 와 같다).
+        if (host && isSshHostRecord(host)) {
+          const needsPasswordFor = await findHostNeedingPassword(ctx, host, attempt?.secrets, attempt?.jumpSecrets);
+          if (needsPasswordFor) {
+            return { credentialsNeeded: { hostId: needsPasswordFor, reason: "missing" as const } };
+          }
+        }
+        try {
+          return await ctx.startContainerTunnelRuntime({
+            ruleId: rule.id,
+            host: host as SftpCompatibleHostRecord,
+            containerId: rule.containerId,
+            networkName: rule.networkName,
+            targetPort: rule.targetPort,
+            bindAddress: "127.0.0.1",
+            bindPort: rule.bindPort,
+            attempt,
+          });
+        } catch (error) {
+          if (error instanceof CredentialsNeededError) {
+            return { credentialsNeeded: error.needed };
+          }
+          throw error;
+        }
       }
       if (rule.transport === "ecs-task") {
         ctx.assertAwsEcsHost(host);
@@ -667,11 +691,18 @@ export function registerPortForwardAndDnsIpcHandlers(
 
       ctx.assertSshHost(host);
       const sshHost = host as SshHostRecord;
+      // 쓸 비밀번호가 없는 홉이 있으면 코어를 부르지 않고 그 홉을 알린다 — 화면이 요청 창을 그 홉으로 띄운다
+      // (점프 호스트면 베스천부터). 코어에 맡기면 붙기 전에 영어 원문으로 멈춘다.
+      const needsPasswordFor = await findHostNeedingPassword(ctx, sshHost, attempt?.secrets, attempt?.jumpSecrets);
+      if (needsPasswordFor) {
+        return { credentialsNeeded: { hostId: needsPasswordFor, reason: "missing" as const } };
+      }
       const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys(sshHost);
-      const { username, authType, secrets, shouldPersistHostSecret } =
-        await ctx.resolveSshAuth(sshHost);
+      const auth = await ctx.resolveSshAuth(sshHost, attempt?.secrets);
+      const { username, authType, secrets } = auth;
       await ctx.ensureCertificateAuthReady(sshHost, secrets, authType);
-      const jump = await ctx.resolveJumpHostTarget(sshHost);
+      const jump = await ctx.resolveJumpHostTarget(sshHost, attempt?.jumpSecrets);
+      const hopSecretsToPersist = await collectHopSecretsToPersist(ctx, sshHost, attempt?.jumpSecrets);
       const authAgentEndpoint =
         authType === "agent" ? await resolveLocalAgentEndpoint() : null;
 
@@ -698,10 +729,19 @@ export function registerPortForwardAndDnsIpcHandlers(
         bindPort: rule.bindPort,
         targetHost: rule.targetHost ?? undefined,
         targetPort: rule.targetPort ?? undefined,
+      }).catch((error: unknown) => {
+        // 점프 홉이나 대상이 넣은 값을 거절했으면 오류 대신 그 홉을 알린다 — 화면이 그 홉을 다시 묻는다.
+        const needed = credentialsNeededAfterFailure(ctx, sshHost, error);
+        if (!needed) {
+          throw error;
+        }
+        return { credentialsNeeded: needed };
       });
-      if (shouldPersistHostSecret) {
-        await ctx.persistHostSpecificSecret(sshHost.id, sshHost.label, secrets);
+      if ("credentialsNeeded" in runtime) {
+        return runtime;
       }
+      // 코어는 SSH 인증을 마친 뒤에 '시작됨'을 알린다 — 이제 넣은 값을 제자리에(팀 호스트는 내 자격 증명).
+      await persistAttemptSecrets(ctx, sshHost, auth, hopSecretsToPersist);
       try {
         await ctx.rewriteActiveDnsOverrides();
       } catch (error) {

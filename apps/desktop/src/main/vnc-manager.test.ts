@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PassThrough } from "node:stream";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 
-import { VncManager, type VncLaunchConfig } from "./vnc-manager";
+import { VncConnectError, VncManager, type VncLaunchConfig } from "./vnc-manager";
 import { encodeControlFrameOf } from "./core-framing";
 import { ipcChannels } from "../common/ipc-channels";
 
@@ -198,20 +198,103 @@ describe("VncManager", () => {
     await expect(connecting).rejects.toThrow("authentication failed");
   });
 
-  // 원인 코드를 버리면 화면이 문구로 다시 판정해야 한다. 인증 실패는 그것이 불가능하다 —
-  // 서버가 붙이는 거부 사유는 서버가 정하는 문장이라(RFB 는 형식을 정하지 않았다) 우리가 아는
-  // 문구가 없다. vnc-core 가 프로토콜에서 읽어 실어 준 코드를 그대로 렌더러까지 올린다.
+  // vnc-core 는 붙는 중의 실패를 세션만 싣고 요청 번호 없이 보낸다(session.rs 의 실패 갈래). 번호로만 찾으면 접속 호출이
+  // 끝나지 않고 남아, 실패 뒤에도 SSH 터널이 열려 있고 재연결 시도가 재연결 자리를 붙든 채 멈췄다(실제 앱, 2026-10-30).
+  describe("붙는 중의 실패(실제 코어 모양 — 요청 번호 없음)", () => {
+    const errorFrame = (sessionId: string, payload: Record<string, unknown>) =>
+      encodeControlFrameOf({ type: "error", sessionId, payload });
+    const errorEvents = (window: ReturnType<typeof windowStub>) =>
+      window.webContents.send.mock.calls
+        .map(([, event]) => event as { type?: string; failure?: string | null })
+        .filter((event) => event?.type === "error");
+
+    // 계정·비밀번호 실패는 부른 쪽(ipc/vnc.ts)이 요청 창으로 돌린다 — 화면에 실패를 알리면 실패 카드가 한 번 그려졌다가 요청 창으로
+    // 바뀐다.
+    it("계정·비밀번호 실패는 까닭 코드를 실어 그 세션의 접속을 끝내고 화면에는 알리지 않는다", async () => {
+      const core = fakeCore();
+      const window = windowStub(1);
+      const manager = managerWith(core, [window]);
+
+      const connecting = manager.connect({ sessionId: "sess-1", host: "10.0.0.5", port: 5900 });
+      core.emit(errorFrame("sess-1", { message: "the server requires a password and none was stored", failure: "password-required" }));
+
+      const rejected = await connecting.catch((error: unknown) => error);
+      expect(rejected).toBeInstanceOf(VncConnectError);
+      expect(rejected).toMatchObject({ failure: "password-required", reported: false });
+      expect(errorEvents(window)).toHaveLength(0);
+    });
+
+    // 다른 실패는 지금처럼 화면이 실패 카드로 보인다(까닭 코드와 함께). 접속 호출은 '이미 알렸다'로 끝난다.
+    it("다른 실패는 화면에 알리고, 알렸다는 것을 실어 그 세션의 접속을 끝낸다", async () => {
+      const core = fakeCore();
+      const window = windowStub(1);
+      const manager = managerWith(core, [window]);
+
+      const connecting = manager.connect({ sessionId: "sess-1", host: "10.0.0.5", port: 5900 });
+      core.emit(errorFrame("sess-1", { message: "connection refused", failure: "refused" }));
+
+      const rejected = await connecting.catch((error: unknown) => error);
+      expect(rejected).toMatchObject({ failure: "refused", reported: true });
+      expect(errorEvents(window)).toHaveLength(1);
+      expect(errorEvents(window)[0].failure).toBe("refused");
+    });
+
+    it("다른 세션의 실패로는 이 접속을 끝내지 않는다", async () => {
+      const core = fakeCore();
+      const manager = managerWith(core, [windowStub(1)]);
+
+      let firstSettled = false;
+      const first = manager.connect({ sessionId: "sess-1", host: "10.0.0.5", port: 5900 }).then(
+        () => (firstSettled = true),
+        () => (firstSettled = true),
+      );
+      const second = manager.connect({ sessionId: "sess-2", host: "10.0.0.6", port: 5900 });
+      core.emit(errorFrame("sess-2", { message: "connection refused", failure: "refused" }));
+
+      await expect(second).rejects.toBeInstanceOf(VncConnectError);
+      await Promise.resolve();
+      expect(firstSettled).toBe(false);
+      void first;
+    });
+
+    // 붙은 뒤의 실패는 접속 호출과 상관없다 — 화면에 알리기만 한다.
+    it("붙은 세션의 실패는 화면에만 알린다", async () => {
+      const core = fakeCore();
+      const window = windowStub(1);
+      const manager = managerWith(core, [window]);
+
+      const connecting = manager.connect({ sessionId: "sess-1", host: "10.0.0.5", port: 5900 });
+      const [request] = requestsIn(core.written);
+      core.emit(
+        encodeControlFrameOf({
+          type: "connected",
+          requestId: request.id,
+          sessionId: "sess-1",
+          payload: { desktopWidth: 800, desktopHeight: 600, name: "x" },
+        }),
+      );
+      await connecting;
+      core.emit(errorFrame("sess-1", { message: "connection reset", failure: "reset" }));
+
+      expect(errorEvents(window)).toHaveLength(1);
+      expect(errorEvents(window)[0].failure).toBe("reset");
+    });
+  });
+
+  // 원인 코드를 버리면 화면이 문구로 다시 판정해야 한다 — 서버가 붙이는 거부 사유는 서버가 정하는 문장이라(RFB 는 형식을
+  // 정하지 않았다) 우리가 아는 문구가 없다. 화면에 알리는 실패는 vnc-core 가 프로토콜에서 읽어 실어 준 코드를 그대로 올린다
+  // (붙는 중의 계정·비밀번호 실패는 화면 대신 접속 호출로 간다 — 위).
   it("오류 이벤트에 코어가 판정한 원인 코드를 함께 올린다", () => {
     const core = fakeCore();
     const window = windowStub(1);
     const manager = managerWith(core, [window]);
 
-    void manager.connect({ sessionId: "sess-1", host: "10.0.0.5", port: 5900 });
+    void manager.connect({ sessionId: "sess-1", host: "10.0.0.5", port: 5900 }).catch(() => undefined);
     core.emit(
       encodeControlFrameOf({
         type: "error",
         sessionId: "sess-1",
-        payload: { message: "authentication failed", failure: "password-truncated" },
+        payload: { message: "connect timed out", failure: "timeout" },
       }),
     );
 
@@ -219,7 +302,7 @@ describe("VncManager", () => {
       .map(([, event]) => event as { type?: string; failure?: string | null })
       .filter((event) => event?.type === "error");
     expect(sent).toHaveLength(1);
-    expect(sent[0].failure).toBe("password-truncated");
+    expect(sent[0].failure).toBe("timeout");
   });
 
   // 코드를 안 싣는 실패(소켓·프로토콜 오류)는 null 로 둔다 — 빈 문자열이나 없는 키로 두면
@@ -229,7 +312,7 @@ describe("VncManager", () => {
     const window = windowStub(1);
     const manager = managerWith(core, [window]);
 
-    void manager.connect({ sessionId: "sess-1", host: "10.0.0.5", port: 5900 });
+    void manager.connect({ sessionId: "sess-1", host: "10.0.0.5", port: 5900 }).catch(() => undefined);
     core.emit(
       encodeControlFrameOf({
         type: "error",

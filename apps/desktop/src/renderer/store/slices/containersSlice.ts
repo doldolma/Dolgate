@@ -1,5 +1,5 @@
 import type { SliceDeps } from "../services/context";
-import type { ContainersSlice, SessionContainerTunnel } from "../types";
+import type { ConnectAttemptSecrets, ContainersSlice, SessionContainerTunnel } from "../types";
 import { createDefaultLogsRelativeRange } from "../../lib/log-range";
 import {
   AWS_SFTP_DEFAULT_PORT,
@@ -171,7 +171,11 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
     ensureTrustedHost,
   } = services;
 
-  const connectHostContainersTab = async (hostId: string) => {
+  const connectHostContainersTab = async (
+    hostId: string,
+    /** 요청 창에 넣은 값(그 호스트와 점프 홉). */
+    attempt?: ConnectAttemptSecrets,
+  ) => {
     const host = get().hosts.find((item) => item.id === hostId);
     if (!host) {
       return;
@@ -305,7 +309,7 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
       return;
     }
 
-    await loadContainersList(set, get, hostId);
+    await loadContainersList(set, get, hostId, attempt);
   };
 
   return {
@@ -510,13 +514,13 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
               return { containerTabs: nextTabs };
             });
           },
-    refreshHostContainers: async (hostId) => {
+    refreshHostContainers: async (hostId, attempt) => {
             const host = get().hosts.find((item) => item.id === hostId);
             if (host && isAwsEcsHostRecord(host)) {
               await loadEcsClusterSnapshot(set, get, hostId);
               return;
             }
-            await connectHostContainersTab(hostId);
+            await connectHostContainersTab(hostId, attempt);
           },
     refreshEcsClusterUtilization: async (hostId) => {
             const host = get().hosts.find((item) => item.id === hostId);
@@ -863,6 +867,10 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
               hostId,
               containerId,
             );
+          },
+    retryHostContainerShell: async (sessionId, hostId, containerId, attempt) => {
+            // 요청 창을 띄울 때 탭은 기다리는 모양 그대로다 — 같은 탭을 넣은 값으로 다시 붙인다.
+            await startPendingContainerShellConnect(set, get, sessionId, hostId, containerId, attempt);
           },
     openEcsExecShell: async (
             hostId,

@@ -6,6 +6,7 @@ import type { TermiusImportSelectionInput } from '@shared';
 import type { TermiusExportBundle, TermiusExportHost, TermiusSnapshot } from './termius-import-service';
 import { buildTermiusEntityKey } from './termius-import-service';
 import { importTermiusSelection } from './termius-import-executor';
+import { createPersonalImportTarget } from './ipc/import-target';
 
 type DatabaseModule = typeof import('./database');
 
@@ -68,11 +69,10 @@ function createSnapshot(hosts: TermiusExportHost[]): TermiusSnapshot {
 
 describe('importTermiusSelection', () => {
   it('imports identical SSH hosts even when one already exists locally', async () => {
-    const { HostRepository, GroupRepository, ActivityLogRepository, SecretMetadataRepository } = await loadRepositories();
+    const { HostRepository, GroupRepository, ActivityLogRepository } = await loadRepositories();
     const hosts = new HostRepository();
     const groups = new GroupRepository();
     const activityLogs = new ActivityLogRepository();
-    const secretMetadata = new SecretMetadataRepository();
     const queueSync = vi.fn();
 
     hosts.create('existing-host', {
@@ -111,11 +111,8 @@ describe('importTermiusSelection', () => {
     };
 
     const result = await importTermiusSelection(snapshot, input, {
-      groups,
-      hosts,
+      target: createPersonalImportTarget({ groups, hosts, persistSecret: vi.fn().mockResolvedValue(null) }),
       activityLogs,
-      secretMetadata,
-      persistSecret: vi.fn().mockResolvedValue(null),
       queueSync,
     });
 

@@ -1,7 +1,7 @@
 import { forwardRef, useEffect } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GroupRecord, HostDraft, HostRecord, SavedWorkspaceRecord, VaultIndex } from '@shared';
+import type { GroupRecord, HostDraft, HostRecord, SavedWorkspaceRecord, VaultIndex, WarpgateImportEvent } from '@shared';
 
 /**
  * 볼트가 **배관까지** 이어졌는지 — 홈 → 사이드바 → 스토어 → IPC.
@@ -93,14 +93,14 @@ function vaultIndex(): VaultIndex {
 
 const requestSecretEditor = vi.fn();
 
-function Home() {
+function Home({ platform = 'darwin' }: { platform?: 'darwin' | 'win32' } = {}) {
   const homeViewModel = useHomeViewModel();
   return (
     <HomeShell
       active
       authState={stub({ status: 'authenticated', session: { user: { id: 'u1', email: 'dolma@acme.dev' } }, capabilities: {} })}
       offlineLeaseExpiryLabel={null}
-      desktopPlatform="darwin"
+      desktopPlatform={platform}
       homeViewModel={homeViewModel}
       containersViewModel={stub({ tabs: [] })}
       modalViewModel={stub({ pendingInteractiveAuths: [] })}
@@ -154,6 +154,34 @@ function createDataTransfer(): DataTransfer {
 }
 
 const tree = () => within(screen.getByLabelText('Group tree'));
+
+const vaultOptions = () =>
+  within(screen.getByRole('listbox', { name: /Vault/ }))
+    .getAllByRole('option')
+    .map((option) => option.textContent);
+
+/** OpenSSH config 를 읽은 결과 — 두 호스트가 같은 SSH 키 파일을 쓴다. */
+function openSshProbe() {
+  const keyHost = (key: string) => ({
+    key,
+    alias: key,
+    hostname: `${key}.example.test`,
+    port: 22,
+    username: 'deploy',
+    authType: 'privateKey' as const,
+    identityFilePath: '/keys/id_deploy',
+    sourceFilePath: '/conf/config',
+    sourceLine: 1,
+  });
+  return {
+    snapshotId: 'openssh-1',
+    sources: [],
+    warnings: [],
+    hosts: [keyHost('web-1'), keyHost('web-2')],
+    skippedExistingHostCount: 0,
+    skippedDuplicateHostCount: 0,
+  };
+}
 const prodRows = () => tree().getAllByRole('button', { name: /^Prod(\s*\d+)?$/ });
 
 describe('HomeShell vaults', () => {
@@ -289,7 +317,7 @@ describe('HomeShell vaults', () => {
     expect(appStore.getState().teamsPanelTeamId).toBe(TEAM);
   });
 
-  it('quick-connects into the team you are in, and imports into your own vault', async () => {
+  it('quick-connects and imports into the team you are in', async () => {
     vi.mocked(desktopApi.hosts.create).mockImplementation(
       async (draft) => ({ ...(draft as object), id: 'quick-host' }) as HostRecord,
     );
@@ -307,12 +335,139 @@ describe('HomeShell vaults', () => {
     expect(vi.mocked(desktopApi.hosts.create).mock.lastCall?.[0]).toMatchObject({ groupName: 'Prod' });
     expect(vi.mocked(desktopApi.hosts.create).mock.lastCall?.[2]).toBe(TEAM);
 
-    // 가져오기는 비밀값까지 개인 볼트에 쓰는 길이라 팀 위치에서도 개인 맨 위(미분류)로 간다.
+    // 가져오기도 지금 위치로 — 서랍과 같은 Vault 칸이 그 팀을 고른 채 열리고, 보고 있는 그룹으로 들어간다.
     act(() => appStore.setState({ searchQuery: '' }));
+    vi.mocked(desktopApi.openssh.probeDefault).mockResolvedValue(openSshProbe());
+    vi.mocked(desktopApi.openssh.importSelection).mockResolvedValue({
+      createdHostCount: 2,
+      createdSecretCount: 1,
+      skippedHostCount: 0,
+      warnings: [],
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Import' }));
-    const dialog = await screen.findByRole('dialog', { name: /OpenSSH/ });
-    expect(dialog).toHaveTextContent('미분류');
-    expect(dialog).not.toHaveTextContent('Prod');
+    const dialog = within(await screen.findByRole('dialog', { name: /OpenSSH/ }));
+    expect(dialog.getByRole('button', { name: 'Vault' })).toHaveTextContent('Acme Infra');
+    expect(dialog.getByText('대상 그룹').parentElement).toHaveTextContent('Prod');
+
+    fireEvent.click(await dialog.findByRole('button', { name: '보이는 항목 모두 선택' }));
+    expect(dialog.getByRole('switch', { name: '비밀번호·SSH 키 1개도 함께 공유' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(dialog.getByRole('button', { name: '가져오기' }));
+    await waitFor(() =>
+      expect(desktopApi.openssh.importSelection).toHaveBeenCalledWith({
+        snapshotId: 'openssh-1',
+        selectedHostKeys: ['web-1', 'web-2'],
+        groupPath: 'Prod',
+        vaultId: TEAM,
+        shareSecrets: true,
+      }),
+    );
+  });
+
+  it('imports into your own vault from the All view, and offers the team in the Vault field', async () => {
+    vi.mocked(desktopApi.openssh.probeDefault).mockResolvedValue(openSshProbe());
+    render(<Home />);
+    expect(appStore.getState().currentVaultId).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    const dialog = within(await screen.findByRole('dialog', { name: /OpenSSH/ }));
+    const picker = dialog.getByRole('button', { name: 'Vault' });
+    expect(picker).toHaveTextContent('Personal');
+    fireEvent.click(picker);
+    expect(vaultOptions()).toEqual(['Personal', 'Acme Infra']);
+  });
+
+  it('adds a Warpgate target to the team you are in through the store and IPC', async () => {
+    let emit: ((event: WarpgateImportEvent) => void) | null = null;
+    vi.mocked(desktopApi.warpgate.onImportEvent).mockImplementation((listener) => {
+      emit = listener;
+      return () => undefined;
+    });
+    vi.mocked(desktopApi.warpgate.startBrowserImport).mockResolvedValue({ attemptId: 'attempt-1' });
+    vi.mocked(desktopApi.hosts.create).mockImplementation(
+      async (draft) => ({ ...(draft as object), id: 'warpgate-host' }) as HostRecord,
+    );
+    render(<Home />);
+    fireEvent.click(prodRows()[1]!);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open import menu' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Import from Warpgate' }));
+    const dialog = within(await screen.findByRole('dialog', { name: /Warpgate/ }));
+    expect(dialog.getByRole('button', { name: 'Vault' })).toHaveTextContent('Acme Infra');
+    fireEvent.change(dialog.getByPlaceholderText('https://warpgate.example.com'), {
+      target: { value: 'https://warpgate.example.com' },
+    });
+    fireEvent.click(dialog.getByRole('button', { name: '브라우저에서 로그인' }));
+    await waitFor(() => expect(desktopApi.warpgate.startBrowserImport).toHaveBeenCalled());
+    act(() =>
+      emit!({
+        attemptId: 'attempt-1',
+        status: 'completed',
+        connectionInfo: { baseUrl: 'https://warpgate.example.com', sshHost: 'ssh.warpgate.example.com', sshPort: 2222, username: 'ops' },
+        targets: [{ id: 'target-1', name: 'prod-db', kind: 'ssh' }],
+        errorMessage: null,
+      }),
+    );
+    fireEvent.click(await dialog.findByRole('button', { name: 'Add host' }));
+
+    await waitFor(() => expect(desktopApi.hosts.create).toHaveBeenCalled());
+    expect(vi.mocked(desktopApi.hosts.create).mock.lastCall?.[0]).toMatchObject({ kind: 'warpgate-ssh', groupName: 'Prod' });
+    expect(vi.mocked(desktopApi.hosts.create).mock.lastCall?.[2]).toBe(TEAM);
+  });
+
+  it('opens the Termius import on the team you are in', async () => {
+    vi.mocked(desktopApi.termius.probeLocal).mockResolvedValue({
+      status: 'ready',
+      snapshotId: 'termius-1',
+      message: null,
+      meta: null,
+      groups: [],
+      hosts: [],
+    });
+    render(<Home />);
+    fireEvent.click(prodRows()[1]!);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open import menu' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Import from Termius' }));
+    const dialog = within(await screen.findByRole('dialog', { name: /Termius/ }));
+    expect(dialog.getByRole('button', { name: 'Vault' })).toHaveTextContent('Acme Infra');
+  });
+
+  it('opens the Xshell import on the team you are in, on Windows', async () => {
+    vi.mocked(desktopApi.xshell.probeDefault).mockResolvedValue({
+      snapshotId: 'xshell-1',
+      sources: [],
+      groups: [],
+      hosts: [],
+      warnings: [],
+      skippedExistingHostCount: 0,
+      skippedDuplicateHostCount: 0,
+    });
+    render(<Home platform="win32" />);
+    fireEvent.click(prodRows()[1]!);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open import menu' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Import from Xshell' }));
+    const dialog = within(await screen.findByRole('dialog', { name: /Xshell/ }));
+    expect(dialog.getByRole('button', { name: 'Vault' })).toHaveTextContent('Acme Infra');
+  });
+
+  it("leaves a team you have to rejoin out of the import's Vault field", async () => {
+    const index = {
+      ...vaultIndex(),
+      teams: [
+        ...vaultIndex().teams,
+        { id: 'team-2', name: 'Beta Ops', role: 'member', syncState: 'needs-rejoin', syncError: null, groups: [] },
+      ],
+    } as VaultIndex;
+    vi.mocked(desktopApi.teams.getVaultIndex).mockResolvedValue(index);
+    vi.mocked(desktopApi.openssh.probeDefault).mockResolvedValue(openSshProbe());
+    appStore.setState({ vaultIndex: index });
+    render(<Home />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    const dialog = within(await screen.findByRole('dialog', { name: /OpenSSH/ }));
+    fireEvent.click(dialog.getByRole('button', { name: 'Vault' }));
+    expect(vaultOptions()).toEqual(['Personal', 'Acme Infra']);
   });
 
   it("narrows the host drawer's pickers to the vault of the host being edited", async () => {
@@ -851,10 +1006,26 @@ describe('HomeShell vault sections', () => {
     render(<Home />);
 
     fireEvent.change(await screen.findByRole('combobox', { name: 'Vault' }), { target: { value: TEAM } });
-    expect(await screen.findByText('b@acme.dev')).toBeInTheDocument();
+    // 남긴 사람 줄(Person 칸의 같은 이름이 아니라).
+    expect(await screen.findByText('b@acme.dev', { selector: 'span' })).toBeInTheDocument();
     expect(desktopApi.teams.listActivity).toHaveBeenCalledWith(TEAM, { limit: 100 });
     fireEvent.click(await screen.findByRole('button', { name: 'Replay' }));
     expect(desktopApi.sessionReplays.open).toHaveBeenCalledWith('rec-1', TEAM);
+  });
+
+  // Person 에는 아직 기록을 안 남긴 멤버도 있다 — 홈이 멤버 목록을 기록 화면에 넘겨야 한다.
+  it('lists the team members under Person in the logs screen', async () => {
+    vi.mocked(desktopApi.teams.listActivity).mockResolvedValue([]);
+    vi.mocked(desktopApi.teams.listMembers).mockResolvedValue([
+      { userId: 'user-c', email: 'c@acme.dev', role: 'member', hasKey: true, addedBy: '', addedByEmail: '', addedAt: '' },
+    ]);
+    appStore.setState({ homeSection: 'logs' });
+    render(<Home />);
+
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Vault' }), { target: { value: TEAM } });
+    const person = await screen.findByRole('combobox', { name: 'Person' });
+    await waitFor(() => expect(within(person).getAllByRole('option').map((option) => option.textContent)).toEqual(['All', 'c@acme.dev']));
+    expect(desktopApi.teams.listMembers).toHaveBeenCalledWith(TEAM);
   });
 
   // 바뀐 것과 복원 — 볼트 표의 역할이 기록 화면까지 가야 관리자에게 Changes 탭이 생긴다(7-4).
@@ -986,6 +1157,35 @@ describe('HomeShell vaults — read-only team', () => {
     await waitFor(() => expect(screen.getByTestId('host-drawer')).toBeInTheDocument());
     expect(appStore.getState().hostDrawer).toMatchObject({ mode: 'create', vaultId: 'personal', defaultGroupPath: null });
     expect((drawerProps.vaultChoices as Array<{ id: string }>).map((choice) => choice.id)).toEqual(['personal']);
+  });
+
+  it('imports into your own vault top level while you look inside the team, with no team to pick', async () => {
+    vi.mocked(desktopApi.openssh.probeDefault).mockResolvedValue(openSshProbe());
+    vi.mocked(desktopApi.openssh.importSelection).mockResolvedValue({
+      createdHostCount: 2,
+      createdSecretCount: 1,
+      skippedHostCount: 0,
+      warnings: [],
+    });
+    render(<Home />);
+    fireEvent.click(prodRows()[1]!);
+    expect(appStore.getState()).toMatchObject({ currentVaultId: TEAM, currentGroupPath: 'Prod' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    const dialog = within(await screen.findByRole('dialog', { name: /OpenSSH/ }));
+    expect(dialog.queryByRole('button', { name: 'Vault' })).toBeNull();
+    expect(dialog.getByText('대상 그룹').parentElement).toHaveTextContent('미분류');
+
+    fireEvent.click(await dialog.findByRole('button', { name: '보이는 항목 모두 선택' }));
+    expect(dialog.queryByRole('switch')).toBeNull();
+    fireEvent.click(dialog.getByRole('button', { name: '가져오기' }));
+    await waitFor(() =>
+      expect(desktopApi.openssh.importSelection).toHaveBeenCalledWith({
+        snapshotId: 'openssh-1',
+        selectedHostKeys: ['web-1', 'web-2'],
+        groupPath: null,
+      }),
+    );
   });
 
   it('never opens the editor on a read-only team host, and leaves the editor when you pick one while editing', async () => {

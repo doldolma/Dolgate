@@ -3,13 +3,14 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 
-import type {
-  ActivityLogRecord,
-  SessionLifecycleLogMetadata,
-  VncConnectedPayload,
-  VncInputEvent,
-  VncConnectStage,
-  VncSessionEvent,
+import {
+  isVncCredentialFailure,
+  type ActivityLogRecord,
+  type SessionLifecycleLogMetadata,
+  type VncConnectedPayload,
+  type VncInputEvent,
+  type VncConnectStage,
+  type VncSessionEvent,
 } from "@shared";
 
 import { CoreFrameParser, encodeControlFrameOf } from "./core-framing";
@@ -50,6 +51,21 @@ interface VncCursorMetadata {
   height: number;
 }
 
+/**
+ * 붙지 못한 접속. 코어가 판정한 까닭 코드를 싣는다 — 문구는 서버가 정하는 문장일 수 있어(RFB 의 거부 사유) 부른 쪽이
+ * 문구로는 가를 수 없다. reported 는 이 실패를 화면에 이미 알렸는지다(오류 이벤트로) — 그랬으면 부른 쪽은 탭을 다시 그리지
+ * 않는다.
+ */
+export class VncConnectError extends Error {
+  constructor(
+    message: string,
+    readonly failure: string | null,
+    readonly reported: boolean,
+  ) {
+    super(message);
+    this.name = "VncConnectError";
+  }
+}
 
 export interface VncConnectOptions {
   sessionId: string;
@@ -116,6 +132,8 @@ export interface VncManagerOptions {
 }
 
 interface PendingConnect {
+  /** 붙는 중인 세션 — 코어는 붙는 중의 실패에 요청 번호를 싣지 않아 세션으로 찾는다. */
+  sessionId: string;
   resolve: (payload: VncConnectedPayload) => void;
   reject: (error: Error) => void;
 }
@@ -160,7 +178,7 @@ export class VncManager {
     }
 
     return await new Promise<VncConnectedPayload>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { sessionId: options.sessionId, resolve, reject });
       child.stdin.write(
         encodeControlFrameOf({
           id,
@@ -585,25 +603,36 @@ export class VncManager {
           typeof payload.message === "string" && payload.message.trim()
             ? payload.message
             : "VNC 연결에 실패했습니다";
-        // 연결 시도 중이면 그 약속을 깨뜨려야 한다. 안 그러면 호출부가 영원히 기다린다.
-        if (requestId && this.pending.has(requestId)) {
-          this.pending.get(requestId)?.reject(new Error(message));
-          this.pending.delete(requestId);
-        }
+        const failure =
+          typeof payload.failure === "string" && payload.failure.trim()
+            ? payload.failure
+            : null;
+        // 연결 시도 중이면 그 약속을 깨뜨려야 한다. 안 그러면 호출부가 영원히 기다린다 — 실패 뒤에도 SSH 터널이 열려 있고,
+        // 재연결이면 그 시도가 재연결 자리를 붙든 채 남는다. 코어는 붙는 중의 실패에 요청 번호를 싣지 않으므로(세션만 싣는다)
+        // 번호가 없으면 그 세션의 붙는 중 접속을 찾는다.
+        const pendingId =
+          requestId && this.pending.has(requestId) ? requestId : this.pendingConnectOf(sessionId);
+        // 붙는 중에 계정·비밀번호로 끝났으면 알리지 않는다 — 부른 쪽(ipc/vnc.ts)이 결과로 받아 요청 창을 띄운다. 알리면 화면이
+        // 실패 카드를 한 번 그렸다가 요청 창으로 바뀐다.
+        const reported = Boolean(sessionId) && !(pendingId && isVncCredentialFailure(failure));
         if (sessionId) {
           this.sessions.delete(sessionId);
           this.finalizeLifecycle(sessionId, "error", message);
-          // 원인 코드를 함께 올린다. 문구는 서버가 정하는 문장일 수 있어(RFB 의 거부 사유)
-          // 화면에서 문구로 판정할 수 없다 — 코어가 프로토콜에서 읽은 코드만이 안다.
-          this.emitEvent({
-            type: "error",
-            sessionId,
-            message,
-            failure:
-              typeof payload.failure === "string" && payload.failure.trim()
-                ? payload.failure
-                : null,
-          });
+          if (reported) {
+            // 원인 코드를 함께 올린다. 문구는 서버가 정하는 문장일 수 있어(RFB 의 거부 사유)
+            // 화면에서 문구로 판정할 수 없다 — 코어가 프로토콜에서 읽은 코드만이 안다.
+            this.emitEvent({
+              type: "error",
+              sessionId,
+              message,
+              failure,
+            });
+          }
+        }
+        // 화면에 알린 뒤에 깨뜨린다 — 부른 쪽은 '이미 알렸다'를 보고 탭을 다시 그리지 않는다.
+        if (pendingId) {
+          this.pending.get(pendingId)?.reject(new VncConnectError(message, failure, reported));
+          this.pending.delete(pendingId);
         }
         return;
       }
@@ -748,6 +777,19 @@ export class VncManager {
       }
       window.webContents.send(channel, payload);
     }
+  }
+
+  /** 그 세션의 붙는 중 접속(요청 번호). */
+  private pendingConnectOf(sessionId: string | undefined): string | undefined {
+    if (!sessionId) {
+      return undefined;
+    }
+    for (const [id, pending] of this.pending) {
+      if (pending.sessionId === sessionId) {
+        return id;
+      }
+    }
+    return undefined;
   }
 
   private rejectAllPending(error: Error): void {

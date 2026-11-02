@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcChannels } from '../../common/ipc-channels';
 import { HostsOverrideError } from '../hosts-override-manager';
+import { CredentialsNeededError } from './connect-credentials';
 import { registerPortForwardAndDnsIpcHandlers } from './port-forwards-dns';
 import { withVaults } from '../vault-catalog.test-support';
 
@@ -226,6 +227,119 @@ describe('registerPortForwardAndDnsIpcHandlers', () => {
         }),
       }),
     );
+  });
+
+  // 다듬기 2단계 — 포트 포워딩도 SSH 터미널·SFTP 처럼 비밀번호가 빠진 홉을 묻고, 넣은 값으로 붙고, 붙은 뒤 저장한다.
+  // 전에는 코어가 붙기 전에 "jump host: password auth requires a password" 원문으로 멈췄다.
+  describe('asks for a missing password like the SSH terminal', () => {
+    const bastion = { id: 'bastion', kind: 'ssh', label: 'Bastion', hostname: '127.0.0.1', port: 22251, username: 'tester', authType: 'password' };
+    const target = { id: 'target', kind: 'ssh', label: 'Target', hostname: 'tpol-target', port: 22, username: 'tester', authType: 'password', jumpHostIds: ['bastion'] };
+    const rule = { id: 'rule-1', hostId: 'target', transport: 'ssh', mode: 'local', bindAddress: '127.0.0.1', bindPort: 18411, targetHost: '127.0.0.1', targetPort: 22 };
+
+    /** stored 에 든 호스트는 저장된 비밀번호가 있다. 이번에 넣은 값이 있으면 그것이 먼저다. */
+    function setup(
+      options: {
+        rule?: Record<string, unknown>;
+        stored?: Record<string, string>;
+        startPortForward?: ReturnType<typeof vi.fn>;
+        startContainerTunnelRuntime?: ReturnType<typeof vi.fn>;
+      } = {},
+    ) {
+      const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+      electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+        handlers.set(channel, handler);
+      });
+      const stored = options.stored ?? {};
+      const hosts = [bastion, target];
+      const startPortForward = options.startPortForward ?? vi.fn().mockResolvedValue({ ruleId: 'rule-1', status: 'running' });
+      const persistHostSpecificSecret = vi.fn(async () => 'ref');
+      const theRule = options.rule ?? rule;
+      registerPortForwardAndDnsIpcHandlers(withVaults({
+        portForwards: { getById: vi.fn(() => theRule), list: vi.fn(() => [theRule]) },
+        hosts: { getById: vi.fn((id: string) => hosts.find((host) => host.id === id) ?? null), list: vi.fn(() => hosts) },
+        assertSshHost: vi.fn(),
+        assertSftpCompatibleHost: vi.fn(),
+        startContainerTunnelRuntime: options.startContainerTunnelRuntime ?? vi.fn(),
+        resolveTrustedHostKeys: vi.fn(() => ['trusted']),
+        resolveSshAuth: vi.fn(async (host: { id: string; username: string; authType: string }, provided?: { password?: string; username?: string }) => ({
+          username: provided?.username ?? host.username,
+          authType: host.authType,
+          secrets: provided?.password ? { password: provided.password } : stored[host.id] ? { password: stored[host.id] } : {},
+          shouldPersistHostSecret: Boolean(provided?.password),
+          typedUsername: provided?.username ?? null,
+        })),
+        ensureCertificateAuthReady: vi.fn(),
+        resolveJumpHostTarget: vi.fn(async (_host: unknown, jumpSecrets?: Record<string, { password?: string }>) => ({
+          host: 'bastion-dial',
+          password: jumpSecrets?.bastion?.password ?? stored.bastion,
+        })),
+        resolveTailnetRoute: vi.fn(() => ({})),
+        persistHostSpecificSecret,
+        coreManager: { startPortForward, setPortForwardRuntime: vi.fn(), listPortForwardRuntimes: vi.fn(() => []) },
+        rewriteActiveDnsOverrides: vi.fn().mockResolvedValue(undefined),
+      }) as any);
+      const start = handlers.get(ipcChannels.portForwards.start);
+      if (!start) {
+        throw new Error('expected port forward start handler to be registered');
+      }
+      return { start, startPortForward, persistHostSpecificSecret };
+    }
+
+    it('names the jump host without calling the core when its password is missing', async () => {
+      const { start, startPortForward } = setup({ stored: { target: 'app-pw' } });
+      await expect(start({}, 'rule-1')).resolves.toEqual({ credentialsNeeded: { hostId: 'bastion', reason: 'missing' } });
+      expect(startPortForward).not.toHaveBeenCalled();
+    });
+
+    it('connects with the typed values and saves them once the core started the forward', async () => {
+      const { start, startPortForward, persistHostSpecificSecret } = setup({ stored: { target: 'app-pw' } });
+      await expect(
+        start({}, 'rule-1', { jumpSecrets: { bastion: { password: 'jump-pw' } } }),
+      ).resolves.toMatchObject({ ruleId: 'rule-1', status: 'running' });
+      expect(startPortForward).toHaveBeenCalledWith(
+        expect.objectContaining({ password: 'app-pw', jump: expect.objectContaining({ password: 'jump-pw' }) }),
+      );
+      // 대상은 저장된 값을 썼다 — 저장하는 것은 넣은 베스천의 값뿐이다.
+      expect(persistHostSpecificSecret.mock.calls).toEqual([['bastion', 'Bastion', { password: 'jump-pw' }, null]]);
+    });
+
+    it('asks the jump host again when it rejects the typed value, saving nothing', async () => {
+      const rejected = Object.assign(
+        new Error('jump host: ssh: handshake failed: ssh: unable to authenticate, attempted methods [none password]'),
+        { jumpDepth: 1 },
+      );
+      const { start, persistHostSpecificSecret } = setup({
+        stored: { target: 'app-pw' },
+        startPortForward: vi.fn().mockRejectedValue(rejected),
+      });
+      await expect(start({}, 'rule-1', { jumpSecrets: { bastion: { password: 'wrong' } } })).resolves.toEqual({
+        credentialsNeeded: { hostId: 'bastion', reason: 'rejected', message: rejected.message },
+      });
+      expect(persistHostSpecificSecret).not.toHaveBeenCalled();
+    });
+
+    it('keeps other failures as errors', async () => {
+      const { start } = setup({
+        stored: { target: 'app-pw', bastion: 'jump-pw' },
+        startPortForward: vi.fn().mockRejectedValue(new Error('dial tcp 127.0.0.1:22251: connection refused')),
+      });
+      await expect(start({}, 'rule-1')).rejects.toThrow('connection refused');
+    });
+
+    // 컨테이너 포워딩은 그 호스트의 컨테이너 연결을 지난다 — 묻는 것도, 넣은 값을 넘기는 것도 같다.
+    it('asks before a container port forward and turns its rejection into a question', async () => {
+      const containerRule = { id: 'rule-c', hostId: 'target', transport: 'container', containerId: 'c1', networkName: 'bridge', targetPort: 80, bindPort: 18080 };
+      const startContainerTunnelRuntime = vi.fn();
+      const { start } = setup({ rule: containerRule, stored: { target: 'app-pw' }, startContainerTunnelRuntime });
+      await expect(start({}, 'rule-c')).resolves.toEqual({ credentialsNeeded: { hostId: 'bastion', reason: 'missing' } });
+      expect(startContainerTunnelRuntime).not.toHaveBeenCalled();
+
+      const needed = { hostId: 'bastion', reason: 'rejected' as const, message: 'jump host: ssh: unable to authenticate' };
+      startContainerTunnelRuntime.mockRejectedValueOnce(new CredentialsNeededError(needed));
+      const attempt = { jumpSecrets: { bastion: { password: 'wrong' } } };
+      await expect(start({}, 'rule-c', attempt)).resolves.toEqual({ credentialsNeeded: needed });
+      expect(startContainerTunnelRuntime).toHaveBeenCalledWith(expect.objectContaining({ ruleId: 'rule-c', attempt }));
+    });
   });
 
   // 4-6: 볼트는 레코드가 정한다 — 규칙은 호스트의 볼트, Linked DNS 는 규칙의 볼트, Static DNS 는 화면이 고른 볼트.

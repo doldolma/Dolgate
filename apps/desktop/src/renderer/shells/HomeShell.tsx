@@ -181,14 +181,14 @@ export function HomeShell({
       translate,
     ],
   );
-  // 지금 위치가 팀 볼트면 그 팀 id. 새 호스트(빠른 연결 포함)는 그 팀에 만들고, 가져오기는 개인 맨 위로 보낸다
-  // (가져오기는 비밀값까지 개인 볼트에 쓰는 길이라 팀으로 보내지 않는다).
+  // 지금 위치가 팀 볼트면 그 팀 id. 새 호스트(빠른 연결 포함)는 그 팀에 만들고, AWS 가져오기는 개인 맨 위로 보낸다
+  // (AWS 찾기는 개인 프로필만 본다).
   const teamVaultId =
     typeof homeViewModel.currentVaultId === "string" &&
     isTeamVaultId(homeViewModel.currentVaultId)
       ? homeViewModel.currentVaultId
       : null;
-  const importGroupPath = teamVaultId ? null : homeViewModel.currentGroupPath;
+  const awsImportGroupPath = teamVaultId ? null : homeViewModel.currentGroupPath;
   const inviteTeam = inviteTeamId
     ? (browserVaults.find((vault) => vault.id === inviteTeamId) ?? null)
     : null;
@@ -294,6 +294,24 @@ export function HomeShell({
         team: vault.kind === "team" ? { id: vault.id, name: vault.name } : null,
       }));
   }, [browserVaults, homeViewModel.hostDrawer]);
+  // 가져오기 창(OpenSSH·Termius·Xshell·Warpgate)의 Vault — 새 호스트 서랍과 같은 후보. 처음엔 지금 보고 있는 볼트,
+  // 거기에 쓸 수 없으면 개인이다. 보고 있는 그룹은 그 볼트로 가져올 때만 따라간다.
+  const importVaultChoices = useMemo(
+    () =>
+      browserVaults
+        .filter((vault) => vault.blocked !== "needs-rejoin" && !vault.readOnly)
+        .map((vault) => ({
+          id: vault.id,
+          team: vault.kind === "team" ? { id: vault.id, name: vault.name } : null,
+        })),
+    [browserVaults],
+  );
+  const viewedVaultId = homeViewModel.currentVaultId ?? PERSONAL_VAULT_ID;
+  const importVaultId = importVaultChoices.some((choice) => choice.id === viewedVaultId)
+    ? viewedVaultId
+    : PERSONAL_VAULT_ID;
+  const importGroupPath =
+    importVaultId === viewedVaultId ? homeViewModel.currentGroupPath : null;
   const groupOptions = useMemo(
     () =>
       buildGroupOptions(
@@ -1265,6 +1283,7 @@ export function HomeShell({
                   onClear={settingsViewModel.clearLogs}
                   onOpenReplay={openSessionReplay}
                   teams={homeViewModel.vaultIndex?.teams}
+                  onListMembers={homeViewModel.listTeamMembers}
                 />
               ) : null}
 
@@ -1328,7 +1347,7 @@ export function HomeShell({
 
       <AwsImportDialog
         open={isAwsImportOpen}
-        currentGroupPath={importGroupPath}
+        currentGroupPath={awsImportGroupPath}
         onClose={() => setIsAwsImportOpen(false)}
         onImport={async (draft, secrets) => {
           // RDP 경로는 자격증명(Administrator + 암호)을 함께 만든다. saveHost 가 시크릿까지 받는다.
@@ -1384,6 +1403,8 @@ export function HomeShell({
 
       <TermiusImportDialog
         open={isTermiusImportOpen}
+        vaultChoices={importVaultChoices}
+        defaultVaultId={importVaultId}
         onClose={() => setIsTermiusImportOpen(false)}
         onImported={async (result) => {
           await homeViewModel.refreshHostCatalog();
@@ -1407,6 +1428,8 @@ export function HomeShell({
       <OpenSshImportDialog
         open={isOpenSshImportOpen}
         currentGroupPath={importGroupPath}
+        vaultChoices={importVaultChoices}
+        defaultVaultId={importVaultId}
         onClose={() => setIsOpenSshImportOpen(false)}
         onImported={async (result) => {
           await homeViewModel.refreshHostCatalog();
@@ -1431,6 +1454,8 @@ export function HomeShell({
 
       <XshellImportDialog
         open={isXshellImportOpen}
+        vaultChoices={importVaultChoices}
+        defaultVaultId={importVaultId}
         onClose={() => setIsXshellImportOpen(false)}
         onImported={async (result) => {
           await homeViewModel.refreshHostCatalog();
@@ -1456,9 +1481,11 @@ export function HomeShell({
       <WarpgateImportDialog
         open={isWarpgateImportOpen}
         currentGroupPath={importGroupPath}
+        vaultChoices={importVaultChoices}
+        defaultVaultId={importVaultId}
         onClose={() => setIsWarpgateImportOpen(false)}
-        onImport={async (draft) => {
-          await homeViewModel.saveHost(null, draft);
+        onImport={async (draft, vaultId) => {
+          await homeViewModel.saveHost(null, draft, undefined, vaultId);
         }}
       />
       {inviteTeam ? (

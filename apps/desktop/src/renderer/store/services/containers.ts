@@ -6,6 +6,7 @@ import {
 } from "../../lib/log-range";
 import type { SliceDeps } from "./context";
 import type {
+  ConnectAttemptSecrets,
   HostContainerLogsRefreshOptions,
   HostContainersTabState,
 } from "../types";
@@ -13,9 +14,11 @@ import {
   DEFAULT_CONTAINER_LOGS_TAIL_WINDOW,
   createEmptyContainersTabState,
 } from "../defaults";
+import { createBootstrapSyncServices } from "./bootstrap-sync";
 import { createSessionServices } from "./session";
 import { createTrustAuthServices } from "./trust-auth";
 import {
+  buildHopCredentialRetry,
   buildContainersEndpointId,
   buildContainersTabTitle,
   classifyContainerLogsErrorMessage,
@@ -37,6 +40,7 @@ import {
   replaceSessionReferencesInState,
   findPendingConnectionAttempt,
   isPendingEcsShellAttempt,
+  resolveCredentialRetryProgress,
 } from "../utils";
 import { t } from '../../i18n';
 
@@ -124,6 +128,7 @@ function applyContainerLogsRangeOptions(
 
 export function createContainersServices(deps: SliceDeps) {
   const { api } = deps;
+  const bootstrapServices = createBootstrapSyncServices(deps);
   const sessionServices = createSessionServices(deps);
   const trustServices = createTrustAuthServices(deps);
   const clearContainerTabConnectionOverlay = (
@@ -203,6 +208,8 @@ export function createContainersServices(deps: SliceDeps) {
       sessionId: string,
       hostId: string,
       containerId: string,
+      /** 요청 창에 넣은 값(그 호스트와 점프 홉). */
+      connectAttempt?: ConnectAttemptSecrets,
     ) => {
       const host = get().hosts.find((item) => item.id === hostId);
       if (!host) {
@@ -220,7 +227,33 @@ export function createContainersServices(deps: SliceDeps) {
       );
 
       try {
-        const connection = await api.containers.openShell(hostId, containerId);
+        const connection = await api.containers.openShell(hostId, containerId, connectAttempt);
+        if ("credentialsNeeded" in connection) {
+          // 그 홉의 비밀번호가 있어야 붙는다 — 요청 창을 그 홉으로 띄우고 탭은 기다리는 모양으로 둔다(SSH 터미널과
+          // 같다). 다시 시도가 이 탭을 이어 쓴다.
+          const retry = buildHopCredentialRetry({
+            hosts: get().hosts,
+            vaultIndex: get().vaultIndex,
+            hostId,
+            needed: connection.credentialsNeeded,
+            source: "containerShell",
+            sessionId,
+            containerId,
+            carried: connectAttempt,
+          });
+          if (!retry) {
+            throw new Error(t("containersStore.shellFailed"));
+          }
+          const promptHost =
+            get().hosts.find((item) => item.id === connection.credentialsNeeded.hostId) ?? host;
+          set({ pendingCredentialRetry: retry });
+          sessionServices.updateSessionProgress(set, sessionId, resolveCredentialRetryProgress(promptHost, "auth"));
+          return;
+        }
+        if (connectAttempt) {
+          // 넣은 사용자 이름은 붙은 뒤 개인 호스트 레코드에 들어간다 — 목록을 다시 읽는다(SFTP 와 같다).
+          await bootstrapServices.refreshHostAndKeychainState(set);
+        }
         const latestAttempt = get().pendingConnectionAttempts.find(
           (attempt) => attempt.sessionId === sessionId,
         );
@@ -683,6 +716,8 @@ export function createContainersServices(deps: SliceDeps) {
     set: StoreSetter,
     get: StoreGetter,
     hostId: string,
+    /** 요청 창에 넣은 값(그 호스트와 점프 홉). */
+    attempt?: ConnectAttemptSecrets,
   ) => {
     const host = get().hosts.find((item) => item.id === hostId);
     if (!host) {
@@ -712,7 +747,40 @@ export function createContainersServices(deps: SliceDeps) {
 
     try {
       await beginContainerLifecycle(set, hostId);
-      const result = await api.containers.list(hostId);
+      const result = await api.containers.list(hostId, attempt);
+      if ("credentialsNeeded" in result) {
+        // 그 홉의 비밀번호가 있어야 붙는다 — 요청 창을 그 홉으로 띄운다(점프면 베스천부터). 탭은 실패로 물들이지
+        // 않고 기다리는 모양으로 둔다. 앞서 넣은 값은 요청에 실어 다음 시도로 넘긴다.
+        const retry = buildHopCredentialRetry({
+          hosts: get().hosts,
+          vaultIndex: get().vaultIndex,
+          hostId,
+          needed: result.credentialsNeeded,
+          source: "containers",
+          carried: attempt,
+        });
+        if (!retry) {
+          throw new Error(t("containersStore.listFailed"));
+        }
+        set((state) => {
+          const currentTab =
+            findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
+          return {
+            pendingCredentialRetry: retry,
+            containerTabs: upsertContainersTab(state.containerTabs, {
+              ...currentTab,
+              connectionProgress: null,
+              isLoading: false,
+              errorMessage: undefined,
+            }),
+          };
+        });
+        return;
+      }
+      if (attempt) {
+        // 넣은 사용자 이름은 붙은 뒤 개인 호스트 레코드에 들어간다 — 목록을 다시 읽는다(SFTP 와 같다).
+        await bootstrapServices.refreshHostAndKeychainState(set);
+      }
       const nextSelectedContainerId = (() => {
         const currentSelectedId =
           findContainersTab(get(), hostId)?.selectedContainerId ?? null;

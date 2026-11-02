@@ -10,6 +10,12 @@ import type {
 import { useTermiusImportController } from '../controllers/useImportControllers';
 import { DialogBackdrop } from './DialogBackdrop';
 import {
+  ImportVaultFields,
+  importVaultRequest,
+  useImportVault,
+  type ImportVaultProps,
+} from './ImportVaultFields';
+import {
   Button,
   CloseIcon,
   EmptyState,
@@ -27,7 +33,7 @@ import {
 } from '../ui';
 import { useTranslation } from 'react-i18next';
 
-interface TermiusImportDialogProps {
+interface TermiusImportDialogProps extends ImportVaultProps {
   open: boolean;
   onClose: () => void;
   onImported: (result: TermiusImportResult) => Promise<void> | void;
@@ -60,11 +66,11 @@ export function filterTermiusImportHosts(hosts: TermiusImportHostPreview[], quer
   );
 }
 
-export function countEffectiveSelectedTermiusHosts(
+function collectEffectiveSelectedTermiusHosts(
   hosts: TermiusImportHostPreview[],
   selectedGroupPaths: string[],
   selectedHostKeys: string[]
-): number {
+): TermiusImportHostPreview[] {
   const selectedGroups = new Set(selectedGroupPaths.map((value) => value.trim()).filter(Boolean));
   const selectedHosts = new Set(selectedHostKeys);
 
@@ -74,7 +80,28 @@ export function countEffectiveSelectedTermiusHosts(
     }
     const groupPath = host.groupPath ?? null;
     return [...selectedGroups].some((candidatePath) => isGroupWithinPath(groupPath, candidatePath));
-  }).length;
+  });
+}
+
+export function countEffectiveSelectedTermiusHosts(
+  hosts: TermiusImportHostPreview[],
+  selectedGroupPaths: string[],
+  selectedHostKeys: string[]
+): number {
+  return collectEffectiveSelectedTermiusHosts(hosts, selectedGroupPaths, selectedHostKeys).length;
+}
+
+/** 가져오면 만들 비밀번호·SSH 키 수 — 같은 ID 를 쓰는 호스트는 하나로 센다(메인과 같다). */
+export function countTermiusImportSecrets(
+  hosts: TermiusImportHostPreview[],
+  selectedGroupPaths: string[],
+  selectedHostKeys: string[]
+): number {
+  return new Set(
+    collectEffectiveSelectedTermiusHosts(hosts, selectedGroupPaths, selectedHostKeys)
+      .map((host) => host.secretKey)
+      .filter(Boolean)
+  ).size;
 }
 
 function renderWarningList(warnings: TermiusImportWarning[]) {
@@ -96,7 +123,13 @@ function renderWarningList(warnings: TermiusImportWarning[]) {
   );
 }
 
-export function TermiusImportDialog({ open, onClose, onImported }: TermiusImportDialogProps) {
+export function TermiusImportDialog({
+  open,
+  vaultChoices = [],
+  defaultVaultId,
+  onClose,
+  onImported
+}: TermiusImportDialogProps) {
   const { t: translate } = useTranslation();
   const { discardTermiusSnapshot, importTermiusSelection, probeTermiusLocal } =
     useTermiusImportController();
@@ -107,6 +140,7 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
   const [selectedGroupPaths, setSelectedGroupPaths] = useState<string[]>([]);
   const [selectedHostKeys, setSelectedHostKeys] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const { vaultId, setVaultId, shareSecrets, setShareSecrets } = useImportVault(open, defaultVaultId);
 
   useEffect(() => {
     if (!open) {
@@ -162,6 +196,10 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
     () => countEffectiveSelectedTermiusHosts(probe?.hosts ?? [], selectedGroupPaths, selectedHostKeys),
     [probe?.hosts, selectedGroupPaths, selectedHostKeys]
   );
+  const secretCount = useMemo(
+    () => countTermiusImportSecrets(probe?.hosts ?? [], selectedGroupPaths, selectedHostKeys),
+    [probe?.hosts, selectedGroupPaths, selectedHostKeys]
+  );
   const isReady = probe?.status === 'ready' && Boolean(probe.snapshotId);
   const canImport = isReady && (selectedGroupPaths.length > 0 || selectedHostKeys.length > 0);
 
@@ -191,6 +229,16 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
               {error}
             </NoticeCard>
           ) : null}
+
+          <ImportVaultFields
+            choices={vaultChoices}
+            vaultId={vaultId}
+            onVaultChange={setVaultId}
+            secretCount={secretCount}
+            shareSecrets={shareSecrets}
+            onShareSecretsChange={setShareSecrets}
+            disabled={isImporting}
+          />
 
           {probe?.meta ? (
             <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
@@ -353,7 +401,8 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
                 const result = await importTermiusSelection({
                   snapshotId: probe.snapshotId,
                   selectedGroupPaths,
-                  selectedHostKeys
+                  selectedHostKeys,
+                  ...importVaultRequest(vaultId, shareSecrets)
                 });
                 await onImported(result);
                 onClose();

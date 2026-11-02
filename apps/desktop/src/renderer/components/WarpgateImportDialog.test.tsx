@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   DesktopApi,
@@ -238,7 +238,7 @@ describe("Warpgate import dialog", () => {
         warpgateTargetId: "target-1",
         warpgateTargetName: "prod-db",
         warpgateUsername: "example.user",
-      }),
+      }, "personal"),
     );
     expect(onClose).toHaveBeenCalled();
   });
@@ -266,5 +266,69 @@ describe("Warpgate import dialog", () => {
       expect(api.warpgate.cancelBrowserImport).toHaveBeenCalledWith("attempt-1"),
     );
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("Warpgate import dialog — 어느 볼트로", () => {
+  const TEAM = "team-1";
+  const choices = [
+    { id: "personal", team: null },
+    { id: TEAM, team: { id: TEAM, name: "Acme Infra" } },
+  ];
+  const withUsername = { ...connectionInfoWithoutUsername, username: "example.user" };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("adds the target to the vault it was opened from, into the group there", async () => {
+    const { emitImportEvent } = installMockApi(withUsername);
+    const onImport = vi.fn().mockResolvedValue(undefined);
+    render(
+      <WarpgateImportDialog
+        open
+        currentGroupPath="Prod"
+        vaultChoices={choices}
+        defaultVaultId={TEAM}
+        onClose={vi.fn()}
+        onImport={onImport}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Vault" })).toHaveTextContent("Acme Infra");
+    await startBrowserImport();
+    emitImportEvent({ status: "completed" });
+    fireEvent.click(await screen.findByRole("button", { name: "Add host" }));
+
+    await waitFor(() => expect(onImport).toHaveBeenCalled());
+    expect(onImport.mock.lastCall?.[0]).toMatchObject({ kind: "warpgate-ssh", groupName: "Prod" });
+    expect(onImport.mock.lastCall?.[1]).toBe(TEAM);
+    // Warpgate 호스트에는 비밀값이 없다 — 공유 줄이 없다.
+    expect(screen.queryByRole("switch")).toBeNull();
+  });
+
+  it("adds the target to the top of another vault you pick", async () => {
+    const { emitImportEvent } = installMockApi(withUsername);
+    const onImport = vi.fn().mockResolvedValue(undefined);
+    render(
+      <WarpgateImportDialog
+        open
+        currentGroupPath="Prod"
+        vaultChoices={choices}
+        defaultVaultId={TEAM}
+        onClose={vi.fn()}
+        onImport={onImport}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Vault" }));
+    fireEvent.click(within(screen.getByRole("listbox", { name: /Vault/ })).getByRole("option", { name: "Personal" }));
+    await startBrowserImport();
+    emitImportEvent({ status: "completed" });
+    fireEvent.click(await screen.findByRole("button", { name: "Add host" }));
+
+    await waitFor(() => expect(onImport).toHaveBeenCalled());
+    expect(onImport.mock.lastCall?.[0]).toMatchObject({ groupName: "" });
+    expect(onImport.mock.lastCall?.[1]).toBe("personal");
   });
 });

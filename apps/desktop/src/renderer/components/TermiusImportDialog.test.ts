@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { TermiusImportGroupPreview, TermiusImportHostPreview } from '@shared';
 import {
   countEffectiveSelectedTermiusHosts,
+  countTermiusImportSecrets,
   filterTermiusImportGroups,
   filterTermiusImportHosts
 } from './TermiusImportDialog';
@@ -73,5 +74,26 @@ describe('Termius import dialog helpers', () => {
     expect(countEffectiveSelectedTermiusHosts(hosts, ['team'], [])).toBe(2);
     expect(countEffectiveSelectedTermiusHosts(hosts, [], ['host-3'])).toBe(1);
     expect(countEffectiveSelectedTermiusHosts(hosts, ['team/api'], ['host-3'])).toBe(2);
+  });
+
+  it('counts the passwords and keys an import makes, once per shared identity', () => {
+    const withSecrets: TermiusImportHostPreview[] = [
+      { ...hosts[0]!, secretKey: 'identity:shared' },
+      { ...hosts[1]!, secretKey: 'identity:shared' },
+      { ...hosts[2]!, secretKey: null }
+    ];
+    // host-1·host-2 는 같은 ID 라 하나, host-3 는 가져올 비밀값이 없다.
+    expect(countTermiusImportSecrets(withSecrets, ['team'], ['host-3'])).toBe(1);
+    expect(countTermiusImportSecrets(withSecrets, [], ['host-3'])).toBe(0);
+    expect(
+      countTermiusImportSecrets(
+        [withSecrets[0]!, { ...withSecrets[1]!, secretKey: 'host:host-2' }],
+        [],
+        ['host-1', 'host-2']
+      )
+    ).toBe(2);
+    // 고르지 않은 호스트의 비밀값은 세지 않는다.
+    expect(countTermiusImportSecrets(withSecrets, ['team/api'], [])).toBe(1);
+    expect(countTermiusImportSecrets(withSecrets, [], [])).toBe(0);
   });
 });

@@ -77,6 +77,7 @@ import { XshellImportService } from './xshell-import-service';
 import { shouldRequestSingleInstanceLock } from './app-runtime-policy';
 import { installRendererRecovery } from './renderer-recovery';
 import { logMessage, type ActivityLogMessage } from './activity-log-message';
+import { createActivityLogObserver, createActivityLogsChangedNotifier } from './activity-log-observer';
 import { closeTeamConnections } from './team-connections';
 import { closeInterruptedSessions } from './interrupted-sessions';
 
@@ -457,7 +458,20 @@ if (termiusHelperArgIndex >= 0) {
     api: teamApi,
     openTeamAccess: (teamId) => teamSyncService.openTeamAccess(teamId),
   });
-  activityLogRepository.setObserver((record) => teamHistoryService.mirror(record));
+  // 쓴 기록마다 — 화면에 알리고(잇따라 쓰면 모아 한 번), 팀 볼트 것이면 팀 기록에 올린다.
+  const activityLogsChanged = createActivityLogsChangedNotifier(() => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(ipcChannels.logs.changed);
+      }
+    }
+  });
+  activityLogRepository.setObserver(
+    createActivityLogObserver({
+      notifyChanged: () => activityLogsChanged.notify(),
+      mirror: (record) => teamHistoryService.mirror(record),
+    }),
+  );
   // 팀 녹화 — 팀 호스트 세션의 녹화를 세션 동안 구간마다 팀에 보낸다. 명령 목록·스냅샷 훑기는 작업 스레드에서 돈다.
   const teamReplayUploads = new TeamReplayUploads({
     api: teamApi,

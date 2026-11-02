@@ -286,8 +286,11 @@ export function buildTermiusHostPreviews(hosts: TermiusExportHost[]): TermiusImp
       const groupPath = normalizeGroupPath(host.groupPath);
       const username = resolveTermiusHostUsername(host);
       const port = resolveTermiusHostPort(host);
+      const key = buildTermiusEntityKey(host.id, host.localId, `${name}|${address ?? ''}|${groupPath ?? ''}`);
+      // 가져오기 실행부와 같은 기준 — 주소·포트가 없어 빠지는 호스트는 비밀값도 만들지 않는다.
+      const credential = resolveTermiusCredential(host);
       return {
-        key: buildTermiusEntityKey(host.id, host.localId, `${name}|${address ?? ''}|${groupPath ?? ''}`),
+        key,
         name,
         address,
         groupPath,
@@ -295,7 +298,8 @@ export function buildTermiusHostPreviews(hosts: TermiusExportHost[]): TermiusImp
         username,
         hasPassword: hasTermiusPassword(host),
         hasPrivateKey: hasTermiusPrivateKey(host),
-        identityName: host.identity?.name?.trim() || null
+        identityName: host.identity?.name?.trim() || null,
+        secretKey: address && port && credential.hasCredential ? (credential.sharedSecretKey ?? `host:${key}`) : null
       };
     })
     .sort((left, right) => {

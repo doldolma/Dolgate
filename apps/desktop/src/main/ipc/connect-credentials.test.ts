@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   collectHopSecretsToPersist,
+  credentialsNeededAfterFailure,
   findHostNeedingPassword,
   jumpHostRejectingAuth,
+  persistAttemptSecrets,
 } from "./connect-credentials";
 
 const bastion = { id: "bastion", kind: "ssh", label: "Bastion", hostname: "b", port: 22, username: "jump", authType: "password" };
@@ -98,5 +100,72 @@ describe("jumpHostRejectingAuth", () => {
     const ctx = createContext([bastion, target]);
     expect(jumpHostRejectingAuth(ctx, target as never, new Error("ssh: unable to authenticate"))).toBeNull();
     expect(jumpHostRejectingAuth(ctx, target as never, withDepth("jump host: dial failed: i/o timeout", 1))).toBeNull();
+  });
+});
+
+// 포트 포워딩·컨테이너·VNC 터널은 실패가 요청 하나로 돌아온다 — 어느 홉을 다시 물을지 메인이 가른다.
+describe("credentialsNeededAfterFailure", () => {
+  const withDepth = (message: string, jumpDepth: number) => Object.assign(new Error(message), { jumpDepth });
+
+  it("asks the jump host again when it rejected the value", () => {
+    const ctx = createContext([bastion, target]);
+    const message = "jump host: ssh: handshake failed: ssh: unable to authenticate, attempted methods [none password]";
+    expect(credentialsNeededAfterFailure(ctx, target as never, withDepth(message, 1))).toEqual({
+      hostId: "bastion",
+      reason: "rejected",
+      message,
+    });
+  });
+
+  it("asks the target again when the target rejected the value", () => {
+    const ctx = createContext([bastion, target]);
+    const message = "ssh: handshake failed: ssh: unable to authenticate, attempted methods [none password]";
+    expect(credentialsNeededAfterFailure(ctx, target as never, new Error(message))).toEqual({
+      hostId: "target",
+      reason: "rejected",
+      message,
+    });
+  });
+
+  // 대화형 인증 홉은 요청 창이 아니라 코어가 묻는다 — 그 홉의 실패를 대상의 거절로 읽어 대상 비밀번호를 물으면 안 된다.
+  it("does not blame the target for a keyboard-interactive jump hop's failure", () => {
+    const otpBastion = { ...bastion, authType: "keyboardInteractive" };
+    const ctx = createContext([otpBastion, target]);
+    const message = "jump host: ssh: handshake failed: ssh: unable to authenticate, attempted methods [none]";
+    expect(credentialsNeededAfterFailure(ctx, target as never, withDepth(message, 1))).toBeNull();
+  });
+
+  // 점프 홉의 다른 실패(네트워크)를 대상의 거절로 읽으면 엉뚱한 호스트를 묻는다.
+  it("asks nothing for network failures, a jump hop's included", () => {
+    const ctx = createContext([bastion, target]);
+    expect(credentialsNeededAfterFailure(ctx, target as never, new Error("dial tcp: connection refused"))).toBeNull();
+    expect(
+      credentialsNeededAfterFailure(ctx, target as never, withDepth("jump host: dial failed: i/o timeout", 1)),
+    ).toBeNull();
+  });
+});
+
+describe("persistAttemptSecrets", () => {
+  it("saves the target only when this attempt carried its value, and every typed jump hop", async () => {
+    const persistHostSpecificSecret = vi.fn(async () => "ref");
+    const ctx = { persistHostSpecificSecret } as never;
+    const hops = [{ hostId: "bastion", label: "Bastion", secrets: { password: "jump-pw" }, username: "ops" }];
+
+    await persistAttemptSecrets(
+      ctx,
+      target as never,
+      { secrets: { password: "stored" }, shouldPersistHostSecret: false, typedUsername: null },
+      hops,
+    );
+    expect(persistHostSpecificSecret.mock.calls).toEqual([["bastion", "Bastion", { password: "jump-pw" }, "ops"]]);
+
+    persistHostSpecificSecret.mockClear();
+    await persistAttemptSecrets(
+      ctx,
+      target as never,
+      { secrets: { password: "app-pw" }, shouldPersistHostSecret: true, typedUsername: "deploy" },
+      [],
+    );
+    expect(persistHostSpecificSecret.mock.calls).toEqual([["target", "Target", { password: "app-pw" }, "deploy"]]);
   });
 });

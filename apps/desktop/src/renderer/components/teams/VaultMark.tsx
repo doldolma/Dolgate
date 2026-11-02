@@ -2,8 +2,8 @@ import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/cn';
 import type { VaultSectionTeam } from '../../lib/vault-groups';
-import { IconButton, Tooltip } from '../../ui';
-import { Plus, User, Users } from '../../ui/icons';
+import { IconButton, SearchableSelect, ToggleSwitch, Tooltip } from '../../ui';
+import { Info, Plus, User, Users } from '../../ui/icons';
 
 /**
  * 볼트 표시 — 개인은 사람, 팀은 사람들 선 아이콘. 사이드바의 폴더 아이콘과 같은 결이다.
@@ -25,6 +25,80 @@ export function VaultMark({
     <Icon
       aria-hidden="true"
       className={cn('shrink-0', size === 'xs' ? 'h-[0.8rem] w-[0.8rem]' : 'h-[1.05rem] w-[1.05rem]', className)}
+    />
+  );
+}
+
+/** 만들 곳으로 고를 수 있는 볼트. 팀이 아니면 개인이다. */
+export interface VaultChoice {
+  id: string;
+  team: VaultSectionTeam | null;
+}
+
+/** "어느 볼트에" 고르는 칸 — 새 호스트 서랍과 가져오기 창이 같은 것을 쓴다. */
+export function VaultSelect({
+  choices,
+  value,
+  onChange,
+  disabled,
+  className,
+}: {
+  choices: VaultChoice[];
+  value: string;
+  onChange: (vaultId: string) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const { t: translate } = useTranslation();
+  return (
+    <SearchableSelect
+      ariaLabel={translate('hostDrawer.vault')}
+      placeholder={translate('hostDrawer.vault')}
+      searchable={false}
+      value={value}
+      options={choices.map((choice) => ({
+        value: choice.id,
+        label: choice.team?.name ?? translate('sidebar.personalVault'),
+        icon: <VaultMark kind={choice.team ? 'team' : 'personal'} className="text-[var(--text-soft)]" />,
+      }))}
+      onChange={onChange}
+      disabled={disabled}
+      className={className}
+    />
+  );
+}
+
+/**
+ * 팀으로 보낼 때 '비밀번호·SSH 키 N개도 함께 공유'(기본 켬) — 볼트 사이 복사와 가져오기가 같은 것을 쓴다. 끄면 팀에는
+ * 넣지 않고 내 것은 내 자격 증명에 둔다(ⓘ 가 그렇게 말한다).
+ */
+export function ShareSecretsToggle({
+  count,
+  checked,
+  onChange,
+  disabled,
+}: {
+  count: number;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+}) {
+  const { t: translate } = useTranslation();
+  const label = translate('teams.copy.shareSecrets', { count });
+  return (
+    <ToggleSwitch
+      checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      label={
+        <span className="inline-flex items-center gap-[0.3rem]">
+          {label}
+          <Tooltip label={translate('teams.copy.shareSecretsHint')} multiline>
+            <Info className="h-4 w-4 text-[var(--text-soft)]" aria-hidden />
+          </Tooltip>
+        </span>
+      }
+      onClick={() => onChange(!checked)}
     />
   );
 }

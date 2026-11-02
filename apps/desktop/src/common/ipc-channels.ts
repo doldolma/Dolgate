@@ -387,6 +387,7 @@ export const ipcChannels = {
   logs: {
     list: 'logs:list',
     clear: 'logs:clear',
+    exportCsv: 'logs:export-csv',
     changed: 'logs:changed'
   },
   sessionReplays: {

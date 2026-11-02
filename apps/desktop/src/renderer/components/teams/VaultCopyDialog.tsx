@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TeamMember, VaultCopyCounts, VaultCopyRequest } from '@shared';
-import { Button, SelectField, ToggleSwitch, Tooltip } from '../../ui';
-import { ArrowRight, Info } from '../../ui/icons';
+import { Button, SelectField } from '../../ui';
+import { ArrowRight } from '../../ui/icons';
 import type { BrowserVault } from '../host-browser/browserVaults';
 import type { VaultCopyDraft } from '../host-browser/useHostBrowser';
 import { TeamContentCountTiles } from './TeamContentCounts';
+import { ShareSecretsToggle } from './VaultMark';
 import { TeamDialogError, TeamDialogFrame } from './TeamDialogFrame';
 import { useDialogAction } from './useDialogAction';
 
@@ -164,7 +165,6 @@ export function VaultCopyDialog({
         : draft.selection.hostIds.length === 1
           ? (hostLabelOf(draft.selection.hostIds[0]!) ?? translate('teams.copy.hostCount', { count: 1 }))
           : translate('teams.copy.hostCount', { count: draft.selection.hostIds.length });
-  const shareLabel = translate('teams.copy.shareSecrets', { count: secrets });
   const footnote = [
     toTeam && memberCount !== null && memberCount > 1 ? translate('teams.copy.members', { count: memberCount }) : null,
     translate('teams.copy.keepsOriginal', { source: sourceName }),
@@ -271,19 +271,7 @@ export function VaultCopyDialog({
         <p className="m-0 text-sm text-[var(--text-soft)]">{translate('teams.copy.alongWith', { items: extras.join(' · ') })}</p>
       ) : null}
       {toTeam && secrets > 0 ? (
-        <ToggleSwitch
-          checked={shareSecrets}
-          aria-label={shareLabel}
-          label={
-            <span className="inline-flex items-center gap-[0.3rem]">
-              {shareLabel}
-              <Tooltip label={translate('teams.copy.shareSecretsHint')} multiline>
-                <Info className="h-4 w-4 text-[var(--text-soft)]" aria-hidden />
-              </Tooltip>
-            </span>
-          }
-          onClick={() => setShareSecrets((current) => !current)}
-        />
+        <ShareSecretsToggle count={secrets} checked={shareSecrets} onChange={setShareSecrets} />
       ) : null}
       <p className="m-0 text-sm text-[var(--text-soft)]">{footnote}</p>
       <TeamDialogError message={previewFailed ? translate('teams.copy.previewFailed') : null} />

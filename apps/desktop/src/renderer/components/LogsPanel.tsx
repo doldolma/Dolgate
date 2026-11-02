@@ -14,6 +14,7 @@ import type {
   SessionLifecycleLogMetadata,
   SftpLifecycleLogMetadata,
   PortForwardTransport,
+  TeamMember,
 } from '@shared';
 import { canManageTeam } from '@shared';
 import {
@@ -32,12 +33,17 @@ import {
   Toolbar,
   Tooltip,
 } from '../ui';
-import { Play } from '../ui/icons';
+import { Calendar, Download, Play } from '../ui/icons';
 import { useTranslation } from 'react-i18next';
 import { getFormatLocale, t } from '../i18n';
 import { resolveLogMessage } from '../lib/activity-log-message';
 import { getKeyboardLayoutSearchQueries } from '../lib/keyboard-layout-search';
-import { useTeamActivity } from '../controllers/useTeamActivity';
+import { buildCsv, formatCsvTime, type CsvValue } from '../lib/csv';
+import { formatLogsRangeLabel, normalizeLogsAbsoluteRange, normalizeLogsRelativeRange } from '../lib/log-range';
+import { exportLogsCsv } from '../services/desktop/logs';
+import type { LogsAbsoluteRangeValue, LogsRelativeRangeValue } from '../store/types';
+import { LogsRangePickerDialog } from './LogsRangePickerDialog';
+import { reachedSince, useTeamActivity } from '../controllers/useTeamActivity';
 import { memberLeavesOf, withMemberLeftEnd } from './teams/team-member-left';
 import { AuthorLine } from './teams/AuthorLine';
 import { TeamChangesList } from './teams/TeamChangesList';
@@ -52,9 +58,94 @@ interface LogsPanelProps {
   onOpenReplay: (recordingId: string, teamId?: string | null) => Promise<void>;
   /** 이 기기의 팀. 있으면 Vault 를 골라 팀 기록(서버)을 본다. 관리자 이상이면 바뀐 것(Changes)도 본다. */
   teams?: ReadonlyArray<{ id: string; name: string; role?: TeamRole }>;
+  /** 팀 멤버 — Person 에 기록을 아직 안 남긴 멤버도 보이게. 없으면 받은 기록의 사람만. */
+  onListMembers?: (teamId: string) => Promise<TeamMember[]>;
 }
 
 const PERSONAL_VAULT = 'personal';
+/** Person 의 '모두'. */
+const ALL = 'all';
+
+/** 기간 — 전체(기본), 최근 얼마, 날짜로 고른 범위. 컨테이너 로그의 기간 고르기를 그대로 쓴다. */
+type LogsPeriod =
+  | { mode: 'all' }
+  | { mode: 'recent'; relative: LogsRelativeRangeValue }
+  | { mode: 'absolute'; absolute: LogsAbsoluteRangeValue };
+
+/** 처음 기간을 고를 때 — 기록은 최근 1주부터 본다. */
+const DEFAULT_RECENT_PERIOD: LogsRelativeRangeValue = { presetKey: '1w', amount: '1', unit: 'week' };
+
+interface PeriodRange {
+  start: number;
+  /** 최근 얼마는 끝이 열려 있다 — 새로 받는 줄도 그 안이다. */
+  end: number | null;
+}
+
+/** 고른 기간의 시작·끝(밀리초). 전체면 null. */
+export function resolveLogsPeriod(period: LogsPeriod, now: Date): PeriodRange | null {
+  if (period.mode === 'recent') {
+    const range = normalizeLogsRelativeRange(period.relative, now);
+    return range ? { start: Date.parse(range.startTime), end: null } : null;
+  }
+  if (period.mode === 'absolute') {
+    const range = normalizeLogsAbsoluteRange(period.absolute);
+    return range ? { start: Date.parse(range.startTime), end: Date.parse(range.endTime) } : null;
+  }
+  return null;
+}
+
+/** 거르기 전의 줄. 팀 기록은 남긴 사람·폰에서 남겼는지가 붙는다. */
+export interface LogRow {
+  log: ActivityLogRecord;
+  author: string | null;
+  mobile: boolean;
+}
+
+interface LogFilter {
+  category: 'all' | ActivityLogCategory;
+  level: 'all' | ActivityLogLevel;
+  person: string;
+  range: PeriodRange | null;
+  queries: readonly string[];
+}
+
+/** 거르기 — 화면 목록과 내보내기가 같은 것을 쓴다. 찾기 글은 필요할 때만 만든다(searchText). */
+export function matchesLogFilter(row: LogRow, filter: LogFilter, searchText: () => string): boolean {
+  if (filter.category !== 'all' && row.log.category !== filter.category) {
+    return false;
+  }
+  if (filter.level !== 'all' && row.log.level !== filter.level) {
+    return false;
+  }
+  if (filter.person !== ALL && row.author !== filter.person) {
+    return false;
+  }
+  if (filter.range) {
+    const time = Date.parse(row.log.createdAt);
+    if (!(time >= filter.range.start) || (filter.range.end !== null && time > filter.range.end)) {
+      return false;
+    }
+  }
+  if (filter.queries.length > 0) {
+    const haystack = searchText();
+    if (!filter.queries.some((query) => haystack.includes(query))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** 저장 창에 넣을 이름 — dolgate-logs-<볼트>-<날짜>.csv. 파일 이름에 못 쓰는 글자는 뺀다. */
+export function logsCsvFileName(vaultName: string, now: Date): string {
+  const slug =
+    vaultName
+      .trim()
+      .toLocaleLowerCase()
+      .replace(/[\\/:*?"<>|\s]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'logs';
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `dolgate-logs-${slug}-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.csv`;
+}
 
 /** 팀 기록 한 줄을 화면의 기록 카드로 — 앱 활동은 로컬 기록과 같은 모양이고, 그 밖의 것은 문구 카드다. */
 interface TeamLogRow {
@@ -596,7 +687,127 @@ function getLogSearchText(log: ActivityLogRecord, translate: Translate): string 
     .toLocaleLowerCase();
 }
 
-export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanelProps) {
+/** 줄의 찾기 글 — 카드에 보이는 것, 팀 기록이면 남긴 사람과(폰이면) 'mobile'. */
+function getRowSearchText(row: LogRow, translate: Translate): string {
+  const text = getLogSearchText(row.log, translate);
+  // 폰이 남긴 줄은 'mobile' 로도 찾는다 — 작성자 뒤에 보이는 그 글자다.
+  const mobile = row.mobile ? ' mobile' : '';
+  return row.author ? `${text} ${row.author.toLocaleLowerCase()}${mobile}` : text;
+}
+
+const TEAM_CSV_HEADER = ['Time', 'Person', 'Device', 'Kind', 'Host', 'Status', 'Message', 'Started', 'Ended', 'Duration (s)'];
+const PERSONAL_CSV_HEADER = ['Time', 'Kind', 'Host', 'Status', 'Message', 'Started', 'Ended', 'Duration (s)'];
+
+interface CsvFields {
+  kind: string;
+  host: string;
+  status: string;
+  message: string;
+  started: string | null | undefined;
+  ended: string | null | undefined;
+  durationMs: number | null | undefined;
+}
+
+/** 줄 하나의 표 칸 — 카드의 뱃지와 같은 이름을 쓴다. */
+function csvFieldsOf(log: ActivityLogRecord, translate: Translate): CsvFields {
+  const metadata = log.metadata;
+  const joined = (...parts: Array<string | null | undefined>) => parts.filter(Boolean).join(' · ');
+  if (log.kind === 'session-lifecycle' && isSessionLifecycleMetadata(metadata)) {
+    return {
+      kind: getConnectionKindLabel(metadata.connectionKind, metadata.tmux, metadata.awsTransport),
+      host: metadata.hostLabel,
+      status: getLifecycleStatusLabel(metadata.status),
+      message: metadata.disconnectReason ?? '',
+      started: metadata.connectedAt,
+      ended: metadata.disconnectedAt,
+      durationMs: metadata.durationMs,
+    };
+  }
+  if (log.kind === 'sftp-lifecycle' && isSftpLifecycleMetadata(metadata)) {
+    return {
+      kind: 'SFTP',
+      host: metadata.hostLabel,
+      status: getSftpStatusLabel(metadata.status),
+      message: metadata.endReason ?? '',
+      started: metadata.startedAt,
+      ended: metadata.endedAt,
+      durationMs: metadata.durationMs,
+    };
+  }
+  if (log.kind === 'port-forward-lifecycle' && isPortForwardLifecycleMetadata(metadata)) {
+    return {
+      kind: `Port forward · ${getPortForwardTransportLabel(metadata.transport)}`,
+      host: metadata.hostLabel,
+      status: getPortForwardStatusLabel(metadata.status),
+      message: joined(metadata.ruleLabel, `${metadata.bindAddress}:${metadata.bindPort} -> ${metadata.targetSummary}`, metadata.endReason),
+      started: metadata.startedAt,
+      ended: metadata.stoppedAt,
+      durationMs: metadata.durationMs,
+    };
+  }
+  if (log.kind === 'container-lifecycle' && isContainerLifecycleMetadata(metadata)) {
+    return {
+      kind: `Containers · ${getContainerTransportLabel(metadata.transport)}`,
+      host: metadata.hostLabel,
+      status: getContainerStatusLabel(metadata.status),
+      message: metadata.lastError ?? metadata.endReason ?? '',
+      started: metadata.startedAt,
+      ended: metadata.endedAt,
+      durationMs: metadata.durationMs,
+    };
+  }
+  if (log.kind === 'container-action' && isContainerActionMetadata(metadata)) {
+    return {
+      kind: 'Container action',
+      host: metadata.hostLabel,
+      status: metadata.status === 'success' ? 'Success' : 'Error',
+      message: joined(getContainerActionLabel(metadata.action), metadata.containerName || metadata.containerId, metadata.errorMessage),
+      started: metadata.startedAt,
+      ended: metadata.completedAt,
+      durationMs: metadata.durationMs,
+    };
+  }
+  // 그 밖의 기록은 문구 카드 — 분류·수준·문구만 있다.
+  return {
+    kind: log.category,
+    host: '',
+    status: log.level.toUpperCase(),
+    message: resolveLogMessage(log, translate),
+    started: null,
+    ended: null,
+    durationMs: null,
+  };
+}
+
+/**
+ * 거른 줄을 CSV 로. 팀 기록은 사람·기기 칸이 더 있다(서버가 남긴 멤버 변화 줄은 둘 다 비어 있다). 명령 내용은 원래
+ * 서버에 올리지 않으므로 없다.
+ */
+export function buildLogsCsv(rows: readonly LogRow[], team: boolean, translate: Translate): string {
+  return buildCsv(
+    team ? TEAM_CSV_HEADER : PERSONAL_CSV_HEADER,
+    rows.map((row) => {
+      const fields = csvFieldsOf(row.log, translate);
+      const tail: CsvValue[] = [
+        fields.kind,
+        fields.host,
+        fields.status,
+        fields.message,
+        formatCsvTime(fields.started),
+        formatCsvTime(fields.ended),
+        // 카드의 '연결 시간'과 같은 초 — 남는 것은 버린다.
+        typeof fields.durationMs === 'number' ? Math.floor(fields.durationMs / 1000) : null,
+      ];
+      if (!team) {
+        return [formatCsvTime(row.log.createdAt), ...tail];
+      }
+      const device = row.author ? (row.mobile ? 'Mobile' : 'Desktop') : '';
+      return [formatCsvTime(row.log.createdAt), row.author ?? '', device, ...tail];
+    }),
+  );
+}
+
+export function LogsPanel({ logs, onClear, onOpenReplay, teams = [], onListMembers }: LogsPanelProps) {
   const { t: translate } = useTranslation();
   const [category, setCategory] = useState<'all' | ActivityLogCategory>('all');
   const [level, setLevel] = useState<'all' | ActivityLogLevel>('all');
@@ -608,6 +819,17 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
   const teamRole = teams.find((team) => team.id === teamId)?.role;
   const canRestore = Boolean(teamId && teamRole && canManageTeam(teamRole));
   const [view, setView] = useState<'activity' | 'changes'>('activity');
+  // 고른 사람은 그 팀에서만 — 다른 볼트로 가면 '모두'다.
+  const [person, setPerson] = useState<{ teamId: string; email: string } | null>(null);
+  const personValue = teamId && person?.teamId === teamId ? person.email : ALL;
+  const [period, setPeriod] = useState<LogsPeriod>({ mode: 'all' });
+  const [periodPickerOpen, setPeriodPickerOpen] = useState(false);
+  // 내보내는 중이면 지금까지 받은 줄 수. 멈춤은 signal 로 알린다.
+  const [exporting, setExporting] = useState<number | null>(null);
+  const exportSignalRef = useRef<{ stopped: boolean } | null>(null);
+  // 내보내기 알림 — 내보낼 때 보던 것(view)과 지금 보는 것이 같을 때만 보인다. 다른 볼트·거르기로 가면 사라진다.
+  const [exportNote, setExportNote] = useState<{ tone: 'saved' | 'failed'; text: string; view: string } | null>(null);
+  const [members, setMembers] = useState<{ teamId: string; emails: string[] } | null>(null);
   const showChanges = canRestore && view === 'changes';
   const teamActivity = useTeamActivity(teamId);
   const teamRows = useMemo(
@@ -624,18 +846,21 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
     [teamRows]
   );
 
+  const rowOf = (log: ActivityLogRecord): LogRow => ({
+    log,
+    author: authorById.get(log.id) ?? null,
+    mobile: mobileIds.has(log.id),
+  });
+
   // 한 번만 뽑아 둔다. 최대 1만 건이라 글자마다 다시 만들면 입력이 끊긴다.
   // translate 가 바뀌는 때는 언어가 바뀌는 때이고, 그때는 다시 만드는 것이 맞다.
   const searchTextById = useMemo(
     () =>
       new Map(
-        shownLogs.map((log) => {
-          const author = authorById.get(log.id);
-          const text = getLogSearchText(log, translate);
-          // 폰이 남긴 줄은 'mobile' 로도 찾는다 — 작성자 뒤에 보이는 그 글자다.
-          const mobile = mobileIds.has(log.id) ? ' mobile' : '';
-          return [log.id, author ? `${text} ${author.toLocaleLowerCase()}${mobile}` : text];
-        })
+        shownLogs.map((log) => [
+          log.id,
+          getRowSearchText({ log, author: authorById.get(log.id) ?? null, mobile: mobileIds.has(log.id) }, translate),
+        ])
       ),
     [authorById, mobileIds, shownLogs, translate]
   );
@@ -645,32 +870,75 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
     [search]
   );
 
+  // 최근 얼마는 지금을 기준으로 — 새 줄을 받을 때마다 다시 잰다.
+  const range = useMemo(() => resolveLogsPeriod(period, new Date()), [period, shownLogs]);
+  const filter: LogFilter = { category, level, person: personValue, range, queries: searchQueries };
+
   const visibleLogs = useMemo(
     () =>
-      shownLogs.filter((log) => {
-        if (category !== 'all' && log.category !== category) {
-          return false;
-        }
-        if (level !== 'all' && log.level !== level) {
-          return false;
-        }
-        if (searchQueries.length > 0) {
-          const haystack = searchTextById.get(log.id) ?? '';
-          if (!searchQueries.some((query) => haystack.includes(query))) {
-            return false;
-          }
-        }
-        return true;
-      }),
-    [category, level, searchQueries, searchTextById, shownLogs]
+      shownLogs.filter((log) =>
+        matchesLogFilter(
+          { log, author: authorById.get(log.id) ?? null, mobile: mobileIds.has(log.id) },
+          { category, level, person: personValue, range, queries: searchQueries },
+          () => searchTextById.get(log.id) ?? ''
+        )
+      ),
+    [authorById, category, level, mobileIds, personValue, range, searchQueries, searchTextById, shownLogs]
   );
 
-  // 팀 기록은 목록 끝까지 내려오면 더 받는다(더 보기 단추는 두지 않는다).
+  // Person 의 사람 — 지금 멤버와, 받은 기록에 남은 사람(빠진 멤버도).
+  useEffect(() => {
+    if (!teamId || !onListMembers) {
+      return undefined;
+    }
+    let cancelled = false;
+    void Promise.resolve()
+      .then(() => onListMembers(teamId))
+      .then((list) => {
+        if (!cancelled) {
+          setMembers({ teamId, emails: list.map((member) => member.email) });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [onListMembers, teamId]);
+  const personOptions = useMemo(() => {
+    if (!teamId) {
+      return [];
+    }
+    const emails = new Set(members?.teamId === teamId ? members.emails : []);
+    for (const row of teamRows ?? []) {
+      if (row.author) {
+        emails.add(row.author);
+      }
+    }
+    if (personValue !== ALL) {
+      emails.add(personValue);
+    }
+    return [...emails].sort((left, right) => left.localeCompare(right));
+  }, [members, personValue, teamId, teamRows]);
+
+  // 팀 기록에서 기간을 고르면 그 시작까지 지난 줄을 받는다 — 그래야 걸러진 목록이 그 기간에 대해 빠짐없다.
+  const { hasMore, loadMore, loadOlder } = teamActivity;
+  useEffect(() => {
+    const start = teamId ? resolveLogsPeriod(period, new Date())?.start : undefined;
+    if (!teamId || start === undefined) {
+      return;
+    }
+    void loadOlder({ since: new Date(start).toISOString() }).catch(() => undefined);
+  }, [loadOlder, period, teamId]);
+  const oldestItem = teamActivity.items[teamActivity.items.length - 1];
+  const periodLoaded = range !== null && reachedSince(oldestItem, new Date(range.start).toISOString());
+
+  // 팀 기록은 목록 끝까지 내려오면 더 받는다(더 보기 단추는 두지 않는다). 거른 줄이 적어 끝 자리가 계속 보이면 쪽마다
+  // 다시 지켜 이어 받는다. 기간을 골랐으면 그 시작까지만.
   const loadMoreRef = useRef<HTMLDivElement>(null);
-  const { hasMore, loadMore } = teamActivity;
+  const keepLoading = Boolean(teamId) && hasMore && !periodLoaded;
   useEffect(() => {
     const sentinel = loadMoreRef.current;
-    if (!teamId || !hasMore || !sentinel || typeof IntersectionObserver === 'undefined') {
+    if (!keepLoading || !sentinel || typeof IntersectionObserver === 'undefined') {
       return undefined;
     }
     const observer = new IntersectionObserver((entries) => {
@@ -680,7 +948,93 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
     });
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, loadMore, teamId, visibleLogs.length]);
+  }, [keepLoading, loadMore, teamActivity.items.length, visibleLogs.length]);
+
+  const periodLabel =
+    period.mode === 'all'
+      ? translate('logs.period.all')
+      : period.mode === 'absolute'
+        ? formatLogsRangeLabel('absolute', period.absolute, null)
+        : formatLogsRangeLabel('recent', null, period.relative);
+  const olderNote =
+    teamId && teamActivity.loadingOlder && exporting === null && oldestItem
+      ? translate('logs.loadingOlder', {
+          date: new Date(oldestItem.createdAt).toLocaleDateString(getFormatLocale(), { month: 'long', day: 'numeric' }),
+        })
+      : null;
+
+  const viewKey = JSON.stringify([teamId ?? PERSONAL_VAULT, personValue, period, category, level, search]);
+  const shownNote = exportNote?.view === viewKey ? exportNote : null;
+
+  /**
+   * 지금 조건에 맞는 줄을 모두 CSV 로. 팀 기록은 아직 안 받은 줄을 먼저 받는다(기간이 있으면 그 시작까지, 없으면 끝까지).
+   * 받는 줄 수를 단추에 보이고, 멈춤을 누르면 저장하지 않고 그만둔다.
+   */
+  const exportCsv = async () => {
+    setExportNote(null);
+    const view = viewKey;
+    const signal = { stopped: false };
+    exportSignalRef.current = signal;
+    const exportFilter: LogFilter = { ...filter, range: resolveLogsPeriod(period, new Date()) };
+    try {
+      let rows: LogRow[];
+      if (teamId) {
+        setExporting(teamActivity.items.length);
+        const items = await loadOlder({
+          since: exportFilter.range ? new Date(exportFilter.range.start).toISOString() : null,
+          onProgress: (count) => {
+            if (!signal.stopped) {
+              setExporting(count);
+            }
+          },
+          signal,
+        });
+        if (!items || signal.stopped) {
+          return;
+        }
+        rows = buildTeamRows(items, translate);
+      } else {
+        rows = logs.map(rowOf);
+      }
+      const matching = rows.filter((row) => matchesLogFilter(row, exportFilter, () => getRowSearchText(row, translate)));
+      if (matching.length === 0) {
+        setExportNote({ tone: 'failed', text: translate('logs.export.nothing'), view });
+        return;
+      }
+      const vaultName = teamId ? (teams.find((team) => team.id === teamId)?.name ?? 'team') : 'personal';
+      const result = await exportLogsCsv({
+        content: buildLogsCsv(matching, Boolean(teamId), translate),
+        fileName: logsCsvFileName(vaultName, new Date()),
+        rowCount: matching.length,
+        vaultId: teamId,
+      });
+      if (!result.canceled && result.savedPath) {
+        setExportNote({
+          tone: 'saved',
+          text: translate('logs.export.saved', { file: result.savedPath.split(/[\\/]/).pop() }),
+          view,
+        });
+      }
+    } catch (reason: unknown) {
+      setExportNote({
+        tone: 'failed',
+        text: translate('logs.export.failed', { message: reason instanceof Error ? reason.message : String(reason) }),
+        view,
+      });
+    } finally {
+      if (exportSignalRef.current === signal) {
+        exportSignalRef.current = null;
+        setExporting(null);
+      }
+    }
+  };
+  const stopExport = () => {
+    if (exportSignalRef.current) {
+      exportSignalRef.current.stopped = true;
+      exportSignalRef.current = null;
+    }
+    setExporting(null);
+  };
 
   return (
     <div className="flex flex-col gap-[1.1rem]">
@@ -723,10 +1077,28 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
           </div>
         ) : null}
 
-        {/* 바뀐 것에는 분류·수준이 없다 — 찾기만 남는다. */}
+        {/* 바뀐 것에는 사람·분류·수준이 없다 — 찾기만 남는다. */}
         {showChanges ? null : (
           <>
-            <label className="flex w-full max-w-[220px] flex-col gap-[0.4rem]">
+            {/* 개인 기록은 다 내 것이라 Person 이 없다. */}
+            {teamId ? (
+              <label className="flex w-full max-w-[240px] flex-col gap-[0.4rem]">
+                <span className="text-[0.9rem] text-[var(--text-soft)]">Person</span>
+                <SelectField
+                  value={personValue}
+                  onChange={(event) => setPerson({ teamId, email: event.target.value })}
+                >
+                  <option value={ALL}>All</option>
+                  {personOptions.map((email) => (
+                    <option key={email} value={email}>
+                      {email}
+                    </option>
+                  ))}
+                </SelectField>
+              </label>
+            ) : null}
+
+            <label className="flex w-full max-w-[150px] flex-col gap-[0.4rem]">
               <span className="text-[0.9rem] text-[var(--text-soft)]">Category</span>
               <SelectField
                 value={category}
@@ -740,7 +1112,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
               </SelectField>
             </label>
 
-            <label className="flex w-full max-w-[220px] flex-col gap-[0.4rem]">
+            <label className="flex w-full max-w-[150px] flex-col gap-[0.4rem]">
               <span className="text-[0.9rem] text-[var(--text-soft)]">Level</span>
               <SelectField
                 value={level}
@@ -775,12 +1147,62 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
         )}
       </Toolbar>
 
+      {/* 개수 줄(홈 호스트 목록의 '항목 N개' 줄과 같은 틀) — 오른쪽에 기간과 내보내기. 바뀐 것에는 없다. */}
+      {showChanges ? null : (
+        <div className="flex items-center justify-between gap-3">
+          <span className="min-w-0 truncate text-[0.9rem] font-semibold text-[var(--text)]">
+            {translate('logs.count', { count: visibleLogs.length.toLocaleString(getFormatLocale()) })}
+            {olderNote ? <span className="font-medium text-[var(--text-soft)]">{olderNote}</span> : null}
+          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            {shownNote ? (
+              <span
+                role={shownNote.tone === 'failed' ? 'alert' : 'status'}
+                className={
+                  shownNote.tone === 'failed'
+                    ? 'text-[0.85rem] text-[var(--danger-text)]'
+                    : 'text-[0.85rem] text-[var(--text-soft)]'
+                }
+              >
+                {shownNote.text}
+              </span>
+            ) : null}
+            <Button
+              size="sm"
+              aria-label={translate('logs.period.aria', { range: periodLabel })}
+              disabled={exporting !== null}
+              onClick={() => setPeriodPickerOpen(true)}
+            >
+              <Calendar className="h-4 w-4" aria-hidden />
+              {periodLabel}
+            </Button>
+            {exporting !== null ? (
+              <>
+                <Button size="sm" disabled>
+                  <Download className="h-4 w-4" aria-hidden />
+                  {translate('logs.export.exporting', { count: exporting.toLocaleString(getFormatLocale()) })}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={stopExport}>
+                  {translate('logs.export.stop')}
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" onClick={() => void exportCsv()}>
+                <Download className="h-4 w-4" aria-hidden />
+                Export CSV
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       <PanelSection>
         {showChanges && teamId ? (
           <TeamChangesList teamId={teamId} search={search} />
         ) : teamId && teamActivity.error && visibleLogs.length === 0 ? (
           <EmptyState title={translate('teamLogs.loadFailed')} description={teamActivity.error} />
-        ) : teamId && teamActivity.loading && visibleLogs.length === 0 ? (
+        ) : teamId && (teamActivity.loading || keepLoading) && visibleLogs.length === 0 ? (
+          // 거른 줄이 아직 없어도 지난 쪽이 남았으면 찾는 중이다 — '기록 없음'이 아니다.
           <EmptyState title={translate('teamLogs.loading')} />
         ) : visibleLogs.length === 0 ? (
           <EmptyState
@@ -973,9 +1395,16 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
                         Replay
                       </Button>
                     ) : replayAction?.kind === 'unavailable' ? (
-                      // 왜 못 여는지 말해 준다. 비활성 버튼만 두면 고장으로 읽는다.
+                      // 왜 못 여는지 말해 준다. 비활성 버튼만 두면 고장으로 읽는다. 하우스 단추의 꺼짐(0.7)은 켜진
+                      // Replay 와 거의 같아 보여서, 호스트 상세의 꺼진 Replay 와 같은 0.5 로 흐린다.
                       <Tooltip className="ml-auto cursor-not-allowed" label={replayAction.reason}>
-                        <Button variant="secondary" size="sm" disabled aria-label={`Replay — ${replayAction.reason}`}>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled
+                          className="disabled:opacity-50"
+                          aria-label={`Replay — ${replayAction.reason}`}
+                        >
                           <Play className="h-[0.8rem] w-[0.8rem]" aria-hidden />
                           Replay
                         </Button>
@@ -1121,12 +1550,36 @@ export function LogsPanel({ logs, onClear, onOpenReplay, teams = [] }: LogsPanel
             );
           })
         )}
-        {teamId && !showChanges && teamActivity.hasMore && visibleLogs.length > 0 ? (
-          <div ref={loadMoreRef} className="py-3 text-center text-[0.85rem] text-[var(--text-soft)]">
-            {teamActivity.loading ? translate('teamLogs.loading') : null}
+        {!showChanges && keepLoading ? (
+          <div ref={loadMoreRef} data-logs-load-more className="py-3 text-center text-[0.85rem] text-[var(--text-soft)]">
+            {teamActivity.loading && visibleLogs.length > 0 ? translate('teamLogs.loading') : null}
           </div>
         ) : null}
       </PanelSection>
+
+      <LogsRangePickerDialog
+        open={periodPickerOpen}
+        mode={period.mode === 'absolute' ? 'absolute' : 'recent'}
+        absoluteValue={period.mode === 'absolute' ? period.absolute : null}
+        relativeValue={period.mode === 'recent' ? period.relative : DEFAULT_RECENT_PERIOD}
+        onClose={() => setPeriodPickerOpen(false)}
+        onApply={(mode, absolute, relative) => {
+          setPeriod(
+            mode === 'absolute' && absolute
+              ? { mode: 'absolute', absolute }
+              : relative
+                ? { mode: 'recent', relative }
+                : { mode: 'all' }
+          );
+          setPeriodPickerOpen(false);
+        }}
+        resetLabel={translate('logs.period.all')}
+        hints={{ relative: translate('logs.period.relativeHint'), absolute: translate('logs.period.absoluteHint') }}
+        onReset={() => {
+          setPeriod({ mode: 'all' });
+          setPeriodPickerOpen(false);
+        }}
+      />
     </div>
   );
 }

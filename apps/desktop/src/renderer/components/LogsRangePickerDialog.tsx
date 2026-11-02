@@ -44,6 +44,9 @@ export function LogsRangePickerDialog({
   relativeValue,
   onClose,
   onApply,
+  resetLabel,
+  onReset,
+  hints,
 }: {
   open: boolean;
   mode: LogsRangeMode;
@@ -55,6 +58,11 @@ export function LogsRangePickerDialog({
     nextAbsoluteValue: LogsAbsoluteRangeValue | null,
     nextRelativeValue: LogsRelativeRangeValue | null,
   ) => void;
+  /** 주면 발판 왼쪽에 기간을 거두는 단추를 둔다(활동 기록의 '전체 기간'). 컨테이너 로그는 늘 기간이 있어 주지 않는다. */
+  resetLabel?: string;
+  onReset?: () => void;
+  /** 범위 아래 설명을 바꾼다 — 기본 설명은 컨테이너 로그의 것(다시 조회·Follow)이다. */
+  hints?: { relative: string; absolute: string };
 }) {
   const { t: translate } = useTranslation();
   const [draftMode, setDraftMode] = useState<LogsRangeMode>(mode);
@@ -302,7 +310,7 @@ export function LogsRangePickerDialog({
               </FieldGroup>
             </div>
             <p className="mt-3 text-[0.82rem] leading-[1.6] text-[var(--text-soft)]">
-              {translate('logRange.dialog.absoluteHint')}
+              {hints?.absolute ?? translate('logRange.dialog.absoluteHint')}
             </p>
           </ModalBody>
         ) : (
@@ -382,7 +390,7 @@ export function LogsRangePickerDialog({
               </FieldGroup>
             </div>
             <p className="text-[0.82rem] leading-[1.6] text-[var(--text-soft)] lg:col-span-2">
-              {translate('logRange.dialog.relativeHint')}
+              {hints?.relative ?? translate('logRange.dialog.relativeHint')}
             </p>
           </ModalBody>
         )}
@@ -396,6 +404,11 @@ export function LogsRangePickerDialog({
         ) : null}
 
         <ModalFooter>
+          {onReset ? (
+            <Button variant="ghost" className="mr-auto" onClick={onReset}>
+              {resetLabel}
+            </Button>
+          ) : null}
           <Button
             variant="secondary"
             onClick={() => {

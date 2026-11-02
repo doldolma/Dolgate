@@ -378,17 +378,33 @@ export function createSecretCoordinator(deps: {
     const host = vaults.getHost(hostId);
     const team = host && "secretRef" in host ? await loadSecrets(host.secretRef) : {};
     const typed: TeamHostCredentials = {};
-    // 사용자 이름은 여기서 옮기지 않는다 — 요청 창에서 넣은 것만 따로 저장한다(setHostLoginUsername).
+    // SSH 의 사용자 이름은 여기서 옮기지 않는다 — 요청 창에서 넣은 것만 따로 저장한다(setHostLoginUsername).
     for (const field of ["domain", "password", "passphrase", "privateKeyPem", "certificateText"] as const) {
       const value = secrets[field];
       if (typeof value === "string" && value && value !== team[field]) {
         typed[field] = value;
       }
     }
-    if (Object.keys(typed).length === 0) {
+    let changed = Object.keys(typed).length > 0;
+    const next: TeamHostCredentials = { ...(vaults.getMyHostCredentials(hostId) ?? {}), ...typed };
+    // RDP·VNC 는 계정이 자격 증명에 딸린다. 내 비밀번호가 있으면 접속은 계정까지 내 것만 쓰므로(loadHostSecrets) 비밀번호를
+    // 둘 때는 쓴 계정도 함께 둔다(비웠으면 뺀다). 비밀번호가 팀 것 그대로면 팀 것과 다른 계정만 둔다 — 팀 비밀번호에 얹힌다.
+    if (host && host.kind !== "ssh") {
+      const username = secrets.username?.trim() ?? "";
+      if (typed.password || (username && username !== (team.username ?? ""))) {
+        if (username && next.username !== username) {
+          next.username = username;
+          changed = true;
+        } else if (!username && next.username !== undefined) {
+          delete next.username;
+          changed = true;
+        }
+      }
+    }
+    if (!changed) {
       return;
     }
-    vaults.setMyHostCredentials(hostId, { ...(vaults.getMyHostCredentials(hostId) ?? {}), ...typed });
+    vaults.setMyHostCredentials(hostId, next);
     activityLogs.append("info", "audit", logMessage("teams.myCredentialsSaved"), { hostId });
     queueSync();
   };

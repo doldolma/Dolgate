@@ -148,6 +148,8 @@ describe('HostDetailPanel — 팀 호스트의 Recent Activity', () => {
 
     const replay = await screen.findByRole('button', { name: 'Replay — 녹화는 관리자와 녹화한 사람만 볼 수 있습니다' });
     expect(replay).toBeDisabled();
+    // 기록 화면의 꺼진 Replay 와 같은 0.5 로 흐리다.
+    expect(replay).toHaveClass('opacity-50');
     fireEvent.click(replay);
     expect(onOpenReplay).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: '세션 Replay 보기' })).toBeNull();

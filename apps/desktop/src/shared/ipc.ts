@@ -619,10 +619,36 @@ export interface ConnectCredentialsNeeded {
   reason: "missing" | "rejected";
   /** rejected 일 때 코어가 올린 문구. */
   message?: string;
+  /** VNC 호스트 자신이 계정·비밀번호를 요구하거나 거절했을 때 그 까닭 코드 — 화면이 계정까지 묻는지와 문구를 고른다. */
+  failure?: import("./vnc").VncCredentialFailure;
+  /** 그 시도에서 VNC 가 쓴 계정. 계정까지 묻는 창에 미리 채운다(비밀이 아니다). */
+  username?: string;
 }
 
 export interface CredentialsNeededResult {
   credentialsNeeded: ConnectCredentialsNeeded;
+}
+
+/**
+ * 붙지 못했고, 코어가 그 실패를 화면에 이미 알렸다(까닭 코드와 함께, 세션 이벤트로) — 탭은 그 알림이 그렸으니(실패 표시·재연결
+ * 예약) 화면 흐름은 다시 그리지 않는다. 메인은 그 시도의 통로를 닫고 끝냈다.
+ */
+export interface ConnectFailureReportedResult {
+  failureReported: true;
+}
+
+/**
+ * 한 접속 시도에서 요청 창에 넣은 값 — 대상의 것과 점프 호스트마다의 것. 저장된 것보다 먼저 쓰고, 붙으면 그 호스트
+ * 제자리(팀 호스트는 내 자격 증명)에 저장한다. 포트 포워딩·컨테이너·VNC 터널이 SSH 터미널·SFTP 처럼 받는다.
+ */
+export interface ConnectAttemptSecrets {
+  secrets?: HostSecretInput;
+  jumpSecrets?: Record<string, HostSecretInput>;
+  /**
+   * VNC 호스트 자신의 값(계정·비밀번호) — SSH 터널의 값(secrets·jumpSecrets)과 따로 싣는다. username 이 실려 있으면 빈 값이라도
+   * 그것을 쓴다(계정을 비워 VNC 암호로 붙기).
+   */
+  vncSecrets?: Pick<HostSecretInput, "username" | "password">;
 }
 
 export type AgentForwardingEndpointKind = "unix" | "windows-openssh-pipe";
@@ -1342,6 +1368,22 @@ export interface TeamActivityItem {
   unreadable: "unsupported-version" | "broken" | null;
 }
 
+/** 기록 화면의 CSV 내보내기 — 글은 화면이 지금 거른 줄로 만든다. */
+export interface LogsCsvExportInput {
+  content: string;
+  /** 저장 창에 미리 넣을 파일 이름. */
+  fileName: string;
+  /** 내보낸 줄 수 — 내보냈다는 기록에 남긴다. */
+  rowCount: number;
+  /** 팀 기록이면 그 팀 — 내보냈다는 줄이 그 팀 기록에도 남는다. */
+  vaultId?: string | null;
+}
+
+export interface LogsCsvExportResult {
+  canceled: boolean;
+  savedPath: string | null;
+}
+
 export interface TeamActivityQuery {
   before?: number;
   after?: number;
@@ -1941,10 +1983,12 @@ export interface DesktopApi {
   };
   // RDP 와 같은 모양이되 RFB 에 없는 것들이 빠져 있다(오디오·클립보드 동기화·모니터 배치).
   vnc: {
+    /** SSH 터널 호스트(또는 그 점프)의 자격 증명을 넣어야 붙으면 오류 대신 그 홉을 알린다. attempt 는 요청 창에 넣은 값. */
     connect: (
       sessionId: string,
       hostId: string,
-    ) => Promise<import("./vnc").VncConnectedPayload>;
+      attempt?: ConnectAttemptSecrets,
+    ) => Promise<import("./vnc").VncConnectedPayload | CredentialsNeededResult | ConnectFailureReportedResult>;
     disconnect: (sessionId: string) => Promise<void>;
     sendInput: (
       sessionId: string,
@@ -2201,7 +2245,11 @@ export interface DesktopApi {
       draft: PortForwardDraft,
     ) => Promise<PortForwardRuleRecord>;
     remove: (id: string) => Promise<void>;
-    start: (ruleId: string) => Promise<PortForwardRuntimeRecord>;
+    /** 그 홉의 자격 증명을 넣어야 붙으면(없음·거절) 오류 대신 그 홉을 알린다. attempt 는 요청 창에 넣은 값. */
+    start: (
+      ruleId: string,
+      attempt?: ConnectAttemptSecrets,
+    ) => Promise<PortForwardRuntimeRecord | CredentialsNeededResult>;
     stop: (ruleId: string) => Promise<PortForwardRuntimeRecord>;
     onEvent: (listener: (event: PortForwardRuntimeEvent) => void) => () => void;
   };
@@ -2354,6 +2402,8 @@ export interface DesktopApi {
   logs: {
     list: () => Promise<ActivityLogRecord[]>;
     clear: () => Promise<void>;
+    /** 화면이 만든 CSV 를 저장 창으로 저장한다. 취소하면 아무것도 쓰지 않는다. */
+    exportCsv: (input: LogsCsvExportInput) => Promise<LogsCsvExportResult>;
     onChanged: (listener: () => void) => () => void;
   };
   sessionReplays: {
@@ -2396,7 +2446,11 @@ export interface DesktopApi {
       lifecycleId: string;
       message: string;
     }) => Promise<void>;
-    list: (hostId: string) => Promise<HostContainerListResult>;
+    /** 그 홉의 자격 증명을 넣어야 붙으면(없음·거절) 오류 대신 그 홉을 알린다. attempt 는 요청 창에 넣은 값. */
+    list: (
+      hostId: string,
+      attempt?: ConnectAttemptSecrets,
+    ) => Promise<HostContainerListResult | CredentialsNeededResult>;
     inspect: (
       hostId: string,
       containerId: string,
@@ -2411,7 +2465,8 @@ export interface DesktopApi {
     openShell: (
       hostId: string,
       containerId: string,
-    ) => Promise<{ sessionId: string }>;
+      attempt?: ConnectAttemptSecrets,
+    ) => Promise<{ sessionId: string } | CredentialsNeededResult>;
     start: (hostId: string, containerId: string) => Promise<void>;
     stop: (hostId: string, containerId: string) => Promise<void>;
     restart: (hostId: string, containerId: string) => Promise<void>;

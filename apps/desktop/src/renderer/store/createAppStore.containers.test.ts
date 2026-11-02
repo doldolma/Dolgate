@@ -1241,6 +1241,8 @@ describe("createAppStore containers", () => {
     expect(api.containers.openShell).toHaveBeenCalledWith(
       "host-1",
       "container-1",
+      // 요청 창에 넣은 값 — 처음 붙을 때는 없다.
+      undefined,
     );
     expect(store.getState().tabs[0]?.sessionId).toBe("session-container-1");
 

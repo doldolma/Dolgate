@@ -389,6 +389,83 @@ describe("login to connect with", () => {
   });
 });
 
+describe("keeping what was typed for a personal VNC host", () => {
+  // 요청 창에서 넣은 값은 VNC 자격증명(쓴 계정까지)으로 만들어 그 호스트에 붙인다 — 붙이는 쪽(updateSecretRef)이 VNC 를 지나치면
+  // 다음에 또 묻는다(다듬기 3단계 결함 ②, 저장소 시험이 그 쪽을 본다).
+  it("saves a VNC credential and points the host at it", async () => {
+    const { deps, coordinator } = createCoordinator();
+    const secretRef = await coordinator.persistHostSpecificSecret("vnc-1", "Desk", {
+      kind: "vnc",
+      username: "alice",
+      password: "typed",
+    });
+
+    expect(secretRef).toMatch(/^secret:/);
+    const saved = JSON.parse(deps.secretStore.save.mock.calls[0][1]);
+    expect(saved).toMatchObject({ kind: "vnc", username: "alice", password: "typed", label: "Desk" });
+    expect(deps.hosts.updateSecretRef).toHaveBeenCalledWith("vnc-1", secretRef);
+  });
+});
+
+describe("keeping what was typed for a team VNC host", () => {
+  const teamVnc = {
+    id: "team-vnc",
+    kind: "vnc",
+    label: "Mac",
+    hostname: "mac.example.com",
+    port: 5900,
+    secretRef: "secret:team-vnc",
+  } as any;
+
+  function createTeamVncCoordinator(team: Record<string, string>, mine: Record<string, string> | null) {
+    clearRuntimeSecretCache();
+    const setMyHostCredentials = vi.fn();
+    const { coordinator } = createCoordinator({
+      vaults: {
+        loadSecret: vi.fn(async (secretRef: string) =>
+          secretRef === "secret:team-vnc" ? JSON.stringify({ secretRef, label: "mac", ...team }) : null,
+        ),
+        scopeOfHost: vi.fn(() => ({ id: "team-1" })),
+        getHost: vi.fn(() => teamVnc),
+        getMyHostCredentials: vi.fn(() => mine),
+        setMyHostCredentials,
+        setHostLoginUsername: vi.fn(),
+      },
+    });
+    return { coordinator, setMyHostCredentials };
+  }
+
+  // 내 비밀번호가 있으면 VNC·RDP 는 계정까지 내 것만 쓴다(loadHostSecrets) — 계정을 함께 두지 않으면 다음 접속이 계정 없이 붙어
+  // 또 묻는다.
+  it("keeps the account it connected with next to my password, even when it is the team's", async () => {
+    const { coordinator, setMyHostCredentials } = createTeamVncCoordinator({ username: "alice", password: "team-pw" }, null);
+    await coordinator.persistHostSpecificSecret("team-vnc", "Mac", { kind: "vnc", username: "alice", password: "mine" });
+    expect(setMyHostCredentials).toHaveBeenCalledWith("team-vnc", { username: "alice", password: "mine" });
+  });
+
+  it("drops my account when it connected without one", async () => {
+    const { coordinator, setMyHostCredentials } = createTeamVncCoordinator(
+      { username: "alice", password: "team-pw" },
+      { username: "alice", password: "old" },
+    );
+    await coordinator.persistHostSpecificSecret("team-vnc", "Mac", { kind: "vnc", password: "vnc-pw" });
+    expect(setMyHostCredentials).toHaveBeenCalledWith("team-vnc", { password: "vnc-pw" });
+  });
+
+  // 비밀번호가 팀 것 그대로면 내 계정만 둔다 — 접속은 팀 비밀번호에 내 계정을 얹는다.
+  it("keeps only a different account when the team's password was the one used", async () => {
+    const { coordinator, setMyHostCredentials } = createTeamVncCoordinator({ password: "team-pw" }, null);
+    await coordinator.persistHostSpecificSecret("team-vnc", "Mac", { kind: "vnc", username: "bob", password: "team-pw" });
+    expect(setMyHostCredentials).toHaveBeenCalledWith("team-vnc", { username: "bob" });
+  });
+
+  it("saves nothing when it connected with exactly what the team has", async () => {
+    const { coordinator, setMyHostCredentials } = createTeamVncCoordinator({ username: "alice", password: "team-pw" }, null);
+    await coordinator.persistHostSpecificSecret("team-vnc", "Mac", { kind: "vnc", username: "alice", password: "team-pw" });
+    expect(setMyHostCredentials).not.toHaveBeenCalled();
+  });
+});
+
 describe("normalizeHostEnvVars", () => {
   it("keeps valid vars, drops invalid keys, strips newlines, caps count", () => {
     expect(

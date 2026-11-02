@@ -1535,6 +1535,21 @@
       "forwardStarted": "포워딩 시작",
       "forwardEnded": "포워딩 종료",
       "forwarding": "포워딩 중"
+    },
+    "count": "{{count}}줄",
+    "loadingOlder": " · 지난 기록을 받는 중… {{date}}까지",
+    "period": {
+      "all": "전체 기간",
+      "aria": "기간: {{range}}",
+      "relativeHint": "지금을 기준으로 거릅니다 — 새로 들어오는 기록도 함께 보입니다.",
+      "absoluteHint": "날짜는 이 기기의 시간대로 봅니다."
+    },
+    "export": {
+      "exporting": "내보내는 중… {{count}}줄",
+      "stop": "멈춤",
+      "saved": "{{file}} 로 저장했습니다",
+      "failed": "내보내지 못했습니다 — {{message}}",
+      "nothing": "내보낼 기록이 없습니다"
     }
   },
   "hostForm": {
@@ -2836,6 +2851,12 @@
     "secretCreateFailed": "새 secret을 생성하지 못했습니다.",
     "hostSecretCreated": "호스트 전용 secret을 새로 생성했습니다."
   },
+  "logsExport": {
+    "title": "기록 내보내기",
+    "plaintext": "암호를 푼 글로 저장됩니다.",
+    "exported": "기록 {{count}}줄을 CSV 로 내보냈습니다.",
+    "invalid": "내보낼 기록이 올바르지 않습니다."
+  },
   "connectStage": {
     "sshConfig": "SSH 설정 확인",
     "awsProfile": "AWS 프로필 확인",
@@ -3283,7 +3304,13 @@
     "retryFailed": "다시 시도하지 못했습니다.",
     "retry": "다시 시도",
     "passwordNeeded": "{{label}} 비밀번호를 넣어 주세요.",
-    "jumpPasswordNeeded": "점프 호스트 {{label}} 비밀번호를 넣어 주세요 — {{target}} 에 갈 때 거칩니다."
+    "jumpPasswordNeeded": "점프 호스트 {{label}} 비밀번호를 넣어 주세요 — {{target}} 에 갈 때 거칩니다.",
+    "tunnelPasswordNeeded": "SSH 터널 호스트 {{label}} 비밀번호를 넣어 주세요 — {{target}} 에 갈 때 거칩니다.",
+    "vncPasswordNeeded": "{{label}} VNC 비밀번호를 넣어 주세요.",
+    "vncPasswordRejected": "비밀번호가 맞지 않습니다. 다시 넣어 주세요.",
+    "vncPasswordTruncated": "VNC 는 비밀번호 앞 8자만 씁니다. 8자 이내로 다시 넣어 주세요.",
+    "vncAccountNeeded": "{{label}} 계정과 비밀번호를 넣어 주세요.",
+    "vncAccountRejected": "계정 또는 비밀번호가 맞지 않습니다. VNC 암호로 붙으려면 계정을 비워 두세요."
   },
   "opensshSvc": {
     "circularInclude": "{{path}}에서 순환 Include를 건너뛰었습니다.",

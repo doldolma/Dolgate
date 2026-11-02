@@ -1255,6 +1255,11 @@ export interface TermiusImportHostPreview {
   hasPassword: boolean;
   hasPrivateKey: boolean;
   identityName: string | null;
+  /**
+   * 가져오면 만들 비밀번호·SSH 키를 가리키는 키 — 같은 ID 를 쓰는 호스트는 같다(하나만 만든다). 가져올 비밀값이 없으면
+   * null. 화면은 이것으로 '함께 공유' 수를 센다.
+   */
+  secretKey?: string | null;
 }
 
 export interface TermiusProbeResult {
@@ -1271,7 +1276,17 @@ export interface TermiusProbeResult {
   hosts: TermiusImportHostPreview[];
 }
 
-export interface TermiusImportSelectionInput {
+/**
+ * 가져오기를 넣을 볼트. 없거나 개인이면 개인 볼트(지금까지와 같다), 팀이면 그 팀 볼트에 바로 쓴다 — 개인에는 아무것도
+ * 안 남는다. shareSecrets 는 팀일 때 비밀번호·SSH 키를 팀에 함께 넣을지다(기본 켬). 끄면 팀에는 넣지 않고 그 호스트의 내
+ * 자격 증명에 둔다 — 팀원은 처음 붙을 때 자기 것을 넣는다(볼트 사이 복사의 '함께 공유'와 같다).
+ */
+export interface ImportVaultTarget {
+  vaultId?: string | null;
+  shareSecrets?: boolean;
+}
+
+export interface TermiusImportSelectionInput extends ImportVaultTarget {
   snapshotId: string;
   selectedGroupPaths: string[];
   selectedHostKeys: string[];
@@ -1327,7 +1342,7 @@ export interface OpenSshSnapshotFileInput {
   filePath: string;
 }
 
-export interface OpenSshImportSelectionInput {
+export interface OpenSshImportSelectionInput extends ImportVaultTarget {
   snapshotId: string;
   selectedHostKeys: string[];
   groupPath?: string | null;
@@ -1391,7 +1406,7 @@ export interface XshellSnapshotFolderInput {
   folderPath: string;
 }
 
-export interface XshellImportSelectionInput {
+export interface XshellImportSelectionInput extends ImportVaultTarget {
   snapshotId: string;
   selectedGroupPaths: string[];
   selectedHostKeys: string[];

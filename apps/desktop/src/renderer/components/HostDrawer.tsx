@@ -2,11 +2,10 @@ import { Fragment, forwardRef, useCallback, useEffect, useImperativeHandle, useR
 import { LEGACY_TOLERATED_HOST_KINDS, getHostBadgeLabel } from '@shared';
 import type { HostRecord, SecretMetadataRecord, SnippetRecord } from '@shared';
 import { HostForm, type HostFormActionState, type HostFormHandle, type HostFormProps } from './HostForm';
-import { VaultMark } from './teams/VaultMark';
+import { VaultSelect, type VaultChoice } from './teams/VaultMark';
 import { cn } from '../lib/cn';
-import type { VaultSectionTeam } from '../lib/vault-groups';
 import { PERSONAL_VAULT_ID } from '../store/utils/vaults';
-import { Button, SearchableSelect, Tooltip } from '../ui';
+import { Button, Tooltip } from '../ui';
 import { X } from '../ui/icons';
 import type { SearchableSelectOption } from '../ui';
 import { useTranslation } from 'react-i18next';
@@ -77,12 +76,6 @@ const KIND_SEGMENT_TRACK_CLASS =
 const KIND_SEGMENT_BASE_CLASS =
   'rounded-[7px] border py-[0.5rem] text-[0.85rem] font-semibold transition-[background-color,border-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_45%,transparent)]';
 
-/** 새 호스트를 만들 수 있는 볼트 하나. team 이 null 이면 개인. */
-export interface HostDrawerVaultChoice {
-  id: string;
-  team: VaultSectionTeam | null;
-}
-
 interface HostDrawerProps {
   open: boolean;
   mode: 'create' | 'edit';
@@ -117,7 +110,7 @@ interface HostDrawerProps {
    * 만들 볼트를 고를 후보(Termius 처럼 서랍 맨 위). 둘 이상일 때만 보인다 — 팀이 없으면 고를 것이 없다.
    * 만들 때만 쓴다. 이미 있는 호스트를 다른 볼트로 보내는 것은 공유(복사)의 일이다.
    */
-  vaultChoices?: HostDrawerVaultChoice[];
+  vaultChoices?: VaultChoice[];
   onVaultChange?: (vaultId: string) => void;
 }
 
@@ -297,16 +290,9 @@ export const HostDrawer = forwardRef<HostDrawerHandle, HostDrawerProps>(function
         className="min-h-0 flex-1 overflow-y-auto px-[0.7rem] pb-[1.3rem] pt-[1.1rem]"
       >
         {mode === 'create' && onVaultChange && vaultChoices.length > 1 ? (
-          <SearchableSelect
-            ariaLabel={translate('hostDrawer.vault')}
-            placeholder={translate('hostDrawer.vault')}
-            searchable={false}
+          <VaultSelect
+            choices={vaultChoices}
             value={vaultId ?? PERSONAL_VAULT_ID}
-            options={vaultChoices.map((choice) => ({
-              value: choice.id,
-              label: choice.team?.name ?? translate('sidebar.personalVault'),
-              icon: <VaultMark kind={choice.team ? 'team' : 'personal'} className="text-[var(--text-soft)]" />,
-            }))}
             onChange={onVaultChange}
             className="mb-[0.7rem]"
           />

@@ -1,9 +1,20 @@
 import { isSshHostRecord, jumpHostIdAtDepth, normalizeJumpHostIds, resolveCredentialRetryKind } from "@shared";
-import type { HostSecretInput } from "@shared";
+import type { ConnectCredentialsNeeded, HostSecretInput } from "@shared";
 import { jumpDepthOfCoreError } from "../core-manager";
-import type { MainIpcContext, PendingHopSecret, SshHostRecord } from "./context";
+import type { MainIpcContext, PendingHopSecret, ResolvedSshAuth, SshHostRecord } from "./context";
 
 type CredentialContext = Pick<MainIpcContext, "vaults" | "resolveSshAuth">;
+
+/**
+ * 그 홉의 자격 증명을 넣어야 붙는다 — 코어를 부르는 깊은 자리(컨테이너 연결·VNC 터널)에서 IPC 까지 올린다. 요청 창을
+ * 띄울 수 있는 IPC 는 받아서 결과(credentialsNeeded)로 돌려주고, 그 밖의 길에서는 코어의 문구 그대로 오류다.
+ */
+export class CredentialsNeededError extends Error {
+  constructor(readonly needed: ConnectCredentialsNeeded) {
+    super(needed.message ?? "credentials needed");
+    this.name = "CredentialsNeededError";
+  }
+}
 
 /**
  * 붙기 전에 체인(점프 첫 홉 → … → 대상)을 훑어, 비밀번호 방식인데 쓸 비밀번호가 없는 첫 호스트를 찾는다.
@@ -88,4 +99,41 @@ export function jumpHostRejectingAuth(
   }
   const message = error instanceof Error ? error.message : String(error);
   return resolveCredentialRetryKind(hop, message) ? hop : null;
+}
+
+/**
+ * 접속이 실패했을 때 요청 창으로 다시 물을 홉 — 점프 홉이 인증을 거절했으면 그 홉, 대상이 거절했으면 대상(화면의
+ * 요청 창과 같은 규칙 resolveCredentialRetryKind). 포트 포워딩·컨테이너·VNC 터널은 실패가 이 요청 하나로 돌아와서
+ * 메인이 가른다(SSH 터미널은 오류 이벤트로, SFTP 의 대상은 화면이 가른다). 다른 실패(네트워크 등)는 null.
+ */
+export function credentialsNeededAfterFailure(
+  ctx: Pick<MainIpcContext, "vaults">,
+  host: SshHostRecord,
+  error: unknown,
+): ConnectCredentialsNeeded | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const hop = jumpHostRejectingAuth(ctx, host, error);
+  if (hop) {
+    return { hostId: hop.id, reason: "rejected", message };
+  }
+  // 깊이가 실렸으면 점프 홉의 실패다(인증이 아닌 까닭) — 대상의 거절로 읽지 않는다.
+  if (jumpDepthOfCoreError(error) === 0 && resolveCredentialRetryKind(host, message)) {
+    return { hostId: host.id, reason: "rejected", message };
+  }
+  return null;
+}
+
+/** 붙은 뒤 이번 시도에서 넣은 값을 제자리에 저장한다 — 대상(넣은 값이 있을 때만)과 점프 홉. 팀 호스트는 내 자격 증명. */
+export async function persistAttemptSecrets(
+  ctx: Pick<MainIpcContext, "persistHostSpecificSecret">,
+  host: SshHostRecord,
+  auth: Pick<ResolvedSshAuth, "secrets" | "shouldPersistHostSecret" | "typedUsername">,
+  hops: PendingHopSecret[],
+): Promise<void> {
+  if (auth.shouldPersistHostSecret) {
+    await ctx.persistHostSpecificSecret(host.id, host.label, auth.secrets, auth.typedUsername);
+  }
+  for (const hop of hops) {
+    await ctx.persistHostSpecificSecret(hop.hostId, hop.label, hop.secrets, hop.username);
+  }
 }

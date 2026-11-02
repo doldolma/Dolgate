@@ -1806,6 +1806,19 @@ export function PortForwardingPanel({
       ) {
         return;
       }
+      if ('credentialsNeeded' in result) {
+        // 편집 창에서는 묻지 않고 무엇이 필요한지만 말한다 — 규칙을 시작하거나 그 호스트의 Containers 를 열면 묻고,
+        // 넣은 값은 저장돼 여기서도 쓰인다.
+        const promptHost = hosts.find((item) => item.id === result.credentialsNeeded.hostId);
+        setDiscoveryContainers([]);
+        setDiscoveryError(
+          result.credentialsNeeded.reason === 'missing' && promptHost
+            ? translate('credentialRetry.passwordNeeded', { label: promptHost.label })
+            : (result.credentialsNeeded.message ?? translate('portForward.error.containersLoadFailed')),
+        );
+        setDiscoveryProgressMessage(null);
+        return;
+      }
       setDiscoveryContainers(result.containers);
       setDiscoveryError(result.unsupportedReason ?? null);
       setDiscoveryProgressMessage(null);

@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { getGroupLabel, getParentGroupPath, normalizeGroupPath } from '@shared';
-import type { HostSecretInput, TermiusImportResult, TermiusImportSelectionInput, TermiusImportWarning } from '@shared';
-import type { ActivityLogRepository, GroupRepository, HostRepository, SecretMetadataRepository } from './database';
+import type { TermiusImportResult, TermiusImportSelectionInput, TermiusImportWarning } from '@shared';
+import type { ActivityLogRepository } from './database';
+import type { ImportedSecret, ImportTarget } from './ipc/import-target';
 import {
   buildTermiusEntityKey,
   buildTermiusGroupAncestorPaths,
@@ -16,11 +17,9 @@ import { t } from './i18n';
 import { logMessage } from "./activity-log-message";
 
 export interface TermiusImportExecutorContext {
-  groups: GroupRepository;
-  hosts: HostRepository;
+  /** 그룹·비밀값·호스트를 쓰는 볼트(개인 또는 팀). */
+  target: ImportTarget;
   activityLogs: ActivityLogRepository;
-  secretMetadata: SecretMetadataRepository;
-  persistSecret: (label: string, secrets: HostSecretInput) => Promise<string | null>;
   queueSync: () => void;
 }
 
@@ -31,8 +30,8 @@ export async function importTermiusSelection(
 ): Promise<TermiusImportResult> {
   const selectedHosts = collectSelectedTermiusHosts(snapshot, input);
   const selectedGroupPaths = collectSelectedTermiusGroupPaths(snapshot, input);
-  const existingGroupPaths = new Set(context.groups.list().map((group) => group.path));
-  const sharedSecretRefs = new Map<string, string>();
+  const existingGroupPaths = new Set(context.target.listGroupPaths());
+  const sharedSecrets = new Map<string, ImportedSecret>();
   const warnings: TermiusImportWarning[] = [
     ...(snapshot.bundle.meta?.warnings ?? []).map((message) => ({
       message,
@@ -49,8 +48,7 @@ export async function importTermiusSelection(
       if (existingGroupPaths.has(candidatePath)) {
         continue;
       }
-      const group = context.groups.create(
-        randomUUID(),
+      const group = context.target.createGroup(
         getGroupLabel(candidatePath),
         getParentGroupPath(candidatePath),
       );
@@ -91,8 +89,7 @@ export async function importTermiusSelection(
       if (existingGroupPaths.has(candidatePath)) {
         continue;
       }
-      context.groups.create(
-        randomUUID(),
+      context.target.createGroup(
         getGroupLabel(candidatePath),
         getParentGroupPath(candidatePath),
       );
@@ -101,20 +98,20 @@ export async function importTermiusSelection(
     }
 
     const credential = resolveTermiusCredential(host);
-    let secretRef: string | null = null;
+    let secret: ImportedSecret | null = null;
 
     if (credential.hasCredential) {
       const sharedSecretKey = credential.sharedSecretKey ?? `host:${hostKey}`;
-      const cachedSecretRef = sharedSecretRefs.get(sharedSecretKey);
-      if (cachedSecretRef) {
-        secretRef = cachedSecretRef;
+      const cachedSecret = sharedSecrets.get(sharedSecretKey);
+      if (cachedSecret) {
+        secret = cachedSecret;
       } else {
-        secretRef = await context.persistSecret(
+        secret = await context.target.persistSecret(
           credential.sharedSecretLabel,
           credential.secrets,
         );
-        if (secretRef) {
-          sharedSecretRefs.set(sharedSecretKey, secretRef);
+        if (secret) {
+          sharedSecrets.set(sharedSecretKey, secret);
           createdSecretCount += 1;
         }
       }
@@ -125,7 +122,7 @@ export async function importTermiusSelection(
       });
     }
 
-    context.hosts.create(
+    context.target.createHost(
       randomUUID(),
       {
         kind: 'ssh',
@@ -139,13 +136,14 @@ export async function importTermiusSelection(
         authType: credential.authType,
         privateKeyPath: null,
       },
-      secretRef,
+      secret,
     );
     createdHostCount += 1;
   }
 
   if (createdGroupCount > 0 || createdHostCount > 0 || createdSecretCount > 0) {
     context.activityLogs.append('info', 'audit', logMessage('termiusSvc.imported'), {
+      vaultId: context.target.vaultId,
       createdGroupCount,
       createdHostCount,
       createdSecretCount,

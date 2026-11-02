@@ -154,6 +154,7 @@ import {
   PERSONAL_VAULT_ID,
   vaultIdOfHost,
   vaultIdOfWorkspace,
+  vncFailureAsksAccount,
 } from "../utils";
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
 import {
@@ -741,8 +742,8 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     retryRdpConnection: async (sessionId) => {
       await retryRdpConnection(set, get, sessionId);
     },
-    retryVncConnection: async (sessionId) => {
-      await retryVncConnection(set, get, sessionId);
+    retryVncConnection: async (sessionId, attempt) => {
+      await retryVncConnection(set, get, sessionId, attempt);
     },
     retrySessionConnection: async (sessionId, secrets, jumpSecrets) => {
       const currentTab = get().tabs.find((tab) => tab.sessionId === sessionId);
@@ -2508,11 +2509,45 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
         set({ pendingCredentialRetry: null });
         return;
       }
+      if (pending?.source === "containers") {
+        // 컨테이너 탭은 기다리는 모양(빈 목록)으로 두었다 — 왜 비었는지 말한다. 다시 시도는 탭의 Retry 다.
+        const host = get().hosts.find((item) => item.id === (pending.promptHostId ?? pending.hostId));
+        const message = t("sessionStore.authInputCancelled", {
+          label: host?.label ?? t("runtime.session"),
+        });
+        set((state) => ({
+          pendingCredentialRetry: null,
+          containerTabs: state.containerTabs.map((tab) =>
+            tab.hostId === pending.hostId ? { ...tab, isLoading: false, connectionProgress: null, errorMessage: message } : tab,
+          ),
+        }));
+        return;
+      }
       set({ pendingCredentialRetry: null });
     },
     submitCredentialRetry: async (input) => {
       const pending = get().pendingCredentialRetry;
       if (!pending) {
+        return;
+      }
+
+      // VNC 호스트 자신의 값 — 요청 창을 먼저 닫고(붙는 도중 터널 호스트의 키를 물을 수 있다) 같은 탭을 넣은 값으로 다시
+      // 붙인다. 계정은 그 창이 계정을 물었을 때만 싣는다 — 실으면 빈 값이라도 그것을 쓴다(계정을 비워 VNC 암호로 붙기).
+      if (pending.vncFailure) {
+        if (!input.password) {
+          throw new Error(t("credentialRetry.passwordRequired"));
+        }
+        if (!pending.sessionId) {
+          return;
+        }
+        set({ pendingCredentialRetry: null });
+        await get().retryVncConnection(pending.sessionId, {
+          ...pending.carried,
+          vncSecrets: {
+            ...(vncFailureAsksAccount(pending.vncFailure) ? { username: input.username.trim() } : {}),
+            password: input.password,
+          },
+        });
         return;
       }
 
@@ -2565,6 +2600,26 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
         ? { ...carried.jumpSecrets, [promptHost.id]: entered }
         : carried.jumpSecrets;
 
+      // 포트 포워딩·컨테이너·VNC 터널 — 요청 창을 먼저 닫고 그 일을 넣은 값으로 다시 한다. 이 길들은 붙는 도중에
+      // 호스트 키를 묻는데(처음 쓰는 호스트), 창이 열려 있으면 그 물음을 가려 누를 수 없다. 다음 홉을 물으면 그 길이
+      // 새 요청 창을 띄우고, 실패는 그 길의 자리(규칙 줄·탭)에 보인다. 사용자 이름 되돌리기(activeCredentialRetryAttempt)는
+      // SSH·SFTP 의 것이다.
+      if (pending.source !== "ssh" && pending.source !== "sftp") {
+        set({ pendingCredentialRetry: null });
+        // 앞서 넣은 다른 자리의 값(VNC 자신의 것)도 잃지 않게 함께 보낸다.
+        const attempt = { ...carried, secrets, jumpSecrets };
+        if (pending.source === "portForward" && pending.ruleId) {
+          await get().startPortForward(pending.ruleId, attempt);
+        } else if (pending.source === "containers") {
+          await get().refreshHostContainers(pending.hostId, attempt);
+        } else if (pending.source === "containerShell" && pending.sessionId && pending.containerId) {
+          await get().retryHostContainerShell(pending.sessionId, pending.hostId, pending.containerId, attempt);
+        } else if (pending.source === "vnc" && pending.sessionId) {
+          await get().retryVncConnection(pending.sessionId, attempt);
+        }
+        return;
+      }
+
       set({
         activeCredentialRetryAttempt: {
           hostId: pending.hostId,
@@ -2594,6 +2649,9 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
           return;
         }
 
+        // 요청 창을 먼저 닫는다 — SFTP 는 붙는 도중에 호스트 키를 묻는데(처음 쓰는 호스트), 창이 열려 있으면 그 물음을
+        // 가려 누를 수 없다. 다음 홉을 물으면 새 요청 창이 뜨고, 실패는 그 칸에 보인다.
+        set({ pendingCredentialRetry: null });
         const endpointId = globalThis.crypto.randomUUID();
 
         const trusted = await ensureTrustedHost(set, {
@@ -2621,10 +2679,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
           set({ activeCredentialRetryAttempt: null });
           return;
         }
-        set({
-          pendingCredentialRetry: null,
-          activeCredentialRetryAttempt: null,
-        });
+        set({ activeCredentialRetryAttempt: null });
       } catch (error) {
         set({ activeCredentialRetryAttempt: null });
         throw error;

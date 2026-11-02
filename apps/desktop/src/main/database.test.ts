@@ -1182,6 +1182,86 @@ describe('HostRepository', () => {
       certificatePath: null,
     });
   });
+
+  // 요청 창에서 넣은 VNC·RDP 값이 호스트에 붙어야 다음에 묻지 않는다. SSH 만 바꾸던 동안 새 비밀값이 어디에도 붙지 않았다
+  // (다듬기 3단계 결함 ②).
+  it('points an RDP or VNC host at a new credential, leaving its other fields alone', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+    hosts.create('vnc-1', {
+      kind: 'vnc',
+      label: 'Desk',
+      tags: [],
+      terminalThemeId: null,
+      hostname: '10.0.0.9',
+      port: 5900,
+      shared: false,
+    });
+    hosts.create('rdp-1', {
+      kind: 'rdp',
+      label: 'Win',
+      groupName: null,
+      tags: [],
+      terminalThemeId: null,
+      hostname: '10.0.0.8',
+      port: 3389,
+      secretRef: 'secret:old',
+    });
+
+    expect(hosts.updateSecretRef('vnc-1', 'secret:vnc')).toMatchObject({ kind: 'vnc', secretRef: 'secret:vnc' });
+    expect(hosts.getById('vnc-1')).toMatchObject({ secretRef: 'secret:vnc', label: 'Desk', hostname: '10.0.0.9', shared: false });
+    expect(hosts.updateSecretRef('rdp-1', 'secret:rdp')).toMatchObject({ kind: 'rdp', secretRef: 'secret:rdp' });
+    expect(hosts.getById('rdp-1')).toMatchObject({ secretRef: 'secret:rdp', label: 'Win', hostname: '10.0.0.8' });
+  });
+
+  it('leaves a kind of host without a credential slot alone', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+    hosts.create('serial-1', {
+      kind: 'serial',
+      label: 'Console',
+      groupName: null,
+      tags: [],
+      terminalThemeId: null,
+      transport: 'rfc2217',
+      devicePath: null,
+      host: 'serial.example.com',
+      port: 2217,
+      baudRate: 115200,
+      dataBits: 8,
+      parity: 'none',
+      stopBits: 1,
+      flowControl: 'none',
+      transmitLineEnding: 'crlf',
+      localEcho: false,
+      localLineEditing: true,
+    });
+
+    expect(hosts.updateSecretRef('serial-1', 'secret:x')).toBeNull();
+    expect(hosts.getById('serial-1')).not.toHaveProperty('secretRef', 'secret:x');
+  });
+
+  // SSH 는 지금처럼 바꾼다(키 파일 경로는 만들 때부터 기기마다 따로 두어 레코드에는 늘 비어 있다).
+  it('still points an SSH host at a new credential', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+    hosts.create('ssh-1', {
+      kind: 'ssh',
+      label: 'Key Host',
+      groupName: null,
+      tags: [],
+      terminalThemeId: null,
+      hostname: 'key.example.com',
+      port: 22,
+      username: 'ubuntu',
+      authType: 'privateKey',
+      privateKeyPath: '/Users/test/.ssh/id_ed25519',
+      secretRef: null,
+    });
+
+    expect(hosts.updateSecretRef('ssh-1', 'secret:key')).toMatchObject({ kind: 'ssh', secretRef: 'secret:key' });
+    expect(hosts.getById('ssh-1')).toMatchObject({ secretRef: 'secret:key', username: 'ubuntu' });
+  });
 });
 
 describe('GroupRepository.remove', () => {

@@ -300,7 +300,7 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
             }));
             await syncOperationalData(set);
           },
-    startPortForward: async (ruleId) => {
+    startPortForward: async (ruleId, attempt) => {
             const rule = get().portForwards.find((item) => item.id === ruleId);
             if (!rule) {
               return;
@@ -383,7 +383,7 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
                 return;
               }
             }
-            await startTrustedPortForward(set, get, ruleId);
+            await startTrustedPortForward(set, get, ruleId, attempt);
           },
     stopPortForward: async (ruleId) => {
             // 사용자가 직접 멈추면 진행 중 자동 재연결을 취소(의도적 종료).

@@ -4,6 +4,7 @@ import type { TermiusImportSelectionInput } from '@shared';
 import {
   buildTermiusEntityKey,
   buildTermiusGroupAncestorPaths,
+  buildTermiusHostPreviews,
   buildTermiusSharedSecretKey,
   collectSelectedTermiusGroupPaths,
   collectSelectedTermiusHosts,
@@ -123,6 +124,26 @@ describe('Termius import helpers', () => {
         }
       }
     })).toBe('identity-fallback:Ops|root|legacy-key|Legacy|legacy.example.com');
+  });
+
+  it('gives each preview host the secret its import would make — one per shared identity', () => {
+    const key = { localId: 300, username: 'deploy', sshKey: { privateKeyPem: '-----BEGIN PRIVATE KEY-----\nk\n-----END PRIVATE KEY-----' } };
+    const previews = buildTermiusHostPreviews([
+      { id: 1, localId: 1, name: 'web-1', address: 'web-1.example.com', sshConfig: { port: 22 }, identity: key },
+      { id: 2, localId: 2, name: 'web-2', address: 'web-2.example.com', sshConfig: { port: 22 }, identity: key },
+      { id: 3, localId: 3, name: 'own', address: 'own.example.com', sshConfig: { port: 22 }, identity: { username: 'root', password: 'pw' } },
+      // 비밀값이 없는 호스트, 주소가 없어 빠질 호스트는 만들 비밀값이 없다.
+      { id: 4, localId: 4, name: 'bare', address: 'bare.example.com', sshConfig: { port: 22 }, identity: { username: 'root' } },
+      { id: 5, localId: 5, name: 'nowhere', address: null, sshConfig: { port: 22 }, identity: key }
+    ]);
+    const secretKeyOf = (name: string) => previews.find((preview) => preview.name === name)?.secretKey;
+
+    expect(secretKeyOf('web-1')).toBe('identity:local:300');
+    expect(secretKeyOf('web-2')).toBe('identity:local:300');
+    expect(secretKeyOf('own')).toMatch(/^identity-fallback:|^host:/);
+    expect(secretKeyOf('own')).not.toBe(secretKeyOf('web-1'));
+    expect(secretKeyOf('bare')).toBeNull();
+    expect(secretKeyOf('nowhere')).toBeNull();
   });
 
   it('prefers private keys over passwords and keeps passphrases only for key auth', () => {

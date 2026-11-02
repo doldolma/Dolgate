@@ -195,6 +195,7 @@ export function createMainIpcContext(
     tunnelRegistry,
     secretCoordinator,
     hostCoordinator,
+    vaults,
     resolveJumpHostTarget: hostCoordinator.resolveJumpHostTarget,
     emitContainersConnectionProgress:
       coreEventBridge.emitContainersConnectionProgress,

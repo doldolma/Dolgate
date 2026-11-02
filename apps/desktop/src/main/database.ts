@@ -1205,19 +1205,28 @@ export class HostRepository {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
       this.root.edit(state).hosts = this.root.edit(state).hosts.map((entry) => {
-        if (entry.id !== id || !isSshHostRecord(entry)) {
+        if (entry.id !== id) {
           return entry;
         }
-        nextRecord = {
-          ...entry,
-          secretRef,
-          privateKeyPath: null,
-          certificatePath: null,
-          tags: normalizeTags(entry.tags),
-          terminalThemeId: normalizeTerminalThemeId(entry.terminalThemeId),
-          updatedAt: nowIso()
-        };
-        return nextRecord;
+        if (isSshHostRecord(entry)) {
+          nextRecord = {
+            ...entry,
+            secretRef,
+            privateKeyPath: null,
+            certificatePath: null,
+            tags: normalizeTags(entry.tags),
+            terminalThemeId: normalizeTerminalThemeId(entry.terminalThemeId),
+            updatedAt: nowIso()
+          };
+          return nextRecord;
+        }
+        // RDP·VNC 도 같은 자격증명 저장소를 같은 이름의 자리로 가리킨다 — 요청 창에서 넣은 값을 붙인다. 빠지면 새 비밀값이
+        // 어디에도 붙지 않아 다음에 또 묻는다. 키 파일 같은 SSH 칸은 없다.
+        if (isRdpHostRecord(entry) || isVncHostRecord(entry)) {
+          nextRecord = { ...entry, secretRef, updatedAt: nowIso() };
+          return nextRecord;
+        }
+        return entry;
       });
     });
     return nextRecord;
