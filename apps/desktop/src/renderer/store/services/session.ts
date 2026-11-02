@@ -43,6 +43,7 @@ import {
   resolveLocalStartingProgress,
   myUsernameOf,
   buildHopCredentialRetry,
+  buildRdpCredentialRetry,
   buildVncCredentialRetry,
   resolveCredentialRetryProgress,
 } from "../utils";
@@ -842,6 +843,8 @@ export function createSessionServices(deps: SliceDeps) {
     get: StoreGetter,
     host: HostRecord,
     reuseSessionId?: string,
+    /** 요청 창에 넣은 RDP 호스트 자신의 값(rdpSecrets). */
+    attempt?: ConnectAttemptSecrets,
   ) => {
     const sessionId = reuseSessionId ?? createPendingSessionId();
     if (!reuseSessionId) {
@@ -942,10 +945,43 @@ export function createSessionServices(deps: SliceDeps) {
     }
 
     try {
-      const connected = await api.rdp.connect(sessionId, host.id, rdpViewportSize());
+      const connected = await api.rdp.connect(sessionId, host.id, rdpViewportSize(), attempt);
+      // 코어가 실패를 이미 알렸다 — 탭은 그 알림이 그렸다(까닭 문구·Retry, 또는 재연결 예약). 오류로 다시 그리면 Retry 가
+      // 숨고 재연결 표시를 덮는다(VNC 와 같다).
+      if ("failureReported" in connected) {
+        return;
+      }
+      if ("credentialsNeeded" in connected) {
+        // 서버가 NLA 로 비밀번호를 요구하는데 없거나 넣은 값을 거절했다 — 요청 창을 띄우고 탭은 기다리는 모양으로 둔다. 다시
+        // 시도가 이 탭을 이어 쓴다.
+        const retry = buildRdpCredentialRetry({ host, needed: connected.credentialsNeeded, sessionId });
+        if (!retry) {
+          markSessionError(set, sessionId, t("sessionSvc.connectFailed"), { retryable: false });
+          return;
+        }
+        // 사람의 답을 기다린다 — 자동 재연결이 돌던 탭이면 멈춘다. 두면 감시 시간이 지나 같은 탭을 다시 붙이며 세션을 바꿔
+        // 이 요청이 가리킬 탭이 사라진다(VNC 와 같다).
+        const stableId = get().tabs.find((tab) => tab.sessionId === sessionId)?.stableId;
+        if (stableId) {
+          cancelReconnect(stableId, "credentials-needed");
+        }
+        set({ pendingCredentialRetry: retry });
+        updateSessionProgress(set, sessionId, resolveCredentialRetryProgress(host, "auth"));
+        return;
+      }
+      if (attempt) {
+        // 넣은 값은 붙은 뒤 개인 호스트의 비밀값으로 들어간다 — 목록을 다시 읽는다(VNC 와 같다).
+        await createBootstrapSyncServices(deps).refreshHostAndKeychainState(set);
+      }
       // 탭 hover 의 "연결 경과"가 SSH 와 같은 레지스트리를 읽는다. 재연결이 sessionId 를
       // 재사용하므로, 끊길 때(runtimeEventSlice) 지워 두면 여기서 새 시각이 찍힌다.
       markSessionConnected(sessionId);
+      // 붙었다 — 자동 재연결이 돌던 탭이면 그 재연결을 끝낸다(VNC 와 같다). 두면 시도마다 거는 감시 시간(30초)이 지나 끝나지
+      // 않은 재연결로 보고, 붙어 있는 세션을 끊고 다시 붙는다(실제 앱: Windows VM 에서 30초마다 시도 2·3·4 …).
+      const connectedStableId = get().tabs.find((tab) => tab.sessionId === sessionId)?.stableId;
+      if (connectedStableId) {
+        cancelReconnect(connectedStableId, "reconnected");
+      }
       // 붙고 나면 진행 표시는 지운다 — 연결 화면이 캔버스를 가리면 안 된다.
       set((state) => ({
         tabs: state.tabs.map((tab) =>
@@ -1149,6 +1185,8 @@ export function createSessionServices(deps: SliceDeps) {
     set: StoreSetter,
     get: StoreGetter,
     sessionId: string,
+    /** 요청 창에 넣은 RDP 값(rdpSecrets). */
+    attempt?: ConnectAttemptSecrets,
   ) => {
     const tab = get().tabs.find((item) => item.sessionId === sessionId);
     if (!tab || tab.paneKind !== "rdp" || !tab.hostId) {
@@ -1184,7 +1222,7 @@ export function createSessionServices(deps: SliceDeps) {
       await api.rdp.disconnect(sessionId).catch(() => undefined);
     }
 
-    await startRdpConnectionFlow(set, get, host, pendingSessionId);
+    await startRdpConnectionFlow(set, get, host, pendingSessionId, attempt);
   };
 
   /**

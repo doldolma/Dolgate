@@ -1,4 +1,4 @@
-import { isSshHostRecord, isVncCredentialFailure } from "@shared";
+import { isRdpCredentialFailure, isSshHostRecord, isVncCredentialFailure } from "@shared";
 import type { AuthType, ConnectCredentialsNeeded, HostRecord, VaultIndex, VncCredentialFailure } from "@shared";
 import { t } from "../../i18n";
 import type { ConnectAttemptSecrets, PendingCredentialRetry } from "../types";
@@ -107,5 +107,36 @@ export function buildVncCredentialRetry(input: {
     message,
     initialUsername: input.needed.username ?? "",
     vncFailure: failure,
+  };
+}
+
+/**
+ * RDP 서버가 NLA 로 비밀번호를 요구하는데 없거나 넣은 값을 거절했다(메인의 credentialsNeeded 가 RDP 호스트 자신을 가리킨다)를
+ * 요청 창 요청으로 바꾼다.
+ *
+ * 창은 계정·비밀번호·도메인을 함께 묻는다 — Windows 계정은 셋이 한 묶음이다. 그 시도에서 쓴 계정·도메인을 미리 채운다.
+ */
+export function buildRdpCredentialRetry(input: {
+  host: HostRecord;
+  needed: ConnectCredentialsNeeded;
+  sessionId: string;
+}): PendingCredentialRetry | null {
+  const failure = input.needed.failure;
+  if (input.host.kind !== "rdp" || input.needed.hostId !== input.host.id || !isRdpCredentialFailure(failure)) {
+    return null;
+  }
+  return {
+    requestId: globalThis.crypto.randomUUID(),
+    sessionId: input.sessionId,
+    hostId: input.host.id,
+    source: "rdp",
+    authType: "password",
+    message:
+      failure === "password-required"
+        ? t("credentialRetry.rdpCredentialsNeeded", { label: input.host.label })
+        : t("credentialRetry.rdpCredentialsRejected"),
+    initialUsername: input.needed.username ?? "",
+    initialDomain: input.needed.domain ?? "",
+    rdpFailure: failure,
   };
 }

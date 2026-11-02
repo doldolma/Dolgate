@@ -1,4 +1,7 @@
 import type {
+  ConnectAttemptSecrets,
+  ConnectFailureReportedResult,
+  CredentialsNeededResult,
   HostRecord,
   RdpConnectedPayload,
   RdpAudioPayload,
@@ -12,8 +15,9 @@ import { desktopApi } from '../desktopApi';
 export function connectRdp(
   sessionId: string,
   hostId: string,
-): Promise<RdpConnectedPayload> {
-  return desktopApi.rdp.connect(sessionId, hostId);
+  attempt?: ConnectAttemptSecrets,
+): Promise<RdpConnectedPayload | CredentialsNeededResult | ConnectFailureReportedResult> {
+  return desktopApi.rdp.connect(sessionId, hostId, undefined, attempt);
 }
 
 export function disconnectRdp(sessionId: string): Promise<void> {

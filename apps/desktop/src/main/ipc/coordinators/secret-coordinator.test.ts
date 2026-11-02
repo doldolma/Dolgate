@@ -466,6 +466,103 @@ describe("keeping what was typed for a team VNC host", () => {
   });
 });
 
+// 다듬기 3단계(RDP) — RDP 의 도메인은 계정의 일부다. 내 비밀번호로 붙으면 접속은 내 칸만 쓰므로(loadHostSecrets) 도메인이 팀 것과
+// 같아도 함께 둔다 — 빼면 다음 접속이 도메인 없이 붙는다.
+describe("keeping what was typed for an RDP host", () => {
+  const teamRdp = {
+    id: "team-rdp",
+    kind: "rdp",
+    label: "Win Box",
+    hostname: "win.example.com",
+    port: 3389,
+    secretRef: "secret:team-rdp",
+  } as any;
+
+  function createTeamRdpCoordinator(team: Record<string, string>, mine: Record<string, string> | null) {
+    clearRuntimeSecretCache();
+    const setMyHostCredentials = vi.fn();
+    const { coordinator } = createCoordinator({
+      vaults: {
+        loadSecret: vi.fn(async (secretRef: string) =>
+          secretRef === "secret:team-rdp" ? JSON.stringify({ secretRef, label: "win", ...team }) : null,
+        ),
+        scopeOfHost: vi.fn(() => ({ id: "team-1" })),
+        getHost: vi.fn(() => teamRdp),
+        getMyHostCredentials: vi.fn(() => mine),
+        setMyHostCredentials,
+        setHostLoginUsername: vi.fn(),
+      },
+    });
+    return { coordinator, setMyHostCredentials };
+  }
+
+  it("saves an RDP credential with its domain for a personal host", async () => {
+    const { deps, coordinator } = createCoordinator();
+    const secretRef = await coordinator.persistHostSpecificSecret("rdp-1", "Win Box", {
+      kind: "rdp",
+      username: "alice",
+      domain: "CORP",
+      password: "typed",
+    });
+
+    const saved = JSON.parse(deps.secretStore.save.mock.calls[0][1]);
+    expect(saved).toMatchObject({ kind: "rdp", username: "alice", domain: "CORP", password: "typed", label: "Win Box" });
+    expect(deps.hosts.updateSecretRef).toHaveBeenCalledWith("rdp-1", secretRef);
+  });
+
+  it("keeps the domain next to my password even when it is the team's", async () => {
+    const { coordinator, setMyHostCredentials } = createTeamRdpCoordinator(
+      { username: "alice", domain: "CORP", password: "team-pw" },
+      null,
+    );
+    await coordinator.persistHostSpecificSecret("team-rdp", "Win Box", {
+      kind: "rdp",
+      username: "alice",
+      domain: "CORP",
+      password: "mine",
+    });
+    expect(setMyHostCredentials).toHaveBeenCalledWith("team-rdp", { username: "alice", domain: "CORP", password: "mine" });
+  });
+
+  it("drops my domain when it connected without one", async () => {
+    const { coordinator, setMyHostCredentials } = createTeamRdpCoordinator(
+      { username: "alice", domain: "CORP", password: "team-pw" },
+      { username: "alice", domain: "CORP", password: "old" },
+    );
+    await coordinator.persistHostSpecificSecret("team-rdp", "Win Box", { kind: "rdp", username: "alice", password: "new" });
+    expect(setMyHostCredentials).toHaveBeenCalledWith("team-rdp", { username: "alice", password: "new" });
+  });
+
+  // 비밀번호가 팀 것 그대로면 팀 것과 다른 계정(도메인 포함)만 둔다 — 접속은 팀 비밀번호에 내 계정을 얹는다.
+  it("keeps only a different domain when the team's password was the one used", async () => {
+    const { coordinator, setMyHostCredentials } = createTeamRdpCoordinator(
+      { username: "alice", password: "team-pw" },
+      null,
+    );
+    await coordinator.persistHostSpecificSecret("team-rdp", "Win Box", {
+      kind: "rdp",
+      username: "alice",
+      domain: "CORP",
+      password: "team-pw",
+    });
+    expect(setMyHostCredentials).toHaveBeenCalledWith("team-rdp", { username: "alice", domain: "CORP" });
+  });
+
+  it("saves nothing when it connected with exactly what the team has", async () => {
+    const { coordinator, setMyHostCredentials } = createTeamRdpCoordinator(
+      { username: "alice", domain: "CORP", password: "team-pw" },
+      null,
+    );
+    await coordinator.persistHostSpecificSecret("team-rdp", "Win Box", {
+      kind: "rdp",
+      username: "alice",
+      domain: "CORP",
+      password: "team-pw",
+    });
+    expect(setMyHostCredentials).not.toHaveBeenCalled();
+  });
+});
+
 describe("normalizeHostEnvVars", () => {
   it("keeps valid vars, drops invalid keys, strips newlines, caps count", () => {
     expect(

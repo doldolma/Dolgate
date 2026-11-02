@@ -1,7 +1,9 @@
 import {
   describeRdpDrives,
   resolveHostDrives,
+  isRdpCredentialFailure,
   isRdpHostRecord,
+  type ConnectAttemptSecrets,
   type RdpCertificatePrompt,
   type RdpHostRecord,
   type RdpInputEvent,
@@ -13,7 +15,7 @@ import path from "node:path";
 import type { WebContents } from "electron";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, screen, systemPreferences } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
-import type { RdpManager } from "../rdp-manager";
+import { RdpConnectError, type RdpManager } from "../rdp-manager";
 import { logMessage } from "../activity-log-message";
 import { decideCertificate } from "../rdp-certificate-trust";
 import { setRdpKeyboardCapture } from "../rdp-keyboard-capture";
@@ -50,6 +52,8 @@ export function registerRdpIpcHandlers(
   runtime: {
     /** 인증서 프롬프트를 띄우고 사용자의 판단을 기다린다. */
     askCertificate: (prompt: RdpCertificatePrompt) => Promise<boolean>;
+    /** 그 세션에 떠 있는 인증서 프롬프트를 거절로 닫는다(세션이 끝났을 때). */
+    cancelCertificate: (sessionId: string) => void;
   },
 ): void {
   // 어느 세션이 어느 호스트로 붙는 중인지. 인증서 판정은 connect 응답보다 먼저 오므로,
@@ -404,6 +408,9 @@ export function registerRdpIpcHandlers(
     // 곳에서 끝낸다. 자동 재연결이 예약된 경우에도 지금 놓는 것이 맞다: 재연결은 새 sessionId 로
     // 새 포워드를 연다.
     if (event.type === "closed") {
+      // 붙기 전에 끝났으면(탭을 닫음·팀에서 빠짐) 떠 있던 인증서 물음을 거절로 닫는다. 두면 엔진이 그 판정을 3분까지 기다리며
+      // 남고, 화면에는 답할 곳 없는 물음이 남는다.
+      runtime.cancelCertificate(event.sessionId);
       void releaseSession(event.sessionId);
       return;
     }
@@ -513,6 +520,8 @@ export function registerRdpIpcHandlers(
       sessionId: string,
       hostId: string,
       viewport?: { width: number; height: number },
+      /** 요청 창에 넣은 값(rdpSecrets). */
+      attempt?: ConnectAttemptSecrets,
     ) => {
       const host = ctx.vaults.getHost(hostId);
       if (!host) {
@@ -530,6 +539,15 @@ export function registerRdpIpcHandlers(
       const ensureHostPresent = hostPresenceGuard(ctx, host.id);
       const secrets = await ctx.loadHostSecrets(host);
       ensureHostPresent();
+      // 요청 창에 넣은 값이 저장된 것보다 먼저다. 창은 계정·비밀번호·도메인을 함께 받으므로(지금 값을 미리 채운다) 실려
+      // 있으면 셋 모두 그것을 쓴다 — 도메인을 비웠으면 도메인 없이 붙는다.
+      //
+      // 계정은 자격증명에만 있다 — Windows 는 DOMAIN\user+비밀번호가 한 묶음이고, 같은 계정을 여러 호스트에 쓸 때 다시
+      // 적지 않아도 된다. 호스트 레코드에는 계정이 없다.
+      const typed = attempt?.rdpSecrets;
+      const username = (typed ? typed.username : secrets.username)?.trim() ?? "";
+      const password = typed?.password ?? secrets.password ?? "";
+      const domain = (typed ? typed.domain : secrets.domain)?.trim() ?? "";
 
       // 어느 화면을 빌려줄지 정하는 순서:
       //   1. 이 기기에서 골라 둔 선택이 있으면 그것 (호스트가 아니라 기기 로컬 설정이다 —
@@ -625,11 +643,10 @@ export function registerRdpIpcHandlers(
           host: host.hostname,
           port: host.port,
           dialAddress,
-          // 계정은 자격증명에만 있다 — Windows 는 DOMAIN\user+비밀번호가 한 묶음이고, 같은
-          // 계정을 여러 호스트에 쓸 때 다시 적지 않아도 된다. 호스트 레코드에는 계정이 없다.
-          username: secrets.username?.trim() ?? "",
-          password: secrets.password ?? "",
-          domain: secrets.domain?.trim() || null,
+          username,
+          // 비어 있으면 코어가 자격 증명을 보내기 직전에 멈추고 'password-required' 로 끝낸다 — 아래에서 요청 창으로 묻는다.
+          password,
+          domain: domain || null,
           // 관리 세션으로 붙을지. 켜지 않으면 지금까지와 같이 일반 세션이다.
           adminSession: host.adminSession === true,
           // 없거나 null 이 "켜짐"이다. 옛 호스트가 조용해지지 않는다.
@@ -667,12 +684,24 @@ export function registerRdpIpcHandlers(
             hostId: host.id,
             hostLabel: host.label,
             title: host.label,
-            connectionDetails: `${host.hostname} · ${host.port} · ${secrets.username?.trim() ?? ""}`,
+            connectionDetails: `${host.hostname} · ${host.port} · ${username}`,
           },
         );
+        // 넣은 값으로 붙었다 — 쓴 계정·비밀번호·도메인을 제자리에 둔다(개인 호스트는 호스트 비밀값, 팀 호스트는 내 자격 증명).
+        // 다음부터는 묻지 않는다. 저장이 실패해도 붙은 연결은 그대로 둔다 — 다음에 다시 물을 뿐이다.
+        if (typed) {
+          await ctx
+            .persistHostSpecificSecret(host.id, host.label, {
+              kind: "rdp",
+              username: username || undefined,
+              domain: domain || undefined,
+              password,
+            })
+            .catch((error: unknown) => {
+              console.warn("[rdp] failed to save the entered credentials", error);
+            });
+        }
         // 탭 hover 의 대상(user@host) 표기용. 계정은 자격증명에만 있어 렌더러가 모른다.
-        const username = secrets.username?.trim() ?? "";
-        const domain = secrets.domain?.trim() ?? "";
         return {
           ...payload,
           username: username
@@ -686,6 +715,25 @@ export function registerRdpIpcHandlers(
         closeSessionForward(sessionId);
         // 붙는 사이 호스트가 사라졌으면(팀에서 빠짐) 끊긴 접속이 남긴 오류 대신 그 까닭으로 끝낸다(VNC 와 같다).
         ensureHostPresent();
+        // 서버가 NLA 로 비밀번호를 요구하는데 없거나, 넣은 값을 거절했다 — 화면이 이 호스트의 값을 요청 창으로 묻는다. 쓴
+        // 계정·도메인을 함께 알린다(창에 미리 채운다). 잠김·만료처럼 다시 넣어도 풀리지 않는 것은 실패 카드로 간다(아래).
+        if (error instanceof RdpConnectError && isRdpCredentialFailure(error.failure)) {
+          return {
+            credentialsNeeded: {
+              hostId: host.id,
+              reason: error.failure === "password-required" ? ("missing" as const) : ("rejected" as const),
+              message: error.message,
+              failure: error.failure,
+              ...(username ? { username } : {}),
+              ...(domain ? { domain } : {}),
+            },
+          };
+        }
+        // 코어가 이 실패를 이미 화면에 알렸다(까닭 코드와 함께) — 탭은 그 알림이 그렸다. 오류로 던지면 화면 흐름이 그 표시
+        // (Retry·재연결 예약)를 덮는다(VNC 와 같다).
+        if (error instanceof RdpConnectError && error.reported) {
+          return { failureReported: true as const };
+        }
         throw error;
       } finally {
         hostBySession.delete(sessionId);
@@ -696,6 +744,9 @@ export function registerRdpIpcHandlers(
   ipcMain.handle(ipcChannels.rdp.disconnect, async (_event, sessionId: string) => {
     await releaseSession(sessionId);
     rdpManager.disconnect(sessionId);
+    // 인증서 물음 중에 탭을 닫았으면 그 물음을 거절로 닫는다 — 엔진은 판정을 3분까지 기다리느라 닫힘을 늦게 알린다. 끊기를 먼저
+    // 보내 둬서 엔진은 깨어나자마자 조용히 접는다.
+    runtime.cancelCertificate(sessionId);
   });
 
   // 배치도 UI 가 그릴 목록. 좌표는 DIP 그대로 넘긴다 — 그리기에는 배율이 필요 없고, 화면별

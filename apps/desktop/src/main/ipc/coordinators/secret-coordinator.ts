@@ -389,15 +389,29 @@ export function createSecretCoordinator(deps: {
     const next: TeamHostCredentials = { ...(vaults.getMyHostCredentials(hostId) ?? {}), ...typed };
     // RDP·VNC 는 계정이 자격 증명에 딸린다. 내 비밀번호가 있으면 접속은 계정까지 내 것만 쓰므로(loadHostSecrets) 비밀번호를
     // 둘 때는 쓴 계정도 함께 둔다(비웠으면 뺀다). 비밀번호가 팀 것 그대로면 팀 것과 다른 계정만 둔다 — 팀 비밀번호에 얹힌다.
+    // RDP 의 도메인은 계정의 일부라 같이 다룬다 — 팀 것과 같다고 빼면 내 비밀번호로 붙을 때 도메인이 사라진다.
     if (host && host.kind !== "ssh") {
       const username = secrets.username?.trim() ?? "";
-      if (typed.password || (username && username !== (team.username ?? ""))) {
+      const domain = host.kind === "rdp" ? (secrets.domain?.trim() ?? "") : "";
+      const accountDiffers =
+        (username && username !== (team.username ?? "")) ||
+        (host.kind === "rdp" && domain !== (team.domain?.trim() ?? ""));
+      if (typed.password || accountDiffers) {
         if (username && next.username !== username) {
           next.username = username;
           changed = true;
         } else if (!username && next.username !== undefined) {
           delete next.username;
           changed = true;
+        }
+        if (host.kind === "rdp") {
+          if (domain && next.domain !== domain) {
+            next.domain = domain;
+            changed = true;
+          } else if (!domain && next.domain !== undefined) {
+            delete next.domain;
+            changed = true;
+          }
         }
       }
     }

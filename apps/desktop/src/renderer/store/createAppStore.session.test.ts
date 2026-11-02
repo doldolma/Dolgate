@@ -69,10 +69,12 @@ describe("createAppStore sessions and auth recovery", () => {
     // 비밀번호는 메인 프로세스가 secretRef 로 푼다 — 렌더러는 hostId 만 넘긴다.
     //
     // 세 번째 인자는 원격 화면이 들어갈 자리의 크기다. 접속할 때 이 크기로 붙어야 화면이 뜨는
-    // 순간부터 창에 맞는다. 테스트 환경에는 그 요소가 없으므로 undefined 가 간다.
+    // 순간부터 창에 맞는다. 테스트 환경에는 그 요소가 없으므로 undefined 가 간다. 네 번째는 요청 창에
+    // 넣은 값인데, 그냥 열 때는 없다.
     expect(api.rdp.connect).toHaveBeenCalledWith(
       expect.any(String),
       "rdp-host-1",
+      undefined,
       undefined,
     );
     // 터미널 경로로 새지 않아야 한다.

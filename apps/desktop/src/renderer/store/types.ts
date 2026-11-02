@@ -16,6 +16,7 @@ import type {
   RdpCertificatePrompt,
   RdpSessionEvent,
   VncCredentialFailure,
+  RdpCredentialFailure,
   VncSessionEvent,
   DesktopApi,
   DnsOverrideDraft,
@@ -587,7 +588,7 @@ export interface PendingCredentialRetry {
    */
   promptHostId?: string;
   /** 다시 할 일 — 제출하면 그 일을 넣은 값으로 다시 한다(submitCredentialRetry). */
-  source: "ssh" | "sftp" | "portForward" | "containers" | "containerShell" | "vnc";
+  source: "ssh" | "sftp" | "portForward" | "containers" | "containerShell" | "vnc" | "rdp";
   authType: Extract<AuthType, "password" | "privateKey" | "certificate">;
   message: string;
   initialUsername: string;
@@ -601,6 +602,13 @@ export interface PendingCredentialRetry {
    * 여기서 갈리고, 넣은 값은 SSH 터널 자리가 아니라 VNC 자리(vncSecrets)로 간다. 없으면 SSH 호스트의 값을 묻는다.
    */
   vncFailure?: VncCredentialFailure;
+  /**
+   * RDP 호스트 자신의 계정·비밀번호·도메인을 묻는다(hostId 가 그 RDP 호스트) — 코어가 알린 까닭 코드다. 넣은 값은 rdpSecrets 로
+   * 간다.
+   */
+  rdpFailure?: RdpCredentialFailure;
+  /** RDP 요청 창의 도메인 칸에 미리 채울 값 — 그 시도에서 쓴 것. */
+  initialDomain?: string;
   /**
    * 이번 시도에서 앞서 요청 창에 넣은 값. 아직 붙지 않아 저장되지 않았으므로, 다음 시도에 이것을 함께 보낸다
    * — 점프 호스트를 묻는 동안 대상에 넣은 값을(또는 그 반대를) 잃지 않는다.
@@ -1074,8 +1082,11 @@ interface AppStateParts {
     /** 이번 시도에서 요청 창에 넣은 점프 호스트의 값(점프 호스트 id → 값). */
     jumpSecrets?: Record<string, HostSecretInput>,
   ) => Promise<void>;
-  /** RDP 세션을 같은 탭에 다시 붙인다. 재연결 오케스트레이터와 오버레이의 재시도가 쓴다. */
-  retryRdpConnection: (sessionId: string) => Promise<void>;
+  /**
+   * RDP 세션을 같은 탭에 다시 붙인다. 재연결 오케스트레이터와 오버레이의 재시도가 쓴다. attempt 는 요청 창에 넣은 RDP 값
+   * (rdpSecrets).
+   */
+  retryRdpConnection: (sessionId: string, attempt?: ConnectAttemptSecrets) => Promise<void>;
   /** VNC 세션을 같은 탭에 다시 붙인다(재연결 시도 횟수를 유지한다). attempt 는 요청 창에 넣은 SSH 터널의 값. */
   retryVncConnection: (sessionId: string, attempt?: ConnectAttemptSecrets) => Promise<void>;
   startSessionShare: (input: SessionShareStartInput) => Promise<void>;

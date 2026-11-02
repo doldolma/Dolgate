@@ -280,8 +280,10 @@ pub struct ClipboardSetPayload {
 #[serde(rename_all = "camelCase")]
 pub struct ErrorPayload {
     pub message: String,
-    /// 실패 원인 코드("refused","timeout","reset","no-route","address-in-use","dns-unresolved").
-    /// 앱이 문구를 뒤지지 않고 원인을 알 수 있게 코어가 판정해 실어 준다. 원인을 모르면 없다.
+    /// 실패 원인 코드 — 소켓("refused","timeout","reset","no-route","address-in-use","dns-unresolved")과
+    /// 로그온("password-required","auth-rejected","account-locked","account-disabled","password-expired",
+    /// "logon-denied", crate::failure). 앱이 문구를 뒤지지 않고 원인을 알 수 있게 코어가 판정해 실어 준다.
+    /// 원인을 모르면 없다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<&'static str>,
 }
@@ -296,10 +298,13 @@ impl ErrorPayload {
     }
 
     /// 세션 실패. 소켓 원인이 체인에 있으면 정경 문구와 코드를 함께 싣는다.
+    ///
+    /// 로그온 계층의 판정이 먼저다 — 비밀번호가 틀렸다는 것을 소켓 errno 로는 알 수 없고, 거꾸로
+    /// 증명을 보낸 직후 서버가 끊은 것(crate::nla)은 소켓으로는 'reset' 이지만 실제로는 거절이다.
     pub fn from_error(error: &anyhow::Error) -> Self {
         Self {
             message: core_framing::neterr::describe(error),
-            failure: core_framing::neterr::code(error),
+            failure: crate::failure::code(error).or_else(|| core_framing::neterr::code(error)),
         }
     }
 }
@@ -493,6 +498,18 @@ mod tests {
         assert!(json.contains(r#""sessionId":"sess-1""#));
         assert!(json.contains(r#""desktopWidth":2560"#));
         assert!(!json.contains("requestId"), "unset optionals are omitted");
+    }
+
+    #[test]
+    fn an_error_carries_the_logon_failure_code() {
+        // 앱은 이 코드를 보고 비밀번호를 묻는다 — 문장으로는 가를 수 없다.
+        let error = anyhow::Error::new(crate::failure::Failure::PasswordRequired).context("connect");
+        let json = serde_json::to_string(&Event::new("error", ErrorPayload::from_error(&error))).unwrap();
+        assert!(json.contains(r#""failure":"password-required""#), "{json}");
+
+        // 소켓 실패는 여전히 소켓의 코드다.
+        let refused = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::ConnectionRefused));
+        assert_eq!(ErrorPayload::from_error(&refused).failure, Some("refused"));
     }
 
     #[test]

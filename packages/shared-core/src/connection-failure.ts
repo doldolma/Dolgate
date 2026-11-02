@@ -26,6 +26,8 @@
 
 export type ConnectionFailureCode =
   | "account-auth-rejected"
+  | "account-disabled"
+  | "account-locked"
   | "account-required"
   | "address-in-use"
   | "agent-unreachable"
@@ -38,7 +40,9 @@ export type ConnectionFailureCode =
   | "dns-unresolved"
   | "host-key-declined"
   | "host-key-untrusted"
+  | "logon-denied"
   | "no-route"
+  | "password-expired"
   | "password-required"
   | "password-truncated"
   | "refused"
@@ -98,16 +102,21 @@ export interface ConnectionFailureSignals {
  * 두 계층이 섞여 있다:
  *   - 소켓: errno 로 판정한다(services/ssh-core 의 internal/neterr, 두 Rust 코어의
  *     core_framing::neterr).
- *   - 인증: 프로토콜 자체가 알려 주는 실패다(services/vnc-core 의 src/failure.rs). 서버가 붙인
- *     거부 사유는 서버가 정하는 문장이라 문구 규칙으로는 판정할 수 없다 — 코드만이 안다.
+ *   - 인증: 프로토콜 자체가 알려 주는 실패다(services/vnc-core·rdp-core 의 src/failure.rs). 서버가
+ *     붙인 거부 사유는 서버가 정하는 문장이거나(RFB) 문장 끝의 NTSTATUS 뿐이라(RDP) 문구 규칙으로는
+ *     판정할 수 없다 — 코드만이 안다.
  */
 const CORE_FAILURE_CODES = new Set<ConnectionFailureCode>([
   "account-auth-rejected",
+  "account-disabled",
+  "account-locked",
   "account-required",
   "address-in-use",
   "auth-rejected",
   "dns-unresolved",
+  "logon-denied",
   "no-route",
+  "password-expired",
   "password-required",
   "password-truncated",
   "refused",

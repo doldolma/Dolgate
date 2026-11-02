@@ -1,5 +1,8 @@
 import type { IpcRenderer } from "electron";
 import type {
+  ConnectAttemptSecrets,
+  ConnectFailureReportedResult,
+  CredentialsNeededResult,
   HostRecord,
   RdpConnectedPayload,
   RdpAudioPayload,
@@ -17,7 +20,9 @@ export interface RdpBridge {
     hostId: string,
     /** 원격 화면이 들어갈 자리의 크기. 없으면 메인이 창 크기로 대신한다. */
     viewport?: { width: number; height: number },
-  ) => Promise<RdpConnectedPayload>;
+    /** 요청 창에 넣은 값(rdpSecrets). */
+    attempt?: ConnectAttemptSecrets,
+  ) => Promise<RdpConnectedPayload | CredentialsNeededResult | ConnectFailureReportedResult>;
   disconnect: (sessionId: string) => Promise<void>;
   sendInput: (sessionId: string, events: RdpInputEvent[]) => void;
   /**
@@ -69,8 +74,8 @@ export interface RdpBridge {
 
 export function buildRdpBridge(ipcRenderer: IpcRenderer): RdpBridge {
   return {
-    connect: (sessionId, hostId, viewport) =>
-      ipcRenderer.invoke(ipcChannels.rdp.connect, sessionId, hostId, viewport),
+    connect: (sessionId, hostId, viewport, attempt) =>
+      ipcRenderer.invoke(ipcChannels.rdp.connect, sessionId, hostId, viewport, attempt),
     disconnect: (sessionId) => ipcRenderer.invoke(ipcChannels.rdp.disconnect, sessionId),
     sendInput: (sessionId, events) =>
       ipcRenderer.send(ipcChannels.rdp.input, sessionId, events),

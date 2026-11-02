@@ -179,6 +179,7 @@ export function registerIpcHandlers(
   );
   registerRdpIpcHandlers(ctx, rdpManager, {
     askCertificate: certificatePrompts.ask,
+    cancelCertificate: certificatePrompts.cancel,
   });
   registerVncIpcHandlers(ctx, vncManager);
   registerContainersIpcHandlers(ctx);

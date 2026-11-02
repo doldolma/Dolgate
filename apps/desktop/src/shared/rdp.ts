@@ -158,6 +158,19 @@ export interface RdpCertificatePrompt {
   previousFingerprint?: string | null;
 }
 
+/**
+ * 계정·비밀번호를 넣으면 풀리는 RDP 로그온 실패(rdp-core 의 `crate::failure`). 붙는 중에 이것으로 끝나면 메인은 실패 대신
+ * "넣어야 붙는다"(credentialsNeeded)로 돌려주고, 화면이 요청 창을 띄운다. 잠김·만료·원격 로그인 금지는 다시 넣어도 풀리지
+ * 않으므로 여기 없다 — 실패 카드에 그 까닭을 보인다.
+ */
+export const RDP_CREDENTIAL_FAILURES = ['password-required', 'auth-rejected'] as const;
+
+export type RdpCredentialFailure = (typeof RDP_CREDENTIAL_FAILURES)[number];
+
+export function isRdpCredentialFailure(code: string | null | undefined): code is RdpCredentialFailure {
+  return (RDP_CREDENTIAL_FAILURES as readonly string[]).includes(code ?? '');
+}
+
 export type RdpSessionEvent =
   | { type: 'connected'; sessionId: string; payload: RdpConnectedPayload }
   | {

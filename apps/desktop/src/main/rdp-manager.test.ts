@@ -295,6 +295,133 @@ describe("RdpManager", () => {
     retry.catch(() => {});
   });
 
+  // 다듬기 3단계(RDP) — 붙는 중에 비밀번호가 없거나 거절돼 끝나면 화면에 알리지 않는다. 부른 쪽(ipc/rdp.ts)이 까닭을 받아 요청
+  // 창을 띄운다. 코어가 뒤이어 보내는 closed 도 화면에는 가지 않는다 — 가면 아직 붙는 중인 그 탭이 지워진다.
+  describe("a connect that ends for want of credentials", () => {
+    function failWith(failure: string | undefined) {
+      const created = createManager();
+      const sessionEvents: Array<{ type: string; sessionId: string }> = [];
+      created.manager.onSessionEvent = (event) => sessionEvents.push(event);
+      const pending = created.manager.connect("sess-1", CONNECT);
+      pending.catch(() => {});
+      const request = created.core.requests()[0].metadata as unknown as { id: string };
+      created.core.emit(
+        encodeControlFrame({
+          type: "error",
+          requestId: request.id,
+          sessionId: "sess-1",
+          payload: { message: "finalize connection: CredSSP: status is STATUS_LOGON_FAILURE", failure },
+        } as never),
+      );
+      created.core.emit(
+        encodeControlFrame({ type: "closed", sessionId: "sess-1", payload: { graceful: false } } as never),
+      );
+      const toScreens = () => created.sent.filter((entry) => entry.channel === "rdp:event").map((entry) => entry.payload);
+      return { ...created, pending, sessionEvents, toScreens };
+    }
+
+    it.each(["password-required", "auth-rejected"])("ends the connect with the %s reason and tells no screen", async (failure) => {
+      const { pending, toScreens, sessionEvents } = failWith(failure);
+
+      await expect(pending).rejects.toMatchObject({ failure, reported: false });
+      // 이름을 바꾸지 않는다 — 화면이 'Error: …' 앞머리를 벗긴다.
+      await expect(pending).rejects.toHaveProperty("name", "Error");
+      expect(toScreens()).toEqual([]);
+      // 메인의 정리(통로·모니터 창)는 그대로 한다.
+      expect(sessionEvents.map((event) => event.type)).toEqual(["closed"]);
+    });
+
+    it("tells the screens a failure typing cannot fix, as before", async () => {
+      const { pending, toScreens } = failWith("account-locked");
+
+      await expect(pending).rejects.toMatchObject({ failure: "account-locked", reported: true });
+      expect(toScreens()).toEqual([
+        expect.objectContaining({ type: "error", sessionId: "sess-1", failure: "account-locked" }),
+        expect.objectContaining({ type: "closed", sessionId: "sess-1" }),
+      ]);
+    });
+
+    it("tells the screens a failure without a reason, as before", async () => {
+      const { pending, toScreens } = failWith(undefined);
+
+      await expect(pending).rejects.toMatchObject({ failure: null, reported: true });
+      expect(toScreens().map((event) => (event as { type: string }).type)).toEqual(["error", "closed"]);
+    });
+
+    // 연결이 없는 세션의 실패(붙은 뒤 끊김 등)는 요청 창을 띄울 곳이 없다 — 늘 화면에 알린다.
+    it("tells the screens a credential failure that no connect is waiting for", () => {
+      const { manager, core, sent } = createManager();
+      manager.onSessionEvent = () => undefined;
+      // 코어를 띄우려고 다른 세션을 하나 붙여 둔다.
+      manager.connect("sess-1", CONNECT).catch(() => {});
+      core.emit(
+        encodeControlFrame({
+          type: "error",
+          sessionId: "sess-9",
+          payload: { message: "rejected", failure: "auth-rejected" },
+        } as never),
+      );
+      core.emit(encodeControlFrame({ type: "closed", sessionId: "sess-9", payload: {} } as never));
+      expect(sent.filter((entry) => entry.channel === "rdp:event").map((entry) => (entry.payload as { type: string }).type)).toEqual([
+        "error",
+        "closed",
+      ]);
+    });
+
+    // 숨긴 닫힘은 한 번뿐이다 — 같은 세션 번호로 다시 붙은 뒤의 닫힘은 화면에 간다.
+    it("lets the next session under that id tell its close again", async () => {
+      const { manager, core, sent, pending } = failWith("auth-rejected");
+      await expect(pending).rejects.toBeTruthy();
+      const retry = manager.connect("sess-1", CONNECT);
+      const request = core.requests()[1].metadata as unknown as { id: string };
+      core.emit(connectedFrame(request.id, "sess-1"));
+      await retry;
+      core.emit(encodeControlFrame({ type: "closed", sessionId: "sess-1", payload: { graceful: true } } as never));
+      expect(
+        sent
+          .filter((entry) => entry.channel === "rdp:event")
+          .map((entry) => entry.payload as { type: string; sessionId: string })
+          .filter((event) => event.type === "closed")
+          .map((event) => event.sessionId),
+      ).toEqual(["sess-1"]);
+    });
+
+    function failWithoutClose() {
+      const created = createManager();
+      const sessionEvents: Array<{ type: string; sessionId: string }> = [];
+      created.manager.onSessionEvent = (event) => sessionEvents.push(event);
+      const pending = created.manager.connect("sess-1", CONNECT);
+      pending.catch(() => {});
+      const request = created.core.requests()[0].metadata as unknown as { id: string };
+      created.core.emit(
+        encodeControlFrame({
+          type: "error",
+          requestId: request.id,
+          sessionId: "sess-1",
+          payload: { message: "x", failure: "password-required" },
+        } as never),
+      );
+      return { ...created, pending, sessionEvents };
+    }
+
+    // 접속이 끝난 뒤(세션 등록이 풀린 뒤) 코어가 closed 없이 죽었다 — 메인의 정리만 한다.
+    it("cleans up a waiting session when the core dies before its close", async () => {
+      const { core, sent, pending, sessionEvents } = failWithoutClose();
+      await expect(pending).rejects.toBeTruthy();
+      core.exit(1);
+      expect(sessionEvents).toEqual([expect.objectContaining({ type: "closed", sessionId: "sess-1" })]);
+      expect(sent.filter((entry) => entry.channel === "rdp:event")).toEqual([]);
+    });
+
+    // 실패와 같은 순간에 죽었다(세션 등록이 아직 남음) — 한 번만, 화면에는 알리지 않고 닫는다.
+    it("closes a waiting session once, quietly, when the core dies in the same moment", () => {
+      const { core, sent, sessionEvents } = failWithoutClose();
+      core.exit(1);
+      expect(sessionEvents).toEqual([expect.objectContaining({ type: "closed", sessionId: "sess-1" })]);
+      expect(sent.filter((entry) => entry.channel === "rdp:event")).toEqual([]);
+    });
+  });
+
   it("forwards pixel frames on the dedicated channel", async () => {
     const { manager, core, sent } = createManager();
 

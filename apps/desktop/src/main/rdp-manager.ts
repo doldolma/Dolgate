@@ -9,6 +9,7 @@ import { app } from "electron";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
+import { isRdpCredentialFailure } from "@shared";
 import type {
   ActivityLogRecord,
   RdpCertificateInfo,
@@ -97,12 +98,34 @@ interface PendingConnect {
   reject: (error: Error) => void;
 }
 
+/**
+ * 붙지 못한 접속. 코어가 판정한 까닭 코드를 싣는다 — 로그온 거절의 까닭(NTSTATUS)은 문장 끝에만 있어 부른 쪽이 문구로는
+ * 가를 수 없다. reported 는 이 실패를 화면에 이미 알렸는지다(오류 이벤트로). VNC 의 VncConnectError 와 같은 모양이다.
+ *
+ * 이름(name)은 바꾸지 않는다 — 부른 쪽이 그대로 던지면 화면은 'Error: …'로 받아 앞머리를 벗기는데, 이름이 다르면 그것이
+ * 실패 문구에 남는다.
+ */
+export class RdpConnectError extends Error {
+  constructor(
+    message: string,
+    readonly failure: string | null,
+    readonly reported: boolean,
+  ) {
+    super(message);
+  }
+}
+
 export class RdpManager {
   private process: ChildProcessWithoutNullStreams | null = null;
   private parser = new CoreFrameParser();
   private requestSeq = 0;
   private readonly pending = new Map<string, PendingConnect>();
   private readonly sessions = new Set<string>();
+  /**
+   * 붙는 중에 비밀번호가 없거나 거절돼 끝난 세션 — 탭은 요청 창의 답을 기다린다. 코어는 실패 뒤에 늘 closed 를 보내는데,
+   * 그것을 화면에 알리면 아직 붙는 중인 그 탭이 지워진다(다시 시도가 이어 쓸 탭). 그 closed 는 메인의 정리에만 쓴다.
+   */
+  private readonly awaitingCredentials = new Set<string>();
 
   /**
    * 세션마다 마지막으로 알린 접속 정보(데스크톱 크기 + 모니터 배치).
@@ -465,10 +488,12 @@ export class RdpManager {
 
     child.on("exit", (code) => {
       // 프로세스가 죽으면 붙어 있던 세션은 전부 끝난 것으로 본다.
-      for (const sessionId of this.sessions) {
-        this.emitEvent({ type: "closed", sessionId });
+      // 요청 창을 기다리는 탭의 세션(코어의 closed 를 못 받은 채 끝났다)은 메인의 정리만 한다 — 화면에 알리면 그 탭이 지워진다.
+      for (const sessionId of new Set([...this.sessions, ...this.awaitingCredentials])) {
+        this.emitEvent({ type: "closed", sessionId }, { toScreens: !this.awaitingCredentials.has(sessionId) });
       }
       this.sessions.clear();
+      this.awaitingCredentials.clear();
       this.rejectAllPending(new Error(`RDP core exited (code ${code ?? "unknown"})`));
       this.parser = new CoreFrameParser();
       this.process = null;
@@ -573,17 +598,25 @@ export class RdpManager {
           typeof payload?.failure === "string" && payload.failure.trim()
             ? payload.failure
             : null;
+        // 붙는 중에 비밀번호가 없거나 거절돼 끝났으면 화면에 알리지 않는다 — 부른 쪽(ipc/rdp.ts)이 결과로 받아 요청 창을
+        // 띄운다. 알리면 화면이 실패 카드를 한 번 그렸다가 요청 창으로 바뀐다.
+        const reported = Boolean(event.sessionId) && !(pending && isRdpCredentialFailure(failure));
+        if (event.sessionId) {
+          if (reported) {
+            this.emitEvent({
+              type: "error",
+              sessionId: event.sessionId,
+              message,
+              failure,
+            });
+          } else {
+            this.awaitingCredentials.add(event.sessionId);
+          }
+        }
+        // 화면에 알린 뒤에 깨뜨린다 — 부른 쪽은 까닭과 '이미 알렸다'를 보고 고른다.
         if (pending && event.requestId) {
           this.pending.delete(event.requestId);
-          pending.reject(new Error(message));
-        }
-        if (event.sessionId) {
-          this.emitEvent({
-            type: "error",
-            sessionId: event.sessionId,
-            message,
-            failure,
-          });
+          pending.reject(new RdpConnectError(message, failure, reported));
         }
         return;
       }
@@ -726,12 +759,16 @@ export class RdpManager {
           this.sessions.delete(event.sessionId);
           // graceful 이면 자동 재연결을 하지 않는다. 이 값을 흘리면 사용자가 로그오프한
           // 세션이 되살아난다.
-          this.emitEvent({
-            type: "closed",
-            sessionId: event.sessionId,
-            graceful: payload?.graceful === true,
-            reason: payload?.reason ?? null,
-          });
+          this.emitEvent(
+            {
+              type: "closed",
+              sessionId: event.sessionId,
+              graceful: payload?.graceful === true,
+              reason: payload?.reason ?? null,
+            },
+            // 요청 창을 기다리는 탭에는 알리지 않는다(awaitingCredentials). 통로·모니터 창 정리는 그대로 한다.
+            { toScreens: !this.awaitingCredentials.delete(event.sessionId) },
+          );
         }
         return;
       }
@@ -741,7 +778,7 @@ export class RdpManager {
     }
   }
 
-  private emitEvent(event: RdpSessionEvent): void {
+  private emitEvent(event: RdpSessionEvent, options: { toScreens?: boolean } = {}): void {
     // 프로세스 사망이 만드는 합성 closed 까지 전부 이 함수를 지나므로, lifecycle 로그는
     // 여기서 한 번에 처리한다.
     if (event.type === "connected") {
@@ -754,7 +791,9 @@ export class RdpManager {
       this.ownerBySession.delete(event.sessionId);
     }
     this.onSessionEvent?.(event);
-    this.broadcast("rdp:event", event);
+    if (options.toScreens !== false) {
+      this.broadcast("rdp:event", event);
+    }
   }
 
   private markLifecycleConnected(sessionId: string): void {

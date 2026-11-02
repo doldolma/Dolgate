@@ -739,8 +739,8 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
         tmux ? tmuxVersion : undefined,
       );
     },
-    retryRdpConnection: async (sessionId) => {
-      await retryRdpConnection(set, get, sessionId);
+    retryRdpConnection: async (sessionId, attempt) => {
+      await retryRdpConnection(set, get, sessionId, attempt);
     },
     retryVncConnection: async (sessionId, attempt) => {
       await retryVncConnection(set, get, sessionId, attempt);
@@ -2547,6 +2547,26 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             ...(vncFailureAsksAccount(pending.vncFailure) ? { username: input.username.trim() } : {}),
             password: input.password,
           },
+        });
+        return;
+      }
+
+      // RDP 호스트 자신의 값 — 요청 창을 먼저 닫고 같은 탭을 넣은 값으로 다시 붙인다. Windows 계정은 계정·비밀번호·도메인이
+      // 한 묶음이라 셋을 함께 보낸다(도메인은 비울 수 있다).
+      if (pending.rdpFailure) {
+        const username = input.username.trim();
+        if (!username) {
+          throw new Error(t("credentialRetry.usernameRequired"));
+        }
+        if (!input.password) {
+          throw new Error(t("credentialRetry.passwordRequired"));
+        }
+        if (!pending.sessionId) {
+          return;
+        }
+        set({ pendingCredentialRetry: null });
+        await get().retryRdpConnection(pending.sessionId, {
+          rdpSecrets: { username, password: input.password, domain: input.domain?.trim() ?? "" },
         });
         return;
       }

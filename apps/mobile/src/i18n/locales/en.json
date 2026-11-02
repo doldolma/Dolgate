@@ -162,7 +162,11 @@
     "accountAuthRejected": "Account-based authentication uses this computer's login password. To connect with the separately configured VNC password instead, leave the account empty in the credentials.",
     "passwordRequired": "This server requires a password. Add one to the credentials.",
     "accountRequired": "This server requires an account name. Add one to the credentials.",
-    "passwordTruncated": "The password was rejected. VNC only uses the first 8 characters, so try one that is 8 characters or shorter."
+    "passwordTruncated": "The password was rejected. VNC only uses the first 8 characters, so try one that is 8 characters or shorter.",
+    "accountLocked": "The account is locked. Try again after it unlocks, or contact your administrator.",
+    "accountDisabled": "The account is disabled or has expired. Contact your administrator.",
+    "passwordExpired": "The password has expired or must be changed. Change it (or ask your administrator to), then try again.",
+    "logonDenied": "This account isn't allowed to sign in to this computer remotely. Ask your administrator to check its Remote Desktop permission and sign-in restrictions."
   },
   "store": {
     "serverSlow": "The server is slow to respond. Try again.",

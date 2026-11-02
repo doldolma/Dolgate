@@ -1812,6 +1812,20 @@ pub fn build_monitor_layout(monitors: &[crate::protocol::MonitorRequest]) -> any
     })
 }
 
+/// 서버가 NLA 를 골랐는데(이 코어는 NLA 만 청한다) 보낼 비밀번호가 없으면 자격 증명을 보내기 전에
+/// 멈춘다. 빈 값을 보내면 서버가 거절하며 그 계정의 실패 횟수만 는다(잠금 정책) — 앱은 이 까닭을
+/// 보고 비밀번호를 묻는다.
+fn ensure_password_for_nla(connector: &connector::ClientConnector) -> anyhow::Result<()> {
+    let has_password = matches!(
+        &connector.config.credentials,
+        Credentials::UsernamePassword { password, .. } if !password.is_empty()
+    );
+    if connector.should_perform_credssp() && !has_password {
+        return Err(anyhow::Error::new(crate::failure::Failure::PasswordRequired));
+    }
+    Ok(())
+}
+
 fn build_config(
     allow_egfx: bool,
     payload: &ConnectPayload,
@@ -2123,15 +2137,32 @@ fn connect(
     }
 
     let upgraded = ironrdp_blocking::mark_as_upgraded(should_upgrade, &mut connector);
+
+    // 인증서는 위에서 이미 확인했다 — 비밀번호를 묻는 것은 맞는 서버라고 안 뒤다.
+    ensure_password_for_nla(&connector)?;
+
     let mut upgraded_framed = ironrdp_blocking::Framed::new(upgraded_stream);
 
     let mut network_client = ReqwestNetworkClient;
+    let server_name: connector::ServerName = server_name.into();
+    // NLA 는 우리가 돌린다 — 증명을 보낸 직후의 끊김을 거절로 알아야 한다(crate::nla). 끝나면 커넥터가
+    // 그 단계를 건너뛴다.
+    if connector.should_perform_credssp() {
+        crate::nla::perform_credssp(
+            &mut connector,
+            &mut upgraded_framed,
+            &mut network_client,
+            server_name.clone(),
+            server_public_key.clone(),
+        )
+        .context("finalize connection")?;
+    }
     let connection_result = ironrdp_blocking::connect_finalize(
         upgraded,
         connector,
         &mut upgraded_framed,
         &mut network_client,
-        server_name.into(),
+        server_name,
         server_public_key,
         None,
     )
@@ -2664,6 +2695,72 @@ mod admin_session_tests {
         }))
         .expect("payload");
         assert!(parsed.admin_session, "camelCase 로 읽어야 한다");
+    }
+}
+
+/// 서버가 NLA 를 골랐을 때 비밀번호가 없으면 보내기 전에 멈추는지.
+#[cfg(test)]
+mod password_for_nla_tests {
+    use super::{build_config, ensure_password_for_nla};
+    use crate::protocol::{ConnectPayload, MonitorRequest};
+    use ironrdp::connector::{self, ClientConnectorState};
+    use ironrdp::pdu::nego::SecurityProtocol;
+
+    fn connector_with(password: &str, state: ClientConnectorState) -> connector::ClientConnector {
+        let payload = ConnectPayload {
+            host: "host".to_owned(),
+            port: 3389,
+            username: "user".to_owned(),
+            password: password.to_owned(),
+            domain: None,
+            microphone: false,
+            camera: false,
+            monitors: vec![MonitorRequest {
+                width: 1920,
+                height: 1080,
+                left: 0,
+                top: 0,
+                primary: true,
+            }],
+            audio: true,
+            clipboard: true,
+            color_depth: None,
+            dial_address: None,
+            tunnel_auth_token: None,
+            admin_session: false,
+            drives: Vec::new(),
+        };
+        let mut connector = connector::ClientConnector::new(
+            build_config(true, &payload, 1920, 1080, Vec::new()),
+            "127.0.0.1:0".parse().expect("address"),
+        );
+        connector.state = state;
+        connector
+    }
+
+    fn nla() -> ClientConnectorState {
+        ClientConnectorState::Credssp {
+            selected_protocol: SecurityProtocol::HYBRID_EX,
+        }
+    }
+
+    #[test]
+    fn stops_before_nla_without_a_password() {
+        let error = ensure_password_for_nla(&connector_with("", nla())).expect_err("must stop");
+        assert_eq!(crate::failure::code(&error), Some("password-required"));
+    }
+
+    #[test]
+    fn goes_on_with_a_password() {
+        assert!(ensure_password_for_nla(&connector_with("secret", nla())).is_ok());
+    }
+
+    #[test]
+    fn goes_on_when_the_server_did_not_pick_nla() {
+        let tls_only = ClientConnectorState::BasicSettingsExchangeSendInitial {
+            selected_protocol: SecurityProtocol::SSL,
+        };
+        assert!(ensure_password_for_nla(&connector_with("", tls_only)).is_ok());
     }
 }
 

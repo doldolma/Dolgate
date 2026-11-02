@@ -240,3 +240,96 @@ describe("CredentialRetryDialog for a VNC host", () => {
     await vi.waitFor(() => expect(mayClear).toHaveBeenCalledWith(expect.objectContaining({ username: "", password: "pw" })));
   });
 });
+
+// 다듬기 3단계(RDP) — RDP 호스트 자신의 값도 같은 요청 창으로 묻는다. Windows 계정은 계정·비밀번호·도메인이 한 묶음이라 셋을 함께.
+describe("CredentialRetryDialog for an RDP host", () => {
+  const base = {
+    hostId: "rdp-1",
+    hostLabel: "Win Box",
+    source: "rdp" as const,
+    authType: "password" as const,
+    message: "Win Box 계정과 비밀번호를 넣어 주세요.",
+    initialUsername: "",
+    // 저장된 값이 있어도(방금 거절됨) 비밀번호는 새로 넣어야 한다.
+    hasStoredSecret: true,
+  };
+
+  it("asks for the account, password and domain under an RDP heading", () => {
+    render(
+      <CredentialRetryDialog
+        request={{ ...base, rdpFailure: "password-required" }}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    expect(screen.getByText("RDP Retry")).toBeInTheDocument();
+    expect(screen.getByLabelText("Username")).toHaveFocus();
+    expect(screen.getByLabelText("Password")).toBeInTheDocument();
+    expect(screen.getByLabelText("Domain")).toHaveValue("");
+    expect(screen.getByLabelText("Domain")).toHaveAttribute("placeholder", t("hostForm.rdp.domainPlaceholder"));
+  });
+
+  it("fills the account and domain it used and starts at the password", () => {
+    render(
+      <CredentialRetryDialog
+        request={{ ...base, rdpFailure: "auth-rejected", initialUsername: "alice", initialDomain: "CORP" }}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    expect(screen.getByLabelText("Username")).toHaveValue("alice");
+    expect(screen.getByLabelText("Domain")).toHaveValue("CORP");
+    expect(screen.getByLabelText("Password")).toHaveFocus();
+  });
+
+  it("requires the account and a new password even when one is stored", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const first = render(
+      <CredentialRetryDialog request={{ ...base, rdpFailure: "auth-rejected" }} onClose={vi.fn()} onSubmit={onSubmit} />,
+    );
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw" } });
+    fireEvent.click(screen.getByRole("button", { name: t("credentialRetry.retry") }));
+    expect(await screen.findByText(t("credentialRetry.usernameRequired"))).toBeInTheDocument();
+    first.unmount();
+
+    render(
+      <CredentialRetryDialog
+        request={{ ...base, rdpFailure: "auth-rejected", initialUsername: "alice" }}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: t("credentialRetry.retry") }));
+    expect(await screen.findByText(t("credentialRetry.passwordRequired"))).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("sends the account, password and domain together — an emptied domain as it is", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <CredentialRetryDialog
+        request={{ ...base, rdpFailure: "auth-rejected", initialUsername: "alice", initialDomain: "CORP" }}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "typed" } });
+    fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "  " } });
+    fireEvent.click(screen.getByRole("button", { name: t("credentialRetry.retry") }));
+    await vi.waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ username: "alice", password: "typed", domain: "" })),
+    );
+  });
+
+  // 다른 종류의 창에는 도메인 칸이 없다.
+  it("keeps the domain field to RDP", () => {
+    render(
+      <CredentialRetryDialog
+        request={{ ...base, source: "vnc", vncFailure: "account-required" }}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    expect(screen.queryByLabelText("Domain")).not.toBeInTheDocument();
+  });
+});

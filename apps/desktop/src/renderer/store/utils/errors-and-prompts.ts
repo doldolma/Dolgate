@@ -187,6 +187,12 @@ export function resolveConnectionFailurePresentation(
     "password-required": () => t('connectFailure.passwordRequired'),
     "account-required": () => t('connectFailure.accountRequired'),
     "password-truncated": () => t('connectFailure.passwordTruncated'),
+    // RDP 로그온에서 다시 넣어도 풀리지 않는 것. 서버가 실은 NTSTATUS 를 rdp-core 가 읽어 코드로 올려 준다(src/failure.rs)
+    // — 요청 창 대신 할 일을 말한다.
+    "account-locked": () => t('connectFailure.accountLocked'),
+    "account-disabled": () => t('connectFailure.accountDisabled'),
+    "password-expired": () => t('connectFailure.passwordExpired'),
+    "logon-denied": () => t('connectFailure.logonDenied'),
     cancelled: () => t('connectFailure.cancelled'),
     "aws-auth": () => t('connectFailure.awsAuthFailed'),
     // 권한 부족은 다시 로그인해도 풀리지 않는다 — 고칠 곳은 정책이다. 어느 액션이 거부됐는지
@@ -223,6 +229,10 @@ export function resolveConnectionFailurePresentation(
     "password-required": "Password Required",
     "account-required": "Account Required",
     "password-truncated": "Authentication Failed",
+    "account-locked": "Account Locked",
+    "account-disabled": "Account Disabled",
+    "password-expired": "Password Expired",
+    "logon-denied": "Sign-in Not Allowed",
     "aws-auth": "AWS Authentication Required",
     "aws-permission": "AWS Permission Required",
   };

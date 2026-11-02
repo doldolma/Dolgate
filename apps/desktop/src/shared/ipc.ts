@@ -619,10 +619,15 @@ export interface ConnectCredentialsNeeded {
   reason: "missing" | "rejected";
   /** rejected 일 때 코어가 올린 문구. */
   message?: string;
-  /** VNC 호스트 자신이 계정·비밀번호를 요구하거나 거절했을 때 그 까닭 코드 — 화면이 계정까지 묻는지와 문구를 고른다. */
-  failure?: import("./vnc").VncCredentialFailure;
-  /** 그 시도에서 VNC 가 쓴 계정. 계정까지 묻는 창에 미리 채운다(비밀이 아니다). */
+  /**
+   * VNC·RDP 호스트 자신이 계정·비밀번호를 요구하거나 거절했을 때 그 까닭 코드 — 화면이 계정까지 묻는지와 문구를 고른다.
+   * 어느 쪽인지는 hostId 의 호스트 종류가 정한다.
+   */
+  failure?: import("./vnc").VncCredentialFailure | import("./rdp").RdpCredentialFailure;
+  /** 그 시도에서 VNC·RDP 가 쓴 계정. 계정까지 묻는 창에 미리 채운다(비밀이 아니다). */
   username?: string;
+  /** 그 시도에서 RDP 가 쓴 도메인. 요청 창에 미리 채운다(비밀이 아니다). */
+  domain?: string;
 }
 
 export interface CredentialsNeededResult {
@@ -649,6 +654,8 @@ export interface ConnectAttemptSecrets {
    * 그것을 쓴다(계정을 비워 VNC 암호로 붙기).
    */
   vncSecrets?: Pick<HostSecretInput, "username" | "password">;
+  /** RDP 호스트 자신의 값(계정·비밀번호·도메인) — 요청 창이 셋을 함께 받으므로 실려 있으면 셋 모두 이것을 쓴다. */
+  rdpSecrets?: Pick<HostSecretInput, "username" | "password" | "domain">;
 }
 
 export type AgentForwardingEndpointKind = "unix" | "windows-openssh-pipe";
@@ -1934,7 +1941,9 @@ export interface DesktopApi {
        * 대신한다.
        */
       viewport?: { width: number; height: number },
-    ) => Promise<import("./rdp").RdpConnectedPayload>;
+      /** 요청 창에 넣은 값(rdpSecrets). 저장된 것보다 먼저 쓰고, 붙으면 제자리에 저장한다. */
+      attempt?: ConnectAttemptSecrets,
+    ) => Promise<import("./rdp").RdpConnectedPayload | CredentialsNeededResult | ConnectFailureReportedResult>;
     disconnect: (sessionId: string) => Promise<void>;
     sendInput: (
       sessionId: string,

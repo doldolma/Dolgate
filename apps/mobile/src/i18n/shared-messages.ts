@@ -135,6 +135,11 @@ const CONNECT_FAILURE_KEYS = {
   "password-required": "connectFailure.passwordRequired",
   "account-required": "connectFailure.accountRequired",
   "password-truncated": "connectFailure.passwordTruncated",
+  // RDP 로그온에서 다시 넣어도 풀리지 않는 것 — 서버가 실은 NTSTATUS 를 rdp-core 가 읽어 코드로 올려 준다(src/failure.rs).
+  "account-locked": "connectFailure.accountLocked",
+  "account-disabled": "connectFailure.accountDisabled",
+  "password-expired": "connectFailure.passwordExpired",
+  "logon-denied": "connectFailure.logonDenied",
 } as const;
 
 export const CONNECT_FAILURE_MESSAGE_KEYS: readonly string[] = [

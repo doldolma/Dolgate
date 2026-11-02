@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { SshCertificateInfo, VncCredentialFailure } from "@shared";
+import type { RdpCredentialFailure, SshCertificateInfo, VncCredentialFailure } from "@shared";
 import type { CredentialRetryInput } from "../store/types";
 import { vncFailureAsksAccount } from "../store/utils";
 import { useHostFormController } from "../controllers/useHostFormController";
@@ -43,7 +43,7 @@ export interface CredentialRetryDialogRequest {
   hostId: string;
   hostLabel: string;
   /** 머리말만 가른다 — SFTP 가 아니면 모두 SSH 접속이다(포트 포워딩·컨테이너·VNC 터널도). */
-  source: "ssh" | "sftp" | "portForward" | "containers" | "containerShell" | "vnc";
+  source: "ssh" | "sftp" | "portForward" | "containers" | "containerShell" | "vnc" | "rdp";
   authType: "password" | "privateKey" | "certificate";
   message: string;
   initialUsername: string;
@@ -51,6 +51,10 @@ export interface CredentialRetryDialogRequest {
   secretRef?: string | null;
   /** VNC 호스트 자신의 값을 묻는다 — 비밀번호만, 계정을 요구하는 서버면 계정도. */
   vncFailure?: VncCredentialFailure;
+  /** RDP 호스트 자신의 값을 묻는다 — Windows 계정은 계정·비밀번호·도메인이 한 묶음이라 셋을 함께. */
+  rdpFailure?: RdpCredentialFailure;
+  /** RDP 도메인 칸에 미리 채울 값. */
+  initialDomain?: string;
 }
 
 interface ImportedRetryFile {
@@ -73,6 +77,7 @@ export function CredentialRetryDialog({
   const { pickPrivateKey, pickSshCertificate } = useHostFormController();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [domain, setDomain] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [privateKeyFile, setPrivateKeyFile] =
     useState<ImportedRetryFile | null>(null);
@@ -86,6 +91,7 @@ export function CredentialRetryDialog({
   useEffect(() => {
     setUsername(request?.initialUsername ?? "");
     setPassword("");
+    setDomain(request?.initialDomain ?? "");
     setPassphrase("");
     setPrivateKeyFile(null);
     setCertificateFile(null);
@@ -148,6 +154,9 @@ export function CredentialRetryDialog({
   // VNC 호스트 자신의 값이면 비밀번호만 묻는다 — 계정은 계정으로 로그인하는 서버(macOS 화면 공유)일 때만.
   const vncFailure = request.vncFailure;
   const showUsername = !vncFailure || vncFailureAsksAccount(vncFailure);
+  const rdpFailure = request.rdpFailure;
+  // RDP 는 계정을 미리 채웠으면(쓴 계정) 비밀번호 칸에서 시작한다 — 바꿀 것은 대개 비밀번호다.
+  const focusPassword = !showUsername || (Boolean(rdpFailure) && Boolean(request.initialUsername.trim()));
 
   return (
     <DialogBackdrop dismissOnBackdrop={false}>
@@ -159,7 +168,13 @@ export function CredentialRetryDialog({
         <ModalHeader>
           <div>
             <SectionLabel>
-              {vncFailure ? "VNC Retry" : request.source === "sftp" ? "SFTP Retry" : "SSH Retry"}
+              {rdpFailure
+                ? "RDP Retry"
+                : vncFailure
+                  ? "VNC Retry"
+                  : request.source === "sftp"
+                    ? "SFTP Retry"
+                    : "SSH Retry"}
             </SectionLabel>
             <h3 id="credential-retry-title">
               {translate('credentialRetry.prompt', { label: request.hostLabel })}
@@ -191,13 +206,13 @@ export function CredentialRetryDialog({
           {showUsername ? (
             <FieldGroup label="Username">
               <Input
-                autoFocus
+                autoFocus={!focusPassword}
                 value={username}
                 onChange={(event) => {
                   setUsername(event.target.value);
                   setError(null);
                 }}
-                placeholder={vncFailure ? "macOS account" : "ubuntu"}
+                placeholder={rdpFailure ? "Administrator" : vncFailure ? "macOS account" : "ubuntu"}
               />
             </FieldGroup>
           ) : null}
@@ -205,7 +220,7 @@ export function CredentialRetryDialog({
           {request.authType === "password" ? (
             <FieldGroup label="Password">
               <Input
-                autoFocus={!showUsername}
+                autoFocus={focusPassword}
                 type="password"
                 value={password}
                 onChange={(event) => {
@@ -213,6 +228,19 @@ export function CredentialRetryDialog({
                   setError(null);
                 }}
                 placeholder="Enter password"
+              />
+            </FieldGroup>
+          ) : null}
+
+          {rdpFailure ? (
+            <FieldGroup label="Domain">
+              <Input
+                value={domain}
+                onChange={(event) => {
+                  setDomain(event.target.value);
+                  setError(null);
+                }}
+                placeholder={translate('hostForm.rdp.domainPlaceholder')}
               />
             </FieldGroup>
           ) : null}
@@ -315,8 +343,14 @@ export function CredentialRetryDialog({
                 setError(translate('credentialRetry.usernameRequired'));
                 return;
               }
+              // RDP 는 비밀번호를 늘 새로 넣는다 — 저장된 것이 없거나 방금 거절됐다.
+              if (rdpFailure && !password) {
+                setError(translate('credentialRetry.passwordRequired'));
+                return;
+              }
               if (
                 !vncFailure &&
+                !rdpFailure &&
                 request.authType === "password" &&
                 !request.hasStoredSecret &&
                 !password
@@ -354,6 +388,7 @@ export function CredentialRetryDialog({
                 await onSubmit({
                   username: username.trim(),
                   password: password || undefined,
+                  ...(rdpFailure ? { domain: domain.trim() } : {}),
                   passphrase: passphrase || undefined,
                   privateKeyPem: privateKeyFile?.content,
                   certificateText: certificateFile?.content,

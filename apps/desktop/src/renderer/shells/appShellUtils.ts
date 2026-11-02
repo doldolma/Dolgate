@@ -26,8 +26,15 @@ export function credentialRetryDialogRequest(
     return null;
   }
   const host = findHost(hosts, pending.promptHostId ?? pending.hostId);
-  // SSH 호스트의 값을 묻거나, VNC 호스트 자신의 계정·비밀번호를 묻는다(vncFailure).
-  if (!host || !(host.kind === 'ssh' || (pending.vncFailure && host.kind === 'vnc'))) {
+  // SSH 호스트의 값을 묻거나, VNC·RDP 호스트 자신의 계정·비밀번호(RDP 는 도메인까지)를 묻는다(vncFailure·rdpFailure).
+  if (
+    !host ||
+    !(
+      host.kind === 'ssh' ||
+      (pending.vncFailure && host.kind === 'vnc') ||
+      (pending.rdpFailure && host.kind === 'rdp')
+    )
+  ) {
     return null;
   }
   return {

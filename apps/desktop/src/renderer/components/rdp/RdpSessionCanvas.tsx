@@ -5,7 +5,7 @@ import type {
   RdpSessionEvent,
 } from "@shared";
 import { cn } from "../../lib/cn";
-import { useAppStore } from "../../store/appStore";
+import { appStore, useAppStore } from "../../store/appStore";
 import { subscribeRdpEvents, trustRdpCertificate } from "../../services/desktop/rdp";
 import type { RdpCanvasRegion } from "./canvas-region";
 import { RdpCertificatePrompt } from "./RdpCertificatePrompt";
@@ -90,8 +90,11 @@ export function RdpSessionCanvas({
   const [desktop, setDesktop] = useState<RdpConnectedPayload | null>(connected ?? null);
   const [error, setError] = useState<string | null>(null);
   // 인증서 프롬프트는 스토어에 둔다 — 연결 오버레이가 그동안 자기를 내려야 하는데, 그쪽은 이
-  // 컴포넌트의 형제라 로컬 state 를 볼 수 없다(store/types.ts 주석 참고).
-  const certificatePrompt = useAppStore((state) => state.pendingRdpCertificatePrompt);
+  // 컴포넌트의 형제라 로컬 state 를 볼 수 없다(store/types.ts 주석 참고). 스토어에는 하나뿐이라
+  // 이 세션의 것만 그린다 — 다른 탭의 물음이 이 탭에 겹쳐 뜨면 누구에게 답하는지 알 수 없다.
+  const pendingCertificatePrompt = useAppStore((state) => state.pendingRdpCertificatePrompt);
+  const certificatePrompt =
+    pendingCertificatePrompt?.sessionId === sessionId ? pendingCertificatePrompt : null;
   const setCertificatePrompt = useAppStore(
     (state) => state.setPendingRdpCertificatePrompt,
   );
@@ -138,9 +141,26 @@ export function RdpSessionCanvas({
       } else if (event.type === "closed") {
         setDesktop(null);
         setAssignedRegion(null);
+        // 붙기 전에 끝났다(탭을 닫음·팀에서 빠짐) — 이 세션의 인증서 물음도 거둔다. 남기면 닫힌 탭 위에 답할 곳 없는 물음이 남아
+        // 그 까닭(팀에서 빠짐)을 가린다. 메인은 같은 때 그 물음을 거절로 닫는다.
+        if (appStore.getState().pendingRdpCertificatePrompt?.sessionId === sessionId) {
+          setCertificatePrompt(null);
+        }
       }
     });
   }, [sessionId]);
+
+  // 탭을 닫아(이 캔버스가 내려감) 세션이 끝나면 그 세션의 인증서 물음도 거둔다. 엔진의 닫힘 알림은 판정을 기다리느라 늦게 오고,
+  // 두면 다음에 여는 RDP 탭에 답할 곳 없는 물음이 남는다. 메인은 끊을 때 그 물음을 거절로 닫는다.
+  useEffect(
+    () => () => {
+      const state = appStore.getState();
+      if (state.pendingRdpCertificatePrompt?.sessionId === sessionId) {
+        state.setPendingRdpCertificatePrompt(null);
+      }
+    },
+    [sessionId],
+  );
 
   // 보조 창은 열릴 때 자기 영역을 프롭으로 받는다. 메인 창은 펼칠 때 이벤트로 받는다.
   const region = regionProp ?? assignedRegion;

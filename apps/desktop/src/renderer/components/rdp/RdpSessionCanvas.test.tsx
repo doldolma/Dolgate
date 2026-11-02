@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import { act } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RdpSessionEvent } from "@shared";
 
 const eventListeners = new Set<(event: RdpSessionEvent) => void>();
@@ -43,6 +43,7 @@ beforeEach(() => {
 });
 
 const { RdpSessionCanvas } = await import("./RdpSessionCanvas");
+const { appStore } = await import("../../store/appStore");
 
 function emit(event: RdpSessionEvent) {
   act(() => {
@@ -250,5 +251,64 @@ describe("RdpSessionCanvas visibility", () => {
 
     const root = container.firstElementChild as HTMLElement;
     expect(root.textContent).not.toContain("남의 오류");
+  });
+});
+
+// 3단계(RDP) 찾은 것 ③ — 붙기 전에 세션이 끝나면(탭을 닫음·팀에서 빠짐) 그 세션의 인증서 물음도 거둔다. 남으면 닫힌 탭 위에 답할 곳
+// 없는 물음이 남아 그 까닭(팀에서 빠짐)을 가렸다(실제 앱, 2026-11-02).
+describe("RdpSessionCanvas certificate prompt once the session ends", () => {
+  const promptFor = (sessionId: string) =>
+    ({
+      sessionId,
+      hostId: "h1",
+      hostLabel: "dolma-RDP",
+      status: "unknown",
+      certificate: { fingerprint: "AA:BB", subject: "CN=win", issuer: "CN=win", notAfter: "2027-01-01" },
+    }) as never;
+
+  afterEach(() => {
+    act(() => appStore.getState().setPendingRdpCertificatePrompt(null));
+  });
+
+  it("takes this session's prompt down when it closes", () => {
+    render(<RdpSessionCanvas sessionId="s1" visible />);
+    emit({ type: "certificatePrompt", sessionId: "s1", prompt: promptFor("s1") } as never);
+    expect(appStore.getState().pendingRdpCertificatePrompt).not.toBeNull();
+
+    emit({ type: "closed", sessionId: "s1", graceful: true, notice: "팀에서 빠져 이 연결을 닫았습니다." } as never);
+    expect(appStore.getState().pendingRdpCertificatePrompt).toBeNull();
+  });
+
+  it("leaves another session's prompt alone", () => {
+    render(<RdpSessionCanvas sessionId="s1" visible />);
+    act(() => appStore.getState().setPendingRdpCertificatePrompt(promptFor("s2")));
+
+    emit({ type: "closed", sessionId: "s1" } as never);
+    expect(appStore.getState().pendingRdpCertificatePrompt).toMatchObject({ sessionId: "s2" });
+  });
+
+  // 탭을 닫으면(캔버스가 내려감) 엔진의 닫힘은 늦게 온다 — 그때 거둔다. 두면 다음 RDP 탭에 남의 물음이 겹쳐 떴다(실제 앱).
+  it("takes its prompt down when the tab closes", () => {
+    const view = render(<RdpSessionCanvas sessionId="s1" visible />);
+    emit({ type: "certificatePrompt", sessionId: "s1", prompt: promptFor("s1") } as never);
+
+    view.unmount();
+    expect(appStore.getState().pendingRdpCertificatePrompt).toBeNull();
+  });
+
+  it("keeps another session's prompt when this tab closes", () => {
+    const view = render(<RdpSessionCanvas sessionId="s1" visible />);
+    act(() => appStore.getState().setPendingRdpCertificatePrompt(promptFor("s2")));
+
+    view.unmount();
+    expect(appStore.getState().pendingRdpCertificatePrompt).toMatchObject({ sessionId: "s2" });
+  });
+
+  it("draws only its own session's prompt", () => {
+    act(() => appStore.getState().setPendingRdpCertificatePrompt(promptFor("s2")));
+    const { container } = render(<RdpSessionCanvas sessionId="s1" visible />);
+
+    expect(container.textContent).not.toContain("AA:BB");
+    expect(container.querySelector("canvas")?.classList.contains("hidden")).toBe(false);
   });
 });

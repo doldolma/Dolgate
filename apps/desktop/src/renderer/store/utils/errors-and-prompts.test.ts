@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { t } from "../../i18n";
 import {
   connectFailureCopy,
   normalizeRemoteInvokeErrorMessage,
@@ -248,6 +249,27 @@ describe("resolveConnectionFailurePresentation", () => {
     expect(
       resolveConnectionFailurePresentation("…", { failure: "account-required" }).title,
     ).toBe("Account Required");
+  });
+
+  // RDP 로그온에서 다시 넣어도 풀리지 않는 것 — 서버가 실은 NTSTATUS 를 rdp-core 가 코드로 올린다(services/rdp-core/src/failure.rs).
+  // 원문은 영어 상태 이름뿐이라 그대로 두면 사용자는 무엇을 해야 할지 모른다.
+  it("presents RDP account problems from the cause code", () => {
+    const raw = "finalize connection: [CredSSP] CredSSP: InvalidToken: CredSSP server returned an error status";
+    const cases: Array<[string, string, string]> = [
+      ["account-locked", "Account Locked", "connectFailure.accountLocked"],
+      ["account-disabled", "Account Disabled", "connectFailure.accountDisabled"],
+      ["password-expired", "Password Expired", "connectFailure.passwordExpired"],
+      ["logon-denied", "Sign-in Not Allowed", "connectFailure.logonDenied"],
+    ];
+    for (const [failure, title, key] of cases) {
+      const presented = resolveConnectionFailurePresentation(raw, { failure });
+      expect(presented.title).toBe(title);
+      expect(presented.message).toBe(t(key));
+    }
+    // 요청 창을 취소하면 실패 카드가 남는다 — 비밀번호가 틀렸다는 코드는 VNC 와 같은 문구다.
+    expect(resolveConnectionFailurePresentation(raw, { failure: "auth-rejected" }).message).toBe(
+      "계정 또는 비밀번호를 확인하세요.",
+    );
   });
 
   it("presents timeout errors without raw Go wording", () => {

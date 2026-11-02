@@ -13,6 +13,8 @@ mod clipboard;
 mod drive;
 mod egfx;
 mod egfx_surface;
+mod failure;
+mod nla;
 
 pub mod ffi;
 pub mod output;

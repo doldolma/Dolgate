@@ -2833,7 +2833,11 @@
     "accountAuthRejected": "Account-based authentication uses this computer's login password. To connect with the separately configured VNC password instead, leave the account empty in the credentials.",
     "passwordRequired": "This server requires a password. Add one to the credentials.",
     "accountRequired": "This server requires an account name. Add one to the credentials.",
-    "passwordTruncated": "The password was rejected. VNC only uses the first 8 characters, so try one that is 8 characters or shorter."
+    "passwordTruncated": "The password was rejected. VNC only uses the first 8 characters, so try one that is 8 characters or shorter.",
+    "accountLocked": "The account is locked. Try again after it unlocks, or contact your administrator.",
+    "accountDisabled": "The account is disabled or has expired. Contact your administrator.",
+    "passwordExpired": "The password has expired or must be changed. Change it (or ask your administrator to), then try again.",
+    "logonDenied": "This account isn't allowed to sign in to this computer remotely. Ask your administrator to check its Remote Desktop permission and sign-in restrictions."
   },
   "knownHostsIpc": {
     "noSecrets": "There is no credential to save.",
@@ -3310,7 +3314,9 @@
     "vncPasswordRejected": "The password was not accepted. Enter it again.",
     "vncPasswordTruncated": "VNC only uses the first 8 characters of a password. Enter one that is 8 characters or shorter.",
     "vncAccountNeeded": "Enter the account and password for {{label}}.",
-    "vncAccountRejected": "The account or password was not accepted. To connect with the VNC password instead, leave the account empty."
+    "vncAccountRejected": "The account or password was not accepted. To connect with the VNC password instead, leave the account empty.",
+    "rdpCredentialsNeeded": "Enter the account and password for {{label}}.",
+    "rdpCredentialsRejected": "The account or password was not accepted. Enter them again."
   },
   "opensshSvc": {
     "circularInclude": "Skipped a circular Include in {{path}}.",

@@ -77,7 +77,8 @@ vi.mock("electron", () => ({
   },
 }));
 
-const { registerRdpIpcHandlers } = await import("./rdp");
+const { registerRdpIpcHandlers, createCertificatePromptBridge } = await import("./rdp");
+const { RdpConnectError } = await import("../rdp-manager");
 
 const CERT: RdpCertificateInfo = {
   fingerprint: "AA:BB:CC",
@@ -157,6 +158,7 @@ function createHarness(
     },
     activityLogs: { append: vi.fn() },
     queueSync: vi.fn(),
+    persistHostSpecificSecret: vi.fn(async () => null as string | null),
   };
 
   let verifier:
@@ -179,13 +181,15 @@ function createHarness(
   };
 
   const askCertificate = vi.fn(async () => true);
+  const cancelCertificate = vi.fn();
 
-  registerRdpIpcHandlers(withVaults(ctx) as never, rdpManager as never, { askCertificate });
+  registerRdpIpcHandlers(withVaults(ctx) as never, rdpManager as never, { askCertificate, cancelCertificate });
 
   return {
     ctx,
     rdpManager,
     askCertificate,
+    cancelCertificate,
     handlers,
     host,
     // 인증서 판정은 connect 가 진행되는 도중에 불린다. 그 순서를 그대로 재현한다.
@@ -201,6 +205,49 @@ function createHarness(
     },
   };
 }
+
+// 3단계(RDP) 찾은 것 ③ — 붙기 전에 세션이 끝나면(탭을 닫음·팀에서 빠짐) 떠 있던 인증서 물음을 거절로 닫는다. 두면 엔진이 판정을 3분까지
+// 기다리며 남고, 화면에는 답할 곳 없는 물음이 남았다(실제 앱, 2026-11-02).
+describe("a certificate prompt whose session ends", () => {
+  it("is closed when the session closes", () => {
+    const harness = createHarness("AA:BB:CC");
+    (harness.rdpManager as unknown as { onSessionEvent: (event: unknown) => void }).onSessionEvent({
+      type: "closed",
+      sessionId: "sess-1",
+      graceful: true,
+      notice: "팀에서 빠져 이 연결을 닫았습니다.",
+    });
+    expect(harness.cancelCertificate).toHaveBeenCalledWith("sess-1");
+  });
+
+  // 탭을 닫으면 엔진의 닫힘은 판정을 기다리느라 늦게 온다 — 끊을 때 바로 닫는다. 끊기를 먼저 보내야 엔진이 조용히 접는다.
+  it("is closed when its tab is closed, after the disconnect", async () => {
+    const harness = createHarness("AA:BB:CC");
+    await harness.handlers.get("rdp:disconnect")!({}, "sess-1");
+    expect(harness.cancelCertificate).toHaveBeenCalledWith("sess-1");
+    expect(harness.rdpManager.disconnect.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.cancelCertificate.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("answers no for that session only, and a late answer changes nothing", async () => {
+    const broadcast = vi.fn();
+    const bridge = createCertificatePromptBridge(broadcast);
+    const prompt = (sessionId: string) =>
+      ({ sessionId, hostId: "rdp-1", hostLabel: "Win Box", status: "unknown", certificate: CERT }) as never;
+    const ended = bridge.ask(prompt("sess-1"));
+    const other = bridge.ask(prompt("sess-2"));
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "certificatePrompt", sessionId: "sess-1" }));
+
+    bridge.cancel("sess-1");
+    await expect(ended).resolves.toBe(false);
+
+    // 닫힌 세션에 늦게 온 답은 버리고, 다른 세션의 물음은 그대로 답을 받는다.
+    await handlers.get("rdp:trust-certificate")!({}, "sess-1", true);
+    await handlers.get("rdp:trust-certificate")!({}, "sess-2", true);
+    await expect(other).resolves.toBe(true);
+  });
+});
 
 describe("registerRdpIpcHandlers certificate trust", () => {
   // 팀 호스트의 핀은 그 팀 레코드에 둔다(읽기 전용이면 내 칸에) — 카탈로그가 그 호스트의 볼트로 보낸다.
@@ -585,6 +632,151 @@ describe("registerRdpIpcHandlers monitor layout", () => {
     );
   });
 
+  // 다듬기 3단계(RDP) — 요청 창에 넣은 값으로 붙고, 비밀번호가 없거나 거절되면 실패 대신 '자격 증명 필요'를 돌려준다.
+  describe("the request dialog", () => {
+    const typed = { rdpSecrets: { username: "alice", password: "typed", domain: "CORP" } };
+    function harnessWithStored() {
+      const harness = createHarness("AA:BB:CC");
+      harness.ctx.loadSecrets = vi.fn(async () => ({ username: "Administrator", domain: "OLD", password: "stored" }));
+      const connect = (attempt?: unknown) =>
+        harness.handlers.get("rdp:connect")!({ sender: { id: 1 } }, "sess-1", "rdp-1", undefined, attempt);
+      return { ...harness, connect };
+    }
+
+    it("connects with the typed account, password and domain before the stored ones", async () => {
+      const harness = harnessWithStored();
+
+      await harness.connect(typed);
+
+      expect(harness.rdpManager.connect).toHaveBeenCalledWith(
+        "sess-1",
+        expect.objectContaining({ username: "alice", password: "typed", domain: "CORP" }),
+        expect.objectContaining({ connectionDetails: "10.0.0.1 · 3389 · alice" }),
+      );
+    });
+
+    it("connects without a domain when the typed one was emptied", async () => {
+      const harness = harnessWithStored();
+
+      await harness.connect({ rdpSecrets: { username: "alice", password: "typed", domain: "" } });
+
+      expect(harness.rdpManager.connect).toHaveBeenCalledWith(
+        "sess-1",
+        expect.objectContaining({ username: "alice", domain: null }),
+        expect.anything(),
+      );
+    });
+
+    it("saves what was typed in the host's own place once connected", async () => {
+      const harness = harnessWithStored();
+
+      const result = await harness.connect(typed);
+
+      expect(harness.ctx.persistHostSpecificSecret).toHaveBeenCalledWith("rdp-1", "Win Box", {
+        kind: "rdp",
+        username: "alice",
+        domain: "CORP",
+        password: "typed",
+      });
+      expect(result).toMatchObject({ username: "CORP\\alice" });
+    });
+
+    it("saves nothing when nothing was typed", async () => {
+      const harness = harnessWithStored();
+
+      await harness.connect();
+
+      expect(harness.ctx.persistHostSpecificSecret).not.toHaveBeenCalled();
+    });
+
+    it("keeps the connection when saving fails", async () => {
+      const harness = harnessWithStored();
+      harness.ctx.persistHostSpecificSecret = vi.fn(async () => {
+        throw new Error("keychain locked");
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+      await expect(harness.connect(typed)).resolves.toMatchObject({ username: "CORP\\alice" });
+      warn.mockRestore();
+    });
+
+    it("asks for the credentials when the core stopped for a missing password", async () => {
+      const harness = harnessWithStored();
+      harness.rdpManager.connect = vi.fn(async () => {
+        throw new RdpConnectError("no password", "password-required", false);
+      });
+
+      await expect(harness.connect()).resolves.toEqual({
+        credentialsNeeded: {
+          hostId: "rdp-1",
+          reason: "missing",
+          message: "no password",
+          failure: "password-required",
+          username: "Administrator",
+          domain: "OLD",
+        },
+      });
+      expect(harness.ctx.persistHostSpecificSecret).not.toHaveBeenCalled();
+    });
+
+    it("asks again with the account it used when the server rejected the typed values", async () => {
+      const harness = harnessWithStored();
+      harness.rdpManager.connect = vi.fn(async () => {
+        throw new RdpConnectError("rejected", "auth-rejected", false);
+      });
+
+      await expect(harness.connect(typed)).resolves.toMatchObject({
+        credentialsNeeded: { reason: "rejected", failure: "auth-rejected", username: "alice", domain: "CORP" },
+      });
+      expect(harness.ctx.persistHostSpecificSecret).not.toHaveBeenCalled();
+    });
+
+    // 다시 넣어도 풀리지 않는 것은 코어가 화면에 이미 알렸다(실패 카드) — 오류로 다시 그리지 않게 '알렸음'으로 끝낸다.
+    it("leaves what typing cannot fix to the failure the core showed", async () => {
+      const harness = harnessWithStored();
+      harness.rdpManager.connect = vi.fn(async () => {
+        throw new RdpConnectError("locked out", "account-locked", true);
+      });
+
+      await expect(harness.connect(typed)).resolves.toEqual({ failureReported: true });
+      expect(harness.ctx.persistHostSpecificSecret).not.toHaveBeenCalled();
+    });
+
+    // 3단계(RDP) 결함 ① — 닫힌 포트처럼 코어가 이미 알린 실패를 오류로 던지면 화면이 Retry 를 숨긴다.
+    it("answers that the core already showed a failure it reported", async () => {
+      const harness = harnessWithStored();
+      harness.rdpManager.connect = vi.fn(async () => {
+        throw new RdpConnectError("connection refused", "refused", true);
+      });
+
+      await expect(harness.connect()).resolves.toEqual({ failureReported: true });
+    });
+
+    it("still fails what the core did not show", async () => {
+      const harness = harnessWithStored();
+      harness.rdpManager.connect = vi.fn(async () => {
+        throw new RdpConnectError("no session", null, false);
+      });
+      await expect(harness.connect()).rejects.toThrow("no session");
+
+      harness.rdpManager.connect = vi.fn(async () => {
+        throw new Error("RDP core exited (code 1)");
+      });
+      await expect(harness.connect()).rejects.toThrow("RDP core exited");
+    });
+
+    it("closes the tailnet forward it opened before asking", async () => {
+      const harness = createHarness("AA:BB:CC", null, { tailnetId: "net-a" });
+      harness.rdpManager.connect = vi.fn(async () => {
+        throw new RdpConnectError("no password", "password-required", false);
+      });
+
+      await harness.handlers.get("rdp:connect")!({ sender: { id: 1 } }, "sess-1", "rdp-1");
+
+      expect(harness.ctx.coreManager.closeTailnetForward).toHaveBeenCalledWith("sess-1");
+    });
+  });
+
   it("routes a tailnet host through a local forward", async () => {
     // rdp-core 는 Rust 라서 tailnet 을 직접 쓸 수 없다. ssh-core 가 연 로컬 주소로 붙는다.
     const harness = createHarness("AA:BB:CC", null, { tailnetId: "net-a" });
@@ -916,6 +1108,7 @@ describe("registerRdpIpcHandlers monitor spread", () => {
     monitorWindowsInstances.length = 0;
     registerRdpIpcHandlers(withVaults(ctx) as never, rdpManager as never, {
       askCertificate: vi.fn(async () => true),
+      cancelCertificate: vi.fn(),
     });
     const monitorWindows = monitorWindowsInstances.at(-1)!;
 

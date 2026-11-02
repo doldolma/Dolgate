@@ -228,4 +228,13 @@ describe('연결 실패 문구', () => {
       'the server rejected the credentials',
     );
   });
+
+  // RDP 로그온에서 다시 넣어도 풀리지 않는 것 — rdp-core 가 서버의 NTSTATUS 를 코드로 올린다(services/rdp-core/src/failure.rs).
+  it('RDP 계정 문제의 코드로 할 일을 말한다', () => {
+    const raw = 'finalize connection: CredSSP: status is STATUS_ACCOUNT_LOCKED_OUT [0xc0000234]';
+    expect(getConnectFailureMessage(raw, 'host', { failure: 'account-locked' })).toBe(t('connectFailure.accountLocked'));
+    expect(getConnectFailureMessage(raw, 'host', { failure: 'account-disabled' })).toBe(t('connectFailure.accountDisabled'));
+    expect(getConnectFailureMessage(raw, 'host', { failure: 'password-expired' })).toBe(t('connectFailure.passwordExpired'));
+    expect(getConnectFailureMessage(raw, 'host', { failure: 'logon-denied' })).toBe(t('connectFailure.logonDenied'));
+  });
 });
