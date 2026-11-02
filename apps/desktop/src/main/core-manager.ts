@@ -1769,6 +1769,13 @@ export class CoreManager {
       windowsHide: true,
     });
 
+    // 코어가 죽은 뒤 그 죽음(exit)을 처리하기 전에 쓰면 EPIPE 가 난다 — 그 사이 stdin 은 아직 쓸 수 있는 것으로 보여
+    // writableCoreStdin 이 못 막는다. 받지 않으면 잡히지 않은 예외가 되어 Electron 기본 알림 창이 메인을 멈춘다(코어가 죽은
+    // 직후 RDP 통로 정리가 쓰다가 실제로 멈췄다). 정리는 아래 exit 처리기가 한다 — 여기서는 남기기만 한다.
+    this.process.stdin.on("error", (error: NodeJS.ErrnoException) => {
+      console.warn(`[ssh-core] input stream failed (${error.code ?? error.message}); the core is gone`);
+    });
+
     // tailnet 설정은 다른 어떤 요청보다 먼저 보낸다. 코어가 설정을 모르면 tailnet 을 지정한
     // 호스트 연결이 노드를 만들 수 없다. 같은 stdin 파이프라 순서가 곧 보장이고, 코어가 다시
     // 떠도(크래시·재시작) 여기를 다시 지나므로 매번 최신 설정으로 복구된다.

@@ -64,7 +64,7 @@ function createFakeChildProcess() {
     exitCode: number | null;
     killed: boolean;
   };
-  child.stdin = {
+  child.stdin = Object.assign(new EventEmitter(), {
     writable: true,
     destroyed: false,
     write: vi.fn((chunk: Uint8Array) => {
@@ -74,7 +74,7 @@ function createFakeChildProcess() {
     end: vi.fn(() => {
       child.stdin.writable = false;
     }),
-  };
+  });
   child.stdout = stdout;
   child.stderr = stderr;
   child.kill = vi.fn(() => {

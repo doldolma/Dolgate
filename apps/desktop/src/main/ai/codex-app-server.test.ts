@@ -27,7 +27,7 @@ class FakeChild extends EventEmitter {
   stderr = new PassThrough();
   kill = vi.fn();
   requests: Array<{ method: string; id: number; params?: unknown }> = [];
-  stdin = {
+  stdin = Object.assign(new EventEmitter(), {
     write: (line: string) => {
       const payload = JSON.parse(line) as { method: string; id: number; params?: unknown };
       this.requests.push(payload);
@@ -38,7 +38,7 @@ class FakeChild extends EventEmitter {
       }
       return true;
     },
-  };
+  });
 
   constructor(
     private readonly responders: Record<
@@ -239,5 +239,22 @@ describe("codex auth helpers", () => {
       "model/list": (request) => ({ id: request.id, result: {} }),
     });
     await expect(codexListModels(client)).resolves.toEqual([]);
+  });
+});
+
+// 서버가 죽은 직후의 틈 — 메인이 그 죽음(exit)을 처리하기 전에는 stdin 이 아직 쓸 수 있는 것으로 보여 요청이 써지고, 그 쓰기가
+// EPIPE 로 실패한다. 받지 않으면 잡히지 않은 예외가 되어 Electron 기본 알림 창이 메인을 멈췄다(실제 앱, 2026-11-02 — ssh-core 가
+// 죽은 직후 RDP 통로 정리가 쓰다가).
+describe("a write that fails because the app server just died", () => {
+  it("is noted and swallowed", async () => {
+    const { client, child } = makeClient({});
+    await client.request("initialize").catch(() => undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    expect(() =>
+      child.stdin.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" })),
+    ).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("EPIPE"));
+    warn.mockRestore();
   });
 });

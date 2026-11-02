@@ -471,6 +471,12 @@ export class RdpManager {
     const config = (this.options.resolveLaunchConfig ?? resolveRdpLaunchConfig)();
     const child = (this.options.spawnProcess ?? defaultSpawn)(config);
 
+    // 코어가 죽은 뒤 그 죽음(exit)을 처리하기 전에 쓰면 EPIPE 가 난다 — 받지 않으면 잡히지 않은 예외가 되어 Electron 기본 알림
+    // 창이 메인을 멈춘다(ssh-core 에서 실제로 겪음). 정리는 아래 exit 처리기가 한다 — 여기서는 남기기만 한다.
+    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+      console.warn(`[rdp-core] input stream failed (${error.code ?? error.message}); the core is gone`);
+    });
+
     child.stdout.on("data", (chunk: Buffer) => {
       this.consume(chunk);
     });

@@ -284,6 +284,11 @@ export class CodexAppServerClient extends EventEmitter {
     child.once("error", (error) => {
       this.failAll(error instanceof Error ? error : new Error(String(error)));
     });
+    // 서버가 죽은 뒤 그 죽음(exit)을 처리하기 전에 쓰면 EPIPE 가 난다 — 받지 않으면 잡히지 않은 예외가 되어 Electron 기본 알림
+    // 창이 메인을 멈춘다(코어에서 실제로 겪음). 기다리던 요청은 exit 처리기가 실패로 끝낸다.
+    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+      console.warn(`[codex] input stream failed (${error.code ?? error.message}); the app server is gone`);
+    });
     child.once("exit", (code, signal) => {
       this.failAll(new Error(t('codexServer.exited', { code: code ?? signal ?? "unknown" })));
     });

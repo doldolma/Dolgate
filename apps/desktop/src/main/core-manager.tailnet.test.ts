@@ -30,7 +30,7 @@ function createFakeChildProcess() {
   stderr.setEncoding = vi.fn();
 
   const child = new EventEmitter() as EventEmitter & {
-    stdin: {
+    stdin: EventEmitter & {
       writable: boolean;
       destroyed: boolean;
       write: ReturnType<typeof vi.fn>;
@@ -42,14 +42,14 @@ function createFakeChildProcess() {
     exitCode: number | null;
     killed: boolean;
   };
-  child.stdin = {
+  child.stdin = Object.assign(new EventEmitter(), {
     writable: true,
     destroyed: false,
     write: vi.fn(() => true),
     end: vi.fn(() => {
       child.stdin.writable = false;
     }),
-  };
+  });
   child.stdout = stdout;
   child.stderr = stderr;
   child.kill = vi.fn(() => true);
@@ -345,5 +345,36 @@ describe("tailnet test completion", () => {
     // ready 라고 뒤집지 않는다. 다른 판정이고, 화면은 이 차이로 경고를 그린다.
     expect(final.ready).toBe(false);
     expect(final.authorized).toBe(true);
+  });
+});
+
+// 코어가 죽은 직후의 틈 — 메인이 그 죽음(exit)을 처리하기 전에는 stdin 이 아직 쓸 수 있는 것으로 보여 요청이 써지고, 그 쓰기가
+// EPIPE 로 실패한다. 받지 않으면 잡히지 않은 예외가 되어 Electron 기본 알림 창이 메인을 멈췄다(실제 앱, 2026-11-02 — ssh-core 가
+// 죽은 직후 RDP 통로 정리가 쓰다가).
+describe("a write that fails because the core just died", () => {
+  beforeEach(() => {
+    spawnMock.mockReset();
+  });
+
+  it("is noted and swallowed, and the exit still cleans up", async () => {
+    const { manager, child } = await startManager();
+    const send = vi.fn();
+    manager.registerWindow(fakeWindow(send, false));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    // 받는 곳이 없으면 EventEmitter 가 'error' 를 그대로 던진다 — 메인에서는 잡히지 않은 예외다.
+    expect(() =>
+      child.stdin.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" })),
+    ).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("EPIPE"));
+
+    // 정리는 지금처럼 exit 처리기가 한다 — 코어가 멈췄다고 화면에 알린다.
+    child.emit("exit", null, "SIGTERM");
+    expect(
+      send.mock.calls.some(
+        ([, event]) => (event as { type?: string; payload?: { status?: string } })?.payload?.status === "stopped",
+      ),
+    ).toBe(true);
+    warn.mockRestore();
   });
 });

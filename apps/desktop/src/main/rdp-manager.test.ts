@@ -6,14 +6,14 @@ import { RdpManager, type RdpLaunchConfig } from "./rdp-manager";
 
 // rdp-core 대역. stdin 으로 들어온 프레임을 모아두고, stdout 으로는 원하는 프레임을 밀어넣는다.
 function createFakeCore() {
-  const stdin = {
+  const stdin = Object.assign(new EventEmitter(), {
     written: [] as Buffer[],
     write(chunk: Buffer) {
       stdin.written.push(chunk);
       return true;
     },
     end: vi.fn(),
-  };
+  });
   const stdout = new EventEmitter();
   // 매니저가 stderr 를 읽는다(파이프가 차면 코어가 멈추므로). 대역에도 있어야 한다.
   const stderr = Object.assign(new EventEmitter(), { setEncoding: vi.fn() });
@@ -628,6 +628,26 @@ describe("RdpManager", () => {
     );
     expect(closed).toHaveLength(1);
     expect((closed[0].payload as { sessionId: string }).sessionId).toBe("sess-1");
+  });
+
+  // 코어가 죽은 직후의 틈 — 메인이 그 죽음(exit)을 처리하기 전에는 stdin 이 아직 쓸 수 있는 것으로 보여 요청이 써지고, 그 쓰기가
+  // EPIPE 로 실패한다. 받지 않으면 잡히지 않은 예외가 되어 Electron 기본 알림 창이 메인을 멈췄다(실제 앱, 2026-11-02 — ssh-core 가
+  // 죽은 직후 RDP 통로 정리가 쓰다가).
+  it("notes and swallows a write that fails because the core just died", async () => {
+    const { manager, core } = createManager();
+    const pending = manager.connect("sess-1", CONNECT);
+    pending.catch(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    expect(() =>
+      core.stdin.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" })),
+    ).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("EPIPE"));
+
+    // 정리는 지금처럼 exit 처리기가 한다.
+    core.exit(1);
+    await expect(pending).rejects.toThrow(/exited/);
+    warn.mockRestore();
   });
 
   it("fails an in-flight connect when the core dies mid-handshake", async () => {

@@ -73,7 +73,7 @@ function createFakeChildProcess() {
 
   // 실제 stdin 과 같은 성질을 준다 — 종료는 stdin 을 먼저 닫고, 코어 매니저는 그것을 보고
   // 프레임 보내기를 멈춘다(writableCoreStdin).
-  child.stdin = {
+  child.stdin = Object.assign(new EventEmitter(), {
     writable: true,
     destroyed: false,
     write: vi.fn((chunk: Uint8Array) => {
@@ -90,7 +90,7 @@ function createFakeChildProcess() {
     end: vi.fn(() => {
       child.stdin.writable = false;
     }),
-  };
+  });
   child.stdout = stdout;
   child.stderr = stderr;
   child.kill = vi.fn((signal?: NodeJS.Signals) => {
