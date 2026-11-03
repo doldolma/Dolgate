@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useScreenPadding } from '../lib/screen-layout';
+import { describeTeamsLeftOnVaultReset } from '../lib/vault-reset-teams';
 import { useMobileAppStore } from '../store/useMobileAppStore';
 import { useMobilePalette } from '../theme';
 import { getNewVaultPassphraseMessage } from '../i18n/shared-messages';
@@ -219,6 +220,9 @@ export function VaultUnlockScreen(): React.JSX.Element {
   const palette = useMobilePalette();
   const unlockVault = useMobileAppStore(state => state.unlockVault);
   const resetVault = useMobileAppStore(state => state.resetVault);
+  const listTeamsLeftOnVaultReset = useMobileAppStore(
+    state => state.listTeamsLeftOnVaultReset,
+  );
   const [passphrase, setPassphrase] = useState('');
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -261,10 +265,21 @@ export function VaultUnlockScreen(): React.JSX.Element {
     }
   };
 
-  const confirmReset = (): void => {
+  const confirmReset = async (): Promise<void> => {
+    // 초기화하면 서버가 모든 팀에서 빼고 혼자인 팀은 지운다 — 팀이 있으면 첫 확인 창에 함께 알린다(창은 뜬 뒤 못 고친다).
+    setBusy(true);
+    let teamsNote: string | null = null;
+    try {
+      teamsNote = describeTeamsLeftOnVaultReset(await listTeamsLeftOnVaultReset());
+    } catch {
+      teamsNote = null;
+    } finally {
+      setBusy(false);
+    }
+    const body = translate("vaultGate.resetBody");
     Alert.alert(
       translate("vaultGate.resetTitle"),
-      translate("vaultGate.resetBody"),
+      teamsNote ? `${body}\n\n${teamsNote}` : body,
       [
         { text: translate("common.cancel"), style: "cancel" },
         {
@@ -333,7 +348,7 @@ export function VaultUnlockScreen(): React.JSX.Element {
       <Pressable
         accessibilityRole="button"
         disabled={busy}
-        onPress={confirmReset}
+        onPress={() => void confirmReset()}
         style={styles.resetButton}
       >
         <Text style={[styles.resetText, { color: palette.danger }]}>

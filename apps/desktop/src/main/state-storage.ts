@@ -77,6 +77,7 @@ import {
   type LocalHistoryOwner
 } from './local-history-scope';
 import { assertTeamVaultEditable, PERSONAL_VAULT_ID, TeamVaultNotFoundError } from './vault-root';
+import { beginTeamWrites, endTeamWrites } from './team-write-times';
 
 const STORAGE_DIRNAME = 'storage';
 const STATE_FILE_NAME = 'state.json';
@@ -1891,7 +1892,15 @@ class DesktopStateStorage {
 
   updateState(mutator: (draft: DesktopStateFile) => void): DesktopStateFile {
     this.ensureLoaded();
-    mutator(this.state);
+    // 팀 볼트를 고친 쓰기는 끝날 때 그 레코드의 시각을 맞춘다(team-write-times.ts). 팀을 안 고치면 아무 일도 없다.
+    beginTeamWrites();
+    try {
+      mutator(this.state);
+    } catch (error) {
+      endTeamWrites(null);
+      throw error;
+    }
+    endTeamWrites((teamId) => this.state.teams[teamId]?.data);
     this.persistState();
     return deepClone(this.state);
   }

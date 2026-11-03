@@ -29,6 +29,7 @@ import { clearRuntimeSecretCache } from "./coordinators/secret-coordinator";
  */
 export function registerTeamsIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(ipcChannels.teams.list, async () => ctx.teams.list());
+  ipcMain.handle(ipcChannels.teams.listForVaultReset, async () => ctx.teams.listForVaultReset());
   ipcMain.handle(ipcChannels.teams.getAvailability, async () => ctx.teams.getAvailability());
   ipcMain.handle(ipcChannels.teams.getVaultIndex, async () => buildVaultIndex(ctx));
   ipcMain.handle(ipcChannels.teams.refresh, async () => ctx.teams.refresh());

@@ -6,6 +6,7 @@ import { subscribeTeamInviteLink, subscribeTeamsChanged } from "../events/state"
 export function buildTeamsBridge(ipcRenderer: IpcRenderer): DesktopApi["teams"] {
   return {
     list: () => ipcRenderer.invoke(ipcChannels.teams.list),
+    listForVaultReset: () => ipcRenderer.invoke(ipcChannels.teams.listForVaultReset),
     getAvailability: () => ipcRenderer.invoke(ipcChannels.teams.getAvailability),
     getVaultIndex: () => ipcRenderer.invoke(ipcChannels.teams.getVaultIndex),
     refresh: () => ipcRenderer.invoke(ipcChannels.teams.refresh),

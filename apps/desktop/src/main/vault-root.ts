@@ -1,6 +1,7 @@
 import { canEditTeamVault } from '@shared';
 import { t } from './i18n';
 import type { DesktopStateFile, DesktopVaultData, DesktopVaultSecure } from './state-storage';
+import { noteTeamWrite } from './team-write-times';
 
 export const PERSONAL_VAULT_ID = 'personal';
 
@@ -77,7 +78,10 @@ export function teamVaultRoot(teamId: string): VaultRoot {
     data: (state) => team(state).data,
     edit: (state) => {
       assertTeamVaultEditable(state, teamId);
-      return team(state).data;
+      const data = team(state).data;
+      // 쓰기가 끝날 때 고친 레코드의 시각을 내가 본 시각보다 뒤로 맞춘다(team-write-times.ts).
+      noteTeamWrite(teamId, data);
+      return data;
     },
     secure: (state) => team(state).secure,
   };

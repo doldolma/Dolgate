@@ -1,6 +1,7 @@
 import type { AuthState, DesktopWindowState } from "@shared";
 import { useState } from "react";
 import { DesktopWindowControls } from "../components/DesktopWindowControls";
+import { VaultResetTeamsNote } from "../components/VaultResetTeamsNote";
 import {
   migrateVault,
   resetVault,
@@ -235,6 +236,7 @@ export function VaultGateShell({
                   <p className="m-0 text-[0.85rem] leading-[1.6] text-[var(--danger-text)]">
                     {translate("vaultGate.reset.warning")}
                   </p>
+                  <VaultResetTeamsNote className="m-0 text-[0.85rem] leading-[1.6] text-[var(--danger-text)]" />
                   <div className="flex gap-2">
                     <Button
                       variant="secondary"

@@ -2624,4 +2624,59 @@ describe('useMobileAppStore vault flows', () => {
         .sort(),
     ).toEqual(['hosts', 'secrets']);
   });
+  // 동기화 암호를 초기화하면 서버가 모든 팀에서 빼고 혼자인 팀은 지운다 — 확인 창이 알리려고 묻는다(2026-11-02 리뷰).
+  it('lists the teams a vault reset would leave, from the server or else from this phone', async () => {
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(
+          createV2AuthSession('', createVaultKdfDescriptor()),
+        ),
+        vault: { status: 'locked' } as never,
+      });
+    });
+    fetchMock.mockImplementation(async input => {
+      if (new URL(String(input)).pathname === '/teams') {
+        return createJsonResponse({
+          teams: [
+            { id: 't-2', name: 'Solo', role: 'owner', wrappedTeamDek: 'w', dataFloor: 0, memberCount: 1, createdAt: '' },
+            { id: 't-1', name: 'Acme', role: 'member', wrappedTeamDek: 'w', dataFloor: 0, memberCount: 3, createdAt: '' },
+          ],
+        });
+      }
+      return createJsonResponse({ error: 'unexpected' }, 404);
+    });
+    await expect(
+      useMobileAppStore.getState().listTeamsLeftOnVaultReset(),
+    ).resolves.toEqual([
+      { name: 'Acme', soleMember: false },
+      { name: 'Solo', soleMember: true },
+    ]);
+
+    useMobileAppStore.setState({
+      teamVaults: [
+        {
+          id: 't-1',
+          name: 'Acme',
+          role: 'member',
+          wrappedTeamDek: 'w',
+          state: 'ready',
+          errorMessage: null,
+          hosts: [],
+          groups: [],
+          knownHosts: [],
+          awsProfiles: [],
+          tailnets: [],
+          snippets: [],
+          hostPrefs: [],
+        },
+      ],
+      teamSecrets: {},
+    });
+    fetchMock.mockImplementation(async () =>
+      createJsonResponse({ error: 'down' }, 500),
+    );
+    await expect(
+      useMobileAppStore.getState().listTeamsLeftOnVaultReset(),
+    ).resolves.toEqual([{ name: 'Acme', soleMember: null }]);
+  });
 });

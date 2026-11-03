@@ -114,7 +114,7 @@ export function registerIpcHandlers(
     awsProfiles,
     teamVaults: createStoredTeamVaults(),
     teamSync,
-    teams: new TeamService({ auth: authService, teamSync }),
+    teams: new TeamService({ auth: authService, teamSync, serverUrl: () => authService.getServerUrl() }),
     secretStore,
     awsService,
     awsSsmTunnelService,

@@ -7,10 +7,15 @@ import { SettingsPanel } from './SettingsPanel';
 
 const settingsServiceMocks = vi.hoisted(() => ({
   copySavedCredentialPassword: vi.fn(),
+  listTeamsLeftOnVaultReset: vi.fn(async () => [] as Array<{ name: string; soleMember: boolean | null }>),
 }));
 
 vi.mock('../services/desktop/settings', () => ({
   copySavedCredentialPassword: settingsServiceMocks.copySavedCredentialPassword,
+}));
+
+vi.mock('../services/desktop/auth-window-updater', () => ({
+  listTeamsLeftOnVaultReset: settingsServiceMocks.listTeamsLeftOnVaultReset,
 }));
 
 const settings: AppSettings = {
@@ -622,6 +627,22 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
+  // 탈퇴도 서버가 모든 팀에서 빼고 혼자인 팀을 지운다 — 탈퇴 창이 그것을 알린다.
+  it('tells which teams the account deletion leaves and deletes', async () => {
+    settingsServiceMocks.listTeamsLeftOnVaultReset.mockResolvedValueOnce([
+      { name: 'Acme', soleMember: false },
+      { name: 'Ops', soleMember: true },
+    ]);
+    renderSettingsPanel({ onDeleteAccount: vi.fn().mockResolvedValue(undefined), activeSection: 'account' });
+
+    fireEvent.click(screen.getByRole('button', { name: '회원 탈퇴' }));
+
+    const dialog = screen.getByRole('dialog', { name: '회원 탈퇴' });
+    expect(
+      await within(dialog).findByText('팀 2개(Acme, Ops)에서도 빠집니다. 혼자 있는 팀은 서버에서도 지워집니다: Ops.'),
+    ).toBeInTheDocument();
+  });
+
   it('changes an existing account password after confirming the current password', async () => {
     const onChangeAccountPassword = vi.fn().mockResolvedValue(undefined);
     renderSettingsPanel({ passwordState: 'set', onChangeAccountPassword, activeSection: 'account' });
@@ -692,6 +713,28 @@ describe('SettingsPanel', () => {
     await waitFor(() =>
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
     );
+  });
+
+  // 서버 목록을 못 읽었으면(오프라인) 이 기기의 팀으로 알리고, 혼자인 팀은 한 문장으로.
+  it('tells which teams the sync reset leaves, from this device when the server cannot be read', async () => {
+    settingsServiceMocks.listTeamsLeftOnVaultReset.mockResolvedValueOnce([{ name: 'Acme', soleMember: null }]);
+    renderSettingsPanel({
+      activeSection: 'account',
+      vaultStatus: 'unlocked',
+      onChangeVaultPassphrase: vi.fn().mockResolvedValue(undefined),
+      onResetVault: vi.fn().mockResolvedValue(undefined),
+    });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '동기화 암호를 잊으셨나요? 초기화' }),
+    );
+
+    const dialog = screen.getByRole('dialog', { name: '동기화 초기화' });
+    expect(
+      await within(dialog).findByText(
+        '팀 1개(Acme)에서도 빠집니다. 이 기기의 팀 데이터는 지워지고, 다시 들어오려면 새 초대 링크가 필요합니다. 혼자 있는 팀은 서버에서도 지워집니다.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('keeps the vault reset dialog open with the error when reset fails', async () => {

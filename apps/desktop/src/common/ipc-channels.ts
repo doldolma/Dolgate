@@ -323,6 +323,7 @@ export const ipcChannels = {
   },
   teams: {
     list: 'teams:list',
+    listForVaultReset: 'teams:list-for-vault-reset',
     getAvailability: 'teams:get-availability',
     getVaultIndex: 'teams:get-vault-index',
     refresh: 'teams:refresh',

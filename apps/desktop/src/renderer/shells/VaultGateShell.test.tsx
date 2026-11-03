@@ -8,6 +8,7 @@ const vaultServiceMocks = vi.hoisted(() => ({
   unlockVault: vi.fn(),
   resetVault: vi.fn(),
   migrateVault: vi.fn(),
+  listTeamsLeftOnVaultReset: vi.fn(),
 }));
 
 vi.mock('../services/desktop/auth-window-updater', () => ({
@@ -15,6 +16,7 @@ vi.mock('../services/desktop/auth-window-updater', () => ({
   unlockVault: vaultServiceMocks.unlockVault,
   resetVault: vaultServiceMocks.resetVault,
   migrateVault: vaultServiceMocks.migrateVault,
+  listTeamsLeftOnVaultReset: vaultServiceMocks.listTeamsLeftOnVaultReset,
 }));
 
 const windowState: DesktopWindowState = { isMaximized: false, isFullScreen: false };
@@ -159,6 +161,30 @@ describe('VaultGateShell', () => {
     await waitFor(() =>
       expect(vaultServiceMocks.resetVault).toHaveBeenCalledTimes(1),
     );
+  });
+
+  // 초기화하면 서버가 모든 팀에서 빼고 혼자인 팀은 지운다 — 확인 단계에서 알린다(새 기기라도 서버 목록으로).
+  it('names the teams the reset leaves and deletes, asking only when the confirmation opens', async () => {
+    vaultServiceMocks.listTeamsLeftOnVaultReset.mockClear();
+    vaultServiceMocks.listTeamsLeftOnVaultReset.mockResolvedValue([
+      { name: 'Acme', soleMember: false },
+      { name: 'Solo', soleMember: true },
+    ]);
+    renderShell('locked');
+    expect(vaultServiceMocks.listTeamsLeftOnVaultReset).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: '동기화 암호를 잊으셨나요? 데이터 초기화',
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        '팀 2개(Acme, Solo)에서도 빠집니다. 이 기기의 팀 데이터는 지워지고, 다시 들어오려면 새 초대 링크가 필요합니다. 혼자 있는 팀은 서버에서도 지워집니다: Solo.',
+      ),
+    ).toBeInTheDocument();
+    expect(vaultServiceMocks.listTeamsLeftOnVaultReset).toHaveBeenCalledTimes(1);
   });
 
   it('migrates with a confirmed passphrase and defers', async () => {

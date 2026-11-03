@@ -79,6 +79,11 @@ export function resetVault() {
   return desktopApi.auth.resetVault();
 }
 
+/** 동기화 암호를 초기화하거나 탈퇴하면 빠질 팀들(두 확인 창의 안내). */
+export function listTeamsLeftOnVaultReset() {
+  return desktopApi.teams.listForVaultReset();
+}
+
 export function migrateVault(passphrase: string) {
   return desktopApi.auth.migrateVault(passphrase);
 }

@@ -114,12 +114,14 @@ import type { ActivityLogMessage } from './activity-log-message';
 import { DesktopConfigService } from './app-config';
 import {
   getDesktopStateStorage,
+  type DesktopStateFile,
   type StoredEncryptedValue,
   type SyncDeletionRecord,
 } from './state-storage';
 import type { LocalHistoryOwner } from './local-history-scope';
 import { PERSONAL_VAULT_ROOT, type VaultRoot } from './vault-root';
 import { decodeSecretFromStorage, encodeSecretForStorage } from './secret-store';
+import { takeRemovedTeamWriteTime, teamRecordWriteTime, writeTimeAfter } from './team-write-times';
 import { getServerUrlValidationMessage } from '../common/shared-messages';
 
 function nowIso(): string {
@@ -2993,10 +2995,14 @@ export class AwsProfileRepository {
   }
 
   upsert(payload: ManagedAwsProfilePayload): ManagedAwsProfilePayload {
+    const updatedAt = payload.updatedAt || nowIso();
+    // 팀 볼트면 시각을 있던 것보다 뒤로 — 팀에 올리는 시각은 잠근 값 안의 것이라 레코드 쪽 맞추기가 닿지 않는다
+    // (team-write-times.ts). 시각을 그대로 둔 저장은 그대로다.
+    const previous = this.root.teamId ? this.getMetadataById(payload.id)?.updatedAt : undefined;
     const nextPayload: ManagedAwsProfilePayload = {
       ...payload,
       name: payload.name.trim(),
-      updatedAt: payload.updatedAt || nowIso(),
+      updatedAt: previous !== undefined && updatedAt !== previous ? writeTimeAfter(updatedAt, previous) : updatedAt,
     };
     const nextMetadata = this.toMetadata(nextPayload);
 
@@ -3056,6 +3062,22 @@ export class AwsProfileRepository {
 
 export { SyncDeletionRecord };
 
+/** 둘 가운데 늦은 시각. other 가 없거나 읽을 수 없으면 time. */
+function laterTime(time: string, other: string | null): string {
+  return other && Date.parse(other) > Date.parse(time) ? other : time;
+}
+
+/** 잠근 비밀값 안의 시각. 못 풀거나 시각이 없으면 null. */
+function readSecretUpdatedAt(stored: StoredEncryptedValue): string | null {
+  try {
+    const raw = decodeSecretFromStorage(stored);
+    const updatedAt = raw ? (JSON.parse(raw) as { updatedAt?: unknown } | null)?.updatedAt : null;
+    return typeof updatedAt === 'string' ? updatedAt : null;
+  } catch {
+    return null;
+  }
+}
+
 export class SyncOutboxRepository {
   constructor(private readonly root: VaultRoot = PERSONAL_VAULT_ROOT) {}
 
@@ -3081,7 +3103,14 @@ export class SyncOutboxRepository {
         const nextRecord: SyncDeletionRecord = {
           kind,
           recordId,
-          deletedAt
+          // 팀 볼트의 지움은 그 레코드의 마지막 시각보다 뒤여야 서버가 받는다(team-write-times.ts). 같은 지움을 다시 남겨도
+          // 앞당기지 않는다.
+          deletedAt: this.root.teamId
+            ? laterTime(
+                writeTimeAfter(deletedAt, this.lastTeamWriteTime(state, kind, recordId)),
+                currentIndex >= 0 ? outbox[currentIndex]!.deletedAt : null
+              )
+            : deletedAt
         };
         if (currentIndex >= 0) {
           outbox[currentIndex] = nextRecord;
@@ -3090,6 +3119,20 @@ export class SyncOutboxRepository {
         }
       }
     });
+  }
+
+  /**
+   * 팀 볼트에서 지울 그 레코드의 마지막 시각 — 아직 있으면 그 레코드의 것(비밀값은 잠근 값 안의 것), 먼저 지웠으면 지울 때
+   * 기억해 둔 것.
+   */
+  private lastTeamWriteTime(state: DesktopStateFile, kind: SyncKind, recordId: string): string | null {
+    const teamId = this.root.teamId as string;
+    const removed = takeRemovedTeamWriteTime(teamId, kind, recordId);
+    if (kind === 'secrets') {
+      const stored = this.root.secure(state).managedSecretsByRef[recordId];
+      return (stored ? readSecretUpdatedAt(stored) : null) ?? removed;
+    }
+    return teamRecordWriteTime(this.root.data(state), kind, recordId) ?? removed;
   }
 
   clear(kind: SyncKind, recordId: string): void {

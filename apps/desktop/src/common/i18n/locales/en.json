@@ -235,6 +235,8 @@
       "title": "Delete account",
       "warning": "<strong>All data stored on the server will be permanently deleted immediately</strong> — synced hosts, secrets, snippets, and account details. This cannot be recovered, and other signed-in devices will be signed out shortly.",
       "localNote": "Local data on this device (hosts, secrets, session replays, activity logs, AI keys) is deleted as well.",
+      "teamsLeave": "You'll also leave {{count}} team ({{names}}).",
+      "teamsLeave_other": "You'll also leave {{count}} teams ({{names}}).",
       "failed": "Could not delete the account.",
       "submitting": "Deleting…",
       "submit": "Delete"
@@ -1957,7 +1959,11 @@
     "reset": {
       "warning": "Without the sync passphrase, data stored on the server cannot be recovered. Resetting deletes all server sync data and starts over. This cannot be undone.",
       "confirm": "Delete everything and start over",
-      "open": "Forgot the sync passphrase? Reset the data"
+      "open": "Forgot the sync passphrase? Reset the data",
+      "teamsLeave": "You'll also leave {{count}} team ({{names}}). Team data on this device is removed, and you'll need a new invite link to rejoin.",
+      "teamsLeave_other": "You'll also leave {{count}} teams ({{names}}). Team data on this device is removed, and you'll need a new invite link to rejoin.",
+      "teamsSoleDeleted": "Teams where you're the only member are deleted from the server too: {{names}}.",
+      "teamsSoleMaybe": "Teams where you're the only member are deleted from the server too."
     },
     "switchAccount": "Sign in with a different account (sign out)"
   },

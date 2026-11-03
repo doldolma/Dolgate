@@ -431,6 +431,7 @@ describe("SettingsScreen server save navigation", () => {
     useMobileAppStore.setState({
       auth: createAuthenticatedState(),
       deleteAccount: deleteAccountMock,
+      listTeamsLeftOnVaultReset: jest.fn(async () => []),
     });
     const alertSpy = jest
       .spyOn(Alert, "alert")
@@ -475,6 +476,85 @@ describe("SettingsScreen server save navigation", () => {
     });
 
     expect(deleteAccountMock).toHaveBeenCalledTimes(1);
+
+    alertSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  // 탈퇴도 서버가 모든 팀에서 빼고 혼자인 팀을 지운다 — 첫 확인 창이 그것을 알린다.
+  it("names the teams the account deletion leaves in the first alert", async () => {
+    const list = jest.fn(async () => [
+      { name: "Acme", soleMember: false },
+      { name: "Ops", soleMember: true },
+    ]);
+    useMobileAppStore.setState({
+      auth: createAuthenticatedState(),
+      deleteAccount: jest.fn(async () => undefined),
+      listTeamsLeftOnVaultReset: list,
+    });
+    const alertSpy = jest
+      .spyOn(Alert, "alert")
+      .mockImplementation(() => undefined);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SettingsScreen />);
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "회원 탈퇴").props.onPress();
+    });
+
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+    expect(alertSpy.mock.calls[0][1]).toBe(
+      "서버에 저장된 모든 데이터(동기화된 호스트·시크릿·계정 정보)가 즉시 영구 삭제됩니다. 복구할 수 없으며, 로그인된 다른 기기도 곧 로그아웃됩니다.\n\n팀(Acme, Ops)에서도 빠집니다. 혼자 있는 팀은 서버에서도 지워집니다: Ops.",
+    );
+
+    alertSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it("locks the row while reading the teams and keeps the plain alert when that fails", async () => {
+    let fail: (error: Error) => void = () => undefined;
+    const list = jest.fn(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    useMobileAppStore.setState({
+      auth: createAuthenticatedState(),
+      deleteAccount: jest.fn(async () => undefined),
+      listTeamsLeftOnVaultReset: list,
+    });
+    const alertSpy = jest
+      .spyOn(Alert, "alert")
+      .mockImplementation(() => undefined);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SettingsScreen />);
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "회원 탈퇴").props.onPress();
+    });
+
+    // 목록을 읽는 동안은 다시 누를 수 없다.
+    expect(findPressableByText(tree!.root, "회원 탈퇴").props.disabled).toBe(true);
+    expect(alertSpy).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fail(new Error("offline"));
+    });
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+    expect(alertSpy.mock.calls[0][1]).toBe(
+      "서버에 저장된 모든 데이터(동기화된 호스트·시크릿·계정 정보)가 즉시 영구 삭제됩니다. 복구할 수 없으며, 로그인된 다른 기기도 곧 로그아웃됩니다.",
+    );
+    expect(findPressableByText(tree!.root, "회원 탈퇴").props.disabled).toBe(false);
 
     alertSpy.mockRestore();
     await act(async () => {

@@ -198,6 +198,11 @@ import { appendSessionBanner } from '../lib/terminal-banner';
 import { AwsSftpHostKeyChallengeError, connectAwsSftp } from '../lib/aws-sftp';
 import { openAwsSsoBrowser } from '../lib/aws-sso-bridge';
 import { closeInAppBrowser, openInAppBrowser } from '../lib/in-app-browser';
+import { fetchTeams } from '../lib/team-api';
+import {
+  compareVaultResetTeams,
+  type VaultResetTeam,
+} from '../lib/vault-reset-teams';
 import {
   cancelSyncedTailnetStart,
   closeSyncedTailnets,
@@ -288,6 +293,7 @@ import {
   hostsInVaultOf,
   knownHostsForHost,
   listHosts,
+  listVaults,
   personalKnownHosts,
   secretForHost,
   snippetsForHost,
@@ -347,6 +353,8 @@ const SESSION_SNAPSHOT_FLUSH_MS = 750;
  */
 const SESSION_ACTIVITY_THROTTLE_MS = 30_000;
 const STARTUP_REFRESH_TIMEOUT_MS = 3_000;
+/** 초기화 확인 창이 서버의 팀 목록을 기다리는 시간. 넘으면 이 폰이 아는 팀으로 알린다. */
+const VAULT_RESET_TEAMS_TIMEOUT_MS = 4_000;
 const MOBILE_TAILNET_START_TIMEOUT_MS = 3 * 60 * 1_000;
 
 function canonicalizeRdpFingerprint(value: string | null | undefined): string {
@@ -995,6 +1003,11 @@ interface MobileAppState {
   setupVault: (passphrase: string) => Promise<void>;
   unlockVault: (passphrase: string) => Promise<void>;
   resetVault: () => Promise<void>;
+  /**
+   * 동기화 암호를 초기화하면 빠질 팀들(초기화 확인 창의 안내). 서버 목록을 먼저 본다 — 혼자인 팀을 가리고, 이 폰이 아직 모르는
+   * 팀도 알린다. 잠겨 있어도 된다(접근 토큰만 쓴다). 못 읽으면 이 폰이 아는 팀이고 혼자인지는 모른다.
+   */
+  listTeamsLeftOnVaultReset: () => Promise<VaultResetTeam[]>;
   migrateVault: (passphrase: string) => Promise<void>;
   deferVaultMigration: () => void;
   changeVaultPassphrase: (
@@ -9175,6 +9188,49 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
           assertVaultOperationContext(operationContext);
           await syncWithSession();
+        },
+        listTeamsLeftOnVaultReset: async () => {
+          // 이 폰이 아는 팀은 찾기 입구로 읽는다(팀 칸을 날로 읽지 않는다 — vault-catalog-boundary.test.ts).
+          const onThisPhone = (): VaultResetTeam[] =>
+            listVaults(get())
+              .flatMap(vault =>
+                vault.id !== null && vault.name !== null
+                  ? [{ name: vault.name, soleMember: null }]
+                  : [],
+              )
+              .sort(compareVaultResetTeams);
+          const auth = get().auth;
+          if (auth.status !== 'authenticated' || !auth.session) {
+            return onThisPhone();
+          }
+          const serverUrl = get().settings.serverUrl;
+          let timer: ReturnType<typeof setTimeout> | null = null;
+          try {
+            // 오래 기다리지 않는다 — 확인 창이 그동안 뜨지 않는다. 못 읽으면 이 폰이 아는 팀으로 알린다.
+            const teams = await Promise.race([
+              callWithFreshAccessToken(accessToken =>
+                fetchTeams(serverUrl, accessToken),
+              ),
+              new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(
+                  () => reject(new Error('timeout')),
+                  VAULT_RESET_TEAMS_TIMEOUT_MS,
+                );
+              }),
+            ]);
+            return teams
+              .map(team => ({
+                name: team.name,
+                soleMember: team.memberCount <= 1,
+              }))
+              .sort(compareVaultResetTeams);
+          } catch {
+            return onThisPhone();
+          } finally {
+            if (timer) {
+              clearTimeout(timer);
+            }
+          }
         },
         // 기존(v1) 유저의 E2EE 전환 — 서버가 알고 있던 기존 DEK 를 사용자가 정한
         // 동기화 암호로 감싸 올리고, 서버는 같은 트랜잭션에서 원문을 삭제한다.

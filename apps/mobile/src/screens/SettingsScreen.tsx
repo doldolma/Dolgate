@@ -30,6 +30,7 @@ import type {
   SettingsSectionKey,
 } from "../navigation/RootNavigator";
 import { useScreenPadding } from "../lib/screen-layout";
+import { describeTeamsLeftOnVaultReset } from "../lib/vault-reset-teams";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
 import {
@@ -83,6 +84,9 @@ function SettingsContent({
   const secretMetadata = useMobileAppStore((state) => state.secretMetadata);
   const logout = useMobileAppStore((state) => state.logout);
   const deleteAccount = useMobileAppStore((state) => state.deleteAccount);
+  const listTeamsLeftOnVaultReset = useMobileAppStore(
+    (state) => state.listTeamsLeftOnVaultReset,
+  );
   const changeAccountPassword = useMobileAppStore(
     (state) => state.changeAccountPassword,
   );
@@ -98,6 +102,7 @@ function SettingsContent({
   const [serverUrlDraft, setServerUrlDraft] = useState(settings.serverUrl);
   const [savingServerUrl, setSavingServerUrl] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [readingTeamsForDelete, setReadingTeamsForDelete] = useState(false);
   const [accountPasswordOpen, setAccountPasswordOpen] = useState(false);
   const [currentAccountPasswordDraft, setCurrentAccountPasswordDraft] =
     useState("");
@@ -385,10 +390,21 @@ function SettingsContent({
     );
   };
 
-  const confirmDeleteAccount = (): void => {
+  const confirmDeleteAccount = async (): Promise<void> => {
+    // 탈퇴하면 서버가 모든 팀에서 빼고 혼자인 팀은 지운다 — 팀이 있으면 첫 확인 창에 함께 알린다(창은 뜬 뒤 못 고친다).
+    setReadingTeamsForDelete(true);
+    let teamsNote: string | null = null;
+    try {
+      teamsNote = describeTeamsLeftOnVaultReset(await listTeamsLeftOnVaultReset(), "accountDelete");
+    } catch {
+      teamsNote = null;
+    } finally {
+      setReadingTeamsForDelete(false);
+    }
+    const body = translate("settings.deleteAccount.confirmBody");
     Alert.alert(
       translate("settings.deleteAccount.confirmTitle"),
-      translate("settings.deleteAccount.confirmBody"),
+      teamsNote ? `${body}\n\n${teamsNote}` : body,
       [
         { text: translate("common.cancel"), style: "cancel" },
         {
@@ -499,14 +515,14 @@ function SettingsContent({
         <SettingsGroup>
           <SettingsRow
             align="center"
-            disabled={deletingAccount}
+            disabled={deletingAccount || readingTeamsForDelete}
             label={translate(
               deletingAccount
                 ? "settings.deleteAccount.deleting"
                 : "settings.deleteAccount.action",
             )}
             tone="danger"
-            onPress={confirmDeleteAccount}
+            onPress={() => void confirmDeleteAccount()}
           />
         </SettingsGroup>
       ) : null}

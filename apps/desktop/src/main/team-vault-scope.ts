@@ -41,6 +41,7 @@ import {
 } from "./team-member-prefs";
 import type { TeamVaultScope, TeamVaultSource, VaultSecretStore } from "./vault-catalog";
 import { teamVaultRoot } from "./vault-root";
+import { writeTimeAfter } from "./team-write-times";
 
 /** 그 팀을 이 사람이 고칠 수 있는지(이 기기에 적힌 역할 — 멤버 이상). 없는 팀이면 아니다. */
 function canEditStoredTeam(teamId: string): boolean {
@@ -239,6 +240,31 @@ function sameAwsProfileSettings(current: ManagedAwsProfilePayload, next: Managed
   return isDeepStrictEqual(settings(current), settings(next));
 }
 
+/**
+ * 비밀값 안의 시각을 있던 것보다 뒤로 — 팀에 올리는 시각은 비밀값 안의 것이라 레코드 쪽 맞추기가 닿지 않는다
+ * (team-write-times.ts). 시각을 그대로 둔 저장이나 JSON 이 아닌 값은 그대로 둔다.
+ */
+function stampAfterCurrentSecret(next: string, current: string | null): string {
+  if (!current) {
+    return next;
+  }
+  try {
+    const nextPayload = JSON.parse(next) as { updatedAt?: unknown };
+    const currentPayload = JSON.parse(current) as { updatedAt?: unknown };
+    if (
+      typeof nextPayload.updatedAt !== "string" ||
+      typeof currentPayload.updatedAt !== "string" ||
+      nextPayload.updatedAt === currentPayload.updatedAt
+    ) {
+      return next;
+    }
+    const updatedAt = writeTimeAfter(nextPayload.updatedAt, currentPayload.updatedAt);
+    return updatedAt === nextPayload.updatedAt ? next : JSON.stringify({ ...nextPayload, updatedAt });
+  } catch {
+    return next;
+  }
+}
+
 /** 팀 볼트 하나의 비밀값. 개인 SecretStore 와 같은 방식(safeStorage)으로 잠가 그 팀 칸에 둔다. */
 class TeamSecretStore implements VaultSecretStore {
   constructor(private readonly teamId: string) {}
@@ -249,7 +275,10 @@ class TeamSecretStore implements VaultSecretStore {
   }
 
   async save(secretRef: string, secret: string): Promise<string> {
-    getDesktopStateStorage().writeTeamSecret(this.teamId, secretRef, encodeSecretForStorage(secret));
+    const storage = getDesktopStateStorage();
+    const current = storage.readTeamSecret(this.teamId, secretRef);
+    const stamped = stampAfterCurrentSecret(secret, current ? decodeSecretFromStorage(current) : null);
+    storage.writeTeamSecret(this.teamId, secretRef, encodeSecretForStorage(stamped));
     return secretRef;
   }
 

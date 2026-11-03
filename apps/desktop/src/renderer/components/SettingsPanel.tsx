@@ -33,6 +33,7 @@ import { TailnetSettingsPanel } from './TailnetSettingsPanel';
 import { AwsProfilesPanel } from './AwsProfilesPanel';
 import { AiSettingsPanel } from './AiSettingsPanel';
 import { TeamsPanel } from './teams/TeamsPanel';
+import { VaultResetTeamsNote } from './VaultResetTeamsNote';
 import {
   Button,
   FieldGroup,
@@ -1512,6 +1513,7 @@ export function SettingsPanel({
                   <p className="m-0 text-[0.88rem] leading-[1.6] text-[var(--text)]">
                     <Trans i18nKey="settings.vault.resetDialog.warning" components={{ strong: <strong /> }} />
                   </p>
+                  <VaultResetTeamsNote className="m-0 text-[0.88rem] leading-[1.6] text-[var(--danger-text)]" />
                   <p className="m-0 text-[0.82rem] leading-[1.55] text-[var(--text-soft)]">
                     {translate('settings.vault.resetDialog.localNote')}
                   </p>
@@ -1558,6 +1560,10 @@ export function SettingsPanel({
                   <p className="m-0 text-[0.88rem] leading-[1.6] text-[var(--text)]">
                     <Trans i18nKey="settings.deleteAccount.warning" components={{ strong: <strong /> }} />
                   </p>
+                  <VaultResetTeamsNote
+                    kind="accountDelete"
+                    className="m-0 text-[0.88rem] leading-[1.6] text-[var(--danger-text)]"
+                  />
                   <p className="m-0 text-[0.82rem] leading-[1.55] text-[var(--text-soft)]">
                     {translate('settings.deleteAccount.localNote')}
                   </p>

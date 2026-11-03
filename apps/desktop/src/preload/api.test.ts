@@ -31,11 +31,13 @@ describe("createDesktopApi", () => {
     const api = createDesktopApi(ipcRenderer);
 
     await api.teams.list();
+    await api.teams.listForVaultReset();
     await api.teams.createInvite("t1", { expiresInHours: 72 });
     await api.teams.join("https://sync.example.com/invite/c#v1.x");
     await api.hosts.create({ kind: "ssh" } as never, undefined, "t1");
 
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(ipcChannels.teams.list);
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(ipcChannels.teams.listForVaultReset);
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(ipcChannels.teams.createInvite, "t1", { expiresInHours: 72 });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(ipcChannels.teams.join, "https://sync.example.com/invite/c#v1.x");
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(ipcChannels.hosts.create, { kind: "ssh" }, undefined, "t1");

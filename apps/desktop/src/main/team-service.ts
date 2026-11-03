@@ -23,6 +23,7 @@ import {
   type TeamListItem,
   type TeamMember,
   type TeamRole,
+  type TeamVaultResetItem,
 } from "@shared";
 import { t } from "./i18n";
 import { getDesktopStateStorage } from "./state-storage";
@@ -57,19 +58,52 @@ export interface TeamServiceOptions {
   >;
   api?: TeamApi;
   storage?: DesktopStateStorage;
+  /** 로그인한 동기화 서버. 볼트가 잠겨 있어도 읽힌다 — 초기화 확인 창이 서버의 팀 목록을 묻는 데 쓴다. */
+  serverUrl?: () => string;
 }
+
+/** 초기화 확인 창이 서버의 팀 목록을 기다리는 시간. 넘으면 이 기기 목록으로 알린다. */
+const VAULT_RESET_TEAMS_TIMEOUT_MS = 5_000;
 
 export class TeamService {
   private readonly auth: TeamSyncAuth;
   private readonly teamSync: TeamServiceOptions["teamSync"];
   private readonly api: TeamApi;
   private readonly storage: DesktopStateStorage;
+  private readonly serverUrl: (() => string) | null;
 
   constructor(options: TeamServiceOptions) {
     this.auth = options.auth;
     this.teamSync = options.teamSync;
     this.api = options.api ?? new TeamApi(options.auth);
     this.storage = options.storage ?? getDesktopStateStorage();
+    this.serverUrl = options.serverUrl ?? null;
+  }
+
+  /**
+   * 동기화 암호를 초기화하거나 탈퇴하면 빠질 팀들. 서버는 초기화·탈퇴할 때 그 사람을 모든 팀에서 빼고 혼자인 팀은 지운다 — 두
+   * 확인 창이 그것을 알린다. 서버 목록을 먼저 본다: 멤버 수로 혼자인 팀을 가리고, 이 기기가 아직 모르는 팀(새 기기)도 알린다. 접근 토큰만
+   * 쓰므로 볼트가 잠겨 있어도 된다. 못 읽으면 이 기기 목록이고, 혼자인지는 모른다(null).
+   */
+  async listForVaultReset(): Promise<TeamVaultResetItem[]> {
+    const serverUrl = this.serverUrl?.();
+    if (serverUrl && this.auth.getState().status === "authenticated") {
+      try {
+        const teams = await this.api.listTeams({
+          serverUrl: normalizeServerUrl(serverUrl),
+          accessToken: this.auth.getAccessToken(),
+          vaultEpoch: null,
+          signal: AbortSignal.timeout(VAULT_RESET_TEAMS_TIMEOUT_MS),
+          isActive: () => true,
+        });
+        return teams
+          .map((team) => ({ name: team.name, soleMember: team.memberCount <= 1 }))
+          .sort((left, right) => left.name.localeCompare(right.name));
+      } catch {
+        // 서버에 못 닿았다(오프라인·옛 서버 등) — 이 기기가 아는 팀으로 알린다.
+      }
+    }
+    return this.list().map((team) => ({ name: team.name, soleMember: null }));
   }
 
   list(): TeamListItem[] {

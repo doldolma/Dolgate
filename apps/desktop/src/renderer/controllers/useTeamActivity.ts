@@ -74,8 +74,8 @@ export interface TeamActivityState {
 }
 
 /**
- * 팀 하나의 기록(서버). 처음에 최신 한 쪽을 받고, 내려가면 더 받고, 열려 있는 동안 30초마다 새 줄만 받는다.
- * 접속 줄의 녹화가 서버에 있는지도 묻는다. teamId 가 null 이면 아무것도 하지 않는다.
+ * 팀 하나의 기록(서버). 처음에 최신 한 쪽을 받고, 내려가면 더 받고, 열려 있는 동안 30초마다 새 줄만 받는다(처음 쪽을
+ * 못 받았으면 30초마다 그것부터 다시 받는다). 접속 줄의 녹화가 서버에 있는지도 묻는다. teamId 가 null 이면 아무것도 하지 않는다.
  */
 export function useTeamActivity(teamId: string | null): TeamActivityState {
   const [items, setItems] = useState<TeamActivityItem[]>(NO_ITEMS);
@@ -95,6 +95,9 @@ export function useTeamActivity(teamId: string | null): TeamActivityState {
   hasMoreRef.current = hasMore;
   // 처음 쪽과 화면의 '더 받기'가 끝나기를 loadOlder 가 기다린다(같은 쪽을 두 번 받지 않게).
   const firstPageRef = useRef<Promise<void>>(Promise.resolve());
+  // 처음 쪽을 받았나. 받기 전에는 30초마다 새 줄을 묻지 않는다 — 기준인 맨 위 줄이 없고, 새 줄 받기로는 '더 받기'가 켜지지
+  // 않아 그 아래 줄과 내보내기가 받은 데서 멈춘다.
+  const firstPageStateRef = useRef<'loading' | 'loaded' | 'failed'>('loading');
   const moreRef = useRef<Promise<void>>(Promise.resolve());
   const [loadingOlder, setLoadingOlder] = useState(false);
 
@@ -146,32 +149,46 @@ export function useTeamActivity(teamId: string | null): TeamActivityState {
       return undefined;
     }
     setLoading(true);
-    // 브리지가 없으면 동기적으로 던진다 — Promise 로 감싸야 .catch 가 잡고, 이 훅을 쓰는 화면(호스트 상세 등)이 산다.
-    firstPageRef.current = Promise.resolve()
-      .then(() => listTeamActivity(teamId, { limit: TEAM_ACTIVITY_PAGE_SIZE }))
-      .then((page) => {
-        if (generation !== generationRef.current) {
-          return;
-        }
-        itemsRef.current = page;
-        setItems(page);
-        hasMoreRef.current = page.length >= TEAM_ACTIVITY_PAGE_SIZE;
-        setHasMore(hasMoreRef.current);
-        void checkReplays(generation, teamId, page, false);
-      })
-      .catch((reason: unknown) => {
-        if (generation === generationRef.current) {
-          setError(reason instanceof Error ? reason.message : String(reason));
-        }
-      })
-      .finally(() => {
-        if (generation === generationRef.current) {
-          setLoading(false);
-        }
-      });
+    // 처음 쪽 — 열 때, 그리고 못 받았으면 30초마다 다시(받을 때까지 못 받은 안내는 그대로 둔다).
+    const loadFirstPage = () => {
+      firstPageStateRef.current = 'loading';
+      // 브리지가 없으면 동기적으로 던진다 — Promise 로 감싸야 .catch 가 잡고, 이 훅을 쓰는 화면(호스트 상세 등)이 산다.
+      firstPageRef.current = Promise.resolve()
+        .then(() => listTeamActivity(teamId, { limit: TEAM_ACTIVITY_PAGE_SIZE }))
+        .then((page) => {
+          if (generation !== generationRef.current) {
+            return;
+          }
+          firstPageStateRef.current = 'loaded';
+          itemsRef.current = page;
+          setItems(page);
+          setError(null);
+          hasMoreRef.current = page.length >= TEAM_ACTIVITY_PAGE_SIZE;
+          setHasMore(hasMoreRef.current);
+          void checkReplays(generation, teamId, page, false);
+        })
+        .catch((reason: unknown) => {
+          if (generation === generationRef.current) {
+            firstPageStateRef.current = 'failed';
+            setError(reason instanceof Error ? reason.message : String(reason));
+          }
+        })
+        .finally(() => {
+          if (generation === generationRef.current) {
+            setLoading(false);
+          }
+        });
+    };
+    loadFirstPage();
 
-    // 새 줄만 받는다. 새로 고침 단추는 두지 않는다.
+    // 새 줄만 받는다. 새로 고침 단추는 두지 않는다. 처음 쪽을 받는 중이면 이 차례는 건너뛴다.
     const timer = window.setInterval(() => {
+      if (firstPageStateRef.current !== 'loaded') {
+        if (firstPageStateRef.current === 'failed') {
+          loadFirstPage();
+        }
+        return;
+      }
       void (async () => {
         let after = itemsRef.current[0]?.seq ?? 0;
         const fresh: TeamActivityItem[] = [];

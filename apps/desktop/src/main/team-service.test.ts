@@ -319,3 +319,60 @@ describe("TeamService", () => {
     expect(harness.server.requestsTo("POST", "/teams")).toHaveLength(1);
   });
 });
+
+// 동기화 암호를 초기화하면 서버가 그 사람을 모든 팀에서 빼고 혼자인 팀은 지운다. 초기화 확인 창이 그것을 알리려고 묻는다.
+describe("TeamService.listForVaultReset", () => {
+  const SHARED_TEAM = "11111111-1111-4111-8111-111111111111";
+  const SOLO_TEAM = "22222222-2222-4222-8222-222222222222";
+
+  async function withServerTeams() {
+    const harness = await createTeamHarness(tempDir);
+    const { TeamService } = await import("./team-service");
+    const shared = harness.server.addTeam(SHARED_TEAM, "Acme", "wrapped-acme");
+    shared.members.set("user-2", harness.server.newMember("member", "wrapped-2"));
+    harness.server.addTeam(SOLO_TEAM, "Solo", "wrapped-solo");
+    const teams = new TeamService({ auth: harness.auth, teamSync: harness.service, serverUrl: () => SERVER });
+    return { harness, teams };
+  }
+
+  it("reads the server's list with the teams I am alone in, even while the vault is locked", async () => {
+    const { harness, teams } = await withServerTeams();
+    harness.vault.status = "locked";
+
+    expect(await teams.listForVaultReset()).toEqual([
+      { name: "Acme", soleMember: false },
+      { name: "Solo", soleMember: true },
+    ]);
+    expect(harness.server.requestsTo("GET", "/teams")).toHaveLength(1);
+  });
+
+  it("falls back to the teams on this device when the server cannot be read", async () => {
+    const { harness, teams } = await withServerTeams();
+    harness.storage.upsertTeamInfo(SHARED_TEAM, {
+      name: "Acme",
+      role: "member",
+      wrappedTeamDek: null,
+      dataFloor: 0,
+      updatedAt: T0,
+    });
+    harness.server.failNextList = true;
+
+    expect(await teams.listForVaultReset()).toEqual([{ name: "Acme", soleMember: null }]);
+  });
+
+  it("uses this device's list without a known server or a session", async () => {
+    const { harness } = await withServerTeams();
+    harness.storage.upsertTeamInfo(SOLO_TEAM, { name: "Solo", role: "owner", wrappedTeamDek: null, dataFloor: 0, updatedAt: T0 });
+
+    // main 이 서버 주소를 넘기지 않은 서비스(시험 기본)는 서버에 묻지 않는다.
+    expect(await harness.teams.listForVaultReset()).toEqual([{ name: "Solo", soleMember: null }]);
+    const { TeamService } = await import("./team-service");
+    const signedOut = new TeamService({
+      auth: { ...harness.auth, getState: () => ({ status: "unauthenticated" }) },
+      teamSync: harness.service,
+      serverUrl: () => SERVER,
+    });
+    expect(await signedOut.listForVaultReset()).toEqual([{ name: "Solo", soleMember: null }]);
+    expect(harness.server.requestsTo("GET", "/teams")).toEqual([]);
+  });
+});

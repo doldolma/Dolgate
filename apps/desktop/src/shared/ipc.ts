@@ -1501,6 +1501,15 @@ export interface SessionReplayView extends SessionReplayIndex {
   team?: TeamReplayView;
 }
 
+/**
+ * 동기화 암호를 초기화하거나 탈퇴하면 빠질 팀 하나(두 확인 창이 알린다). 혼자인 팀은 서버에서도 지워진다 — 혼자인지는 서버 목록에서만
+ * 알아서, 못 읽었으면 null 이다.
+ */
+export interface TeamVaultResetItem {
+  name: string;
+  soleMember: boolean | null;
+}
+
 /** 이 기기에 있는 팀 하나. */
 export interface TeamListItem {
   id: string;
@@ -2280,6 +2289,8 @@ export interface DesktopApi {
   teams: {
     /** 이 기기에 있는 팀들. */
     list: () => Promise<TeamListItem[]>;
+    /** 동기화 암호를 초기화하거나 탈퇴하면 빠질 팀들. 서버 목록을 먼저 보고(잠겨 있어도 된다), 못 읽으면 이 기기 목록이다. */
+    listForVaultReset: () => Promise<TeamVaultResetItem[]>;
     /** 이 계정으로 팀을 쓸 수 있는지(로그인·E2EE 볼트·서버). */
     getAvailability: () => Promise<TeamAvailability>;
     /** 팀 볼트 목록·그룹과, 팀 레코드 id → 팀 표. 화면이 레코드의 볼트를 찾는다. */

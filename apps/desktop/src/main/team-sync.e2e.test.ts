@@ -1169,4 +1169,65 @@ describe.skipIf(!RUN)("team vault against the real sync server", () => {
     expect(liveIds((await api(account.accessToken, "GET", `/teams/${team.id}/sync`)).body, "hosts")).toEqual(["p-team-host"]);
     expect(device.storage.getTeamState(team.id)!.data.syncOutbox).toEqual([]);
   }, 60_000);
+
+  // 다른 기기(다른 멤버의 기기도 같다)의 시계가 빠르면 그 기기가 고친 레코드의 시각이 내 '지금'보다 뒤다. 예전에는 그 레코드를
+  // 고치거나 지워도 올라가지 않고 다음 받기에서 덮였다(2026-11-02 리뷰). 실제 서버에서도 내 수정·지움이 간다.
+  it("lets an edit and a deletion win over a device whose clock runs an hour ahead", async () => {
+    const draft = (label: string) => ({
+      kind: "ssh" as const,
+      label,
+      hostname: "skew.internal",
+      port: 22,
+      username: "ubuntu",
+      authType: "password" as const,
+    });
+    const { unwrapTeamDek } = await import("@shared");
+    const wrapped = deviceA1.storage.getTeamState(teamId)!.info.wrappedTeamDek!;
+    const teamKey = Buffer.from(unwrapTeamDek(wrapped, Buffer.from(accountA.dekBase64, "base64"), teamId)).toString("base64");
+    const serverLabel = async () => {
+      const body = (await api(accountA.accessToken, "GET", `/teams/${teamId}/sync`)).body;
+      const row = (body.hosts as Array<{ id: string; encrypted_payload: string; deleted_at?: string | null }>).find(
+        (record) => record.id === "skew-host",
+      );
+      return !row ? "(none)" : row.deleted_at ? "(deleted)" : (decrypt(row.encrypted_payload, teamKey) as { label: string }).label;
+    };
+    const onFastClock = async (work: () => Promise<void>) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(Date.now() + 60 * 60 * 1000);
+      try {
+        await work();
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+
+    deviceA1.catalog.createHost(teamId, "skew-host", draft("first"), null);
+    await deviceA1.service.pushDirty();
+    await deviceA2.tick();
+
+    await onFastClock(async () => {
+      deviceA2.catalog.updateHost("skew-host", draft("from-fast-clock"), null);
+      await deviceA2.service.pushDirty();
+    });
+    await deviceA1.tick();
+    expect(deviceA1.catalog.getHost("skew-host")).toMatchObject({ label: "from-fast-clock" });
+
+    deviceA1.catalog.updateHost("skew-host", draft("from-a1-after"), null);
+    await deviceA1.service.pushDirty();
+    await deviceA2.tick();
+    expect(await serverLabel()).toBe("from-a1-after");
+    expect(deviceA2.catalog.getHost("skew-host")).toMatchObject({ label: "from-a1-after" });
+
+    await onFastClock(async () => {
+      deviceA2.catalog.updateHost("skew-host", draft("again-fast"), null);
+      await deviceA2.service.pushDirty();
+    });
+    await deviceA1.tick();
+    deviceA1.catalog.removeHosts(["skew-host"]);
+    await deviceA1.service.pushDirty();
+    await deviceA2.tick();
+    expect(await serverLabel()).toBe("(deleted)");
+    expect(deviceA1.catalog.getHost("skew-host")).toBeNull();
+    expect(deviceA2.catalog.getHost("skew-host")).toBeNull();
+  }, 60_000);
 });
