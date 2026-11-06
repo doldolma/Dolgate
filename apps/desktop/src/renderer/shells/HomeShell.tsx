@@ -181,14 +181,12 @@ export function HomeShell({
       translate,
     ],
   );
-  // 지금 위치가 팀 볼트면 그 팀 id. 새 호스트(빠른 연결 포함)는 그 팀에 만들고, AWS 가져오기는 개인 맨 위로 보낸다
-  // (AWS 찾기는 개인 프로필만 본다).
+  // 지금 위치가 팀 볼트면 그 팀 id. 새 호스트(빠른 연결 포함)는 그 팀에 만든다.
   const teamVaultId =
     typeof homeViewModel.currentVaultId === "string" &&
     isTeamVaultId(homeViewModel.currentVaultId)
       ? homeViewModel.currentVaultId
       : null;
-  const awsImportGroupPath = teamVaultId ? null : homeViewModel.currentGroupPath;
   const inviteTeam = inviteTeamId
     ? (browserVaults.find((vault) => vault.id === inviteTeamId) ?? null)
     : null;
@@ -294,7 +292,7 @@ export function HomeShell({
         team: vault.kind === "team" ? { id: vault.id, name: vault.name } : null,
       }));
   }, [browserVaults, homeViewModel.hostDrawer]);
-  // 가져오기 창(OpenSSH·Termius·Xshell·Warpgate)의 Vault — 새 호스트 서랍과 같은 후보. 처음엔 지금 보고 있는 볼트,
+  // 가져오기 창(OpenSSH·Termius·Xshell·Warpgate·AWS)의 Vault — 새 호스트 서랍과 같은 후보. 처음엔 지금 보고 있는 볼트,
   // 거기에 쓸 수 없으면 개인이다. 보고 있는 그룹은 그 볼트로 가져올 때만 따라간다.
   const importVaultChoices = useMemo(
     () =>
@@ -1347,11 +1345,26 @@ export function HomeShell({
 
       <AwsImportDialog
         open={isAwsImportOpen}
-        currentGroupPath={awsImportGroupPath}
+        currentGroupPath={importGroupPath}
+        vaultChoices={importVaultChoices}
+        defaultVaultId={importVaultId}
         onClose={() => setIsAwsImportOpen(false)}
-        onImport={async (draft, secrets) => {
+        onImport={async (draft, secrets, target) => {
           // RDP 경로는 자격증명(Administrator + 암호)을 함께 만든다. saveHost 가 시크릿까지 받는다.
-          await homeViewModel.saveHost(null, draft, secrets);
+          if (!target.vaultId) {
+            await homeViewModel.saveHost(null, draft, secrets);
+            return;
+          }
+          // 팀에 함께 공유하지 않으면 팀에는 두지 않고, 만든 호스트의 내 자격 증명에 둔다(다른 가져오기와 같다).
+          if (secrets && target.shareSecrets === false) {
+            const host = await homeViewModel.saveHost(null, draft, undefined, target.vaultId);
+            await homeViewModel.saveMyHostCredentials(host.id, {
+              username: secrets.username,
+              password: secrets.password,
+            });
+            return;
+          }
+          await homeViewModel.saveHost(null, draft, secrets, target.vaultId);
         }}
       />
 

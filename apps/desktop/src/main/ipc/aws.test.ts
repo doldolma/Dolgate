@@ -241,6 +241,57 @@ describe("registerAwsIpcHandlers", () => {
     expect(team.syncOutbox.clear).toHaveBeenCalledWith("awsProfiles", "t-1");
   });
 
+  // 가져오기 창이 팀을 고르면 찾기 다섯이 그 팀의 프로필로 간다. 개인은 지금까지의 인자 그대로다.
+  it("finds with the team the import window picked, and keeps personal lookups as they were", async () => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+      handlers.set(channel, handler);
+    });
+    const awsService = {
+      listRegions: vi.fn().mockResolvedValue([]),
+      listEc2Instances: vi.fn().mockResolvedValue([]),
+      listEcsClusters: vi.fn().mockResolvedValue([]),
+      getWindowsPassword: vi.fn().mockResolvedValue({ password: null, reason: "not-available" }),
+      inspectHostSshMetadata: vi.fn().mockResolvedValue({}),
+    };
+    const team = { awsProfiles: { listMetadata: vi.fn(() => []) } };
+    registerAwsIpcHandlers(withVaults({ awsService }, { "team-1": team }) as any);
+    const call = (channel: string, ...args: unknown[]) => handlers.get(channel)!({}, ...args);
+    const vault = { teamId: "team-1", profiles: team.awsProfiles };
+    const password = { profileName: "prod", region: "us-east-1", instanceId: "i-win", privateKeyPem: "pem" };
+    const inspection = { profileName: "prod", region: "us-east-1", instanceId: "i-1", availabilityZone: "us-east-1a" };
+
+    await call(ipcChannels.aws.listRegions, "prod", "team-1");
+    await call(ipcChannels.aws.listEc2Instances, "prod", "us-east-1", "team-1");
+    await call(ipcChannels.aws.listEcsClusters, "prod", "us-east-1", "team-1");
+    await call(ipcChannels.aws.getWindowsPassword, { ...password, vaultId: "team-1" });
+    await call(ipcChannels.aws.inspectHostSshMetadata, { ...inspection, vaultId: "team-1" });
+
+    expect(awsService.listRegions.mock.lastCall).toEqual(["prod", vault]);
+    expect(awsService.listEc2Instances.mock.lastCall).toEqual(["prod", "us-east-1", vault]);
+    expect(awsService.listEcsClusters.mock.lastCall).toEqual(["prod", "us-east-1", vault]);
+    // 볼트는 입력에서 떼어 따로 넘긴다 — 서비스의 입력은 지금 모양 그대로다.
+    expect(awsService.getWindowsPassword.mock.lastCall).toEqual([password, vault]);
+    expect(awsService.inspectHostSshMetadata.mock.lastCall).toEqual([inspection, vault]);
+
+    // 개인(볼트 없음·"personal")은 볼트 없이 부른다.
+    await call(ipcChannels.aws.listRegions, "default");
+    await call(ipcChannels.aws.listEc2Instances, "default", "us-east-1");
+    await call(ipcChannels.aws.listEcsClusters, "default", "us-east-1", "personal");
+    await call(ipcChannels.aws.getWindowsPassword, password);
+    await call(ipcChannels.aws.inspectHostSshMetadata, inspection);
+
+    expect(awsService.listRegions.mock.lastCall).toEqual(["default"]);
+    expect(awsService.listEc2Instances.mock.lastCall).toEqual(["default", "us-east-1"]);
+    expect(awsService.listEcsClusters.mock.lastCall).toEqual(["default", "us-east-1"]);
+    expect(awsService.getWindowsPassword.mock.lastCall).toEqual([password]);
+    expect(awsService.inspectHostSshMetadata.mock.lastCall).toEqual([inspection]);
+
+    // 이 기기에 없는 팀이면 찾지 않는다(막 빠진 팀을 창이 들고 있을 수 있다).
+    await expect(call(ipcChannels.aws.listEc2Instances, "prod", "us-east-1", "team-gone")).rejects.toThrow();
+    expect(awsService.listEc2Instances).toHaveBeenCalledTimes(2);
+  });
+
   it("updates an aws profile region and queues sync", async () => {
     const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
     electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {

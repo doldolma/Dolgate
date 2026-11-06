@@ -3723,10 +3723,14 @@ export class AwsService {
     }
   }
 
-  async listRegions(profileName: string): Promise<string[]> {
+  /**
+   * 아래 찾기(지역·EC2·ECS·SSH 검사·Windows 비밀번호)는 가져오기 창이 부른다. vault 를 주면 그 팀의 프로필로 찾는다 — 펼친
+   * 이름(`teamAwsProfileName`)으로 부르는 것뿐이고, 팀 호스트에 붙을 때와 같은 자격 증명이다.
+   */
+  async listRegions(profileName: string, vault?: AwsProfileVault): Promise<string[]> {
     try {
       const output = await this.getEc2Client(
-        profileName,
+        this.materializedNameOf(profileName, vault),
         REGION_DISCOVERY_REGION,
       ).send(new DescribeRegionsCommand({}));
       const regions = (output.Regions ?? [])
@@ -3759,12 +3763,15 @@ export class AwsService {
    * - 부팅 직후 몇 분간 → 빈 값
    * - 키페어가 RSA 가 아니거나(ed25519) 다른 키페어의 개인키 → 복호화 실패
    */
-  async getWindowsPassword(input: {
-    profileName: string;
-    region: string;
-    instanceId: string;
-    privateKeyPem: string;
-  }): Promise<{ password: string | null; reason: AwsWindowsPasswordFailure | null }> {
+  async getWindowsPassword(
+    input: {
+      profileName: string;
+      region: string;
+      instanceId: string;
+      privateKeyPem: string;
+    },
+    vault?: AwsProfileVault,
+  ): Promise<{ password: string | null; reason: AwsWindowsPasswordFailure | null }> {
     const privateKeyPem = input.privateKeyPem.trim();
     if (!privateKeyPem) {
       return { password: null, reason: "no-key" };
@@ -3777,7 +3784,10 @@ export class AwsService {
 
     let ciphertext: string;
     try {
-      const output = await this.getEc2Client(input.profileName, input.region).send(
+      const output = await this.getEc2Client(
+        this.materializedNameOf(input.profileName, vault),
+        input.region,
+      ).send(
         new GetPasswordDataCommand({ InstanceId: input.instanceId }),
         { abortSignal: AbortSignal.timeout(30_000) },
       );
@@ -3809,10 +3819,12 @@ export class AwsService {
   async listEc2Instances(
     profileName: string,
     region: string,
+    vault?: AwsProfileVault,
   ): Promise<AwsEc2InstanceSummary[]> {
+    const sdkProfileName = this.materializedNameOf(profileName, vault);
     let payload: Ec2DescribeInstancesPayload;
     try {
-      const client = this.getEc2Client(profileName, region);
+      const client = this.getEc2Client(sdkProfileName, region);
       const reservations: NonNullable<
         Ec2DescribeInstancesPayload["Reservations"]
       > = [];
@@ -3836,7 +3848,7 @@ export class AwsService {
     const treatAllAsSsmReady = isE2EFakeAwsSessionEnabled();
     const ssmLookup = treatAllAsSsmReady
       ? null
-      : await this.loadSsmManagedInstanceLookup(profileName, region);
+      : await this.loadSsmManagedInstanceLookup(sdkProfileName, region);
     const instances: AwsEc2InstanceSummary[] = [];
     for (const reservation of payload.Reservations ?? []) {
       for (const instance of reservation.Instances ?? []) {
@@ -3941,9 +3953,10 @@ export class AwsService {
   async listEcsClusters(
     profileName: string,
     region: string,
+    vault?: AwsProfileVault,
   ): Promise<AwsEcsClusterListItem[]> {
     try {
-      const client = this.getEcsClient(profileName, region);
+      const client = this.getEcsClient(this.materializedNameOf(profileName, vault), region);
       const clusterArns: string[] = [];
       let nextToken: string | undefined;
       do {
@@ -5335,9 +5348,13 @@ export class AwsService {
 
   async inspectHostSshMetadata(
     input: AwsHostSshInspectionInput,
+    vault?: AwsProfileVault,
   ): Promise<AwsHostSshInspectionResult> {
     try {
-      const metadata = await this.loadHostSshMetadata(input);
+      const metadata = await this.loadHostSshMetadata({
+        ...input,
+        profileName: this.materializedNameOf(input.profileName, vault),
+      });
       return {
         sshPort: metadata.sshPort,
         recommendedUsername: metadata.recommendedUsername,

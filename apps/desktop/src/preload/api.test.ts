@@ -149,6 +149,33 @@ describe("createDesktopApi", () => {
     ]);
   });
 
+  // 가져오기 창의 찾기 — 팀을 고르면 끝 인자로(입력이 객체인 둘은 입력 그대로) 싣고, 개인은 지금과 같은 인자로 간다.
+  it("adds the import window's team to the AWS lookups only when one is picked", async () => {
+    const { createDesktopApi } = await import("./api");
+    const { ipcChannels } = await import("../common/ipc-channels");
+    const ipcRenderer = { invoke: vi.fn().mockResolvedValue({}), on: vi.fn() } as any;
+    const api = createDesktopApi(ipcRenderer);
+    const password = { profileName: "prod", region: "r", instanceId: "i", privateKeyPem: "pem", vaultId: "team-1" };
+
+    await api.aws.listRegions("prod");
+    await api.aws.listRegions("prod", "team-1");
+    await api.aws.listEc2Instances("prod", "r");
+    await api.aws.listEc2Instances("prod", "r", "team-1");
+    await api.aws.listEcsClusters("prod", "r");
+    await api.aws.listEcsClusters("prod", "r", "team-1");
+    await api.aws.getWindowsPassword(password);
+
+    expect(ipcRenderer.invoke.mock.calls).toEqual([
+      [ipcChannels.aws.listRegions, "prod"],
+      [ipcChannels.aws.listRegions, "prod", "team-1"],
+      [ipcChannels.aws.listEc2Instances, "prod", "r"],
+      [ipcChannels.aws.listEc2Instances, "prod", "r", "team-1"],
+      [ipcChannels.aws.listEcsClusters, "prod", "r"],
+      [ipcChannels.aws.listEcsClusters, "prod", "r", "team-1"],
+      [ipcChannels.aws.getWindowsPassword, password],
+    ]);
+  });
+
   // 팀 녹화(5-4) — 재생 창의 부름에 팀이 실려 가야 메인이 서버의 녹화를 연다.
   it("passes the team of a team recording to the replay channels", async () => {
     const { createDesktopApi } = await import("./api");

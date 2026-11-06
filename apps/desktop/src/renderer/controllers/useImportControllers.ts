@@ -43,6 +43,7 @@ export function useAwsImportController() {
   return useMemo(
     () => ({
       listAwsProfiles,
+      listTeamAwsProfiles,
       getSyncStatus,
       listExternalAwsProfiles,
       createAwsProfile,

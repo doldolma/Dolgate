@@ -1831,10 +1831,15 @@ export interface DesktopApi {
     getProfileStatusById: (profileId: string) => Promise<AwsProfileStatus>;
     login: (profileName: string, vaultId?: string | null) => Promise<void>;
     loginById: (profileId: string) => Promise<void>;
-    listRegions: (profileName: string) => Promise<string[]>;
+    /**
+     * 가져오기 창의 찾기(지역·EC2·ECS, 아래 Windows 비밀번호·SSH 검사도). vaultId 는 창에서 고른 볼트다 — 팀이면 그
+     * 팀의 프로필(원래 이름)로 찾는다. 없거나 개인이면 개인 프로필이다.
+     */
+    listRegions: (profileName: string, vaultId?: string | null) => Promise<string[]>;
     listEc2Instances: (
       profileName: string,
       region: string,
+      vaultId?: string | null,
     ) => Promise<AwsEc2InstanceSummary[]>;
     /**
      * Windows 초기 관리자 비밀번호를 가져온다. 개인키는 메인 프로세스가 받아 그 자리에서 복호화하고
@@ -1845,10 +1850,12 @@ export interface DesktopApi {
       region: string;
       instanceId: string;
       privateKeyPem: string;
+      vaultId?: string | null;
     }) => Promise<AwsWindowsPasswordResult>;
     listEcsClusters: (
       profileName: string,
       region: string,
+      vaultId?: string | null,
     ) => Promise<AwsEcsClusterListItem[]>;
     loadEcsClusterSnapshot: (hostId: string) => Promise<AwsEcsClusterSnapshot>;
     loadEcsClusterUtilization: (
@@ -1876,7 +1883,7 @@ export interface DesktopApi {
       serviceName: string,
     ) => Promise<AwsEcsTaskTunnelServiceDetails>;
     inspectHostSshMetadata: (
-      input: AwsHostSshInspectionInput,
+      input: AwsHostSshInspectionInput & { vaultId?: string | null },
     ) => Promise<AwsHostSshInspectionResult>;
     loadHostSshMetadata: (hostId: string) => Promise<HostRecord>;
   };

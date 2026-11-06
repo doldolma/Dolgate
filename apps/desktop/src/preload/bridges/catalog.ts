@@ -101,14 +101,20 @@ export function buildAwsBridge(ipcRenderer: IpcRenderer): DesktopApi["aws"] {
         : ipcRenderer.invoke(ipcChannels.aws.login, profileName),
     loginById: (profileId: string) =>
       ipcRenderer.invoke(ipcChannels.aws.loginById, profileId),
-    listRegions: (profileName: string) =>
-      ipcRenderer.invoke(ipcChannels.aws.listRegions, profileName),
-    listEc2Instances: (profileName: string, region: string) =>
-      ipcRenderer.invoke(ipcChannels.aws.listEc2Instances, profileName, region),
+    listRegions: (profileName: string, vaultId?: string | null) =>
+      vaultId
+        ? ipcRenderer.invoke(ipcChannels.aws.listRegions, profileName, vaultId)
+        : ipcRenderer.invoke(ipcChannels.aws.listRegions, profileName),
+    listEc2Instances: (profileName: string, region: string, vaultId?: string | null) =>
+      vaultId
+        ? ipcRenderer.invoke(ipcChannels.aws.listEc2Instances, profileName, region, vaultId)
+        : ipcRenderer.invoke(ipcChannels.aws.listEc2Instances, profileName, region),
     getWindowsPassword: (input) =>
       ipcRenderer.invoke(ipcChannels.aws.getWindowsPassword, input),
-    listEcsClusters: (profileName: string, region: string) =>
-      ipcRenderer.invoke(ipcChannels.aws.listEcsClusters, profileName, region),
+    listEcsClusters: (profileName: string, region: string, vaultId?: string | null) =>
+      vaultId
+        ? ipcRenderer.invoke(ipcChannels.aws.listEcsClusters, profileName, region, vaultId)
+        : ipcRenderer.invoke(ipcChannels.aws.listEcsClusters, profileName, region),
     loadEcsClusterSnapshot: (hostId: string) =>
       ipcRenderer.invoke(ipcChannels.aws.loadEcsClusterSnapshot, hostId),
     loadEcsClusterUtilization: (hostId: string) =>

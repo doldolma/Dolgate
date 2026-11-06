@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AwsProfileStatus, DesktopApi } from '@shared';
 import {
@@ -271,6 +271,8 @@ describe('AwsImportDialog', () => {
         }),
         // 계정과 암호는 호스트 레코드가 아니라 자격증명으로 간다.
         { kind: 'rdp', username: 'Administrator', password: 'Init!alPass' },
+        // 볼트 후보가 없으면 개인 — 요청에 볼트를 싣지 않는다.
+        {},
       ),
     );
   });
@@ -373,6 +375,7 @@ describe('AwsImportDialog', () => {
       expect(onImport).toHaveBeenCalledWith(
         expect.objectContaining({ kind: 'rdp' }),
         { kind: 'rdp', username: 'Administrator', password: 'TypedByHand1' },
+        {},
       ),
     );
   });
@@ -611,6 +614,8 @@ describe('AwsImportDialog', () => {
           awsSshMetadataStatus: 'ready',
           awsSshMetadataError: null,
         }),
+        undefined,
+        {},
       ),
     );
   });
@@ -668,6 +673,8 @@ describe('AwsImportDialog', () => {
           awsSshUsername: null,
           awsSshMetadataStatus: 'idle',
         }),
+        undefined,
+        {},
       ),
     );
   });
@@ -795,6 +802,8 @@ describe('AwsImportDialog', () => {
           awsEcsClusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
           awsEcsClusterName: 'prod',
         }),
+        undefined,
+        {},
       ),
     );
   });
@@ -1041,6 +1050,8 @@ describe('AwsImportDialog', () => {
           awsSshMetadataStatus: 'idle',
           awsSshMetadataError: null,
         }),
+        undefined,
+        {},
       ),
     );
     expect(api.aws.inspectHostSshMetadata).toHaveBeenCalledTimes(1);
@@ -1090,5 +1101,333 @@ describe('AwsImportDialog', () => {
       expect(screen.getByLabelText('SSH Port')).toHaveValue('2022'),
     );
     expect(screen.getByLabelText('SSH Username')).toHaveValue('custom-user');
+  });
+});
+
+// 팀으로 가져오기 — 팀 호스트는 다른 볼트의 AWS 프로필을 가리킬 수 없으니, 고른 팀의 프로필로 찾고 그 팀에 저장한다.
+describe('AwsImportDialog — 어느 볼트로', () => {
+  const TEAM = 'team-1';
+  const choices = [
+    { id: 'personal', team: null },
+    { id: TEAM, team: { id: TEAM, name: 'Acme Infra' } },
+  ];
+  const windowsInstance = {
+    instanceId: 'i-win',
+    name: 'winbox',
+    availabilityZone: 'ap-northeast-2a',
+    platform: 'Windows',
+    privateIp: '10.0.2.181',
+    keyName: 'gw-prod-keypair',
+    state: 'running',
+    ssmAvailability: 'ready',
+    ssmAvailabilityReason: null,
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** 팀 id 를 주면 그 팀의 프로필, 아니면 개인 프로필을 주는 목 API. */
+  function installTeamApi() {
+    const api = installMockApi();
+    api.aws.listProfiles.mockImplementation(async (vaultId?: string) =>
+      vaultId === TEAM
+        ? [{ id: 'team-profile', name: 'team-prod' }]
+        : [{ id: 'profile-default', name: 'default' }],
+    );
+    return api;
+  }
+
+  function renderDialog(props: Partial<Parameters<typeof AwsImportDialog>[0]> = {}) {
+    const onImport = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        vaultChoices={choices}
+        defaultVaultId={TEAM}
+        onClose={onClose}
+        onImport={onImport}
+        {...props}
+      />,
+    );
+    return { onImport, onClose };
+  }
+
+  const vaultPicker = () => screen.getByRole('button', { name: 'Vault' });
+  const pickVault = (name: string) => {
+    fireEvent.click(vaultPicker());
+    fireEvent.click(within(screen.getByRole('listbox', { name: /Vault/ })).getByRole('option', { name }));
+  };
+  const shareSwitch = () => screen.queryByRole('switch');
+  const cliImportButton = () => screen.queryByRole('button', { name: '로컬 AWS CLI에서 가져오기' });
+
+  it('finds with the team profile of the vault it was opened from and saves an EC2 host there, in the group there', async () => {
+    const api = installTeamApi();
+    const { onImport } = renderDialog();
+
+    expect(vaultPicker()).toHaveTextContent('Acme Infra');
+    await waitFor(() => expect(screen.getByText('web-1')).toBeInTheDocument());
+    expect(api.aws.listProfiles).toHaveBeenCalledWith(TEAM);
+    expect(screen.getByLabelText('Profile')).toHaveValue('team-prod');
+    expect(api.aws.getProfileStatus).toHaveBeenCalledWith('team-prod', TEAM);
+    expect(api.aws.listRegions).toHaveBeenCalledWith('team-prod', TEAM);
+    expect(api.aws.listEc2Instances).toHaveBeenCalledWith('team-prod', 'ap-northeast-2', TEAM);
+    // CLI 프로필은 개인으로만 들어온다 — 팀을 고른 동안에는 없다.
+    expect(cliImportButton()).toBeNull();
+    // 비밀번호를 가져올 일이 없으면 공유 줄도 없다.
+    expect(shareSwitch()).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'SSH 정보 확인' }));
+    await waitFor(() =>
+      expect(api.aws.inspectHostSshMetadata).toHaveBeenCalledWith({
+        profileName: 'team-prod',
+        region: 'ap-northeast-2',
+        instanceId: 'i-aws',
+        availabilityZone: 'ap-northeast-2a',
+        vaultId: TEAM,
+      }),
+    );
+    // 고른 볼트로 찾은 것을 등록하는 동안에는 볼트를 바꾸지 못한다.
+    expect(vaultPicker()).toBeDisabled();
+    await waitFor(() => expect(screen.getByDisplayValue('ubuntu')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Host 등록' }));
+
+    await waitFor(() =>
+      expect(onImport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'aws-ec2',
+          groupName: 'Servers',
+          awsProfileId: 'team-profile',
+          awsProfileName: 'team-prod',
+        }),
+        undefined,
+        { vaultId: TEAM, shareSecrets: true },
+      ),
+    );
+  });
+
+  it('adds an ECS cluster found with the team profile to that team', async () => {
+    const api = installTeamApi();
+    const { onImport } = renderDialog();
+    await waitFor(() => expect(screen.getByText('web-1')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'ECS' }));
+    expect(await screen.findByText('prod')).toBeInTheDocument();
+    expect(api.aws.listEcsClusters).toHaveBeenCalledWith('team-prod', 'ap-northeast-2', TEAM);
+    fireEvent.click(screen.getByRole('button', { name: '클러스터 추가' }));
+
+    await waitFor(() =>
+      expect(onImport).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'aws-ecs', awsProfileId: 'team-profile', awsProfileName: 'team-prod' }),
+        undefined,
+        { vaultId: TEAM, shareSecrets: true },
+      ),
+    );
+  });
+
+  it('goes back to your own profiles and calls without a team when you pick your own vault, leaving the group behind', async () => {
+    const api = installTeamApi();
+    const { onImport } = renderDialog();
+    await waitFor(() => expect(screen.getByText('web-1')).toBeInTheDocument());
+    api.aws.getProfileStatus.mockClear();
+    api.aws.listRegions.mockClear();
+    api.aws.listEc2Instances.mockClear();
+
+    pickVault('Personal');
+
+    await waitFor(() => expect(api.aws.listEc2Instances).toHaveBeenCalledWith('default', 'ap-northeast-2'));
+    expect(api.aws.listProfiles).toHaveBeenLastCalledWith();
+    expect(screen.getByLabelText('Profile')).toHaveValue('default');
+    expect(api.aws.getProfileStatus).toHaveBeenCalledWith('default');
+    expect(api.aws.listRegions).toHaveBeenCalledWith('default');
+    expect(cliImportButton()).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'SSH 정보 확인' }));
+    await waitFor(() =>
+      expect(api.aws.inspectHostSshMetadata).toHaveBeenCalledWith({
+        profileName: 'default',
+        region: 'ap-northeast-2',
+        instanceId: 'i-aws',
+        availabilityZone: 'ap-northeast-2a',
+      }),
+    );
+    await waitFor(() => expect(screen.getByDisplayValue('ubuntu')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Host 등록' }));
+
+    // 처음 볼트가 아니면 보고 있던 그룹은 따라가지 않는다(그 그룹은 처음 볼트의 것이다).
+    await waitFor(() =>
+      expect(onImport).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'aws-ec2', groupName: '', awsProfileId: 'profile-default' }),
+        undefined,
+        {},
+      ),
+    );
+  });
+
+  it('shares the Windows password with the team by default, or keeps it as my credential when turned off', async () => {
+    const api = installTeamApi();
+    api.aws.listEc2Instances.mockResolvedValue([windowsInstance]);
+    const { onImport } = renderDialog();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'RDP 로 추가' }));
+    // 비밀번호가 생기는 단계 — Vault 칸 아래에 공유 줄이 생긴다(기본 켬). 볼트는 잠기고 공유는 고를 수 있다.
+    expect(shareSwitch()).toHaveAccessibleName('비밀번호·SSH 키 1개도 함께 공유');
+    expect(shareSwitch()).toHaveAttribute('aria-checked', 'true');
+    expect(shareSwitch()).toBeEnabled();
+    expect(vaultPicker()).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '키 내용 직접 붙여넣기' }));
+    fireEvent.change(screen.getByLabelText('프라이빗 키'), {
+      target: { value: '-----BEGIN RSA PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----' },
+    });
+    await waitFor(() =>
+      expect(api.aws.getWindowsPassword).toHaveBeenCalledWith(
+        expect.objectContaining({ profileName: 'team-prod', instanceId: 'i-win', vaultId: TEAM }),
+      ),
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Host 등록' })).toBeEnabled());
+
+    fireEvent.click(shareSwitch()!);
+    expect(shareSwitch()).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(screen.getByRole('button', { name: 'Host 등록' }));
+
+    await waitFor(() =>
+      expect(onImport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'rdp',
+          awsSsm: expect.objectContaining({ profileId: 'team-profile', profileName: 'team-prod' }),
+        }),
+        { kind: 'rdp', username: 'Administrator', password: 'Init!alPass' },
+        { vaultId: TEAM, shareSecrets: false },
+      ),
+    );
+  });
+
+  it('puts the key in place for a team static profile without one on this device, then finds again', async () => {
+    const api = installTeamApi();
+    const missingKey = { teamId: TEAM, profileId: 'team-profile', profileName: 'team-prod' };
+    api.aws.getProfileStatus
+      .mockResolvedValueOnce(
+        createStatus({
+          profileName: 'team-prod',
+          isAuthenticated: false,
+          errorMessage: "이 기기에 'team-prod' 키가 없습니다.",
+          missingKey,
+        }),
+      )
+      .mockResolvedValue(
+        createStatus({ profileName: 'team-prod', isAuthenticated: true, configuredRegion: 'ap-northeast-2' }),
+      );
+    const updateProfile = vi.fn().mockResolvedValue(undefined);
+    Object.assign(api.aws, { updateProfile });
+    renderDialog();
+
+    fireEvent.click(await screen.findByRole('button', { name: '키 넣기' }));
+    fireEvent.change(screen.getByLabelText('Access Key'), { target: { value: 'AKIAEXAMPLE' } });
+    fireEvent.change(screen.getByLabelText('Secret'), { target: { value: 'secret-value' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+
+    await waitFor(() =>
+      expect(updateProfile).toHaveBeenCalledWith({
+        profileName: 'team-prod',
+        accessKeyId: 'AKIAEXAMPLE',
+        secretAccessKey: 'secret-value',
+        vaultId: TEAM,
+      }),
+    );
+    // 넣었으면 같은 프로필의 상태부터 다시 읽고 찾는다.
+    await waitFor(() => expect(screen.getByText('web-1')).toBeInTheDocument());
+    expect(api.aws.getProfileStatus).toHaveBeenCalledTimes(2);
+    expect(api.aws.getProfileStatus).toHaveBeenLastCalledWith('team-prod', TEAM);
+    expect(screen.queryByRole('button', { name: '키 넣기' })).toBeNull();
+  });
+
+  it('signs a team SSO profile in with that team, keeping the vault while it signs in', async () => {
+    const api = installTeamApi();
+    api.aws.getProfileStatus
+      .mockResolvedValueOnce(createStatus({ profileName: 'team-prod', isSsoProfile: true, isAuthenticated: false }))
+      .mockResolvedValue(
+        createStatus({ profileName: 'team-prod', isSsoProfile: true, isAuthenticated: true, configuredRegion: 'ap-northeast-2' }),
+      );
+    let finishLogin: () => void = () => undefined;
+    api.aws.login.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishLogin = resolve;
+        }),
+    );
+    renderDialog();
+
+    fireEvent.click(await screen.findByRole('button', { name: '브라우저에서 로그인' }));
+    await waitFor(() => expect(api.aws.login).toHaveBeenCalledWith('team-prod', TEAM));
+    // 로그인하는 동안 볼트를 바꾸면 끝난 로그인이 다른 볼트의 상태를 덮는다.
+    expect(vaultPicker()).toBeDisabled();
+    await act(async () => {
+      finishLogin();
+    });
+
+    await waitFor(() => expect(screen.getByText('web-1')).toBeInTheDocument());
+    expect(api.aws.getProfileStatus).toHaveBeenLastCalledWith('team-prod', TEAM);
+    expect(vaultPicker()).toBeEnabled();
+  });
+
+  it('makes a new profile in the team it is on and picks it', async () => {
+    const api = installTeamApi();
+    api.aws.listProfiles
+      .mockResolvedValueOnce([{ id: 'team-profile', name: 'team-prod' }])
+      .mockResolvedValueOnce([
+        { id: 'team-profile', name: 'team-prod' },
+        { id: 'team-new', name: 'team-new' },
+      ]);
+    renderDialog();
+    await waitFor(() => expect(screen.getByLabelText('Profile')).toHaveValue('team-prod'));
+
+    fireEvent.click(screen.getByRole('button', { name: '프로필 생성' }));
+    fireEvent.change(screen.getByLabelText('새 프로필명'), { target: { value: 'team-new' } });
+    fireEvent.change(screen.getByLabelText('Access Key'), { target: { value: 'AKIATEST123' } });
+    fireEvent.change(screen.getByLabelText('Secret'), { target: { value: 'secret-value' } });
+    fireEvent.click(screen.getByRole('button', { name: '프로필 저장' }));
+
+    await waitFor(() =>
+      expect(api.aws.createProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'static', profileName: 'team-new', vaultId: TEAM }),
+      ),
+    );
+    await waitFor(() => expect(screen.getByLabelText('Profile')).toHaveValue('team-new'));
+    expect(api.aws.listProfiles).toHaveBeenLastCalledWith(TEAM);
+  });
+
+  it('drops the profile list of a vault you have just left', async () => {
+    const api = installTeamApi();
+    let releaseTeam: (items: unknown[]) => void = () => undefined;
+    api.aws.listProfiles.mockImplementation((vaultId?: string) =>
+      vaultId === TEAM
+        ? new Promise((resolve) => {
+            releaseTeam = resolve;
+          })
+        : Promise.resolve([{ id: 'profile-default', name: 'default' }]),
+    );
+    renderDialog();
+
+    pickVault('Personal');
+    await waitFor(() => expect(screen.getByLabelText('Profile')).toHaveValue('default'));
+    await act(async () => {
+      releaseTeam([{ id: 'team-profile', name: 'team-prod' }]);
+    });
+
+    expect(screen.getByLabelText('Profile')).toHaveValue('default');
+    expect(within(screen.getByLabelText('Profile')).queryByRole('option', { name: 'team-prod' })).toBeNull();
+  });
+
+  it('has no Vault field with only your own vault', async () => {
+    const api = installTeamApi();
+    renderDialog({ vaultChoices: [choices[0]!], defaultVaultId: 'personal' });
+
+    await waitFor(() => expect(screen.getByText('web-1')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Vault' })).toBeNull();
+    expect(api.aws.listProfiles).toHaveBeenCalledWith();
+    expect(cliImportButton()).toBeInTheDocument();
   });
 });

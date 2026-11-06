@@ -1789,6 +1789,63 @@ describe('AwsService AWS profile management', () => {
   });
 });
 
+// 가져오기 창이 팀을 고르면 찾기는 그 팀의 펼친 이름(`이름@team-<id>`)으로 SDK 클라이언트를 만든다 — 팀 호스트에 붙을
+// 때와 같은 자격 증명이다. 볼트가 없으면 이름 그대로다.
+describe('AwsService lookups for the import window', () => {
+  function createLookupService() {
+    const service = new AwsService() as unknown as {
+      getEc2Client: ReturnType<typeof vi.fn>;
+      getSsmClient: ReturnType<typeof vi.fn>;
+      getEcsClient: ReturnType<typeof vi.fn>;
+      loadHostSshMetadata: ReturnType<typeof vi.fn>;
+      listRegions: AwsService['listRegions'];
+      listEc2Instances: AwsService['listEc2Instances'];
+      listEcsClusters: AwsService['listEcsClusters'];
+      getWindowsPassword: AwsService['getWindowsPassword'];
+      inspectHostSshMetadata: AwsService['inspectHostSshMetadata'];
+    };
+    service.getEc2Client = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({ Regions: [{ RegionName: 'ap-northeast-2' }], Reservations: [], PasswordData: '' }),
+    });
+    service.getSsmClient = vi.fn().mockReturnValue({ send: vi.fn().mockResolvedValue({ InstanceInformationList: [] }) });
+    service.getEcsClient = vi.fn().mockReturnValue({ send: vi.fn().mockResolvedValue({ clusterArns: [] }) });
+    service.loadHostSshMetadata = vi
+      .fn()
+      .mockResolvedValue({ sshPort: 22, recommendedUsername: 'ubuntu', usernameCandidates: ['ubuntu'] });
+    return service;
+  }
+
+  async function lookUpEverything(service: ReturnType<typeof createLookupService>, vault?: Parameters<AwsService['listRegions']>[1]) {
+    await service.listRegions('prod', vault);
+    await service.listEc2Instances('prod', 'us-east-1', vault);
+    await service.listEcsClusters('prod', 'us-east-1', vault);
+    await service.getWindowsPassword(
+      { profileName: 'prod', region: 'us-east-1', instanceId: 'i-win', privateKeyPem: 'pem' },
+      vault,
+    );
+    await service.inspectHostSshMetadata({ profileName: 'prod', region: 'us-east-1', instanceId: 'i-1' }, vault);
+  }
+
+  it.each([
+    ['a team', { teamId: 'team-1', profiles: new AwsProfileRepository() }, teamAwsProfileName('team-1', 'prod')],
+    ['no vault', undefined, 'prod'],
+  ])('builds the clients of every lookup with %s under the right name', async (_name, vault, sdkName) => {
+    const service = createLookupService();
+
+    await lookUpEverything(service, vault);
+
+    // 지역(조회 지역)·EC2·Windows 비밀번호 — EC2 클라이언트 셋, EC2 목록의 SSM 조회, ECS 클러스터.
+    expect(service.getEc2Client.mock.calls.map(([name]: unknown[]) => name)).toEqual([sdkName, sdkName, sdkName]);
+    expect(service.getSsmClient).toHaveBeenCalledWith(sdkName, 'us-east-1');
+    expect(service.getEcsClient).toHaveBeenCalledWith(sdkName, 'us-east-1');
+    expect(service.loadHostSshMetadata).toHaveBeenCalledWith({
+      profileName: sdkName,
+      region: 'us-east-1',
+      instanceId: 'i-1',
+    });
+  });
+});
+
 describe('AwsService EC2 helpers', () => {
   it('includes availability zone when listing EC2 instances', async () => {
     const service = new AwsService() as unknown as {

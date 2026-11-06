@@ -9,11 +9,20 @@ import {
   type AwsWindowsPasswordFailure,
   type HostDraft,
   type HostSecretInput,
+  type ImportVaultTarget,
 } from '@shared';
 import { useAwsImportController } from '../controllers/useImportControllers';
+import { isTeamVaultId } from '../store/utils/vaults';
 import { DialogBackdrop } from './DialogBackdrop';
 import { AwsExternalProfileImportDialog } from './AwsExternalProfileImportDialog';
 import { AwsProfileCreateWizard } from './AwsProfileCreateWizard';
+import {
+  ImportVaultFields,
+  importVaultRequest,
+  useImportVault,
+  type ImportVaultProps,
+} from './ImportVaultFields';
+import { AwsKeyDialog } from './teams/AwsKeyDialog';
 import {
   Button,
   Card,
@@ -42,11 +51,15 @@ import { t } from "../i18n";
 
 type AwsImportMode = 'ec2' | 'ecs';
 
-interface AwsImportDialogProps {
+interface AwsImportDialogProps extends ImportVaultProps {
   open: boolean;
   currentGroupPath: string | null;
   onClose: () => void;
-  onImport: (draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
+  /**
+   * target 은 고른 볼트다(개인이면 빈 값). 팀이면 secrets(RDP 의 Administrator 비밀번호)를 팀에 함께 넣을지도 싣는다 —
+   * 끄면 팀에는 두지 않고 그 호스트의 내 자격 증명에 둔다.
+   */
+  onImport: (draft: HostDraft, secrets: HostSecretInput | undefined, target: ImportVaultTarget) => Promise<void>;
 }
 
 function getSsmAvailabilityBadgeLabel(
@@ -177,7 +190,14 @@ function toAwsSshPortValue(value: string): number | null {
   return parsed;
 }
 
-export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: AwsImportDialogProps) {
+export function AwsImportDialog({
+  open,
+  currentGroupPath,
+  vaultChoices = [],
+  defaultVaultId,
+  onClose,
+  onImport,
+}: AwsImportDialogProps) {
   const { t: translate } = useTranslation();
   const {
     createAwsProfile,
@@ -192,10 +212,25 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     listAwsEc2Instances,
     listAwsEcsClusters,
     listAwsProfiles,
+    listTeamAwsProfiles,
     listAwsRegions,
     loginAwsProfile,
     prepareAwsSsoProfile,
   } = useAwsImportController();
+  // 넣을 볼트 — 다른 가져오기 창과 같다. 팀이면 그 팀의 프로필로 찾고(팀 호스트는 다른 볼트의 프로필을 가리킬 수 없다)
+  // 그 팀에 저장한다. 비밀값은 RDP 의 Administrator 비밀번호뿐이다.
+  const { vaultId, setVaultId, shareSecrets, setShareSecrets, isDefaultVault } = useImportVault(
+    open,
+    defaultVaultId,
+  );
+  const teamId = isTeamVaultId(vaultId) ? vaultId : null;
+  const groupPath = isDefaultVault ? currentGroupPath : null;
+  const importTarget = importVaultRequest(vaultId, shareSecrets);
+  const listProfilesOfVault = () => (teamId ? listTeamAwsProfiles(teamId) : listAwsProfiles());
+  const inVault = teamId ? { vaultId: teamId } : {};
+  const [isAwsKeyOpen, setIsAwsKeyOpen] = useState(false);
+  // '키 넣기'로 키를 넣으면 올린다 — 같은 프로필의 상태부터 다시 읽는다.
+  const [statusReloadKey, setStatusReloadKey] = useState(0);
   const [importMode, setImportMode] = useState<AwsImportMode>('ec2');
   const [profiles, setProfiles] = useState<AwsProfileSummary[]>([]);
   const [selectedProfile, setSelectedProfile] = useState('');
@@ -341,6 +376,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
         region: selectedRegion,
         instanceId: rdpTarget.instanceId,
         privateKeyPem: rdpPrivateKey,
+        ...inVault,
       });
       if (result.password) {
         setRdpPassword(result.password);
@@ -407,7 +443,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
         {
           kind: 'rdp',
           label: instance.name || instance.instanceId,
-          groupName: currentGroupPath ?? '',
+          groupName: groupPath ?? '',
           terminalThemeId: null,
           hostname: instance.privateIp?.trim() || instance.instanceId,
           port: 3389,
@@ -423,6 +459,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
         // 자격증명으로 저장한다 — 호스트 레코드에는 계정이 실리지 않는다. EC2 Windows 의 기본
         // 관리자 계정은 Administrator 이고, 도메인은 이 경로에서 쓰지 않는다.
         { kind: 'rdp', username: 'Administrator', password },
+        importTarget,
       );
       resetRdpRegistration();
       onClose();
@@ -465,6 +502,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
         region: selectedRegion,
         instanceId: instance.instanceId,
         availabilityZone: instance.availabilityZone ?? null,
+        ...inVault,
       });
     } catch (inspectError) {
       result = {
@@ -490,8 +528,17 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     if (!open) {
       return;
     }
-
     setImportMode('ec2');
+    setExternalImportSummary(null);
+  }, [open]);
+
+  // 열 때와 볼트를 바꿀 때 — 그 볼트의 프로필부터 다시 받는다. 늦게 온 앞 볼트의 목록은 버린다.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    let cancelled = false;
     setProfiles([]);
     setSelectedProfile('');
     setProfileStatus(null);
@@ -499,24 +546,36 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     setSelectedRegion('');
     setInstances([]);
     setEcsClusters([]);
-    setExternalImportSummary(null);
     setError(null);
+    setIsAwsKeyOpen(false);
     resetCreateProfileForm();
     resetInspection();
     setIsLoadingProfiles(true);
 
-    void listAwsProfiles()
+    void listProfilesOfVault()
       .then((items) => {
+        if (cancelled) {
+          return;
+        }
         setProfiles(items);
         setSelectedProfile(resolveSelectedProfileName(items));
       })
       .catch((loadError) => {
+        if (cancelled) {
+          return;
+        }
         setError(loadError instanceof Error ? loadError.message : translate('awsImport.error.profileListFailed'));
       })
       .finally(() => {
-        setIsLoadingProfiles(false);
+        if (!cancelled) {
+          setIsLoadingProfiles(false);
+        }
       });
-  }, [open]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, teamId]);
 
   useEffect(() => {
     if (!open || !selectedProfile) {
@@ -537,7 +596,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     setEcsClusters([]);
     setError(null);
 
-    void getAwsProfileStatus(selectedProfile)
+    void getAwsProfileStatus(selectedProfile, teamId)
       .then((status) => {
         if (cancelled) {
           return;
@@ -559,7 +618,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     return () => {
       cancelled = true;
     };
-  }, [open, selectedProfile]);
+  }, [open, selectedProfile, teamId, statusReloadKey]);
 
   useEffect(() => {
     if (!open || !selectedProfile || !profileStatus?.isAuthenticated) {
@@ -575,7 +634,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     setIsLoadingRegions(true);
     setError(null);
 
-    void listAwsRegions(selectedProfile)
+    void listAwsRegions(selectedProfile, teamId)
       .then((nextRegions) => {
         if (cancelled) {
           return;
@@ -607,7 +666,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     return () => {
       cancelled = true;
     };
-  }, [open, profileStatus?.isAuthenticated, selectedProfile]);
+  }, [open, profileStatus?.isAuthenticated, selectedProfile, teamId]);
 
   useEffect(() => {
     if (!open || !selectedProfile || !selectedRegion || !profileStatus?.isAuthenticated) {
@@ -623,8 +682,8 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
 
     const loadTargets =
       importMode === 'ecs'
-        ? listAwsEcsClusters(selectedProfile, selectedRegion)
-        : listAwsEc2Instances(selectedProfile, selectedRegion);
+        ? listAwsEcsClusters(selectedProfile, selectedRegion, teamId)
+        : listAwsEc2Instances(selectedProfile, selectedRegion, teamId);
 
     void loadTargets
       .then((items) => {
@@ -660,11 +719,11 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     return () => {
       cancelled = true;
     };
-  }, [importMode, open, profileStatus?.isAuthenticated, selectedProfile, selectedRegion]);
+  }, [importMode, open, profileStatus?.isAuthenticated, selectedProfile, selectedRegion, teamId]);
 
   const handleCreateProfileSuccess = async (profileName: string) => {
     setError(null);
-    const items = await listAwsProfiles();
+    const items = await listProfilesOfVault();
     setProfiles(items);
     setSelectedProfile(resolveSelectedProfileName(items, profileName));
     resetCreateProfileForm();
@@ -745,6 +804,17 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
           </ModalHeader>
 
         <ModalBody className="grid gap-4">
+          {/* 고른 볼트로 이미 찾은 인스턴스를 등록하는 동안(검사·RDP 단계)은 볼트를 잠근다. */}
+          <ImportVaultFields
+            choices={vaultChoices}
+            vaultId={vaultId}
+            onVaultChange={setVaultId}
+            secretCount={rdpTarget ? 1 : 0}
+            shareSecrets={shareSecrets}
+            onShareSecretsChange={setShareSecrets}
+            disabled={isRegistering}
+            vaultLocked={Boolean(inspectionTarget) || Boolean(rdpTarget) || isLoggingIn}
+          />
           <Tabs aria-label="AWS import mode" className="justify-start">
             <TabButton
               type="button"
@@ -828,15 +898,18 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <Button
-              variant="secondary"
-              disabled={Boolean(inspectionTarget) || isRegistering}
-              onClick={() => {
-                setIsExternalImportOpen(true)
-              }}
-            >
-              {translate('awsImport.action.importFromCli')}
-            </Button>
+            {/* CLI 프로필은 개인으로만 들어온다 — 팀을 고른 동안에는 두지 않는다(팀 목록에 안 보인다). */}
+            {teamId ? null : (
+              <Button
+                variant="secondary"
+                disabled={Boolean(inspectionTarget) || isRegistering}
+                onClick={() => {
+                  setIsExternalImportOpen(true)
+                }}
+              >
+                {translate('awsImport.action.importFromCli')}
+              </Button>
+            )}
             <Button
               variant="secondary"
               disabled={Boolean(inspectionTarget) || isRegistering}
@@ -863,6 +936,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                   profiles={profiles}
                   createProfile={createAwsProfile}
                   prepareSsoProfile={prepareAwsSsoProfile}
+                  vaultId={teamId}
                   onCancel={() => resetCreateProfileForm()}
                   onSuccess={(profileName) => handleCreateProfileSuccess(profileName)}
                 />
@@ -890,6 +964,15 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
             </NoticeCard>
           ) : null}
 
+          {/* 이 기기에 키가 없거나 AWS 가 거절한 팀 정적 프로필 — 연결 실패 화면과 같이 그 자리에서 넣는다. */}
+          {shouldShowAwsProfileAuthError(profileStatus, isLoadingStatus) && profileStatus?.missingKey ? (
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <Button variant="primary" onClick={() => setIsAwsKeyOpen(true)}>
+                {translate('teams.awsKey.add')}
+              </Button>
+            </div>
+          ) : null}
+
           {shouldShowUnknownSsmNotice ? (
             <NoticeCard tone="warning" role="alert">
               {unknownSsmAvailabilityReason}
@@ -907,8 +990,8 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                   setIsLoggingIn(true);
                   setError(null);
                   try {
-                    await loginAwsProfile(selectedProfile);
-                    const status = await getAwsProfileStatus(selectedProfile);
+                    await loginAwsProfile(selectedProfile, teamId);
+                    const status = await getAwsProfileStatus(selectedProfile, teamId);
                     setProfileStatus(status);
                   } catch (loginError) {
                     setError(loginError instanceof Error ? loginError.message : translate('awsImport.error.ssoLoginFailed'));
@@ -1180,17 +1263,21 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                             setIsRegistering(true);
                             setError(null);
                             try {
-                              await onImport({
-                                kind: 'aws-ecs',
-                                label: cluster.clusterName,
-                                groupName: currentGroupPath ?? '',
-                                terminalThemeId: null,
-                                awsProfileId: selectedProfileSummary?.id ?? null,
-                                awsProfileName: selectedProfile,
-                                awsRegion: selectedRegion,
-                                awsEcsClusterArn: cluster.clusterArn,
-                                awsEcsClusterName: cluster.clusterName,
-                              });
+                              await onImport(
+                                {
+                                  kind: 'aws-ecs',
+                                  label: cluster.clusterName,
+                                  groupName: groupPath ?? '',
+                                  terminalThemeId: null,
+                                  awsProfileId: selectedProfileSummary?.id ?? null,
+                                  awsProfileName: selectedProfile,
+                                  awsRegion: selectedRegion,
+                                  awsEcsClusterArn: cluster.clusterArn,
+                                  awsEcsClusterName: cluster.clusterName,
+                                },
+                                undefined,
+                                importTarget,
+                              );
                               onClose();
                             } catch (submitError) {
                               setError(
@@ -1354,25 +1441,29 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                       const sshUsername = inspectionUsername.trim() || null;
                       setInspectionError(null);
                       setIsRegistering(true);
-                      await onImport({
-                        kind: 'aws-ec2',
-                        label: inspectionTarget.name || inspectionTarget.instanceId,
-                        groupName: currentGroupPath ?? '',
-                        terminalThemeId: null,
-                        awsProfileId: selectedProfileSummary?.id ?? null,
-                        awsProfileName: selectedProfile,
-                        awsRegion: selectedRegion,
-                        awsInstanceId: inspectionTarget.instanceId,
-                        awsAvailabilityZone: inspectionTarget.availabilityZone || null,
-                        awsInstanceName: inspectionTarget.name || null,
-                        awsPlatform: inspectionTarget.platform || null,
-                        awsPrivateIp: inspectionTarget.privateIp || null,
-                        awsState: inspectionTarget.state || null,
-                        awsSshUsername: sshUsername,
-                        awsSshPort: sshPort,
-                        awsSshMetadataStatus: sshUsername ? 'ready' : 'idle',
-                        awsSshMetadataError: null
-                      });
+                      await onImport(
+                        {
+                          kind: 'aws-ec2',
+                          label: inspectionTarget.name || inspectionTarget.instanceId,
+                          groupName: groupPath ?? '',
+                          terminalThemeId: null,
+                          awsProfileId: selectedProfileSummary?.id ?? null,
+                          awsProfileName: selectedProfile,
+                          awsRegion: selectedRegion,
+                          awsInstanceId: inspectionTarget.instanceId,
+                          awsAvailabilityZone: inspectionTarget.availabilityZone || null,
+                          awsInstanceName: inspectionTarget.name || null,
+                          awsPlatform: inspectionTarget.platform || null,
+                          awsPrivateIp: inspectionTarget.privateIp || null,
+                          awsState: inspectionTarget.state || null,
+                          awsSshUsername: sshUsername,
+                          awsSshPort: sshPort,
+                          awsSshMetadataStatus: sshUsername ? 'ready' : 'idle',
+                          awsSshMetadataError: null
+                        },
+                        undefined,
+                        importTarget,
+                      );
                       onClose();
                     } catch (submitError) {
                       setInspectionStatus('error');
@@ -1404,6 +1495,16 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
         getExternalProfileDetails={getExternalAwsProfileDetails}
         importExternalProfiles={importExternalAwsProfiles}
       />
+      {isAwsKeyOpen && profileStatus?.missingKey ? (
+        <AwsKeyDialog
+          missing={profileStatus.missingKey}
+          onClose={() => setIsAwsKeyOpen(false)}
+          onSaved={() => {
+            setIsAwsKeyOpen(false);
+            setStatusReloadKey((current) => current + 1);
+          }}
+        />
+      ) : null}
     </>
   );
 }

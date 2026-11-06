@@ -111,12 +111,17 @@ export function loginAwsProfile(profileName: string, vaultId?: string | null) {
   return vaultId ? desktopApi.aws.login(profileName, vaultId) : desktopApi.aws.login(profileName);
 }
 
-export function listAwsRegions(profileName: string) {
-  return desktopApi.aws.listRegions(profileName);
+// 가져오기 창의 찾기 — vaultId 는 창에서 고른 팀(없으면 개인). 개인이면 지금까지의 인자 그대로 간다.
+export function listAwsRegions(profileName: string, vaultId?: string | null) {
+  return vaultId
+    ? desktopApi.aws.listRegions(profileName, vaultId)
+    : desktopApi.aws.listRegions(profileName);
 }
 
-export function listAwsEc2Instances(profileName: string, region: string) {
-  return desktopApi.aws.listEc2Instances(profileName, region);
+export function listAwsEc2Instances(profileName: string, region: string, vaultId?: string | null) {
+  return vaultId
+    ? desktopApi.aws.listEc2Instances(profileName, region, vaultId)
+    : desktopApi.aws.listEc2Instances(profileName, region);
 }
 
 /**
@@ -125,17 +130,16 @@ export function listAwsEc2Instances(profileName: string, region: string) {
  * 개인키는 메인 프로세스로 넘어가 그 자리에서 복호화되고 어디에도 저장되지 않는다 — 렌더러도, AWS 도
  * 개인키를 보관하지 않는다.
  */
-export function getAwsWindowsPassword(input: {
-  profileName: string;
-  region: string;
-  instanceId: string;
-  privateKeyPem: string;
-}) {
+export function getAwsWindowsPassword(
+  input: Parameters<typeof desktopApi.aws.getWindowsPassword>[0],
+) {
   return desktopApi.aws.getWindowsPassword(input);
 }
 
-export function listAwsEcsClusters(profileName: string, region: string) {
-  return desktopApi.aws.listEcsClusters(profileName, region);
+export function listAwsEcsClusters(profileName: string, region: string, vaultId?: string | null) {
+  return vaultId
+    ? desktopApi.aws.listEcsClusters(profileName, region, vaultId)
+    : desktopApi.aws.listEcsClusters(profileName, region);
 }
 
 export function inspectAwsHostSshMetadata(

@@ -52,6 +52,11 @@ describe("listHostReferences", () => {
     ]);
     expect(listHostReferences({ kind: "vnc", sshTunnelHostId: "tun" } as never)).toEqual([{ kind: "tunnelHost", id: "tun" }]);
     expect(listHostReferences({ kind: "aws-ec2", awsProfileId: "p" } as never)).toEqual([{ kind: "awsProfile", id: "p" }]);
+    // SSM 으로 붙는 Windows RDP 의 프로필(AWS 가져오기로 팀에도 생긴다). SSM 이 아닌 RDP 는 가리키는 프로필이 없다.
+    expect(
+      listHostReferences({ kind: "rdp", awsSsm: { profileId: "p", profileName: "prod", region: "r", instanceId: "i" } } as never),
+    ).toEqual([{ kind: "awsProfile", id: "p" }]);
+    expect(listHostReferences({ kind: "rdp", awsSsm: null } as never)).toEqual([]);
     // 명령으로 시작하는 것·빈 값은 참조가 아니다.
     expect(listHostReferences(ssh({ startupCommand: { type: "command", command: "ls" }, tailnetId: " ", jumpHostIds: [null] }))).toEqual([]);
   });
@@ -63,6 +68,11 @@ describe("findCrossVaultReference", () => {
     expect(findCrossVaultReference(vaults, team, { kind: "vnc", sshTunnelHostId: "my-jump" } as never)).toEqual({ kind: "tunnelHost", id: "my-jump" });
     expect(findCrossVaultReference(vaults, team, ssh({ tailnetId: "my-tailnet" }))).toEqual({ kind: "tailnet", id: "my-tailnet" });
     expect(findCrossVaultReference(vaults, team, { kind: "aws-ec2", awsProfileId: "my-aws" } as never)).toEqual({ kind: "awsProfile", id: "my-aws" });
+    const rdpOverSsm = (profileId: string) =>
+      ({ kind: "rdp", awsSsm: { profileId, profileName: "prod", region: "r", instanceId: "i" } }) as never;
+    expect(findCrossVaultReference(vaults, team, rdpOverSsm("my-aws"))).toEqual({ kind: "awsProfile", id: "my-aws" });
+    expect(findCrossVaultReference(vaults, team, rdpOverSsm("team-aws"))).toBeNull();
+    expect(findCrossVaultReference(vaults, personal, rdpOverSsm("team-aws"))).toEqual({ kind: "awsProfile", id: "team-aws" });
     expect(findCrossVaultReference(vaults, team, ssh({ startupCommand: { type: "snippet", snippetId: "my-snippet" } }))).toEqual({
       kind: "snippet",
       id: "my-snippet",

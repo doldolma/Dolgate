@@ -239,16 +239,25 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
     );
   });
 
+  // 가져오기 창의 찾기(지역·EC2·ECS·SSH 검사·Windows 비밀번호). vaultId 는 창에서 고른 볼트다 — 팀이면 그 팀의
+  // 프로필로 찾는다. 없거나 개인이면 지금까지와 같다.
   ipcMain.handle(
     ipcChannels.aws.listRegions,
-    async (_event, profileName: string) =>
-      ctx.awsService.listRegions(profileName),
+    async (_event, profileName: string, vaultId?: string | null) => {
+      const target = resolveProfileVault(ctx, vaultId);
+      return target
+        ? ctx.awsService.listRegions(profileName, target.vault)
+        : ctx.awsService.listRegions(profileName);
+    },
   );
 
   ipcMain.handle(
     ipcChannels.aws.listEc2Instances,
-    async (_event, profileName: string, region: string) => {
-      return ctx.awsService.listEc2Instances(profileName, region);
+    async (_event, profileName: string, region: string, vaultId?: string | null) => {
+      const target = resolveProfileVault(ctx, vaultId);
+      return target
+        ? ctx.awsService.listEc2Instances(profileName, region, target.vault)
+        : ctx.awsService.listEc2Instances(profileName, region);
     },
   );
 
@@ -263,14 +272,24 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
         region: string;
         instanceId: string;
         privateKeyPem: string;
+        vaultId?: string | null;
       },
-    ) => ctx.awsService.getWindowsPassword(input),
+    ) => {
+      const { vaultId, ...request } = input;
+      const target = resolveProfileVault(ctx, vaultId);
+      return target
+        ? ctx.awsService.getWindowsPassword(request, target.vault)
+        : ctx.awsService.getWindowsPassword(request);
+    },
   );
 
   ipcMain.handle(
     ipcChannels.aws.listEcsClusters,
-    async (_event, profileName: string, region: string) => {
-      return ctx.awsService.listEcsClusters(profileName, region);
+    async (_event, profileName: string, region: string, vaultId?: string | null) => {
+      const target = resolveProfileVault(ctx, vaultId);
+      return target
+        ? ctx.awsService.listEcsClusters(profileName, region, target.vault)
+        : ctx.awsService.listEcsClusters(profileName, region);
     },
   );
 
@@ -567,8 +586,15 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
         region: string;
         instanceId: string;
         availabilityZone?: string | null;
+        vaultId?: string | null;
       },
-    ) => ctx.awsService.inspectHostSshMetadata(input),
+    ) => {
+      const { vaultId, ...inspection } = input;
+      const target = resolveProfileVault(ctx, vaultId);
+      return target
+        ? ctx.awsService.inspectHostSshMetadata(inspection, target.vault)
+        : ctx.awsService.inspectHostSshMetadata(inspection);
+    },
   );
 
   ipcMain.handle(

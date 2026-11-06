@@ -1,7 +1,16 @@
 import { forwardRef, useEffect } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GroupRecord, HostDraft, HostRecord, SavedWorkspaceRecord, VaultIndex, WarpgateImportEvent } from '@shared';
+import type {
+  AwsEc2InstanceSummary,
+  AwsProfileStatus,
+  GroupRecord,
+  HostDraft,
+  HostRecord,
+  SavedWorkspaceRecord,
+  VaultIndex,
+  WarpgateImportEvent,
+} from '@shared';
 
 /**
  * 볼트가 **배관까지** 이어졌는지 — 홈 → 사이드바 → 스토어 → IPC.
@@ -412,6 +421,113 @@ describe('HomeShell vaults', () => {
     await waitFor(() => expect(desktopApi.hosts.create).toHaveBeenCalled());
     expect(vi.mocked(desktopApi.hosts.create).mock.lastCall?.[0]).toMatchObject({ kind: 'warpgate-ssh', groupName: 'Prod' });
     expect(vi.mocked(desktopApi.hosts.create).mock.lastCall?.[2]).toBe(TEAM);
+  });
+
+  describe('AWS import into the team you are in', () => {
+    const winbox: AwsEc2InstanceSummary = {
+      instanceId: 'i-win',
+      name: 'winbox',
+      availabilityZone: 'ap-northeast-2a',
+      platform: 'Windows',
+      privateIp: '10.0.2.181',
+      keyName: 'gw-prod-keypair',
+      state: 'running',
+      ssmAvailability: 'ready',
+      ssmAvailabilityReason: null,
+    };
+
+    beforeEach(() => {
+      // 팀 id 를 주면 그 팀의 프로필, 아니면 개인 프로필.
+      vi.mocked(desktopApi.aws.listProfiles).mockImplementation(async (vaultId?: string | null) =>
+        vaultId === TEAM ? [{ id: 'team-profile', name: 'team-prod' }] : [{ id: 'my-profile', name: 'mine' }],
+      );
+      vi.mocked(desktopApi.aws.getProfileStatus).mockImplementation(async (profileName: string): Promise<AwsProfileStatus> => ({
+        id: null,
+        profileName,
+        available: true,
+        isSsoProfile: false,
+        isAuthenticated: true,
+        configuredRegion: 'ap-northeast-2',
+        accountId: null,
+        arn: null,
+        errorMessage: null,
+      }));
+      vi.mocked(desktopApi.aws.listRegions).mockResolvedValue(['ap-northeast-2']);
+      vi.mocked(desktopApi.hosts.create).mockImplementation(
+        async (draft) => ({ ...(draft as object), id: 'aws-host' }) as HostRecord,
+      );
+    });
+
+    async function openAwsImport() {
+      render(<Home />);
+      fireEvent.click(prodRows()[1]!);
+      fireEvent.click(screen.getByRole('button', { name: 'Open import menu' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Import via AWS SSM' }));
+      const dialog = within(await screen.findByRole('dialog', { name: /AWS SSM/ }));
+      expect(dialog.getByRole('button', { name: 'Vault' })).toHaveTextContent('Acme Infra');
+      return dialog;
+    }
+
+    it('adds an ECS cluster found with the team profile to that team, into the group there', async () => {
+      vi.mocked(desktopApi.aws.listEcsClusters).mockResolvedValue([
+        {
+          clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
+          clusterName: 'prod',
+          status: 'ACTIVE',
+          activeServicesCount: 1,
+          runningTasksCount: 1,
+          pendingTasksCount: 0,
+        },
+      ]);
+      const dialog = await openAwsImport();
+
+      fireEvent.click(dialog.getByRole('button', { name: 'ECS' }));
+      fireEvent.click(await dialog.findByRole('button', { name: '클러스터 추가' }));
+
+      await waitFor(() => expect(desktopApi.hosts.create).toHaveBeenCalled());
+      expect(desktopApi.aws.listEcsClusters).toHaveBeenCalledWith('team-prod', 'ap-northeast-2', TEAM);
+      expect(vi.mocked(desktopApi.hosts.create).mock.lastCall).toEqual([
+        expect.objectContaining({ kind: 'aws-ecs', groupName: 'Prod', awsProfileId: 'team-profile' }),
+        undefined,
+        TEAM,
+      ]);
+    });
+
+    it.each([
+      ['shared with the team', true],
+      ['kept as my credential', false],
+    ])('puts the Windows password %s', async (_name, share) => {
+      vi.mocked(desktopApi.aws.listEc2Instances).mockResolvedValue([winbox]);
+      const dialog = await openAwsImport();
+
+      fireEvent.click(await dialog.findByRole('button', { name: 'RDP 로 추가' }));
+      fireEvent.change(dialog.getByLabelText('관리자 암호'), { target: { value: 'TypedByHand1' } });
+      if (!share) {
+        fireEvent.click(dialog.getByRole('switch'));
+      }
+      fireEvent.click(dialog.getByRole('button', { name: 'Host 등록' }));
+
+      await waitFor(() => expect(desktopApi.hosts.create).toHaveBeenCalled());
+      const credentials = { kind: 'rdp', username: 'Administrator', password: 'TypedByHand1' };
+      expect(vi.mocked(desktopApi.hosts.create).mock.lastCall).toEqual([
+        expect.objectContaining({
+          kind: 'rdp',
+          awsSsm: expect.objectContaining({ profileId: 'team-profile', profileName: 'team-prod' }),
+        }),
+        share ? credentials : undefined,
+        TEAM,
+      ]);
+      if (share) {
+        expect(desktopApi.teams.setMyCredentials).not.toHaveBeenCalled();
+      } else {
+        await waitFor(() =>
+          expect(desktopApi.teams.setMyCredentials).toHaveBeenCalledWith('aws-host', {
+            username: 'Administrator',
+            password: 'TypedByHand1',
+          }),
+        );
+      }
+    });
   });
 
   it('opens the Termius import on the team you are in', async () => {

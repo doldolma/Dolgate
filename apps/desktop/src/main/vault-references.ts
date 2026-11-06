@@ -35,6 +35,10 @@ export function listHostReferences(host: HostDraft | HostRecord): VaultReference
   if ("awsProfileId" in host) {
     add("awsProfile", host.awsProfileId);
   }
+  // SSM 으로 붙는 Windows RDP 호스트의 프로필 — AWS 가져오기로 팀에도 생긴다.
+  if ("awsSsm" in host) {
+    add("awsProfile", host.awsSsm?.profileId);
+  }
   if ("startupCommand" in host && host.startupCommand?.type === "snippet") {
     add("snippet", host.startupCommand.snippetId);
   }

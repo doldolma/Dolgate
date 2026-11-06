@@ -43,6 +43,8 @@ interface ImportVaultFieldsProps {
   shareSecrets: boolean;
   onShareSecretsChange: (share: boolean) => void;
   disabled?: boolean;
+  /** Vault 칸만 잠근다 — 고른 볼트로 이미 찾은 것을 등록하는 중(AWS 가져오기의 검사·RDP 단계). 공유는 그대로 고른다. */
+  vaultLocked?: boolean;
 }
 
 /**
@@ -57,11 +59,17 @@ export function ImportVaultFields({
   shareSecrets,
   onShareSecretsChange,
   disabled,
+  vaultLocked,
 }: ImportVaultFieldsProps) {
   return (
     <>
       {choices.length > 1 ? (
-        <VaultSelect choices={choices} value={vaultId} onChange={onVaultChange} disabled={disabled} />
+        <VaultSelect
+          choices={choices}
+          value={vaultId}
+          onChange={onVaultChange}
+          disabled={disabled || vaultLocked}
+        />
       ) : null}
       {isTeamVaultId(vaultId) && secretCount > 0 ? (
         <ShareSecretsToggle
