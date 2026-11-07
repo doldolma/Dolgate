@@ -341,7 +341,9 @@ func TestSyncWatchTellsADeletedAccountToSignIn(t *testing.T) {
 func TestSyncWeakETag(t *testing.T) {
 	env := newWatchTestEnv(t)
 	hub := env.hub(t, time.Hour)
-	router := env.router(t, httpserver.RouterConfig{SyncWatch: hub, SyncWatchHold: 100 * time.Millisecond})
+	// watchAsync 가 대기 등록을 확인할 틈이 있어야 한다. 100ms(지터로 80~120ms)면 바쁜 CI 에서 그 틈을
+	// 놓쳐 "watch answered before waiting" 으로 실패할 수 있다 — TestSyncWatchTimesOutWithNotModified 와 맞춘다.
+	router := env.router(t, httpserver.RouterConfig{SyncWatch: hub, SyncWatchHold: 400 * time.Millisecond})
 	account := newWatchTestAccount(t, router, "weak-etag@example.com")
 	etag := account.currentETag(t, router)
 	weak := "W/" + etag

@@ -364,17 +364,27 @@ export function formatSyncRevisionEtag(revision: number): string {
 }
 
 // ETag 문자열("\"42\"")에서 리비전 숫자를 꺼낸다. push 응답 리비전을 "직전 pull+1 일 때만
-// 저장" 하는 규칙(중간에 낀 다른 기기의 push 를 건너뛰지 않기 위함)에 쓴다.
+// 저장" 하는 규칙(중간에 낀 다른 기기의 push 를 건너뛰지 않기 위함)에 쓴다. 프록시가 약하게
+// 바꾼 모양(W/"42")도 같은 리비전으로 읽는다.
 export function parseSyncRevisionEtag(etag: string | null): number | null {
   if (!etag) {
     return null;
   }
-  const match = /^"(\d+)"$/.exec(etag.trim());
+  const match = /^(?:W\/)?"(\d+)"$/.exec(etag.trim());
   if (!match) {
     return null;
   }
   const value = Number(match[1]);
   return Number.isSafeInteger(value) ? value : null;
+}
+
+// 응답에서 읽은 ETag 를 서버가 낸 모양("42")으로 되돌린다. nginx gzip·Cloudflare 같은 압축 프록시는
+// ETag 를 W/"42" 로 약하게 바꾸는데, 그대로 저장하면 자기 push 의 리비전을 못 읽어 편집마다 전체를
+// 다시 받고, 이를 같은 리비전으로 보지 못하는 옛 서버에서는 당기기를 끝없이 되풀이한다. 응답의
+// ETag 를 읽는 곳마다 거친다. 리비전 모양이 아니면 받은 그대로 둔다.
+export function normalizeSyncRevisionEtag(etag: string | null): string | null {
+  const revision = parseSyncRevisionEtag(etag);
+  return revision === null ? etag : formatSyncRevisionEtag(revision);
 }
 
 // e2ee 볼트에서 캐시된 DEK 를 어떻게 처리할지 결정하는 순수 함수. 데스크톱·모바일이

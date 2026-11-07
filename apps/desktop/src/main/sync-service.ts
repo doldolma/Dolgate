@@ -31,6 +31,7 @@ import {
   rebaseGroupPath,
   projectSecretMetadata,
   isVaultEpochRejectionCode,
+  normalizeSyncRevisionEtag,
   parseSyncRevisionEtag,
   SYNC_DATA_FLOOR_HEADER,
   SYNC_DATA_FLOOR_LEGACY_INTOLERANT_KINDS,
@@ -792,7 +793,7 @@ export class SyncService {
       await response.body?.cancel();
       return this.waitWithoutServer(cancel, 'changed');
     }
-    const etag = response.headers.get('etag');
+    const etag = normalizeSyncRevisionEtag(response.headers.get('etag'));
     await response.body?.cancel();
     // 이미 그 리비전을 적용했다면(자기 push 의 메아리) 당길 것이 없다.
     return {
@@ -1104,7 +1105,7 @@ export class SyncService {
     if (response.status === 304) {
       return { payload: null, etag: this.lastSyncRevision };
     }
-    const etag = response.headers.get('etag');
+    const etag = normalizeSyncRevisionEtag(response.headers.get('etag'));
     const payload = normalizeSyncPayload((await response.json()) as Partial<SyncPayloadV2>, {
       includeAwsProfiles: this.shouldSyncAwsProfiles(awsProfilesServerSupport),
     });

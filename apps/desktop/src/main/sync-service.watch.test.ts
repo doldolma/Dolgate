@@ -112,6 +112,7 @@ interface WatchRequest {
 function stubServer(options: {
   info?: Record<string, unknown> | "network-error";
   watch?: (request: WatchRequest) => Response | "hang";
+  snapshotEtag?: string;
 }) {
   const calls: string[] = [];
   const watchRequests: WatchRequest[] = [];
@@ -149,7 +150,7 @@ function stubServer(options: {
       }
       return new Response(JSON.stringify({ hosts: [] }), {
         status: 200,
-        headers: { "content-type": "application/json", etag: '"2"' },
+        headers: { "content-type": "application/json", etag: options.snapshotEtag ?? '"2"' },
       });
     }),
   );
@@ -203,6 +204,33 @@ describe("변경 대기 (watchForChanges)", () => {
     setLastSyncRevision(service, '"5"');
 
     await expect(service.watchForChanges()).resolves.toEqual({ outcome: "unchanged", live: true });
+  });
+
+  // 압축 프록시(nginx gzip·Cloudflare)는 ETag 를 W/"5" 로 약하게 바꾼다. 리비전은 같다.
+  it("프록시가 ETag 를 약하게 바꿔도 이미 적용한 리비전이면 당기지 않는다", async () => {
+    const service = await createHarness();
+    stubServer({
+      watch: () => Response.json({ revision: 5 }, { headers: { etag: 'W/"5"' } }),
+    });
+    setLastSyncRevision(service, '"5"');
+
+    await expect(service.watchForChanges()).resolves.toEqual({ outcome: "unchanged", live: true });
+  });
+
+  // 약한 모양을 그대로 저장하면 자기 push 의 리비전을 못 읽어 편집마다 전체를 다시 받고, 이 모양을
+  // 같은 리비전으로 보지 못하는 옛 서버에서는 당기기가 끝없이 되풀이된다.
+  it("당겨 온 ETag 가 약하게 바뀌어 있어도 서버가 낸 모양으로 읽는다", async () => {
+    const service = await createHarness();
+    stubServer({ snapshotEtag: 'W/"2"' });
+    const internals = service as unknown as {
+      captureSyncLease(): unknown;
+      fetchAwsProfilesServerSupport(lease: unknown): Promise<unknown>;
+      fetchRemoteSnapshot(support: unknown, lease: unknown): Promise<{ etag: string | null }>;
+    };
+    const lease = internals.captureSyncLease();
+    const support = await internals.fetchAwsProfilesServerSupport(lease);
+
+    await expect(internals.fetchRemoteSnapshot(support, lease)).resolves.toMatchObject({ etag: '"2"' });
   });
 
   // 이 설계의 핵심이다. 대기를 동기화 큐 안에서 하면 그동안 로컬 편집이 25초씩 서버에 못 간다.

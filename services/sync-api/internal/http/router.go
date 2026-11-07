@@ -1734,8 +1734,8 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	syncGroup.GET("/watch", func(ctx *gin.Context) {
 		userID := ctx.GetString("userId")
 		since := ctx.GetInt64(syncGateRevisionContextKey)
-		known := syncRevisionETag(since)
-		if !matchesSyncETag(ctx.GetHeader("If-None-Match"), known) {
+		gateETag := syncRevisionETag(since)
+		if !matchesSyncETag(ctx.GetHeader("If-None-Match"), gateETag) {
 			respondSyncWatchChanged(ctx, since)
 			return
 		}
@@ -1754,7 +1754,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			}
 			release()
 			if !woke {
-				ctx.Header("ETag", known)
+				ctx.Header("ETag", gateETag)
 				ctx.Status(http.StatusNotModified)
 				return
 			}
