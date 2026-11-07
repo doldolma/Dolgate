@@ -371,6 +371,54 @@ describe('sync snapshot payload shape', () => {
   });
 });
 
+describe('fetchSyncSnapshot request', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function stubSnapshotResponse(etag: string) {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    globalThis.fetch = jest.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return {
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name: string) => (name.toLowerCase() === 'etag' ? etag : null),
+        },
+        json: async () => ({ hosts: [] }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+    return calls;
+  }
+
+  // 안드로이드 기본 HTTP 캐시(OkHttp)가 v1.9.4 전 서버에서 저장한 응답에 제 ETag 를 붙여 304 를 받고,
+  // 그 옛 본문을 200 인 척 넘기지 못하게 한다.
+  it('keeps the platform HTTP cache from answering with a stored response', async () => {
+    const calls = stubSnapshotResponse('"7"');
+
+    await fetchSyncSnapshot('https://ssh.doldolma.com', 'access-token', '"6"');
+
+    const headers = calls[0].init?.headers as Record<string, string>;
+    expect(headers['Cache-Control']).toBe('no-cache');
+    expect(headers['If-None-Match']).toBe('"6"');
+  });
+
+  // 압축 프록시(nginx gzip·Cloudflare)는 ETag 를 W/"7" 로 약하게 바꾼다. 리비전은 같다.
+  it('reads a proxy-weakened ETag in the form the server sent', async () => {
+    stubSnapshotResponse('W/"7"');
+
+    const snapshot = await fetchSyncSnapshot(
+      'https://ssh.doldolma.com',
+      'access-token',
+    );
+
+    expect(snapshot.etag).toBe('"7"');
+  });
+});
+
 // 다른 기기의 변경을 기다리는 요청(GET /sync/watch). 서버는 바뀌면 그 순간 200, 아니면 대기가
 // 끝나 304 로 답한다.
 describe('watchSyncChanges', () => {
@@ -421,6 +469,20 @@ describe('watchSyncChanges', () => {
 
   it('reports the new revision when it changed', async () => {
     stubWatchResponse({ status: 200, etag: '"6"', body: { revision: 6 } });
+
+    await expect(
+      watchSyncChanges(
+        'https://ssh.doldolma.com',
+        'access-token',
+        '"5"',
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual({ changed: true, etag: '"6"' });
+  });
+
+  // 그대로 두면 이미 적용한 리비전("6")과 달라 보여 자기 push 를 다시 당긴다.
+  it('reads a proxy-weakened ETag in the form the server sent', async () => {
+    stubWatchResponse({ status: 200, etag: 'W/"6"', body: { revision: 6 } });
 
     await expect(
       watchSyncChanges(

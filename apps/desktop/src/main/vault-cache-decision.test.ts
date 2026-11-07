@@ -4,6 +4,7 @@ import {
   decideVaultAccess,
   deriveVaultKek,
   formatSyncRevisionEtag,
+  normalizeSyncRevisionEtag,
   parseSyncRevisionEtag,
   VAULT_KDF_DEFAULT_COST,
 } from "@dolssh/shared-core";
@@ -22,12 +23,32 @@ describe("parseSyncRevisionEtag", () => {
     expect(parseSyncRevisionEtag('"0"')).toBe(0);
   });
 
+  // 압축 프록시(nginx gzip·Cloudflare)가 약하게 바꾼 ETag 다. 리비전은 그대로다.
+  it("reads a proxy-weakened etag as the same revision", () => {
+    expect(parseSyncRevisionEtag('W/"42"')).toBe(42);
+    expect(parseSyncRevisionEtag(' W/"42" ')).toBe(42);
+  });
+
   it("returns null for missing or malformed values", () => {
     expect(parseSyncRevisionEtag(null)).toBeNull();
     expect(parseSyncRevisionEtag("")).toBeNull();
     expect(parseSyncRevisionEtag("42")).toBeNull();
-    expect(parseSyncRevisionEtag('W/"42"')).toBeNull();
+    expect(parseSyncRevisionEtag('w/"42"')).toBeNull();
+    expect(parseSyncRevisionEtag('"42-gzip"')).toBeNull();
     expect(parseSyncRevisionEtag('"abc"')).toBeNull();
+  });
+});
+
+describe("normalizeSyncRevisionEtag", () => {
+  it("turns a proxy-weakened etag back into the server's form", () => {
+    expect(normalizeSyncRevisionEtag('W/"42"')).toBe('"42"');
+    expect(normalizeSyncRevisionEtag(' W/"42" ')).toBe('"42"');
+    expect(normalizeSyncRevisionEtag('"42"')).toBe('"42"');
+  });
+
+  it("leaves values that are not a revision as they came", () => {
+    expect(normalizeSyncRevisionEtag(null)).toBeNull();
+    expect(normalizeSyncRevisionEtag('"42-gzip"')).toBe('"42-gzip"');
   });
 });
 

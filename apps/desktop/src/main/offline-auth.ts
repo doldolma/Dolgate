@@ -28,6 +28,8 @@ type OfflineLeaseVerificationResult =
   | {
       ok: false;
       reason: string;
+      // 기간만 지난 것인가. 이때는 리프레시 토큰을 지우지 않고 서버를 기다린다(auth-service).
+      expired?: boolean;
     };
 
 export function isOfflineSessionCache(value: unknown): value is OfflineSessionCache {
@@ -132,7 +134,8 @@ export function verifyOfflineLease(
     if (!expiresAtSeconds || now.getTime() >= expiresAtSeconds * 1000) {
       return {
         ok: false,
-        reason: t('offlineLease.expired')
+        reason: t('offlineLease.expired'),
+        expired: true
       };
     }
 

@@ -40,6 +40,7 @@ import {
   isVncHostRecord,
   LEGACY_TOLERATED_HOST_KINDS,
   normalizeServerUrl,
+  normalizeSyncRevisionEtag,
   parseVaultCacheRecord,
   projectSecretMetadata,
   SYNC_DATA_FLOOR_HEADER,
@@ -1003,6 +1004,10 @@ export async function fetchSyncSnapshot(
 ): Promise<SyncSnapshotResult> {
   const headers: Record<string, string> = {
     authorization: `Bearer ${accessToken}`,
+    // 안드로이드 기본 HTTP 캐시(OkHttp)를 건너뛴다. 서버가 no-store 를 붙이기 전(v1.9.4 전)에 저장된
+    // 응답이 남아 있으면, 앱이 If-None-Match 를 안 보낸 첫 당기기에 캐시가 그 ETag 를 대신 붙이고 304 를
+    // 받아 옛 본문(계정을 바꿨다면 다른 계정 것)을 200 인 척 넘긴다.
+    'Cache-Control': 'no-cache',
     ...(await buildClientIdentificationHeaders()),
   };
   if (ifNoneMatch) {
@@ -1022,7 +1027,11 @@ export async function fetchSyncSnapshot(
   const payload = normalizeSyncPayload(
     (await response.json()) as Partial<SyncPayloadV2>,
   );
-  return { notModified: false, payload, etag: response.headers.get('etag') };
+  return {
+    notModified: false,
+    payload,
+    etag: normalizeSyncRevisionEtag(response.headers.get('etag')),
+  };
 }
 
 /**
@@ -1065,7 +1074,10 @@ export async function watchSyncChanges(
     if (!response.ok) {
       throw await toApiError(response);
     }
-    return { changed: true, etag: response.headers.get('etag') };
+    return {
+      changed: true,
+      etag: normalizeSyncRevisionEtag(response.headers.get('etag')),
+    };
   } finally {
     clearTimeout(timer);
     signal.removeEventListener('abort', abort);
