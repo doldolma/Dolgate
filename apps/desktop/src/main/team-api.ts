@@ -1,5 +1,6 @@
 import {
   isVaultEpochRejectionCode,
+  normalizeSyncRevisionEtag,
   normalizeTeamInviteRole,
   normalizeTeamRole,
   SYNC_DATA_FLOOR_HEADER,
@@ -470,7 +471,7 @@ export class TeamApi {
     assertActive(lease);
     return {
       changed: true,
-      etag: response.headers.get("etag"),
+      etag: normalizeSyncRevisionEtag(response.headers.get("etag")),
       revisions: {
         revision: Number(body.revision ?? 0),
         infoRevision: Number(body.infoRevision ?? 0),
@@ -492,7 +493,7 @@ export class TeamApi {
       await response.body?.cancel();
       return { payload: null, etag };
     }
-    const nextEtag = response.headers.get("etag");
+    const nextEtag = normalizeSyncRevisionEtag(response.headers.get("etag"));
     const payload = (await response.json()) as TeamSyncPayload | null;
     assertActive(lease);
     return { payload: payload ?? {}, etag: nextEtag };

@@ -381,10 +381,15 @@ export function parseSyncRevisionEtag(etag: string | null): number | null {
 // 응답에서 읽은 ETag 를 서버가 낸 모양("42")으로 되돌린다. nginx gzip·Cloudflare 같은 압축 프록시는
 // ETag 를 W/"42" 로 약하게 바꾸는데, 그대로 저장하면 자기 push 의 리비전을 못 읽어 편집마다 전체를
 // 다시 받고, 이를 같은 리비전으로 보지 못하는 옛 서버에서는 당기기를 끝없이 되풀이한다. 응답의
-// ETag 를 읽는 곳마다 거친다. 리비전 모양이 아니면 받은 그대로 둔다.
+// ETag 를 읽는 곳마다 거친다. 리비전 숫자가 아닌 ETag(팀 감시의 "t1.i2.p3")는 W/ 만 떼고, 따옴표로
+// 싼 모양이 아니면 받은 그대로 둔다.
 export function normalizeSyncRevisionEtag(etag: string | null): string | null {
   const revision = parseSyncRevisionEtag(etag);
-  return revision === null ? etag : formatSyncRevisionEtag(revision);
+  if (revision !== null) {
+    return formatSyncRevisionEtag(revision);
+  }
+  const weak = /^W\/(".*")$/.exec(etag?.trim() ?? "");
+  return weak ? weak[1] : etag;
 }
 
 // e2ee 볼트에서 캐시된 DEK 를 어떻게 처리할지 결정하는 순수 함수. 데스크톱·모바일이

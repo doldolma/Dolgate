@@ -1,5 +1,6 @@
 import {
   normalizeServerUrl,
+  normalizeSyncRevisionEtag,
   SYNC_WATCH_CLIENT_TIMEOUT_MS,
   toTeamSummary,
   type RawTeamSummary,
@@ -94,7 +95,7 @@ async function fetchTeamSnapshot(
   return {
     notModified: false,
     payload: normalizeTeamPayload(await response.json()),
-    etag: response.headers.get('etag'),
+    etag: normalizeSyncRevisionEtag(response.headers.get('etag')),
   };
 }
 
@@ -218,7 +219,7 @@ export async function watchTeamChanges(
     };
     return {
       changed: true,
-      etag: response.headers.get('etag'),
+      etag: normalizeSyncRevisionEtag(response.headers.get('etag')),
       revisions: {
         revision: Number(body.revision ?? 0),
         infoRevision: Number(body.infoRevision ?? 0),

@@ -46,9 +46,16 @@ describe("normalizeSyncRevisionEtag", () => {
     expect(normalizeSyncRevisionEtag('"42"')).toBe('"42"');
   });
 
+  // 팀 감시의 ETag 는 리비전 셋을 싣는다 — W/ 만 뗀다.
+  it("only drops W/ from an etag that is not a single revision", () => {
+    expect(normalizeSyncRevisionEtag('W/"t4.i2.p7"')).toBe('"t4.i2.p7"');
+    expect(normalizeSyncRevisionEtag('"t4.i2.p7"')).toBe('"t4.i2.p7"');
+  });
+
   it("leaves values that are not a revision as they came", () => {
     expect(normalizeSyncRevisionEtag(null)).toBeNull();
     expect(normalizeSyncRevisionEtag('"42-gzip"')).toBe('"42-gzip"');
+    expect(normalizeSyncRevisionEtag("w/\"42\"")).toBe("w/\"42\"");
   });
 });
 

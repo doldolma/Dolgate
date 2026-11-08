@@ -143,4 +143,29 @@ describe("TeamApi", () => {
     failWith({ error: "code 없는 실패입니다." }, 400);
     await expect(api.getRecords(lease(), "t1", null)).rejects.toMatchObject({ code: null, message: "code 없는 실패입니다." });
   });
+
+  // 압축 프록시(nginx gzip·Cloudflare)는 ETag 를 W/ 로 약하게 바꾼다. 서버가 낸 모양으로 되돌려 둬야 다음 요청에
+  // 그대로 돌려줘도 옛 서버까지 같은 값으로 본다.
+  it("reads a proxy-weakened ETag in the form the server sent", async () => {
+    const api = new TeamApi({
+      refreshSession: vi.fn(),
+      getAccessToken: () => "access-old",
+      getClientIdentificationHeaders: () => ({}),
+    });
+    const weak = (body: unknown, etag: string) =>
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json", etag } });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: URL) =>
+        new URL(String(url)).pathname.endsWith("/sync/watch")
+          ? weak({ revision: 4, infoRevision: 2, privateRevision: 7 }, 'W/"t4.i2.p7"')
+          : weak({ hosts: [] }, 'W/"3"'),
+      ),
+    );
+
+    await expect(api.getRecords(lease(), "t1", null)).resolves.toMatchObject({ etag: '"3"' });
+    await expect(api.watch(lease(), "t1", null, new AbortController().signal)).resolves.toMatchObject({
+      etag: '"t4.i2.p7"',
+    });
+  });
 });

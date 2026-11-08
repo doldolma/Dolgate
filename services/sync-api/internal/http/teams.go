@@ -358,10 +358,13 @@ func registerTeamRoutes(
 		ctx.Next()
 	})
 
+	// If-None-Match 는 개인 /sync 처럼 matchesSyncETag 로 견준다 — 압축 프록시가 W/ 로 약하게 바꾼 값도 같은
+	// 값이다. 304 에는 받은 값이 아니라 서버 값을 싣는다.
 	data.GET("/me", func(ctx *gin.Context) {
 		gate := ctx.MustGet(teamGateContextKey).(storepkg.TeamGate)
-		if match := strings.TrimSpace(ctx.GetHeader("If-None-Match")); match != "" && match == syncRevisionETag(gate.PrivateRevision) {
-			ctx.Header("ETag", match)
+		privateETag := syncRevisionETag(gate.PrivateRevision)
+		if matchesSyncETag(ctx.GetHeader("If-None-Match"), privateETag) {
+			ctx.Header("ETag", privateETag)
 			ctx.Status(http.StatusNotModified)
 			return
 		}
@@ -398,8 +401,9 @@ func registerTeamRoutes(
 
 	data.GET("/sync", func(ctx *gin.Context) {
 		gate := ctx.MustGet(teamGateContextKey).(storepkg.TeamGate)
-		if match := strings.TrimSpace(ctx.GetHeader("If-None-Match")); match != "" && match == syncRevisionETag(gate.Revision) {
-			ctx.Header("ETag", match)
+		gateETag := syncRevisionETag(gate.Revision)
+		if matchesSyncETag(ctx.GetHeader("If-None-Match"), gateETag) {
+			ctx.Header("ETag", gateETag)
 			ctx.Status(http.StatusNotModified)
 			return
 		}
@@ -442,8 +446,8 @@ func registerTeamRoutes(
 		teamID := ctx.Param("teamId")
 		userID := ctx.GetString("userId")
 		gate := ctx.MustGet(teamGateContextKey).(storepkg.TeamGate)
-		known := strings.TrimSpace(ctx.GetHeader("If-None-Match"))
-		if known != teamWatchETag(gate) {
+		gateETag := teamWatchETag(gate)
+		if !matchesSyncETag(ctx.GetHeader("If-None-Match"), gateETag) {
 			respondTeamWatchChanged(ctx, gate)
 			return
 		}
@@ -463,7 +467,7 @@ func registerTeamRoutes(
 			}
 			release()
 			if !woke {
-				ctx.Header("ETag", known)
+				ctx.Header("ETag", gateETag)
 				ctx.Status(http.StatusNotModified)
 				return
 			}

@@ -393,6 +393,39 @@ func TestTeamSyncAndPrivateSlots(t *testing.T) {
 	}
 }
 
+// 압축 프록시(nginx gzip·Cloudflare)가 팀 응답의 ETag 를 W/ 로 약하게 바꿔도 같은 값으로 본다 — 개인 /sync 와
+// 같다. 다른 값으로 보면 팀 감시가 기다리지 않고 바로 답해, 앱이 팀 데이터를 쉬지 않고 다시 받는다.
+func TestTeamWeakETag(t *testing.T) {
+	env := newWatchTestEnv(t)
+	hub := env.hub(t, time.Hour)
+	router := env.router(t, httpserver.RouterConfig{SyncWatch: hub, SyncWatchHold: 400 * time.Millisecond})
+	owner := newWatchTestAccount(t, router, "weak-team-owner@example.com")
+	teamID := createTeamOverHTTP(t, router, owner, "Acme")
+	expectStatus(t, teamCall(router, owner, http.MethodPost, "/teams/"+teamID+"/sync",
+		`{"hosts":[{"id":"h1","encrypted_payload":"x","updated_at":"2026-10-19T01:00:00.000Z"}]}`, nil), http.StatusAccepted, "team push")
+	expectStatus(t, teamCall(router, owner, http.MethodPut, "/teams/"+teamID+"/me",
+		`{"hostPrefs":[{"id":"h1","encrypted_payload":"mine","updated_at":"2026-10-19T01:00:00.000Z"}]}`, epochHeader(owner)), http.StatusAccepted, "private push")
+
+	for _, path := range []string{"/sync", "/me"} {
+		pulled := teamCall(router, owner, http.MethodGet, "/teams/"+teamID+path, "", nil)
+		expectStatus(t, pulled, http.StatusOK, "pull "+path)
+		etag := pulled.Header().Get("ETag")
+		unchanged := teamCall(router, owner, http.MethodGet, "/teams/"+teamID+path, "", map[string]string{"If-None-Match": "W/" + etag})
+		expectStatus(t, unchanged, http.StatusNotModified, "weak pull "+path)
+		if got := unchanged.Header().Get("ETag"); got != etag {
+			t.Fatalf("%s 304 ETag = %q, want the server's %q", path, got, etag)
+		}
+	}
+
+	// 감시도 바로 답하지 않고 기다렸다가 304 로 끝난다.
+	etag := currentTeamWatchETag(t, router, owner, teamID)
+	recorder := awaitWatch(t, teamWatchAsync(t, router, hub, owner, teamID, "W/"+etag), 5*time.Second, "weak team watch")
+	expectStatus(t, recorder, http.StatusNotModified, "weak team watch")
+	if got := recorder.Header().Get("ETag"); got != etag {
+		t.Fatalf("team watch 304 ETag = %q, want the server's %q", got, etag)
+	}
+}
+
 func TestTeamDataFloorGatesOnlyThatTeam(t *testing.T) {
 	restore := httpserver.SetTeamDataFloorMinimumVersionsForTest(map[int]map[string]string{1: {"desktop": "9.0.0"}})
 	defer restore()

@@ -173,4 +173,33 @@ describe('team-api', () => {
     expect(lastRequest().headers['If-None-Match']).toBe('"4.2.7"');
     expect(unchanged).toEqual({ changed: false });
   });
+
+  // 압축 프록시(nginx gzip·Cloudflare)는 ETag 를 W/ 로 약하게 바꾼다. 서버가 낸 모양으로 되돌려 둬야
+  // 다음 요청에 그대로 돌려줘도 옛 서버까지 같은 값으로 본다.
+  it('프록시가 약하게 바꾼 ETag 를 서버가 낸 모양으로 읽는다', async () => {
+    fetchMock.mockResolvedValueOnce(json({ hosts: [] }, 200, 'W/"3"'));
+    const records = await fetchTeamRecords(
+      SERVER_URL,
+      'access-token',
+      'team-1',
+      null,
+    );
+    expect(records.etag).toBe('"3"');
+
+    fetchMock.mockResolvedValueOnce(
+      json(
+        { revision: 4, infoRevision: 2, privateRevision: 7 },
+        200,
+        'W/"t4.i2.p7"',
+      ),
+    );
+    const changed = await watchTeamChanges(
+      SERVER_URL,
+      'access-token',
+      'team-1',
+      null,
+      new AbortController().signal,
+    );
+    expect(changed).toMatchObject({ changed: true, etag: '"t4.i2.p7"' });
+  });
 });
