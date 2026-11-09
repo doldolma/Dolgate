@@ -24,6 +24,13 @@ const (
 	maxViewerInputBytes       = 64 * 1024
 	sessionShareTransportSSH  = "ssh"
 	sessionShareTransportAWS  = "aws-ssm"
+
+	// sessionSharePingInterval 은 공유의 두 연결(데스크톱 owner·브라우저 viewer)에 보내는 살아 있음 신호(ping) 간격이다.
+	// 서버 앞 프록시(ALB·nginx)는 60초 동안 아무것도 안 오가면 연결을 끊는데, 터미널이 조용하면 이 연결도 조용해서
+	// 공유가 60초 만에 끝나 버렸다. 그 절반 밑으로 둔다(sync_watch_hub 의 25초와 같은 까닭).
+	sessionSharePingInterval = 25 * time.Second
+	// sessionSharePingWriteTimeout 은 ping 하나를 쓰는 데 기다리는 최대 시간이다.
+	sessionSharePingWriteTimeout = 10 * time.Second
 )
 
 type createSessionShareRequest struct {
@@ -349,6 +356,15 @@ func (c *shareConn) Close() error {
 	return c.conn.Close()
 }
 
+// Ping 은 살아 있음 신호 하나를 보낸다. WriteControl 은 WriteJSON 과 동시에 불러도 되므로(gorilla/websocket)
+// mu 를 잡지 않는다 — 큰 출력을 쓰는 중에도 ping 이 그 뒤에 줄 서지 않는다.
+func (c *shareConn) Ping(timeout time.Duration) error {
+	if c.conn == nil {
+		return nil
+	}
+	return c.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(timeout))
+}
+
 type sessionShareViewerState struct {
 	nickname string
 }
@@ -383,11 +399,14 @@ type SessionShareHub struct {
 	publicBaseURL  string
 	ownerUpgrader  websocket.Upgrader
 	viewerUpgrader websocket.Upgrader
+	// pingInterval 은 sessionSharePingInterval 이다. 시험만 짧게 바꾼다.
+	pingInterval time.Duration
 }
 
 func NewSessionShareHub(publicBaseURL string) *SessionShareHub {
 	hub := &SessionShareHub{
 		publicBaseURL: publicBaseURL,
+		pingInterval:  sessionSharePingInterval,
 		shares:        make(map[string]*sessionShare),
 		ownerUpgrader: websocket.Upgrader{
 			CheckOrigin: func(_ *http.Request) bool {
@@ -565,6 +584,32 @@ func (hub *SessionShareHub) HasOwnerToken(shareID, ownerToken string) bool {
 	return ok && share.ownerToken == ownerToken
 }
 
+// keepAlive 는 연결 하나에 hub.pingInterval 마다 ping 을 보낸다. 돌려준 함수를 부르면 멈춘다.
+// 쓰기가 실패하면(상대가 사라짐) 그냥 멈춘다 — 연결 정리는 읽기 고리가 끝나며 하던 대로 한다.
+// 데스크톱(Electron 의 WebSocket)과 브라우저는 ping 에 저절로 답하므로 앱은 따로 할 일이 없다.
+func (hub *SessionShareHub) keepAlive(conn *shareConn) (stop func()) {
+	interval := hub.pingInterval
+	if interval <= 0 {
+		return func() {}
+	}
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := conn.Ping(sessionSharePingWriteTimeout); err != nil {
+					return
+				}
+			}
+		}
+	}()
+	return sync.OnceFunc(func() { close(done) })
+}
+
 func (hub *SessionShareHub) HandleOwnerWebSocket(writer http.ResponseWriter, request *http.Request, shareID, ownerToken string) error {
 	conn, err := hub.ownerUpgrader.Upgrade(writer, request, nil)
 	if err != nil {
@@ -585,6 +630,10 @@ func (hub *SessionShareHub) HandleOwnerWebSocket(writer http.ResponseWriter, req
 	share.owner = shareConn
 	viewerCount := len(share.viewers)
 	hub.mu.Unlock()
+
+	// 터미널이 조용해도 프록시가 끊지 않게 — owner 가 끊기면 아래에서 공유가 통째로 지워진다.
+	stopPing := hub.keepAlive(shareConn)
+	defer stopPing()
 
 	_ = shareConn.WriteJSON(ownerViewerCountMessage{
 		Type:        "viewer-count",
@@ -646,6 +695,10 @@ func (hub *SessionShareHub) HandleViewerWebSocket(writer http.ResponseWriter, re
 	chatHistory := append([]sessionShareChatMessage(nil), share.chatLog...)
 	owner := share.owner
 	hub.mu.Unlock()
+
+	// 터미널이 조용해도 프록시가 시청자 연결을 끊지 않게(브라우저 '종료됨').
+	stopPing := hub.keepAlive(viewer)
+	defer stopPing()
 
 	_ = viewer.WriteJSON(initMessage)
 	if snapshot != "" {
