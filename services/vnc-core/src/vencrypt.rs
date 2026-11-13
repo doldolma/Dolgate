@@ -54,8 +54,8 @@ impl SubType {
             260 => Self::X509None,
             261 => Self::X509Vnc,
             262 => Self::X509Plain,
-            263 => Self::TlsSasl,
-            264 => Self::X509Sasl,
+            263 => Self::X509Sasl,
+            264 => Self::TlsSasl,
             other => Self::Unknown(other),
         }
     }
@@ -69,8 +69,8 @@ impl SubType {
             Self::X509None => 260,
             Self::X509Vnc => 261,
             Self::X509Plain => 262,
-            Self::TlsSasl => 263,
-            Self::X509Sasl => 264,
+            Self::X509Sasl => 263,
+            Self::TlsSasl => 264,
             Self::Unknown(value) => value,
         }
     }
