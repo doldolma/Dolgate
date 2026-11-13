@@ -233,6 +233,8 @@
     "syncDecryptFailed": "The sync data could not be decrypted. It may be corrupted.",
     "syncPayloadUnreadable": "Could not read the sync data. Please update the app to the latest version.",
     "usingCache": "Using cached data without a network.",
+    "syncRecordTooLarge": "\"{{name}}\" is too large to sync ({{size}}). Make it smaller or delete it to resume syncing.",
+    "syncRecordsTooLarge": "\"{{name}}\" ({{size}}) and {{count}} more are too large to sync. Make them smaller or delete them to resume syncing.",
     "onlineOnly": "Available only while signed in online.",
     "vaultCancelledAccountChanged": "The sync vault operation was cancelled because the account or server changed.",
     "sessionExpiredRetry": "Your session has expired. Sign in again and retry.",

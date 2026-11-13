@@ -36,6 +36,7 @@ import type {
   RdpHostRecord,
   VncHostRecord,
   SyncPayloadV2,
+  SyncPushEntry,
   SyncStatus,
   TailnetPayload,
   VncImageQuality,
@@ -143,7 +144,8 @@ import {
   logoutRemoteSession,
   mergePromptedSecrets,
   MobileServerPublicKeyInfo,
-  postSyncSnapshot,
+  describeOversizedSyncRecords,
+  postSyncSnapshotInBatches,
   postVaultReset,
   postVaultSetup,
   putVaultRewrap,
@@ -315,6 +317,39 @@ import {
   type SftpCounts,
   type TeamHistory,
 } from './team-history';
+
+/** 너무 커서 못 올린 대기열 항목(④) — 그때의 레코드 시각과 크기·알릴 이름. */
+interface OversizedOutboxRecord {
+  updatedAt: string;
+  bytes: number;
+  label: string;
+}
+
+/** 너무 큰 대기열 항목을 알릴 이름 — 호스트·자격증명은 label, 그룹은 name, known host 는 주소. */
+function oversizedRecordLabel(
+  entry: SyncOutboxEntry,
+  local: {
+    hosts: HostRecord[];
+    groups: GroupRecord[];
+    knownHosts: KnownHostRecord[];
+    secretsByRef: Record<string, LoadedManagedSecretPayload>;
+  },
+): string {
+  // 개인 대기열의 항목이라 개인 볼트에서만 찾는다.
+  if (entry.kind === 'hosts') {
+    return findPersonalHost(local, entry.id)?.label ?? entry.id;
+  }
+  if (entry.kind === 'groups') {
+    return local.groups.find(item => item.id === entry.id)?.name ?? entry.id;
+  }
+  if (entry.kind === 'secrets') {
+    return findPersonalSecret(local, entry.id)?.label ?? entry.id;
+  }
+  return (
+    personalKnownHosts(local).find(item => item.id === entry.id)?.host ??
+    entry.id
+  );
+}
 
 // shared-core 는 코드만 돌려주므로, 사용자에게 보일 문구는 이 앱에서 만들어 던진다.
 function assertVaultPassphrase(passphrase: string): void {
@@ -3865,6 +3900,12 @@ export const useMobileAppStore = create<MobileAppState>()(
       };
 
       /**
+       * 너무 커서 못 올린 대기열 항목(`종류:id`) — 그때의 레코드 시각과 크기·이름. 그 시각 그대로인 동안 다시 보내지
+       * 않는다(대기열에는 남는다). 받기는 레코드별 병합이라 이 항목이 남아 있어도 계속 돈다.
+       */
+      const oversizedOutbox = new Map<string, OversizedOutboxRecord>();
+
+      /**
        * 못 민 로컬 변경을 서버로 올린다.
        *
        * **바뀐 레코드만 보낸다.** 데스크톱(sync-service)은 밀 것이 있으면 로컬 전체
@@ -3895,12 +3936,52 @@ export const useMobileAppStore = create<MobileAppState>()(
         }
 
         const local = get();
-        const { payload, drained } = buildSyncOutboxPayload(queued, {
+        const localUpdatedAt = (entry: SyncOutboxEntry): string | null => {
+          if (entry.op === 'delete') {
+            return null;
+          }
+          // 개인 대기열의 항목이라 개인 볼트에서만 찾는다.
+          const record =
+            entry.kind === 'hosts'
+              ? findPersonalHost(local, entry.id)
+              : entry.kind === 'groups'
+                ? local.groups.find(item => item.id === entry.id)
+                : entry.kind === 'secrets'
+                  ? findPersonalSecret(local, entry.id)
+                  : personalKnownHosts(local).find(
+                      item => item.id === entry.id,
+                    );
+          return record?.updatedAt ?? null;
+        };
+        // 너무 커서 지난번에 뺐고 그대로인 항목은 이번에 싣지 않는다 — 대기열에는 남아 있고, 고치면 다시 간다.
+        const held: OversizedOutboxRecord[] = [];
+        const sendable = queued.filter(entry => {
+          const key = `${entry.kind}:${entry.id}`;
+          const oversized = oversizedOutbox.get(key);
+          if (!oversized) {
+            return true;
+          }
+          if (oversized.updatedAt === localUpdatedAt(entry)) {
+            held.push(oversized);
+            return false;
+          }
+          oversizedOutbox.delete(key);
+          return true;
+        });
+        const { drained } = buildSyncOutboxPayload(sendable, {
           hosts: local.hosts,
           groups: local.groups,
           knownHosts: local.knownHosts,
           secretsByRef: local.secretsByRef,
         });
+        // 실은 레코드(`종류:id:upsert|delete`) → 그 대기열 항목. 묶음이 들어가면 그 항목만 뺀다.
+        const entryByRecord = new Map(
+          drained.map(entry => [`${entry.kind}:${entry.id}:${entry.op}`, entry]),
+        );
+        const recordKey = (entry: SyncPushEntry) =>
+          `${entry.kind}:${entry.record.id}:${entry.record.deleted_at ? 'delete' : 'upsert'}`;
+        const sent = new Set<SyncOutboxEntry>();
+        const tooLarge: OversizedOutboxRecord[] = [];
 
         try {
           await callWithFreshAccessToken(async accessToken => {
@@ -3908,7 +3989,17 @@ export const useMobileAppStore = create<MobileAppState>()(
             if (!currentSession) {
               throw new Error(t('store.onlineOnly'));
             }
-            const pushedRevision = await postSyncSnapshot(
+            // 토큰을 갱신해 다시 불렸으면 이미 들어간 묶음의 항목은 빼고 나머지만 보낸다.
+            const { payload } = buildSyncOutboxPayload(
+              drained.filter(entry => !sent.has(entry)),
+              {
+                hosts: local.hosts,
+                groups: local.groups,
+                knownHosts: local.knownHosts,
+                secretsByRef: local.secretsByRef,
+              },
+            );
+            const oversized = await postSyncSnapshotInBatches(
               get().settings.serverUrl,
               accessToken,
               buildHostMutationSyncPayload(
@@ -3917,8 +4008,34 @@ export const useMobileAppStore = create<MobileAppState>()(
               ),
               resolveVaultEpochForPush(),
               resolveMobileSyncDataFloor(get().hosts),
+              (revision, entries) => {
+                storePushedRevision(revision);
+                const pushed = entries
+                  .map(entry => entryByRecord.get(recordKey(entry)))
+                  .filter((entry): entry is SyncOutboxEntry => Boolean(entry));
+                for (const entry of pushed) {
+                  sent.add(entry);
+                }
+                // 들어간 묶음의 항목은 바로 뺀다 — 뒤 묶음이 실패해도 다시 보내지 않는다. 미는 동안 다시 고친
+                // 것은 새 항목이라 남는다(removeSyncOutbox 는 항목 자체로 지운다).
+                set(state => ({
+                  syncOutbox: removeSyncOutbox(state.syncOutbox, pushed),
+                }));
+              },
             );
-            storePushedRevision(pushedRevision);
+            for (const entry of oversized) {
+              const queuedEntry = entryByRecord.get(recordKey(entry));
+              if (!queuedEntry) {
+                continue;
+              }
+              const record = {
+                updatedAt: localUpdatedAt(queuedEntry) ?? '',
+                bytes: entry.bytes,
+                label: oversizedRecordLabel(queuedEntry, local),
+              };
+              oversizedOutbox.set(`${queuedEntry.kind}:${queuedEntry.id}`, record);
+              tooLarge.push(record);
+            }
           });
         } catch (error) {
           // 볼트 세대 문제는 재시도해도 영원히 실패한다 — 공통 처리가 상태를 정리한다.
@@ -3949,9 +4066,17 @@ export const useMobileAppStore = create<MobileAppState>()(
           return 'failed';
         }
 
+        // 보낼 레코드가 없던 항목(큐에 들어간 뒤 지워진 것 — 지움 항목이 따로 있다)도 뺀다. 너무 큰 것은 남긴다.
+        const oversizedEntries = new Set(
+          [...entryByRecord.values()].filter(entry =>
+            oversizedOutbox.has(`${entry.kind}:${entry.id}`),
+          ),
+        );
+        const settled = drained.filter(entry => !oversizedEntries.has(entry));
+        const left = [...tooLarge, ...held];
         // 미는 동안 사용자가 또 고쳤을 수 있다. 그 항목은 남겨야 한다.
         set(state => {
-          const next = removeSyncOutbox(state.syncOutbox, drained);
+          const next = removeSyncOutbox(state.syncOutbox, settled);
           const cleared = next.length === 0;
           return {
             syncOutbox: next,
@@ -3965,6 +4090,10 @@ export const useMobileAppStore = create<MobileAppState>()(
                 : {}),
               ...(cleared
                 ? { lastSuccessfulSyncAt: new Date().toISOString() }
+                : {}),
+              // 너무 커서 못 올린 것이 남았다 — 무엇인지 알린다(받기가 덮지 않는다: 대기열이 남아 있으면 문구를 둔다).
+              ...(left.length > 0
+                ? { status: 'error' as const, errorMessage: describeOversizedSyncRecords(left) }
                 : {}),
             },
             syncOutboxFailure: null,
@@ -8327,7 +8456,9 @@ export const useMobileAppStore = create<MobileAppState>()(
               countSyncPayloadRecords(payload) === 0 &&
               hasLocalDataToRecover
             ) {
-              const recoveryRevision = await postSyncSnapshot(
+              // 묶음으로 나눠 올린다(④). 그것만으로 앞단 한도를 넘는 레코드는 빠지는데, 서버에 없고 지운 적도
+              // 없으니 다음 받기의 병합이 대기열에 다시 넣는다 — 그 뒤로는 대기열이 다룬다.
+              await postSyncSnapshotInBatches(
                 get().settings.serverUrl,
                 currentSession.tokens.accessToken,
                 buildLocalStateSyncPayload(
@@ -8343,11 +8474,15 @@ export const useMobileAppStore = create<MobileAppState>()(
                 ),
                 vaultState.status === 'unlocked' ? vaultState.epoch : null,
                 resolveMobileSyncDataFloor(get().hosts),
+                revision => {
+                  if (!isStaleSync()) {
+                    storePushedRevision(revision);
+                  }
+                },
               );
               if (isStaleSync()) {
                 return;
               }
-              storePushedRevision(recoveryRevision);
               clearOfflineRecoveryLoop();
               set({
                 vault: vaultState,
@@ -9257,9 +9392,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             Object.keys(local.secretsByRef).length > 0;
           if (hasLocalData) {
             try {
-              const pushedRevision = await callWithFreshAccessToken(
+              // 묶음으로 나눠 올린다(④) — 위의 복구 올리기와 같다.
+              await callWithFreshAccessToken(
                 accessToken =>
-                  postSyncSnapshot(
+                  postSyncSnapshotInBatches(
                     operationContext.serverUrl,
                     accessToken,
                     buildLocalStateSyncPayload(
@@ -9275,10 +9411,10 @@ export const useMobileAppStore = create<MobileAppState>()(
                     ),
                     epoch,
                     resolveMobileSyncDataFloor(get().hosts),
+                    storePushedRevision,
                   ),
                 operationContext,
               );
-              storePushedRevision(pushedRevision);
             } catch (error) {
               assertVaultOperationContext(operationContext);
               // 복구 push 실패 — 여기서 pull 로 이어가면 빈 서버 스냅샷이 로컬을 통째로

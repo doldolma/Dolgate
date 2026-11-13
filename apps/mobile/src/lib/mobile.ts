@@ -23,6 +23,7 @@ import type {
   SnippetRecord,
   SshHostRecord,
   SyncPayloadV2,
+  SyncPushEntry,
   SyncRecord,
   SyncStatus,
   TailnetPayload,
@@ -43,6 +44,7 @@ import {
   normalizeSyncRevisionEtag,
   parseVaultCacheRecord,
   projectSecretMetadata,
+  pushSyncRecordsInBatches,
   SYNC_DATA_FLOOR_HEADER,
   SYNC_DATA_FLOOR_LEGACY_INTOLERANT_KINDS,
   SYNC_WATCH_CLIENT_TIMEOUT_MS,
@@ -1145,6 +1147,65 @@ export async function postSyncSnapshot(
     // 구버전 서버는 본문이 없을 수 있다 — 다음 폴링이 전체를 한 번 당긴다(무해).
   }
   return null;
+}
+
+/**
+ * 동기화 올리기를 묶음으로 나눠 보낸다(④, 2026-11-13).
+ *
+ * 서버 앞의 리버스 프록시는 본문이 크면(nginx 기본 1MB) 서버에 닿기도 전에 413 을 준다. 대기열이 클 때(오프라인에서
+ * 많이 고쳤을 때)와 초기화 뒤 통째로 다시 올릴 때 넘는다. 서버는 받은 레코드만 넣거나 고치므로 나눠도 결과가 같다.
+ *
+ * 묶음 하나가 들어갈 때마다 onSent 로 그 리비전과 실은 레코드를 알린다. 그것만으로 한도를 넘는 레코드는 빼고
+ * 돌려준다(나머지는 다 보냈다). 그 밖의 실패는 던진다 — 그때까지 들어간 묶음은 이미 알렸다.
+ */
+export async function postSyncSnapshotInBatches(
+  serverUrl: string,
+  accessToken: string,
+  payload: SyncPayloadV2,
+  vaultEpoch?: number | null,
+  syncDataFloor?: number | null,
+  onSent?: (revision: string | null, entries: SyncPushEntry[]) => void,
+): Promise<SyncPushEntry[]> {
+  let revision: string | null = null;
+  const result = await pushSyncRecordsInBatches(
+    payload as unknown as Record<string, SyncRecord[]>,
+    {
+      serverKey: normalizeServerUrl(serverUrl),
+      send: async batch => {
+        try {
+          revision = await postSyncSnapshot(
+            serverUrl,
+            accessToken,
+            batch as unknown as SyncPayloadV2,
+            vaultEpoch,
+            syncDataFloor,
+          );
+          return 'sent';
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 413) {
+            return 'too-large';
+          }
+          throw error;
+        }
+      },
+      onSent: entries => onSent?.(revision, entries),
+    },
+  );
+  return result.tooLarge;
+}
+
+/** 너무 커서 못 올린 레코드를 알리는 문구 — 첫 레코드의 이름과 크기, 더 있으면 그 수. */
+export function describeOversizedSyncRecords(
+  records: ReadonlyArray<{ label: string; bytes: number }>,
+): string {
+  const [first, ...rest] = records;
+  const size =
+    first.bytes >= 1024 * 1024
+      ? `${(first.bytes / (1024 * 1024)).toFixed(1)}MB`
+      : `${Math.ceil(first.bytes / 1024)}KB`;
+  return rest.length === 0
+    ? t('store.syncRecordTooLarge', { name: first.label, size })
+    : t('store.syncRecordsTooLarge', { name: first.label, size, count: rest.length });
 }
 
 export function decodeSyncRecords<T>(

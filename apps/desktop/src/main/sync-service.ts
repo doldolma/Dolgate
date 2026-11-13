@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import type {
   AwsProfilesServerSupport,
   DnsOverrideRecord,
@@ -13,6 +13,8 @@ import type {
   SavedWorkspaceRecord,
   SnippetRecord,
   SyncPayloadV2,
+  SyncPushEntry,
+  SyncPushSendOutcome,
   SyncRecord,
   SyncStatus,
   SyncWatchResult,
@@ -33,6 +35,7 @@ import {
   isVaultEpochRejectionCode,
   normalizeSyncRevisionEtag,
   parseSyncRevisionEtag,
+  pushSyncRecordsInBatches,
   SYNC_DATA_FLOOR_HEADER,
   SYNC_DATA_FLOOR_LEGACY_INTOLERANT_KINDS,
   LEGACY_TOLERATED_HOST_KINDS,
@@ -108,6 +111,108 @@ export class SyncVaultDecodeError extends Error {
     super(message);
     this.name = 'SyncVaultDecodeError';
   }
+}
+
+// 레코드 하나가 그것만 보내도 앞단(리버스 프록시)의 본문 한도를 넘는다. 나머지는 올렸다. 그 레코드가 남아 있는
+// 동안은 받기를 하지 않는다 — 받기는 서버 사본으로 로컬을 갈아 끼우므로, 받으면 그 레코드를 잃는다.
+export class SyncRecordTooLargeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SyncRecordTooLargeError';
+  }
+}
+
+/** 이 기기가 아는 서버 사본의 레코드 하나 — 바뀐 것만 고르는 기준(SyncService.serverIndex). */
+interface ServerRecordMark {
+  /** 서버가 견주는 시각(updated_at, ms). */
+  at: number;
+  /** 복호화한 내용의 지문. 지운 것이거나 풀지 못했으면 null. */
+  fingerprint: string | null;
+  deleted: boolean;
+}
+
+/** 너무 커서 못 올린 레코드. 내용이 그대로인 동안 다시 보내지 않는다. */
+interface OversizedRecord {
+  fingerprint: string;
+  bytes: number;
+  label: string;
+}
+
+/** 올릴 수 있는 로컬 레코드 하나 — 서버에 보낼 모양 그대로의 값. */
+interface PushCandidate {
+  kind: SyncRecordKind;
+  id: string;
+  updatedAt: string;
+  value: unknown;
+}
+
+/** GET /sync 의 결과. payload 가 null 이면 304(이미 적용한 리비전 그대로)다. */
+interface RemoteSnapshot {
+  payload: SyncPayloadV2 | null;
+  etag: string | null;
+}
+
+/** 이번에 올릴 것 — 서버 사본과 다른 레코드와 지움. */
+interface PushDelta {
+  payload: SyncPayloadV2;
+  /** 지움 대기열에서 실은 것(실은 뒤 서버가 받으면 대기열에서 지운다). */
+  includedDeletions: SyncDeletionRecord[];
+  /** 레코드가 들어가면 기준이 될 값(`종류\0id`). */
+  marks: Map<string, ServerRecordMark>;
+  /** 너무 클 때 알릴 이름(`종류\0id`). */
+  labels: Map<string, string>;
+  /** 너무 커서 지난번에 뺐고 그대로라 이번에도 싣지 않은 것. */
+  held: OversizedRecord[];
+}
+
+function syncIndexKey(kind: string, id: string): string {
+  return `${kind}\u0000${id}`;
+}
+
+/** 키 순서와 상관없는 JSON — 같은 내용을 다른 기기(다른 키 순서)가 써도 같은 글이 된다. */
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value) ?? 'null';
+  }
+  if (Array.isArray(value)) {
+    return `[${value
+      .map((item) => (item === undefined || typeof item === 'function' ? 'null' : canonicalJson(item)))
+      .join(',')}]`;
+  }
+  const fields: string[] = [];
+  for (const key of Object.keys(value).sort()) {
+    const item = (value as Record<string, unknown>)[key];
+    if (item === undefined || typeof item === 'function') {
+      continue;
+    }
+    fields.push(`${JSON.stringify(key)}:${canonicalJson(item)}`);
+  }
+  return `{${fields.join(',')}}`;
+}
+
+/** 레코드 내용의 지문. 암호문은 올릴 때마다 달라서 견줄 수 없으므로 복호화한 내용으로 잰다. */
+export function syncContentFingerprint(value: unknown): string {
+  return createHash('sha256').update(canonicalJson(value)).digest('base64url');
+}
+
+function describeByteSize(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)}MB` : `${Math.ceil(bytes / 1024)}KB`;
+}
+
+/** 너무 큰 레코드를 알리는 문구 — 첫 레코드의 이름과 크기, 더 있으면 그 수. 팀 동기화도 쓴다. */
+export function describeOversized(records: ReadonlyArray<{ label: string; bytes: number }>): string {
+  const [first, ...rest] = records;
+  return rest.length === 0
+    ? t('sync.recordTooLarge', { name: first.label, size: describeByteSize(first.bytes) })
+    : t('sync.recordsTooLarge', { name: first.label, size: describeByteSize(first.bytes), count: rest.length });
+}
+
+/** 너무 클 때 알릴 이름 — 호스트·스니펫·비밀값은 label, 그룹·워크스페이스는 name. 없으면 id. 팀 동기화도 쓴다. */
+export function syncRecordLabel(value: unknown, id: string): string {
+  const fields = value as { label?: unknown; name?: unknown } | null;
+  const label = typeof fields?.label === 'string' && fields.label.trim() ? fields.label : null;
+  const name = typeof fields?.name === 'string' && fields.name.trim() ? fields.name : null;
+  return label ?? name ?? id;
 }
 
 function nowIso(): string {
@@ -204,6 +309,22 @@ function defaultSyncStatus(): SyncStatus {
 
 function isE2ESyncDisabled(): boolean {
   return process.env.DOLSSH_E2E_DISABLE_SYNC === '1';
+}
+
+function emptySyncPayload(): SyncPayloadV2 {
+  return {
+    groups: [],
+    hosts: [],
+    secrets: [],
+    knownHosts: [],
+    portForwards: [],
+    dnsOverrides: [],
+    snippets: [],
+    workspaces: [],
+    preferences: [],
+    awsProfiles: [],
+    tailnets: [],
+  };
 }
 
 function totalRecordCount(payload: SyncPayloadV2): number {
@@ -485,6 +606,12 @@ export class SyncService {
   // 마지막으로 서버와 맞춘 리비전(ETag). 폴링의 If-None-Match 로 보내 변경 없으면 304 로
   // 조기 종료한다. 프로세스 메모리에만 두고, 재시작 시 첫 부트스트랩이 전체를 받아 다시 채운다.
   private lastSyncRevision: string | null = null;
+  // 마지막으로 받은 서버 사본의 레코드별 시각·내용 지문(`종류\0id`) — 바뀐 것만 올리는 기준이다. 받을 때(200)마다
+  // 새로 만들고, 묶음을 보낼 때마다 보낸 것으로 고친다. 리비전과 같은 "이 기기가 아는 서버 모습" 이라 같이 지운다.
+  // 없으면(앱을 켠 뒤 아직 못 받았으면) 올리기 전에 한 번 받아 만든다.
+  private serverIndex: Map<string, ServerRecordMark> | null = null;
+  // 너무 커서 못 올린 레코드(`종류\0id`). 내용이 그대로인 동안은 다시 보내지 않는다(30초마다 1MB 를 되풀이하지 않게).
+  private oversized = new Map<string, OversizedRecord>();
   // 서버가 변경 대기(GET /sync/watch)를 지원하는가. /api/info 로 알게 되고, 서버 URL 이 바뀌면
   // 다시 모르는 것으로 본다. 대기 요청이 404 등을 받으면 지원하지 않는 것으로 바꾼다.
   private watchSupport: { serverUrl: string; supported: boolean } | null = null;
@@ -557,6 +684,8 @@ export class SyncService {
     }
     if (options?.resetRevision) {
       this.lastSyncRevision = null;
+      this.serverIndex = null;
+      this.oversized.clear();
     }
   }
 
@@ -684,22 +813,23 @@ export class SyncService {
         awsProfilesServerSupport,
       });
 
+      // 올릴 것이 있으면 받기 전에 올린다. 받기는 서버 사본으로 로컬을 통째로 갈아 끼우므로, 못 올린 변경이
+      // 있는 채 받으면 그 변경이 사라진다. 기준(서버 사본의 레코드별 모습)이 없으면 먼저 받아 만든다 — 그 받은
+      // 것은 올린 것이 없을 때만 그대로 적용한다(받기를 두 번 하지 않는다). 올렸으면 서버가 바뀌었으니 다시 받는다.
+      let inHand: RemoteSnapshot | null = null;
       if (hadPendingLocalChanges || shouldBackfillAwsProfiles) {
-        const local = await this.buildEncryptedSnapshot(true, awsProfilesServerSupport, lease);
-        this.assertSyncLeaseActive(lease);
-        if (totalRecordCount(local) > 0) {
-          await this.pushSnapshot(local, lease);
+        inHand = await this.ensureServerIndex(awsProfilesServerSupport, lease);
+        if (await this.pushLocalChanges(awsProfilesServerSupport, lease)) {
+          inHand = null;
         }
       }
 
-      let remote = await this.fetchRemoteSnapshot(awsProfilesServerSupport, lease);
+      let remote = inHand ?? (await this.fetchRemoteSnapshot(awsProfilesServerSupport, lease));
       this.assertSyncLeaseActive(lease);
-      // remote 가 비어 있으면(신규/서버 유실) 로컬을 재업로드해 복구한다.
+      // remote 가 비어 있으면(신규/서버 유실) 로컬을 다시 올려 복구한다. 서버 사본이 비었으니 전부 고른다.
       if (remote.payload !== null && totalRecordCount(remote.payload) === 0) {
-        const local = await this.buildEncryptedSnapshot(true, awsProfilesServerSupport, lease);
-        this.assertSyncLeaseActive(lease);
-        if (totalRecordCount(local) > 0) {
-          await this.pushSnapshot(local, lease);
+        this.serverIndex = new Map();
+        if (await this.pushLocalChanges(awsProfilesServerSupport, lease)) {
           remote = await this.fetchRemoteSnapshot(awsProfilesServerSupport, lease);
           this.assertSyncLeaseActive(lease);
         }
@@ -719,12 +849,14 @@ export class SyncService {
       this.assertSyncLeaseActive(lease);
       // "저장된 리비전 = 실제로 적용한 상태" 불변식: apply 가 성공한 지금에서야 ETag 를
       // 저장한다(decode 실패 시 저장되지 않아, 재잠금 후 unlock 이 304 에 갇히지 않는다).
-      if (applied && remote.etag) {
-        this.lastSyncRevision = remote.etag;
+      // 기준도 같다 — 적용한 서버 사본이 다음 올리기의 기준이다.
+      if (applied) {
+        this.serverIndex = this.buildServerIndex(remote.payload as SyncPayloadV2, lease.vaultKeyBase64);
+        if (remote.etag) {
+          this.lastSyncRevision = remote.etag;
+        }
       }
-      this.outbox.clearMany(
-        this.listSyncableDeletions(awsProfilesServerSupport)
-      );
+      // 지움 대기열은 올린 것만 비운다(pushLocalChanges). 받는 사이에 새로 지운 것은 남겨 다음 올리기에 보낸다.
       this.patchState({
         status: 'ready',
         lastSuccessfulSyncAt: new Date().toISOString(),
@@ -942,18 +1074,14 @@ export class SyncService {
             pendingPush: true,
             errorMessage: null
           });
-          const snapshot = await this.buildEncryptedSnapshotResult(
-            true,
-            this.state.awsProfilesServerSupport ?? 'unknown',
-            lease,
-          );
+          const awsProfilesServerSupport = this.state.awsProfilesServerSupport ?? 'unknown';
+          // 서버 사본과 다른 것만 올린다. 팀 편집처럼 개인 쪽이 그대로면 아무것도 보내지 않는다.
+          await this.ensureServerIndex(awsProfilesServerSupport, lease);
+          await this.pushLocalChanges(awsProfilesServerSupport, lease);
           this.assertSyncLeaseActive(lease);
-          await this.pushSnapshot(snapshot.payload, lease);
-          this.assertSyncLeaseActive(lease);
-          this.outbox.clearMany(snapshot.includedDeletions);
           shouldContinuePush =
             this.queuedPushGeneration === lease.generation ||
-            this.listSyncableDeletions(this.state.awsProfilesServerSupport ?? 'unknown').length > 0;
+            this.listSyncableDeletions(awsProfilesServerSupport).length > 0;
         } while (shouldContinuePush);
 
         this.patchState({
@@ -983,7 +1111,10 @@ export class SyncService {
             pendingPush: true,
             errorMessage: error instanceof Error ? error.message : t('sync.uploadFailed')
           });
-          this.scheduleRetry();
+          // 너무 큰 레코드는 그대로인 동안 다시 해도 같다 — 고치면 그 편집이 올리기를 다시 부른다.
+          if (!(error instanceof SyncRecordTooLargeError)) {
+            this.scheduleRetry();
+          }
         }
       }
       return this.state;
@@ -1005,7 +1136,6 @@ export class SyncService {
   async exportDecryptedSnapshot(): Promise<SyncPayloadV2> {
     const lease = this.captureSyncLease();
     return this.buildEncryptedSnapshot(
-      true,
       this.state.awsProfilesServerSupport ?? 'unknown',
       lease,
     );
@@ -1179,10 +1309,11 @@ export class SyncService {
       : 0;
   }
 
+  /** 묶음 하나를 올린다. 앞단이 본문이 크다고 거절하면(413) "too-large" — 나누기 도우미가 더 작게 나눈다. */
   private async pushSnapshot(
-    payload: SyncPayloadV2,
+    payload: Partial<SyncPayloadV2>,
     lease: SyncLease,
-  ): Promise<void> {
+  ): Promise<SyncPushSendOutcome> {
     this.assertSyncLeaseActive(lease);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json'
@@ -1200,6 +1331,8 @@ export class SyncService {
     //
     // 0 이어도 보낸다. 서버는 헤더가 없으면 0 으로 보지만, 모든 클라이언트가 자기 수준을 선언하는
     // 편이 규칙이 단순하다 — "안 보낸 것" 과 "0" 을 구분할 일이 없어진다.
+    //
+    // 묶음마다 싣는다 — 첫 묶음이 하한을 올린 뒤에 새 종류가 들어간다(하한은 계정 전체 호스트로 잰다).
     headers[SYNC_DATA_FLOOR_HEADER] = String(this.resolveSyncDataFloor());
     const response = await this.fetchWithAuthRetry(
       lease,
@@ -1210,10 +1343,17 @@ export class SyncService {
         body: JSON.stringify(payload)
       },
       t('sync.uploadFailed'),
+      (status) => status === 413,
     );
+    if (response.status === 413) {
+      await response.body?.cancel();
+      return 'too-large';
+    }
     // push 응답의 리비전은 "직전 pull 리비전 + 1"일 때만 저장한다. 그보다 크면 내 push
     // 이전에 다른 기기의 변경이 끼어 있다는 뜻 — 그대로 저장하면 다음 폴링이 304 로 그
     // 변경들을 영영 건너뛴다. 옛 ETag 를 유지해 다음 폴링이 200 전체를 받게 한다.
+    // 묶음으로 나눠 보내면 묶음마다 리비전이 하나씩 오른다 — 묶음마다 이렇게 이어 받으면 사이에 다른 기기가
+    // 끼지 않은 한 마지막 묶음의 리비전까지 따라간다.
     try {
       const body = (await response.json()) as { revision?: number };
       this.assertSyncLeaseActive(lease);
@@ -1223,31 +1363,171 @@ export class SyncService {
           this.lastSyncRevision = formatSyncRevisionEtag(body.revision);
         }
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof StaleSyncLeaseError) {
+        throw error;
+      }
       // 구버전 서버는 본문이 없을 수 있다 — 그러면 다음 폴링이 전체를 한 번 당긴다(무해).
     }
+    return 'sent';
   }
 
-  private async buildEncryptedSnapshot(
-    includeDeletions: boolean,
+  /**
+   * 기준(서버 사본의 레코드별 모습)이 없으면 서버 사본을 한 번 받아 만든다. 받은 것은 적용하지 않는다 — 올릴 것이
+   * 있는 채 적용하면 그 변경이 사라진다. 받았으면 그 사본을 돌려준다(올릴 것이 없으면 부른 쪽이 그대로 적용한다).
+   */
+  private async ensureServerIndex(
     awsProfilesServerSupport: AwsProfilesServerSupport,
     lease: SyncLease,
-  ): Promise<SyncPayloadV2> {
-    const snapshot = await this.buildEncryptedSnapshotResult(
-      includeDeletions,
-      awsProfilesServerSupport,
-      lease,
-    );
-    return snapshot.payload;
-  }
-
-  private async buildEncryptedSnapshotResult(
-    includeDeletions: boolean,
-    awsProfilesServerSupport: AwsProfilesServerSupport,
-    lease: SyncLease,
-  ): Promise<{ payload: SyncPayloadV2; includedDeletions: SyncDeletionRecord[] }> {
+  ): Promise<RemoteSnapshot | null> {
+    if (this.serverIndex) {
+      return null;
+    }
+    const remote = await this.fetchRemoteSnapshot(awsProfilesServerSupport, lease, { ignoreEtag: true });
     this.assertSyncLeaseActive(lease);
-    const vaultKeyBase64 = lease.vaultKeyBase64;
+    this.serverIndex = this.buildServerIndex(remote.payload as SyncPayloadV2, lease.vaultKeyBase64);
+    return remote;
+  }
+
+  /**
+   * 서버 사본의 레코드마다 시각과 내용 지문. 내용은 복호화해 잰다 — 암호문은 올릴 때마다 달라 견줄 수 없다.
+   * 풀지 못한 레코드는 지문 없이 둔다(그 레코드는 같은 시각이어도 로컬 것을 다시 올린다).
+   */
+  private buildServerIndex(payload: SyncPayloadV2, vaultKeyBase64: string): Map<string, ServerRecordMark> {
+    const index = new Map<string, ServerRecordMark>();
+    for (const [kind, records] of Object.entries(payload) as Array<[string, SyncRecord[] | undefined]>) {
+      for (const record of records ?? []) {
+        const deleted = Boolean(record.deleted_at);
+        let fingerprint: string | null = null;
+        if (!deleted) {
+          try {
+            fingerprint = syncContentFingerprint(decodeEncryptedPayload<unknown>(record.encrypted_payload, vaultKeyBase64));
+          } catch {
+            fingerprint = null;
+          }
+        }
+        index.set(syncIndexKey(kind, record.id), { at: Date.parse(record.updated_at), fingerprint, deleted });
+      }
+    }
+    return index;
+  }
+
+  /**
+   * 서버 사본과 다른 로컬 레코드와 지움을 묶음으로 나눠 올린다. 올린 묶음이 있으면 true.
+   *
+   * 고르는 규칙(buildPushDelta): 서버에 없거나, 서버 것보다 시각이 늦거나, 시각은 같은데 내용이 다른 레코드.
+   * 마지막 것은 안전망이다 — 시각을 일부러 안 올리고 내용만 채우는 곳(HostRepository.fillRdpAwsSsmProfileId)이 있다.
+   *
+   * 레코드 하나가 그것만으로 앞단 한도를 넘으면 나머지를 다 올린 뒤 SyncRecordTooLargeError 를 던진다.
+   */
+  private async pushLocalChanges(
+    awsProfilesServerSupport: AwsProfilesServerSupport,
+    lease: SyncLease,
+  ): Promise<boolean> {
+    const delta = await this.buildPushDelta(awsProfilesServerSupport, lease);
+    this.assertSyncLeaseActive(lease);
+    const result =
+      totalRecordCount(delta.payload) > 0
+        ? await pushSyncRecordsInBatches(delta.payload as unknown as Record<string, SyncRecord[]>, {
+            serverKey: lease.serverUrl,
+            send: (batch) => this.pushSnapshot(batch as Partial<SyncPayloadV2>, lease),
+            onSent: (entries: SyncPushEntry[]) => {
+              this.assertSyncLeaseActive(lease);
+              for (const entry of entries) {
+                const key = syncIndexKey(entry.kind, entry.record.id);
+                const mark = delta.marks.get(key);
+                if (mark) {
+                  this.serverIndex?.set(key, mark);
+                }
+              }
+            },
+          })
+        : { batches: 0, tooLarge: [] };
+    this.assertSyncLeaseActive(lease);
+    // 실은 지움은 다 들어갔다(못 들어갔으면 위에서 던졌다). 서버가 받지 않을 모양이라 뺀 지움도 같이 치운다.
+    this.outbox.clearMany(delta.includedDeletions);
+    const tooLarge: OversizedRecord[] = [];
+    for (const entry of result.tooLarge) {
+      const key = syncIndexKey(entry.kind, entry.record.id);
+      const fingerprint = delta.marks.get(key)?.fingerprint;
+      if (!fingerprint) {
+        continue;
+      }
+      const record = { fingerprint, bytes: entry.bytes, label: delta.labels.get(key) ?? entry.record.id };
+      this.oversized.set(key, record);
+      tooLarge.push(record);
+    }
+    const left = [...tooLarge, ...delta.held];
+    if (left.length > 0) {
+      throw new SyncRecordTooLargeError(describeOversized(left));
+    }
+    return result.batches > 0;
+  }
+
+  /** 서버 사본(serverIndex)과 다른 로컬 레코드를 골라 암호화한다. 지움은 대기열에서 모두 싣는다. */
+  private async buildPushDelta(
+    awsProfilesServerSupport: AwsProfilesServerSupport,
+    lease: SyncLease,
+  ): Promise<PushDelta> {
+    const candidates = await this.collectPushCandidates(awsProfilesServerSupport, lease);
+    const index = this.serverIndex ?? new Map<string, ServerRecordMark>();
+    const payload = emptySyncPayload();
+    const marks = new Map<string, ServerRecordMark>();
+    const labels = new Map<string, string>();
+    const held: OversizedRecord[] = [];
+    for (const candidate of candidates) {
+      const key = syncIndexKey(candidate.kind, candidate.id);
+      const fingerprint = syncContentFingerprint(candidate.value);
+      const oversized = this.oversized.get(key);
+      if (oversized) {
+        if (oversized.fingerprint === fingerprint) {
+          held.push(oversized);
+          continue;
+        }
+        // 고쳤다 — 다시 골라 본다.
+        this.oversized.delete(key);
+      }
+      const at = Date.parse(candidate.updatedAt);
+      const known = index.get(key);
+      const changed =
+        !known ||
+        at > known.at ||
+        (!known.deleted && at === known.at && known.fingerprint !== fingerprint);
+      if (!changed) {
+        continue;
+      }
+      payload[candidate.kind].push(
+        this.toSyncRecord(candidate.id, candidate.updatedAt, candidate.value, lease.vaultKeyBase64),
+      );
+      marks.set(key, { at, fingerprint, deleted: false });
+      labels.set(key, syncRecordLabel(candidate.value, candidate.id));
+    }
+    const includedDeletions = this.listSyncableDeletions(awsProfilesServerSupport);
+    for (const tombstone of includedDeletions) {
+      payload[tombstone.kind].push({
+        id: tombstone.recordId,
+        encrypted_payload: '',
+        updated_at: tombstone.deletedAt,
+        deleted_at: tombstone.deletedAt,
+      });
+      marks.set(syncIndexKey(tombstone.kind, tombstone.recordId), {
+        at: Date.parse(tombstone.deletedAt),
+        fingerprint: null,
+        deleted: true,
+      });
+    }
+    return { payload: keepPushableRecords(payload), includedDeletions, marks, labels, held };
+  }
+
+  /**
+   * 서버에 올리는 모양 그대로의 로컬 레코드 — 종류·id·시각·값(암호화 전). 올리기와 내보내기가 함께 쓴다.
+   * AWS 프로필은 서버가 모르면 뺀다.
+   */
+  private async collectPushCandidates(
+    awsProfilesServerSupport: AwsProfilesServerSupport,
+    lease: SyncLease,
+  ): Promise<PushCandidate[]> {
+    this.assertSyncLeaseActive(lease);
     // 구버전 기기도 pull 이후에는 실제 Group ID로 이름을 바꿀 수 있도록,
     // Host만으로 존재하던 경로를 push 전에 영속화한다.
     const data = this.stateStorage.getState().data;
@@ -1257,120 +1537,59 @@ export class SyncService {
         state.data.groups = materializedGroups;
       });
     }
-    const groups = this.groups.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
-    const hosts = this.hosts.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
-    const knownHosts = this.knownHosts.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
-    const portForwards = this.portForwards.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
-    const dnsOverrides = this.dnsOverrides.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
-    const snippets = this.snippets.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
-    const workspaces = this.savedWorkspaces
-      .list()
-      .map((record) => this.toSyncRecord(record.id, record.updatedAt, { ...record, lastOpenedAt: null }, vaultKeyBase64));
+    const candidates: PushCandidate[] = [];
+    const add = (kind: SyncRecordKind, id: string, updatedAt: string, value: unknown) => {
+      candidates.push({ kind, id, updatedAt, value });
+    };
+    for (const record of this.groups.list()) add('groups', record.id, record.updatedAt, record);
+    for (const record of this.hosts.list()) add('hosts', record.id, record.updatedAt, record);
+    for (const record of this.knownHosts.list()) add('knownHosts', record.id, record.updatedAt, record);
+    for (const record of this.portForwards.list()) add('portForwards', record.id, record.updatedAt, record);
+    for (const record of this.dnsOverrides.list()) add('dnsOverrides', record.id, record.updatedAt, record);
+    for (const record of this.snippets.list()) add('snippets', record.id, record.updatedAt, record);
+    // 연 시각은 기기마다 다르다 — 올리지 않는다.
+    for (const record of this.savedWorkspaces.list()) {
+      add('workspaces', record.id, record.updatedAt, { ...record, lastOpenedAt: null });
+    }
     // auth key 를 포함한 페이로드를 올린다. 서버는 암호문만 보므로(E2EE) 키가 실려도 안전하다.
-    const tailnets = this.tailnets
-      .listPayloads()
-      .map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
-    const preferences = [this.settings.getSyncedTerminalPreferences()].map((record) =>
-      this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64)
-    );
-    const shouldSyncAwsProfiles = this.shouldSyncAwsProfiles(awsProfilesServerSupport);
-    const awsProfiles = shouldSyncAwsProfiles
-      ? this.awsProfiles.listPayloads().map((record) =>
-          this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64)
-        )
-      : [];
-
-    const secretEntries = this.secretMetadata.list();
-    const secrets: SyncRecord[] = [];
-    for (const entry of secretEntries) {
+    for (const record of this.tailnets.listPayloads()) add('tailnets', record.id, record.updatedAt, record);
+    const preferences = this.settings.getSyncedTerminalPreferences();
+    add('preferences', preferences.id, preferences.updatedAt, preferences);
+    if (this.shouldSyncAwsProfiles(awsProfilesServerSupport)) {
+      for (const record of this.awsProfiles.listPayloads()) add('awsProfiles', record.id, record.updatedAt, record);
+    }
+    for (const entry of this.secretMetadata.list()) {
       const secret = await loadManagedSecret(this.secretStore, entry.secretRef);
       this.assertSyncLeaseActive(lease);
       if (!secret) {
         continue;
       }
-      secrets.push(this.toSyncRecord(entry.secretRef, secret.updatedAt, secret, vaultKeyBase64));
+      add('secrets', entry.secretRef, secret.updatedAt, secret);
     }
+    return candidates;
+  }
 
-    if (!includeDeletions) {
-      return {
-        payload: keepPushableRecords({
-          groups,
-          hosts,
-          secrets,
-          knownHosts,
-          portForwards,
-          dnsOverrides,
-          snippets,
-          workspaces,
-          preferences,
-          awsProfiles,
-          tailnets
-        }),
-        includedDeletions: []
-      };
+  /** 로컬 전체를 서버에 올리는 모양으로(지움 포함) — 내보내기용. 올리기는 buildPushDelta 로 바뀐 것만 보낸다. */
+  private async buildEncryptedSnapshot(
+    awsProfilesServerSupport: AwsProfilesServerSupport,
+    lease: SyncLease,
+  ): Promise<SyncPayloadV2> {
+    const candidates = await this.collectPushCandidates(awsProfilesServerSupport, lease);
+    const payload = emptySyncPayload();
+    for (const candidate of candidates) {
+      payload[candidate.kind].push(
+        this.toSyncRecord(candidate.id, candidate.updatedAt, candidate.value, lease.vaultKeyBase64),
+      );
     }
-
-    const includedDeletions = this.listSyncableDeletions(awsProfilesServerSupport);
-    for (const tombstone of includedDeletions) {
-      const record: SyncRecord = {
+    for (const tombstone of this.listSyncableDeletions(awsProfilesServerSupport)) {
+      payload[tombstone.kind].push({
         id: tombstone.recordId,
         encrypted_payload: '',
         updated_at: tombstone.deletedAt,
-        deleted_at: tombstone.deletedAt
-      };
-      switch (tombstone.kind) {
-        case 'groups':
-          groups.push(record);
-          break;
-        case 'hosts':
-          hosts.push(record);
-          break;
-        case 'secrets':
-          secrets.push(record);
-          break;
-        case 'knownHosts':
-          knownHosts.push(record);
-          break;
-        case 'portForwards':
-          portForwards.push(record);
-          break;
-        case 'dnsOverrides':
-          dnsOverrides.push(record);
-          break;
-        case 'snippets':
-          snippets.push(record);
-          break;
-        case 'workspaces':
-          workspaces.push(record);
-          break;
-        case 'preferences':
-          preferences.push(record);
-          break;
-        case 'awsProfiles':
-          awsProfiles.push(record);
-          break;
-        case 'tailnets':
-          tailnets.push(record);
-          break;
-      }
+        deleted_at: tombstone.deletedAt,
+      });
     }
-
-    return {
-      payload: keepPushableRecords({
-        groups,
-        hosts,
-        secrets,
-        knownHosts,
-        portForwards,
-        dnsOverrides,
-        snippets,
-        workspaces,
-        preferences,
-        awsProfiles,
-        tailnets
-      }),
-      includedDeletions
-    };
+    return keepPushableRecords(payload);
   }
 
   private toSyncRecord(id: string, updatedAt: string, payload: unknown, vaultKeyBase64: string): SyncRecord {

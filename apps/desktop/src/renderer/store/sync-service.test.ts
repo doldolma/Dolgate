@@ -78,6 +78,34 @@ function createRemoteSnapshotWithPreferences(keyBase64: string): SyncPayloadV2 {
   };
 }
 
+/** 빈 서버 사본(GET /sync 200). 기준이 없으면 올리기 전에 한 번 받는다(④). */
+function createEmptySnapshotResponse(): Response {
+  const empty: SyncPayloadV2 = {
+    groups: [],
+    hosts: [],
+    secrets: [],
+    knownHosts: [],
+    portForwards: [],
+    dnsOverrides: [],
+    preferences: [],
+    awsProfiles: [],
+    snippets: [],
+    workspaces: [],
+    tailnets: [],
+  };
+  return new Response(JSON.stringify(empty), {
+    status: 200,
+    headers: { "content-type": "application/json", etag: '"0"' },
+  });
+}
+
+/** fetch 가짜의 부름 가운데 올리기(POST)만. */
+function postCalls(fetchMock: { mock: { calls: unknown[][] } }): Array<RequestInit | undefined> {
+  return fetchMock.mock.calls
+    .map((call) => call[1] as RequestInit | undefined)
+    .filter((init) => init?.method === "POST");
+}
+
 function createServerInfoResponse(
   awsProfiles = true,
   version = "2026.04.07-test",
@@ -629,9 +657,11 @@ describe("SyncService", () => {
       errorMessage: null,
     });
 
+    // 기준(서버 사본)이 없으니 먼저 받아 만들고(적용은 안 함), 다른 것을 올린 뒤 다시 받아 적용한다(④).
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(createServerInfoResponse())
+      .mockResolvedValueOnce(createEmptySnapshotResponse())
       .mockResolvedValueOnce(
         new Response(null, {
           status: 202,
@@ -659,12 +689,14 @@ describe("SyncService", () => {
 
     const state = await service.bootstrap();
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/info");
-    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBeUndefined();
+    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({
       method: "POST",
     });
-    expect(fetchMock.mock.calls[2]?.[1]?.method).toBeUndefined();
+    // 받아서 적용하는 것은 올린 뒤다.
+    expect(fetchMock.mock.calls[3]?.[1]?.method).toBeUndefined();
     expect(state.status).toBe("ready");
     expect(state.pendingPush).toBe(false);
     expect(state.awsProfilesServerSupport).toBe("supported");
@@ -774,8 +806,10 @@ describe("SyncService", () => {
     });
 
     let resolveFirstPush: ((value: Response) => void) | null = null;
+    // 기준용 받기(GET /sync)는 바로 답하고, 첫 올리기만 붙잡는다.
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce(createEmptySnapshotResponse())
       .mockImplementationOnce(
         () =>
           new Promise<Response>((resolve) => {
@@ -795,7 +829,7 @@ describe("SyncService", () => {
     const firstPushPromise = service.pushDirty();
 
     await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(postCalls(fetchMock)).toHaveLength(1);
     });
 
     outbox.records.push({
@@ -832,7 +866,7 @@ describe("SyncService", () => {
 
     expect(state.status).toBe("ready");
     expect(state.pendingPush).toBe(false);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(postCalls(fetchMock)).toHaveLength(2);
     expect(outbox.clearMany).toHaveBeenCalledTimes(2);
     expect(outbox.clearMany).toHaveBeenNthCalledWith(1, [
       {
@@ -856,10 +890,10 @@ describe("SyncService", () => {
     expect(outbox.records).toEqual([]);
 
     const firstPayload = JSON.parse(
-      String(fetchMock.mock.calls[0]?.[1]?.body),
+      String(postCalls(fetchMock)[0]?.body),
     ) as { hosts: Array<{ id: string; deleted_at?: string }> };
     const secondPayload = JSON.parse(
-      String(fetchMock.mock.calls[1]?.[1]?.body),
+      String(postCalls(fetchMock)[1]?.body),
     ) as { hosts: Array<{ id: string; deleted_at?: string }> };
 
     expect(
@@ -909,18 +943,20 @@ describe("SyncService", () => {
       recordId: "profile-1",
       deletedAt: "2026-04-07T00:00:00.000Z",
     });
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(null, {
-        status: 202,
-        headers: {
-          "content-type": "application/json",
-        },
-      }),
+    const fetchMock = vi.fn(async (_url: URL, init?: RequestInit) =>
+      init?.method === "POST"
+        ? new Response(null, {
+            status: 202,
+            headers: {
+              "content-type": "application/json",
+            },
+          })
+        : createEmptySnapshotResponse(),
     );
     vi.stubGlobal("fetch", fetchMock);
 
     const state = await service.pushDirty();
-    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+    const payload = JSON.parse(String(postCalls(fetchMock)[0]?.body)) as {
       awsProfiles: Array<{ id: string; deleted_at?: string }>;
     };
 

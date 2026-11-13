@@ -2907,6 +2907,8 @@
     "initialFailed": "The initial sync failed.",
     "pausedOfflineUpload": "In offline mode changes are kept locally and synced later.",
     "pausedNeedsVaultUpload": "Enter the sync passphrase to sync your changes.",
+    "recordTooLarge": "\"{{name}}\" is too large to sync ({{size}}). Make it smaller or delete it to resume syncing.",
+    "recordsTooLarge": "\"{{name}}\" ({{size}}) and {{count}} more are too large to sync. Make them smaller or delete them to resume syncing.",
     "uploadFailed": "The sync upload failed.",
     "fetchFailed": "Fetching the sync data failed."
   },

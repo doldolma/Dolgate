@@ -203,6 +203,9 @@ export class FakeTeamServer {
   readonly outdatedTeams = new Set<string>();
   /** 개인 칸 올리기를 볼트 세대 거절(409)로 답한다 — 다른 기기가 볼트를 초기화한 뒤의 옛 DEK. */
   rejectPrivateEpoch = false;
+  /** 앞단(nginx) 본문 한도. 넘으면 서버에 닿기 전에 413(HTML) — 그런 요청은 tooLarge 에 적는다(④). */
+  bodyLimit = Number.POSITIVE_INFINITY;
+  readonly tooLarge: Array<{ method: string; path: string; bytes: number }> = [];
   private lastChangedAtMs = 0;
 
   addTeam(id: string, name: string, wrapped: string | null): FakeTeam {
@@ -312,6 +315,13 @@ export class FakeTeamServer {
   async handle(input: URL | string, init?: RequestInit): Promise<Response> {
     const url = new URL(String(input));
     const method = (init?.method ?? "GET").toUpperCase();
+    if (typeof init?.body === "string" && Buffer.byteLength(init.body) > this.bodyLimit) {
+      this.tooLarge.push({ method, path: url.pathname, bytes: Buffer.byteLength(init.body) });
+      return new Response("<html><body><h1>413 Request Entity Too Large</h1></body></html>", {
+        status: 413,
+        headers: { "content-type": "text/html" },
+      });
+    }
     const headers = new Headers(init?.headers ?? {});
     const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
     this.requests.push({ method, path: url.pathname, headers, body });

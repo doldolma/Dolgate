@@ -1731,6 +1731,76 @@ describe('useMobileAppStore vault flows', () => {
     expect(state.syncStatus.status).toBe('ready');
   });
 
+  // ④(2026-11-13) 통째로 다시 올리기는 앞단 본문 한도(nginx 기본 1MB)를 넘기 쉽다 — 묶음으로 나눠 보낸다.
+  it('re-uploads a large local vault in batches under the proxy body limit', async () => {
+    const kdf = createVaultKdfDescriptor();
+    const dek = randomBytes(32);
+    const wrappedDekBase64 = wrapVaultDek(
+      dek,
+      deriveFakeKekForPassphrase('pass', kdf.saltBase64),
+    );
+    const session = createV2AuthSession(wrappedDekBase64, kdf, {
+      epoch: 3,
+      dekVerifierBase64: computeVaultDekVerifier(dek),
+    });
+    const limit = 1024 * 1024;
+    const posts: Array<{ status: number; bytes: number; hosts: number }> = [];
+    let revision = 3;
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/info') {
+        return serverInfoResponse();
+      }
+      if (path === '/sync' && init?.method === 'POST') {
+        const body = String(init.body);
+        const bytes = Buffer.byteLength(body);
+        if (bytes > limit) {
+          posts.push({ status: 413, bytes, hosts: 0 });
+          return createJsonResponse('<html><body>413 Request Entity Too Large</body></html>', 413);
+        }
+        revision += 1;
+        const payload = JSON.parse(body) as { hosts?: unknown[] };
+        posts.push({ status: 202, bytes, hosts: payload.hosts?.length ?? 0 });
+        return createJsonResponse({ revision }, 202);
+      }
+      if (path === '/sync') {
+        return createJsonResponse(buildEmptySyncPayload(), 200, '"3"');
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    const hosts = Array.from({ length: 1500 }, (_, n) => ({
+      ...createHostRecord(),
+      id: `host-${n}`,
+      label: `bulk-${n}-${'x'.repeat(600)}`,
+    }));
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(session),
+        vault: {
+          status: 'unlocked',
+          dekBase64: fromByteArray(dek),
+          wrappedDekBase64,
+          kdf,
+          epoch: 3,
+          wrapRevision: 0,
+        },
+      });
+      useMobileAppStore.setState({ hosts });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().syncNow();
+    });
+
+    expect(posts.every(post => post.status === 202)).toBe(true);
+    expect(posts.length).toBeGreaterThan(1);
+    expect(posts.reduce((sum, post) => sum + post.hosts, 0)).toBe(1500);
+    const state = useMobileAppStore.getState();
+    expect(state.hosts).toHaveLength(1500);
+    expect(state.syncStatus.status).toBe('ready');
+  });
+
   it('reconciles a vault-reset 409 from empty-server recovery without wiping local data', async () => {
     const kdf = createVaultKdfDescriptor();
     const dek = randomBytes(32);

@@ -115,7 +115,9 @@ describe("TeamApi", () => {
         return json({ error: "동기화 암호가 초기화되었습니다.", code: "vault_dek_mismatch" }, 409);
       }),
     );
-    await expect(api.putPrivate(lease(), "t1", {})).rejects.toBeInstanceOf(SyncVaultDekMismatchError);
+    // 빈 칸은 보내지 않는다(나눠 보내기, ④) — 레코드 하나를 싣는다.
+    const onePref = { hostPrefs: [{ id: "h1", encrypted_payload: "{}", updated_at: "2026-11-13T00:00:00.000Z" }] };
+    await expect(api.putPrivate(lease(), "t1", onePref)).rejects.toBeInstanceOf(SyncVaultDekMismatchError);
     expect(epochHeader).toBe("5");
     expect(auth.refreshSession).not.toHaveBeenCalled();
   });

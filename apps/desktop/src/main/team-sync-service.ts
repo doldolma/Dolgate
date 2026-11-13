@@ -23,6 +23,7 @@ import {
   type PortForwardRuleRecord,
   type SavedWorkspaceRecord,
   type SnippetRecord,
+  type SyncPushEntry,
   type SyncRecord,
   type SyncWatchLoop,
   type SyncWatchLoopOptions,
@@ -52,10 +53,13 @@ import {
 import {
   collectRenamedGroupPaths,
   decodeEncryptedPayload,
+  describeOversized,
   encodeEncryptedPayload,
   isPushableSyncRecord,
   rebaseSavedWorkspaceGroups,
   secretMetadataFromSyncedSecret,
+  SyncRecordTooLargeError,
+  syncRecordLabel,
 } from "./sync-service";
 import {
   isTeamApiError,
@@ -193,6 +197,17 @@ interface TeamRuntime {
   tail: Promise<unknown>;
   /** 줄에 서 있는(아직 시작 전) 올리기 차례. 시작하면 비운다 — 그 뒤의 변경은 새 차례를 연다. */
   queuedPush: Promise<void> | null;
+  /**
+   * 그것만으로 앞단(리버스 프록시) 본문 한도를 넘어 못 올린 레코드(`kind\0id`, 팀 레코드와 내 개인 칸). 그 시각
+   * 그대로인 동안 다시 보내지 않고, 남아 있는 동안 받은 것을 적용하지 않는다 — 적용하면 서버 사본으로 갈아 끼워 잃는다.
+   */
+  oversized: Map<string, OversizedTeamRecord>;
+}
+
+interface OversizedTeamRecord {
+  updatedAt: string;
+  bytes: number;
+  label: string;
 }
 
 const RECORDS_AND_PRIVATE: WatchParts = { records: true, info: false, private: true };
@@ -219,15 +234,30 @@ function buildBaseline(payload: TeamSyncPayload): Map<string, number> {
 class DeltaBuilder {
   readonly payload: TeamSyncPayload = {};
   count = 0;
+  /** 너무 커서 지난번에 뺐고 그 시각 그대로라 이번에도 싣지 않은 것. */
+  readonly held: OversizedTeamRecord[] = [];
+  /** 실은 레코드의 시각과 이름(`kind\0id`) — 너무 커서 못 올렸을 때 적어 두고 알린다. */
+  readonly added = new Map<string, { updatedAt: string; label: string }>();
   private dropped = 0;
 
   constructor(
     private readonly baseline: Map<string, number>,
     private readonly keyBase64: string,
+    private readonly oversized?: Map<string, OversizedTeamRecord>,
   ) {}
 
   add(kind: string, id: string, updatedAt: string, value: unknown): void {
-    const known = this.baseline.get(baselineKey(kind, id));
+    const key = baselineKey(kind, id);
+    const big = this.oversized?.get(key);
+    if (big) {
+      if (big.updatedAt === updatedAt) {
+        this.held.push(big);
+        return;
+      }
+      // 고쳤다 — 다시 골라 본다.
+      this.oversized?.delete(key);
+    }
+    const known = this.baseline.get(key);
     if (known !== undefined && !(Date.parse(updatedAt) > known)) {
       return;
     }
@@ -236,6 +266,7 @@ class DeltaBuilder {
       encrypted_payload: encodeEncryptedPayload(JSON.stringify(value), this.keyBase64),
       updated_at: updatedAt,
     });
+    this.added.set(key, { updatedAt, label: syncRecordLabel(value, id) });
   }
 
   addDeletion(kind: string, id: string, deletedAt: string): void {
@@ -650,6 +681,7 @@ export class TeamSyncService {
       loop: null,
       tail: Promise.resolve(),
       queuedPush: null,
+      oversized: new Map(),
     };
     this.runtimes.set(teamId, runtime);
     this.statuses.set(teamId, { state: "ready", errorMessage: null });
@@ -854,14 +886,17 @@ export class TeamSyncService {
     const before = this.storage.teamVaultFingerprint(teamId);
     // 올릴 것을 모으기 전의 모습이다. 모으는 사이에 고친 것은 여기에 없어서, 다음 pushDirty 가 그것을 올린다.
     const signature = this.storage.teamSyncSignatures(teamId)?.records ?? null;
-    const delta = await this.buildRecordDelta(runtime, baseline);
-    if (delta.builder.count > 0) {
-      if (editable) {
-        await this.api.pushRecords(lease, teamId, delta.builder.payload, TEAM_SYNC_DATA_FLOOR);
+    const delta = await this.buildRecordDelta(runtime, baseline, editable);
+    if (delta.builder.count > 0 || delta.builder.held.length > 0) {
+      let tooLarge: SyncPushEntry[] = [];
+      if (editable && delta.builder.count > 0) {
+        tooLarge = await this.api.pushRecords(lease, teamId, delta.builder.payload, TEAM_SYNC_DATA_FLOOR);
         assertActive(lease);
       }
       // 읽기 전용이면 이 기기에 남은 다른 모습(역할이 바뀌기 전에 고친 것 등)을 서버 것으로 되돌린다.
       runtime.scope.syncOutbox.clearMany(delta.deletions);
+      // 너무 커서 못 올린 레코드가 남았으면 받은 것을 적용하지 않는다 — 서버 사본으로 갈아 끼우면 그것을 잃는다.
+      this.throwIfOversized(runtime, delta.builder, tooLarge);
       remote = await this.api.getRecords(lease, teamId, null);
     }
     if (!remote.payload) {
@@ -909,9 +944,11 @@ export class TeamSyncService {
   private async buildRecordDelta(
     runtime: TeamRuntime,
     baseline: Map<string, number>,
+    editable: boolean,
   ): Promise<{ builder: DeltaBuilder; deletions: SyncDeletionRecord[] }> {
     const { scope } = runtime;
-    const builder = new DeltaBuilder(baseline, runtime.dekBase64);
+    // 읽기 전용은 올리지 않으므로 너무 큰 것을 붙들 일도 없다(받은 것으로 되돌린다).
+    const builder = new DeltaBuilder(baseline, runtime.dekBase64, editable ? runtime.oversized : undefined);
     await forEachTeamRecord(scope, (kind, id, updatedAt, value) => builder.add(kind, id, updatedAt, value));
     // 앱 설정(preferences)은 팀에 없다.
     const deletions = scope.syncOutbox.list().filter((entry) => entry.kind !== "preferences");
@@ -919,6 +956,27 @@ export class TeamSyncService {
       builder.addDeletion(entry.kind, entry.recordId, entry.deletedAt);
     }
     return { builder, deletions };
+  }
+
+  /**
+   * 그것만으로 앞단 본문 한도를 넘어 못 올린 레코드를 적어 두고(그 시각 그대로인 동안 다시 보내지 않는다), 그런 것이
+   * 남았으면 던진다 — 부른 쪽은 받은 것을 적용하지 않는다. 나머지는 이미 다 올렸다.
+   */
+  private throwIfOversized(runtime: TeamRuntime, builder: DeltaBuilder, tooLarge: SyncPushEntry[]): void {
+    const left = [...builder.held];
+    for (const entry of tooLarge) {
+      const key = baselineKey(entry.kind, entry.record.id);
+      const added = builder.added.get(key);
+      if (!added) {
+        continue;
+      }
+      const record = { updatedAt: added.updatedAt, bytes: entry.bytes, label: added.label };
+      runtime.oversized.set(key, record);
+      left.push(record);
+    }
+    if (left.length > 0) {
+      throw new SyncRecordTooLargeError(describeOversized(left));
+    }
   }
 
   /** 받은 팀 레코드로 그 팀 볼트를 갈아 끼운다. 그룹 이름 변경을 따라 워크스페이스를 옮겼으면 true. */
@@ -1000,7 +1058,7 @@ export class TeamSyncService {
     }
     const before = JSON.stringify(memberPrefsToCompare(local));
     const deletions = this.storage.listTeamPrivateDeletions(teamId);
-    const builder = new DeltaBuilder(baseline, key);
+    const builder = new DeltaBuilder(baseline, key, runtime.oversized);
     for (const record of local.hostPrefs) builder.add("hostPrefs", record.id, record.updatedAt, record);
     for (const record of local.workspacePrefs) builder.add("workspacePrefs", record.id, record.updatedAt, record);
     // 내 자격 증명은 이 기기에서 잠근 것을 풀어 내 개인 DEK 로 다시 잠가 올린다(팀 키로는 안 열린다).
@@ -1013,9 +1071,17 @@ export class TeamSyncService {
       }
     }
     for (const entry of deletions) builder.addDeletion(entry.kind, entry.recordId, entry.deletedAt);
-    if (builder.count > 0) {
-      await this.api.putPrivate(lease, teamId, builder.payload);
-      assertActive(lease);
+    if (builder.count > 0 || builder.held.length > 0) {
+      let tooLarge: SyncPushEntry[] = [];
+      if (builder.count > 0) {
+        tooLarge = await this.api.putPrivate(lease, teamId, builder.payload);
+        assertActive(lease);
+      }
+      if (tooLarge.length > 0 || builder.held.length > 0) {
+        // 올린 지움은 치우고, 받은 것은 적용하지 않는다(팀 레코드와 같은 까닭).
+        this.storage.settleTeamPrivatePush(teamId, deletions);
+        this.throwIfOversized(runtime, builder, tooLarge);
+      }
       remote = await this.api.getPrivate(lease, teamId, null);
     }
     assertActive(lease);

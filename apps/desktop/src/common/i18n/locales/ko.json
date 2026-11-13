@@ -2907,6 +2907,8 @@
     "initialFailed": "초기 동기화에 실패했습니다.",
     "pausedOfflineUpload": "오프라인 모드에서는 변경 내용을 로컬에 보관하고 나중에 동기화합니다.",
     "pausedNeedsVaultUpload": "동기화 암호를 입력하면 변경 내용을 동기화합니다.",
+    "recordTooLarge": "'{{name}}' 항목이 너무 커서({{size}}) 동기화하지 못했습니다. 크기를 줄이거나 지우면 다시 동기화됩니다.",
+    "recordsTooLarge": "'{{name}}' 항목({{size}}) 외 {{count}}개가 너무 커서 동기화하지 못했습니다. 크기를 줄이거나 지우면 다시 동기화됩니다.",
     "uploadFailed": "동기화 업로드에 실패했습니다.",
     "fetchFailed": "동기화 데이터 조회에 실패했습니다."
   },

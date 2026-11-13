@@ -93,6 +93,29 @@ function encryptRecord(id: string, value: unknown, keyBase64: string) {
   };
 }
 
+/**
+ * 기준(서버 사본의 레코드별 모습)이 없으면 올리기 전에 GET /sync 로 한 번 받는다(④). GET /sync 에는 빈 서버 사본을
+ * 주고, 그 밖의 요청은 respond 에 맡긴다.
+ */
+function withEmptyRemote(respond: (url: URL, init?: RequestInit) => Promise<Response> | Response) {
+  return vi.fn(async (url: URL, init?: RequestInit) => {
+    if ((init?.method ?? "GET") === "GET" && new URL(String(url)).pathname === "/sync") {
+      return new Response(JSON.stringify(emptySyncPayload()), {
+        status: 200,
+        headers: { "content-type": "application/json", etag: '"0"' },
+      });
+    }
+    return respond(url, init);
+  });
+}
+
+/** 올리기(POST)만 센다. */
+function posts(fetchMock: { mock: { calls: unknown[][] } }): Array<RequestInit | undefined> {
+  return fetchMock.mock.calls
+    .map((call) => call[1] as RequestInit | undefined)
+    .filter((init) => init?.method === "POST");
+}
+
 async function createHarness(initialContext: AuthSyncContext) {
   process.env.DOLSSH_USER_DATA_DIR = tempDir;
   vi.resetModules();
@@ -656,7 +679,9 @@ describe("SyncService immutable lease", () => {
     const harness = await createHarness(oldContext);
     const secretLoad = createDeferred<string | null>();
     harness.secretStore.load.mockReturnValue(secretLoad.promise);
-    const fetchMock = vi.fn();
+    const fetchMock = withEmptyRemote(() => {
+      throw new Error("올리면 안 된다");
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     harness.service.markLocalChangesPendingPush();
@@ -668,7 +693,7 @@ describe("SyncService immutable lease", () => {
     secretLoad.resolve(managedSecret);
     await push;
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(posts(fetchMock)).toHaveLength(0);
     expect(harness.outbox.clearMany).not.toHaveBeenCalled();
     expect(harness.service.getState().status).toBe("paused");
   });
@@ -680,7 +705,7 @@ describe("SyncService immutable lease", () => {
       .mockReturnValueOnce(staleSecretLoad.promise)
       .mockResolvedValue(managedSecret);
     let requestInit: RequestInit | undefined;
-    const fetchMock = vi.fn(async (_url: URL, init?: RequestInit) => {
+    const fetchMock = withEmptyRemote(async (_url: URL, init?: RequestInit) => {
       requestInit = init;
       return new Response(JSON.stringify({ revision: 1 }), {
         status: 202,
@@ -700,7 +725,7 @@ describe("SyncService immutable lease", () => {
     harness.service.markLocalChangesPendingPush();
     const currentPush = harness.service.pushDirty();
 
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(posts(fetchMock)).toHaveLength(1));
     const headers = new Headers(requestInit?.headers);
     expect(headers.get("X-Dolgate-Vault-Epoch")).toBe("3");
     const payload = JSON.parse(String(requestInit?.body)) as SyncPayloadV2;
@@ -714,7 +739,7 @@ describe("SyncService immutable lease", () => {
     staleSecretLoad.resolve(managedSecret);
     await Promise.all([stalePush, currentPush]);
 
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(posts(fetchMock)).toHaveLength(1);
     expect(harness.outbox.clearMany).toHaveBeenCalledOnce();
     expect(harness.service.getState().status).toBe("ready");
   });
@@ -729,7 +754,7 @@ describe("SyncService immutable lease", () => {
       }
     ).operationTail = queueGate.promise;
     let requestInit: RequestInit | undefined;
-    const fetchMock = vi.fn(async (_url: URL, init?: RequestInit) => {
+    const fetchMock = withEmptyRemote(async (_url: URL, init?: RequestInit) => {
       requestInit = init;
       return new Response(JSON.stringify({ revision: 1 }), {
         status: 202,
@@ -748,7 +773,7 @@ describe("SyncService immutable lease", () => {
 
     await harness.service.pushDirty();
 
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(posts(fetchMock)).toHaveLength(1);
     expect(new Headers(requestInit?.headers).get("X-Dolgate-Vault-Epoch")).toBe(
       "3",
     );
@@ -759,7 +784,7 @@ describe("SyncService immutable lease", () => {
     harness.secretStore.load.mockResolvedValue(managedSecret);
     const responseBody = createDeferred<{ revision: number }>();
     let requestInit: RequestInit | undefined;
-    const fetchMock = vi.fn(async (_url: URL, init?: RequestInit) => {
+    const fetchMock = withEmptyRemote(async (_url: URL, init?: RequestInit) => {
       requestInit = init;
       return {
         ok: true,
@@ -772,7 +797,7 @@ describe("SyncService immutable lease", () => {
 
     harness.service.markLocalChangesPendingPush();
     const push = harness.service.pushDirty();
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(posts(fetchMock)).toHaveLength(1));
 
     const headers = new Headers(requestInit?.headers);
     expect(headers.get("X-Dolgate-Vault-Epoch")).toBe("1");
@@ -800,26 +825,23 @@ describe("SyncService immutable lease", () => {
     harness.authService.handleVaultDekRejected.mockReturnValue(
       staleRecovery.promise,
     );
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            code: "vault_reset",
-            error: "The vault generation changed.",
-          }),
-          {
-            status: 409,
-            headers: { "content-type": "application/json" },
-          },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ revision: 1 }), {
-          status: 202,
-          headers: { "content-type": "application/json" },
+    const pushResponses = [
+      new Response(
+        JSON.stringify({
+          code: "vault_reset",
+          error: "The vault generation changed.",
         }),
-      );
+        {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+      new Response(JSON.stringify({ revision: 1 }), {
+        status: 202,
+        headers: { "content-type": "application/json" },
+      }),
+    ];
+    const fetchMock = withEmptyRemote(() => pushResponses.shift() as Response);
     vi.stubGlobal("fetch", fetchMock);
 
     harness.service.markLocalChangesPendingPush();
@@ -832,7 +854,7 @@ describe("SyncService immutable lease", () => {
     harness.service.resetVaultRecoveryState();
     harness.service.markLocalChangesPendingPush();
     const currentPush = harness.service.pushDirty();
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(posts(fetchMock)).toHaveLength(2));
     await currentPush;
 
     staleRecovery.resolve();
@@ -1047,7 +1069,9 @@ describe("SyncService immutable lease", () => {
     await bootstrap;
     await push;
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    // 정보·받기(304) 뒤에 올리기가 줄을 섰다. 받기가 304 라 기준이 없어 올리기 전에 한 번 받는다(④) — 받기·올리기.
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(posts(fetchMock)).toHaveLength(1);
     expect(harness.service.getState().status).toBe("ready");
   });
 

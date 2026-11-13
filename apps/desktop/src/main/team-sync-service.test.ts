@@ -182,6 +182,64 @@ describe("TeamSyncService", () => {
     expect(harness.server.requestsTo("POST", `/teams/${TEAM_ID}/sync`)).toHaveLength(1);
   });
 
+  // ④(11-13) 팀으로 가져오기·AWS 가져오기로 수백 대를 넣으면 요청 하나가 앞단 본문 한도(nginx 기본 1MB)를 넘어
+  // 413 이었다 — 그 뒤로 그 팀의 올리기가 하나도 안 갔다. 묶음으로 나눠 올린다.
+  it("uploads a big team import in batches under the proxy's body limit", async () => {
+    const harness = await createSyncedTeam();
+    harness.server.bodyLimit = 1024 * 1024;
+    // 가져오기처럼 한 번에 넣는다(하나씩 만들면 매번 상태 파일을 다시 쓴다).
+    const at = new Date().toISOString();
+    harness.storage.updateState((state) => {
+      for (let n = 0; n < 900; n += 1) {
+        state.teams[TEAM_ID]!.data.hosts.push(
+          host(`bulk-${n}`, { tags: [`ec2-${"x".repeat(1000)}-${n}`], createdAt: at, updatedAt: at }),
+        );
+      }
+    });
+
+    await harness.service.pushDirty();
+
+    const posts = harness.server.requestsTo("POST", `/teams/${TEAM_ID}/sync`);
+    expect(harness.server.tooLarge).toEqual([]);
+    expect(posts.length).toBeGreaterThan(1);
+    for (const post of posts) {
+      expect(Buffer.byteLength(JSON.stringify(post.body))).toBeLessThanOrEqual(256 * 1024);
+    }
+    expect(harness.server.teams.get(TEAM_ID)!.records.get("hosts")!.size).toBe(902);
+    expect(harness.service.listStatuses()).toEqual({ [TEAM_ID]: { state: "ready", errorMessage: null } });
+  }, 20_000);
+
+  it("leaves out a team record too large for the proxy, keeps it, does not resend it, and recovers once it shrinks", async () => {
+    const harness = await createSyncedTeam();
+    harness.server.bodyLimit = 64 * 1024;
+    const root = harness.vaultRoot.teamVaultRoot(TEAM_ID);
+    const snippets = new harness.database.SnippetRepository(root);
+    const huge = snippets.create({ label: "huge-script", command: "y".repeat(100_000) });
+    new harness.database.HostRepository(root).update("team-a", sshDraft("renamed"));
+
+    await harness.service.pushDirty();
+
+    // 처음 묶음(스니펫+호스트)이 413 → 반으로 → 호스트는 가고 스니펫 혼자 413.
+    expect(harness.server.tooLarge).toHaveLength(2);
+    const rows = harness.server.teams.get(TEAM_ID)!.records;
+    expect(open(rows.get("hosts")!.get("team-a")!.encrypted_payload, harness.teamKey)).toMatchObject({ label: "renamed" });
+    expect(rows.get("snippets")?.has(huge.id) ?? false).toBe(false);
+    expect(harness.service.listStatuses()[TEAM_ID]).toMatchObject({ state: "error", errorMessage: expect.stringMatching(/huge-script/) });
+    // 받은 것을 적용하지 않았다 — 갈아 끼웠으면 서버에 없는 스니펫이 사라졌다.
+    expect(snippets.list().map((record) => record.id)).toEqual([huge.id]);
+
+    // 그대로면 다시 보내지 않는다.
+    await harness.service.pushDirty();
+    expect(harness.server.tooLarge).toHaveLength(2);
+    expect(snippets.list().map((record) => record.id)).toEqual([huge.id]);
+
+    // 줄이면 다시 골라 올리고 맞춰진다.
+    snippets.update(huge.id, { label: "huge-script", command: "./deploy.sh" });
+    await harness.service.pushDirty();
+    expect(rows.get("snippets")?.has(huge.id)).toBe(true);
+    expect(harness.service.listStatuses()).toEqual({ [TEAM_ID]: { state: "ready", errorMessage: null } });
+  });
+
   it("tries a failed push again on the next call, though nothing else changed", async () => {
     const harness = await createSyncedTeam();
     new harness.database.HostRepository(harness.vaultRoot.teamVaultRoot(TEAM_ID)).update("team-a", sshDraft("renamed"));

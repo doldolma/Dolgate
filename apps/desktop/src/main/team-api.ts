@@ -3,11 +3,13 @@ import {
   normalizeSyncRevisionEtag,
   normalizeTeamInviteRole,
   normalizeTeamRole,
+  pushSyncRecordsInBatches,
   SYNC_DATA_FLOOR_HEADER,
   toTeamSummary,
   VAULT_EPOCH_HEADER,
   type RawTeamSummary,
   type ServerInfoResponse,
+  type SyncPushEntry,
   type TeamSummary,
   type TeamSyncPayload,
   type TeamWatchResult,
@@ -269,13 +271,14 @@ export class TeamApi {
     return this.getSnapshot(lease, `${teamPath(teamId)}/sync`, etag);
   }
 
+  /** 팀 레코드를 올린다. 그것만으로 앞단 본문 한도를 넘어 못 올린 레코드를 돌려준다(나머지는 다 올렸다). */
   async pushRecords(
     lease: TeamRequestLease,
     teamId: string,
     payload: TeamSyncPayload,
     dataFloor: number,
-  ): Promise<number | null> {
-    return this.pushSnapshot(lease, "POST", `${teamPath(teamId)}/sync`, payload, {
+  ): Promise<SyncPushEntry[]> {
+    return this.pushInBatches(lease, "POST", `${teamPath(teamId)}/sync`, payload, {
       headers: { [SYNC_DATA_FLOOR_HEADER]: String(dataFloor) },
     });
   }
@@ -289,8 +292,9 @@ export class TeamApi {
     return this.getSnapshot(lease, `${teamPath(teamId)}/me`, etag);
   }
 
-  async putPrivate(lease: TeamRequestLease, teamId: string, payload: TeamSyncPayload): Promise<number | null> {
-    return this.pushSnapshot(lease, "PUT", `${teamPath(teamId)}/me`, payload, { vaultEpoch: true });
+  /** 내 개인 칸을 올린다. 못 올린 레코드는 pushRecords 와 같이 돌려준다. */
+  async putPrivate(lease: TeamRequestLease, teamId: string, payload: TeamSyncPayload): Promise<SyncPushEntry[]> {
+    return this.pushInBatches(lease, "PUT", `${teamPath(teamId)}/me`, payload, { vaultEpoch: true });
   }
 
   /** 앱 활동 기록을 올린다(여러 줄 한 번에). 이미 받은 기록 ID 는 서버가 건너뛴다 — 받은 줄 수를 돌려준다. */
@@ -497,6 +501,34 @@ export class TeamApi {
     const payload = (await response.json()) as TeamSyncPayload | null;
     assertActive(lease);
     return { payload: payload ?? {}, etag: nextEtag };
+  }
+
+  /**
+   * 레코드를 묶음으로 나눠 올린다. 서버 앞의 리버스 프록시는 본문이 크면(nginx 기본 1MB) 서버에 닿기 전에 413 을 준다 —
+   * 팀으로 가져오기·AWS 가져오기로 수백 대를 넣으면 넘는다. 서버는 받은 레코드만 넣거나 고치므로 나눠도 결과가 같다.
+   */
+  private async pushInBatches(
+    lease: TeamRequestLease,
+    method: "POST" | "PUT",
+    path: string,
+    payload: TeamSyncPayload,
+    options: { headers?: Record<string, string>; vaultEpoch?: boolean },
+  ): Promise<SyncPushEntry[]> {
+    const result = await pushSyncRecordsInBatches(payload, {
+      serverKey: lease.serverUrl,
+      send: async (batch) => {
+        try {
+          await this.pushSnapshot(lease, method, path, batch, options);
+          return "sent";
+        } catch (error) {
+          if (error instanceof TeamApiError && error.status === 413) {
+            return "too-large";
+          }
+          throw error;
+        }
+      },
+    });
+    return result.tooLarge;
   }
 
   private async pushSnapshot(
