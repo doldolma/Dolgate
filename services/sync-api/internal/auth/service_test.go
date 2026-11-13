@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"gorm.io/gorm"
 
 	"dolssh/services/sync-api/internal/store"
 )
@@ -370,5 +371,97 @@ func TestNewServiceGeneratesAndReusesSigningKeyFile(t *testing.T) {
 	}
 	if firstService.signingPublicKeyPEM != secondService.signingPublicKeyPEM {
 		t.Fatalf("expected signing public key PEM reuse, got %q vs %q", firstService.signingPublicKeyPEM, secondService.signingPublicKeyPEM)
+	}
+}
+
+// failingStore 는 정한 조회만 실패로 바꾸고 나머지는 진짜 저장소로 보낸다.
+type failingStore struct {
+	store.Store
+	refreshLookup error
+	userLookup    error
+	exchange      error
+}
+
+func (s failingStore) GetRefreshToken(ctx context.Context, tokenHash string) (store.RefreshToken, error) {
+	if s.refreshLookup != nil {
+		return store.RefreshToken{}, s.refreshLookup
+	}
+	return s.Store.GetRefreshToken(ctx, tokenHash)
+}
+
+func (s failingStore) GetUserByID(ctx context.Context, id string) (store.User, error) {
+	if s.userLookup != nil {
+		return store.User{}, s.userLookup
+	}
+	return s.Store.GetUserByID(ctx, id)
+}
+
+func (s failingStore) ConsumeExchangeCode(ctx context.Context, codeHash string) (store.ExchangeCode, error) {
+	if s.exchange != nil {
+		return store.ExchangeCode{}, s.exchange
+	}
+	return s.Store.ConsumeExchangeCode(ctx, codeHash)
+}
+
+// 앞단 점검 ②(2026-11-12): 토큰·교환 코드·사용자가 '없을' 때만 거절(401) 오류다. 저장소가 잠기거나 끊긴 것은
+// 그대로 올린다(500). 거절로 답하면 그 순간 갱신한 기기가 멀쩡한 토큰을 버리고 로그아웃된다(SQLite 잠금으로 재현).
+func TestRefreshAndExchangeRejectOnlyWhatIsMissing(t *testing.T) {
+	ctx := context.Background()
+	service, backingStore := newTestService(t)
+	user, session, err := service.Signup(ctx, "missing@example.com", "hunter2", "https://ssh.doldolma.com", VaultResolutionLegacy)
+	if err != nil {
+		t.Fatalf("Signup() error = %v", err)
+	}
+
+	// 없는 토큰·코드는 지금처럼 거절이다.
+	if _, err := service.Refresh(ctx, "missing-refresh-token", "https://ssh.doldolma.com", VaultResolutionLegacy); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("Refresh(missing token) error = %v, want %v", err, ErrInvalidCredentials)
+	}
+	if _, err := service.ExchangeCode(ctx, "missing-code", "https://ssh.doldolma.com", VaultResolutionLegacy); !errors.Is(err, ErrInvalidExchangeCode) {
+		t.Fatalf("ExchangeCode(missing code) error = %v, want %v", err, ErrInvalidExchangeCode)
+	}
+
+	locked := errors.New("database is locked (5) (SQLITE_BUSY)")
+	refresh := func(s *Service) error {
+		_, err := s.Refresh(ctx, session.Tokens.RefreshToken, "https://ssh.doldolma.com", VaultResolutionLegacy)
+		return err
+	}
+	exchange := func(s *Service) error {
+		code, err := service.IssueExchangeCode(ctx, user)
+		if err != nil {
+			t.Fatalf("IssueExchangeCode() error = %v", err)
+		}
+		_, err = s.ExchangeCode(ctx, code, "https://ssh.doldolma.com", VaultResolutionLegacy)
+		return err
+	}
+	for _, tc := range []struct {
+		name  string
+		store failingStore
+		call  func(*Service) error
+		want  error
+	}{
+		{"갱신: 토큰 조회가 잠김", failingStore{Store: backingStore, refreshLookup: locked}, refresh, locked},
+		{"갱신: 사용자 조회가 잠김", failingStore{Store: backingStore, userLookup: locked}, refresh, locked},
+		{"갱신: 사용자가 없음", failingStore{Store: backingStore, userLookup: gorm.ErrRecordNotFound}, refresh, ErrInvalidCredentials},
+		{"교환: 코드 소비가 잠김", failingStore{Store: backingStore, exchange: locked}, exchange, locked},
+		{"교환: 사용자 조회가 잠김", failingStore{Store: backingStore, userLookup: locked}, exchange, locked},
+		{"교환: 사용자가 없음", failingStore{Store: backingStore, userLookup: gorm.ErrRecordNotFound}, exchange, ErrInvalidExchangeCode},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wrapped := *service
+			wrapped.store = tc.store
+			err := tc.call(&wrapped)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("error = %v, want %v", err, tc.want)
+			}
+			if tc.want == locked && (errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrExpiredRefreshToken) || errors.Is(err, ErrInvalidExchangeCode)) {
+				t.Fatalf("저장소 오류가 거절로 바뀌었다: %v", err)
+			}
+		})
+	}
+
+	// 잠김이 풀리면 같은 토큰이 그대로 통한다 — 거절이 아니었다.
+	if _, err := service.Refresh(ctx, session.Tokens.RefreshToken, "https://ssh.doldolma.com", VaultResolutionLegacy); err != nil {
+		t.Fatalf("Refresh(after store recovered) error = %v", err)
 	}
 }

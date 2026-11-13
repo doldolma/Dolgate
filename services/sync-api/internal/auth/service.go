@@ -18,6 +18,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 
 	"dolssh/services/sync-api/internal/store"
 )
@@ -208,11 +209,21 @@ func (s *Service) Login(ctx context.Context, email string, password string, issu
 	return user, session, err
 }
 
+// rejectIfMissing 은 '그런 행이 없다'만 거절 오류(앱이 로그아웃하는 401)로 바꾸고, 그 밖의 저장소 오류는
+// 그대로 돌려준다(500). DB 가 잠깐 잠기거나 끊긴 것을 토큰 거절로 답하면, 그 순간 갱신한 기기가 멀쩡한
+// 토큰을 버리고 로그아웃된다(SQLite 잠금 5초로 재현).
+func rejectIfMissing(err error, rejection error) error {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return rejection
+	}
+	return err
+}
+
 func (s *Service) Refresh(ctx context.Context, refreshToken string, issuer string, vaultResolution VaultResolution) (SessionBootstrap, error) {
 	tokenHash := hashToken(refreshToken)
 	record, err := s.store.GetRefreshToken(ctx, tokenHash)
 	if err != nil {
-		return SessionBootstrap{}, ErrInvalidCredentials
+		return SessionBootstrap{}, rejectIfMissing(err, ErrInvalidCredentials)
 	}
 	now := time.Now()
 	if now.After(record.ExpiresAt) {
@@ -222,7 +233,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string, issuer strin
 
 	user, err := s.store.GetUserByID(ctx, record.UserID)
 	if err != nil {
-		return SessionBootstrap{}, ErrInvalidCredentials
+		return SessionBootstrap{}, rejectIfMissing(err, ErrInvalidCredentials)
 	}
 
 	// 슬라이딩 idle: 토큰을 회전(교체)하지 않고 같은 토큰의 만료만 idle TTL 만큼 앞으로 민다.
@@ -324,14 +335,14 @@ func (s *Service) IssueExchangeCode(ctx context.Context, user store.User) (strin
 func (s *Service) ExchangeCode(ctx context.Context, code string, issuer string, vaultResolution VaultResolution) (SessionBootstrap, error) {
 	record, err := s.store.ConsumeExchangeCode(ctx, hashToken(code))
 	if err != nil {
-		return SessionBootstrap{}, ErrInvalidExchangeCode
+		return SessionBootstrap{}, rejectIfMissing(err, ErrInvalidExchangeCode)
 	}
 	if time.Now().After(record.ExpiresAt) {
 		return SessionBootstrap{}, ErrInvalidExchangeCode
 	}
 	user, err := s.store.GetUserByID(ctx, record.UserID)
 	if err != nil {
-		return SessionBootstrap{}, ErrInvalidExchangeCode
+		return SessionBootstrap{}, rejectIfMissing(err, ErrInvalidExchangeCode)
 	}
 	return s.issueSession(ctx, user, issuer, vaultResolution)
 }

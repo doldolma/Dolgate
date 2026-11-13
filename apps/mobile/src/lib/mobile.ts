@@ -1586,6 +1586,9 @@ export async function toApiError(response: Response): Promise<ApiError> {
   return new ApiError(message, response.status, code);
 }
 
+// 서버(sync-api)는 오류를 늘 JSON 의 error 로 준다. 그 밖의 본문 — 앞단 프록시가 대신 준 502·429 의 HTML 같은 것 —
+// 은 서버가 한 말이 아니고 화면에 그대로 보일 글도 아니라서 쓰지 않는다. 부르는 쪽이 상태 번호가 든 문구로 바꾼다.
+// (예전에는 nginx 의 502 HTML 이 로그인 화면 오류 칸에 그대로 찍혔다.)
 function extractApiErrorMessage(raw: string): string | null {
   if (!raw) {
     return null;
@@ -1597,10 +1600,10 @@ function extractApiErrorMessage(raw: string): string | null {
       return parsed.error.trim();
     }
   } catch {
-    return raw;
+    return null;
   }
 
-  return raw;
+  return null;
 }
 
 export { AsyncStorage, Keychain };

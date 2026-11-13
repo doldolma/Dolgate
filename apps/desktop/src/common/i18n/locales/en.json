@@ -1203,7 +1203,7 @@
     "authRequestFailed": "The authentication request failed.",
     "authResponseInvalid": "The authentication response format is not valid.",
     "vaultStateRestoreFailed": "The sync vault state could not be restored.",
-    "offlineLeaseExpired": "The offline period ended while the server was unreachable. You'll be signed back in automatically once the server is reachable.",
+    "offlineLeaseExpired": "Please sign in again.",
     "passkeyRegisterUnavailable": "Passkey registration cannot be started.",
     "registrationLinkInvalid": "The registration link is not valid.",
     "callbackPortFailed": "Could not open the local sign-in callback port.",

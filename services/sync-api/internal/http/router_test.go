@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,6 +37,24 @@ type observingStore struct {
 	vaultStateObserved    chan struct{}
 	vaultStateReadRelease chan struct{}
 	snapshotReads         atomic.Int64
+	// 저장소가 잠긴 것처럼 토큰·교환 코드 조회를 실패시킨다(앞단 점검 ②).
+	failTokenLookups atomic.Bool
+}
+
+var errStoreLocked = errors.New("database is locked (5) (SQLITE_BUSY)")
+
+func (s *observingStore) GetRefreshToken(ctx context.Context, tokenHash string) (store.RefreshToken, error) {
+	if s.failTokenLookups.Load() {
+		return store.RefreshToken{}, errStoreLocked
+	}
+	return s.GormStore.GetRefreshToken(ctx, tokenHash)
+}
+
+func (s *observingStore) ConsumeExchangeCode(ctx context.Context, codeHash string) (store.ExchangeCode, error) {
+	if s.failTokenLookups.Load() {
+		return store.ExchangeCode{}, errStoreLocked
+	}
+	return s.GormStore.ConsumeExchangeCode(ctx, codeHash)
 }
 
 func (s *observingStore) GetSyncSnapshot(ctx context.Context, userID string) (int64, syncmodel.Payload, error) {
@@ -2492,5 +2511,81 @@ func TestSyncDataFloorGatesSessionIssuance(t *testing.T) {
 	router.ServeHTTP(refreshRecorder, refresh)
 	if refreshRecorder.Code != http.StatusUpgradeRequired {
 		t.Fatalf("old client refresh should be gated: %d %s", refreshRecorder.Code, refreshRecorder.Body.String())
+	}
+}
+
+// 앞단 점검 ②(2026-11-12): 토큰 갱신·코드 교환은 토큰·코드가 정말 없을 때만 401 이다. 저장소가 잠기면 500 이라
+// 앱이 멀쩡한 토큰을 버리고 로그아웃하지 않는다. 예전에는 모두 401 이었다.
+func TestRefreshAndExchangeAnswer500WhenTheStoreFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router, observed, authService := createObservedTestRouterWithConfig(t, httpserver.RouterConfig{
+		LocalAuthEnabled:   true,
+		LocalSignupEnabled: true,
+	})
+	post := func(path string, body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	signup := post("/auth/signup", `{"email":"locked@example.com","password":"supersecure"}`)
+	if signup.Code != http.StatusCreated {
+		t.Fatalf("signup status = %d: %s", signup.Code, signup.Body.String())
+	}
+	var session struct {
+		User struct {
+			ID    string `json:"id"`
+			Email string `json:"email"`
+		} `json:"user"`
+		Tokens struct {
+			RefreshToken string `json:"refreshToken"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(signup.Body.Bytes(), &session); err != nil {
+		t.Fatalf("decode signup: %v", err)
+	}
+	code, err := authService.IssueExchangeCode(context.Background(), store.User{ID: session.User.ID, Email: session.User.Email})
+	if err != nil {
+		t.Fatalf("IssueExchangeCode() error = %v", err)
+	}
+
+	// 없는 토큰·코드, 만료된 토큰은 지금처럼 401 이다.
+	if recorder := post("/auth/refresh", `{"refreshToken":"missing-token"}`); recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("refresh(missing) status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	expiredHash := sha256.Sum256([]byte("expired-token"))
+	if err := observed.SaveRefreshToken(context.Background(), store.RefreshToken{
+		UserID:     session.User.ID,
+		TokenHash:  hex.EncodeToString(expiredHash[:]),
+		ExpiresAt:  time.Now().Add(-time.Hour),
+		LastUsedAt: time.Now().Add(-2 * time.Hour),
+	}); err != nil {
+		t.Fatalf("SaveRefreshToken(expired) error = %v", err)
+	}
+	if recorder := post("/auth/refresh", `{"refreshToken":"expired-token"}`); recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("refresh(expired) status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := post("/auth/exchange", `{"code":"missing-code"}`); recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("exchange(missing) status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	// 저장소가 잠겼다 — 거절이 아니라 서버 오류다.
+	observed.failTokenLookups.Store(true)
+	if recorder := post("/auth/refresh", `{"refreshToken":"`+session.Tokens.RefreshToken+`"}`); recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("refresh(store locked) status = %d, want 500: %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := post("/auth/exchange", `{"code":"`+code+`"}`); recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("exchange(store locked) status = %d, want 500: %s", recorder.Code, recorder.Body.String())
+	}
+
+	// 잠김이 풀리면 같은 토큰·코드가 그대로 통한다 — 거절이 아니었다.
+	observed.failTokenLookups.Store(false)
+	if recorder := post("/auth/refresh", `{"refreshToken":"`+session.Tokens.RefreshToken+`"}`); recorder.Code != http.StatusOK {
+		t.Fatalf("refresh(after unlock) status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := post("/auth/exchange", `{"code":"`+code+`"}`); recorder.Code != http.StatusOK {
+		t.Fatalf("exchange(after unlock) status = %d: %s", recorder.Code, recorder.Body.String())
 	}
 }

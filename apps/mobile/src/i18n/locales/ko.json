@@ -188,6 +188,7 @@
     "restoredOffline": "네트워크 없이 저장된 세션을 복구했습니다.",
     "networkUnavailable": "네트워크에 연결할 수 없습니다.",
     "sessionRestoreFailed": "로그인 세션을 복구하지 못했습니다.",
+    "serverWaitOfflineExpired": "다시 로그인이 필요합니다.",
     "vaultSetupRequired": "계속 동기화하려면 먼저 동기화 암호를 설정해야 합니다.",
     "vaultUnlockRequired": "동기화 잠금 해제가 필요합니다.",
     "vaultResetElsewhere": "동기화 암호가 초기화되었습니다. 새 동기화 암호로 잠금을 해제해 주세요.",

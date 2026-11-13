@@ -1588,6 +1588,882 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(keychainMock.resetGenericPassword).toHaveBeenCalled();
   });
 
+  // 앞단 점검 ②(2026-11-12): 앱을 켤 때 토큰 갱신이 서버의 판정을 받지 못하면(앞단 프록시의 502·429·HTML,
+  // 5xx, 연결 실패) 아무것도 지우지 않는다 — 예전에는 키체인과 저장된 호스트·대기열까지 지웠다(실측).
+  // 서버가 거절한 것(401·403)만 로그아웃 사유다.
+  describe("startup refresh without the server's verdict", () => {
+    const keyBase64 = Buffer.from(
+      "12345678901234567890123456789012",
+      "utf8",
+    ).toString("base64");
+    const waitingHost: SshHostRecord = {
+      id: "waiting-host",
+      kind: "ssh",
+      label: "Waiting SSH",
+      hostname: "waiting.example.com",
+      port: 22,
+      username: "deploy",
+      authType: "password",
+      secretRef: "secret-1",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const waitingGroup: GroupRecord = {
+      id: "group-1",
+      path: "Servers",
+      name: "Servers",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    // 오프라인에서 고치고 아직 못 보낸 변경.
+    const pendingOutbox = [
+      { kind: "hosts" as const, id: "waiting-host", op: "upsert" as const },
+    ];
+    const storedSecrets: Record<string, LoadedManagedSecretPayload> = {
+      "secret-1": {
+        secretRef: "secret-1",
+        label: "Stored SSH secret",
+        password: "super-secret",
+        updatedAt: "2026-04-13T00:00:00.000Z",
+      },
+    };
+    const serverInfo = {
+      serverVersion: "test",
+      capabilities: { sync: { awsProfiles: true }, sessions: { awsSsm: true } },
+    };
+    const WAIT_MESSAGE = "다시 로그인이 필요합니다";
+
+    function sessionWithLease(
+      expiresInMs: number,
+      overrides?: Partial<AuthSession>,
+    ): AuthSession {
+      return createAuthSession({
+        vaultBootstrap: { keyBase64 },
+        offlineLease: {
+          token: "offline-token",
+          issuedAt: new Date(Date.now() - 3_600_000).toISOString(),
+          expiresAt: new Date(Date.now() + expiresInMs).toISOString(),
+          verificationPublicKeyPem: "public-key",
+        },
+        ...overrides,
+      });
+    }
+
+    // 앞단 nginx 가 서버 대신 준 HTML 페이지(서버가 죽었거나 다시 뜨는 중).
+    function proxyHtmlResponse(status: number): Response {
+      const html = `<html>\r\n<head><title>${status} Bad Gateway</title></head>\r\n<body>\r\n<center><h1>${status} Bad Gateway</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>`;
+      return {
+        ok: false,
+        status,
+        headers: {
+          get: (name: string) =>
+            name.toLowerCase() === "content-type" ? "text/html" : null,
+        },
+        json: async () => {
+          throw new SyntaxError("Unexpected token <");
+        },
+        text: async () => html,
+      } as unknown as Response;
+    }
+
+    function fetchedPaths(): string[] {
+      return fetchMock.mock.calls.map(
+        ([input]) => new URL(String(input)).pathname,
+      );
+    }
+
+    function refreshCount(): number {
+      return fetchedPaths().filter(path => path === "/auth/refresh").length;
+    }
+
+    // 서버에는 다른 기기가 올린 호스트가 하나 있다. 서버가 비어 있으면 '빈 서버면 로컬을 통째 다시 올리기' 길을 타
+    // 대기열이 그 길로 비워지는데, 그러면 복구 직후 첫 밀기가 미뤄지는 결함(실제 앱에서 봄)이 가려진다.
+    const serverHost: SshHostRecord = {
+      ...waitingHost,
+      id: "server-host",
+      label: "Server SSH",
+      hostname: "server.example.com",
+      secretRef: null,
+    };
+    // 가짜 서버는 계정마다 레코드를 들고, 올린 것을 기억해 다음 받기에 돌려준다 — 실제 서버처럼. 이 기기(user-1)는
+    // 오프라인으로 고치기 전에 서버와 맞춰 둔 상태다(호스트의 옛 판·그룹·비밀이 서버에 있다). 안 그러면 받기가
+    // '서버에 없는 로컬 것'을 지키려고 다시 대기열에 넣어, 대기열이 비었는지 볼 수 없다.
+    function fakeSyncServer(): (
+      path: string,
+      init?: RequestInit,
+    ) => Response | null {
+      const byUser: Record<string, Record<string, SyncRecord[]>> = {
+        "user-1": {
+          hosts: [
+            createEncryptedRecord("server-host", serverHost, keyBase64),
+            createEncryptedRecord(
+              "waiting-host",
+              {
+                ...waitingHost,
+                label: "Waiting SSH (before the offline edit)",
+                updatedAt: "2026-04-12T00:00:00.000Z",
+              },
+              keyBase64,
+              "2026-04-12T00:00:00.000Z",
+            ),
+          ],
+          groups: [createEncryptedRecord("group-1", waitingGroup, keyBase64)],
+          secrets: [
+            createEncryptedRecord(
+              "secret-1",
+              storedSecrets["secret-1"],
+              keyBase64,
+            ),
+          ],
+        },
+        "user-2": {},
+      };
+      return (path, init) => {
+        if (path === "/api/info") {
+          return createJsonResponse(serverInfo);
+        }
+        if (path !== "/sync") {
+          return null;
+        }
+        const authorization = String(
+          (init?.headers as Record<string, string> | undefined)
+            ?.authorization ?? "",
+        );
+        const records =
+          byUser[authorization.includes("other-access") ? "user-2" : "user-1"];
+        if (init?.method === "POST") {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          for (const [kind, value] of Object.entries(body)) {
+            if (!Array.isArray(value)) {
+              continue;
+            }
+            const current = records[kind] ?? [];
+            for (const record of value as SyncRecord[]) {
+              const index = current.findIndex(item => item.id === record.id);
+              if (index >= 0) {
+                current[index] = record;
+              } else {
+                current.push(record);
+              }
+            }
+            records[kind] = current;
+          }
+          return createJsonResponse({ revision: 2 }, 202);
+        }
+        return createJsonResponse({ ...buildEmptySyncPayload(), ...records });
+      };
+    }
+    let serverAfterRecovery = fakeSyncServer();
+    beforeEach(() => {
+      serverAfterRecovery = fakeSyncServer();
+    });
+
+    async function startApp(
+      storedSession: AuthSession,
+      refresh: (attempt: number) => Response | Promise<Response>,
+      other: (path: string, init?: RequestInit) => Response | null = () =>
+        null,
+      options?: { secretsArriveAfterRefresh?: boolean; holdSecrets?: boolean },
+    ): Promise<() => void> {
+      mockStoredCredentials({
+        session: storedSession,
+        secretsByRef: storedSecrets,
+      });
+      // 키체인이 갱신 실패보다 늦게 답하는 순서. 기다리기에 들어가면 auth.session 이 비어, 시작 때의 비밀
+      // 복원이 아무것도 안 하고 끝난다(secureStateReady 가 false 로 남는다).
+      let releaseSecrets: () => void = () => undefined;
+      if (options?.secretsArriveAfterRefresh || options?.holdSecrets) {
+        const gate = new Promise<void>(resolve => {
+          releaseSecrets = resolve;
+        });
+        const stored = keychainMock.getGenericPassword.getMockImplementation();
+        keychainMock.getGenericPassword.mockImplementation(
+          async (args: { service: string }) => {
+            if (args.service === "dolgate.mobile.managed-secrets") {
+              await gate;
+            }
+            return stored?.(args);
+          },
+        );
+      }
+      let attempt = 0;
+      fetchMock.mockImplementation(async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/auth/refresh") {
+          attempt += 1;
+          return refresh(attempt);
+        }
+        const response = other(path, init);
+        if (response) {
+          return response;
+        }
+        throw new Error(`unexpected fetch path: ${path}`);
+      });
+      await act(async () => {
+        resetStore({
+          authGateResolved: false,
+          secureStateReady: false,
+          hosts: [waitingHost],
+          groups: [waitingGroup],
+        });
+        // 볼트는 앱을 막 켠 상태 그대로다(정해지지 않음). resetStore 는 볼트를 되돌리지 않아, 앞 시험이 남긴
+        // 볼트가 남으면 '기다리기에서 빠져나올 때 볼트를 먼저 정한다'를 시험이 못 본다(실제 앱에서는 'none').
+        useMobileAppStore.setState({
+          syncOutbox: pendingOutbox,
+          vault: { status: "none" },
+        });
+        await useMobileAppStore.getState().initializeApp();
+        await flushAsyncWorkDeep();
+      });
+      if (options?.secretsArriveAfterRefresh) {
+        await act(async () => {
+          releaseSecrets();
+          await flushAsyncWorkDeep();
+        });
+        expect(useMobileAppStore.getState().secureStateReady).toBe(false);
+      }
+      return releaseSecrets;
+    }
+
+    function expectNothingCleared(): void {
+      const state = useMobileAppStore.getState();
+      expect(state.hosts.map(host => host.id)).toEqual(["waiting-host"]);
+      expect(state.groups.map(group => group.id)).toEqual(["group-1"]);
+      expect(state.syncOutbox).toEqual(pendingOutbox);
+      // 키체인의 저장 세션·비밀값·팀 비밀·AWS 프로필·tailnet 을 지우는 것은 모두 resetGenericPassword 다.
+      // 팀 기록 대기열 지우기(purge)도 같은 정리 함수 안에서만 돈다. (removeItem 은 대기열이 비어 있기만 해도
+      // 평소에 불려 지움의 표지가 못 된다.)
+      expect(keychainMock.resetGenericPassword).not.toHaveBeenCalled();
+    }
+
+    function expectStoredSessionCleared(): void {
+      expect(keychainMock.resetGenericPassword).toHaveBeenCalledWith(
+        expect.objectContaining({ service: "dolgate.mobile.auth-session" }),
+      );
+    }
+
+    afterEach(() => {
+      useMobileAppStore.setState({ syncOutbox: [] });
+    });
+
+    const unconfirmed: Array<[string, () => Response]> = [
+      ["the proxy's 502 HTML", () => proxyHtmlResponse(502)],
+      ["the proxy's 503 HTML", () => proxyHtmlResponse(503)],
+      [
+        "a 500 from the server",
+        () => createJsonResponse({ error: "서버 오류가 발생했습니다." }, 500),
+      ],
+      [
+        "the proxy's 429",
+        () => createJsonResponse({ error: "too many requests" }, 429),
+      ],
+      ["the proxy's 404 HTML", () => proxyHtmlResponse(404)],
+      ["the proxy's 413 HTML", () => proxyHtmlResponse(413)],
+    ];
+
+    it.each(unconfirmed)(
+      "waits for the server and clears nothing on %s once the offline lease has ended",
+      async (_label, respond) => {
+        await startApp(sessionWithLease(-60_000), () => respond());
+
+        const state = useMobileAppStore.getState();
+        expect(state.auth.status).toBe("unauthenticated");
+        expect(state.auth.errorMessage).toContain(WAIT_MESSAGE);
+        expect(state.authGateResolved).toBe(true);
+        expectNothingCleared();
+      },
+    );
+
+    it.each(unconfirmed)(
+      "opens the offline cache and clears nothing on %s while the offline lease is valid",
+      async (_label, respond) => {
+        await startApp(sessionWithLease(60_000), () => respond());
+
+        expect(useMobileAppStore.getState().auth.status).toBe(
+          "offline-authenticated",
+        );
+        expectNothingCleared();
+      },
+    );
+
+    it("also waits instead of clearing when the server cannot be reached at all", async () => {
+      await startApp(sessionWithLease(-60_000), () => {
+        throw new Error("Network request failed");
+      });
+
+      const state = useMobileAppStore.getState();
+      expect(state.auth.status).toBe("unauthenticated");
+      expect(state.auth.errorMessage).toContain(WAIT_MESSAGE);
+      expectNothingCleared();
+    });
+
+    it("shows the status instead of the proxy's HTML page", async () => {
+      await startApp(sessionWithLease(60_000), () => proxyHtmlResponse(502));
+
+      const state = useMobileAppStore.getState();
+      expect(state.syncStatus.errorMessage).toBe("요청이 실패했습니다. (502)");
+    });
+
+    it("keeps asking while it waits and signs back in by itself once the server answers", async () => {
+      jest.useFakeTimers();
+      try {
+        const refreshed = sessionWithLease(3_600_000, {
+          tokens: {
+            accessToken: "fresh-access-token",
+            refreshToken: "refresh-token",
+            expiresInSeconds: 900,
+          },
+        });
+        await startApp(
+          sessionWithLease(-60_000),
+          attempt =>
+            attempt <= 2
+              ? proxyHtmlResponse(502)
+              : createJsonResponse(refreshed),
+          serverAfterRecovery,
+        );
+        expect(useMobileAppStore.getState().auth.status).toBe(
+          "unauthenticated",
+        );
+        expect(refreshCount()).toBe(1);
+
+        // 2초 뒤 두 번째 물음도 502 — 지우지 않고 계속 기다린다.
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(2_000);
+          await flushAsyncWorkDeep();
+        });
+        expect(refreshCount()).toBe(2);
+        expect(useMobileAppStore.getState().auth.status).toBe(
+          "unauthenticated",
+        );
+        expectNothingCleared();
+
+        // 5초 뒤 세 번째 물음에 서버가 답한다 — 저절로 로그인하고 못 보낸 변경을 올린다.
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(5_000);
+          await flushAsyncWorkDeep();
+          await flushAsyncWorkDeep();
+        });
+        const state = useMobileAppStore.getState();
+        expect(refreshCount()).toBe(3);
+        expect(state.auth.status).toBe("authenticated");
+        expect(state.auth.session?.tokens.accessToken).toBe(
+          "fresh-access-token",
+        );
+        expect(state.auth.errorMessage).toBeNull();
+        expect(keychainMock.resetGenericPassword).not.toHaveBeenCalled();
+        const pushes = fetchMock.mock.calls.filter(
+          ([input, init]) =>
+            new URL(String(input)).pathname === "/sync" &&
+            init?.method === "POST",
+        );
+        expect(pushes.length).toBeGreaterThan(0);
+        expect(state.syncOutbox).toHaveLength(0);
+
+        // 돌아온 뒤에는 더 묻지 않는다.
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(30_000);
+          await flushAsyncWorkDeep();
+        });
+        expect(refreshCount()).toBe(3);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("signs out and clears this device when the server, back again, rejects the waiting token", async () => {
+      jest.useFakeTimers();
+      try {
+        await startApp(sessionWithLease(-60_000), attempt =>
+          attempt === 1
+            ? proxyHtmlResponse(502)
+            : createJsonResponse({ error: "인증에 실패했습니다." }, 401),
+        );
+        expectNothingCleared();
+
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(2_000);
+          await flushAsyncWorkDeep();
+        });
+        const state = useMobileAppStore.getState();
+        expect(state.auth.status).toBe("unauthenticated");
+        expect(state.hosts).toHaveLength(0);
+        expect(state.syncOutbox).toHaveLength(0);
+        expectStoredSessionCleared();
+
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(30_000);
+          await flushAsyncWorkDeep();
+        });
+        expect(refreshCount()).toBe(2);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("signs out and clears this device on 403 just like 401", async () => {
+      await startApp(sessionWithLease(60_000), () =>
+        createJsonResponse({ error: "forbidden" }, 403),
+      );
+
+      const state = useMobileAppStore.getState();
+      expect(state.auth.status).toBe("unauthenticated");
+      expect(state.hosts).toHaveLength(0);
+      expect(state.syncOutbox).toHaveLength(0);
+      expectStoredSessionCleared();
+    });
+
+    it("treats a 403 during offline recovery as a rejection instead of asking forever", async () => {
+      await startApp(sessionWithLease(60_000), attempt =>
+        attempt === 1
+          ? proxyHtmlResponse(502)
+          : createJsonResponse({ error: "forbidden" }, 403),
+      );
+      await act(async () => {
+        await flushAsyncWorkDeep();
+      });
+
+      const state = useMobileAppStore.getState();
+      expect(refreshCount()).toBe(2);
+      expect(state.auth.status).toBe("unauthenticated");
+      expect(state.hosts).toHaveLength(0);
+      expectStoredSessionCleared();
+    });
+
+    it("only explains an outdated app on 426 — even with a valid lease, without clearing or asking again", async () => {
+      jest.useFakeTimers();
+      try {
+        await startApp(sessionWithLease(60_000), () =>
+          createJsonResponse(
+            {
+              error:
+                "이 계정은 종단간 암호화가 적용되어 있습니다. 앱을 최신 버전으로 업데이트한 뒤 다시 시도해 주세요.",
+            },
+            426,
+          ),
+        );
+
+        const state = useMobileAppStore.getState();
+        expect(state.auth.status).toBe("unauthenticated");
+        expect(state.auth.errorMessage).toContain("업데이트");
+        expectNothingCleared();
+
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(60_000);
+          await flushAsyncWorkDeep();
+        });
+        expect(refreshCount()).toBe(1);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    async function signInWhileWaiting(exchanged: AuthSession): Promise<void> {
+      await startApp(
+        sessionWithLease(-60_000),
+        () => proxyHtmlResponse(502),
+        (path, init) =>
+          path === "/auth/exchange"
+            ? createJsonResponse(exchanged)
+            : serverAfterRecovery(path, init),
+      );
+      expect(useMobileAppStore.getState().auth.errorMessage).toContain(
+        WAIT_MESSAGE,
+      );
+      await act(async () => {
+        useMobileAppStore.setState({
+          pendingBrowserLoginState: "expected-state",
+        });
+      });
+      await act(async () => {
+        await useMobileAppStore
+          .getState()
+          .handleAuthCallbackUrl(
+            "dolgate://auth/callback?code=exchange-code&state=expected-state",
+          );
+        await flushAsyncWorkDeep();
+      });
+    }
+
+    it("keeps this device's data when the same account signs in while waiting", async () => {
+      jest.useFakeTimers();
+      try {
+        await signInWhileWaiting(
+          sessionWithLease(3_600_000, {
+            tokens: {
+              accessToken: "same-account-access",
+              refreshToken: "same-account-refresh",
+              expiresInSeconds: 900,
+            },
+          }),
+        );
+
+        const state = useMobileAppStore.getState();
+        expect(state.auth.status).toBe("authenticated");
+        expect(state.auth.session?.tokens.accessToken).toBe(
+          "same-account-access",
+        );
+        expect(keychainMock.resetGenericPassword).not.toHaveBeenCalledWith(
+          expect.objectContaining({ service: "dolgate.mobile.auth-session" }),
+        );
+        expect(state.hosts.map(host => host.id)).toContain("waiting-host");
+        // 기다리는 동안 남긴 호스트는 같은 계정으로 올라간다.
+        const pushedWaitingHost = fetchMock.mock.calls.some(
+          ([input, init]) =>
+            new URL(String(input)).pathname === "/sync" &&
+            init?.method === "POST" &&
+            String(init.body).includes("waiting-host"),
+        );
+        expect(pushedWaitingHost).toBe(true);
+
+        // 로그인 직후 첫 동기화가 남긴 대기열을 민다(다음 회차를 기다리지 않는다).
+        expect(state.syncOutbox).toHaveLength(0);
+
+        // 로그인으로 기다리기는 끝났다 — 남긴 토큰으로 더 묻지 않는다.
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(30_000);
+          await flushAsyncWorkDeep();
+        });
+        expect(refreshCount()).toBe(1);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("clears the waiting account's data before another account signs in", async () => {
+      jest.useFakeTimers();
+      try {
+        await signInWhileWaiting(
+          sessionWithLease(3_600_000, {
+            user: { id: "user-2", email: "other@example.com" },
+            tokens: {
+              accessToken: "other-access",
+              refreshToken: "other-refresh",
+              expiresInSeconds: 900,
+            },
+          }),
+        );
+
+        const state = useMobileAppStore.getState();
+        expect(state.auth.status).toBe("authenticated");
+        expect(state.auth.session?.user.id).toBe("user-2");
+        expect(state.hosts.map(host => host.id)).not.toContain(
+          "waiting-host",
+        );
+        expect(state.groups).toHaveLength(0);
+        expect(state.syncOutbox).toHaveLength(0);
+        expect(keychainMock.resetGenericPassword).toHaveBeenCalledWith(
+          expect.objectContaining({ service: "dolgate.mobile.team-secrets" }),
+        );
+        expect(keychainMock.resetGenericPassword).toHaveBeenCalledWith(
+          expect.objectContaining({ service: "dolgate.mobile.vault-dek" }),
+        );
+        // 앞 계정의 것을 다 지운 뒤에 새 계정의 세션을 저장한다.
+        const cleared = keychainMock.resetGenericPassword.mock.calls.findIndex(
+          ([options]) =>
+            (options as { service?: string })?.service ===
+            "dolgate.mobile.auth-session",
+        );
+        expect(cleared).toBeGreaterThanOrEqual(0);
+        const savedNew = keychainMock.setGenericPassword.mock.calls.findIndex(
+          ([, password, options]) =>
+            (options as { service?: string })?.service ===
+              "dolgate.mobile.auth-session" &&
+            String(password).includes("user-2"),
+        );
+        expect(savedNew).toBeGreaterThanOrEqual(0);
+        expect(
+          keychainMock.resetGenericPassword.mock.invocationCallOrder[cleared],
+        ).toBeLessThan(
+          keychainMock.setGenericPassword.mock.invocationCallOrder[savedNew],
+        );
+        // 앞 계정의 대기열은 새 계정으로 올라가지 않았다.
+        const pushedWaitingHost = fetchMock.mock.calls.some(
+          ([input, init]) =>
+            new URL(String(input)).pathname === "/sync" &&
+            init?.method === "POST" &&
+            String(init.body).includes("waiting-host"),
+        );
+        expect(pushedWaitingHost).toBe(false);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("does not ask in the background while the user is signing in", async () => {
+      jest.useFakeTimers();
+      try {
+        await startApp(sessionWithLease(-60_000), () => proxyHtmlResponse(502));
+        await act(async () => {
+          useMobileAppStore.setState({
+            pendingBrowserLoginState: "expected-state",
+            auth: {
+              ...useMobileAppStore.getState().auth,
+              status: "authenticating",
+            },
+          });
+        });
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(30_000);
+          await flushAsyncWorkDeep();
+        });
+        expect(refreshCount()).toBe(1);
+        expectNothingCleared();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("stops asking and explains when the server answers 426 while waiting", async () => {
+      jest.useFakeTimers();
+      try {
+        await startApp(sessionWithLease(-60_000), attempt =>
+          attempt === 1
+            ? proxyHtmlResponse(502)
+            : createJsonResponse(
+                { error: "앱을 최신 버전으로 업데이트한 뒤 다시 시도해 주세요." },
+                426,
+              ),
+        );
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(2_000);
+          await flushAsyncWorkDeep();
+        });
+        expect(refreshCount()).toBe(2);
+        const state = useMobileAppStore.getState();
+        expect(state.auth.status).toBe("unauthenticated");
+        expect(state.auth.errorMessage).toContain("업데이트");
+        expectNothingCleared();
+
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(60_000);
+          await flushAsyncWorkDeep();
+        });
+        expect(refreshCount()).toBe(2);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("reads the secrets again after signing back in by itself, so what was left still goes up", async () => {
+      jest.useFakeTimers();
+      try {
+        const refreshed = sessionWithLease(3_600_000, {
+          tokens: {
+            accessToken: "fresh-access-token",
+            refreshToken: "refresh-token",
+            expiresInSeconds: 900,
+          },
+        });
+        await startApp(
+          sessionWithLease(-60_000),
+          attempt =>
+            attempt === 1
+              ? proxyHtmlResponse(502)
+              : createJsonResponse(refreshed),
+          serverAfterRecovery,
+          { secretsArriveAfterRefresh: true },
+        );
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(2_000);
+          await flushAsyncWorkDeep();
+          await flushAsyncWorkDeep();
+        });
+        expect(useMobileAppStore.getState().auth.status).toBe("authenticated");
+        expect(useMobileAppStore.getState().secureStateReady).toBe(true);
+        expect(useMobileAppStore.getState().syncOutbox).toHaveLength(0);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("reads the secrets again after the same account signs in while waiting", async () => {
+      jest.useFakeTimers();
+      try {
+        await startApp(
+          sessionWithLease(-60_000),
+          () => proxyHtmlResponse(502),
+          (path, init) =>
+            path === "/auth/exchange"
+              ? createJsonResponse(
+                  sessionWithLease(3_600_000, {
+                    tokens: {
+                      accessToken: "same-account-access",
+                      refreshToken: "same-account-refresh",
+                      expiresInSeconds: 900,
+                    },
+                  }),
+                )
+              : serverAfterRecovery(path, init),
+          { secretsArriveAfterRefresh: true },
+        );
+        await act(async () => {
+          useMobileAppStore.setState({
+            pendingBrowserLoginState: "expected-state",
+          });
+        });
+        await act(async () => {
+          await useMobileAppStore
+            .getState()
+            .handleAuthCallbackUrl(
+              "dolgate://auth/callback?code=exchange-code&state=expected-state",
+            );
+          await flushAsyncWorkDeep();
+        });
+        expect(useMobileAppStore.getState().secureStateReady).toBe(true);
+        expect(useMobileAppStore.getState().syncOutbox).toHaveLength(0);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("ignores a late answer for the waiting token once the user has signed in", async () => {
+      jest.useFakeTimers();
+      try {
+        let answerLate: (response: Response) => void = () => undefined;
+        await startApp(
+          sessionWithLease(-60_000),
+          attempt =>
+            attempt === 1
+              ? proxyHtmlResponse(502)
+              : new Promise<Response>(resolve => {
+                  answerLate = resolve;
+                }),
+          (path, init) =>
+            path === "/auth/exchange"
+              ? createJsonResponse(
+                  sessionWithLease(3_600_000, {
+                    tokens: {
+                      accessToken: "login-access",
+                      refreshToken: "login-refresh",
+                      expiresInSeconds: 900,
+                    },
+                  }),
+                )
+              : serverAfterRecovery(path, init),
+        );
+        // 2초 뒤 두 번째 물음이 나가 답을 기다린다.
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(2_000);
+          await flushAsyncWorkDeep();
+        });
+        expect(refreshCount()).toBe(2);
+
+        // 그 사이 사용자가 직접 로그인했다.
+        await act(async () => {
+          useMobileAppStore.setState({
+            pendingBrowserLoginState: "expected-state",
+          });
+        });
+        await act(async () => {
+          await useMobileAppStore
+            .getState()
+            .handleAuthCallbackUrl(
+              "dolgate://auth/callback?code=exchange-code&state=expected-state",
+            );
+          await flushAsyncWorkDeep();
+        });
+        expect(useMobileAppStore.getState().auth.session?.tokens.accessToken).toBe(
+          "login-access",
+        );
+
+        // 늦게 온 답이 옛 토큰을 거절해도, 막 로그인한 사람을 내보내거나 지우지 않는다.
+        await act(async () => {
+          answerLate(createJsonResponse({ error: "인증에 실패했습니다." }, 401));
+          await flushAsyncWorkDeep();
+        });
+        const state = useMobileAppStore.getState();
+        expect(state.auth.status).toBe("authenticated");
+        expect(state.auth.session?.tokens.accessToken).toBe("login-access");
+        expect(keychainMock.resetGenericPassword).not.toHaveBeenCalledWith(
+          expect.objectContaining({ service: "dolgate.mobile.auth-session" }),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    // 예전부터 있던 것(11-13 실제 앱에서 봄): 서버가 멀쩡해도, 못 보낸 대기열이 남은 채 앱을 켜면 첫 동기화가
+    // 볼트가 정해지기 전에 밀려다 미뤄져 그 회차에 안 올라갔다.
+    it("pushes what was left offline on the first sync when the app starts with the server up", async () => {
+      const refreshed = sessionWithLease(3_600_000, {
+        tokens: {
+          accessToken: "fresh-access-token",
+          refreshToken: "refresh-token",
+          expiresInSeconds: 900,
+        },
+      });
+      await startApp(
+        sessionWithLease(60_000),
+        () => createJsonResponse(refreshed),
+        serverAfterRecovery,
+      );
+
+      const state = useMobileAppStore.getState();
+      expect(state.auth.status).toBe("authenticated");
+      expect(state.syncOutbox).toHaveLength(0);
+      const pushedWaitingHost = fetchMock.mock.calls.some(
+        ([input, init]) =>
+          new URL(String(input)).pathname === "/sync" &&
+          init?.method === "POST" &&
+          String(init.body).includes("waiting-host"),
+      );
+      expect(pushedWaitingHost).toBe(true);
+    });
+
+    it("waits for the keychain secrets before that first push", async () => {
+      const refreshed = sessionWithLease(3_600_000, {
+        tokens: {
+          accessToken: "fresh-access-token",
+          refreshToken: "refresh-token",
+          expiresInSeconds: 900,
+        },
+      });
+      const releaseSecrets = await startApp(
+        sessionWithLease(60_000),
+        () => createJsonResponse(refreshed),
+        serverAfterRecovery,
+        { holdSecrets: true },
+      );
+      // 갱신은 끝났지만 키체인이 아직 답하지 않았다 — 비밀 없이 밀면 비밀값이 빠지므로 아직 밀지 않는다.
+      expect(useMobileAppStore.getState().auth.status).toBe("authenticated");
+      expect(
+        fetchMock.mock.calls.some(
+          ([input, init]) =>
+            new URL(String(input)).pathname === "/sync" &&
+            init?.method === "POST",
+        ),
+      ).toBe(false);
+
+      await act(async () => {
+        releaseSecrets();
+        await flushAsyncWorkDeep();
+        await flushAsyncWorkDeep();
+      });
+      expect(useMobileAppStore.getState().secureStateReady).toBe(true);
+      expect(useMobileAppStore.getState().syncOutbox).toHaveLength(0);
+    });
+
+    it("stops asking the old server once the server address changes while waiting", async () => {
+      jest.useFakeTimers();
+      try {
+        await startApp(sessionWithLease(-60_000), () => proxyHtmlResponse(502));
+        await act(async () => {
+          await useMobileAppStore
+            .getState()
+            .updateSettings({ serverUrl: "https://other.example.com" });
+        });
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(30_000);
+          await flushAsyncWorkDeep();
+        });
+        expect(refreshCount()).toBe(1);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+  });
+
   it("persists lightweight startup cache without secret metadata or terminal snapshots", async () => {
     await act(async () => {
       resetStore({

@@ -2314,7 +2314,7 @@ describe("AuthService 로컬 전용", () => {
 // 서버의 idle 기간(14일) 안이어도 서버가 돌아온 뒤 다시 로그인해야 했다(실측).
 describe("AuthService 서버가 세션을 확인해 주지 못할 때", () => {
   const serverUrl = "https://ssh.doldolma.com";
-  const leaseExpired = "서버에 연결되지 않은 채 오프라인으로 쓸 수 있는 시간이 지났습니다. 서버에 연결되면 자동으로 다시 로그인합니다.";
+  const leaseExpired = "다시 로그인이 필요합니다.";
 
   function sessionWithLease(expiresAt: Date): AuthSession {
     return {

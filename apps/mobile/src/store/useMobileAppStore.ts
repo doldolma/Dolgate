@@ -1327,6 +1327,13 @@ let offlineRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 let offlineRecoveryAttempt = 0;
 let offlineRecoveryInFlight = false;
 let offlineRecoveryKey: string | null = null;
+// 서버 기다리기. 앱을 켤 때 토큰 갱신이 서버의 판정을 받지 못했고(연결 실패·시간 초과·5xx·앞단 프록시의
+// 429·404·HTML) 오프라인 임대도 끝났을 때다. 로그인 화면을 보이되 아무것도 지우지 않고, 저장 세션으로 뒤에서
+// 다시 묻다가 서버가 받아 주면 저절로 로그인 상태로 돌아온다(데스크톱 auth-service 의 enterServerWait 와 같다).
+// 로그인 화면이라 auth.session 은 비어 있으므로 다시 물을 세션은 여기 따로 든다.
+let serverWait: { session: AuthSession; serverUrl: string } | null = null;
+let serverWaitTimer: ReturnType<typeof setTimeout> | null = null;
+let serverWaitAttempt = 0;
 let secureStateRestoreVersion = 0;
 // 진행 중인 비밀 복원. pull 이 복원보다 먼저 도착하면 그 시점의 secretsByRef 가 비어 있어,
 // 병합이 "로컬에 없다" 고 보고 서버 것으로 Keychain 을 덮어쓴다 — 아직 안 올린 비밀이
@@ -2580,6 +2587,21 @@ function isLikelyNetworkError(error: unknown): boolean {
   return !(error instanceof ApiError) || typeof error.status !== 'number';
 }
 
+// 서버가 이 토큰을 거절했는가 — 401·403 만이다. 연결 실패·시간 초과·5xx·앞단 프록시의 429·404·413·HTML 은
+// 서버의 판정이 아니라서, 그것으로 로그아웃하거나 기기에 남은 것을 지우면 안 된다(데스크톱 auth-service 의
+// isUnconfirmedSessionError 와 같은 규칙). 앱 시작과 세션 복구에서만 쓴다 — 동기화 실패 길은
+// isLikelyNetworkError 로 따로 판단한다.
+function isSessionRejectedError(error: unknown): boolean {
+  return (
+    error instanceof ApiError && (error.status === 401 || error.status === 403)
+  );
+}
+
+// 이 앱 버전으로는 세션을 줄 수 없다는 서버의 답(426)이다. 업데이트하면 남긴 토큰으로 이어진다.
+function isClientOutdatedError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 426;
+}
+
 function getUnknownErrorMessage(error: unknown): string {
   if (typeof error === 'string') {
     return error;
@@ -2904,6 +2926,8 @@ export const useMobileAppStore = create<MobileAppState>()(
         await Promise.allSettled(tasks);
       };
 
+      // 세션을 뒤에서 되살리는 두 루프(오프라인 복구·서버 기다리기)를 함께 멈춘다. 로그인·로그아웃·서버
+      // 바꾸기·앱 시작처럼 세션 경계가 바뀌는 곳이 모두 이것을 부르므로, 서버 기다리기도 여기서 끝낸다.
       const clearOfflineRecoveryLoop = () => {
         if (offlineRecoveryTimer) {
           clearTimeout(offlineRecoveryTimer);
@@ -2912,6 +2936,12 @@ export const useMobileAppStore = create<MobileAppState>()(
         offlineRecoveryAttempt = 0;
         offlineRecoveryInFlight = false;
         offlineRecoveryKey = null;
+        if (serverWaitTimer) {
+          clearTimeout(serverWaitTimer);
+          serverWaitTimer = null;
+        }
+        serverWait = null;
+        serverWaitAttempt = 0;
       };
 
       // 계정/서버 경계가 바뀌면 이전 대상에 속한 조건부 GET 표식과 진행 중 sync 결과를
@@ -3133,6 +3163,10 @@ export const useMobileAppStore = create<MobileAppState>()(
 
           clearOfflineRecoveryLoop();
           const refreshed = await acceptAuthSession(received);
+          // 앱을 막 켜서 볼트가 아직 정해지지 않았다. 캐시된 DEK 로 먼저 정하고 비밀 복원을 기다려야, 못 보낸 대기열이
+          // 남아 있을 때 첫 동기화가 그것을 민다 — 안 그러면 첫 밀기가 '볼트 잠김'으로 미뤄지고, 서버에 바뀐 것이 없으면
+          // 다음 회차가 오지 않아 대기열이 남는다(실제 앱에서 봄). 오프라인·서버 기다리기에서 돌아올 때와 같은 방법이다.
+          const vault = await resolveStoredVaultState(refreshed);
           set(state => ({
             auth: {
               status: 'authenticated',
@@ -3140,45 +3174,74 @@ export const useMobileAppStore = create<MobileAppState>()(
               offline: null,
               errorMessage: null,
             },
+            vault,
             syncStatus: {
               ...state.syncStatus,
               errorMessage: null,
             },
           }));
+          await finishSecureStateRestore();
           await syncWithSession(refreshed);
         } catch (error) {
           if (!isSessionRecoveryContextCurrent(session, serverUrl)) {
             return;
           }
 
-          if (isLikelyNetworkError(error) && isOfflineLeaseActive(session)) {
-            const offlineVaultState = await resolveStoredVaultState(session);
-            set({
-              auth: {
-                status: 'offline-authenticated',
-                session,
-                offline: buildOfflineState(session, t('store.restoredOffline')),
-                errorMessage: null,
-              },
-              vault: offlineVaultState,
-              syncStatus: {
-                ...get().syncStatus,
-                status: 'paused',
-                errorMessage:
-                  error instanceof Error
-                    ? error.message
-                    : t('store.networkUnavailable'),
-              },
-            });
-            scheduleOfflineRecoveryRetry(session, serverUrl, {
-              immediate: true,
-              reset: true,
-            });
+          // 서버가 토큰을 거절한 것(401·403)만 로그아웃 사유다. 연결 실패·시간 초과·5xx·앞단 프록시의
+          // 429·404·HTML 은 서버의 판정이 아니어서 아무것도 지우지 않는다. 예전에는 상태 번호만 있으면 여기서
+          // 키체인과 저장된 호스트·대기열까지 지워, 오프라인에서 고치고 못 보낸 것이 영영 사라졌다(실측).
+          if (!isSessionRejectedError(error)) {
+            if (isClientOutdatedError(error)) {
+              // 이 앱 버전으로는 세션을 못 준다(426). 오프라인으로 넘기면 동기화가 조용히 멈추므로 로그인
+              // 화면에 안내만 하고, 지우지도 다시 묻지도 않는다. 업데이트하면 남긴 토큰으로 이어진다.
+              clearOfflineRecoveryLoop();
+              set({
+                auth: {
+                  ...createUnauthenticatedState(),
+                  errorMessage:
+                    error instanceof Error
+                      ? error.message
+                      : t('store.sessionRestoreFailed'),
+                },
+                authGateResolved: true,
+                bootstrapping: false,
+              });
+              return;
+            }
+
+            if (isOfflineLeaseActive(session)) {
+              const offlineVaultState = await resolveStoredVaultState(session);
+              set({
+                auth: {
+                  status: 'offline-authenticated',
+                  session,
+                  offline: buildOfflineState(
+                    session,
+                    t('store.restoredOffline'),
+                  ),
+                  errorMessage: null,
+                },
+                vault: offlineVaultState,
+                syncStatus: {
+                  ...get().syncStatus,
+                  status: 'paused',
+                  errorMessage:
+                    error instanceof Error
+                      ? error.message
+                      : t('store.networkUnavailable'),
+                },
+              });
+              scheduleOfflineRecoveryRetry(session, serverUrl, {
+                immediate: true,
+                reset: true,
+              });
+              return;
+            }
+
+            enterServerWait(session, serverUrl);
             return;
           }
 
-          const shouldClearStoredAuthSession =
-            error instanceof ApiError && error.status === 401;
           clearOfflineRecoveryLoop();
           secureStateRestoreVersion += 1;
           set({
@@ -3195,12 +3258,180 @@ export const useMobileAppStore = create<MobileAppState>()(
             secureStateReady: true,
             bootstrapping: false,
           });
-          void clearPersistedSecureState({
-            clearStoredAuthSession: shouldClearStoredAuthSession,
-          });
+          // 거절된 토큰이니 저장 세션도 지운다(401·403 둘 다 — 데스크톱과 같다).
+          void clearPersistedSecureState();
         } finally {
           finishStartupRefreshTiming?.();
         }
+      };
+
+      // 서버가 남긴 토큰을 거절했다(401·403). 그때 비로소 로그아웃하고 이 기기의 것을 지운다 — 오프라인 복구와
+      // 서버 기다리기가 함께 쓴다.
+      const logOutRejectedSession = async () => {
+        await clearPersistedSecureState();
+        clearOfflineRecoveryLoop();
+        secureStateRestoreVersion += 1;
+        set({
+          auth: {
+            ...createUnauthenticatedState(),
+            errorMessage: t('store.sessionExpiredSignIn'),
+          },
+          syncStatus: {
+            ...createDefaultSyncStatus(),
+            status: 'error',
+            errorMessage: t('store.sessionExpired'),
+          },
+          ...createEmptyProtectedState(),
+          authGateResolved: true,
+          secureStateReady: true,
+          bootstrapping: false,
+        });
+      };
+
+      const enterServerWait = (session: AuthSession, serverUrl: string) => {
+        clearOfflineRecoveryLoop();
+        serverWait = { session, serverUrl };
+        set(state => ({
+          auth: {
+            ...createUnauthenticatedState(),
+            errorMessage: t('store.serverWaitOfflineExpired'),
+          },
+          syncStatus: {
+            ...state.syncStatus,
+            status: 'paused',
+          },
+          authGateResolved: true,
+          bootstrapping: false,
+        }));
+        scheduleServerWaitRetry();
+      };
+
+      const scheduleServerWaitRetry = () => {
+        if (!serverWait) {
+          return;
+        }
+        if (serverWaitTimer) {
+          clearTimeout(serverWaitTimer);
+        }
+        const delay =
+          OFFLINE_RECOVERY_RETRY_DELAYS_MS[
+            Math.min(
+              serverWaitAttempt,
+              OFFLINE_RECOVERY_RETRY_DELAYS_MS.length - 1,
+            )
+          ];
+        serverWaitTimer = setTimeout(() => {
+          serverWaitTimer = null;
+          void retryWhileAwaitingServer();
+        }, delay);
+      };
+
+      const retryWhileAwaitingServer = async () => {
+        const waiting = serverWait;
+        if (!waiting) {
+          return;
+        }
+        if (get().settings.serverUrl !== waiting.serverUrl) {
+          // 기다리는 사이 서버 주소가 바뀌었다. 이 토큰은 옛 서버의 것이라 새 서버로 보내지 않는다.
+          clearOfflineRecoveryLoop();
+          return;
+        }
+        // 사용자가 로그인을 시작했으면 이번 차례는 건너뛴다. 그 로그인이 끝나면 기다리기도 끝난다.
+        const isUserSigningIn = () =>
+          Boolean(get().pendingBrowserLoginState) ||
+          get().auth.status !== 'unauthenticated';
+        if (isUserSigningIn()) {
+          serverWaitAttempt += 1;
+          scheduleServerWaitRetry();
+          return;
+        }
+
+        try {
+          const received = await refreshAuthSession(
+            waiting.serverUrl,
+            waiting.session,
+          );
+          if (serverWait !== waiting) {
+            // 묻는 사이에 기다리기가 끝났다(로그인·서버 바꾸기 등). 이 결과는 쓰지 않는다.
+            return;
+          }
+          if (isUserSigningIn()) {
+            serverWaitAttempt += 1;
+            scheduleServerWaitRetry();
+            return;
+          }
+          clearOfflineRecoveryLoop();
+          const refreshed = await acceptAuthSession(received);
+          // 기다리는 동안 볼트는 정해지지 않았다(로그인 화면). 캐시된 DEK 로 먼저 정해 둬야 아래 동기화가 남긴
+          // 대기열을 이번 회차에 민다 — 안 그러면 첫 밀기가 '볼트 잠김'으로 미뤄지고, 서버에 바뀐 것이 없으면
+          // 다음 회차가 오지 않아 대기열이 그대로 남는다(실제 앱에서 봄). 오프라인 길과 같은 방법이다.
+          const vault = await resolveStoredVaultState(refreshed);
+          set(state => ({
+            auth: {
+              status: 'authenticated',
+              session: refreshed,
+              offline: null,
+              errorMessage: null,
+            },
+            vault,
+            syncStatus: {
+              ...state.syncStatus,
+              errorMessage: null,
+            },
+          }));
+          await finishSecureStateRestore();
+          await syncWithSession(refreshed);
+        } catch (error) {
+          if (serverWait !== waiting) {
+            return;
+          }
+          if (isSessionRejectedError(error)) {
+            await logOutRejectedSession();
+            return;
+          }
+          if (isClientOutdatedError(error)) {
+            clearOfflineRecoveryLoop();
+            set(state => ({
+              auth: {
+                ...state.auth,
+                errorMessage:
+                  error instanceof Error
+                    ? error.message
+                    : state.auth.errorMessage,
+              },
+            }));
+            return;
+          }
+          serverWaitAttempt += 1;
+          scheduleServerWaitRetry();
+        }
+      };
+
+      // 첫 동기화 전에 비밀 복원이 끝나기를 기다린다 — 비밀이 준비되기 전의 밀기는 건너뛰므로, 기다리지 않으면
+      // 이번 회차에 남긴 대기열을 못 민다. 앱을 막 켰으면 이미 도는 복원을 기다리고, 서버 기다리기 동안
+      // auth.session 이 비어 복원이 아무것도 안 하고 끝났으면 다시 읽는다.
+      const finishSecureStateRestore = async () => {
+        await secureStateRestorePromise?.catch(() => undefined);
+        if (!get().secureStateReady) {
+          get().ensureSecureStateRestored();
+          await secureStateRestorePromise?.catch(() => undefined);
+        }
+      };
+
+      // 다른 계정으로 로그인하기 전에 앞 계정이 이 기기에 남긴 것을 지운다(키체인·저장된 호스트·대기열·팀·DEK).
+      // 서버 기다리기와 426 은 앞 계정의 것을 지우지 않고 남기므로, 지우지 않으면 앞 계정의 대기열이 새 계정으로
+      // 올라간다.
+      const clearLocalAccountData = async () => {
+        clearOfflineRecoveryLoop();
+        invalidateSyncRuntime();
+        secureStateRestoreVersion += 1;
+        await clearPersistedSecureState();
+        await clearStoredVaultDek().catch(() => undefined);
+        set({
+          ...createEmptyProtectedState(),
+          syncStatus: createDefaultSyncStatus(),
+          secureStateReady: true,
+        });
       };
 
       const restoreStoredSecureStateInBackground = async (
@@ -3337,25 +3568,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             return 'stop';
           }
 
-          if (error instanceof ApiError && error.status === 401) {
-            await clearPersistedSecureState();
-            clearOfflineRecoveryLoop();
-            secureStateRestoreVersion += 1;
-            set({
-              auth: {
-                ...createUnauthenticatedState(),
-                errorMessage: t('store.sessionExpiredSignIn'),
-              },
-              syncStatus: {
-                ...createDefaultSyncStatus(),
-                status: 'error',
-                errorMessage: t('store.sessionExpired'),
-              },
-              ...createEmptyProtectedState(),
-              authGateResolved: true,
-              secureStateReady: true,
-              bootstrapping: false,
-            });
+          // 403 도 거절이다 — 예전에는 401 만 보고 403 이면 끝없이 다시 물었다.
+          if (isSessionRejectedError(error)) {
+            await logOutRejectedSession();
             return 'stop';
           }
 
@@ -8728,13 +8943,24 @@ export const useMobileAppStore = create<MobileAppState>()(
           }));
 
           try {
-            const session = await acceptAuthSession(
-              await fetchExchangeSession(
-                get().settings.serverUrl,
-                payload.code,
-              ),
+            const exchanged = await fetchExchangeSession(
+              get().settings.serverUrl,
+              payload.code,
             );
+            // 이 기기에 남은 데이터의 주인(저장 세션)과 다른 계정으로 들어왔다. 서버 기다리기·426 은 앞 계정의
+            // 것을 지우지 않고 남기므로, 그대로 두면 앞 계정의 호스트·대기열이 새 계정으로 올라간다. 먼저 지운다.
+            const previous = await loadStoredAuthSession().catch(() => null);
+            if (previous && previous.user.id !== exchanged.user.id) {
+              await clearLocalAccountData();
+            }
+            const session = await acceptAuthSession(exchanged);
             clearOfflineRecoveryLoop();
+            // 같은 계정으로 다시 들어왔다(서버 기다리기·426 뒤) — 남긴 대기열을 이번 회차에 밀도록 캐시된 DEK 로
+            // 볼트를 먼저 정한다(서버 기다리기의 복구와 같다).
+            const keptVault =
+              previous && previous.user.id === exchanged.user.id
+                ? await resolveStoredVaultState(session)
+                : null;
             set({
               auth: {
                 status: 'authenticated',
@@ -8742,8 +8968,10 @@ export const useMobileAppStore = create<MobileAppState>()(
                 offline: null,
                 errorMessage: null,
               },
+              ...(keptVault ? { vault: keptVault } : {}),
               pendingBrowserLoginState: null,
             });
+            await finishSecureStateRestore();
             await syncWithSession(session, { context: 'login' });
           } catch (error) {
             set({
@@ -11751,6 +11979,12 @@ export function resetMobileStoreRuntimeForTests(): void {
   offlineRecoveryAttempt = 0;
   offlineRecoveryInFlight = false;
   offlineRecoveryKey = null;
+  if (serverWaitTimer) {
+    clearTimeout(serverWaitTimer);
+    serverWaitTimer = null;
+  }
+  serverWait = null;
+  serverWaitAttempt = 0;
   const pendingRdpCertificate =
     useMobileAppStore.getState().pendingRdpCertificatePrompt;
   if (pendingRdpCertificate) {

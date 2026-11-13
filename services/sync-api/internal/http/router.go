@@ -1073,11 +1073,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		session, err := authService.ExchangeCode(ctx.Request.Context(), request.Code, resolveRequestOrigin(ctx), resolveVaultResolution(ctx))
 		if err != nil {
-			if errors.Is(err, auth.ErrVaultClientOutdated) {
-				ctx.JSON(http.StatusUpgradeRequired, gin.H{"error": vaultClientOutdatedMessage})
-				return
-			}
-			logAndJSONError(ctx, http.StatusUnauthorized, "인증에 실패했습니다.", err)
+			respondSessionIssueError(ctx, err)
 			return
 		}
 		if err := recordAuthClientObservation(ctx, store, session.User.ID, "exchange"); err != nil {
@@ -1104,11 +1100,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		session, err := authService.Refresh(ctx.Request.Context(), request.RefreshToken, resolveRequestOrigin(ctx), resolveVaultResolution(ctx))
 		if err != nil {
-			if errors.Is(err, auth.ErrVaultClientOutdated) {
-				ctx.JSON(http.StatusUpgradeRequired, gin.H{"error": vaultClientOutdatedMessage})
-				return
-			}
-			logAndJSONError(ctx, http.StatusUnauthorized, "인증에 실패했습니다.", err)
+			respondSessionIssueError(ctx, err)
 			return
 		}
 		if err := recordAuthClientObservation(ctx, store, session.User.ID, "refresh"); err != nil {
@@ -2174,6 +2166,23 @@ var (
 
 // logAndJSONError/logAndStringError는 클라이언트에는 generic 메시지만 주고 원본 오류는 서버
 // 로그에만 남긴다 — DB/OIDC/JWT 등 내부 오류 문자열이 응답 body로 새어 나가는 것을 막는다.
+// respondSessionIssueError 는 토큰 갱신·코드 교환이 세션을 못 준 까닭을 상태 번호로 갈라 답한다.
+// 앱은 401 이면 토큰을 버리고 로그아웃하므로, 401 은 서버가 정말 거절한 것(토큰·코드가 없거나 만료됨)에만 쓴다.
+// 그 밖의 실패(DB 잠금·끊김 같은 저장소 오류)는 500 이라 앱이 토큰을 남긴 채 다시 묻는다. 예전에는 모두 401 이라,
+// SQLite 가 5초 넘게 잠기면 그 순간 갱신한 기기가 멀쩡한 토큰을 버리고 로그아웃됐다(재현).
+func respondSessionIssueError(ctx *gin.Context, err error) {
+	switch {
+	case errors.Is(err, auth.ErrVaultClientOutdated):
+		ctx.JSON(http.StatusUpgradeRequired, gin.H{"error": vaultClientOutdatedMessage})
+	case errors.Is(err, auth.ErrInvalidCredentials),
+		errors.Is(err, auth.ErrExpiredRefreshToken),
+		errors.Is(err, auth.ErrInvalidExchangeCode):
+		logAndJSONError(ctx, http.StatusUnauthorized, "인증에 실패했습니다.", err)
+	default:
+		logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+	}
+}
+
 func logAndJSONError(ctx *gin.Context, status int, publicMsg string, err error) {
 	if err != nil {
 		log.Printf("http error (%d): %s: %v", status, publicMsg, err)

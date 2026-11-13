@@ -537,3 +537,77 @@ describe('watchSyncChanges', () => {
     expect((pending[0].init?.signal as AbortSignal).aborted).toBe(true);
   });
 });
+
+// 앞단 점검 ②(2026-11-12): 오류 칸에는 서버가 한 말(JSON 의 error)만 쓴다. 앞단 프록시가 대신 준
+// HTML·글 본문은 서버의 말이 아니어서 상태 번호가 든 문구로 바꾼다(예전에는 nginx 502 HTML 이 그대로 찍혔다).
+describe('auth request error text', () => {
+  function errorResponse(status: number, body: string, contentType: string) {
+    return {
+      ok: false,
+      status,
+      headers: {
+        get: (name: string) =>
+          name.toLowerCase() === 'content-type' ? contentType : null,
+      },
+      json: jest.fn(async () => JSON.parse(body)),
+      text: jest.fn(async () => body),
+    } as unknown as Response;
+  }
+
+  beforeEach(() => {
+    keychainMock.getGenericPassword.mockReset();
+    keychainMock.getGenericPassword.mockResolvedValue(null);
+    keychainMock.setGenericPassword.mockReset();
+    keychainMock.setGenericPassword.mockResolvedValue(true);
+  });
+
+  it.each([
+    [
+      "the proxy's 502 HTML page",
+      502,
+      '<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>',
+      'text/html',
+      '요청이 실패했습니다. (502)',
+    ],
+    [
+      'a plain text body',
+      503,
+      'Service Unavailable',
+      'text/plain',
+      '요청이 실패했습니다. (503)',
+    ],
+    [
+      'JSON without an error string',
+      500,
+      '{"message":"boom"}',
+      'application/json',
+      '요청이 실패했습니다. (500)',
+    ],
+    ['an empty body', 429, '', 'text/plain', '요청이 실패했습니다. (429)'],
+    [
+      "the server's JSON error",
+      401,
+      '{"error":"인증에 실패했습니다."}',
+      'application/json',
+      '인증에 실패했습니다.',
+    ],
+  ])(
+    'turns %s into a short message that keeps the status',
+    async (_label, status, body, contentType, expected) => {
+      globalThis.fetch = jest
+        .fn()
+        .mockResolvedValue(
+          errorResponse(status, body, contentType),
+        ) as typeof fetch;
+
+      const error = await refreshAuthSession(
+        'https://ssh.doldolma.com',
+        createAuthSession(),
+      ).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).status).toBe(status);
+      expect((error as ApiError).message).toBe(expected);
+    },
+  );
+});

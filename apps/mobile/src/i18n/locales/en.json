@@ -188,6 +188,7 @@
     "restoredOffline": "Restored the stored session without a network.",
     "networkUnavailable": "Cannot reach the network.",
     "sessionRestoreFailed": "Could not restore the sign-in session.",
+    "serverWaitOfflineExpired": "Please sign in again.",
     "vaultSetupRequired": "Set a sync passphrase before syncing continues.",
     "vaultUnlockRequired": "The sync vault must be unlocked.",
     "vaultResetElsewhere": "The sync passphrase was reset. Unlock with the new passphrase.",
