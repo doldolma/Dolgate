@@ -95,6 +95,7 @@ docker compose exec sync-api sqlite3 /app/data/dolgate_sync.db ".backup '/app/da
 - Production deployments should sit behind an HTTPS reverse proxy.
 - If you use a reverse proxy, put only the actual proxy addresses in `TRUSTED_PROXIES`.
 - With `TRUSTED_PROXIES` left empty, `X-Forwarded-For` is not trusted.
+- `TRUSTED_PROXIES` only decides which client IP is recorded. Sign-in is never limited by IP: wrong passwords are counted per account, and 10 within 15 minutes pause password sign-in for that account until the 15 minutes are up.
 
 Example:
 

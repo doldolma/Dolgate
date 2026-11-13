@@ -1228,90 +1228,171 @@ func TestSessionShareCreateAndViewerPage(t *testing.T) {
 	}
 }
 
-func TestAuthLoginRateLimit(t *testing.T) {
+// 앞단 점검 ③(2026-11-13): 로그인은 IP 가 아니라 계정마다 비밀번호 틀린 횟수로 막는다. 앞단 뒤에서는 모든 사용자가 한
+// IP 라, 예전의 IP 칸은 남의 시도로 내 로그인·토큰 갱신·패스키를 막았다(앞단 nginx 뒤에서 재현).
+func postJSONFrom(router *gin.Engine, path string, body string, forwardedFor string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	if forwardedFor != "" {
+		request.Header.Set("X-Forwarded-For", forwardedFor)
+	}
+	request.RemoteAddr = "127.0.0.1:43123"
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func TestWrongPasswordsLockOnlyThatAccount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := createTestRouterWithConfig(t, httpserver.RouterConfig{
 		LocalAuthEnabled:   true,
 		LocalSignupEnabled: true,
-		RateLimit: httpserver.AuthRateLimitConfig{
-			Login: httpserver.RateLimitRuleConfig{
-				Limit:         1,
-				WindowSeconds: 300,
-			},
-		},
+		TrustedProxies:     []string{"127.0.0.1"},
 	})
+	for _, email := range []string{"locked@example.com", "other@example.com"} {
+		if recorder := postJSONFrom(router, "/auth/signup", `{"email":"`+email+`","password":"supersecure"}`, ""); recorder.Code != http.StatusCreated {
+			t.Fatalf("signup %s status = %d: %s", email, recorder.Code, recorder.Body.String())
+		}
+	}
 
-	for attempt := 0; attempt < 2; attempt += 1 {
-		request := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBufferString(`{"email":"limit@example.com","password":"supersecure"}`))
+	// 10번 틀린다 — 매번 다른 IP 인 척(X-Forwarded-For)해도 계정 칸은 같다.
+	for attempt := 1; attempt <= 10; attempt++ {
+		recorder := postJSONFrom(router, "/auth/login", `{"email":"locked@example.com","password":"wrong-password"}`, fmt.Sprintf("203.0.113.%d", attempt))
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("wrong attempt %d status = %d: %s", attempt, recorder.Code, recorder.Body.String())
+		}
+	}
+
+	// 11번째는 맞는 비밀번호도 막힌다. 대소문자가 달라도 같은 계정이다(앞뒤 공백은 JSON 이 형식 검사로 먼저 거른다 —
+	// 서비스 시험이 본다).
+	locked := postJSONFrom(router, "/auth/login", `{"email":"LOCKED@Example.com","password":"supersecure"}`, "198.51.100.7")
+	if locked.Code != http.StatusTooManyRequests {
+		t.Fatalf("locked login status = %d, want 429: %s", locked.Code, locked.Body.String())
+	}
+
+	// 다른 계정은 같은 IP 에서도 그대로 들어간다.
+	if recorder := postJSONFrom(router, "/auth/login", `{"email":"other@example.com","password":"supersecure"}`, "203.0.113.1"); recorder.Code != http.StatusOK {
+		t.Fatalf("other account login status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestBrowserLoginShowsTooManyAttemptsForALockedAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouter(t)
+	if recorder := postJSONFrom(router, "/auth/signup", `{"email":"form@example.com","password":"supersecure"}`, ""); recorder.Code != http.StatusCreated {
+		t.Fatalf("signup status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	login := func(password string) *httptest.ResponseRecorder {
+		form := url.Values{}
+		form.Set("email", "form@example.com")
+		form.Set("password", password)
+		form.Set("redirect_uri", "http://127.0.0.1:53123/auth/callback")
+		form.Set("lang", "ko")
+		request := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		return recorder
+	}
+	for attempt := 1; attempt <= 10; attempt++ {
+		if recorder := login("wrong-password"); recorder.Code == http.StatusTooManyRequests {
+			t.Fatalf("attempt %d was locked too early", attempt)
+		}
+	}
+	locked := login("supersecure")
+	if locked.Code != http.StatusTooManyRequests {
+		t.Fatalf("locked browser login status = %d, want 429", locked.Code)
+	}
+	if !strings.Contains(locked.Body.String(), "너무 많은 인증 시도") {
+		t.Fatalf("locked browser login does not say so: %s", locked.Body.String())
+	}
+}
+
+func TestPasswordChangeLocksAfterWrongCurrentPasswords(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouter(t)
+	signup := postJSONFrom(router, "/auth/signup", `{"email":"change@example.com","password":"old-password"}`, "")
+	if signup.Code != http.StatusCreated {
+		t.Fatalf("signup status = %d: %s", signup.Code, signup.Body.String())
+	}
+	var session struct {
+		Tokens struct {
+			AccessToken  string `json:"accessToken"`
+			RefreshToken string `json:"refreshToken"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(signup.Body.Bytes(), &session); err != nil {
+		t.Fatalf("decode signup: %v", err)
+	}
+	change := func(current string) *httptest.ResponseRecorder {
+		body := `{"currentPassword":"` + current + `","newPassword":"new-password","refreshToken":"` + session.Tokens.RefreshToken + `"}`
+		request := httptest.NewRequest(http.MethodPut, "/auth/account/password", bytes.NewBufferString(body))
+		request.Header.Set("Authorization", "Bearer "+session.Tokens.AccessToken)
 		request.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, request)
-
-		if attempt == 0 && recorder.Code != http.StatusUnauthorized {
-			t.Fatalf("expected first attempt to be unauthorized, got %d", recorder.Code)
+		return recorder
+	}
+	for attempt := 1; attempt <= 10; attempt++ {
+		if recorder := change("wrong-password"); recorder.Code != http.StatusBadRequest {
+			t.Fatalf("wrong current %d status = %d: %s", attempt, recorder.Code, recorder.Body.String())
 		}
-		if attempt == 1 && recorder.Code != http.StatusTooManyRequests {
-			t.Fatalf("expected second attempt to be rate limited, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	locked := change("old-password")
+	if locked.Code != http.StatusTooManyRequests || !strings.Contains(locked.Body.String(), `"code":"too_many_attempts"`) {
+		t.Fatalf("locked password change = %d: %s", locked.Code, locked.Body.String())
+	}
+}
+
+// 갱신·교환·가입·패스키 시작은 몇십 번을 불러도 막지 않는다. 예전에는 IP 칸이라 앞단 뒤에서 서버 전체가 한 칸을 나눠
+// 썼고, 남의 가짜 갱신 30번이 내 멀쩡한 갱신을, 남의 패스키 시작 30번이 내 패스키 로그인을 막았다.
+func TestRefreshExchangeSignupAndPasskeyStartAreNotLimited(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouterWithConfig(t, enabledWebAuthnConfig())
+	for attempt := 1; attempt <= 40; attempt++ {
+		if recorder := postJSONFrom(router, "/auth/refresh", `{"refreshToken":"bogus-token"}`, ""); recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("refresh %d status = %d: %s", attempt, recorder.Code, recorder.Body.String())
+		}
+		if recorder := postJSONFrom(router, "/auth/exchange", `{"code":"bogus-code"}`, ""); recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("exchange %d status = %d: %s", attempt, recorder.Code, recorder.Body.String())
+		}
+		if recorder := postJSONFrom(router, "/auth/webauthn/login/begin", `{}`, ""); recorder.Code != http.StatusOK {
+			t.Fatalf("passkey begin %d status = %d: %s", attempt, recorder.Code, recorder.Body.String())
+		}
+	}
+	for attempt := 1; attempt <= 8; attempt++ {
+		body := fmt.Sprintf(`{"email":"many-%d@example.com","password":"supersecure"}`, attempt)
+		if recorder := postJSONFrom(router, "/auth/signup", body, ""); recorder.Code != http.StatusCreated {
+			t.Fatalf("signup %d status = %d: %s", attempt, recorder.Code, recorder.Body.String())
 		}
 	}
 }
 
-func TestTrustedProxiesAffectAuthRateLimitIdentity(t *testing.T) {
+// TRUSTED_PROXIES 는 이제 기록에 남는 클라이언트 IP(기기 관찰 행)만 정한다.
+func TestTrustedProxiesOnlyDecideTheRecordedClientIP(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	withTrustedProxy := createTestRouterWithConfig(t, httpserver.RouterConfig{
-		LocalAuthEnabled:   true,
-		LocalSignupEnabled: true,
-		TrustedProxies:     []string{"127.0.0.1"},
-		RateLimit: httpserver.AuthRateLimitConfig{
-			Exchange: httpserver.RateLimitRuleConfig{
-				Limit:         1,
-				WindowSeconds: 300,
-			},
-		},
-	})
-
-	forwardedIPs := []string{"203.0.113.10", "203.0.113.11"}
-	for _, forwardedIP := range forwardedIPs {
-		request := httptest.NewRequest(http.MethodPost, "/auth/exchange", bytes.NewBufferString(`{"code":"bad-code"}`))
-		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("X-Forwarded-For", forwardedIP)
-		request.RemoteAddr = "127.0.0.1:43123"
-		recorder := httptest.NewRecorder()
-		withTrustedProxy.ServeHTTP(recorder, request)
-		if recorder.Code != http.StatusUnauthorized {
-			t.Fatalf("expected forwarded IP %s to be treated independently, got %d: %s", forwardedIP, recorder.Code, recorder.Body.String())
-		}
-	}
-
-	withoutTrustedProxy := createTestRouterWithConfig(t, httpserver.RouterConfig{
-		LocalAuthEnabled:   true,
-		LocalSignupEnabled: true,
-		RateLimit: httpserver.AuthRateLimitConfig{
-			Exchange: httpserver.RateLimitRuleConfig{
-				Limit:         1,
-				WindowSeconds: 300,
-			},
-		},
-	})
-
-	first := httptest.NewRequest(http.MethodPost, "/auth/exchange", bytes.NewBufferString(`{"code":"bad-code"}`))
-	first.Header.Set("Content-Type", "application/json")
-	first.Header.Set("X-Forwarded-For", "203.0.113.10")
-	first.RemoteAddr = "127.0.0.1:43123"
-	firstRecorder := httptest.NewRecorder()
-	withoutTrustedProxy.ServeHTTP(firstRecorder, first)
-	if firstRecorder.Code != http.StatusUnauthorized {
-		t.Fatalf("expected first untrusted proxy request to be unauthorized, got %d", firstRecorder.Code)
-	}
-
-	second := httptest.NewRequest(http.MethodPost, "/auth/exchange", bytes.NewBufferString(`{"code":"bad-code"}`))
-	second.Header.Set("Content-Type", "application/json")
-	second.Header.Set("X-Forwarded-For", "203.0.113.11")
-	second.RemoteAddr = "127.0.0.1:43123"
-	secondRecorder := httptest.NewRecorder()
-	withoutTrustedProxy.ServeHTTP(secondRecorder, second)
-	if secondRecorder.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected second untrusted proxy request to be rate limited, got %d: %s", secondRecorder.Code, secondRecorder.Body.String())
+	for _, tc := range []struct {
+		name    string
+		trusted []string
+		want    string
+	}{
+		{"앞단을 믿음", []string{"127.0.0.1"}, "203.0.113.10"},
+		{"아무것도 안 믿음(기본)", nil, "127.0.0.1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router, observed, _ := createObservedTestRouterWithConfig(t, httpserver.RouterConfig{
+				LocalAuthEnabled:   true,
+				LocalSignupEnabled: true,
+				TrustedProxies:     tc.trusted,
+			})
+			recorder := postJSONFrom(router, "/auth/signup", `{"email":"ip-`+tc.want+`@example.com","password":"supersecure"}`, "203.0.113.10")
+			if recorder.Code != http.StatusCreated {
+				t.Fatalf("signup status = %d: %s", recorder.Code, recorder.Body.String())
+			}
+			if len(observed.observations) == 0 || observed.observations[len(observed.observations)-1].LastIP != tc.want {
+				t.Fatalf("recorded ip = %#v, want %s", observed.observations, tc.want)
+			}
+		})
 	}
 }
 

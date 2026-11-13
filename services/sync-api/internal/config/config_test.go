@@ -105,6 +105,26 @@ func TestLoadRejectsLegacyJWTSecretConfig(t *testing.T) {
 	}
 }
 
+// 앞단 점검 ③(2026-11-13): auth.rateLimit 는 더는 쓰지 않는다. 그 항목이 남은 옛 설정으로도 서버가 떠야 한다.
+func TestLoadIgnoresTheRemovedRateLimitConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "sync-api.json")
+	legacy := `{"auth":{"accessTokenTtlMinutes":20,"rateLimit":{"login":{"limit":3,"windowSeconds":60},"refresh":{"limit":1,"windowSeconds":60}}}}`
+	if err := os.WriteFile(configPath, []byte(legacy), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+
+	t.Setenv("DOLSSH_API_CONFIG_PATH", configPath)
+
+	cfg, _, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v, want the old rateLimit section ignored", err)
+	}
+	if cfg.Auth.AccessTokenTTLMinutes != 20 {
+		t.Fatalf("AccessTokenTTLMinutes = %d, want the rest of the file still read", cfg.Auth.AccessTokenTTLMinutes)
+	}
+}
+
 func TestLoadRejectsLegacyOfflineLeaseKeyConfig(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "sync-api.json")

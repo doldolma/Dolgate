@@ -74,7 +74,6 @@ func registerWebAuthnRoutes(
 	runtime *webauthnRuntime,
 	authService *auth.Service,
 	dataStore store.Store,
-	limiters authRouteLimiters,
 	config RouterConfig,
 ) {
 	if runtime == nil {
@@ -83,10 +82,6 @@ func registerWebAuthnRoutes(
 
 	// --- discoverable 로그인 (공개) ---
 	router.POST("/auth/webauthn/login/begin", func(ctx *gin.Context) {
-		if !limiters.webauthn.Allow(authAttemptKeys(ctx.ClientIP(), "")...) {
-			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": pageTextOf(ctx).TooManyAttempts})
-			return
-		}
 		assertion, ceremonyID, err := runtime.service.BeginLogin(ctx.Request.Context())
 		if err != nil {
 			logAndJSONError(ctx, http.StatusInternalServerError, pageTextOf(ctx).ServerError, err)
@@ -96,10 +91,6 @@ func registerWebAuthnRoutes(
 	})
 
 	router.POST("/auth/webauthn/login/finish", func(ctx *gin.Context) {
-		if !limiters.webauthn.Allow(authAttemptKeys(ctx.ClientIP(), "")...) {
-			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": pageTextOf(ctx).TooManyAttempts})
-			return
-		}
 		var request webauthnLoginFinishRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
 			logAndJSONError(ctx, http.StatusBadRequest, pageTextOf(ctx).BadRequest, err)
@@ -155,11 +146,6 @@ func registerWebAuthnRoutes(
 	})
 
 	router.POST("/auth/webauthn/register/begin", func(ctx *gin.Context) {
-		// 티켓 하나로 ceremony 를 무한정 만들 수 있고, 가짜 티켓도 매번 RSA 검증을 태운다.
-		if !limiters.webauthn.Allow(authAttemptKeys(ctx.ClientIP(), "")...) {
-			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": pageTextOf(ctx).TooManyAttempts})
-			return
-		}
 		var request webauthnRegisterBeginRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
 			logAndJSONError(ctx, http.StatusBadRequest, pageTextOf(ctx).BadRequest, err)
@@ -183,10 +169,6 @@ func registerWebAuthnRoutes(
 	})
 
 	router.POST("/auth/webauthn/register/finish", func(ctx *gin.Context) {
-		if !limiters.webauthn.Allow(authAttemptKeys(ctx.ClientIP(), "")...) {
-			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": pageTextOf(ctx).TooManyAttempts})
-			return
-		}
 		var request webauthnRegisterFinishRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
 			logAndJSONError(ctx, http.StatusBadRequest, pageTextOf(ctx).BadRequest, err)
@@ -228,12 +210,6 @@ func registerWebAuthnRoutes(
 	group.Use(authMiddleware(authService))
 	group.POST("/registration-ticket", func(ctx *gin.Context) {
 		userID := ctx.GetString("userId")
-		// 발급이 ceremony 행을 하나씩 남기게 됐다 — 인증된 클라이언트라도 무제한으로
-		// 부르면 정리가 쫓아가야 할 양이 계속 늘어난다.
-		if !limiters.webauthn.Allow(authAttemptKeys(ctx.ClientIP(), userID)...) {
-			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": tooManyAuthAttemptsMessage})
-			return
-		}
 		ticket, err := authService.NewWebAuthnRegisterTicket(ctx.Request.Context(), userID)
 		if err != nil {
 			logAndJSONError(ctx, http.StatusInternalServerError, serverErrorMessage, err)

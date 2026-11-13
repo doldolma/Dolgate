@@ -44,6 +44,10 @@ const (
 // 이 에러를 426 + 업데이트 안내 문구로 바꿔 내려준다.
 var ErrVaultClientOutdated = errors.New("client update required for e2ee vault")
 
+// ErrTooManyPasswordAttempts — 이 계정에 비밀번호가 15분 안에 10번 틀려, 창이 끝날 때까지 비밀번호 확인을 막았다.
+// 라우터가 429 와 '너무 많은 인증 시도' 문구로 바꾼다. IP 가 아니라 계정마다 센다(password_attempts.go).
+var ErrTooManyPasswordAttempts = errors.New("too many wrong passwords for this account")
+
 // TokenPair는 클라이언트가 세션을 유지하는 데 필요한 최소 정보다.
 type TokenPair struct {
 	AccessToken      string `json:"accessToken"`
@@ -130,6 +134,7 @@ type Service struct {
 	offlineLeaseTTL     time.Duration
 	refreshHandoffTTL   time.Duration
 	localAuthEnabled    bool
+	passwordAttempts    *passwordAttempts
 }
 
 // Claims는 access token에 실어 보낼 사용자 식별 정보다.
@@ -178,6 +183,7 @@ func NewService(
 		offlineLeaseTTL:     offlineLeaseTTL,
 		refreshHandoffTTL:   refreshHandoffTTL,
 		localAuthEnabled:    localAuthEnabled,
+		passwordAttempts:    newPasswordAttempts(),
 	}, nil
 }
 
@@ -195,16 +201,30 @@ func (s *Service) Signup(ctx context.Context, email string, password string, iss
 }
 
 func (s *Service) Login(ctx context.Context, email string, password string, issuer string, vaultResolution VaultResolution) (store.User, SessionBootstrap, error) {
+	attemptKey := emailAttemptKey(email)
+	// 막힌 동안에는 비밀번호를 확인하지도 세지도 않는다 — 맞는 비밀번호인지조차 알려 주지 않는다.
+	if s.passwordAttempts.locked(attemptKey) {
+		return store.User{}, SessionBootstrap{}, ErrTooManyPasswordAttempts
+	}
 	user, err := s.store.GetUserByEmail(ctx, email)
 	if err != nil {
+		// 저장소 오류는 틀린 비밀번호가 아니다. 세지 않고 그대로 올린다 — DB 가 흔들리는 동안 계정이 잠기지 않게.
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return store.User{}, SessionBootstrap{}, err
+		}
+		// 없는 계정도 똑같이 센다 — 응답으로 계정이 있는지 없는지 갈리지 않게.
+		s.passwordAttempts.fail(attemptKey)
 		return store.User{}, SessionBootstrap{}, ErrInvalidCredentials
 	}
 	if user.PasswordHash == "" {
+		s.passwordAttempts.fail(attemptKey)
 		return store.User{}, SessionBootstrap{}, ErrInvalidCredentials
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		s.passwordAttempts.fail(attemptKey)
 		return store.User{}, SessionBootstrap{}, ErrInvalidCredentials
 	}
+	s.passwordAttempts.succeed(attemptKey)
 	session, err := s.issueSession(ctx, user, issuer, vaultResolution)
 	return user, session, err
 }
@@ -269,6 +289,10 @@ func (s *Service) ChangePassword(ctx context.Context, userID string, currentPass
 	if utf8.RuneCountInString(newPassword) < 8 || len([]byte(newPassword)) > 72 {
 		return ErrInvalidPassword
 	}
+	attemptKey := userAttemptKey(userID)
+	if s.passwordAttempts.locked(attemptKey) {
+		return ErrTooManyPasswordAttempts
+	}
 
 	user, err := s.store.GetUserByID(ctx, userID)
 	if err != nil {
@@ -277,6 +301,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID string, currentPass
 	expectedHash := user.PasswordHash
 	if expectedHash != "" {
 		if bcrypt.CompareHashAndPassword([]byte(expectedHash), []byte(currentPassword)) != nil {
+			s.passwordAttempts.fail(attemptKey)
 			return ErrCurrentPasswordInvalid
 		}
 		if bcrypt.CompareHashAndPassword([]byte(expectedHash), []byte(newPassword)) == nil {
@@ -305,6 +330,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID string, currentPass
 		}
 		return err
 	}
+	s.passwordAttempts.succeed(attemptKey)
 	return nil
 }
 

@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -46,30 +47,15 @@ type DatabaseConfig struct {
 }
 
 type AuthConfig struct {
-	SigningPrivateKeyPEM          string              `json:"signingPrivateKeyPem"`
-	SigningPrivateKeyPath         string              `json:"signingPrivateKeyPath"`
-	AccessTokenTTLMinutes         int                 `json:"accessTokenTtlMinutes"`
-	RefreshTokenIdleDays          int                 `json:"refreshTokenIdleDays"`
-	OfflineLeaseTTLHours          int                 `json:"offlineLeaseTtlHours"`
-	RefreshRotationHandoffSeconds int                 `json:"refreshRotationHandoffSeconds"`
-	RateLimit                     AuthRateLimitConfig `json:"rateLimit"`
-	Local                         LocalAuthConfig     `json:"local"`
-	OIDC                          OIDCConfig          `json:"oidc"`
-	WebAuthn                      WebAuthnConfig      `json:"webauthn"`
-}
-
-type AuthRateLimitConfig struct {
-	Login    AuthRateLimitRuleConfig `json:"login"`
-	Signup   AuthRateLimitRuleConfig `json:"signup"`
-	Refresh  AuthRateLimitRuleConfig `json:"refresh"`
-	Exchange AuthRateLimitRuleConfig `json:"exchange"`
-	Password AuthRateLimitRuleConfig `json:"password"`
-	Webauthn AuthRateLimitRuleConfig `json:"webauthn"`
-}
-
-type AuthRateLimitRuleConfig struct {
-	Limit         int `json:"limit"`
-	WindowSeconds int `json:"windowSeconds"`
+	SigningPrivateKeyPEM          string          `json:"signingPrivateKeyPem"`
+	SigningPrivateKeyPath         string          `json:"signingPrivateKeyPath"`
+	AccessTokenTTLMinutes         int             `json:"accessTokenTtlMinutes"`
+	RefreshTokenIdleDays          int             `json:"refreshTokenIdleDays"`
+	OfflineLeaseTTLHours          int             `json:"offlineLeaseTtlHours"`
+	RefreshRotationHandoffSeconds int             `json:"refreshRotationHandoffSeconds"`
+	Local                         LocalAuthConfig `json:"local"`
+	OIDC                          OIDCConfig      `json:"oidc"`
+	WebAuthn                      WebAuthnConfig  `json:"webauthn"`
 }
 
 type LocalAuthConfig struct {
@@ -126,13 +112,6 @@ func defaultConfig() AppConfig {
 			RefreshTokenIdleDays:          14,
 			OfflineLeaseTTLHours:          72,
 			RefreshRotationHandoffSeconds: 120,
-			RateLimit: AuthRateLimitConfig{
-				Login:    AuthRateLimitRuleConfig{Limit: 10, WindowSeconds: 300},
-				Signup:   AuthRateLimitRuleConfig{Limit: 5, WindowSeconds: 900},
-				Refresh:  AuthRateLimitRuleConfig{Limit: 30, WindowSeconds: 300},
-				Exchange: AuthRateLimitRuleConfig{Limit: 30, WindowSeconds: 300},
-				Password: AuthRateLimitRuleConfig{Limit: 5, WindowSeconds: 900},
-			},
 			Local: LocalAuthConfig{
 				Enabled:       true,
 				SignupEnabled: true,
@@ -197,6 +176,7 @@ func Load() (AppConfig, string, error) {
 		if err := rejectLegacyAuthConfig(data); err != nil {
 			return AppConfig{}, configPath, err
 		}
+		warnIgnoredAuthConfig(data)
 		if err := json.Unmarshal(data, &cfg); err != nil {
 			return AppConfig{}, configPath, err
 		}
@@ -275,7 +255,8 @@ func validateConfig(cfg AppConfig) error {
 	return nil
 }
 
-func rejectLegacyAuthConfig(data []byte) error {
+// authSectionOf 는 설정 파일의 auth 칸을 키 그대로 읽는다. 못 읽으면 nil — 본 읽기(json.Unmarshal)가 오류를 낸다.
+func authSectionOf(data []byte) map[string]json.RawMessage {
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(data, &root); err != nil {
 		return nil
@@ -284,9 +265,24 @@ func rejectLegacyAuthConfig(data []byte) error {
 	if !ok {
 		return nil
 	}
-
 	var authSection map[string]json.RawMessage
 	if err := json.Unmarshal(authRaw, &authSection); err != nil {
+		return nil
+	}
+	return authSection
+}
+
+// warnIgnoredAuthConfig 는 더는 쓰지 않는 auth 항목을 알리기만 한다. 서버는 그대로 켠다 — 보안 때문에 막아야 하는 키가
+// 아니고, 이 항목이 남은 옛 설정으로도 서버가 떠야 한다.
+func warnIgnoredAuthConfig(data []byte) {
+	if _, ok := authSectionOf(data)["rateLimit"]; ok {
+		log.Printf("config: auth.rateLimit is no longer used; sign-in is limited per account (wrong passwords), not per IP")
+	}
+}
+
+func rejectLegacyAuthConfig(data []byte) error {
+	authSection := authSectionOf(data)
+	if authSection == nil {
 		return nil
 	}
 	if _, ok := authSection["jwtSecret"]; ok {

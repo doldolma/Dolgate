@@ -91,32 +91,6 @@ func main() {
 		ServerVersion:      version,
 		AwsSsmRuntime:      awsSsmRuntime,
 		AwsSsoBrowserFlow:  awsSsoBrowserFlowEnabled,
-		RateLimit: httpserver.AuthRateLimitConfig{
-			Login: httpserver.RateLimitRuleConfig{
-				Limit:         cfg.Auth.RateLimit.Login.Limit,
-				WindowSeconds: cfg.Auth.RateLimit.Login.WindowSeconds,
-			},
-			Signup: httpserver.RateLimitRuleConfig{
-				Limit:         cfg.Auth.RateLimit.Signup.Limit,
-				WindowSeconds: cfg.Auth.RateLimit.Signup.WindowSeconds,
-			},
-			Refresh: httpserver.RateLimitRuleConfig{
-				Limit:         cfg.Auth.RateLimit.Refresh.Limit,
-				WindowSeconds: cfg.Auth.RateLimit.Refresh.WindowSeconds,
-			},
-			Exchange: httpserver.RateLimitRuleConfig{
-				Limit:         cfg.Auth.RateLimit.Exchange.Limit,
-				WindowSeconds: cfg.Auth.RateLimit.Exchange.WindowSeconds,
-			},
-			Password: httpserver.RateLimitRuleConfig{
-				Limit:         cfg.Auth.RateLimit.Password.Limit,
-				WindowSeconds: cfg.Auth.RateLimit.Password.WindowSeconds,
-			},
-			Webauthn: httpserver.RateLimitRuleConfig{
-				Limit:         cfg.Auth.RateLimit.Webauthn.Limit,
-				WindowSeconds: cfg.Auth.RateLimit.Webauthn.WindowSeconds,
-			},
-		},
 		OIDC: httpserver.OIDCConfig{
 			Enabled:      cfg.Auth.OIDC.Enabled,
 			DisplayName:  cfg.Auth.OIDC.DisplayName,

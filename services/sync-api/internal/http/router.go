@@ -32,7 +32,6 @@ type RouterConfig struct {
 	TrustedProxies     []string
 	PublicBaseURL      string
 	ServerVersion      string
-	RateLimit          AuthRateLimitConfig
 	OIDC               OIDCConfig
 	WebAuthn           WebAuthnRouterConfig
 	AwsSsmRuntime      AwsSsmRuntime
@@ -599,7 +598,6 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		syncWatchHold = defaultSyncWatchHold
 	}
 	shareAssetHandler := http.StripPrefix("/share/assets/", http.FileServer(http.FS(mustShareAssetFS())))
-	authLimiters := newAuthRouteLimiters(config.RateLimit)
 
 	oidcRuntime, err := newOIDCRuntime(config.OIDC)
 	if err != nil {
@@ -625,7 +623,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		renderLoginPage(ctx, data)
 	}
 
-	registerWebAuthnRoutes(router, webauthnRuntime, authService, store, authLimiters, config)
+	registerWebAuthnRoutes(router, webauthnRuntime, authService, store, config)
 
 	router.GET("/healthz", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"status": "ok", "time": time.Now().UTC().Format(time.RFC3339)})
@@ -717,24 +715,6 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			})
 			return
 		}
-		if !authLimiters.login.Allow(authAttemptKeys(ctx.ClientIP(), form.Email)...) {
-			ctx.Status(http.StatusTooManyRequests)
-			renderLogin(ctx, loginPageData{
-				IsSignup:           false,
-				ErrorMessage:       pageTextOf(ctx).TooManyAttempts,
-				Email:              form.Email,
-				Client:             form.Client,
-				RedirectURI:        form.RedirectURI,
-				State:              form.State,
-				Platform:           form.Platform,
-				LocalAuthEnabled:   config.LocalAuthEnabled,
-				LocalSignupEnabled: config.LocalSignupEnabled,
-				OIDCEnabled:        oidcVisibleForPlatform(config, oidcRuntime, browserLoginPlatform(ctx)),
-				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
-				ShowSignupLink:     config.LocalAuthEnabled && config.LocalSignupEnabled,
-			})
-			return
-		}
 		if !config.LocalAuthEnabled {
 			renderLogin(ctx, loginPageData{
 				IsSignup:           false,
@@ -760,6 +740,25 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		// 이 세션은 앱으로 전달되지 않고 곧장 exchange code 로 바뀐다 — 볼트를 건드리지
 		// 않아야 신규 유저가 웹 폼을 거쳤다는 이유로 v1 볼트가 미리 생성되지 않는다.
 		user, _, err := authService.Login(ctx.Request.Context(), form.Email, form.Password, resolveRequestOrigin(ctx), auth.VaultResolutionSkip)
+		if errors.Is(err, auth.ErrTooManyPasswordAttempts) {
+			// 이 계정에 비밀번호가 15분 안에 10번 틀렸다. IP 가 아니라 계정마다 센다.
+			ctx.Status(http.StatusTooManyRequests)
+			renderLogin(ctx, loginPageData{
+				IsSignup:           false,
+				ErrorMessage:       pageTextOf(ctx).TooManyAttempts,
+				Email:              form.Email,
+				Client:             form.Client,
+				RedirectURI:        form.RedirectURI,
+				State:              form.State,
+				Platform:           form.Platform,
+				LocalAuthEnabled:   config.LocalAuthEnabled,
+				LocalSignupEnabled: config.LocalSignupEnabled,
+				OIDCEnabled:        oidcVisibleForPlatform(config, oidcRuntime, browserLoginPlatform(ctx)),
+				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
+				ShowSignupLink:     config.LocalAuthEnabled && config.LocalSignupEnabled,
+			})
+			return
+		}
 		if err != nil {
 			renderLogin(ctx, loginPageData{
 				IsSignup:           false,
@@ -821,23 +820,6 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			renderLogin(ctx, loginPageData{
 				IsSignup:           true,
 				ErrorMessage:       pageTextOf(ctx).InvalidInput,
-				Email:              form.Email,
-				Client:             form.Client,
-				RedirectURI:        form.RedirectURI,
-				State:              form.State,
-				Platform:           form.Platform,
-				LocalAuthEnabled:   true,
-				LocalSignupEnabled: true,
-				OIDCEnabled:        oidcVisibleForPlatform(config, oidcRuntime, browserLoginPlatform(ctx)),
-				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
-			})
-			return
-		}
-		if !authLimiters.signup.Allow(authAttemptKeys(ctx.ClientIP(), form.Email)...) {
-			ctx.Status(http.StatusTooManyRequests)
-			renderLogin(ctx, loginPageData{
-				IsSignup:           true,
-				ErrorMessage:       pageTextOf(ctx).TooManyAttempts,
 				Email:              form.Email,
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
@@ -1003,10 +985,6 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
-		if !authLimiters.signup.Allow(authAttemptKeys(ctx.ClientIP(), request.Email)...) {
-			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": tooManyAuthAttemptsMessage})
-			return
-		}
 
 		_, session, err := authService.Signup(ctx.Request.Context(), request.Email, request.Password, resolveRequestOrigin(ctx), resolveVaultResolution(ctx))
 		if err != nil {
@@ -1031,13 +1009,12 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
-		if !authLimiters.login.Allow(authAttemptKeys(ctx.ClientIP(), request.Email)...) {
-			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": tooManyAuthAttemptsMessage})
-			return
-		}
-
 		_, session, err := authService.Login(ctx.Request.Context(), request.Email, request.Password, resolveRequestOrigin(ctx), resolveVaultResolution(ctx))
 		if err != nil {
+			if errors.Is(err, auth.ErrTooManyPasswordAttempts) {
+				ctx.JSON(http.StatusTooManyRequests, gin.H{"error": tooManyAuthAttemptsMessage})
+				return
+			}
 			if errors.Is(err, auth.ErrVaultClientOutdated) {
 				ctx.JSON(http.StatusUpgradeRequired, gin.H{"error": vaultClientOutdatedMessage})
 				return
@@ -1067,10 +1044,6 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
-		if !authLimiters.exchange.Allow(authAttemptKeys(ctx.ClientIP(), "")...) {
-			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": tooManyAuthAttemptsMessage})
-			return
-		}
 		session, err := authService.ExchangeCode(ctx.Request.Context(), request.Code, resolveRequestOrigin(ctx), resolveVaultResolution(ctx))
 		if err != nil {
 			respondSessionIssueError(ctx, err)
@@ -1092,10 +1065,6 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		var request refreshRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
 			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
-			return
-		}
-		if !authLimiters.refresh.Allow(authAttemptKeys(ctx.ClientIP(), "")...) {
-			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": tooManyAuthAttemptsMessage})
 			return
 		}
 		session, err := authService.Refresh(ctx.Request.Context(), request.RefreshToken, resolveRequestOrigin(ctx), resolveVaultResolution(ctx))
@@ -1137,11 +1106,6 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusBadRequest, gin.H{"code": "invalid_password", "error": "새 비밀번호를 확인해 주세요."})
 			return
 		}
-		if !authLimiters.password.Allow(accountAuthAttemptKeys(ctx.ClientIP(), userID)...) {
-			ctx.JSON(http.StatusTooManyRequests, gin.H{"code": "too_many_attempts", "error": tooManyAuthAttemptsMessage})
-			return
-		}
-
 		err := authService.ChangePassword(
 			ctx.Request.Context(),
 			userID,
@@ -1152,6 +1116,8 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		switch {
 		case err == nil:
 			ctx.JSON(http.StatusOK, gin.H{"passwordState": auth.PasswordStateSet})
+		case errors.Is(err, auth.ErrTooManyPasswordAttempts):
+			ctx.JSON(http.StatusTooManyRequests, gin.H{"code": "too_many_attempts", "error": tooManyAuthAttemptsMessage})
 		case errors.Is(err, auth.ErrCurrentPasswordInvalid):
 			ctx.JSON(http.StatusBadRequest, gin.H{"code": "current_password_invalid", "error": "현재 비밀번호가 올바르지 않습니다."})
 		case errors.Is(err, auth.ErrPasswordChangeUnavailable):
