@@ -16,8 +16,13 @@ export const SYNC_WATCH_FALLBACK_POLL_MS = 30_000;
 /** 실패가 이어질 때 물러서는 시간. 마지막 값은 예전 폴링 주기와 같다. */
 export const SYNC_WATCH_BACKOFF_MS = [2_000, 5_000, 15_000, 30_000] as const;
 
-/** 이보다 빨리 끝난 '변경 없음' 은 비정상으로 본다(아래 startSyncWatchLoop 주석). */
+/** 이보다 빨리 끝난 대기는 서버가 기다려 주지 않은 것이다. '변경 없음' 이면 바로, '바뀜' 이면 아래 횟수를
+ *  넘을 때 실패로 본다(아래 startSyncWatchLoop 주석). */
 const SYNC_WATCH_MIN_HEALTHY_WAIT_MS = 1_000;
+
+/** 빨리 끝난 '바뀜' 을 연달아 몇 번까지 그대로 당기나. 다른 기기가 잇달아 고칠 때와 루프의 첫 대기(아는
+ *  리비전이 없다)가 여기에 든다. */
+const SYNC_WATCH_QUICK_CHANGES_ALLOWED = 3;
 
 export type SyncWatchOutcome = 'changed' | 'unchanged';
 
@@ -62,12 +67,16 @@ export function syncWatchBackoffMs(
 /**
  * 변경 대기 루프를 시작한다.
  *
- * **실패로 세는 것:** watch 가 던질 때, 당기기가 실패할 때, '변경 없음' 이 1초도 안 돼 돌아올 때.
- * 셋 다 그대로 다시 붙으면 요청이 끝없이 돈다 —
+ * **실패로 세는 것:** watch 가 던질 때, 당기기가 실패할 때, '변경 없음' 이 1초도 안 돼 돌아올 때,
+ * 1초도 안 돼 돌아온 '바뀜' 이 세 번 넘게 이어질 때. 모두 그대로 다시 붙으면 요청이 끝없이 돈다 —
  * - 당기기가 리비전을 못 올리면 다음 watch 가 즉시 또 'changed' 를 돌려준다.
  * - 서버가 내려가는 중이거나 중간 장비가 대기를 바로 끊으면 '변경 없음' 이 즉시 돌아온다.
- * 그래서 이때는 2·5·15·30초로 물러선다. 정상인 대기(바뀌면 그 순간, 아니면 20~30초)는
- * 실패 횟수를 되돌린다.
+ * - 앞단이 ETag 를 지우거나 바꾸면 앱이 아는 리비전을 서버에 알리지 못해, 서버가 매번 즉시 '바뀜' 이라
+ *   답한다. 당기기는 성공하므로 위 둘로는 안 잡힌다.
+ * 그래서 이때는 2·5·15·30초로 물러선다. 빨리 끝난 '바뀜' 도 세 번까지는 그대로 당긴다 — 다른 기기가
+ * 잇달아 고칠 때와 첫 대기가 그렇다. 물러서기 전에도 늘 당기므로, 늦는 것은 물러선 동안의 변경뿐이다.
+ * 정상인 대기(바뀌면 그 순간, 아니면 20~30초)는 실패 횟수를 되돌린다. 서버가 1초 넘게 기다려 준
+ * 대기는 빠른 '바뀜' 의 셈도 0 으로 돌린다.
  */
 export function startSyncWatchLoop(options: SyncWatchLoopOptions): SyncWatchLoop {
   const sleep = options.sleep ?? abortableSleep;
@@ -79,6 +88,8 @@ export function startSyncWatchLoop(options: SyncWatchLoopOptions): SyncWatchLoop
 
   const run = async () => {
     let failures = 0;
+    // 빨리 끝난 '바뀜' 이 연달아 몇 번이었나.
+    let quickChanges = 0;
     while (!stopped) {
       const controller = new AbortController();
       waiting = controller;
@@ -89,10 +100,20 @@ export function startSyncWatchLoop(options: SyncWatchLoopOptions): SyncWatchLoop
         if (stopped) {
           return;
         }
-        healthy =
-          outcome === 'changed'
-            ? await options.onChange()
-            : now() - startedAt >= SYNC_WATCH_MIN_HEALTHY_WAIT_MS;
+        // 당기기 전에 잰다 — 당기는 데 걸린 시간은 서버가 기다려 준 시간이 아니다.
+        const quick = now() - startedAt < SYNC_WATCH_MIN_HEALTHY_WAIT_MS;
+        if (!quick) {
+          quickChanges = 0;
+        }
+        if (outcome === 'unchanged') {
+          healthy = !quick;
+        } else {
+          healthy = await options.onChange();
+          if (healthy && quick) {
+            quickChanges += 1;
+            healthy = quickChanges <= SYNC_WATCH_QUICK_CHANGES_ALLOWED;
+          }
+        }
       } catch {
         healthy = false;
       }

@@ -153,6 +153,94 @@ describe("startSyncWatchLoop", () => {
     harness.loop.stop();
   });
 
+  // 앞단이 ETag 를 지우거나 바꾸면 서버가 매번 즉시 '바뀜' 이라 답하고, 당기기는 성공한다.
+  it("pulls every quick 'changed' but backs off once more than three come in a row", async () => {
+    const harness = startHarness();
+    await flush();
+
+    for (let round = 1; round <= 3; round += 1) {
+      harness.lastWatch().result.resolve("changed");
+      await flush();
+    }
+    expect(harness.onChange).toHaveBeenCalledTimes(3);
+    expect(harness.watches).toHaveLength(4);
+    expect(harness.sleeps).toHaveLength(0);
+
+    for (const expected of [2_000, 5_000, 15_000, 30_000, 30_000]) {
+      harness.lastWatch().result.resolve("changed");
+      await flush();
+      expect(harness.lastSleep().ms).toBe(expected);
+      harness.lastSleep().result.resolve();
+      await flush();
+    }
+    expect(harness.onChange).toHaveBeenCalledTimes(8);
+    harness.loop.stop();
+  });
+
+  it.each(["changed", "unchanged"] as const)(
+    "counts quick 'changed' answers from zero again after a wait the server held (%s)",
+    async (held) => {
+      const harness = startHarness();
+      await flush();
+      for (let round = 1; round <= 3; round += 1) {
+        harness.lastWatch().result.resolve("changed");
+        await flush();
+      }
+
+      // 1초를 채운 대기는 서버가 기다려 준 것이다.
+      harness.advance(1_000);
+      harness.lastWatch().result.resolve(held);
+      await flush();
+      for (let round = 1; round <= 3; round += 1) {
+        harness.lastWatch().result.resolve("changed");
+        await flush();
+      }
+      expect(harness.sleeps).toHaveLength(0);
+
+      harness.lastWatch().result.resolve("changed");
+      await flush();
+      expect(harness.lastSleep().ms).toBe(2_000);
+      harness.loop.stop();
+    },
+  );
+
+  it("times only the wait, not the pull, when telling a quick 'changed'", async () => {
+    const harness = startHarness();
+    harness.onChange.mockImplementation(async () => {
+      harness.advance(2_000);
+      return true;
+    });
+    await flush();
+
+    for (let round = 1; round <= 3; round += 1) {
+      harness.lastWatch().result.resolve("changed");
+      await flush();
+    }
+    expect(harness.sleeps).toHaveLength(0);
+    harness.lastWatch().result.resolve("changed");
+    await flush();
+    expect(harness.lastSleep().ms).toBe(2_000);
+    harness.loop.stop();
+  });
+
+  // 끊겼다 돌아오면 첫 대기가 그동안 쌓인 변경으로 즉시 '바뀜' 이다. 그것은 정상이다.
+  it("still clears earlier failures on a quick 'changed' within the three", async () => {
+    const harness = startHarness();
+    await flush();
+    harness.lastWatch().result.reject(new Error("offline"));
+    await flush();
+    expect(harness.lastSleep().ms).toBe(2_000);
+    harness.lastSleep().result.resolve();
+    await flush();
+
+    harness.lastWatch().result.resolve("changed");
+    await flush();
+    harness.lastWatch().result.reject(new Error("offline"));
+    await flush();
+    expect(harness.lastSleep().ms).toBe(2_000);
+    harness.loop.stop();
+  });
+
   it("stop aborts the wait in flight and ignores its result", async () => {
     const harness = startHarness();
     await flush();
